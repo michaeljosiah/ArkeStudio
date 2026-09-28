@@ -47,7 +47,8 @@ import {
   type ManifestModel,
 } from "@arke-studio/contracts";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
-import { ChevronDown, Mic, Pin, Plus, Waveform } from "../components/icons.js";
+import { useMediaQuery } from "../lib/media-query.js";
+import { ChevronDown, Mic, Pin, Play, Plus, Waveform } from "../components/icons.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { Button } from "../components/ui.js";
 import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, usePlayback, useQueueAt } from "../lib/audio.js";
@@ -1073,11 +1074,12 @@ function MarkerMenu({ row, at, model, onApply, onClose }: {
   );
 }
 
-export function AudiobookBlocks({ rows, sounding, selected, onSelect, onPlayOne, slug, filter = null, choices, onPin, marker = null, onMarker, modelOf, onDirect }: {
+export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, onSelect, onPlayOne, slug, filter = null, choices, onPin, marker = null, onMarker, modelOf, onDirect }: {
   rows: BlockRow[];
   sounding: BlockRow | null;
   selected: string | null;
   onSelect: (key: string) => void;
+  onSelectionChange?: (selection: BlockSelection | null) => void;
   onPlayOne: (row: BlockRow) => void;
   slug: string | undefined;
   filter?: AudiobookFilter;
@@ -1092,7 +1094,18 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelect, onPlayOne,
   /** A block's direction written with its markers changed (R-42). */
   onDirect?: (key: string, direction: AudiobookDirectionInput | null) => void;
 }) {
+  const coarse = useMediaQuery("(pointer: coarse)");
+  const pressedSelection = useRef<BlockSelection | null>(null);
   const [menu, setMenu] = useState<{ key: string; selection?: { from: number; to: number } } | null>(null);
+  useEffect(() => {
+    const changed = () => {
+      const captured = audiobookSelection(rows);
+      // A sheet takes focus; the captured selection remains the subject of its controls.
+      if (captured !== null) onSelectionChange?.(captured);
+    };
+    document.addEventListener("selectionchange", changed);
+    return () => document.removeEventListener("selectionchange", changed);
+  }, [rows, onSelectionChange]);
   useEffect(() => {
     if (menu === null) return;
     const close = () => setMenu(null);
@@ -1137,7 +1150,8 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelect, onPlayOne,
             data-state={row.state}
             data-block={row.block.key}
             data-speaker={row.speakerKey ?? "narrator"}
-            onClick={() => onSelect(row.block.key)}
+            onPointerDown={() => { pressedSelection.current = audiobookSelection(rows); }}
+            onClick={() => { onSelectionChange?.(audiobookSelection(rows) ?? pressedSelection.current); pressedSelection.current = null; onSelect(row.block.key); }}
           >
             {pinnable && row.block.paragraph >= 0 ? (
               <button
@@ -1165,7 +1179,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelect, onPlayOne,
               onMouseUp={(event) => {
                 // Words selected in narration can be made a line (SPEC-012 R-63): within one block,
                 // between 1 and 600 characters; the menu opens for the selection.
-                if (!pinnable || row.speakerKey !== null || row.block.paragraph < 0) return;
+                if (coarse || !pinnable || row.speakerKey !== null || row.block.paragraph < 0) return;
                 const span = rawSelection(event.currentTarget);
                 if (span === null) return;
                 const words = row.block.text.slice(span.from, span.to);
@@ -1206,6 +1220,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelect, onPlayOne,
               />
             )}
             <span className="fy-ab__marks">
+              <span className="fy-ab__state-word">{row.state === "not made" ? "waiting" : STATE_LABEL[row.state]}</span>
               {row.block.pinned === true && (
                 <span className="fy-ab__pin" title="set by you" aria-label="set by you">
                   <Pin size={11} />
@@ -1236,7 +1251,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelect, onPlayOne,
                   event.stopPropagation();
                   onPlayOne(row);
                 }}
-              />
+              ><Play size={16} aria-hidden="true" /></button>
             </span>
           </div>
         );
@@ -1442,7 +1457,7 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
 }
 
 /** The side in the Audiobook view: the block pressed, its direction, then its takes. */
-export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, onUpload, onRecorded, onLines, onMarker, refused, blockHost }: {
+export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, onUpload, onRecorded, onLines, onMarker, refused, blockHost, capturedSelection, choices, onPin, inSheet = false }: {
   rows: BlockRow[];
   selected: string | null;
   record: ChapterAudiobook | null;
@@ -1464,10 +1479,18 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   onMarker?: (at: MarkerAt) => void;
   /** The last write's refusal (R-9), said on the panel until the next write answers. */
   refused: string | null;
+  capturedSelection?: BlockSelection | null;
+  inSheet?: boolean;
+  choices?: SpeakerChoices;
+  onPin?: (row: BlockRow, pick: SpeakerPick, selection?: { from: number; to: number }) => void;
   /** The element the block's words are shown in, for a cue placed at the selection. */
   blockHost: (key: string) => HTMLElement | null;
 }) {
   const row = rows.find((candidate) => candidate.block.key === selected) ?? null;
+  const [supportNotice, setSupportNotice] = useState<string | null>(null);
+  const [lineOpen, setLineOpen] = useState(false);
+  const [markerMenu, setMarkerMenu] = useState<MarkerAt | null>(null);
+  const coarse = useMediaQuery("(pointer: coarse)");
   const [phraseDraft, setPhraseDraft] = useState<string | null>(null);
   // Edits compose while the record's answer is on its way (codex on PR 1186): a delivery then
   // a speed pressed before the first write answers would otherwise both be built from the same
@@ -1477,6 +1500,9 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   useEffect(() => {
     setPhraseDraft(null);
     setPending(null);
+    setLineOpen(false);
+    setSupportNotice(null);
+    setMarkerMenu(null);
   }, [selected]);
   useEffect(() => setPending(null), [record?.updatedAt, refused]);
   if (row === null) return null;
@@ -1526,8 +1552,12 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
     onSetDirection(row.block.key, next);
   };
   const write = (next: Partial<AudiobookDirectionInput>) => send({ ...base, ...next });
+  // Both offsets and source words were captured before the sheet moved focus. A changed block
+  // invalidates them rather than applying the old span to a newer version of its prose.
+  const captured = capturedSelection?.key === row.block.key && capturedSelection.text === row.block.text ? capturedSelection : null;
+  const selectionSpan = () => captured?.span ?? (coarse ? null : selectedSpan(blockHost(row.block.key), row.block.text));
   const addCue = (kind: "pause" | "breath" | "emphasis") => {
-    const span = selectedSpan(blockHost(row.block.key), row.block.text);
+    const span = selectionSpan();
     if (span === null || (kind === "emphasis" && span.to <= span.from)) return;
     const cue: CadencePlan["cues"][number] =
       kind === "pause"
@@ -1560,10 +1590,11 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
           type="button"
           role="radio"
           className={`fy-ab__chip${item.active ? " fy-ab__chip--on" : ""}${item.off ? " fy-ab__chip--off" : ""}`}
-          disabled={item.off}
+          disabled={item.off && !coarse}
+          aria-disabled={item.off}
           aria-checked={item.active}
           title={item.title}
-          onClick={item.press}
+          onClick={() => item.off ? setSupportNotice(`${item.label} · ${item.title}`) : item.press()}
         >
           {item.label}
         </button>
@@ -1577,10 +1608,11 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
           key={item.key}
           type="button"
           className={`fy-seg__item${item.active ? " fy-seg__item--active" : ""}${item.off ? " fy-ab__seg-item--off" : ""}`}
-          disabled={item.off}
+          disabled={item.off && !coarse}
+          aria-disabled={item.off}
           aria-pressed={item.active}
           title={item.title}
-          onClick={item.press}
+          onClick={() => item.off ? setSupportNotice(`${item.label} · ${item.title}`) : item.press()}
         >
           {item.label}
         </button>
@@ -1607,7 +1639,12 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
         </p>
         {row.state === "flagged" && flag !== undefined && <div className="fy-ch__moved fy-ch__moved--line">{flag.reason}</div>}
       </section>
+      {coarse && captured !== null && choices !== undefined && onPin !== undefined && row.speakerKey === null && row.block.paragraph >= 0 && captured.raw.to > captured.raw.from && captured.raw.to - captured.raw.from <= 600 && <div className="fy-ab__make-line">
+        <Button onClick={() => setLineOpen(true)}>Make this a line</Button>
+        {lineOpen && <SpeakerMenu row={row} choices={choices} onClose={() => setLineOpen(false)} onPick={pick => { onPin(row, pick, captured.raw); setLineOpen(false); }} />}
+      </div>}
       <section className="fy-bible__panel fy-ab__direction" data-testid="audiobook-direction">
+        {coarse && supportNotice && <p role="status" className="fy-mono">{supportNotice}</p>}
         <div className="fy-ab__row fy-ab__row--stack">
           <span className="fy-ab__label">Delivery</span>
           {chips(
@@ -1690,8 +1727,9 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
                   title="[ at the words selected"
                   onClick={(event) => {
                     event.stopPropagation();
-                    const span = selectedSpan(blockHost(row.block.key), row.block.text);
-                    onMarker({ key: row.block.key, span: span ?? { from: 0, to: text.length } });
+                    const span = selectionSpan();
+                    const at = { key: row.block.key, span: span ?? { from: 0, to: text.length } };
+                    if (inSheet) setMarkerMenu(at); else onMarker(at);
                   }}
                   data-testid="audiobook-marker-open"
                   aria-label="Add marker"
@@ -1721,6 +1759,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
             </span>
           </span>
         </div>
+        {markerMenu !== null && <MarkerMenu row={row} at={markerMenu} model={model} onClose={() => setMarkerMenu(null)} onApply={cues => { setMarkerMenu(null); send(cues === null ? null : { ...base, cues }); }} />}
         {(report !== null || refused !== null) && (
           <p className={`fy-ch__stamp fy-mono${refused !== null ? " fy-ch__who-where--warn" : ""}`} data-testid="audiobook-report">
             {refused ?? report}
@@ -2117,4 +2156,18 @@ export function SpeakerLinesDialog({ worldId, productionId, speaker, label, tone
       </div>
     </EditorDialog>
   );
+}
+
+/** Raw character offsets for casting and normalized speech offsets for cadence share one snapshot. */
+export interface BlockSelection { key: string; text: string; raw: { from: number; to: number }; span: { from: number; to: number }; }
+export function audiobookSelection(rows: readonly BlockRow[]): BlockSelection | null {
+  const at = markerAtSelection(rows);
+  if (at === null) return null;
+  const row = rows.find(row => row.block.key === at.key);
+  const selection = window.getSelection?.();
+  const node = selection?.rangeCount ? selection.getRangeAt(0).startContainer : null;
+  const host = (node?.nodeType === 1 ? node as Element : node?.parentElement)?.closest<HTMLElement>(".fy-ab__text");
+  const raw = host ? rawSelection(host) : null;
+  if (!row || raw === null) return null;
+  return { key: at.key, text: row.block.text, raw, span: at.span };
 }

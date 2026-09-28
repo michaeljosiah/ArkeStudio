@@ -1,5 +1,8 @@
-import { createPortal } from "react-dom";
-import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Composer } from "../components/composer.js";
+import { HeldBar } from "../components/held-bar.js";
+import { ResponsiveSheet } from "../components/responsive-sheet.js";
+import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
+import { Fragment, useId, useLayoutEffect, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Link, useParams, useNavigate, useSearchParams } from "react-router";
 import {
   chapterParagraphs,
@@ -35,7 +38,7 @@ import {
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
-import { Pin, RotateCcw, X } from "../components/icons.js";
+import { FileText, Pin, Play, RotateCcw, Sparkle, X } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
 import { EmptyState, Screen } from "../components/layout.js";
@@ -540,6 +543,7 @@ export function ChapterWorkspace({
   chapter: ChapterSummary;
 }) {
   const worldId = world.meta.worldId;
+  const navigate = useNavigate();
   const prodId = production.meta.id;
   const path = chapterPath(production, chapter);
   const { connection, rejoins } = useStore();
@@ -1104,7 +1108,22 @@ export function ChapterWorkspace({
     return { record: opened, missing };
   }, [record?.audiobook, record?.audiobookMissing, finishedAudiobook]);
   // Below 700 the Audiobook view is one column and a block's panel is a sheet (turn 165l).
-  const phone = useMediaQuery("(max-width: 699px)");
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const coarse = useMediaQuery("(pointer: coarse)");
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [blockSheet, setBlockSheet] = useState(compact);
+  const [blockSelection, setBlockSelection] = useState<import("./chapter-audiobook.js").BlockSelection | null>(null);
+  const chapterCentre = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const node = chapterCentre.current;
+    if (!node) return;
+    const measure = () => setBlockSheet(compact || node.clientWidth > 0 && node.clientWidth < 900);
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(node);
+    return () => observer?.disconnect();
+  }, [compact]);
   const audiobook = useChapterAudiobook({
     worldId,
     prodId,
@@ -1181,7 +1200,8 @@ export function ChapterWorkspace({
   // down from the number, so no Restore is offered that would silently fail.
   const history = useMemo(() => [...(record?.versions ?? [])].sort((a, b) => b - a).slice(0, 12), [record?.versions]);
 
-  const [dock, setDock] = useState(true);
+  const [dock, setDock] = useState(!compact);
+  const [passageLine, setPassageLine] = useState("");
   /*
    * The plan (turn 127): typed where it reads and saved in place, one write for every field.
    * A fact proposed is said into the production thread in the author's name — handed to the
@@ -1266,12 +1286,14 @@ export function ChapterWorkspace({
   const onSelect = useCallback((text: string | null, paragraph: number | null = null, source?: HTMLTextAreaElement) => {
     const subject = passageSubject(text);
     const at = source === undefined ? askAt(manuscriptRef.current) : askAtSource(manuscriptRef.current, source);
-    setSelection(subject === null ? null : { text: subject, paragraph, ...at });
+    // Native selection may collapse when the ask field receives focus. Keep its captured subject.
+    const inAsk = document.activeElement?.closest(".fy-passage-ask");
+    if (subject !== null || !coarse || !inAsk) setSelection(subject === null ? null : { text: subject, paragraph, ...at });
     // A subject flushes the pending autosave, as Read the chapter does (codex on turn 128): the
     // words the thread hears must be the words the coordinator will find, and an ask sent inside
     // the autosave window would otherwise quote prose the file does not hold yet.
     if (subject !== null && timer.current !== null && draftRef.current !== null) flushSave(draftRef.current);
-  }, [flushSave]);
+  }, [flushSave, coarse]);
   // The words come from the text the editor holds, not the element's value: the two are the same
   // string in a browser, and only the first is there under test.
   const onTextareaSelect = (e: { currentTarget: HTMLTextAreaElement }) => {
@@ -1282,6 +1304,22 @@ export function ChapterWorkspace({
     const lead = selected.length - selected.trimStart().length;
     onSelect(selectionStart === selectionEnd ? null : selected, paragraphAt(text, selectionStart + lead), e.currentTarget);
   };
+  useEffect(() => {
+    const selected = () => {
+      const area = document.activeElement;
+      if (area?.tagName === "TEXTAREA" && manuscriptRef.current?.contains(area)) onTextareaSelect({ currentTarget: area as HTMLTextAreaElement });
+    };
+    document.addEventListener("selectionchange", selected);
+    return () => document.removeEventListener("selectionchange", selected);
+  }, [text, onSelect]);
+  useLayoutEffect(() => {
+    const area = manuscriptRef.current?.querySelector<HTMLTextAreaElement>(".fy-ch__source");
+    if (!area || !compact) return;
+    const fit = () => { area.style.height = "auto"; area.style.height = `${area.scrollHeight}px`; };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => { window.removeEventListener("resize", fit); area.style.height = ""; };
+  }, [compact, text, view, richMode]);
   useEffect(() => {
     if (locked) setSelection(null);
   }, [locked]);
@@ -1388,6 +1426,7 @@ export function ChapterWorkspace({
         >
           {segment.before !== "" && <del>{segment.before}</del>}
           {segment.after !== "" && <ins>{segment.after}</ins>}
+          {coarse && <span className="fy-ch__edit-state">{refused.has(segment.index) ? "Refused" : "Kept"}</span>}
         </button>
       ),
     );
@@ -1568,11 +1607,15 @@ export function ChapterWorkspace({
     onUpload: audiobook.uploadTake,
     onRecorded: (speaker, on) => setAudiobookRecorded(worldId, prodId, speaker, on),
     onLines: (speaker, label) => setLinesFor({ speaker, label }),
+    capturedSelection: blockSelection,
+    inSheet: blockSheet,
+    ...(pinChoices !== null ? { choices: pinChoices, onPin: pinBlock } : {}),
     blockHost: (key) => audiobookColumn.current?.querySelector<HTMLElement>(`[data-block="${key}"] .fy-ab__text`) ?? null,
   };
   return (
     <div className="fy-sw" data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"}>
-      <main className="fy-sw__centre">
+      <main className="fy-sw__centre" ref={chapterCentre}>
+        {phone && <SceneBackRow context={`${production.meta.title} · Chapters`} title={`${String(chapter.order).padStart(2,"0")} · ${chapter.title}`} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)}><Button onClick={() => setNotesOpen(true)}>Notes</Button><Button onClick={() => setDock(true)}>Ask Arke</Button></SceneBackRow>}
         <header className="fy-sw__head">
           <p className="fy-sw__breadcrumb">
             CHAPTER {String(chapter.order).padStart(2, "0")} OF {production.chapters.length}
@@ -1611,6 +1654,7 @@ export function ChapterWorkspace({
           )}
           <div className="fy-sw__context" aria-label="Chapter state">
             <span className="fy-ch__mark">
+              {compact ? <span>{chapter.pov ? sheetName(chapter.pov) : "Point of view"}</span> : (
               <select
                 className="fy-ch__pick"
                 aria-label="Point of view"
@@ -1625,9 +1669,10 @@ export function ChapterWorkspace({
                   </option>
                 ))}
               </select>
+              )}
             </span>
             <span className="fy-ch__mark">
-              {locked ? (
+              {locked || compact ? (
                 <span className="fy-mono">{chapter.when ?? ""}</span>
               ) : (
                 <EditableText
@@ -1640,8 +1685,8 @@ export function ChapterWorkspace({
               )}
             </span>
             <span>{chapter.status}</span>
-            <span>{words.toLocaleString()} words</span>
-            <span>{waiting !== null ? `${waiting} waiting` : saveRefusal !== null ? "not saved" : saving ? "saving" : "saved"}</span>
+            <span>{words.toLocaleString()} words{compact && ` · ${waiting !== null ? `${waiting} waiting` : saveRefusal !== null ? "not saved" : saving ? "saving" : "saved"}`}</span>
+            {!compact && <span>{waiting !== null ? `${waiting} waiting` : saveRefusal !== null ? "not saved" : saving ? "saving" : "saved"}</span>}
             {stale && (
               <span className="fy-ch__moved">
                 overview moved · v{chapter.draftedAgainst} → v{production.story?.version}
@@ -1659,6 +1704,7 @@ export function ChapterWorkspace({
                 Audiobook
               </button>
             </nav>
+            {compact && <div className="fy-ch__compact-actions">{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && <PageReadControl read={read} label={<><Play size={18} /><span className="fy-sr-only">Read the chapter</span></>} />}<button type="button" className="ui-btn" aria-label="Notes" onClick={() => setNotesOpen(true)}><FileText size={18} />{!phone && "Notes"}</button></div>}
             {view === "audiobook" && (
               <>
                 <ReadingMenu
@@ -1702,6 +1748,7 @@ export function ChapterWorkspace({
                   rows={audiobook.rows}
                   sounding={audiobook.sounding}
                   selected={audiobook.selected}
+                  onSelectionChange={setBlockSelection}
                   onSelect={audiobook.setSelected}
                   slug={worldSlug}
                   onPlayOne={(row) => {
@@ -1756,6 +1803,23 @@ export function ChapterWorkspace({
               <EmptyState title={openFailure} />
             ) : record === null ? (
               <EmptyState title="Opening…" />
+            ) : stagedDraft !== undefined && passageChange !== null && coarse ? (
+              <div className="fy-ch__prose fy-ch__touch-draft" aria-label="Arke's passage">
+                {(() => {
+                  const body = stagedDraft.body ?? live, from = passageChange.start, to = from + passageChange.after.length;
+                  const first = passageParagraphs.find(p => p.end >= from)?.start ?? from;
+                  const last = passageParagraphs.find(p => p.end >= to)?.end ?? to;
+                  return <>
+                    {chapterParagraphs(body.slice(0, first)).map((p,i) => <p key={`before-${i}`}>{p}</p>)}
+                    <section className="fy-passage-band">
+                      <header><Sparkle size={14} /><strong>Arke’s passage</strong><span>{countWords(passageChange.before)} → {countWords(passageChange.after)} words · against v{record.version}</span></header>
+                      <p>{body.slice(first,from)}{segments.map((segment,i) => segment.kind === "same" ? <span key={i}>{segment.text}</span> : <span key={i}>{segment.before && <del>{segment.before}</del>}{segment.after && <ins>{segment.after}</ins>}</span>)}{body.slice(to,last)}</p>
+                      {choosing && <div className="fy-passage-edits">{segments.filter(segment => segment.kind === "edit").map(segment => <button type="button" key={segment.index} disabled={keeping !== null || accepting !== null} aria-pressed={!refused.has(segment.index)} onClick={() => toggleEdit(segment.index)}><b>“{segment.after || segment.before}”</b><span className={cx("fy-ch__edit-state", refused.has(segment.index) && "fy-ch__edit-state--refused")}>{refused.has(segment.index) ? "Refused" : "Kept"}</span></button>)}</div>}
+                    </section>
+                    {chapterParagraphs(body.slice(last)).map((p,i) => <p key={`after-${i}`}>{p}</p>)}
+                  </>;
+                })()}
+              </div>
             ) : stagedDraft !== undefined && passageChange !== null ? (
               <div className="fy-ch__prose">
                 {/* A passage waits (turn 128): the replacement stands in the passage's place, the
@@ -1885,7 +1949,7 @@ export function ChapterWorkspace({
             )}
             {/* The press beside a selection (turn 128). Mouse-down is swallowed so the press does
                 not collapse the selection it is about before the click lands. */}
-            {selection !== null && !locked && (
+            {selection !== null && !locked && !coarse && (
               <PassageMenu
                 key={selection.text}
                 words={countWords(selection.text)}
@@ -1905,6 +1969,7 @@ export function ChapterWorkspace({
                       : {})}
               />
             )}
+            {selection !== null && !locked && coarse && <TouchPassageAsk manuscript={manuscriptRef.current} paragraph={selection.paragraph} words={countWords(selection.text)} actions={passageActions(style !== null)} held={draftConflict || saveRefusal !== null ? "not saved" : saving || draft !== null ? "saving…" : asking ? "asking…" : undefined} onClose={() => setSelection(null)} onAsk={askPassage} value={passageLine} onChange={setPassageLine} onSubmit={() => { askPassage({ ...TIGHTEN, line: passageLine.trim(), replyOnly: false }); setPassageLine(""); }} />}
             <div className="fy-ch__foot">
               <span className="fy-mono">{foot}</span>
               <span className="fy-ch__foot-push" />
@@ -1918,23 +1983,10 @@ export function ChapterWorkspace({
             </div>
           </div>
 
-          <aside className="fy-ch__side">
-            {view === "audiobook" && !phone && <AudiobookSide {...blockPanel} />}
-            {/* On a phone the block's panel is a sheet raised by a press on a block (turn 165l): the
-                side would sit under every block, out of reach of the one pressed. A portal, because
-                the centre is a size container and a fixed sheet inside it would be pinned to it. */}
-            {view === "audiobook" &&
-              phone &&
-              audiobook.selected !== null &&
-              createPortal(
-                <div className="fy-ab__sheet" role="dialog" aria-modal="false" aria-label="Block">
-                  <button type="button" className="fy-ab__sheet-close" aria-label="Close" onClick={() => audiobook.setSelected(null)}>
-                    <X size={16} aria-hidden="true" />
-                  </button>
-                  <AudiobookSide {...blockPanel} />
-                </div>,
-                document.body,
-              )}
+          <div className="fy-ch__panels">
+          {view === "audiobook" && <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null} title={`${audiobook.selected === "title" ? "Title" : `Block ${audiobook.rows.findIndex(row => row.block.key === audiobook.selected) + 1}`} · ${audiobook.rows.find(row => row.block.key === audiobook.selected)?.mark ?? "Narrator"}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><AudiobookSide {...blockPanel} /></aside></ResponsiveSheet>}
+          <ResponsiveSheet sheet={compact} open={notesOpen} title={`Chapter ${String(chapter.order).padStart(2,"0")} · notes`} onClose={() => setNotesOpen(false)} className="fy-chapter-notes-sheet">
+          <aside className="fy-ch__side fy-ch__notes">
             <section className="fy-bible__panel">
               <h2 className="fy-bible__paneltitle">The book</h2>
               <p className="fy-bible__empty fy-mono">
@@ -2257,11 +2309,20 @@ export function ChapterWorkspace({
                 </>
               )}
             </section>
+            {compact && <section className="fy-bible__panel fy-ch__plan"><h2 className="fy-bible__paneltitle">Chapter plan</h2>
+              <label>Title{locked ? <span>{chapter.title}</span> : <EditableText value={chapter.title} placeholder="Chapter title" className="fy-ch__plan-field" rows={1} onCommit={title => plan({ title })} />}</label>
+              <label>Synopsis{locked ? <span>{chapter.synopsis}</span> : <EditableText value={chapter.synopsis ?? ""} placeholder="What this chapter is for." className="fy-ch__plan-field" rows={2} onCommit={synopsis => plan({ synopsis: synopsis || null })} />}</label>
+              <label>Point of view<select aria-label="Point of view" disabled={locked} value={chapter.pov ?? ""} onChange={event => plan({ pov: event.target.value || null })}><option value="">Not set</option>{characters.map(sheet => <option key={sheet.id} value={sheet.id}>{sheet.name}</option>)}</select></label>
+              <label>When{locked ? <span>{chapter.when}</span> : <EditableText value={chapter.when ?? ""} placeholder="When" className="fy-ch__plan-field" rows={1} onCommit={when => plan({ when: when || null })} />}</label>
+            </section>}
           </aside>
+          </ResponsiveSheet>
+          </div>
         </div>
       </main>
 
-      {dock ? (
+      {compact && stagedDraft !== undefined && passageChange !== null && <HeldBar className="fy-passage-decision"><span>{keptCount} of {editCount} kept</span><StagedDecision worldId={worldId} subject={chapterLabel} staged={stagedDraft.staged} {...(accept !== undefined ? { accept } : {})} /></HeldBar>}
+      <ResponsiveSheet sheet={compact || !dock} open={compact && dock} title="Arke" onClose={() => setDock(false)} className="fy-season-arke-sheet">
         <ProductionConversation
           key={`dock:${say?.seq ?? 0}`}
           worldId={worldId}
@@ -2276,6 +2337,7 @@ export function ChapterWorkspace({
             title: `Arke · Chapter ${String(chapter.order).padStart(2, "0")}`,
             subject: `${chapter.title} · ${production.meta.title}`,
             conversationFirst: true,
+            controlsInSheet: true,
             onPutAway: () => setDock(false),
             ...(ask !== null ? { ask } : {}),
             onAsk: setAsk,
@@ -2317,7 +2379,7 @@ export function ChapterWorkspace({
           placeholder={`Ask about ${chapterLabel}`}
           {...(stagedDraft === undefined && view === "audiobook" && audiobook.directionRun !== undefined
             ? { side: <DirectionCard run={audiobook.directionRun} chapterOrder={chapter.order} onAccept={audiobook.accept} onDiscard={audiobook.discard} /> }
-            : stagedDraft === undefined
+            : stagedDraft === undefined || compact && passageChange !== null
             ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the chapter appears here." }
             : {
                 side: (
@@ -2341,13 +2403,44 @@ export function ChapterWorkspace({
                 ),
               })}
         />
-      ) : (
-        <button type="button" className="fy-sw__rail" title="Pin the assistant back" onClick={() => setDock(true)}>
-          <span className="fy-sw__rail-dot" aria-hidden="true" />
-          <span className="fy-sw__rail-label">Ask Arke</span>
+      </ResponsiveSheet>
+      {(compact || !dock) && (
+        <button type="button" className={phone ? "fy-season-arke" : "fy-sw__rail fy-season-arke-rail"} aria-label="Open Arke" title="Pin the assistant back" onClick={() => setDock(true)}>
+          {compact ? <Sparkle size={16} /> : <span className="fy-sw__rail-dot" aria-hidden="true" />}
+          <span className="fy-sw__rail-label">{phone ? "Arke" : "Ask Arke"}</span>
           <span className="fy-sw__rail-pin"><Pin size={13} /></span>
         </button>
       )}
     </div>
   );
+}
+
+/** The touch bar preserves the native selection and its handles; only Close dismisses its subject. */
+function TouchPassageAsk({ manuscript, paragraph, words, actions, held, onClose, onAsk, value, onChange, onSubmit }: {
+  manuscript: HTMLElement | null; paragraph: number | null; words: number; actions: readonly PassageAction[]; held?: string;
+  onClose: () => void; onAsk: (action: PassageAction) => void; value: string; onChange: (value: string) => void; onSubmit: () => void;
+}) {
+  const phone = useMediaQuery("(max-width: 599px)");
+  const bar = useRef<HTMLDivElement>(null);
+  const [top, setTop] = useState<number | null>(null);
+  const [reserve, setReserve] = useState(0);
+  const anchorId = useId();
+  useLayoutEffect(() => {
+    if (phone || !manuscript || !bar.current || paragraph === null) { setTop(null); return; }
+    const block = manuscript.querySelector<HTMLElement>(`.fy-rme__doc > :nth-child(${paragraph})`);
+    if (!block) { setTop(null); return; }
+    // Style outside ProseMirror's document. Mutating a paragraph makes its DOM observer
+    // replace that node, collapsing the native selection and invalidating its coordinates.
+    manuscript.dataset.touchAsk = anchorId;
+    const measure = () => { const current = manuscript.querySelector<HTMLElement>(`.fy-rme__doc > :nth-child(${paragraph})`); if (!bar.current || !current) return; setReserve(bar.current.getBoundingClientRect().height + 40); setTop(current.getBoundingClientRect().bottom - manuscript.getBoundingClientRect().top + 20); };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(bar.current); window.addEventListener("resize", measure);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", measure); delete manuscript.dataset.touchAsk; };
+  }, [phone, manuscript, paragraph, words, anchorId]);
+  return <div ref={bar} style={top === null ? undefined : { position: "absolute", top, left: 0, right: 0 }} className="fy-passage-anchor">{!phone && reserve > 0 && <style>{`[data-touch-ask="${anchorId}"] .fy-rme__doc > :nth-child(${paragraph}) { margin-bottom: ${reserve}px; }`}</style>}<HeldBar className="fy-passage-ask">
+    <header><Sparkle size={16} /><strong>About this passage</strong><span>{words} words · paragraph {paragraph ?? "—"}</span><button type="button" aria-label="Close passage" onClick={onClose}><X size={18} /></button></header>
+    <div className="fy-passage-prompts">{actions.filter(action => !action.draft).sort((a,b) => (["tighten","style","simplify"].includes(a.id) ? ["tighten","style","simplify"].indexOf(a.id) : 99) - (["tighten","style","simplify"].includes(b.id) ? ["tighten","style","simplify"].indexOf(b.id) : 99)).map(action => <button key={action.id} type="button" disabled={held !== undefined} onMouseDown={event => event.preventDefault()} onClick={() => onAsk(action)}>{action.id === "tighten" ? "Tighten this" : action.id === "style" ? "Hold it against the style" : action.id === "simplify" ? "Say it plainer" : action.label}</button>)}</div>
+    <Composer value={value} onChange={onChange} onSubmit={onSubmit} onDictate={line => onChange(value ? `${value} ${line}` : line)} placeholder="Ask about this passage…" disabledReason={held} />
+  </HeldBar></div>;
 }

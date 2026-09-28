@@ -1,0 +1,21 @@
+import { type ClientState, type AudiobookDoor } from "@arke-studio/contracts";
+import { developLayoutFixture, CHAT_ID } from "./develop-layout-fixture.js";
+export const CHAPTER_BODY="The ledger of the Vigil is kept in a hand that changes every generation and a form that never has: date, moon, tide predicted, tide observed, bells, name of the watch. Six columns since 1747.\n\nMaren has the 1820 volume open on the rail desk because the binding is failing and somebody has to say so in writing. She is not reading it. You do not read the ledger; you check it, the way you check a lock.\n\nThe entry for the eleventh of March is ordinary. Neap tide predicted, neap tide observed, no bells, watch signed E. Kell — a name that runs through the harbour like a seam and means nothing in particular. Then the correction.\n\nMaren reads that twice. Then she reads it a third time, because on the third reading she notices that the crossing-out is neat. Not the scrape of a mistake caught. The stroke of somebody who had the correct answer in mind before they wrote the wrong one, and wrote it anyway, because the form has a column for what the tables say and a column for what the water does.";
+export const CHAPTER_HASH='sha256:'+'a'.repeat(64);
+export function chapterLayoutFixture(mode='normal'):ClientState {
+ const state=developLayoutFixture(mode==='waiting'?'staged':'normal'),world=state.world!,book=world.productions[1]!;
+ state.app.manifest!.models.push({id:'kokoro-82m',provider:'kokoro',capability:'voice-tts',displayName:'Kokoro 82M',accepts:{referenceImages:0,startFrame:false,endFrame:false},limits:{audioFormat:'wav'},pricing:{kind:'unmetered'},cadence:{deliveries:['measured','urgent'],speed:null,pause:'unsupported',emphasis:'unsupported',breath:'unsupported',outputTimestamps:'none',deliveryMappings:{measured:{settings:{speed:.92}},urgent:{settings:{speed:1.15}}}}});
+ book.meta={...book.meta,id:'ledger',title:'The Ledger of Nights',kind:'novel',medium:'story',format:'story'};
+ book.chapters=['Neap','The same ink','Nothing wrong with it','Her own hand'].map((title,i)=>({id:['neap','same-ink','nothing-wrong','own-hand'][i]!,file:'0'+(i+1)+'-chapter',order:i+1,title,status:i===3?'planned':'drafted',version:i===2?5:4,words:[3120,2930,3520,0][i]!,bodyHash:CHAPTER_HASH,hash:CHAPTER_HASH,pov:'maren-kest',when:'1820 · March',synopsis:['A watchkeeper strikes through a predicted tide in 1820, and Maren has to account for it.','The same hand, eighty-one years on, with both columns filled in one sitting.','Ines Half-Hitch audits the ledger and finds it accurate, which is the finding.','An entry three weeks ahead, in a hand she now recognises as her own.'][i]!,draws:{sheets:['maren-kest'],canon:['CANON-002']}}));
+ book.story={...book.story!,targetLength:'40,000 words'};world.productions=[book];world.series=[];
+ world.conversations[0]!.entryContext={kind:'production',productionId:'ledger'};
+ state.worldChat!.messages=[];
+ if(mode==='waiting') { const staged=world.proposals[0]!,path='productions/ledger/chapters/01-chapter.md';
+ staged.proposal.kind='chapter-draft';staged.proposal.targets=[{path,baseVersion:4,baseHash:null}];staged.proposal.origin={source:'world-chat-action:act_1',surface:'world-chat',gesture:'passage-revision',conversationId:CHAT_ID};
+ staged.proposal.summary='A tighter passage';staged.proposal.worldChatOrigins![0]!.targetPaths=[path];
+ staged.review!.targets[0]!.path=path;staged.review!.targets[0]!.kind='chapter';staged.review!.targets[0]!.fields=[{field:'Prose',before:CHAPTER_BODY,proposed:CHAPTER_BODY.replace('the scrape of a mistake caught','a mistake caught').replace('had the correct answer in mind before they wrote the wrong one, and wrote it anyway','knew the answer and wrote the wrong one anyway')}]; }
+ return state;
+}
+export function chapterDoor():AudiobookDoor {return {reading:'narrator',voices:[{name:'George',voice:{label:'George',provider:'kokoro',local:true},state:'narrator',blocks:66}],unattributed:0,
+ rows:chapterLayoutFixture().world!.productions[0]!.chapters.map((c,i)=>({chapterId:c.id,file:c.file,order:c.order,title:c.title,version:c.version,planned:i===3,total:[21,19,26,0][i]!,made:0,stale:0,flagged:0,notMade:[21,19,26,0][i]!,seconds:null})),
+ price:{chapters:3,blocks:66,cloudBlocks:0,characters:1000,estimatedMicroUsd:0,voices:[]}};}

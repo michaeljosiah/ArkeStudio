@@ -313,6 +313,9 @@ export const LogOut = icon(
   </>,
 );
 export const LoaderCircle = icon(<path d="M21 12a9 9 0 1 1-6.219-8.56" />);
+export const BookOpen = icon(
+  <><path d="M12 7C9 4 6 4 2 5v15c4-1 7-1 10 2 3-3 6-3 10-2V5c-4-1-7-1-10 2Z" /><path d="M12 7v15" /></>,
+);
 export const Book = icon(
   <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />,
 );
