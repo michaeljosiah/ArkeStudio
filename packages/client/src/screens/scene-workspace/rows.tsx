@@ -1400,6 +1400,10 @@ function Row({
                     {generatorPending ? "Opening…" : "Open in generator"}
                   </button>
                   <button type="button" role="menuitem" disabled={disabled} onClick={() => { closeMenu(true); onCommand({ kind: "duplicate-shot", shotId: shot.id }); }}>Duplicate</button>
+                  {compact && <>
+                    <button type="button" role="menuitem" disabled={disabled || prevShotId === null} onClick={() => { closeMenu(true); if (prevShotId !== null) onCommand({ kind: "move-shot", shotId: shot.id, to: { before: prevShotId } }); }}>Move up</button>
+                    <button type="button" role="menuitem" disabled={disabled || nextShotId === null} onClick={() => { closeMenu(true); if (nextShotId !== null) onCommand({ kind: "move-shot", shotId: shot.id, to: { after: nextShotId } }); }}>Move down</button>
+                  </>}
                   <button
                     type="button"
                     role="menuitem"
