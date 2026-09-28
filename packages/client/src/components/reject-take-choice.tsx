@@ -3,18 +3,19 @@ import type { Take, WorldBundle } from "@arke-studio/contracts";
 import { PageSheet } from "./page-sheet.js";
 import { Portrait, sheetPortraitPath } from "./portrait.js";
 import { Button } from "./ui.js";
-import { rejectTake } from "../lib/store.js";
+import { rejectTake, useStore } from "../lib/store.js";
 
 /** A rejection teaches from an explicit citation, chosen from this take's frozen provenance. */
 export function RejectTakeChoice({ world, productionId, take, number, shotId, onClose }: {
   world: WorldBundle; productionId: string; take: Take; number: number; shotId?: string; onClose: () => void;
 }) {
   const citations = Object.entries(take.provenance.sheets);
+  const { connection } = useStore();
   const [sheet, setSheet] = useState(citations[0]?.[0] ?? "");
   const [note, setNote] = useState("");
   return <PageSheet open onClose={onClose} title={`Reject take ${number}`} className="fy-reject-take" footer={<>
     <Button variant="outline" onClick={onClose}>Cancel</Button>
-    <Button variant="primary" disabled={!citations.some(([id]) => id === sheet)} onClick={() => {
+    <Button variant="primary" disabled={connection !== "open" || !citations.some(([id]) => id === sheet)} onClick={() => {
       rejectTake(world.meta.worldId, productionId, take.id, { sheet, field: "appearance", note }, shotId); onClose();
     }}>Reject take {number}</Button>
   </>}>

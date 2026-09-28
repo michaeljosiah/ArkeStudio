@@ -155,6 +155,7 @@ export function TakesView({
 }) {
   const { world, production } = useProduction(worldId, prodId);
   const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
   const [dock, setDock] = useSceneDock();
   const [reject, setReject] = useState<Take | null>(null);
   const [diagnostics, setDiagnostics] = useState(false);
@@ -282,6 +283,7 @@ export function TakesView({
       <div className="fy-arkewrap fy-generate-wrap">
         <div className="fy-prodmain fy-takes" data-screen="generate-workspace">
           <header className="fy-takes__head">
+          {compact && !phone && <div className="fy-takes__page-title"><span>{production.meta.title} · Generate</span><h1>Takes</h1></div>}
             <nav className="fy-takes__filters" aria-label="Take filters">{episodeFilter}</nav>
           </header>
           <EmptyState
@@ -300,11 +302,12 @@ export function TakesView({
     <div className="fy-arkewrap fy-generate-wrap">
       <div className="fy-prodmain fy-takes" data-screen="generate-workspace">
         <header className="fy-takes__head">
+          {compact && !phone && <div className="fy-takes__page-title"><span>{production.meta.title} · Generate</span><h1>Takes</h1></div>}
           <nav className="fy-takes__filters" aria-label="Take filters">
             {episodeFilter}
             {scenes.length > 1 && (
               <div className={cx("fy-takes__filter", selectedEpisode !== null && "fy-takes__filter--episode-scenes")}>
-                <span className="fy-takes__filter-label">SCENE</span>
+                <span className="fy-takes__filter-label">{compact ? "Scene" : "SCENE"}</span>
                 <div className="fy-takechips" role="group" aria-label="Scene">
                   <button
                     type="button"
@@ -345,7 +348,7 @@ export function TakesView({
               </div>
             )}
             <div className="fy-takes__filter">
-              <span className="fy-takes__filter-label">SHOT</span>
+              <span className="fy-takes__filter-label">{compact ? "Shot" : "SHOT"}</span>
               <div className="fy-takechips fy-takechips--shots" role="group" aria-label="Shot">
                 {shots.map((candidate) => {
                   const done = acceptedTakeId(production, candidate.id) !== null;
@@ -368,14 +371,14 @@ export function TakesView({
                           background: done ? "var(--foreground)" : has ? "var(--warning)" : "var(--neutral-300)",
                         }}
                       />
-                      Shot {candidate.number}{phone ? ` · ${candidate.title}` : ""}
+                      {compact ? `${candidate.number} · ${candidate.title}` : `Shot ${candidate.number}`}
                     </button>
                   );
                 })}
               </div>
             </div>
           </nav>
-          {phone ? <div className="fy-takes__phone-title"><div><span>Shot {shot.number} · {seconds(shot.durationSec)}</span><h1>{shot.title}</h1></div><small>{acceptedCount} of {shots.length} accepted</small></div> : <>          <div className="fy-h1row">
+          {compact ? <div className="fy-takes__phone-title"><div><span>Shot {shot.number} · {seconds(shot.durationSec)}</span><h1>{shot.title}</h1></div><small>{acceptedCount} of {shots.length} accepted</small></div> : <>          <div className="fy-h1row">
             <h1 className="fy-h1">Shot {shot.number}</h1>
             <span className="fy-h1row__meta">
               {shot.title} · {seconds(shot.durationSec)}
@@ -408,6 +411,8 @@ export function TakesView({
                     onClick={() => setPickedId(t.id)}
                   />
                   <span className="fy-take__frame">
+                    {compact && <span className="fy-take__badge">Take {i + 1}</span>}
+                    {compact && picked?.id === t.id && <span className="fy-take__selected">✓ Selected</span>}
                     <TakeTileMedia
                       production={production}
                       take={t}
@@ -418,10 +423,10 @@ export function TakesView({
                     />
                   </span>
                   <span className="fy-take__foot">
-                    <span className="fy-take__name">Take {i + 1}{phone && <small>{t.model} · {seconds(durationSec)}</small>}</span>
+                    <span className="fy-take__name">Take {i + 1}{compact && <small>{t.model} · {seconds(durationSec)}</small>}</span>
                     <span style={{ flex: 1 }} />
                     <span className="fy-mono">
-                      {t.id === accepted ? "✓ SELECTED" : seconds(durationSec)}
+                      {t.id === accepted ? compact ? "Accepted" : "✓ SELECTED" : seconds(durationSec)}
                     </span>
                   </span>
                 </article>
@@ -429,7 +434,7 @@ export function TakesView({
             })}
           </div>
         )}
-        {picked && worldId && shotId && (phone ? <>
+        {picked && worldId && shotId && (compact ? <>
           <button type="button" className="fy-takes__diagnostics" aria-haspopup="dialog" onClick={() => setDiagnostics(true)}>Take diagnostics<span aria-hidden="true">›</span></button>
           <PageSheet open={diagnostics} title="Take diagnostics" onClose={() => setDiagnostics(false)}><TakeDialogueFeedbackPanel key={picked.id+shotId} embedded worldId={worldId} production={production} take={picked} shotId={shotId} /></PageSheet>
         </> : <TakeDialogueFeedbackPanel key={picked.id+shotId} worldId={worldId} production={production} take={picked} shotId={shotId} />)}

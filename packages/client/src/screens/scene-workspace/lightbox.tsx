@@ -100,6 +100,7 @@ export function ShotLightbox({
   const { connection } = useStore();
   const [variants, setVariants] = useState(false), [menu, setMenu] = useState(false);
   const swipe = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => { setVariants(false); setMenu(false); swipe.current = null; }, [shotId]);
   const open = shotId !== null;
   // Keyed on open rather than the shot: showModal() on a dialog that is already modal throws,
   // and the arrows change the shot without ever closing it.

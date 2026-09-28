@@ -143,16 +143,22 @@ export function generateLayoutFixture(mode = "normal"): ClientState {
   const world = state.world!, production = world.productions[0]!;
   const scene = production.scenes.find(scene => scene.id === "sc_04")!;
   const clip = production.takes.find(take => take.kind === "clip")!;
+  const frames = production.takes.filter(take => take.kind === "frame" || take.kind === "still");
   production.takes = Array.from({length:4}, (_,i) => ({...structuredClone(clip), id:'layout-take-'+i, kind:mode==='stills'?'frame':'clip', coversShots:['sh_12'], model:'Seedance 2.0', media:mode==='stills'?'frame.png':'clip.mp4', provenance:{...clip.provenance, sheets:{'maren-kest':4,'the-vigil':2}}}));
   production.selections.sh_12 = {acceptedTakeId:production.takes[1]!.id, trimInSec:0};
   state.app.manifest!.models.push({...IMAGE_MODEL, displayName:'FLUX.2 Pro'});
   state.app.routing.defaults.image = IMAGE_MODEL.id;
+  if (mode === 'unavailable') {
+    production.meta.models = {...production.meta.models,image:IMAGE_MODEL.id};
+    state.app.models.disabled.push(IMAGE_MODEL.id);
+    state.app.manifest!.models.push({...IMAGE_MODEL,id:'other-frame-image',displayName:'Other image'});
+  }
   if (mode === 'running' || mode === 'completed') {
+    production.takes.push(...frames);
     const complete = mode === 'completed';
     const run = generateFrameRun(complete ? {sceneVersion:scene.version,first:{status:'succeeded'},second:{status:'succeeded'},firstLanding:'filed',secondLanding:'filed'} : {sceneVersion:scene.version,second:{status:'failed',error:'Provider returned a dark frame',failureClass:'transient'}});
     state.frameRuns = [run];
-    const image = world.artifacts.find(item => item.kind === 'image')!;
-    world.artifacts.push({...structuredClone(image),id:'ar_layout_frame',file:'layout-frame.png',links:['sh_12'],origin:{by:'system',producedBy:'frame-run:'+JOB_1}});
+    world.artifacts.push({id:'ar_layout_frame',kind:'image',file:'layout-frame.png',hash:'sha256:0123456789abcdef',links:['saltlight','sh_12'],production:'saltlight',created:'2026-08-30T12:01:00Z',origin:{by:'system',producedBy:'frame-run:'+JOB_1}});
     production.selections.sh_12.startFrameArtifactId = 'ar_layout_frame';
   }
   return state;

@@ -155,6 +155,7 @@ function GenerateFramesDialogOpen({
   onStarted,
 }: Omit<Parameters<typeof GenerateFramesDialog>[0], "open">) {
   const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const sceneShots = orderedShots(scene);
@@ -385,7 +386,7 @@ function GenerateFramesDialogOpen({
         <header className="fy-swgen__head">
           <h2 id={titleId}>Generate {displayedCount} frame{displayedCount === 1 ? "" : "s"}</h2>
           <span className="fy-swgen__scene">scene {scene.number}</span>
-          {phone && <button type="button" aria-label="Close" onClick={onClose}><X size={20} /></button>}
+          {compact && <button type="button" aria-label="Close" onClick={onClose}><X size={20} /></button>}
         </header>
 
         {shotId === undefined ? <section className="fy-swgen__section">
@@ -404,7 +405,7 @@ function GenerateFramesDialogOpen({
                 onClick={() => setMode(candidate)}
               >
                 <strong>{candidate === "per-shot" ? "Per shot" : "Shot board"}</strong>
-                <span>{phone ? candidate === "per-shot" ? "Fastest · each retry is cheap" : "Holds cast and light together" : candidate === "per-shot" ? "Fastest, cheap to retry, but characters and light drift between shots." : "Holds cast, light and grade together — a retry redoes the whole board."}</span>
+                <span>{compact ? candidate === "per-shot" ? "Fastest · each retry is cheap" : "Holds cast and light together" : candidate === "per-shot" ? "Fastest, cheap to retry, but characters and light drift between shots." : "Holds cast, light and grade together — a retry redoes the whole board."}</span>
               </button>
             ))}
           </div>
@@ -427,7 +428,7 @@ function GenerateFramesDialogOpen({
                 onKeyDown={(event) => moveRadio(event, (at) => setScope((["missing", "all"] as const)[at]!))}
                 onClick={() => setScope(candidate)}
               >
-                {candidate === "missing" ? "Shots without a frame" : "Every shot in the scene"}
+                {compact ? candidate === "missing" ? "Without a frame" : "Every shot" : candidate === "missing" ? "Shots without a frame" : "Every shot in the scene"}
               </button>
             ))}
           </div>
@@ -532,9 +533,9 @@ function GenerateFramesDialogOpen({
                       ? "Checking current price..."
                       : "Quote unavailable"}
               </span>
-              <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+              <Button variant={compact ? "outline" : "ghost"} size="sm" onClick={onClose}>Cancel</Button>
               {startReason === null ? null : <p className="fy-swgen__guard" role="status">{startReason}</p>}
-              {displayedBlockedReason !== null && startPending === null ? <p className="fy-swgen__guard" role="status">{displayedBlockedReason}</p> : <Button variant="primary" size="sm" disabled={!canStart || startPending !== null} onClick={start}>{startPending === null ? "Generate frames" : "Starting..."}</Button>}
+              {displayedBlockedReason !== null && startPending === null ? <p className="fy-swgen__guard" role="status">{displayedBlockedReason}</p> : <Button variant="primary" size="sm" disabled={!canStart || startPending !== null} onClick={start}>{startPending === null ? compact ? "Generate" : "Generate frames" : "Starting..."}</Button>}
             </div>
           )}
         </footer>

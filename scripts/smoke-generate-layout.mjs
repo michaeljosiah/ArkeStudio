@@ -63,14 +63,15 @@ window.measureLayout=()=>{
 });
 await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
 console.log("Generate artifacts: " + dir);
-execFileSync("ffmpeg",["-hide_banner","-loglevel","error","-loop","1","-i",join(root,"design-system/assets/scene4-shot12.png"),"-t","1","-vf","scale=320:-2","-c:v","libx264","-pix_fmt","yuv420p","-y",join(dir,"fixture.mp4")],{windowsHide:true});
+execFileSync("ffmpeg",["-hide_banner","-loglevel","error","-loop","1","-i",join(root,"design-system/assets/scene4-shot12.png"),"-t","1","-vf","scale=320:180:force_original_aspect_ratio=increase,crop=320:180","-c:v","libx264","-pix_fmt","yuv420p","-y",join(dir,"fixture.mp4")],{windowsHide:true});
 const chrome=process.env.ARKE_CHROME ?? (process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
+execFileSync("ffmpeg",["-hide_banner","-loglevel","error","-i",join(dir,"fixture.mp4"),"-frames:v","1","-y",join(dir,"fixture-poster.png")],{windowsHide:true});
 await access(chrome);
 const server=createServer(async (req,res) => {
   try {
     const path=decodeURIComponent(new URL(req.url,"http://localhost").pathname);
     if(path.startsWith("/media/") && path.includes("missing-candidate")) {res.writeHead(404);res.end();return;}
-    const file=path.startsWith("/media/") && path.endsWith(".mp4") ? join(dir,"fixture.mp4") : path.startsWith("/media/") ? join(root,"design-system/assets",path.includes("head-front") ? "char-maren.png" : path.includes("shot13") ? "scene4-shot13.png" : path.includes("shot15") ? "saltlight-shot15.png" : "scene4-shot12.png") : path.startsWith("/art-styles/") ? join(root,"packages/client/public",path.slice(1)) : path.startsWith("/design/") ? join(root,"design-system",path.slice(8)) : join(dir,path === "/" ? "index.html" : path.slice(1));
+    const file=path.startsWith("/media/") && path.endsWith(".mp4") ? join(dir,"fixture.mp4") : path.startsWith("/media/") && path.includes("layout-take-") ? join(dir,"fixture-poster.png") : path.startsWith("/media/") ? join(root,"design-system/assets",path.includes("head-front") ? "char-maren.png" : path.includes("shot13") ? "scene4-shot13.png" : path.includes("shot15") ? "saltlight-shot15.png" : "scene4-shot12.png") : path.startsWith("/art-styles/") ? join(root,"packages/client/public",path.slice(1)) : path.startsWith("/design/") ? join(root,"design-system",path.slice(8)) : join(dir,path === "/" ? "index.html" : path.slice(1));
     assert.ok([dir,join(root,"design-system"),join(root,"packages/client/public")].some(base=>{const rel=relative(base,file);return !rel.startsWith("..") && !isAbsolute(rel);}));
     res.setHeader("Content-Type",file.endsWith(".mp4")?"video/mp4":file.endsWith(".svg")?"image/svg+xml":file.endsWith(".css")?"text/css":file.endsWith(".js")?"text/javascript":file.endsWith(".html")?"text/html":"application/octet-stream"); res.end(await readFile(file));
   } catch {res.writeHead(404);res.end();}

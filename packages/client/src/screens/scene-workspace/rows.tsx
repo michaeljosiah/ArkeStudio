@@ -1053,8 +1053,9 @@ function Row({
       <button ref={titleTrigger} type="button" className="fy-swrow__pencil" aria-label={`Edit title for shot ${shot.number}`} title="Rename" disabled={disabled} onClick={(event) => { event.stopPropagation(); setEditingTitle(true); }}><Pencil size={14} /></button>
     </span>
   );
+  const phoneRunLabel = !phone || !runState ? null : runState.status === "running" ? "Generating" : ["failed", "missing", "needs-reconciliation"].includes(runState.status) ? "Failed" : ["queued", "not-enqueued", "submitting"].includes(runState.status) ? "Queued" : runState.landingOutcome === "filed" ? "Frame added" : null;
   const stateChip = compact || state === "needs attention" || state === "story"
-    ? <span className="fy-swchip" data-state={state}><span aria-hidden="true" />{state === "needs attention" ? "Needs attention" : state === "rendered" ? "Rendered" : hasFrame ? "Frame ready" : "Needs frame"}</span>
+    ? <span className="fy-swchip" data-state={state}><span aria-hidden="true" />{phoneRunLabel ?? (state === "needs attention" ? "Needs attention" : state === "rendered" ? "Rendered" : hasFrame ? "Frame ready" : "Needs frame")}</span>
     : null;
   const durationControl = editingDuration ? (
     <input
@@ -1153,6 +1154,7 @@ function Row({
       className="fy-swrow__band"
       style={{ "--shot-aspect": aspect.replace(":", " / ") } as CSSProperties}
       data-shot-id={shot.id}
+      data-run-state={phoneRunLabel ?? undefined}
       data-state={state}
       data-selected={selected ? "true" : undefined}
       data-staged={staged ? "true" : undefined}
@@ -1477,13 +1479,14 @@ function FrameState({
   onRetry: (() => boolean) | null;
   onRetryFinalization: (() => void) | null;
 }) {
+  const phone = useMediaQuery("(max-width: 599px)");
   if (state.status === "queued" || state.status === "not-enqueued" || state.status === "submitting") {
     const held = state.failureClass === "provider-fault" || state.failureClass === "offline";
-    return <div className="fy-swrow__run" data-state={held ? "failed" : "queued"}>{held ? failureCopy(state) : "queued"}</div>;
+    return <div className="fy-swrow__run" data-state={held ? "failed" : "queued"}>{held ? failureCopy(state) : phone ? "Queued" : "queued"}</div>;
   }
   if (state.status === "running") {
     const held = state.failureClass === "provider-fault" || state.failureClass === "offline";
-    return <div className="fy-swrow__run" data-state={held ? "failed" : "running"}>{held ? failureCopy(state) : "generating frame…"}</div>;
+    return <div className="fy-swrow__run" data-state={held ? "failed" : "running"}>{held ? failureCopy(state) : phone ? "Generating frame" : "generating frame…"}</div>;
   }
   if (state.status === "failed" || state.status === "missing" || state.status === "needs-reconciliation") {
     return (
