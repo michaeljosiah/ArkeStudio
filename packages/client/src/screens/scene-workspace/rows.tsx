@@ -368,7 +368,9 @@ export function StoryboardRows({
                 run={frameRun}
                 onRetryFinalization={retryFinalizationId === null ? null : () => retryJobFinalization(retryFinalizationId)}
                 worldId={worldId}
-                onGenerateFrame={(trigger) => onGenerateFrame(shot.id, trigger)}
+                // A beat that keeps the picture before generates that picture: its own frame is
+                // never shown, so paying for one is paying for nothing (codex round 10).
+                onGenerateFrame={(trigger) => onGenerateFrame(beats === undefined ? shot.id : beats.pictureShotId(shot.id), trigger)}
                 onEdit={() => onEditShot(shot.id)}
                 onOpenInGenerator={() => onOpenShotInGenerator(shot.id)}
                 onPreview={() => onPreviewShot(shot.id)}

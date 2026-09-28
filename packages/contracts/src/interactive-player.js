@@ -1030,7 +1030,12 @@ export function mountInteractivePlayer(root, options) {
       renderBar();
       renderBeat();
     } else if (key === "r" || key === "R") {
+      // One panel at a time, as the Route button has it: the log steps aside for the route.
       routeOpen = !routeOpen;
+      if (routeOpen && logOpen) {
+        logOpen = false;
+        renderBeat();
+      }
       renderPanel();
     } else if (key === "f" || key === "F") full();
   };

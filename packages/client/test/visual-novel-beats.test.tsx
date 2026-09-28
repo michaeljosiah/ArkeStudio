@@ -172,6 +172,40 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     assert.equal(sent.filter((message) => message.kind === "plan-table-read").length, before + 1);
   });
 
+  it("the plan goes with the last line: nothing is offered for lines no longer there (codex round 10)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = visualNovel();
+    const mounted = await mountState(state, SCENE_PATH);
+    const asked = sent.find((message) => message.kind === "plan-table-read")!;
+    await act(async () => {
+      __applyEventForTest({ at: "2026-09-27T10:00:00.000Z", type: "rehearsal.result", requestId: (asked as { requestId: string }).requestId, worldId: FIXTURE_WORLD_ID, status: "planned", reason: "", plan } as never);
+    });
+    assert.ok(q(mounted, ".fy-swvoice__go"), "the plan offers its line");
+    const next = structuredClone(state) as ClientState;
+    const scene = next.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")! as unknown as { shots: Array<{ covers?: unknown; audio?: unknown }> };
+    // No shot reads a line any more: nothing covered, nothing of its own to say.
+    for (const shot of scene.shots) { delete shot.covers; delete shot.audio; }
+    await act(async () => { __setStateForTest(next); });
+    assert.equal(q(mounted, ".fy-swvoice") === null, true, "no count, no offer, no stale token");
+  });
+
+  it("a same-picture beat's Generate asks for the picture it shows, never a frame of its own (codex round 10)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = visualNovel();
+    state.app.manifest!.models.push({
+      id: "frame-image", provider: "fal", capability: "image", displayName: "Frame image",
+      accepts: { referenceImages: 4, referenceRoles: false, startFrame: false, endFrame: false },
+      limits: { aspects: ["16:9"] }, pricing: { kind: "perImage", microUsdPerImage: 37_000 },
+    } as never);
+    const mounted = await mountState(state, SCENE_PATH);
+    await click(q(mounted, '[data-testid="workspace-row-sh_13"] .fy-swrow__generate')!);
+    const quote = sent.find((message) => message.kind === "frame-run-quote") as { shotId?: string } | undefined;
+    assert.ok(quote, "the dialog asks its quote");
+    assert.equal(quote.shotId, "sh_12");
+  });
+
   it("Preview reads the scene in the beat player over the window, once its voices are in, and closes back to the beats", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

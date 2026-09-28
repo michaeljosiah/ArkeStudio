@@ -17,6 +17,7 @@ import {
   publicationBlockers,
   routingFindings,
   RoutingSchema,
+  sceneBeats,
   TraversalEvidenceSchema,
   ulid,
   INTERACTIVE_PLAYER_SOURCE,
@@ -881,6 +882,14 @@ async function exportBeats(
   };
   /** Each picture the beats show, by the shot it is resolved from, to check again under the gate. */
   const pictures = new Map<string, string | null>();
+  // Whose voices the package speaks in, as they stand before anything is awaited: a sheet's voice
+  // changed between one scene's plan and the next moves no scene version, and would have one
+  // character change voice mid-story (codex round 10).
+  const speakers = [...new Set(production.scenes.filter((scene) => !excluded.has(scene.id)).flatMap((scene) => {
+    try { return sceneBeats(scene).flatMap((beat) => (beat.speaker === undefined ? [] : [beat.speaker])); } catch { return []; }
+  }))].sort();
+  const speakerVoices = () => JSON.stringify(speakers.map((id) => [id, store.getBundle().sheets.find((sheet) => sheet.id === id)?.voice ?? null]));
+  const voicesBefore = speakerVoices();
   const scenes: Array<{ sceneId: string; beats: PlayerBeat[] }> = [];
   for (const scene of production.scenes.filter((candidate) => !excluded.has(candidate.id))) {
     // A resolver that fails is not a scene with no voices: shipping every prepared line as text
@@ -940,12 +949,18 @@ async function exportBeats(
     const moved = scenes.filter(({ sceneId }) =>
       now?.scenes.find((scene) => scene.id === sceneId)?.version !== production.scenes.find((scene) => scene.id === sceneId)?.version);
     const reframed = now === undefined || [...pictures].some(([shotId, source]) => beatPicturePath(now, nowArtifacts, shotId) !== source);
-    if (moved.length > 0 || reframed) {
+    // The routing the package plays is the snapshot's; a choice drawn meanwhile would ship the
+    // graph Studio no longer shows (codex round 10).
+    const rerouted = JSON.stringify(now?.routing ?? null) !== JSON.stringify(routing);
+    const revoiced = speakerVoices() !== voicesBefore;
+    if (moved.length > 0 || reframed || rerouted || revoiced) {
       return {
         ok: false,
         blockers: [
           ...moved.map(({ sceneId }) => `${sceneId} changed while the package was made — export again`),
           ...(reframed && moved.length === 0 ? ["a picture changed while the package was made — export again"] : []),
+          ...(rerouted ? ["the branch map changed while the package was made — export again"] : []),
+          ...(revoiced ? ["a character's voice changed while the package was made — export again"] : []),
         ],
       };
     }

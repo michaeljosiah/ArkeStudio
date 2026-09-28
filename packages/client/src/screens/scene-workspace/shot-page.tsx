@@ -618,7 +618,7 @@ function ShotWorkspace({
           scene={scene}
           aspect={aspect}
           videoModel={videoModel}
-          shotId={shot.id}
+          shotId={pictureShotId}
           returnFocus={generateReturnFocus}
           onClose={() => setGenerating(false)}
         />

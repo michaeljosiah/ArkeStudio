@@ -54,7 +54,10 @@ export function useTableReadPlan({
   const speakers = [...new Set(lines.flatMap((line) => (line.speakerSheetId === undefined ? [] : [line.speakerSheetId])))].sort();
   const speakerVoices = JSON.stringify(speakers.map((id) => [id, state?.world?.sheets.find((sheet) => sheet.id === id)?.voice ?? null]));
   useEffect(() => {
-    if (lines.length > 0 && connection === "open") requestPlan();
+    // The last line gone takes its plan with it: the plan names lines no longer there, and its
+    // token would prepare them (codex round 10).
+    if (lines.length === 0) { planRequest.current = null; setPlan(null); return; }
+    if (connection === "open") requestPlan();
   }, [lines.length, scene.version, production.performanceReview.reviewHash, production.performanceReview.selectionHash, cacheJobs, narrator, speakerVoices, connection, requestPlan]);
   const prepare = useCallback(() => {
     if (plan === null) return;

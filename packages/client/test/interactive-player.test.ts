@@ -617,6 +617,16 @@ describe("the player reading beats (turn 174)", () => {
     assert.equal(p.all(".aip-log-line.narration").length, 0, "nor as narration in the log");
   });
 
+  it("R opens the route over an open log by closing the log, one panel at a time (codex round 10)", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    p.key("l");
+    assert.equal(p.q('[aria-label="Log"]')!.hidden, false);
+    p.key("r");
+    assert.equal(p.q("[data-ref=panel]")!.hasAttribute("hidden"), false, "the route opens");
+    assert.equal(p.q('[aria-label="Log"]')!.hidden, true, "and the log steps aside");
+    assert.equal(p.button("Log")?.getAttribute("aria-pressed"), "false");
+  });
+
   it("keeps the focus on the open log's control when the reader moves on beneath it", () => {
     const p = mount({ ...NOVEL, autoplay: true });
     p.key("ArrowRight"); p.key("ArrowRight");

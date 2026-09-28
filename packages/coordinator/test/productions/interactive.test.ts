@@ -548,6 +548,32 @@ describe("a visual novel's package (turn 174)", () => {
     assert.deepEqual(result.blockers, ["a picture changed while the package was made — export again"]);
   });
 
+  it("refuses a package whose branch map was redrawn while its voices were gathered (codex round 10)", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await novel(dir, bundle.productions[0]!);
+    await appendTraversal(store, production.meta.id, walked);
+    const now = { ...production, routing: { ...ROUTING, version: 2, choices: [{ ...ROUTING.choices[0]!, label: "Wade on" }] } };
+    const voices = async () => ({ sceneVersion: 1, files: new Map<string, string>() });
+    const result = await exportInteractive(store, production, CLOCK, { voices, current: () => now });
+    assert.ok(!result.ok);
+    assert.deepEqual(result.blockers, ["the branch map changed while the package was made — export again"]);
+  });
+
+  it("refuses a package whose speaker changed voice between one scene's plan and the next (codex round 10)", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await novel(dir, bundle.productions[0]!);
+    await appendTraversal(store, production.meta.id, walked);
+    const maren = store.getBundle().sheets.find((sheet) => sheet.id === "maren-kest")!;
+    const voices = async (sceneId: string) => {
+      // The first scene is planned; then Maren's voice is replaced before the second.
+      if (sceneId === "sc_i2") (maren as { voice?: unknown }).voice = { provider: "kokoro", voiceId: "bf_emma", label: "Emma", assignedAtVersion: 1 };
+      return { sceneVersion: 1, files: new Map<string, string>() };
+    };
+    const result = await exportInteractive(store, production, CLOCK, { voices, current: () => production });
+    assert.ok(!result.ok);
+    assert.deepEqual(result.blockers, ["a character's voice changed while the package was made — export again"]);
+  });
+
   it("a voice path the plan names outside the world never reaches the package", async () => {
     const { dir, store, bundle } = await open();
     const production = await novel(dir, bundle.productions[0]!);
