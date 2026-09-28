@@ -420,6 +420,8 @@ describe("a read over the reader's cap (issue 1208)", () => {
       const asked = h.audio(REQUEST).find((event) => event.status === "confirmation-required")!;
       await readSection(h.send, REQUEST, asked.confirmationToken);
       await until(() => h.jobs(REQUEST).length === pieces.length && h.jobs(REQUEST).every((status) => status === "failed" || status === "cancelled"), "every piece's job to settle", PATIENCE);
+      // Queue cancellation is published before the read failure; a busy disk can separate them.
+      await until(() => h.audio(REQUEST).some((event) => event.status === "failed"), "the refused piece to fail the read", PATIENCE);
       assert.deepEqual(h.jobs(REQUEST).sort(), [...pieces.slice(1).map(() => "cancelled"), "failed"].sort(), "one failed, the rest cancelled unpaid");
       assert.ok(h.reader.attempts < pieces.length, `the siblings still queued never reached the reader: ${h.reader.attempts} of ${pieces.length} were sent`);
       await settle();
