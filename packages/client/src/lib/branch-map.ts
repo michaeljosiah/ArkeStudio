@@ -107,15 +107,15 @@ export function edgePath(
 }
 
 /** Cards on the canvas from the layout, the curves between them, and the tray below. */
-export function mapGeometry(routing: Routing, scenes: ReadonlyArray<{ id: string }>, layout: RoutingLayout): MapGeometry {
+export function mapGeometry(routing: Routing, scenes: ReadonlyArray<{ id: string }>, layout: RoutingLayout, compact = false): MapGeometry {
   // The picture starts at y=0 and a fitted view clips above it, so an arc over the first row — the
   // full 150px, or stacked above another — moves everything down until its label is inside.
-  const first = mapGeometryAt(routing, scenes, layout, PAD_TOP);
+  const first = mapGeometryAt(routing, scenes, layout, PAD_TOP, compact);
   const highest = Math.min(Infinity, ...first.edges.map((edge) => edge.ly));
-  return highest >= ARC_LABEL_MIN ? first : mapGeometryAt(routing, scenes, layout, PAD_TOP + Math.ceil(ARC_LABEL_MIN - highest));
+  return highest >= ARC_LABEL_MIN ? first : mapGeometryAt(routing, scenes, layout, PAD_TOP + Math.ceil(ARC_LABEL_MIN - highest), compact);
 }
 
-function mapGeometryAt(routing: Routing, scenes: ReadonlyArray<{ id: string }>, layout: RoutingLayout, padTop: number): MapGeometry {
+function mapGeometryAt(routing: Routing, scenes: ReadonlyArray<{ id: string }>, layout: RoutingLayout, padTop: number, compact = false): MapGeometry {
   const layerOf = new Map<string, number>();
   const nodes: PlacedNode[] = [];
   let rows = 0;
@@ -123,7 +123,7 @@ function mapGeometryAt(routing: Routing, scenes: ReadonlyArray<{ id: string }>, 
     rows = Math.max(rows, layer.length);
     layer.forEach((id, row) => {
       layerOf.set(id, index);
-      nodes.push({ id, x: PAD_X + index * (NODE_W + LAYER_GAP), y: padTop + row * (NODE_H + ROW_GAP) });
+      nodes.push({ id, x: PAD_X + index * (NODE_W + LAYER_GAP), y: padTop + (compact ? Math.max(0,layout.layers.length - 2 - index) * 100 + row * 311 : row * (NODE_H + ROW_GAP)) });
     });
   });
   const at = new Map(nodes.map((node) => [node.id, node]));
@@ -156,7 +156,7 @@ function mapGeometryAt(routing: Routing, scenes: ReadonlyArray<{ id: string }>, 
   const layers = Math.max(1, layout.layers.length);
   // The bounds hold the curves as well as the cards: a loop back to an earlier layer bows about
   // 150px under its cards and past the rightmost one, and a fit to the cards alone clipped it.
-  const cardsBottom = padTop + Math.max(1, rows) * (NODE_H + ROW_GAP) - ROW_GAP;
+  const cardsBottom = compact ? Math.max(padTop, ...nodes.map(node => node.y + 196)) : padTop + Math.max(1, rows) * (NODE_H + ROW_GAP) - ROW_GAP;
   const trayY = Math.max(cardsBottom, bottomOf(edges)) + TRAY_GAP;
   const trayNodes: PlacedNode[] = tray.map((id, index) => ({ id, x: 40 + index * (NODE_W + 20), y: trayY + 56 }));
 

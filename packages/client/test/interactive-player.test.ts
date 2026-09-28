@@ -786,3 +786,11 @@ describe("the player reading beats (turn 174)", () => {
     assert.equal(again.text(".aip-who"), "Maren");
   });
 });
+
+it('touch chrome stays held until every active pointer has released, including cancel',()=>{
+ const p=mount();const emit=(target:EventTarget,type:string,pointerId:number)=>{const e=new dom.Event(type,{bubbles:true});Object.assign(e,{pointerType:'touch',pointerId});target.dispatchEvent(e as unknown as Event);};
+ emit(p.root as unknown as EventTarget,'pointerdown',1);emit(p.root as unknown as EventTarget,'pointerdown',2);assert.ok(p.root.hasAttribute('data-held'));
+ emit(dom.window as unknown as EventTarget,'pointerup',1);assert.ok(p.root.hasAttribute('data-held'));
+ emit(dom.window as unknown as EventTarget,'pointercancel',2);assert.equal(p.root.hasAttribute('data-held'),false);
+ p.handle.destroy();emit(p.root as unknown as EventTarget,'pointerdown',3);assert.equal(p.root.hasAttribute('data-held'),false);
+});

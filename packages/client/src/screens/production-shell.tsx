@@ -349,7 +349,8 @@ export function ProductionLayout() {
   const sceneRoute = /\/scenes(?:\/[^/]+(?:\/shots\/[^/]+)?)?\/?$/.test(location.pathname);
   const sceneChrome = compact && sceneRoute ? production?.scenes.find(scene => scene.id === sceneId) : undefined;
   const shotChrome = sceneChrome && orderedShots(sceneChrome).find(shot => shot.id === shotId);
-  const sceneDeepPhone = !refusal && (phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
+  const episodeDeep = phone && !location.pathname.includes("/story/episodes/") && production?.episodes.some(episode => episode.id === episodeId);
+  const sceneDeepPhone = !refusal && (episodeDeep || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
   const wantsFold = compact && (sceneRoute || cutRoute) || (railChoice ?? (cutRoute || sceneDetailDefault));
   const drawerMode = !phone && wantsFold && (compact || coarse);
   const folded = !phone && wantsFold && !drawerMode;
@@ -448,7 +449,7 @@ export function ProductionLayout() {
   // The switch card counts what the format counts: seconds of cut for video, chapters for story.
   const switchSub = production
     ? shape?.isEpisodic
-      ? `series · ${production.episodes.length} episode${production.episodes.length === 1 ? "" : "s"} · ${production.scenes.length} scene${production.scenes.length === 1 ? "" : "s"}`
+      ? phone ? `${shape.displayLabel.toLowerCase()} · season ${Math.max(1,(world?.series.find(series=>series.seasons.includes(production.meta.id))?.seasons.indexOf(production.meta.id) ?? 0)+1)} · ${Math.max(production.episodes.length, production.season?.defaults?.episodeCount ?? production.episodes.length)} episodes` : `series · ${production.episodes.length} episode${production.episodes.length === 1 ? "" : "s"} · ${production.scenes.length} scene${production.scenes.length === 1 ? "" : "s"}`
       : isStory
       ? `${shape!.displayLabel.toLowerCase()} · ${production.chapters.length} chapter${production.chapters.length === 1 ? "" : "s"}`
       : `${shape!.displayLabel.toLowerCase()}${phone ? ` · ${production.scenes.length} scenes` : ""}${cut ? ` · ${cutFigure} cut` : ""}`

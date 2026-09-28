@@ -217,3 +217,11 @@ describe("a new choice's id", () => {
     assert.equal(choiceIdFor("…", null), "ch_choice", "words with no letters still make an id");
   });
 });
+
+it('compact map leaves room for readable wrapped cards and routes between the staggered layers',()=>{
+ const geometry=mapGeometry(ROUTING,scenes,layoutRouting(ROUTING,scenes),true);
+ const nodes=new Map(geometry.nodes.map(node=>[node.id,node]));
+ assert.ok(nodes.get('sc_a')!.y>nodes.get('sc_b')!.y);assert.ok(nodes.get('sc_b')!.y>nodes.get('sc_c')!.y);
+ for(const node of geometry.nodes){assert.ok(node.y+196<=geometry.trayY);for(const other of geometry.nodes){if(node!==other&&node.x===other.x)assert.ok(Math.abs(node.y-other.y)>=196);}}
+ for(const edge of geometry.edges){const from=nodes.get(edge.from);if(from)assert.ok(edge.d.startsWith('M'+(from.x+NODE_W)+','+(from.y+65)));}
+});

@@ -323,3 +323,10 @@ describe("pins over the cast (SPEC-012 R-62..R-65)", () => {
     assert.ok(!ChapterVoicesSchema.safeParse({ ...record, pins: [{ ...base, narration: true, sheet: "a" }] }).success);
   });
 });
+
+it('episode reads name one saved promise field and reject unknown fields or episode IDs',()=>{
+ const source={of:'episode',productionId:'bell-watch',episodeId:'ep_night-3',field:'opens'};
+ assert.deepEqual(ProseReadSourceSchema.parse(source),source);
+ assert.equal(ProseReadSourceSchema.safeParse({...source,field:'script'}).success,false);
+ assert.equal(ProseReadSourceSchema.safeParse({...source,episodeId:'../other'}).success,false);
+});

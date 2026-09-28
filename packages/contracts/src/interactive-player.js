@@ -239,6 +239,14 @@ export function mountInteractivePlayer(root, options) {
 .aip-log-line>.t{margin-top:3px;font-size:14px;line-height:1.5}
 .aip-log-line.narration>.t{font-style:italic;margin-top:0}
 .aip-log-line>button{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:28px;height:28px;border-radius:99px;display:inline-flex!important;align-items:center;justify-content:center;border:1px solid color-mix(in srgb,var(--aip-fg) 30%,transparent)!important}
+@media (pointer:coarse){
+.aip-scrub{height:44px;touch-action:none}
+.aip .aip-ib,.aip .aip-btn,.aip .aip-log-line>button{min-width:44px;min-height:44px}
+.aip .aip-choices{flex-direction:column;flex-wrap:nowrap;align-items:stretch}
+.aip .aip-choice{width:100%;min-height:58px;flex:none}
+.aip .aip-kbd,.aip .aip-choice>.k{display:none}
+.aip[data-held] .aip-chrome{animation:none!important;opacity:1!important}
+}
 @media (prefers-reduced-motion:reduce){.aip-pic>img{animation:none!important}.aip-line>span{animation:none}}
 @media (max-width:640px){
 .aip-top{left:20px;right:14px;top:20px}
@@ -332,6 +340,10 @@ export function mountInteractivePlayer(root, options) {
     void root.offsetWidth;
     root.classList.add("aip-wake");
   }
+
+  const heldPointers = new Set();
+  const holdChrome = (event) => { if(event.pointerType !== "touch") return; heldPointers.add(event.pointerId);root.setAttribute("data-held","");wake(); };
+  const releaseChrome = (event) => { if(!heldPointers.delete(event.pointerId)) return; if(!heldPointers.size){root.removeAttribute("data-held");wake();} };
 
   function play(sceneId, positionSec) {
     logVoice.pause && logVoice.pause();
@@ -1091,6 +1103,9 @@ export function mountInteractivePlayer(root, options) {
   root.addEventListener("click", onClick);
   root.addEventListener("keydown", onKey);
   root.addEventListener("pointermove", wake);
+  root.addEventListener("pointerdown", holdChrome);
+  win.addEventListener("pointerup", releaseChrome);
+  win.addEventListener("pointercancel", releaseChrome);
   // A beat's voice ending, and the two CSS animations whose ends are signals: the hold element's,
   // which moves the beat on, and the last word's, which is the line finished typing on.
   const onVoiceEnded = () => voiceEnded();
@@ -1156,6 +1171,9 @@ export function mountInteractivePlayer(root, options) {
       root.removeEventListener("click", onClick);
       root.removeEventListener("keydown", onKey);
       root.removeEventListener("pointermove", wake);
+      root.removeEventListener("pointerdown", holdChrome);
+      win.removeEventListener("pointerup", releaseChrome);
+      win.removeEventListener("pointercancel", releaseChrome);
       voice.removeEventListener("ended", onVoiceEnded);
       voice.removeEventListener("error", onVoiceError);
       root.removeEventListener("animationend", onAnimationEnd);

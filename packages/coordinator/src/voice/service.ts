@@ -336,6 +336,11 @@ export function authoritativeProseSpeech(
         `${source.productionId}/${source.field}`,
       );
     }
+    case "episode": {
+      const episode = production(source.productionId).episodes.find(episode => episode.id === source.episodeId);
+      if (!episode) throw new Error("That episode is no longer in this production.");
+      return spoken(episode.promise?.[source.field], source.field, episode.version, `${source.productionId}/${source.episodeId}/${source.field}`);
+    }
     case "series": {
       const series = bundle.series.find((candidate) => candidate.id === source.seriesId);
       if (!series) throw new Error("That Series is no longer in this world.");

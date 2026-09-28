@@ -34,21 +34,21 @@
   .dom-proposal__touch-reasons { display: block; font: var(--type-meta); color: var(--muted-foreground); }
 }
 @media (max-width: 1099px) {
-  [data-screen="production-chat"] { min-width: 0; }
-  [data-screen="production-chat"] .fy-story__chathead { padding: 20px 28px 12px; }
-  [data-screen="production-chat"] .fy-story__h1 { font-size: var(--text-3xl); margin-top: 6px; }
-  [data-screen="production-chat"] .fy-develop-model { margin: 0 28px 14px; }
-  [data-screen="production-chat"] .fy-story__log { padding: 0 28px 18px; }
-  [data-screen="production-chat"] .fy-chat__transcript { gap: 12px; }
-  [data-screen="production-chat"] :is(.fy-chat__turn--user, .fy-chat__turn--studio) { max-width: 84%; }
-  [data-screen="production-chat"] .fy-chat__bubble { padding: 10px 14px; font: 400 var(--text-sm)/1.5 var(--font-sans); border-radius: 16px; overflow-wrap: anywhere; }
-  [data-screen="production-chat"] .fy-chat__turn--user .fy-chat__bubble { border-top-right-radius: 6px; }
-  [data-screen="production-chat"] .fy-chat__turn--studio .fy-chat__bubble { border-top-left-radius: 6px; }
-  [data-screen="production-chat"] .fy-chat__turn:has(.fy-actioncard) { width: 100%; max-width: 100%; }
-  [data-screen="production-chat"] .fy-actioncard { min-width: 0; overflow-wrap: anywhere; }
-  [data-screen="production-chat"] .fy-actioncard__facts { grid-template-columns: 1fr; }
-  [data-screen="production-chat"] .fy-chat__turn > .fy-textactions { display: none; }
-  [data-screen="production-chat"] .fy-story__side { width: 340px; background: var(--background); padding: 20px 20px 22px; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) { min-width: 0; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__chathead { padding: 20px 28px 12px; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__h1 { font-size: var(--text-3xl); margin-top: 6px; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-develop-model { margin: 0 28px 14px; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__log { padding: 0 28px 18px; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-chat__transcript { gap: 12px; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) :is(.fy-chat__turn--user, .fy-chat__turn--studio) { max-width: 84%; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-chat__bubble { padding: 10px 14px; font: 400 var(--text-sm)/1.5 var(--font-sans); border-radius: 16px; overflow-wrap: anywhere; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-chat__turn--user .fy-chat__bubble { border-top-right-radius: 6px; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-chat__turn--studio .fy-chat__bubble { border-top-left-radius: 6px; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-chat__turn:has(.fy-actioncard) { width: 100%; max-width: 100%; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-actioncard { min-width: 0; overflow-wrap: anywhere; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-actioncard__facts { grid-template-columns: 1fr; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-chat__turn > .fy-textactions { display: none; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__side { width: 340px; background: var(--background); padding: 20px 20px 22px; }
   .fy-develop-side { display: flex; flex-direction: column; min-height: 100%; gap: 14px; }
   .fy-develop-side__head { flex-wrap: wrap; }
   .fy-develop-side__head > div { font: var(--type-label) !important; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: .12em; }
@@ -67,7 +67,7 @@
   .fy-develop-side .fy-wrapup { display: flex !important; align-items: center; justify-content: space-between; flex: none; margin-top: auto !important; }
   .fy-wrapup__caption { color: var(--muted-foreground); font: var(--type-meta); }
   .fy-develop-composer { padding: 14px 28px calc(22px + env(safe-area-inset-bottom, 0px)); }
-  :is([data-screen="production-chat"], .fy-develop-sheet, .fy-develop-model-sheet) :is(.ui-btn, .ui-iconbtn, .fy-set__link, summary) { min-height: 44px; }
+  :is(:is([data-screen="production-chat"], [data-screen="episode-chat"]), .fy-develop-sheet, .fy-develop-model-sheet) :is(.ui-btn, .ui-iconbtn, .fy-set__link, summary) { min-height: 44px; }
   .fy-develop-sheet .fy-page-sheet__body { display: flex; flex-direction: column; padding-top: 8px; }
   .fy-develop-sheet { top: min(252px, 40dvh); }
   .fy-develop-sheet .fy-page-sheet__head { border: 0; padding-bottom: 2px; }
@@ -142,11 +142,11 @@
   .fy-narrative__fields textarea { width: 100%; min-width: 0; min-height: 88px; resize: none; border-radius: 12px !important; font: 400 var(--text-md)/1.5 var(--font-sans) !important; }
 }
 @media (max-width: 599px) {
-  [data-screen="production-chat"] .fy-story__chat { border: 0; }
-  [data-screen="production-chat"] .fy-story__chathead { display: none; }
-  [data-screen="production-chat"] .fy-develop-model { margin: 14px 20px 12px; }
-  [data-screen="production-chat"] .fy-story__log { padding: 0 20px calc(var(--held-bar-height, 174px) + 14px); }
-  [data-screen="production-chat"] .fy-story__side { display: contents; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__chat { border: 0; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__chathead { display: none; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-develop-model { margin: 14px 20px 12px; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__log { padding: 0 20px calc(var(--held-bar-height, 174px) + 14px); }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__side { display: contents; }
   .fy-develop-composer.fy-held-bar { display: flex; flex-direction: column; align-items: stretch; gap: 30px; padding: 10px 12px calc(14px + env(safe-area-inset-bottom, 0px)); border: 0; background: transparent; box-shadow: none; }
   .fy-develop-composer.fy-held-bar::before { content: ""; position: absolute; z-index: -1; inset: 86px 0 0; border-top: 1px solid var(--border); background: var(--background); }
   .fy-develop-composer .fy-thread-peek { min-height: 56px; }
@@ -173,7 +173,7 @@
 }
 
 @media (min-width: 600px) and (max-width: 899px) {
-  [data-screen="production-chat"] .fy-story__chat { min-width: 0; border: 0; }
-  [data-screen="production-chat"] .fy-story__side { display: contents; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__chat { min-width: 0; border: 0; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__side { display: contents; }
   .fy-develop-composer .fy-thread-peek { min-height: 56px; margin-bottom: 14px; width: 100%; }
 }

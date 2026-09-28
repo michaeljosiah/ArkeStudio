@@ -886,6 +886,7 @@ describe("authoritative prose speech (issue 857)", () => {
         meta: { id: "season-one", title: "Season One" },
         story: { version: 7, logline: "A diver hears her drowned sister sing.", spine: "" },
         season: { version: 2, question: "Who is singing?" },
+        episodes: [{ id: "ep_watch", version: 4, title: "Her mother’s hour", promise: { opens: "  The answering bell.  " } }],
         treatment: "Long-form prose about the season.",
         scenes: [
           {
@@ -899,6 +900,12 @@ describe("authoritative prose speech (issue 857)", () => {
       },
     ],
   } as unknown as WorldBundle;
+
+  it("reads an episode promise from its current saved version and refuses missing episodes", () => {
+    assert.deepEqual(authoritativeProseSpeech(BUNDLE,{of:"episode",productionId:"season-one",episodeId:"ep_watch",field:"opens"}),{text:"The answering bell.",heading:"opens",version:4,subjectId:"season-one/ep_watch/opens"});
+    assert.throws(()=>authoritativeProseSpeech(BUNDLE,{of:"episode",productionId:"season-one",episodeId:"ep_missing",field:"opens"}),/no longer/);
+    assert.throws(()=>authoritativeProseSpeech(BUNDLE,{of:"episode",productionId:"season-one",episodeId:"ep_watch",field:"closes"}),/nothing|no text|empty|not written/i);
+  });
 
   it("reads each kind of record off the bundle, normalized", () => {
     assert.deepEqual(authoritativeProseSpeech(BUNDLE, { of: "canon", canonId: "CANON-004" }), {

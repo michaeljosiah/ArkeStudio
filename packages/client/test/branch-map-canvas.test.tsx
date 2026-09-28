@@ -21,7 +21,7 @@ const dom = parseHTML("<!doctype html><html><body></body></html>");
 /** Set by a test that wants the narrow window (157i); every other test is wide. */
 let narrowWindow = false;
 Object.assign(dom.window, {
-  matchMedia: (query: string) => ({ matches: narrowWindow && query === "(max-width: 899px)", media: query, addEventListener() {}, removeEventListener() {} }),
+  matchMedia: (query: string) => ({ matches: narrowWindow && query === "(max-width: 599px)", media: query, addEventListener() {}, removeEventListener() {} }),
 });
 // linkedom keeps no focus; this does, so a test can ask where it went.
 const focusLog: unknown[] = [];
@@ -140,7 +140,7 @@ afterEach(async () => {
   __setStateForTest(FIXTURE_STATE);
 });
 
-const all = (item: Mounted, selector: string) => [...item.container.querySelectorAll(selector)] as unknown as HTMLElement[];
+const all = (item: Mounted, selector: string) => [...item.container.ownerDocument.querySelectorAll(selector)] as unknown as HTMLElement[];
 const text = (el: Element | null) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
 
 async function click(el: HTMLElement | undefined) {
@@ -303,14 +303,14 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.deepEqual(commands(item), [{ operation: "edit-choice", choiceId: "ch_wait", changes: { to: "sc_towers" } }]);
   });
 
-  it("lists the map below 900 wide: layers in order, each choice a goes-to row (157i)", async () => {
+  it("lists the map below 600 wide: layers in order, each choice a goes-to row (turn 172)", async () => {
     narrowWindow = true;
     try {
       const item = await mount();
       assert.equal(all(item, ".bm-viewport").length, 0, "no canvas to pan about in");
       const list = all(item, ".bm-list")[0]!;
-      assert.match(text(list), /^Layer 1\s*The drowned quarter\s*start\s*Follow the lantern\s*goes to\s*The causeway/);
-      assert.match(text(list), /Not on a route · 1\s*The undertow\s*unreachable/);
+      assert.match(text(list), /^Layer 1\s*The drowned quarter · 2 ways out\s*start\s*Follow the lantern\s*goes to\s*The causeway/);
+      assert.match(text(list), /Not on a route · 1\s*The undertow · 0 ways out\s*unreachable/);
       const rows = all(item, ".bm-goes");
       assert.equal(rows.length, ROUTING.choices.length, "every choice, once");
       assert.ok(rows.every((row) => row.classList.contains("bm-goes--unwalked")), "dashed: nobody has walked them");
@@ -465,7 +465,7 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.deepEqual(commands(item), [{ operation: "remove-choice", choiceId: "ch_ghost" }], "drawn nowhere else, the finding is where it is removed");
   });
 
-  it("returns focus to the choice's row when a removal is cancelled in the narrow list", async () => {
+  it("keeps focus in the choice sheet when a removal is cancelled on a phone", async () => {
     narrowWindow = true;
     try {
       const item = await mount();
@@ -473,13 +473,13 @@ describe("the branch map canvas (design turn 157)", () => {
       await click(row);
       await click(button(item, "Remove choice"));
       await click(all(item, '[role="alertdialog"] button').find((el) => text(el) === "Cancel"));
-      assert.equal(focused(), all(item, ".bm-goes").find((el) => /Wait for low water/.test(text(el))), "back on its row, not lost");
+      assert.equal(focused(), all(item, '.bm-inspector-sheet input[aria-label="Label"]')[0], "the map stays inert behind the open sheet");
     } finally {
       narrowWindow = false;
     }
   });
 
-  it("lays day one out narrow too, below 900 wide", async () => {
+  it("lays day one out narrow too, below 600 wide", async () => {
     narrowWindow = true;
     try {
       const item = await mount(null);
