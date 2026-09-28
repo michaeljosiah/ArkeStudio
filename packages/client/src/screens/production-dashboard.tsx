@@ -162,7 +162,8 @@ export function ProductionDashboardScreen() {
     ? production.scenes.flatMap((scene) => orderedShots(scene).flatMap((shot, _, sceneShots) => (beatPictureShotId(sceneShots, shot.id) === shot.id ? [] : [shot.id])))
     : []);
   const takes = beats
-    ? production.takes.filter((t) => (t.kind === "frame" || t.kind === "still") && !t.coversShots.some((shotId) => retained.has(shotId)))
+    // Nor a board sheet's composite: no shot can select it; its panel crops are the pictures.
+    ? production.takes.filter((t) => (t.kind === "frame" || t.kind === "still") && t.boardSheetParent !== true && !t.coversShots.some((shotId) => retained.has(shotId)))
     : production.takes;
   const pending = takes.filter((t) => decisions[t.id] === "pending");
   const shots = production.scenes.flatMap((s) => orderedShots(s));

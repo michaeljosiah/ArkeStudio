@@ -399,6 +399,23 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     assert.equal(all(mounted, ".fy-sw__tab").find((tab) => tab.getAttribute("aria-checked") === "true")?.textContent, "Beats");
   });
 
+  it("a performance selected while the preview gathers its voices asks every scene again (codex round 18)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = visualNovel();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.scenes.push({ ...structuredClone(production.scenes[0]!), id: "sc_05", number: 5, slug: "the-pier" } as never);
+    const mounted = await mountState(state, SCENE_PATH);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Preview")!);
+    const askedOf = (sceneId: string) => sent.filter((message) => message.kind === "plan-table-read" && message.sceneId === sceneId).length;
+    assert.equal(askedOf("sc_05"), 1);
+    const next = structuredClone(state) as ClientState;
+    const review = next.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.performanceReview as { selectionHash: string };
+    review.selectionHash = `sha256:${"e".repeat(64)}`;
+    await act(async () => { __setStateForTest(next); });
+    assert.equal(askedOf("sc_05"), 2, "a plan made before the selection names other audio");
+  });
+
   it("a studio lost while the voices are asked for opens the preview as text, rather than waiting forever", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
@@ -502,6 +519,15 @@ describe("a visual novel's dashboard lists (codex round 14)", () => {
     const mounted = await mountState(state, `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
     assert.equal(all(mounted, ".fy-clip").length, pictures);
     assert.match(q(mounted, '[data-screen="production-dashboard"]')?.textContent ?? "", new RegExp(`All ${pictures} pictures`));
+  });
+
+  it("leaves out a board sheet's composite, which no shot can select (codex round 18)", async () => {
+    const state = visualNovel();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const pictures = production.takes.filter((take) => take.kind === "frame" || take.kind === "still").length;
+    production.takes.push({ ...structuredClone(production.takes.find((take) => take.kind === "frame")!), id: "tk_01J8A0000000000000000000A8", boardSheetParent: true } as never);
+    const mounted = await mountState(state, `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
+    assert.equal(all(mounted, ".fy-clip").length, pictures);
   });
 
   it("leaves out a picture made for a shot that now keeps the one before (codex round 17)", async () => {

@@ -713,6 +713,25 @@ describe("the player reading beats (turn 174)", () => {
     assert.match(p.q(".aip-hold")!.style.animation, /aip-hold/, "and reads on once it has been heard");
   });
 
+  it("with Auto on, a line that cannot be heard again hands the beat back at once (codex round 18)", () => {
+    const p = mount({
+      ...NOVEL,
+      autoplay: true,
+      scenes: { ...NOVEL.scenes, sc_quarter: { title: "Q", beats: [
+        { picture: "media/a.png", text: "One.", audio: "media/one.mp3", advance: "voice" as const },
+        { picture: "media/a.png", text: "Two.", audio: "media/two.mp3", advance: "voice" as const },
+      ] } },
+    });
+    p.q("audio")!.dispatchEvent(new dom.Event("ended") as unknown as Event);
+    p.key("ArrowRight"); p.key("ArrowRight");
+    p.key("a");
+    p.key("l");
+    p.click(p.q('[aria-label="Log"] [data-line="0"]') as unknown as HTMLElement);
+    assert.equal(p.q(".aip-hold")!.style.animation, "none");
+    p.all("audio")[1]!.dispatchEvent(new dom.Event("error") as unknown as Event);
+    assert.match(p.q(".aip-hold")!.style.animation, /aip-hold/, "Auto reads on rather than waiting for an end that never comes");
+  });
+
   it("keeps the focus on the open log's control when the reader moves on beneath it", () => {
     const p = mount({ ...NOVEL, autoplay: true });
     p.key("ArrowRight"); p.key("ArrowRight");

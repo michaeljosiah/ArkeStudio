@@ -952,7 +952,9 @@ export function mountInteractivePlayer(root, options) {
         if (holdByAuto) stopHold();
         logVoice.setAttribute("src", b.audio);
         const p = logVoice.play && logVoice.play();
-        if (p && p.catch) p.catch(() => undefined);
+        // A line that cannot be heard again hands the beat back at once, as one heard out would:
+        // Auto was held for it, and nothing else would release it (codex round 18).
+        if (p && p.catch) p.catch(replayDone);
       }
       return;
     }
@@ -1106,8 +1108,12 @@ export function mountInteractivePlayer(root, options) {
     }
   };
   voice.addEventListener("ended", onVoiceEnded);
-  // A line heard again from the log hands the beat back to Auto when it ends.
-  logVoice.addEventListener("ended", () => { if (mode === "playing" && isBeats(state.sceneId)) schedule(false); });
+  // A line heard again from the log hands the beat back to Auto when it ends — or fails to play.
+  function replayDone() {
+    if (mode === "playing" && isBeats(state.sceneId)) schedule(false);
+  }
+  logVoice.addEventListener("ended", replayDone);
+  logVoice.addEventListener("error", replayDone);
   voice.addEventListener("error", onVoiceError);
   root.addEventListener("animationend", onAnimationEnd);
 

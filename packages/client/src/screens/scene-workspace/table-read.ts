@@ -121,7 +121,15 @@ export function useProductionVoiceFiles({
   // So do the voices the lines are read in: a narrator or a character recast mid-batch would
   // mount one story in two voices (codex round 11), and a speaker retired mid-batch one voiced in
   // some scenes and read in others (codex round 14).
-  const voicesKey = JSON.stringify([state?.app.narrator ?? null, (state?.world?.sheets ?? []).map((sheet) => [sheet.id, sheet.voice ?? null, sheet.retired ?? false])]);
+  // And the reads accepted for its lines: a performance selected, cleared or rejected mid-batch
+  // changes which audio a plan names (codex round 18).
+  const review = state?.world?.productions.find((candidate) => candidate.meta.id === productionId)?.performanceReview;
+  const voicesKey = JSON.stringify([
+    state?.app.narrator ?? null,
+    (state?.world?.sheets ?? []).map((sheet) => [sheet.id, sheet.voice ?? null, sheet.retired ?? false]),
+    review?.reviewHash ?? null,
+    review?.selectionHash ?? null,
+  ]);
   useEffect(() => {
     if (key !== null && settled.current === key) return;
     setFiles(new Map());
