@@ -11,8 +11,13 @@ import type {
   WorldChatSubject,
   WorldChatWorkspace,
 } from "@arke-studio/contracts";
-import { findHarnessModel, proposalDecisionOf } from "@arke-studio/contracts";
+import { findHarnessModel, harnessModelManifestEntry, PROVIDERS, proposalDecisionOf } from "@arke-studio/contracts";
 import { Composer } from "./composer.js";
+import { HeldBar } from "./held-bar.js";
+import { PageSheet } from "./page-sheet.js";
+import { ResponsiveSheet } from "./responsive-sheet.js";
+import { useMediaQuery } from "../lib/media-query.js";
+import { attachHostFiles, worldChatAttachTarget, useWorldChatRefusals } from "../lib/store.js";
 import {
   cancelWorldChat,
   createWorldChat,
@@ -44,7 +49,7 @@ import { HarnessModelOptions, HarnessModelStatus, harnessModelUnavailableReason 
 import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
-import { Film, Pin } from "./icons.js";
+import { Film, Pin, ChevronDown, ChevronUp, Sparkle } from "./icons.js";
 import { PosterVideo } from "./player.js";
 import { ReadAloud } from "./read-aloud.js";
 import { renderInlineMarkdown } from "./inline-markdown.js";
@@ -792,6 +797,8 @@ export function ProductionConversation({
   dock,
   onSelectShot,
   subject,
+  contextSummary,
+  stagedTitle,
 }: {
   worldId: string | undefined;
   productionId: string | undefined;
@@ -803,6 +810,9 @@ export function ProductionConversation({
   footer?: React.ReactNode;
   /** What the understanding rail says before there is any. */
   pointsEmpty?: string;
+  /** Turn 171's full-page Develop layout; episodic docks keep their own layout. */
+  contextSummary?: string;
+  stagedTitle?: string;
   /**
    * Which thread this view enters. The production's own by default; an episode or a scene names
    * itself, because the coordinator gives each context its own briefing (R-20) and a message about
@@ -907,6 +917,7 @@ export function ProductionConversation({
   const [opening, setOpening] = useState<{
     text: string;
     attach?: boolean;
+    files?: readonly File[];
     was: string | null;
     subject?: WorldChatSubject;
     modelId?: string;
@@ -918,6 +929,11 @@ export function ProductionConversation({
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
   /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
   const [pointsOpen, setPointsOpen] = useState(false);
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const [modelsOpen, setModelsOpen] = useState(false);
+  const [sideOpen, setSideOpen] = useState(false);
+  const [attachmentTrouble, setAttachmentTrouble] = useState<readonly { name: string; reason: string }[]>([]);
   const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const contextKey = JSON.stringify(context);
@@ -959,6 +975,11 @@ export function ProductionConversation({
   }, [languageModelId, rememberedLanguageModel]);
   const agentLanguageModel = state?.app.agents.find((agent) => agent.name === "world-builder")?.model;
   const effectiveLanguageModelId = languageModelId ?? agentLanguageModel ?? rememberedLanguageModel;
+  const model = effectiveLanguageModelId ? findHarnessModel(effectiveLanguageModelId, state?.app.harnessModels ?? [], state?.app.manifest?.models) : undefined;
+  const modelEntry = model ? harnessModelManifestEntry(model, state?.app.manifest?.models) : undefined;
+  const authorLocation = modelEntry ? (PROVIDERS[modelEntry.provider].local ? "local" : "cloud")
+    : state?.app.harnessInfo?.generation === "arke" ? "local"
+      : ["claude", "codex"].includes(state?.app.harnessInfo?.generation ?? "") ? "cloud" : "model";
   const languageUnavailableReason = languageChoiceReason(state, effectiveLanguageModelId);
   const thread = useMemo(() => {
     const wanted = JSON.parse(contextKey) as WorldChatContext;
@@ -1014,7 +1035,8 @@ export function ProductionConversation({
     // Said only on a connection that can carry it (codex on PR 1232): a send that does not leave
     // keeps the line waiting for its thread, rather than dropping the wait to be made again.
     if (connection !== "open") return;
-    if (opening.attach) worldChatAttachFiles(worldId, opened);
+    if (opening.files) void attachHostFiles(worldChatAttachTarget(worldId, opened), opening.files).then(setAttachmentTrouble);
+    else if (opening.attach) worldChatAttachFiles(worldId, opened);
     else {
       const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
       if (requestId === null) return;
@@ -1023,6 +1045,7 @@ export function ProductionConversation({
     setOpening(null);
   }, [opening, worldId, workspace?.conversationId, conversationId, connection]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
+  const attachRefusals = useWorldChatRefusals(conversationId ?? undefined);
   const loadedRef = useRef(loaded);
   loadedRef.current = loaded;
   const progress = useWorldChatProgress(conversationId ?? undefined, loaded?.runStartedAt ?? null);
@@ -1289,6 +1312,14 @@ export function ProductionConversation({
   }));
   const attachProps = {
     attachments: attachChips,
+    refusals: [...attachmentTrouble, ...attachRefusals],
+    ...(worldId ? { onAttachFiles: (files: readonly File[]) => {
+      if (opening || running) return Promise.resolve(files.map(file => ({ name: file.name, reason: "Wait for the current turn to finish." })));
+      if (conversationId) return attachHostFiles(worldChatAttachTarget(worldId, conversationId), files);
+      if (!createWorldChat(worldId, "Production references", crypto.randomUUID(), context)) return Promise.resolve(files.map(file => ({ name: file.name, reason: "The studio is disconnected. Attach the file again when it reconnects." })));
+      setOpening({ text: "", files, was: workspace?.conversationId ?? null });
+      return Promise.resolve([]);
+    } } : {}),
     ...(worldId
       ? { onAttach: () => {
           if (opening || running) return;
@@ -1537,91 +1568,65 @@ export function ProductionConversation({
     );
   }
 
-  const pane = (
-    <div className="fy-story__chat">
-      {(eyebrow || heading) && (
-        <div className="fy-story__chathead">
-          {eyebrow && <div className="fy-eyebrow-sm">{eyebrow}</div>}
-          {heading && <h1 className="fy-story__h1">{heading}</h1>}
-        </div>
-      )}
-      <div className="fy-story__log">
-        {transcript}
-      </div>
-      <div style={{ flex: "none", padding: "14px 36px 22px" }}>
-        {languageControl}
-        <Composer
-          value={message}
-          onChange={setMessage}
-          onSubmit={submit}
-          placeholder={placeholder}
-          agentLabel="story author"
-          busy={running}
-          busyLabel="reading the world…"
-          disabledReason={languageUnavailableReason}
-          onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
-          {...attachProps}
-        />
-        {footer}
-      </div>
+  const responsive = contextSummary !== undefined;
+  const pointCount = points.filter(point => point.kind === "point").length;
+  const groups = groupPointsBySubject(points);
+  const openCount = points.filter(point => point.kind === "question").length;
+  const sideTitle = stagedTitle ?? "What it understood";
+  const rail = side ?? (pointsEmpty === undefined ? null : <>
+    <div className="fy-develop-side__head" style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+      <div style={{ font: "600 15px var(--font-sans)" }}>What it understood</div>
+      <span className="fy-mono">{(compact ? pointCount : points.length) > 0 ? (compact ? pointCount : points.length) + " so far" : "no new notes"}</span>
     </div>
-  );
-
-  // A staged proposal takes the rail from the points; the two are never up together (turn 91).
-  if (side !== undefined) {
-    return (
-      <>
-        {pane}
-        <div className="fy-story__side">{side}</div>
-      </>
-    );
-  }
-  if (pointsEmpty === undefined) return pane;
-  return (
-    <>
-      {pane}
-      <div className="fy-story__side">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          <div style={{ font: "600 15px var(--font-sans)" }}>What it understood</div>
-          <span className="fy-mono">{points.length > 0 ? `${points.length} so far` : "no new notes"}</span>
-        </div>
-        {loaded?.productionSetup?.status === "created" && <details>
-          <summary>From production setup</summary>
-          <p>The outline and open questions at creation. Current production records are in Overview and Scenes.</p>
-          <ProductionSetupOutline draft={loaded.productionSetup.draft}
-            sheetName={id => state?.world?.sheets.find(sheet => sheet.id === id)?.name ?? id} />
-        </details>}
-        <ConversationPoints
-          points={points}
-          empty={pointsEmpty}
-          onMedia={openMedia}
-          busyId={busyMedia}
-          {...(worldId && conversationId
-            ? {
-                onSave: (point: WorldChatPoint) =>
-                  saveWorldChatPoint(worldId, conversationId, point.id, point.revision),
-                onReject: (point: WorldChatPoint) =>
-                  rejectWorldChatPoint(worldId, conversationId, point.id, point.revision),
-              }
-            : {})}
-        />
-        {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
-        {/* Every level has a wrap-up (turn 92). It was drawn on 89a from the start and built
-            nowhere, which left the season — the first hop anybody walks — with no way to turn a
-            conversation into anything at all. */}
-        <WrapUp
-          worldId={worldId}
-          conversationId={conversationId}
-          seq={loaded?.seq ?? null}
-          carried={carriedPoints}
-          status={loaded?.status ?? null}
-          subjectKey={contextKey}
-          wrapping={wrapping}
-          onWrappingChange={setWrapping}
-        />
-      </div>
-    </>
-  );
+    <div className="fy-develop-side__points">
+      {responsive && phone && <p className="fy-develop-side__summary">{pointCount} so far · saying more changes them</p>}
+      <ConversationPoints points={points} empty={pointsEmpty} onMedia={openMedia} busyId={busyMedia}
+        {...(worldId && conversationId ? {
+          onSave: (point: WorldChatPoint) => saveWorldChatPoint(worldId, conversationId, point.id, point.revision),
+          onReject: (point: WorldChatPoint) => rejectWorldChatPoint(worldId, conversationId, point.id, point.revision),
+        } : {})} />
+      {loaded?.productionSetup?.status === "created" && <details className="fy-develop-setup">
+        <summary>From production setup</summary>
+        <p>The outline and open questions at creation. Current production records are in Overview and Scenes.</p>
+        <ProductionSetupOutline draft={loaded.productionSetup.draft} sheetName={id => state?.world?.sheets.find(sheet => sheet.id === id)?.name ?? id} />
+      </details>}
+      {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
+    </div>
+    <WrapUp worldId={worldId} conversationId={conversationId} seq={loaded?.seq ?? null}
+      carried={carriedPoints} status={loaded?.status ?? null} subjectKey={contextKey}
+      wrapping={wrapping} onWrappingChange={setWrapping} brief={responsive && compact} />
+  </>);
+  return <>
+    <div className="fy-story__chat">
+      {(eyebrow || heading) && <div className="fy-story__chathead">
+        {eyebrow && <div className="fy-eyebrow-sm">{eyebrow}</div>}
+        {heading && <h1 className="fy-story__h1">{heading}</h1>}
+      </div>}
+      {responsive && compact && <button type="button" className="fy-develop-model" aria-haspopup="dialog" onClick={() => setModelsOpen(true)}>
+        <Sparkle size={16} /><b>Story author · {authorLocation}</b>
+        <span>in context: {contextSummary}</span><ChevronDown size={16} />
+      </button>}
+      <div className="fy-story__log">{transcript}</div>
+      <HeldBar className={responsive ? "fy-develop-composer" : "fy-story-composer"} query={responsive ? "(max-width: 599px)" : "(max-width: 0px)"}>
+        {responsive && phone && rail && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setSideOpen(true)}>
+          <span><b>{sideTitle}{!side && " · " + pointCount + " so far"}</b><span>{side ? "Open the proposed changes" : [...groups.map(group => group.subject), ...(openCount ? [openCount + " still open"] : [])].join(" · ") || "Nothing understood yet"}</span></span><ChevronUp size={18} />
+        </button>}
+        {(!responsive || !compact) && languageControl}
+        <Composer value={message} onChange={setMessage} onSubmit={submit} placeholder={responsive && compact ? "Keep shaping the story…" : placeholder}
+          agentLabel="story author" busy={running} busyLabel="reading the world…" disabledReason={languageUnavailableReason}
+          onDictate={text => setMessage(prev => prev ? prev + " " + text : text)} {...attachProps} />
+        {(!responsive || !compact) && footer}
+      </HeldBar>
+    </div>
+    {rail && <div className="fy-story__side">
+      <ResponsiveSheet sheet={responsive && phone} open={sideOpen} onClose={() => setSideOpen(false)} title={sideTitle} className="fy-develop-sheet">
+        <div className={responsive ? "fy-develop-side" : "fy-story-side"}>{rail}</div>
+      </ResponsiveSheet>
+    </div>}
+    <PageSheet open={responsive && compact && modelsOpen} onClose={() => setModelsOpen(false)} title="Story author" className="fy-develop-model-sheet">
+      {languageControl}<p>In context: {contextSummary}</p>
+    </PageSheet>
+  </>;
 }
 
 /**
@@ -1647,6 +1652,7 @@ function WrapUp({
   wrapping,
   onWrappingChange,
   onRefused,
+  brief = false,
 }: {
   worldId: string | undefined;
   conversationId: string | null;
@@ -1661,6 +1667,7 @@ function WrapUp({
   onWrappingChange: (next: boolean) => void;
   /** A refusal answered this press; the dock opens the points the refusal names. */
   onRefused?: () => void;
+  brief?: boolean;
 }) {
   const setWrapping = onWrappingChange;
   /*
@@ -1706,7 +1713,8 @@ function WrapUp({
   }, [refusedRequestId]);
   // A press that transmitted nothing has no answer coming, so the wait must never begin on one.
   return (
-    <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
+    <div className="fy-wrapup" style={{ display: "grid", gap: 8, marginTop: 14 }}>
+      {brief && <span className="fy-wrapup__caption">writes settled notes</span>}
       <Button
         variant="primary"
         size="lg"
@@ -1719,7 +1727,7 @@ function WrapUp({
           setWrapping(true);
         }}
       >
-        {wrapping ? "Writing them…" : `Wrap up · write what is settled${carried > 0 ? ` · ${carried}` : ""}`}
+        {wrapping ? "Writing them…" : brief ? "Wrap up" : `Wrap up · write what is settled${carried > 0 ? ` · ${carried}` : ""}`}
       </Button>
       {/* A refused wrap-up wrote nothing, so the panel above is unchanged and says nothing about
           it. Without this line the press leaves no trace at all. */}
@@ -1882,7 +1890,7 @@ export function ConversationPoints({
       ))}
       {/* A question is not a claim about the production, so it is listed apart from what is. */}
       {open.length > 0 && (
-        <div className="fy-panel__group">
+        <div className="fy-panel__group fy-panel__group--open">
           <div className="fy-panel__grouphead">
             <span className="fy-panel__subject">Still open</span>
             <span className="fy-mono">{open.length} question{open.length === 1 ? "" : "s"}</span>

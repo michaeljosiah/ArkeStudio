@@ -314,6 +314,11 @@ export function authoritativeProseSpeech(
       }
       if (!story) throw new Error("Nothing has been settled about this production yet.");
       if (source.field === "acts") {
+        if (source.act !== undefined) {
+          const act = story.acts?.[source.act];
+          return spoken(act ? `${source.act + 1}. ${act.title}${act.summary ? ` — ${act.summary}` : ""}` : undefined,
+            `Act ${source.act + 1}`, story.version, `${subjectId}/${source.act}`);
+        }
         const acts = (story.acts ?? [])
           .map((act, i) => `${i + 1}. ${act.title}${act.summary ? ` — ${act.summary}` : ""}`)
           .join(". ");

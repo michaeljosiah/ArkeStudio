@@ -38,6 +38,7 @@ import {
   useProduction,
 } from "../lib/selectors.js";
 import { DevelopmentWorkspace } from "./development.js";
+import { CompactOverview } from "./production-overview.js";
 import { SceneWorkspace } from "./scene-workspace/workspace.js";
 import {
   cancelExport,
@@ -187,6 +188,7 @@ export function StoryScreen() {
 }
 
 function OverviewStoryScreen() {
+  const compact = useMediaQuery("(max-width: 1099px)");
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const story = production?.story ?? null;
@@ -251,6 +253,7 @@ function OverviewStoryScreen() {
     })),
   ];
   const pageRead = useProsePageRead({ pageId: prodId, title: overviewTitle, blocks: pageBlocks });
+  if (compact && production && worldId) return <CompactOverview worldId={worldId} production={production} staged={staged} read={pageRead} />;
   return (
     <div className="fy-story" data-screen="story-overview">
       {/* The details, not a conversation (turn 88): what the thread settled, read and worked

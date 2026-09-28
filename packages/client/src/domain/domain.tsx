@@ -401,6 +401,10 @@ export function ProposalPanel({
         </div>
       )}
       <RippleList ripple={ripple} />
+      <div className="dom-proposal__touch-reasons">
+        {(openChoices.length > 0 || acceptBlocked || unresolved.length > 0) && <p>{openChoices.length > 0 ? "Answer the question above before accepting." : acceptBlocked ?? "Resolve the conflicts above before accepting."}</p>}
+        {onSendBack && <p>Send back reopens the conversation this came from.</p>}
+      </div>
       <div className="dom-proposal__actions">
         {proposal.pendingReview ? (
           <Button variant="primary" onClick={onMarkSeen} disabled={!onMarkSeen}>
@@ -418,7 +422,7 @@ export function ProposalPanel({
         )}
         {onSendBack && (
           <Button variant="ghost" onClick={onSendBack} title="Reopens the conversation this came from">
-            Send back to the conversation
+            <span className="dom-proposal__send-long">Send back to the conversation</span><span className="dom-proposal__send-short">Send back</span>
           </Button>
         )}
         <Button variant="ghost" onClick={onDiscard} disabled={!onDiscard} title={disabledReason}>

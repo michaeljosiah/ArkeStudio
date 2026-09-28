@@ -394,3 +394,20 @@ same media. Inspect the PNGs alongside the master; geometry alone is not a visua
 import refusal, frame stepping, compact timecode entry, draft retention on resize, base-lane
 protection and explicit Library placement. Retain the existing editor drag/drop, trim, playhead,
 Library, export and undo suites when changing these paths.
+
+### Develop, Overview and the composer on touch (turn 171)
+
+Run `node scripts/smoke-develop-layout.mjs` to render the actual Develop conversation, understood
+and staged sheets, story Overview, acts, style and film Narrative at 360, 375, 390, 984 and 1360
+pixels. It captures all eight master frames for visual comparison, checks overflow and held
+controls, and exercises coarse-pointer Return, model sheets, read sources and narrative saves.
+Use `--viewport phone`, `--viewport fold` or `--viewport desktop --hover` to narrow the run;
+`--baseline <git-ref> --viewport desktop --hover` supplies the previous mouse layout.
+
+The renderer suite `test/develop-layout.test.tsx` covers revision-safe points, staged acceptance
+reasons, draft and pending retention across resizing, device file selection, per-act speech,
+narrative conflicts and keyboard viewport insets. Device uploads are limited to 16 MiB, accept
+bytes rather than host paths, and reuse the conversation attachment writer. Run contracts
+`test/browser-attachment.test.ts` and coordinator `test/world-chat/browser-upload.test.ts`,
+`test/remote-access.test.ts` and `test/voice/page-read.test.ts` for that boundary and the speech
+source. Preserve the existing conversation, composer, production and page-read regression suites.

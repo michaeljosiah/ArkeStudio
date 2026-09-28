@@ -61,7 +61,7 @@ export const ProseReadSourceSchema = z.discriminatedUnion("of", [
     .strict(),
   /**
    * The production overview: the pieces of `story.json` and the freeform treatment beside it.
-   * `acts` is a list rather than a paragraph, so it is read whole or not at all. `voice` and
+   * `acts` is read whole, or one numbered card when `act` is present. `voice` and
    * `samples` are the style record's two readable pieces (turn 128), kept beside the overview
    * because the Overview screen draws them there; point of view and tense are labels, not a listen.
    */
@@ -75,6 +75,8 @@ export const ProseReadSourceSchema = z.discriminatedUnion("of", [
        * at their bound outrun a narrator's prompt cap read as one, so each is its own block.
        */
       sample: z.number().int().min(0).optional(),
+      /** One act card, counted from zero (turn 171). */
+      act: z.number().int().min(0).optional(),
     })
     .strict(),
   /** The season record's two authored answers (SPEC-023 R-10). */

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { DEFAULT_NARRATOR, formatMicroUsd, supportsVoiceUse, type ProseReadSource } from "@arke-studio/contracts";
 import {
   clearQueue,
@@ -247,7 +247,7 @@ export function useProsePageRead(input: {
 const ROW = { display: "inline-flex", alignItems: "center", gap: "var(--space-2)" } as const;
 
 /** The page-scale control: one press to start, then position and movement while it reads. */
-export function PageReadControl({ read, label }: { read: PageRead; label: string }) {
+export function PageReadControl({ read, label }: { read: PageRead; label: ReactNode }) {
   if (!read.reading) return <Button onClick={read.begin}>{label}</Button>;
   if (read.upload) {
     return <RemoteVoiceUploadConfirmation destinationLabel={read.upload.destination} destinationNotice={read.upload.notice} onCancel={read.stop} onConfirm={read.upload.confirm} />;

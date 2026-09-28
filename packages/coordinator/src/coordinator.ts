@@ -7145,6 +7145,13 @@ export class Coordinator {
         this.transport.broadcastSnapshot();
         return;
       }
+      case "world-chat-upload": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await this.attachBytesToWorldChat(store, msg.conversationId, msg.name, Buffer.from(msg.data, "base64"));
+        await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
       case "world-chat-attach": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -16917,6 +16924,11 @@ export class Coordinator {
       return;
     }
 
+    await this.attachBytesToWorldChat(store, conversationId, name, bytes);
+  }
+
+  private async attachBytesToWorldChat(store: WorldStore, conversationId: ConversationId, name: string, bytes: Uint8Array): Promise<void> {
+    const refuse = (reason: string) => this.emit({ at: new Date().toISOString(), type: "world-chat.attachment-refused", conversationId, name, reason });
     const unreadable = refuseUnreadable(name, bytes);
     if (unreadable) {
       refuse(unreadable);

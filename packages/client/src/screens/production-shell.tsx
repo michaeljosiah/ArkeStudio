@@ -806,6 +806,8 @@ export function ProductionChatScreen() {
         worldId={worldId}
         productionId={prodId}
         openingNote="Develop · opening…"
+        contextSummary={`${contextCount} ${contextUnit}${contextCount === 1 ? "" : "s"}, ${cast} cast${world?.meta.tone ? ", " + world.meta.tone : ""}`}
+        stagedTitle={staged ? `${stagedStyle ? "Style" : shape?.isEpisodic ? "Season" : "Story"} v${(staged.proposal.targets[0]?.baseVersion ?? 0) + 1} · waiting on you` : undefined}
         eyebrow={`DEVELOP · ${shape ? shape.displayLabel.toLowerCase() : ""}`}
         heading={shape?.isEpisodic ? "What is this season?" : "Find the spine together."}
         placeholder="Say what this is — what happens, who it costs, how it ends…"

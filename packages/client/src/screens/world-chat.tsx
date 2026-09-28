@@ -21,7 +21,7 @@ import {
   cancelWorldChat,
   restoreBible,
   deleteWorldChat,
-  hostCanAttach,
+  canAttachConversationFiles,
   retryWorldChatTurn,
   createWorldChat,
   dismissWorldChatRipples,
@@ -970,7 +970,7 @@ export function WorldChatScreen() {
                     },
                   }
                 : {})}
-              {...(worldId && hostCanAttach() && !wrappingUp
+              {...(worldId && canAttachConversationFiles() && !wrappingUp
                 ? {
                     onAttachFiles: (files: readonly File[]) => {
                       if (conversationId) {
