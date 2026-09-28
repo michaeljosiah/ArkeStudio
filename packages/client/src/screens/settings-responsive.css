@@ -136,8 +136,8 @@
   .fy-activity-phone .fy-ap__head, .fy-activity-phone .fy-ap__status { display: none; }
   .fy-activity-phone .fy-ap__tabs { padding: 0 0 4px; height: auto; }
   .fy-activity-phone .fy-ap__body { padding: 0; }
-  .fy-activity-phone .fy-ap__tabs .fy-seg { width: 100%; }
-  .fy-activity-phone .fy-seg__item { min-height: 44px; flex: 1; padding: 0 10px; }
+  .fy-activity-phone .fy-ap__tabs .fy-seg { width: max-content; max-width: 100%; }
+  .fy-activity-phone .fy-seg__item { min-height: 44px; flex: none; padding: 0 10px; }
   .fy-activity-phone .fy-ap__row { flex-wrap: wrap; gap: 8px; padding: 12px 0; align-items: start; }
   .fy-activity-phone .fy-ap__row > .fy-ap__dot { margin-top: 5px; }
   .fy-activity-phone .fy-ap__main { flex-basis: calc(100% - 20px); }
@@ -187,6 +187,7 @@
   .fy-narrator-default { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: var(--type-ui); text-align: left; }
   .fy-activity-phone .fy-page-sheet__foot { display: flex; align-items: center; gap: 10px; }
   .fy-activity-phone .fy-page-sheet__foot > span { flex: 1; }
+  .fy-activity-phone .fy-page-sheet__foot > .ui-btn { flex: none; min-width: 100px; }
   .fy-account-phone .fy-account__menu { display: grid; gap: 16px; }
   .fy-account-phone .fy-account__band { gap: 16px; }
   .fy-account-phone .fy-on-pc { margin-top: 0; }
@@ -209,7 +210,8 @@
   .fy-provider-row .fy-src .fy-set__dot { flex: none; }
   .fy-provider-row .fy-src > svg { margin-left: auto; }
   .fy-ap__title { font: var(--type-h3); }
-  .fy-ap__close svg { width: 18px; height: 18px; }
+  .fy-ap__close { color: var(--foreground); }
+  .fy-ap__close svg { width: 20px; height: 20px; stroke-width: 1.5; }
   .fy-ap__status { order: 2; border-bottom: 0; border-top: 1px solid var(--border); }
   .fy-ap__eyebrow--first { margin-top: 12px; }
 }
@@ -219,6 +221,9 @@
   .fy-ap__main { flex-basis: calc(100% - 20px); }
   .fy-ap__end { flex: 1 0 100%; }
   .fy-ap__actions .ui-btn, .fy-ap__end .ui-btn { flex: 1 1 110px; white-space: normal; }
-  .fy-ap .fy-seg { padding: 0; border-radius: 12px; width: max-content; max-width: 100%; }
-  .fy-ap .fy-seg__item { font: var(--type-ui); min-height: 44px; padding: 0 14px; }
+  .fy-ap .fy-seg { gap: 2px; padding: 0 3px; border-radius: 12px; width: max-content; max-width: 100%; }
+  .fy-ap .fy-seg__item { position: relative; font: var(--type-ui); min-height: 44px; padding: 0 14px; }
+  /* The painted segment has the master's 3px inset; its full 44px button remains tappable. */
+  .fy-ap .fy-seg__item--active { isolation: isolate; background: transparent; box-shadow: none; }
+  .fy-ap .fy-seg__item--active::before { content: ""; position: absolute; inset: 3px 0; z-index: -1; border-radius: 9px; background: var(--background); box-shadow: var(--shadow-xs); pointer-events: none; }
 }

@@ -117,15 +117,17 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   const waiting = waitingUpdate(update);
 
   useLayoutEffect(() => {
-    const panelRoot = root.current;
-    const body = panelRoot?.querySelector<HTMLElement>(".fy-ap__body");
+    const body = root.current?.querySelector<HTMLElement>(".fy-ap__body");
     if (body) body.scrollTop = 0;
+  }, [panel.calls, panel.tab, phone]);
+  useLayoutEffect(() => {
+    const panelRoot = root.current;
     const dialog = panelRoot?.closest("dialog");
     const target = panel.calls !== undefined
       ? dialog?.querySelector<HTMLElement>('header [aria-label="Back"]') ?? panelRoot?.querySelector<HTMLElement>(".fy-ap__back")
       : dialog?.querySelector<HTMLElement>("h2") ?? panelRoot;
     target?.focus({ preventScroll: true });
-  }, [panel.calls, panel.tab, phone]);
+  }, [panel.calls, phone]);
 
   // Closes when the screen behind it changes — its own actions navigate, and so does the user.
   const path = `${location.pathname}${location.search}`;
@@ -276,7 +278,7 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   );
   return phone ? <PageSheet open onClose={closeActivityPanel} title="Activity" className="fy-activity-phone"
     {...(panel.calls !== undefined ? { onBack: leaveProviderCalls } : {})}
-    footer={activeWorldId && panel.calls === undefined ? <><span>{scope === "active" ? "this world" : "all worlds"}</span><Button onClick={() => setScope(scope === "active" ? "all" : "active")}>{scope === "active" ? "All worlds" : "This world"}</Button></> : undefined}>{content}</PageSheet> : content;
+    footer={activeWorldId && panel.calls === undefined && panel.tab !== "new" ? <><span>{scope === "active" ? "this world" : "all worlds"}</span><Button onClick={() => setScope(scope === "active" ? "all" : "active")}>{scope === "active" ? "All worlds" : "This world"}</Button></> : undefined}>{content}</PageSheet> : content;
 }
 
 function Eyebrow({ children, first = false }: { children: ReactNode; first?: boolean }) {

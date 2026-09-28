@@ -421,7 +421,7 @@ export function ConversationPermissionCard({
       {action.undo && <div className="fy-actioncard__audit">Undo available · {action.undo.kind}</div>}
       {supported && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
         <div className="fy-actioncard__actions">
-          {action.status === "pending" && (onPC ? <OnYourPC>choose files and approve</OnYourPC> : <Button
+          {action.status === "pending" && (!onPC || action.availableDecisions.includes("approve")) && (onPC ? <OnYourPC>choose files and approve</OnYourPC> : <Button
             variant="primary"
             disabled={busy || !action.availableDecisions.includes("approve")}
             onClick={() => decide("approve")}

@@ -125,6 +125,12 @@ try {
         assert.deepEqual(await js('(()=>{const r=document.querySelector(".fy-provider-state [role=switch]").getBoundingClientRect();return [r.width,r.height]})()'),[44,26]);
         if(width>=900)assert.ok(await js('(()=>{const [a,b]=Array.from(document.querySelectorAll(".fy-provider-model"),e=>e.getBoundingClientRect());return a.y===b.y&&b.x>a.right})()'),'two Fold model cards across');
         await click('.fy-provider-model [role=switch]');assert.equal(await js('window.commands.at(-1).kind'),'set-model-enabled');}
+      if(label==='activity'){for(const tab of ["What's new", "Spend", "Inbox"]){
+        const nth=await js('Array.from(document.querySelectorAll(".fy-ap [role=tab]")).findIndex(e=>e.textContent.startsWith('+JSON.stringify(tab)+'))+1');
+        assert.ok(nth>0);await click('.fy-ap [role=tab]:nth-child('+nth+')');
+        assert.ok(await js('document.activeElement?.getAttribute("role")==="tab" && document.activeElement.getAttribute("aria-selected")==="true"'),'Activity tab keeps focus');
+        if(tab==="What's new"){assert.equal(await js('!!document.querySelector(".fy-activity-phone footer,.fy-ap__scope")'),false);await check(name+'-activity-new');}
+      }}
       if(label==='activity'&&width>=600&&width<1100){assert.equal(await js('document.querySelector(".fy-ap").getBoundingClientRect().top'),52);assert.equal(await js('document.querySelector(".fy-ap__close").getBoundingClientRect().height'),44);
         await cdp('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:30,y:250}]});await cdp('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:30,y:180}]});await cdp('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
         // Let Chrome deliver the swipe's deferred scroll before starting the separate tap.

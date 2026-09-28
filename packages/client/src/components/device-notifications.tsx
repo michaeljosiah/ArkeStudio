@@ -36,7 +36,7 @@ export function useDeviceNotifications(state: ClientState | null) {
     if (!isRemoteSession() || !state) return;
     const notices = [
       ...computeNeedsYou(state).map(n => ({ id: `need:${n.kind}:${n.worldId ?? ""}:${n.ref ?? ""}`, title: n.title, body: n.detail })),
-      ...state.app.jobs.filter(j => j.status === "succeeded").map(j => ({ id: `ready:${j.id}`, title: "Your work is ready", body: `${j.provider} · ${j.model}` })),
+      ...state.app.jobs.filter(j => j.status === "succeeded" && (j.finalization === undefined || j.finalization.status === "complete")).map(j => ({ id: `ready:${j.id}`, title: "Your work is ready", body: `${j.provider} · ${j.model}` })),
     ];
     const added = notices.filter(n => seen.current !== null && !seen.current.has(n.id));
     seen.current = new Set(notices.map(n => n.id));

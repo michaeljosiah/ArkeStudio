@@ -639,8 +639,9 @@ export function SettingsProvidersScreen() {
   const column = (rowsOf: Row[]) =>
     rowsOf.map((r) => compact ? (() => {
       const models = (state?.app.manifest?.models ?? []).filter(m => r.kind === "engine" ? ENGINE_PROVIDERS[r.id as EngineId].includes(m.provider) : m.provider === r.id);
-      const usable = models.some(model => deriveCapabilityAvailability(providerStatus).some(a => a.capability === model.capability && a.via.includes(model.provider)));
-      const on = usable && models.some(m => !(state?.app.models.disabled ?? []).includes(m.id));
+      const unlocked = models.filter(model => deriveCapabilityAvailability(providerStatus).some(a => a.capability === model.capability && a.via.includes(model.provider)));
+      const usable = unlocked.length > 0;
+      const on = unlocked.some(m => !(state?.app.models.disabled ?? []).includes(m.id));
       return <div className={cx("fy-provider-row", r.id === current && "is-current")} key={r.id}>
         <button type="button" className="fy-src" onClick={() => setSearchParams({ provider: r.id }, { replace: true })}>
           {!phone && <i className={cx("fy-set__dot", r.note === null && "fy-set__dot--ok")} />}<span><strong>{r.label}</strong>{phone && <small><i className={cx("fy-set__dot", r.note === null && "fy-set__dot--ok")} />{r.note ?? "connected"}</small>}</span>{!phone && <ChevronRight size={14} />}
