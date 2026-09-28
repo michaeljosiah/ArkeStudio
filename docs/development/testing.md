@@ -309,6 +309,21 @@ coarse-pointer folding, resize across the phone breakpoint, season/episode Arke 
 Run alongside the existing new-production, dashboard, development and production-navigation tests.
 Typecheck after test changes.
 
+## Art direction on phones and Fold7
+
+Run `node scripts/smoke-art-direction-layout.mjs` with Chrome installed (or set
+`ARKE_CHROME`). It uses the real app and schema-checked local fixtures for accepted and
+empty pictures, long descriptions, staged changes and generation previews. Captures cover
+360, 375, 390, 600, 984 and 1360px, including the Models sheet and the held acceptance action.
+The printed directory includes all seven turn 167 master frames and measured geometry.
+`--viewport phone` narrows a run; `--hover --viewport desktop` checks invisible picture
+doors using Chrome's real pointer/hover media queries. Add `--baseline <revision>` to
+render the earlier desktop with the same fixture. Touch controls are checked at every width.
+
+Client `test/art-direction-layout.test.tsx` covers touch doors, full titles, model access
+and the authored/staged footer commands. Run alongside art-direction-step, generation-dialog,
+dispatch-bar and chrome tests. Typecheck after test changes.
+
 ## Cast on phones and Fold7
 
 Run `node scripts/smoke-cast-layout.mjs` with Chrome installed (`ARKE_CHROME` overrides

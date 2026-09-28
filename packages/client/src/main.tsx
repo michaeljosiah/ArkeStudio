@@ -33,6 +33,7 @@ import "./screens/home.css";
 import "./screens/world.css";
 import "./screens/character-pages.css";
 import "./screens/cast.css";
+import "./screens/art-direction.css";
 import "./screens/bible-canon.css";
 import "./screens/chat-artifacts.css";
 import "./screens/productions.css";
