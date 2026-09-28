@@ -15,3 +15,26 @@ export function settingsLayoutFixture(): ClientState {
   state.app.version = "0.5.52";
   return state;
 }
+
+/** Populated machine rows exercise paths that the cloud-provider design frame leaves empty. */
+export function settingsMachineLayoutFixture(): ClientState {
+  const state = settingsLayoutFixture();
+  const model: ManifestModel = {
+    id: "gemma4-12b", provider: "ollama", capability: "llm", displayName: "Gemma 4 12B",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: { maxContextTokens: 256000 }, pricing: { kind: "unmetered" }, requires: { vramMb: 9600 },
+  };
+  state.app.manifest!.models.push(model);
+  state.app.runtime = {
+    probes: { vramMb: 24576, memMb: 65536, diskFreeMb: 400000, accelerators: ["cuda"], platform: "win32" },
+    detectedAt: "2026-09-28T12:00:00Z", recommended: { llm: model.id },
+    models: [{ modelId: model.id, provider: model.provider, displayName: model.displayName, capability: model.capability, locality: "local", fit: "runs-well" }],
+  };
+  state.app.setup = { running: true, diskFreeMb: 400000, diskCheckedAt: null, components: [{
+    id: "ollama-gemma4-12b", engine: "ollama", displayName: "Gemma 4 · 12B", purpose: "Reads images and holds a 256K context",
+    sizeMb: 7600, installLocation: "C:\\Users\\Helen\\AppData\\Local\\ArkeStudio\\models\\gemma4-12b",
+    state: "downloading", bytesDone: 3800 * 1024 * 1024, bytesTotal: 7600 * 1024 * 1024,
+    bytesPerSecond: 12 * 1024 * 1024, pauseSupported: true, provides: [model.id], removable: true,
+  }] };
+  return state;
+}

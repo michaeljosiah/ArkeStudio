@@ -47,6 +47,9 @@ Native file selection, dropped host files and desktop-rendered playblasts requir
 app. The gateway rejects their host-file commands, including manually supplied filesystem paths.
 These commands and the other named PC-only commands receive a typed `host-only` refusal;
 the socket remains connected. The client shows the relevant state with **On your PC**.
+Conversation cards that choose host files or render desktop playblasts also require approval
+on the PC. The gateway restricts every remote decision, and the conversation lifecycle checks
+the stored action before approval or replay; ordinary authored decisions and denial remain available.
 Provider keys are displayed only as set or not set, never as a key or fingerprint.
 
 On a paired browser, **Settings → Remote access** shows only that browser's name and pairing

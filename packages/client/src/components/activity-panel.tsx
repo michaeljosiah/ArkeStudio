@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, type NavigateFunction } from "react-router";
 import {
   activityJobLabels,
@@ -115,6 +115,17 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   const exportsState = useExports();
   const update = useUpdateStatus();
   const waiting = waitingUpdate(update);
+
+  useLayoutEffect(() => {
+    const panelRoot = root.current;
+    const body = panelRoot?.querySelector<HTMLElement>(".fy-ap__body");
+    if (body) body.scrollTop = 0;
+    const dialog = panelRoot?.closest("dialog");
+    const target = panel.calls !== undefined
+      ? dialog?.querySelector<HTMLElement>('header [aria-label="Back"]') ?? panelRoot?.querySelector<HTMLElement>(".fy-ap__back")
+      : dialog?.querySelector<HTMLElement>("h2") ?? panelRoot;
+    target?.focus({ preventScroll: true });
+  }, [panel.calls, panel.tab, phone]);
 
   // Closes when the screen behind it changes — its own actions navigate, and so does the user.
   const path = `${location.pathname}${location.search}`;

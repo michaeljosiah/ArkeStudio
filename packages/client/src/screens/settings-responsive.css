@@ -37,6 +37,9 @@
   .fy-provider-state small { display: flex; align-items: center; gap: 6px; margin-top: 2px; font: 400 11px/1.5 var(--font-mono); color: var(--muted-foreground); }
   .fy-provider-models, .fy-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 10px; }
   .fy-mtile { width: auto; min-width: 0; }
+  :is(.fy-settings, .fy-settings-phone) .fy-set__row--stack > div:first-child { flex-wrap: wrap; min-width: 0; }
+  :is(.fy-settings, .fy-settings-phone) .fy-set__row--stack .fy-on-pc { flex-basis: 100%; }
+  .fy-settings .fy-set__row--stack .fy-set__name--wide { flex-basis: 140px; }
   .fy-provider-model { display: grid; gap: 6px; border: 1px solid var(--border); border-radius: 12px; padding: 12px; min-width: 0; }
   .fy-provider-model__row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
   .fy-provider-model strong { font: 600 13px/1.3 var(--font-sans); }
@@ -52,14 +55,17 @@
   .fy-settings__tab { padding: 0 10px; border-radius: 10px; }
   .fy-settings__tab--active { margin-left: 0; box-shadow: none; background: var(--muted); }
   .fy-settings__pane > .fy-set, .fy-cols__pane { padding: 24px; }
+  .fy-settings__pane .fy-rt__head, .fy-settings__pane .fy-pane__head { padding-right: 40px; flex-wrap: wrap; }
   .fy-cols__list, [data-screen="settings-providers"] .fy-cols__list { padding: 24px 14px; }
   .fy-provider-row.is-current { background: var(--muted); }
   [data-screen="settings-providers"] .fy-cols__list > .fy-half { display: none; }
   .fy-settings__close { top: 12px; right: 12px; }
+  .fy-settings__close svg { width: 20px; height: 20px; }
 }
 @media (max-width: 1099px) and (pointer: coarse) {
   .fy-settings__tab, .fy-kind, .fy-settings .fy-set__link, .fy-settings .fy-fact__link, .fy-settings .fy-act, .fy-settings .ui-btn, .fy-settings .ui-iconbtn, .fy-settings .ui-select__control { min-height: 44px; }
   .fy-settings__close { width: 44px; height: 44px; }
+  :is(.fy-settings, .fy-settings-phone) .fy-set__link[aria-expanded], :is(.fy-settings, .fy-settings-phone) .fy-play { min-width: 44px; min-height: 44px; }
   .fy-settings .fy-prov__switch, .fy-settings-phone .fy-prov__switch { position: relative; width: 44px; height: 26px; border-radius: 13px; flex: none; padding: 3px; }
   .fy-settings .fy-prov__switch > span, .fy-settings-phone .fy-prov__switch > span { width: 20px; height: 20px; top: 3px; left: 3px; }
   .fy-settings .fy-prov__switch.is-on > span, .fy-settings-phone .fy-prov__switch.is-on > span { transform: none; }
@@ -95,6 +101,12 @@
   .fy-provider-row > .fy-prov__switch { margin-right: 0; }
   .fy-settings-phone .fy-set > .fy-pane__name, .fy-settings-phone .fy-set > .fy-set__eyebrow:first-child { display: none; }
   .fy-settings-phone .fy-set__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 0; }
+  .fy-settings-phone .fy-set__row--stack { display: block; }
+  .fy-settings-phone .fy-set__link[aria-expanded], .fy-settings-phone .fy-play { min-width: 44px; min-height: 44px; }
+  .fy-settings-phone .fy-set__row--stack > div:first-child:has(> .fy-set__link[aria-expanded]) > .fy-set__name { flex: 1 1 calc(100% - 112px); width: auto; }
+  .fy-settings-phone .fy-set__caps, .fy-settings-phone .fy-set__why { overflow-wrap: anywhere; }
+  .fy-settings-phone .fy-rt__head, .fy-settings-phone .fy-rt__sechead { flex-wrap: wrap; gap: 8px; }
+  .fy-settings-phone .fy-rt__sechead > .fy-on-pc { flex-basis: 100%; }
   .fy-settings-phone .fy-set__name { width: 100%; flex-basis: 100%; }
   .fy-settings-phone .fy-set__field, .fy-settings-phone .fy-set__row > .ui-select { flex-basis: 100%; width: 100%; }
   .fy-settings-phone .fy-fact { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--border); }

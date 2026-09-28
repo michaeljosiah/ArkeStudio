@@ -186,7 +186,10 @@ export class RemoteGateway {
         client.send(JSON.stringify(refusal)); return;
       }
       if (parsed.data.kind === "hello") return;
-      const message = JSON.stringify(parsed.data);
+      // A decision names a stored card, not its effect. Impose this after parsing so the peer
+      // cannot omit it; the lifecycle resolves the authoritative kind before approval or replay.
+      const message = JSON.stringify(parsed.data.kind === "conversation-action-decide"
+        ? { ...parsed.data, hostActions: "refuse" } : parsed.data);
       if (upstream.readyState === WebSocket.OPEN) upstream.send(message);
       else if (pending.length < 32 && (pendingBytes += Buffer.byteLength(message)) <= frameLimit) pending.push(message);
       else client.close(1008, "too many pending commands");

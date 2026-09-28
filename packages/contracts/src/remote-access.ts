@@ -36,9 +36,9 @@ export interface RemoteAccessReply {
 }
 
 /** Named refusals include mixed commands whose host-only payload is checked separately. */
-export { REMOTE_COMMAND_ACCESS, isRemoteHostCommand } from "./remote-command-access.js";
+export { REMOTE_COMMAND_ACCESS, REMOTE_PREPARED_ACTION_ACCESS, isRemoteHostCommand, isRemoteHostConversationAction } from "./remote-command-access.js";
 export const REMOTE_HOST_ONLY_COMMANDS = Object.entries(REMOTE_COMMAND_ACCESS)
-  .filter(([, access]) => access !== "studio").map(([kind]) => kind) as [RemoteHostCommand, ...RemoteHostCommand[]];
+  .filter(([, access]) => access === "host" || access === "payload").map(([kind]) => kind) as [RemoteHostCommand, ...RemoteHostCommand[]];
 export const RemoteCommandRefusalSchema = z.object({
   kind: z.literal("command-refused"), refused: z.literal("host-only"),
   command: z.enum(REMOTE_HOST_ONLY_COMMANDS),

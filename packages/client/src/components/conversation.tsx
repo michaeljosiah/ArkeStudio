@@ -11,7 +11,9 @@ import type {
   WorldChatSubject,
   WorldChatWorkspace,
 } from "@arke-studio/contracts";
-import { findHarnessModel, harnessModelManifestEntry, PROVIDERS, proposalDecisionOf } from "@arke-studio/contracts";
+import { findHarnessModel, harnessModelManifestEntry, PROVIDERS, proposalDecisionOf, isRemoteHostConversationAction } from "@arke-studio/contracts";
+import { isRemoteSession } from "../lib/remote-session.js";
+import { OnYourPC } from "./on-your-pc.js";
 import { Composer } from "./composer.js";
 import { HeldBar } from "./held-bar.js";
 import { PageSheet } from "./page-sheet.js";
@@ -297,6 +299,7 @@ export function ConversationPermissionCard({
   const [busy, setBusy] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const supported = DECIDABLE_CARD_FAMILIES.has(action.shown.body.family);
+  const onPC = isRemoteSession() && isRemoteHostConversationAction(action.actionKind);
   const terminal = ["completed", "failed", "cancelled", "denied", "stale", "superseded"].includes(action.status);
 
   useEffect(
@@ -418,13 +421,13 @@ export function ConversationPermissionCard({
       {action.undo && <div className="fy-actioncard__audit">Undo available · {action.undo.kind}</div>}
       {supported && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
         <div className="fy-actioncard__actions">
-          {action.status === "pending" && <Button
+          {action.status === "pending" && (onPC ? <OnYourPC>choose files and approve</OnYourPC> : <Button
             variant="primary"
             disabled={busy || !action.availableDecisions.includes("approve")}
             onClick={() => decide("approve")}
           >
             {busy ? "Deciding…" : "Approve"}
-          </Button>}
+          </Button>)}
           {action.availableDecisions.includes("deny") && <Button
             variant="ghost"
             disabled={busy || !action.availableDecisions.includes("deny")}

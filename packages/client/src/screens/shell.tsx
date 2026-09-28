@@ -1613,10 +1613,10 @@ export function SettingsLayout() {
     if (id === "about") return `v${state?.app.version ?? "—"}`;
     return id === "diagnostics" ? "studio health" : "a world to explore";
   };
-  if (phone) return <PageSheet open onClose={leave} title={section?.[1] ?? "Settings"} className="fy-settings-phone"
+  if (phone) return <PageSheet open onClose={leave} title={section?.[1] ?? (slug === "downloads" ? "Downloads" : "Settings")} className="fy-settings-phone"
     resetKey={pathname + search}
     footer={<span>{slug === "general" ? "new work only" : slug === "remote-access" && isRemoteSession() ? "connected through your PC" : `Arke Studio ${state?.app.version ?? "—"}${isRemoteSession() ? " · remote" : ""}`}</span>}
-    {...(slug ? { onBack: () => navigate(providerDetail ? "/settings/providers" : "/settings") } : {})}>
+    {...(slug ? { onBack: () => navigate(providerDetail || slug === "downloads" ? "/settings/providers" : "/settings") } : {})}>
     <div className="fy-settings-phone__content" data-screen="settings">
       {slug ? <Outlet /> : <nav className="fy-settings-sections" aria-label="Settings sections">{SETTINGS_SECTIONS.map(([id, label, Glyph]) =>
         <NavLink key={id} to={`/settings/${id}`}><Glyph size={20} /><span><strong>{label}</strong><small>{summary(id)}</small></span><ChevronRight size={18} /></NavLink>)}</nav>}

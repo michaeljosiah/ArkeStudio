@@ -6,9 +6,9 @@ import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
 import { REMOTE_HOST_ONLY_COMMANDS, type ClientMessage } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest, send, subscribeRemoteRefusals } from "../src/lib/store.js";
+import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest, __stateForTest, __pendingQueueRequestsForTest, pickManuscript, stageVoiceClip, uploadWorldImage, uploadMasterLook, pickStagedReference, send, subscribeRemoteRefusals } from "../src/lib/store.js";
 import { __resetSettingsReturnForTest } from "../src/lib/settings-return.js";
-import { __resetActivityPanelForTest, openActivityPanel } from "../src/lib/activity-panel.js";
+import { __resetActivityPanelForTest, openActivityPanel, inspectProviderCalls, leaveProviderCalls } from "../src/lib/activity-panel.js";
 import { settingsLayoutFixture } from "./settings-layout-fixture.js";
 const dom = parseHTML('<html><head><meta name="arke-remote" content="true"></head><body></body></html>');
 let width = 375;
@@ -129,6 +129,30 @@ it("phone pane and provider navigation starts at the top and focuses the heading
  assert.equal(body.scrollTop, 0); assert.equal(focus, 1);
  body.scrollTop = 250; await click('.fy-provider-row .fy-src');
  assert.equal(body.scrollTop, 0); assert.equal(focus, 2);
+});
+it("Activity call-detail navigation resets its inner scroller and focuses Back", async () => {
+ await mount(); await act(async () => openActivityPanel("inbox"));
+ const body = find('.fy-ap__body'); body.scrollTop = 500;
+ const original = dom.HTMLElement.prototype.focus; const focused: HTMLElement[] = [];
+ dom.HTMLElement.prototype.focus = function(this: HTMLElement) { focused.push(this); };
+ try {
+  await act(async () => inspectProviderCalls(null));
+  assert.equal(body.scrollTop, 0); assert.equal(focused.at(-1), find('.fy-activity-phone header [aria-label="Back"]'));
+  body.scrollTop = 300; await act(async () => leaveProviderCalls());
+  assert.equal(body.scrollTop, 0); assert.equal(focused.at(-1), find('.fy-activity-phone h2'));
+ } finally { dom.HTMLElement.prototype.focus = original; }
+});
+it("a refused manuscript picker reaches a terminal state without a phantom in-flight import", async () => {
+ await mount(); const world = settingsLayoutFixture().world!; let request = "";
+ await act(async () => { request = pickManuscript(world.meta.worldId, world.productions[0]!.meta.id); });
+ assert.equal(__stateForTest().manuscripts[request]?.state, "refused");
+ assert.match(__stateForTest().manuscripts[request]?.reason ?? "", /on your PC/);
+ assert.ok(!sent.some(command => command.kind === "pick-manuscript"));
+ assert.equal(stageVoiceClip(world.meta.worldId), null);
+ const pending = __pendingQueueRequestsForTest();
+ uploadWorldImage(world.meta.worldId); uploadMasterLook(world.meta.worldId); pickStagedReference(world.meta.worldId, "world-image");
+ assert.deepEqual(__pendingQueueRequestsForTest(), pending, "refused pickers do not leave orphan queue requests");
+ assert.equal(typeof stageVoiceClip(world.meta.worldId, { audioBase64: "UklGRg==", contentType: "audio/wav" }), "string", "browser recordings remain available");
 });
 it("compact local provider switches remain off when the capability is unavailable", async () => {
  const marker = document.querySelector('meta[name="arke-remote"]')!; marker.setAttribute('content', 'false');

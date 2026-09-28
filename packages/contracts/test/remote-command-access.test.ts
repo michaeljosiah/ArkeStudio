@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { z } from "zod";
 import { ClientMessageSchema, type ClientMessage } from "../src/frames.js";
-import { REMOTE_COMMAND_ACCESS, isRemoteHostCommand } from "../src/remote-command-access.js";
+import { REMOTE_COMMAND_ACCESS, REMOTE_PREPARED_ACTION_ACCESS, isRemoteHostCommand, isRemoteHostConversationAction } from "../src/remote-command-access.js";
+import { WorldChatPreparedActionSchema } from "../src/world-chat-actions.js";
 
 function kinds(schema: z.ZodTypeAny): string[] {
   if (schema instanceof z.ZodDiscriminatedUnion || schema instanceof z.ZodUnion) return (schema.options as z.ZodTypeAny[]).flatMap(kinds);
@@ -11,6 +12,14 @@ function kinds(schema: z.ZodTypeAny): string[] {
 }
 it("every command in the wire schema has an explicit remote ownership decision", () => {
   assert.deepEqual(Object.keys(REMOTE_COMMAND_ACCESS).sort(), [...new Set(kinds(ClientMessageSchema))].sort());
+});
+it("every prepared action has an explicit policy and native work cannot hide in a decision", () => {
+  assert.deepEqual(Object.keys(REMOTE_PREPARED_ACTION_ACCESS).sort(), kinds(WorldChatPreparedActionSchema).sort());
+  for (const kind of ["world-chat-artifact-import", "world-chat-reference-import", "world-chat-reference-image-import", "world-chat-voice-clone", "world-chat-production-take-import", "world-chat-production-stage-playblast", "upload-world-image"]) {
+    assert.equal(isRemoteHostConversationAction(kind), true, kind);
+  }
+  for (const kind of ["rename-world", "world-chat-canon", "world-chat-production-stage-construct", "world-chat-world-export"]) assert.equal(isRemoteHostConversationAction(kind), false, kind);
+  assert.equal(isRemoteHostConversationAction("future-unclassified-action"), true);
 });
 it("host installers, deletion, native folders and chooser payloads stay on the PC", () => {
   const cases: ClientMessage[] = [

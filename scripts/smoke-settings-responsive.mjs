@@ -35,18 +35,18 @@ import { flushSync } from "react-dom";
 import { MemoryRouter, useNavigate } from "react-router";
 import { App } from "./App";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest, __connectionStatusForTest } from "./lib/store";
-import { settingsLayoutFixture } from "../test/settings-layout-fixture";
+import { settingsLayoutFixture, settingsMachineLayoutFixture } from "../test/settings-layout-fixture";
 import { __resetActivityPanelForTest, openActivityPanel } from "./lib/activity-panel";
 import { __resetSettingsReturnForTest } from "./lib/settings-return";
 ${styles}
 let renderer;window.errors=[];window.addEventListener("error",e=>window.errors.push(e.error?.stack??e.message));window.addEventListener("unhandledrejection",e=>window.errors.push(String(e.reason)));
 function Navigation(){window.go=useNavigate();return null;}
 window.settleLayout=async()=>{await new Promise(r=>setTimeout(r,450));await document.fonts.ready;await Promise.all([...document.images].map(i=>i.decode().catch(()=>{})));for(const a of document.getAnimations()){if(Number.isFinite(a.effect?.getComputedTiming().endTime))a.finish();else{a.pause();a.currentTime=0;}}};
-window.mountLayout=async(route="/settings",remote=true)=>{
- renderer?.unmount();__resetActivityPanelForTest();__resetSettingsReturnForTest();const state=settingsLayoutFixture(),world=state.world;
+window.mountLayout=async(route="/settings",remote=true,machine=false)=>{
+ renderer?.unmount();__resetActivityPanelForTest();__resetSettingsReturnForTest();const state=machine?settingsMachineLayoutFixture():settingsLayoutFixture(),world=state.world;
  document.querySelector('meta[name="arke-remote"]')?.remove();if(remote){const meta=document.createElement('meta');meta.name="arke-remote";meta.content="true";document.head.append(meta);}
  window.commands=[];const bridge={connect(){},send(raw){window.commands.push(JSON.parse(raw));},subscribe(){return()=>{};},coordinatorHttpBase:()=>location.origin};
- if(remote)delete window.arke;else window.arke=bridge;__setBridgeForTest(bridge);__setStateForTest(state);__connectionStatusForTest("open");
+ if(remote)delete window.arke;else window.arke=bridge;__setBridgeForTest(bridge);__setStateForTest(state,{setupStatus:state.app.setup});__connectionStatusForTest("open");
  renderer=createRoot(document.getElementById("root"));flushSync(()=>renderer.render(<MemoryRouter initialEntries={["/w/"+world.meta.worldId]}><Navigation/><App/></MemoryRouter>));await window.settleLayout();
  if(route==="activity"){openActivityPanel("inbox");}else if(route==="account"){document.querySelector('[data-account-control]').click();}else{window.go(route);}await window.settleLayout();
 };
@@ -126,12 +126,23 @@ try {
         if(width>=900)assert.ok(await js('(()=>{const [a,b]=Array.from(document.querySelectorAll(".fy-provider-model"),e=>e.getBoundingClientRect());return a.y===b.y&&b.x>a.right})()'),'two Fold model cards across');
         await click('.fy-provider-model [role=switch]');assert.equal(await js('window.commands.at(-1).kind'),'set-model-enabled');}
       if(label==='activity'&&width>=600&&width<1100){assert.equal(await js('document.querySelector(".fy-ap").getBoundingClientRect().top'),52);assert.equal(await js('document.querySelector(".fy-ap__close").getBoundingClientRect().height'),44);
-        await cdp('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:30,y:250}]});await cdp('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:30,y:180}]});await cdp('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});assert.ok(await js('!!document.querySelector(".fy-ap")'));
+        await cdp('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:30,y:250}]});await cdp('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:30,y:180}]});await cdp('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+        // Let Chrome deliver the swipe's deferred scroll before starting the separate tap.
+        await js('window.settleLayout()');assert.ok(await js('!!document.querySelector(".fy-ap")'));
         await cdp('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:30,y:250}]});await cdp('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await js('window.settleLayout()');assert.equal(await js('!!document.querySelector(".fy-ap")'),false);
+      }
+      if(label==='activity'&&width<600){await js('document.querySelector(".fy-ap__body").scrollTop=300;document.querySelector('+JSON.stringify('.fy-ap [aria-label="Provider calls"]')+').click()');await js('window.settleLayout()');
+        assert.equal(await js('document.querySelector(".fy-ap__body").scrollTop'),0);assert.ok(await js('document.activeElement===document.querySelector(".fy-activity-phone header [aria-label=Back]")'));
+        await check(name+'-activity-calls');await click('.fy-activity-phone header [aria-label="Back"]');assert.equal(await js('document.querySelector(".fy-ap__body").scrollTop'),0);
       }
       if(label==='remote'&&remote){const text=await js('document.querySelector(".fy-paired-device").textContent');assert.match(text,/Chrome on Android/);assert.doesNotMatch(text,/Revoke|Approve|Pair a device/);}
     }
-    if(!baseline && remote){for(const slug of ['harness','sign-in','notifications','about','appearance','adapters','diagnostics','sample-world']){await js('window.mountLayout("/settings/'+slug+'",true)');await check(name+'-'+slug);assert.equal(await js('document.querySelectorAll("input[type=password]").length'),0);}}
+    if(!baseline && remote){for(const slug of ['harness','sign-in','notifications','about','appearance','adapters','diagnostics','sample-world']){await js('window.mountLayout("/settings/'+slug+'",true)');await check(name+'-'+slug);assert.equal(await js('document.querySelectorAll("input[type=password]").length'),0);}
+      for(const [label,route] of [['downloads','/settings/downloads'],['local-models','/settings/models?model=gemma4-12b']]){await js('window.mountLayout('+JSON.stringify(route)+',true,true)');await check(name+'-'+label);assert.ok(await js('document.querySelector(".fy-set__row--stack").textContent.includes("On your PC")'));
+        if(width<600 && label==='downloads'){assert.equal(await js('document.querySelector("dialog h2").textContent'),'Downloads');await click('dialog [aria-label="Back"]');assert.equal(await js('document.querySelector("dialog h2").textContent'),'Providers');}
+        if(width<600 && label==='local-models')assert.ok(await js('(()=>{const r=document.querySelector(".fy-set__link[aria-expanded]").getBoundingClientRect();return r.width>=44 && r.height>=44})()'));
+      }
+    }
   }
   const masterRecords=[];
   for(const id of ["st175a1","st175a2","st175a3","st175b1","st175b2","st175b3","st175c","st175d"]){const fold=["st175c","st175d"].includes(id);await size(fold?984:390,fold?1060:797,true);await navigate('/'+id+'.html');await capture(id);masterRecords.push({id,geometry:await js('Object.fromEntries([".sheet",".sdlg",".srail",".slist",".sdet",".mtile",".apanel",".seg3"].map(s=>{const e=document.querySelector(s),r=e?.getBoundingClientRect();return[s,r?{x:r.x,y:r.y,width:r.width,height:r.height}:null]}))')});}

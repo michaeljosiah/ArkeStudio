@@ -245,12 +245,19 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     }
     assert.deepEqual(received.filter((message: any) => message.kind !== "hello"), [JSON.parse(dictation), upload],
       "no host command or secret reaches the upstream session");
+    const decision = ClientMessageSchema.parse({ kind: "conversation-action-decide", worldId, conversationId,
+      actionId: "act_" + worldId, expectedConversationSeq: 2, expectedStatus: "pending", decision: "approve", requestId: worldId });
+    const scoped = once(phone, "message"); phone.send(JSON.stringify(decision));
+    assert.deepEqual(JSON.parse((await scoped)[0].toString()), { ...decision, hostActions: "refuse" },
+      "omitting the restriction cannot let a paired peer approve native work");
     const allowed = once(phone, "message"); phone.send(JSON.stringify({ kind: "refresh-diagnostics" }));
     assert.equal(JSON.parse((await allowed)[0].toString()).kind, "refresh-diagnostics", "allowed commands still work after all refusals");
     // The trusted desktop transport bypasses this remote-only boundary.
     const desktop = new WebSocket(`ws://127.0.0.1:${upstreamPort}`); sockets.push(desktop); await once(desktop, "open");
     const ready = once(desktop, "message"); desktop.send(JSON.stringify({ kind: "hello", token })); await ready;
     for (const command of commands) { const result = once(desktop, "message"); desktop.send(JSON.stringify(command)); assert.deepEqual(JSON.parse((await result)[0].toString()), command); }
+    const trustedDecision = once(desktop, "message"); desktop.send(JSON.stringify(decision));
+    assert.deepEqual(JSON.parse((await trustedDecision)[0].toString()), decision, "desktop decisions keep their native authority");
     const laptopDevice = await paired(devices, "Laptop");
     const own = await get(port, "/remote/device", { headers: { Cookie: credentialCookie } });
     assert.equal(own.status, 200);

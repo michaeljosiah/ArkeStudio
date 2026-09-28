@@ -1,3 +1,4 @@
+import type { WorldChatPreparedAction } from "./world-chat-actions.js";
 import type { ClientMessage } from "./frames.js";
 import type { AdapterAction } from "./adapters.js";
 
@@ -46,7 +47,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "stage-art-direction-change": "studio", "set-art-direction": "studio", "proposal-accept": "studio",
   "proposal-discard": "studio", "proposal-rebase": "studio", "proposal-resolve-conflict": "studio",
   "proposal-mark-seen": "studio", "proposal-resolve-choice": "studio", "proposal-update-field": "studio",
-  "proposal-update-passage": "studio", "world-chat-open": "studio", "conversation-action-decide": "studio",
+  "proposal-update-passage": "studio", "world-chat-open": "studio", "conversation-action-decide": "resolved",
   "world-chat-send": "studio", "world-chat-send-status": "studio", "world-chat-wrap-up": "studio",
   "world-chat-save-point": "studio", "world-chat-reject-point": "studio", "world-chat-open-media": "studio",
   "world-chat-retry-turn": "studio", "proposal-send-back": "studio", "world-chat-cancel": "studio",
@@ -137,17 +138,65 @@ export const REMOTE_COMMAND_ACCESS = {
   "bench-preset-delete": "studio", "bench-dispatch": "studio", "bench-rerun": "studio",
   "bench-keep": "studio", "bench-accept": "studio", "bench-discard": "studio",
   "bench-clear-view": "studio", "bench-select-take": "studio", "stage-artifact-reference": "studio",
-} as const satisfies Record<ClientMessage["kind"], "host" | "payload" | "studio">;
+} as const satisfies Record<ClientMessage["kind"], "host" | "payload" | "resolved" | "studio">;
 
-export type RemoteHostCommand = { [K in keyof typeof REMOTE_COMMAND_ACCESS]: typeof REMOTE_COMMAND_ACCESS[K] extends "studio" ? never : K }[keyof typeof REMOTE_COMMAND_ACCESS];
+export type RemoteHostCommand = { [K in keyof typeof REMOTE_COMMAND_ACCESS]: typeof REMOTE_COMMAND_ACCESS[K] extends "host" | "payload" ? K : never }[keyof typeof REMOTE_COMMAND_ACCESS];
 
 const adapterAccess = { refresh: "studio", enable: "studio", "disable-content": "studio", scan: "studio",
   install: "host", disable: "studio", restore: "studio", remove: "payload" } as const satisfies Record<AdapterAction["action"], "host" | "payload" | "studio">;
 
 /** Recorded bytes and existing world references never open the PC file chooser. */
 export function isRemoteHostCommand(message: ClientMessage): boolean {
+  // The gateway adds a restriction and the lifecycle checks the stored card, including replays.
+  if (message.kind === "conversation-action-decide") return false;
   if (message.kind === "stage-voice-clip") return message.source?.from !== "recorded";
   if (message.kind === "pick-staged-reference") return message.worldFile === undefined && message.image === undefined;
   if (message.kind === "adapter-command") return message.command?.action === "remove" ? message.command.deleteOwnedFile : adapterAccess[message.command?.action] !== "studio";
   return REMOTE_COMMAND_ACCESS[message.kind] !== "studio";
+}
+
+/** Conversation decisions resolve these prepared kinds from the durable card, never from the browser. */
+export const REMOTE_PREPARED_ACTION_ACCESS = {
+  "world-chat-prop-authoring": "studio", "world-chat-prop-reference": "studio",
+  "world-chat-proposal": "studio", "world-chat-bible-edit": "studio",
+  "world-chat-scene-edit": "studio", "world-chat-editor-request": "studio",
+  "world-chat-world-metadata": "studio", "world-chat-canon": "studio",
+  "world-chat-canon-retire": "studio", "world-chat-canon-restore": "studio",
+  "world-chat-sheet": "studio", "world-chat-sheet-retire": "studio",
+  "world-chat-sheet-restore": "studio", "world-chat-art-direction": "studio",
+  "world-chat-art-direction-restore": "studio", "world-chat-artifact-import": "host",
+  "world-chat-artifact-metadata": "studio", "world-chat-artifact-extraction": "studio",
+  "world-chat-artifact-extraction-stop": "studio", "world-chat-artifact-extraction-review": "studio",
+  "world-chat-artifact-reference": "studio", "world-chat-reference-import": "host",
+  "world-chat-reference-result-use": "studio", "world-chat-reference-review": "studio",
+  "world-chat-reference-change": "studio", "world-chat-reference-tile-lock": "studio",
+  "world-chat-reference-compile": "studio", "world-chat-reference-style": "studio",
+  "world-chat-reference-generation": "studio", "world-chat-reference-image-import": "host",
+  "world-chat-reference-world-image-result-use": "studio", "world-chat-reference-master-look-result-use": "studio",
+  "world-chat-reference-image-discard": "studio", "world-chat-voice-assignment": "studio",
+  "world-chat-voice-audition": "studio", "world-chat-voice-clone": "host",
+  "world-chat-voice-clip-review": "studio", "world-chat-world-archive": "studio",
+  "world-chat-world-export": "studio", "world-chat-production-create": "studio",
+  "world-chat-production-metadata": "studio", "world-chat-production-model": "studio",
+  "world-chat-production-series": "studio", "world-chat-production-overview": "studio",
+  "world-chat-production-prose-style": "studio", "world-chat-production-season": "studio",
+  "world-chat-production-episode": "studio", "world-chat-production-chapter": "studio",
+  "world-chat-production-scene": "studio", "world-chat-production-episode-order": "studio",
+  "world-chat-production-chapter-order": "studio", "world-chat-production-scene-order": "studio",
+  "world-chat-production-scene-delete": "studio", "world-chat-production-scene-restore": "studio",
+  "world-chat-production-style": "studio", "world-chat-production-scene-command": "studio",
+  "world-chat-production-board-compile": "studio", "world-chat-production-board-export": "studio",
+  "world-chat-production-take-import": "host", "world-chat-production-take-generation": "studio",
+  "world-chat-production-take-review": "studio", "world-chat-production-take-trim": "studio",
+  "world-chat-production-stage-playblast": "host", "world-chat-production-stage-construct": "studio",
+  "world-chat-audio-spine-command": "studio", "world-chat-production-routing": "studio",
+  "world-chat-production-routing-traversal": "studio", "world-chat-production-branch-canon": "studio",
+  "world-chat-production-interactive-export": "studio", "world-chat-production-cut-export": "studio",
+  "world-chat-production-export-cancel": "studio", "world-chat-bench-generation": "studio",
+} as const satisfies Record<WorldChatPreparedAction["kind"], "host" | "studio">;
+
+export function isRemoteHostConversationAction(kind: string): boolean {
+  const access = (REMOTE_PREPARED_ACTION_ACCESS as Readonly<Record<string, string>>)[kind]
+    ?? (REMOTE_COMMAND_ACCESS as Readonly<Record<string, string>>)[kind];
+  return access !== "studio";
 }

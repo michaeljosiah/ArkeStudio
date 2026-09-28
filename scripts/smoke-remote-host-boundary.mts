@@ -65,10 +65,14 @@ try {
  }
  assert.equal(received.length,1,"only the authenticated hello reached the coordinator");
  const after=await js('new Promise(resolve=>{studio.addEventListener("message",e=>resolve(JSON.parse(e.data)),{once:true});studio.send(JSON.stringify({kind:"refresh-diagnostics"}));})');assert.deepEqual(after,{kind:"refresh-diagnostics"});
+ const id="01ARZ3NDEKTSV4RRFFQ69G5FAV";
+ const decision={kind:"conversation-action-decide",worldId:id,conversationId:"cv_"+id,actionId:"act_"+id,expectedConversationSeq:2,expectedStatus:"pending",decision:"approve",requestId:id};
+ const scoped=await js('new Promise(resolve=>{studio.addEventListener("message",e=>resolve(JSON.parse(e.data)),{once:true});studio.send('+JSON.stringify(JSON.stringify(decision))+');})');
+ assert.deepEqual(scoped,{...decision,hostActions:"refuse"},"the real paired browser cannot omit the native-action restriction");
  await js('studio.close()');
  const desktop=new WebSocket("ws://127.0.0.1:"+(upstream.address() as import("node:net").AddressInfo).port);await once(desktop,"open");
  for(const command of commands){const reply=once(desktop,"message");desktop.send(JSON.stringify(command));assert.deepEqual(JSON.parse((await reply)[0].toString()),command);}desktop.terminate();
- const result={pairedBrowser:"Chrome over HTTPS",refusals:commands.length,socketSurvived:true,allowedCommandAfterRefusals:true,desktopTransportPassed:commands.length};
+ const result={pairedBrowser:"Chrome over HTTPS",refusals:commands.length,socketSurvived:true,allowedCommandAfterRefusals:true,conversationDecisionsRestricted:true,desktopTransportPassed:commands.length};
  await writeFile(join(dir,"result.json"),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 } finally {
  control?.close();child.kill();await gateway.stop();await devices.stop();for(const socket of wss.clients)socket.terminate();wss.close();proxy.closeAllConnections();await Promise.all([new Promise<void>(r=>proxy.close(()=>r())),new Promise<void>(r=>upstream.close(()=>r()))]);

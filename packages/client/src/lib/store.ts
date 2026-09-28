@@ -2443,6 +2443,7 @@ export function initStore(): void {
 
 export function send(msg: ClientMessage): boolean {
   if (isRemoteSession() && isRemoteHostCommand(msg)) {
+    if ("requestId" in msg && typeof msg.requestId === "string") pendingQueueRequests.delete(msg.requestId);
     const refusal = RemoteCommandRefusalSchema.parse({ kind: "command-refused", refused: "host-only", command: msg.kind });
     for (const listener of remoteRefusalListeners) listener(refusal);
     return false;
@@ -4038,15 +4039,15 @@ export interface StagedClip {
 export function stageVoiceClip(
   worldId: string,
   recording?: { audioBase64: string; contentType: string },
-): string {
+): string | null {
   const requestId = `clip-${crypto.randomUUID()}`;
-  send({
+  const sent = send({
     kind: "stage-voice-clip",
     worldId,
     requestId,
     source: recording ? { from: "recorded", ...recording } : { from: "chosen" },
   });
-  return requestId;
+  return sent ? requestId : null;
 }
 
 /** Cancelling the dialog: the temp file should not outlive the screen that made it. */
@@ -5163,8 +5164,10 @@ export function openExportsFolder(worldId: string): void {
 /** Ask the host for a `.docx` and read it; the answer arrives by this request id, and nothing is written until the import press. */
 export function pickManuscript(worldId: string, productionId: string): string {
   const requestId = ulid();
-  emitChange({ ...current, manuscripts: { ...current.manuscripts, [requestId]: { state: "reading" } } });
-  send({ kind: "pick-manuscript", worldId, productionId, requestId });
+  const sent = send({ kind: "pick-manuscript", worldId, productionId, requestId });
+  emitChange({ ...current, manuscripts: { ...current.manuscripts, [requestId]: sent ? { state: "reading" } : {
+    state: "refused", reason: isRemoteSession() ? "Choose a manuscript on your PC." : "Studio is not connected. Try again after it reconnects.",
+  } } });
   return requestId;
 }
 
@@ -5962,16 +5965,16 @@ export function sendBenchUploadReferences(
   worldId: string,
   sessionId: string,
   lane?: "reference" | "keyframe",
-): string {
+): string | null {
   const requestId = ulid();
-  send({
+  const sent = send({
     kind: "bench-upload-references",
     worldId,
     sessionId,
     requestId,
     ...(lane !== undefined ? { lane } : {}),
   } as ClientMessage);
-  return requestId;
+  return sent ? requestId : null;
 }
 
 /** Returns the requestId so the screen can correlate the queue.enqueue-result. */
@@ -6041,15 +6044,15 @@ export function sendStageArtifactReference(worldId: string, key: string, artifac
 }
 
 /** Returns the requestId the artifact.filed-batch answer will carry. */
-export function sendAttachFilesCorrelated(worldId: string, links?: string[]): string {
+export function sendAttachFilesCorrelated(worldId: string, links?: string[]): string | null {
   const requestId = ulid();
-  send({
+  const sent = send({
     kind: "attach-files-correlated",
     worldId,
     requestId,
     ...(links !== undefined ? { links } : {}),
   } as ClientMessage);
-  return requestId;
+  return sent ? requestId : null;
 }
 
 // ---- props (design turn 105; issues 535, 537) --------------------------------------------
