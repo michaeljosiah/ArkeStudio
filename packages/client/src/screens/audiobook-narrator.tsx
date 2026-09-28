@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type KeyboardEvent } from "react";
 import { cloudSpeechPreference, estimateMicroUsd, formatMicroUsd, modelPriceCopy, readerName, readerPlace, supportsVoiceUse, type AudiobookReader, type ManifestModel } from "@arke-studio/contracts";
+import { PageSheet } from "../components/page-sheet.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { DesignVoiceDialog } from "../components/design-voice-dialog.js";
 import { Button } from "../components/ui.js";
@@ -274,7 +276,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
   if (designing) return <DesignVoiceDialog worldId={worldId} name="Book narrator" useLabel="Choose for this book"
     onClose={() => setDesigning(false)} onUse={voice => { setPicked(readerOf({ ...voice, usedBy: [] })); setMode("book"); setDesigning(false); }} />;
   return (
-    <EditorDialog open title="Narrator" subtitle={data} onClose={onClose} width={mode === "book" ? 860 : 580} panelClassName="fy-abnarr__panel">
+    <NarratorSurface data={data} onClose={onClose} width={mode === "book" ? 860 : 580}>
       <div className="fy-abnarr" data-testid="narrator-dialog">
         {models.some(model => model.provider === "google" && model.capability === "voice-tts") && <Button onClick={() => setDesigning(true)}>Design a narrator</Button>}
         <span className="fy-seg" role="group" aria-label="Narrator">
@@ -313,6 +315,11 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
           </Button>
         </div>
       </div>
-    </EditorDialog>
+    </NarratorSurface>
   );
+}
+
+function NarratorSurface({ data, onClose, width, children }: { data: string; onClose: () => void; width: number; children: ReactNode }) {
+  const phone = useMediaQuery("(max-width: 599px)");
+  return phone ? <PageSheet open title="Narrator" onClose={onClose} className="fy-abnarr__sheet">{children}</PageSheet> : <EditorDialog open title="Narrator" subtitle={data} onClose={onClose} width={width} panelClassName="fy-abnarr__panel">{children}</EditorDialog>;
 }

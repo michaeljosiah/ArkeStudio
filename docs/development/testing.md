@@ -454,3 +454,15 @@ to compare the pre-change screen sources. Selection/gesture renderer coverage is
 `test/season-layout.test.tsx`; run it with the existing development, branch-map, setup and
 interactive-player suites. Coordinator `test/voice/service.test.ts` covers authoritative
 episode promise reads. No hardware touch device is assumed by these checks.
+
+### Chapters and audiobook on touch (turn 173)
+
+Run `node scripts/smoke-chapter-responsive.mjs` for real React captures at 360, 375, 390,
+984 and 1360px, including all eight turn-173 frames and 165l/m. The run checks overflow,
+chapter actions, native passage selections, Notes and block sheets, and narrator selection.
+Use `--viewport desktop --hover` for the unchanged mouse layout or add `--baseline <revision>`
+to render its prior implementation. Inspect the emitted screenshots alongside the master.
+`test/chapter-layout.test.tsx` covers source selectionchange, card actions, draft retention
+and attended passage decisions; retain the chapter-workspace, chapter-audiobook,
+audiobook-door, production-story, manuscript and player suites. Chrome emulates coarse
+pointers; a real touch-device check is additional when hardware is available.

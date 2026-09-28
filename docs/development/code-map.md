@@ -368,3 +368,10 @@ chapter briefing/read receipts, conversation action lifecycle and proposal gate 
 through `local-prose.ts`, returning Markdown with version/file-hash provenance.
 Regression checks: `test/application/writing.test.ts` and the packed engine consumer cover the
 draft/accept/revise/manuscript journey and its failure boundaries.
+
+Chapter touch layouts (turn 173, #1369) live in client `screens/chapter-responsive.css` beside
+`chapter-workspace.tsx`, `chapter-audiobook.tsx`, `audiobook.tsx` and `production-story.tsx`.
+`ResponsiveSheet` retains Notes, block controls and Arke across the compact boundary; the block
+panel measures the centre's width. `TouchPassageAsk` observes native selection and places its
+composer at the phone's foot or below the paragraph. `audiobookSelection` captures both raw and
+normalised offsets before a block sheet takes focus, for speaker assignment and cadence markers.

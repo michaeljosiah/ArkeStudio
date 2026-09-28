@@ -303,10 +303,12 @@ export function SceneSynopsis({
 export function SceneTitle({
   title,
   locked = false,
+  label = "Scene title",
   onCommit,
 }: {
   title: string;
   locked?: boolean;
+  label?: string;
   onCommit: (title: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -361,7 +363,7 @@ export function SceneTitle({
     <input
       autoFocus
       className="fy-sw__title-input"
-      aria-label="Scene title"
+      aria-label={label}
       defaultValue={title}
       maxLength={200}
       onFocus={(e) => e.currentTarget.select()}

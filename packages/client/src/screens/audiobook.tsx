@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { DEFAULT_NARRATOR, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, providerName, readerPlace, type AudiobookPriceLine, type AudiobookRow } from "@arke-studio/contracts";
+import { HeldBar } from "../components/held-bar.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { EditorDialog } from "../components/editor-dialog.js";
-import { ChevronRight } from "../components/icons.js";
+import { ChevronRight, Play, Speaker } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { Badge, Button, cx } from "../components/ui.js";
@@ -88,7 +90,7 @@ export function useChapterReading(worldId: string | undefined, prodId: string | 
  * where its voice is set (issue 1191) — the narrator's to Settings, a speaker's to their voice
  * page — and one with nowhere to go, the unattributed lines, is plain.
  */
-function VoiceChip({ name, voice, state, blocks, awaiting, to, onPress, performer, note, noteHeld, book }: {
+function VoiceChip({ name, voice, state, blocks, awaiting, to, onPress, performer, note, noteHeld, book, compactDetail }: {
   name: string;
   voice?: { label: string; provider: string; local: boolean };
   state: string;
@@ -103,6 +105,7 @@ function VoiceChip({ name, voice, state, blocks, awaiting, to, onPress, performe
   noteHeld?: boolean;
   /** The narrator is the book's own (R-46). */
   book?: boolean;
+  compactDetail?: string;
 }) {
   const navigate = useNavigate();
   const warn = state === "no voice" || state === "voice unavailable" || noteHeld === true;
@@ -119,9 +122,10 @@ function VoiceChip({ name, voice, state, blocks, awaiting, to, onPress, performe
         : `${state} · narrator`;
   const inside = (
     <>
+      {compactDetail !== undefined && <Speaker size={16} />}
       <span className="fy-abdoor__voice-name">{name}</span>
       <span className="fy-abdoor__voice-what fy-mono">
-        {what} · {blocks} block{blocks === 1 ? "" : "s"}
+        {compactDetail ?? `${what} · ${blocks} block${blocks === 1 ? "" : "s"}`}
       </span>
     </>
   );
@@ -155,6 +159,7 @@ function priceLineWords(line: AudiobookPriceLine): { who: string; how: string; c
 }
 
 export function AudiobookScreen() {
+  const phone = useMediaQuery("(max-width: 599px)");
   const { prodId, worldId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
@@ -281,7 +286,7 @@ export function AudiobookScreen() {
     if (price === null || price.chapters === 0) return null;
     return (
       <Button variant="primary" disabled={connection !== "open" || book?.state === "priced"} onClick={begin} data-testid="read-book">
-        Read the book · {price.chapters} chapter{price.chapters === 1 ? "" : "s"}
+        {phone ? <><Play size={16} />Read the book</> : `Read the book · ${price.chapters} chapter${price.chapters === 1 ? "" : "s"}`}
         {price.estimatedMicroUsd > 0 ? ` · up to ${formatMicroUsd(price.estimatedMicroUsd)}` : ""}
       </Button>
     );
@@ -294,8 +299,9 @@ export function AudiobookScreen() {
           {door === null ? "…" : line.line}
         </span>
         <span className="fy-h1row__push" />
-        {primary}
+        {!phone && primary}
       </div>
+      {phone && <HeldBar className="fy-abdoor-held"><span>{totalBlocks} blocks · {price === null ? "price unavailable" : price.estimatedMicroUsd === 0 ? "free" : `up to ${formatMicroUsd(price.estimatedMicroUsd)}`}</span>{primary}</HeldBar>}
       <div className="fy-abdoor__voices" data-testid="audiobook-voices">
         <nav className="fy-seg" aria-label="Reading">
           <button type="button" className={cx("fy-seg__item", reading === "narrator" && "fy-seg__item--active")} disabled={running} onClick={() => setAudiobookReading(worldId, prodId, "narrator")}>
@@ -315,6 +321,7 @@ export function AudiobookScreen() {
             voice={voice.voice}
             state={voice.state}
             blocks={voice.blocks}
+            {...(phone && index === 0 && voice.state === "narrator" && voice.voice ? { compactDetail: `${readerPlace(voice.voice.provider, voice.voice.local)} · ${price === null ? "price unavailable" : price.estimatedMicroUsd === 0 ? "free" : `up to ${formatMicroUsd(price.estimatedMicroUsd)}`}` } : {})}
             {...(voice.awaiting !== undefined ? { awaiting: voice.awaiting } : {})}
             {...(index > 0 && voice.state === "narrator" ? { performer: true } : {})}
             {...(voice.note !== undefined ? { note: voice.note } : {})}
@@ -384,7 +391,7 @@ export function AudiobookScreen() {
                 onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(row.chapterId)}?view=audiobook`)}
               >
                 <span className="fy-mono">{pad(row.order)}</span>
-                <span className="fy-row__name">{row.title}</span>
+                <span className="fy-row__name">{row.title}{phone && ` · v${row.version}`}</span>
                 <Badge tone="outline">v{row.version}</Badge>
                 <span className={cx("fy-row__meta", warn && "fy-ch__who-where--warn", row.planned && "fy-abdoor__planned")}>{label}</span>
                 <span className="fy-row__chev">

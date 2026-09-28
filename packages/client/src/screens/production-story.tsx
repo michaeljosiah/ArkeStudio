@@ -1,3 +1,7 @@
+import { PageSheet } from "../components/page-sheet.js";
+import { ArkeEdge } from "../components/arke-edge.js";
+import { ProductionConversation } from "../components/conversation.js";
+import { More } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import {
   resolvedAuthoredDuration,
@@ -487,11 +491,15 @@ export function ChapterOutlineRow({ chapter: c, world, story, inHand, onOpen }: 
     {c.source !== undefined && <Badge tone="outline">imported</Badge>}
     <Badge tone="outline">v{c.version}</Badge>
     <span className="fy-row__meta">{c.words ? `${c.words.toLocaleString()} words` : c.status}{inHand ? " · in hand" : ""}</span>
+    <span className="fy-chapter-card__meta">{c.words ? `${c.words.toLocaleString()} words · ` : ""}{c.status} · v{c.version}</span>
     <span className="fy-row__chev"><ChevronRight size={15} /></span>
   </button>;
 }
 
 export function ChapterTreeScreen() {
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const [menu, setMenu] = useState<{ file: string } | "manuscript" | null>(null);
   const { prodId, worldId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
@@ -499,8 +507,12 @@ export function ChapterTreeScreen() {
   const allChapters = production?.chapters ?? [];
   const chapters = allChapters.filter((c) => !c.retired);
   const retiredChapters = allChapters.filter((c) => c.retired);
+  const menuChapter = menu !== null && menu !== "manuscript" ? chapters.find(c => c.file === menu.file) : undefined;
+  const menuIndex = chapters.findIndex(c => c.file === menuChapter?.file);
   const move = (chapter: ChapterSummary, direction: number) => {
-    const neighbour = chapters[chapters.indexOf(chapter) + direction];
+    const index = chapters.findIndex(c => c.file === chapter.file);
+    if (index < 0) return;
+    const neighbour = chapters[index + direction];
     if (!worldId || !prodId || !neighbour) return;
     const files = allChapters.map((c) => c.file);
     const a = files.indexOf(chapter.file), b = files.indexOf(neighbour.file);
@@ -573,6 +585,7 @@ export function ChapterTreeScreen() {
   const pad = (order: number) => String(order).padStart(2, "0");
   return (
     <div className="fy-prodmain" data-screen="chapter-tree">
+      <p className="fy-chapters-count">{chapters.length} chapters · {bookWords.toLocaleString()} words</p>
       <div className="fy-h1row">
         <h1 className="fy-h1">{view === "continuity" ? "Where everyone is" : "Chapters"}</h1>
         <span className="fy-h1row__meta">
@@ -594,20 +607,25 @@ export function ChapterTreeScreen() {
         <span className="fy-h1row__push" />
         {isStory && (
           <>
-            <Button onClick={() => setSheet("export")} data-testid="export-manuscript">
+            <Button className="fy-chapters-wide-action" onClick={() => setSheet("export")} data-testid="export-manuscript">
               <Download size={13} />
               Export
             </Button>
-            <Button onClick={beginImport} data-testid="import-manuscript">
+            <Button className="fy-chapters-wide-action" onClick={beginImport} data-testid="import-manuscript">
               <Upload size={13} />
               Import
             </Button>
             <Button variant="primary" disabled={newChapter.pending} onClick={() => newChapter.create(chapters.length + 1)}>
-              New chapter
+              {phone ? <><Plus size={16} /> New</> : "New chapter"}
             </Button>
           </>
         )}
       </div>
+      {phone && isStory && <button type="button" className="fy-chapters-more" aria-label="Manuscript actions" onClick={() => setMenu("manuscript")}><More size={20} /></button>}
+      <PageSheet open={menu === "manuscript" || menuChapter !== undefined} title={menu === "manuscript" ? "Manuscript" : menuChapter?.title ?? "Chapter"} onClose={() => setMenu(null)} className="fy-chapter-menu">
+        {menu === "manuscript" ? <><Button onClick={() => { setMenu(null); setSheet("export"); }}>Export</Button><Button onClick={() => { setMenu(null); beginImport(); }}>Import</Button></> : menuChapter && <><Button disabled={menuIndex === 0} onClick={() => { move(menuChapter, -1); setMenu(null); }}>Move up</Button><Button disabled={menuIndex === chapters.length - 1} onClick={() => { move(menuChapter, 1); setMenu(null); }}>Move down</Button><Button onClick={() => { if (worldId && prodId) setChapterRetired(worldId, prodId, menuChapter.file, true); setMenu(null); }}>Retire</Button></>}
+      </PageSheet>
+      {compact && <ArkeEdge>{putAway => <ProductionConversation worldId={worldId} productionId={prodId} placeholder="Ask about the chapters" emptyLine="Nothing written with Arke about the chapters yet." entry={{ kind: "production", productionId: prodId ?? "" }} dock={{ title: "Arke · Chapters", subject: production?.meta.title ?? "Chapters", conversationFirst: true, controlsInSheet: true, onPutAway: putAway }} />}</ArkeEdge>}
       {isStory && production && (
         <ManuscriptExportSheet open={sheet === "export"} onClose={() => setSheet(null)} worldId={worldId} prodId={prodId} production={production} chapters={chapters} />
       )}
@@ -639,6 +657,7 @@ export function ChapterTreeScreen() {
       )}
       {production && chapters.length > 0 && view === "continuity" ? (
         <div className="fy-cont" data-testid="continuity-table">
+          {phone && <div className="fy-cont-cards">{rows.map(row => <button type="button" key={row.chapter.id} onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(row.chapter.id)}`)}><strong>{pad(row.chapter.order)} · {row.chapter.title}</strong><span>{continuityRowStamp(row.stamp)}</span>{row.cells.map((cell, i) => <span key={cast[i]!.id}><b>{cast[i]!.name}</b> · {cell?.gone ? `gone since ${pad(cell.since!)}` : cell?.unsure ? "unsure · place dropped" : cell === null ? "not known" : `${placeName(cell.where ?? "")}${cell.since === undefined ? "" : ` · since chapter ${pad(cell.since)}`}`}{cell?.warn ? " · chapter moved" : ""}</span>)}</button>)}</div>}
           <table className="fy-cont__table">
             <thead>
               <tr>
@@ -706,11 +725,12 @@ export function ChapterTreeScreen() {
         <div className="fy-ledger">
           {chapters.map((c, index) => {
             return (
-            <div key={c.id} style={{ display: "flex", alignItems: "center" }}>
+            <div key={c.id} className="fy-chapter-card" style={{ display: "flex", alignItems: "center" }}>
             <ChapterOutlineRow chapter={c} world={world} story={production.story} inHand={c === inHand}
               onOpen={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(c.id)}`)} />
             {/* One register per row (issue 1010, U1): the two arrows were already glyphs, and
                 Retire beside them repeated the word once per chapter. */}
+            {phone && <button type="button" className="fy-chapter-card__more" aria-label={`Actions for ${c.title}`} onClick={() => setMenu({ file: c.file })}><More size={18} /></button>}
             <IconButton label={`Move ${c.title} up`} disabled={index === 0} onClick={() => move(c, -1)}><ChevronUp /></IconButton>
             <IconButton label={`Move ${c.title} down`} disabled={index === chapters.length - 1} onClick={() => move(c, 1)}><ChevronDown /></IconButton>
             <IconButton label={`Retire ${c.title}`} onClick={() => worldId && prodId && setChapterRetired(worldId, prodId, c.file, true)}><Archive /></IconButton>

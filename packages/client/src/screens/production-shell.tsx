@@ -18,6 +18,7 @@ import { AppChrome } from "../components/chrome.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import {
   Book,
+  BookOpen,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -149,7 +150,7 @@ function ProductionSwitcher({
         onClick={() => (at === null ? open() : setAt(null))}
       >
         <span className="fy-prodrail__switchmark" aria-hidden>
-          {compact ? production && productionShape(production.meta).hasChapters ? <Book size={20} /> : <Film size={20} /> : (production?.meta.title ?? "P").trim().charAt(0).toUpperCase() || "P"}
+          {compact ? production && productionShape(production.meta).hasChapters ? <BookOpen size={20} /> : <Film size={20} /> : (production?.meta.title ?? "P").trim().charAt(0).toUpperCase() || "P"}
         </span>
         <div className="fy-prodrail__switchcopy">
           <div className="fy-prodrail__switchname">{production?.meta.title ?? "…"}</div>
@@ -230,7 +231,7 @@ function ProductionSwitcher({
           const shape = productionShape(candidate.meta);
           const current = candidate.meta.id === production?.meta.id;
           return <button key={candidate.meta.id} type="button" className="fy-production-switch-row" aria-current={current ? "true" : undefined} onClick={() => go(candidate.meta.id)}>
-            <span className="fy-production-switch-row__mark">{shape.hasChapters ? <Book size={18} /> : <Film size={18} />}</span>
+            <span className="fy-production-switch-row__mark">{shape.hasChapters ? <BookOpen size={18} /> : <Film size={18} />}</span>
             <span className="fy-production-switch-row__copy"><b>{candidate.meta.title}</b><span>{shape.displayLabel.toLowerCase()}{shape.hasChapters ? ` · ${candidate.chapters.filter(chapter => !chapter.retired).length} chapters` : ""}</span></span>
             {current && <Check size={18} />}
           </button>;
@@ -244,7 +245,7 @@ function ProductionSwitcher({
 // ---- the production shell (frames 11a/14a left rail) -----------------------
 
 export function ProductionLayout() {
-  const { worldId, prodId, episodeId, sceneId, shotId } = useParams();
+  const { worldId, prodId, episodeId, sceneId, shotId, chapterId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const refusal = useWorldOpenRefusal(worldId);
   const location = useLocation();
@@ -350,8 +351,10 @@ export function ProductionLayout() {
   const sceneChrome = compact && sceneRoute ? production?.scenes.find(scene => scene.id === sceneId) : undefined;
   const shotChrome = sceneChrome && orderedShots(sceneChrome).find(shot => shot.id === shotId);
   const episodeDeep = phone && !location.pathname.includes("/story/episodes/") && production?.episodes.some(episode => episode.id === episodeId);
-  const sceneDeepPhone = !refusal && (episodeDeep || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
-  const wantsFold = compact && (sceneRoute || cutRoute) || (railChoice ?? (cutRoute || sceneDetailDefault));
+  const chapterRoute = /\/story\/chapters\/[^/]+\/?$/.test(location.pathname);
+  const chapterDeep = phone && chapterRoute && production?.chapters.some(chapter => chapter.id === chapterId || chapter.file === chapterId);
+  const sceneDeepPhone = !refusal && (chapterDeep || episodeDeep || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
+  const wantsFold = compact && chapterRoute ? false : compact && (sceneRoute || cutRoute) || (railChoice ?? (cutRoute || sceneDetailDefault));
   const drawerMode = !phone && wantsFold && (compact || coarse);
   const folded = !phone && wantsFold && !drawerMode;
   useEffect(() => { setDrawerOpen(false); }, [location.pathname, location.search]);
@@ -378,7 +381,7 @@ export function ProductionLayout() {
     overview: Scroll,
     narrative: Scroll,
     season: Film,
-    "story/chapters": Book,
+    "story/chapters": compact ? BookOpen : Book,
     "story/audiobook": Speaker,
     "story-structure": Folder,
     scenes: Film,
@@ -673,6 +676,7 @@ export function ProductionLayout() {
                   {item("story", "Develop", "chat", true)}
                   {item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
                   {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0))}
+                  {compact && chapterRoute && <div className="fy-prodrail__chapters">{production?.chapters.filter(chapter => !chapter.retired).map(chapter => <NavLink key={chapter.id} to={`${base}/story/chapters/${encodeURIComponent(chapter.id)}`} className="fy-prodrail__chapter">{String(chapter.order).padStart(2,"0")} · {chapter.title}</NavLink>)}</div>}
                   {/* The reading (turn 146, SPEC-047 R-29): chapters read of those with prose, from the door's last answer. */}
                   {item("story/audiobook", "Audiobook", audiobookCount)}
                   <span className="fy-prodrail__section-divider" aria-hidden="true" />
@@ -721,7 +725,7 @@ export function ProductionLayout() {
   return (
     <div className="fy-app fy-production-app" data-scene-route={sceneRoute || undefined} data-cut-route={cutRoute || undefined} data-deep-phone={sceneDeepPhone || undefined}>
       {!sceneDeepPhone && <AppChrome
-        back={sceneChrome ? { label: shotChrome ? `Scene ${sceneChrome.number}` : "Scenes", to: `${base}/scenes${shotChrome ? `/${sceneChrome.id}` : ""}` } : { label: "World", to: `/w/${worldId}` }}
+        back={compact && chapterRoute ? { label: "Chapters", to: `${base}/story/chapters` } : sceneChrome ? { label: shotChrome ? `Scene ${sceneChrome.number}` : "Scenes", to: `${base}/scenes${shotChrome ? `/${sceneChrome.id}` : ""}` } : { label: "World", to: `/w/${worldId}` }}
         context={{
           label: production && shape ? `${production.meta.title} · ${shotChrome ? `shot ${shotChrome.number}` : sceneChrome ? `scene ${sceneChrome.number}` : shape.displayLabel.toLowerCase()}` : "…",
           to: `/w/${worldId}/productions`,
