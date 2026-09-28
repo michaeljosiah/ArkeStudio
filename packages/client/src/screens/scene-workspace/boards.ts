@@ -10,6 +10,7 @@ import {
   type ProductionBundle,
   type SceneRecord,
   type Sheet,
+  type Shot,
 } from "@arke-studio/contracts";
 
 export function shotHasFrame(
@@ -64,8 +65,10 @@ export function boardsForScene(input: {
   capSec: number;
   panelCap?: number;
   stagedShotIds?: ReadonlySet<string>;
+  /** The shots to pack, when not all of the scene's: a visual novel's run leaves kept pictures out. */
+  shots?: readonly Shot[];
 }): WorkspaceBoardPack {
-  const shots = orderedShots(input.scene);
+  const shots = input.shots ?? orderedShots(input.scene);
   const packed = packBoards(
     packShotsFor({
       scene: input.scene,

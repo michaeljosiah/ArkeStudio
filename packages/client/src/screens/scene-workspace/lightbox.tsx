@@ -1,15 +1,18 @@
 import { useEffect, useRef } from "react";
 import {
+  beatPictureShotId,
   effectiveFraming,
   DEFAULT_SHOT_SEC,
   hasOwnFrame,
   orderedShots,
+  productionShape,
   type ArtifactSidecar,
   type ProductionBundle,
   type SceneRecord,
 } from "@arke-studio/contracts";
 import { ChevronLeft, ChevronRight, ImageMark, X } from "../../components/icons.js";
 import { mediaUrl } from "../../lib/media.js";
+import { shotFramePath as beatFrame } from "./boards.js";
 import { mediaTakeFor, acceptedTakeId } from "../../lib/selectors.js";
 import { posterNameFor, posterize } from "../../lib/poster.js";
 
@@ -100,7 +103,13 @@ export function ShotLightbox({
     const next = shots[(index + delta + shots.length) % shots.length];
     if (next !== undefined) onSelectShot(next.id);
   };
-  const path = shotFramePath(production, artifacts, shot.id);
+  // A visual novel's beat that keeps the picture before shows that picture here too, as the page
+  // behind it does (turn 174): the arrows step onto such a beat without remounting (codex round 7).
+  const beats = productionShape(production.meta).playsAsBeats;
+  const pictureShotId = beats ? beatPictureShotId(shots, shot.id) : shot.id;
+  // A beat shows its picture or nothing: never a clip's poster or a steering take's, which the
+  // story does not use — the rows' resolution, not the film's fallbacks (codex round 14).
+  const path = beats ? beatFrame(production, artifacts, pictureShotId).path : shotFramePath(production, artifacts, pictureShotId);
   const src = path === null || worldSlug === undefined ? null : mediaUrl(worldSlug, path);
   const durationSec = shot.durationSec ?? DEFAULT_SHOT_SEC;
   // The lens the shot actually has, inherited from the scene when it sets none of its own.
@@ -127,7 +136,7 @@ export function ShotLightbox({
             <div className="fy-swlightbox__empty">
               <ImageMark size={22} />
               <span>no frame yet</span>
-              <button type="button" onClick={() => { onClose(); onOpenInGenerator(shot.id); }}>Generate frame</button>
+              <button type="button" onClick={() => { onClose(); onOpenInGenerator(pictureShotId); }}>Generate frame</button>
             </div>
           ) : (
             <img src={src} alt={shot.title} />

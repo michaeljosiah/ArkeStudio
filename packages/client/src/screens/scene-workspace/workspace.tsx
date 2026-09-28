@@ -2,9 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   DEFAULT_SHOT_SEC,
+  beatPictureShotId,
+  deriveRehearsalLines,
+  productionShape,
+  sceneBeats,
   seasonFindings,
   orderedShots,
   legacySceneView,
+  type SceneBeat,
   type ArtifactSidecar,
   type ClientMessage,
   type FrameRunState,
@@ -30,7 +35,9 @@ import {
 import { ProductionConversation, StagedDecision } from "../../components/conversation.js";
 import { SceneReview, SceneSynopsis, SceneTitle, useBlockDigests } from "../storyboard.js";
 import { SceneFlow } from "./flow.js";
-import { StoryboardRows } from "./rows.js";
+import { StoryboardRows, type BeatsView } from "./rows.js";
+import { SceneBeatPreview, VoiceLinesControl } from "./beats.js";
+import { lineVoices, useTableReadPlan } from "./table-read.js";
 import { SelectionProvider, selectedShotId, subjectMatchesBoard, type WorkspaceSubject } from "./selection.js";
 import { boardsForScene, shotHasFrame } from "./boards.js";
 import { FrameRunBar, FrameRunBoardFailures, GenerateFramesDialog } from "./frame-run.js";
@@ -212,7 +219,34 @@ export function SceneWorkspace({
   const episodeIds = new Set(production.episodes.filter((episode) => episode.scenes.includes(scene.id)).map((episode) => episode.id));
   const lengthFindings = seasonFindings(production).filter((finding) => finding.kind === "cost-pattern" && episodeIds.has(finding.about));
   const totalSec = shots.reduce((sum, shot) => sum + (shot.durationSec ?? DEFAULT_SHOT_SEC), 0);
-  const framed = shots.filter((shot) => shotHasFrame(production, artifacts, shot.id)).length;
+  // A visual novel reads its shots as beats (turn 174): the rows carry their lines and whether
+  // each is voiced, the table read voices the rest, and a beat that keeps the picture before it
+  // counts as having one. The plan is asked only here, where there are lines to plan.
+  // Lines nothing can voice still ask it: the plan's reasons are how Voice lines says what to
+  // repair, even when no line in the scene can be voiced yet (codex round 5).
+  const playsAsBeats = productionShape(production.meta).playsAsBeats;
+  // A production that becomes a visual novel while Flow is open has no Flow to show: the page
+  // moves to its beats rather than staying on a view with no tab (codex round 14).
+  useEffect(() => {
+    if (playsAsBeats && view === "flow") setView("storyboard");
+  }, [playsAsBeats, view]);
+  const beatLines = useMemo(
+    () => (playsAsBeats ? deriveRehearsalLines(scene, world.sheets, { narration: true }) : []),
+    [playsAsBeats, scene, world.sheets],
+  );
+  const tableRead = useTableReadPlan({ worldId: world.meta.worldId, production, scene, lines: beatLines });
+  const beatsView = useMemo((): BeatsView | undefined => {
+    if (!playsAsBeats) return undefined;
+    const byShot = new Map<string, SceneBeat[]>();
+    for (const beat of sceneBeats(workingScene)) byShot.set(beat.shot.id, [...(byShot.get(beat.shot.id) ?? []), beat]);
+    // The plan is the accepted scene's. A staged proposal that rewrites a line keeps its id, and
+    // its words were never read: they show unvoiced, never as the old words' audio (codex round 13).
+    const accepted = new Map(sceneBeats(scene).flatMap((beat) => (beat.lineId === undefined ? [] : [[beat.lineId, beat.text] as const])));
+    const proposed = new Map(sceneBeats(workingScene).flatMap((beat) => (beat.lineId === undefined ? [] : [[beat.lineId, beat.text] as const])));
+    const voices = new Map([...lineVoices(tableRead.plan)].filter(([lineId]) => proposed.get(lineId) === accepted.get(lineId)));
+    return { byShot, voices, pictureShotId: (shotId) => beatPictureShotId(workingShots, shotId) };
+  }, [playsAsBeats, scene, workingScene, workingShots, tableRead.plan]);
+  const framed = shots.filter((shot) => shotHasFrame(production, artifacts, playsAsBeats ? beatPictureShotId(shots, shot.id) : shot.id)).length;
   const focus = selectedShotId(subject);
   const focused = focus === null ? undefined : workingShots.find((shot) => shot.id === focus);
   if (focus !== null) lastShotSubject.current = focus;
@@ -521,7 +555,8 @@ export function SceneWorkspace({
           */}
           <div className="fy-sw__toolbar">
             <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
-              {(["storyboard", "flow", "preview"] as const).map((candidate) => (
+              {/* A visual novel has no motion to lay out, so Flow is a film's (turn 174). */}
+              {(playsAsBeats ? (["storyboard", "preview"] as const) : (["storyboard", "flow", "preview"] as const)).map((candidate) => (
                 <button
                   key={candidate}
                   type="button"
@@ -531,7 +566,7 @@ export function SceneWorkspace({
                   data-on={view === candidate ? "true" : undefined}
                   onClick={() => setView(candidate)}
                 >
-                  {candidate === "storyboard" ? "Storyboard" : candidate === "flow" ? "Flow" : "Preview"}
+                  {candidate === "storyboard" ? (playsAsBeats ? "Beats" : "Storyboard") : candidate === "flow" ? "Flow" : "Preview"}
                 </button>
               ))}
             </div>
@@ -553,10 +588,21 @@ export function SceneWorkspace({
               />
             ) : shots.length === 0 ? null : (
               <span className="fy-sw__coverage" data-ready={framed > 0 || undefined}>
-                <span aria-hidden="true" />{framed} of {shots.length} frames ready
+                <span aria-hidden="true" />{framed} of {shots.length} {playsAsBeats ? "pictures" : "frames"} ready
               </span>
             )}
-            {frameRun === null || frameRun.status === "completed" ? (
+            {/* Voicing prepares the accepted lines, so it waits while a proposal is staged over them. */}
+            {playsAsBeats && staged === undefined ? (
+              <VoiceLinesControl
+                plan={tableRead.plan}
+                preparing={tableRead.preparing}
+                notice={tableRead.notice}
+                onPrepare={tableRead.prepare}
+                ceiling={tableRead.plan?.items.some((item) => state?.app.manifest?.models.some((model) => model.id === item.model && model.pricing.kind === "perToken")) ?? false}
+              />
+            ) : null}
+            {/* Boards pack shots into a clip's length; a visual novel renders no clips. */}
+            {!playsAsBeats && (frameRun === null || frameRun.status === "completed") ? (
               <button
                 type="button"
                 className="fy-sw__boards-toggle"
@@ -638,6 +684,7 @@ export function SceneWorkspace({
               onTalkToArke={talkToArke}
               onPlanVideo={planVideo}
               onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
+              {...(beatsView === undefined ? {} : { beats: beatsView })}
             />
           ) : view === "flow" ? (
             <SceneFlow
@@ -670,6 +717,17 @@ export function SceneWorkspace({
               }}
               onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
               onTalkToArke={talkToArke}
+            />
+          ) : playsAsBeats ? (
+            // A visual novel previews as it will be read (174d): the beat player over the window,
+            // from this scene, back to the beats on close — never the film's timeline.
+            <SceneBeatPreview
+              key={`${production.meta.id}/${scene.id}`}
+              world={world}
+              production={production}
+              sceneId={scene.id}
+              {...(linkedShotId === null ? {} : { startShotId: linkedShotId })}
+              onClose={() => setView("storyboard")}
             />
           ) : (
             <ScenePreview
@@ -772,7 +830,9 @@ export function SceneWorkspace({
           {...(generateTarget?.shotId === undefined ? {} : { shotId: generateTarget.shotId })}
           returnFocus={generateReturnFocus}
           onClose={() => setGenerateTarget(null)}
-          onStarted={() => { if (generateTarget?.shotId === undefined) navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`); }}
+          // A scene-wide run hands a film to the Cut to assemble; a visual novel has no cut to
+          // assemble, its pictures play as beats, so it stays on the beats (codex round 6).
+          onStarted={() => { if (generateTarget?.shotId === undefined && !playsAsBeats) navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`); }}
         />
         {openMember === null ? null : (
           <CharacterDialog

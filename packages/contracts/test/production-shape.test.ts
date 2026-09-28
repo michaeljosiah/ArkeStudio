@@ -54,6 +54,15 @@ describe("productionShape resolves the legacy discriminator", () => {
       episodic: false,
       label: "Interactive video",
     },
+    {
+      // Turn 174: the second interactive kind. It branches, and its pictures are image takes.
+      meta: { format: "video", medium: "video", kind: "visual-novel" },
+      medium: "video",
+      kind: "visual-novel",
+      capability: "image",
+      episodic: false,
+      label: "Visual novel",
+    },
   ];
 
   for (const row of table) {
@@ -66,7 +75,8 @@ describe("productionShape resolves the legacy discriminator", () => {
       assert.equal(shape.displayLabel, row.label);
       assert.equal(shape.hasChapters, row.medium === "story");
       assert.equal(shape.hasScenes, row.medium !== "story");
-      assert.equal(shape.isBranching, row.kind === "interactive");
+      assert.equal(shape.isBranching, row.kind === "interactive" || row.kind === "visual-novel");
+      assert.equal(shape.playsAsBeats, row.kind === "visual-novel");
     });
   }
 
@@ -92,6 +102,14 @@ describe("productionShape resolves the legacy discriminator", () => {
     assert.equal(shape.kindLabel, "docuseries");
     assert.equal(shape.isEpisodic, false, "behaviour falls back to the medium default");
     assert.equal(shape.dispatchCapability, "video");
+  });
+
+  it("the visual-novel kind on a story is no visual novel (codex round 17)", () => {
+    const shape = productionShape({ format: "story", medium: "story", kind: "visual-novel" });
+    assert.equal(shape.hasChapters, true);
+    assert.equal(shape.isBranching, false, "a story does not route");
+    assert.equal(shape.playsAsBeats, false, "nor read as beats");
+    assert.equal(shape.dispatchCapability, "video", "nor dispatch pictures as a visual novel does");
   });
 
   it("a linear season is never branching (turn 78, rule 3)", () => {

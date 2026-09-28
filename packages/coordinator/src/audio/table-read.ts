@@ -1,6 +1,6 @@
 import { estimateSpeechMicroUsd, speechInputFits, voiceFormatForModel, type ManifestModel } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
-import { deriveRehearsalLines, TableReadPlanSchema, normalizeSpeechText, legacyVoiceModel, providerModelId,
+import { CLONED_VOICE_PROVIDER, deriveRehearsalLines, productionShape, TableReadPlanSchema, normalizeSpeechText, legacyVoiceModel, providerModelId,
   type ModelManifest, type Job, type ProviderStatus, type TableReadPlan } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { speechCacheFile, cachedVoiceAudioLooksRight, type SpeechSpec, type VoiceService } from "../voice/service.js";
@@ -11,21 +11,32 @@ import { readAudioBytes } from "./media-tools.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 
+/** The voice a visual novel's narration is read in: the narrator the audiobook resolves (turn 174). */
+export interface TableReadNarrator { provider: string; model?: string; voiceId: string; label?: string }
+
+/**
+ * `narrator` is read only where the production plays as beats: a visual novel's table read is
+ * every line the reader hears, its narration included, and that is what "Voice lines" prepares.
+ * A film's table read stays the characters' lines alone, whatever is passed.
+ */
 export async function planTableRead(store: WorldStore, productionId: string, sceneId: string, manifest: ModelManifest,
-  jobs: readonly Job[], providers: readonly ProviderStatus[], readerProblem?: (model: ManifestModel, voiceId: string) => Promise<string | null>) {
+  jobs: readonly Job[], providers: readonly ProviderStatus[], readerProblem?: (model: ManifestModel, voiceId: string) => Promise<string | null>,
+  narrator: TableReadNarrator | null = null) {
   const production = store.getBundle().productions.find(p => p.meta.id === productionId), scene = production?.scenes.find(s => s.id === sceneId);
   if (!production || !scene) throw new Error("This rehearsal scene is unavailable.");
+  const narration = productionShape(production.meta).playsAsBeats;
   const items: TableReadPlan["items"] = [], cloud: EnqueueInput[] = [], local: Array<{ file: string; spec: SpeechSpec }> = [], bindings: unknown[] = [];
   // A plan may contain many lines for one reader. Revalidate on the next plan/confirmation,
   // not once per line; neither successful nor refused discovery survives this invocation.
   const readerProblems = new Map<string, string | null>();
-  for (const line of deriveRehearsalLines(scene, store.getBundle().sheets)) {
+  for (const line of deriveRehearsalLines(scene, store.getBundle().sheets, { narration })) {
     const item: TableReadPlan["items"][number] = { lineId: line.id, shotId: line.shotId, ...(line.blockId ? { blockId: line.blockId } : {}),
-      ...(line.speakerSheetId ? { speakerSheetId: line.speakerSheetId } : {}), route: "unavailable", estimatedMicroUsd: 0 };
+      ...(line.speakerSheetId ? { speakerSheetId: line.speakerSheetId } : {}), ...(line.narration ? { narration: true } : {}),
+      route: "unavailable", estimatedMicroUsd: 0 };
     if (line.text) item.textHash = audioHash(Buffer.from(line.text));
     items.push(item);
     if (line.reason) { item.reason = line.reason; continue; }
-    const selection = production.performanceReview.selections[line.id];
+    const selection = line.narration ? undefined : production.performanceReview.selections[line.id];
     if (selection?.performanceId) {
       try {
         const record = await readPerformance(store, productionId, selection.performanceId);
@@ -43,11 +54,20 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
       } catch { item.reason = "Selected source unavailable or stale. Repair or clear the performance selection first."; }
       continue;
     }
-    const sheet = store.getBundle().sheets.find(s => s.id === line.speakerSheetId), voice = sheet?.voice;
-    if (!voice || !["kokoro", "elevenlabs", "google"].includes(voice.provider)) { item.reason = "No supported TTS assignment for this character."; continue; }
+    // Narration has no sheet: it is read in the narrator's voice, and says so when there is none.
+    // The narrator is any voice the app lets narrate — the audiobook reads in Mistral, BreezeBlue
+    // and Fish Audio presets too, which take a voice and the text as the table read sends them —
+    // but not a cloned reader, whose upload is confirmed elsewhere and which writes flac.
+    const voice = line.narration ? narrator ?? undefined : store.getBundle().sheets.find(s => s.id === line.speakerSheetId)?.voice;
+    if (!voice || (line.narration ? voice.provider === CLONED_VOICE_PROVIDER : !["kokoro", "elevenlabs", "google"].includes(voice.provider))) {
+      item.reason = line.narration ? "Choose a supported narrator voice in Settings." : "No supported TTS assignment for this character."; continue;
+    }
     const model = manifest.models.find(m => m.id === (voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId)) && m.provider === voice.provider && m.capability === "voice-tts");
     if (!model) { item.reason = "The assigned TTS model is unavailable."; continue; }
-    const spec: SpeechSpec = { provider: model.provider, model: providerModelId(model), voiceId: voice.voiceId, text: normalizeSpeechText(line.text), format: voiceFormatForModel(model) };
+    const format = voiceFormatForModel(model);
+    // The table-read cache is read back as wav or mp3; a reader that writes flac is not one it plays.
+    if (format === "flac") { item.reason = "This voice's audio cannot be read in a table read."; continue; }
+    const spec: SpeechSpec = { provider: model.provider, model: providerModelId(model), voiceId: voice.voiceId, text: normalizeSpeechText(line.text), format };
     const file = speechCacheFile(spec);
     const inputHash = audioHash(Buffer.from(JSON.stringify({ spec, assignment: voice })));
     Object.assign(item, { provider: model.provider, model: model.id, voiceId: voice.voiceId });
@@ -71,7 +91,8 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
     item.route = "cloud"; item.estimatedMicroUsd = estimateSpeechMicroUsd(model, spec.text);
     cloud.push({ worldId: store.worldId, productionId, target: { kind: "table-read-cache", id: line.id }, capability: "voice-tts", provider: model.provider, model: model.id,
       params: { voiceId: voice.voiceId, text: spec.text, tableReadSceneId: sceneId, tableReadInputHash: inputHash, tableReadCacheFile: file, tableReadSpec: spec,
-        tableReadVoiceAssignment: voice, tableReadSpeakerSheetId: line.speakerSheetId, tableReadSceneVersion: scene.version }, estimatedMicroUsd: item.estimatedMicroUsd,
+        tableReadVoiceAssignment: voice, ...(line.narration ? { tableReadNarration: true } : { tableReadSpeakerSheetId: line.speakerSheetId }),
+        tableReadSceneVersion: scene.version }, estimatedMicroUsd: item.estimatedMicroUsd,
       landing: { dir: ".cache/voice-previews", name: file.split("/").at(-1)! } });
   }
   const totalEstimatedMicroUsd = items.reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
