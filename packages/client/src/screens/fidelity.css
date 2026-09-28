@@ -1039,9 +1039,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   .fy-content--cast .fy-split { flex-direction: column; padding-top: var(--space-6); }
   .fy-content--cast .fy-split__side { width: min(var(--cast-feature), 100%); }
   .fy-content--cast .fy-feature__frame { width: 100%; height: auto; aspect-ratio: 19 / 22; }
-  .fy-row { align-items: flex-start; flex-wrap: wrap; }
-  .fy-row__meta { width: 100%; margin-left: 58px; white-space: normal; }
-  .fy-row__chev { margin-left: auto; }
+  .fy-content--cast .fy-row { align-items: flex-start; flex-wrap: wrap; }
+  .fy-content--cast .fy-row__meta { width: 100%; margin-left: 58px; white-space: normal; }
+  .fy-content--cast .fy-row__chev { margin-left: auto; }
 }
 
 /* ---- sheet detail (3a): design card, turnaround strip, identity column ---- */
@@ -1157,7 +1157,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-sheet__heading > .fy-sheet__name { margin-bottom: 0; margin-right: auto; }
 .fy-character-overview-tabs { flex-wrap: wrap; max-width: 100%; }
 .fy-overview-sheet { width: 322px; margin-top: 22px; padding: 0 0 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: var(--shadow-sm); text-align: left; cursor: pointer; overflow: hidden; }
-.fy-overview-sheet > span { display: block; width: 320px; height: 168px; overflow: hidden; }
+.fy-overview-sheet > span:first-child { display: block; width: 320px; height: 168px; overflow: hidden; }
 .fy-overview-sheet strong { display: inline-block; margin: 9px 0 0 12px; font: 600 12px var(--font-sans); }
 .fy-overview-sheet small { float: right; margin: 11px 12px 0 0; font: 400 9px var(--font-mono); color: var(--success); }
 
