@@ -373,7 +373,7 @@ export function StoryboardRows({
                 onOpenInGenerator={() => onOpenShotInGenerator(shot.id)}
                 onPreview={() => onPreviewShot(shot.id)}
                 {...(beats === undefined ? {} : {
-                  beat: { lines: beats.byShot.get(shot.id) ?? [], voices: beats.voices, pictureShotId: beats.pictureShotId(shot.id) },
+                  beat: rowBeat(beats, shot.id, newShotIds),
                 })}
               />
             </li>
@@ -406,7 +406,6 @@ export function StoryboardRows({
   );
 }
 
-/** 9:16 stands up; 16:9, 1:1 and anything wider lies down. An aspect that does not parse lies down too. */
 /** What the rows read when the production plays as beats (turn 174). */
 export interface BeatsView {
   byShot: ReadonlyMap<string, SceneBeat[]>;
@@ -419,7 +418,16 @@ interface RowBeat {
   lines: readonly SceneBeat[];
   voices: ReadonlyMap<string, LineVoice>;
   pictureShotId: string;
+  /** Whether the picture's own shot is staged as new — the kept shot's, not the keeper's. */
+  pictureNew: boolean;
 }
+
+function rowBeat(beats: BeatsView, shotId: string, newShotIds: ReadonlySet<string>): RowBeat {
+  const pictureShotId = beats.pictureShotId(shotId);
+  return { lines: beats.byShot.get(shotId) ?? [], voices: beats.voices, pictureShotId, pictureNew: newShotIds.has(pictureShotId) };
+}
+
+/** 9:16 stands up; 16:9, 1:1 and anything wider lies down. An aspect that does not parse lies down too. */
 
 export function aspectIsPortrait(aspect: string): boolean {
   const [w, h] = aspect.split(":").map(Number);
@@ -843,8 +851,12 @@ function Row({
   const acceptedTake = accepted === null ? undefined : takes.find((take) => take.id === accepted);
   const coverage = shotCoverage(shot, digests);
   // A beat that keeps the picture before shows that picture (turn 174); its own is not played.
+  // The kept shot's accepted frame is read as the kept shot's — a new shot keeping an accepted
+  // one still shows it (codex round 5).
   const samePicture = beat !== undefined && beat.pictureShotId !== shot.id;
-  const frame = shotFramePath(production, artifacts, samePicture ? beat.pictureShotId : shot.id, newShot);
+  const frame = samePicture
+    ? shotFramePath(production, artifacts, beat.pictureShotId, beat.pictureNew)
+    : shotFramePath(production, artifacts, shot.id, newShot);
   const hasFrame = frame.hasFrame;
   const state = shotCardState({
     blankScript: shot.description.trim() === "",

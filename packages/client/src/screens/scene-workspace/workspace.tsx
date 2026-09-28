@@ -222,9 +222,11 @@ export function SceneWorkspace({
   // A visual novel reads its shots as beats (turn 174): the rows carry their lines and whether
   // each is voiced, the table read voices the rest, and a beat that keeps the picture before it
   // counts as having one. The plan is asked only here, where there are lines to plan.
+  // Lines nothing can voice still ask it: the plan's reasons are how Voice lines says what to
+  // repair, even when no line in the scene can be voiced yet (codex round 5).
   const playsAsBeats = productionShape(production.meta).playsAsBeats;
   const beatLines = useMemo(
-    () => (playsAsBeats ? deriveRehearsalLines(scene, world.sheets, { narration: true }).filter((line) => line.reason === undefined) : []),
+    () => (playsAsBeats ? deriveRehearsalLines(scene, world.sheets, { narration: true }) : []),
     [playsAsBeats, scene, world.sheets],
   );
   const tableRead = useTableReadPlan({ worldId: world.meta.worldId, production, scene, lines: beatLines });

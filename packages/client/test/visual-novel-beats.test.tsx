@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import type { ClientMessage, ClientState } from "@arke-studio/contracts";
+import { insertShot, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __applyEventForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -215,6 +215,44 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     });
     assert.equal(q(mounted, ".fy-swvoice__go"), null, "nothing to press");
     assert.match(q(mounted, '[data-testid="voice-lines-blocked"]')?.textContent ?? "", /2 can’t be voiced: Choose a supported narrator voice in Settings\. Validate this voice provider/);
+  });
+
+  it("asks the plan even when no line can be voiced, so Voice lines can say what to repair (codex round 5)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = visualNovel();
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")! as unknown as { script: { blocks: unknown[] }; shots: Array<{ covers?: unknown }> };
+    scene.script.blocks = [{ id: "blk_gone", kind: "dialogue", speaker: "retired-sheet", text: "Nobody reads this now." }];
+    scene.shots[0]!.covers = [{ blockId: "blk_gone", textDigest: "sha256:12345678" }];
+    await mountState(state, SCENE_PATH);
+    assert.ok(sent.some((message) => message.kind === "plan-table-read"), "the plan carries the reason the page shows");
+  });
+
+  it("a staged new beat keeping an accepted shot's picture shows that picture (codex round 5)", async () => {
+    const state = visualNovel();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const accepted = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    // A visual novel's shot is its picture: sh_12's accepted take is its frame.
+    production.selections.sh_12 = { ...production.selections.sh_12!, acceptedTakeId: "tk_01J8A0000000000000000000A1" };
+    const path = "productions/saltlight/scenes/04-the-verse-rises.json";
+    const proposed = insertShot(accepted, { at: { after: "sh_12" }, shot: { id: "sh_999", title: "Still the quarter", description: "", beat: { samePicture: true } } });
+    state.world!.proposals = [{
+      proposal: {
+        id: "pr_01J8H0000000000000000000Q2", kind: "scene-edit", summary: "A change to scene 4",
+        targets: [{ path, baseVersion: accepted.version, baseHash: `sha256:${"a".repeat(64)}` }],
+        baseCanonRevision: 42, reservedCanonIds: [], source: "chat:scene",
+        decision: { mode: "attended", owner: { kind: "proposal-conversation", surface: "scene-workspace", targetPath: path } },
+        created: "2026-08-30T12:00:00Z", draftRevision: 1,
+      },
+      ripple: null,
+      scenes: { [path]: proposed },
+    }] as never;
+    const mounted = await mountState(state, SCENE_PATH);
+    const row = q(mounted, '[data-testid="workspace-row-sh_999"]')!;
+    assert.match(row.querySelector(".fy-swrow__same")?.textContent ?? "", /Same picture/);
+    const kept = q(mounted, '[data-testid="workspace-row-sh_12"] .fy-swrow__img')?.getAttribute("src");
+    assert.ok(kept, "sh_12 has its accepted frame");
+    assert.equal(row.querySelector(".fy-swrow__img")?.getAttribute("src"), kept, "the new beat shows the picture it keeps");
   });
 
   it("a film's scene page is as it was", async () => {

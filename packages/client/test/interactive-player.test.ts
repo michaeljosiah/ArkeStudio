@@ -605,6 +605,24 @@ describe("the player reading beats (turn 174)", () => {
     assert.equal(log.hidden, true, "Escape closes the log first");
   });
 
+  it("keeps the focus on the open log's control when the reader moves on beneath it", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    p.key("ArrowRight"); p.key("ArrowRight");
+    p.key("l");
+    const log = p.q('[aria-label="Log"]')!;
+    const close = log.querySelector('[data-act="log"]') as unknown as HTMLElement;
+    close.focus();
+    p.key("a");
+    assert.equal(focused(), close, "a redraw that changes nothing replaces nothing");
+    (log.querySelector('[aria-label="Play line"]') as unknown as HTMLElement).focus();
+    // The first press finishes the line typing; the second reads on, and the log gains a line.
+    p.key("ArrowRight"); p.key("ArrowRight");
+    assert.equal(p.all(".aip-log-line").length, 3, "the next line joined the log");
+    const again = focused() as HTMLElement;
+    assert.ok(log.contains(again), "focus stays in the log, inside the player");
+    assert.equal(again.getAttribute("data-line"), "0", "on the same line's Play button");
+  });
+
   it("keeps the place as a beat, in the same four fields, and reopens on it", () => {
     const KEY = "arke-iv-test-beats";
     const p = mount({ ...NOVEL, autoplay: true, storageKey: KEY });

@@ -92,6 +92,8 @@ export function mountInteractivePlayer(root, options) {
   let holdByAuto = false;
   let auto = false;
   let logOpen = false;
+  /** The markup the log last drew — compared as written, since a browser reserializes innerHTML. */
+  let logDrawn = "";
   const still = () => Boolean(win.matchMedia && win.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
   const esc = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -540,7 +542,7 @@ export function mountInteractivePlayer(root, options) {
       return;
     }
     const lines = beatsOf(state.sceneId).slice(0, beatIndex + 1).map((b, i) => ({ b, i })).filter((x) => x.b.text);
-    el.log.innerHTML =
+    const html =
       '<div class="aip-panel-head"><span style="flex:1">Log</span><span class="aip-kbd">L</span><button type="button" class="aip-ib" data-act="log" aria-label="Close">' + icon(I.x) + "</button></div>" +
       '<div class="aip-panel-list">' +
       lines.map((x) =>
@@ -548,6 +550,18 @@ export function mountInteractivePlayer(root, options) {
         (x.b.speaker ? '<div class="w">' + esc(x.b.speaker) + "</div>" : "") + '<div class="t">' + esc(x.b.text) + "</div>" +
         (x.b.audio ? '<button type="button" data-line="' + x.i + '" aria-label="Play line">' + icon(I.play, 11) + "</button>" : "") + "</div>").join("") +
       "</div>";
+    // Redrawn only when it reads differently, and the focused control found again after: a
+    // replaced button takes the focus with it, out of the player and past its Tab trap.
+    if (html === logDrawn) return;
+    logDrawn = html;
+    const at = doc.activeElement;
+    const held = at && el.log.contains(at) ? (at.getAttribute("data-line") !== null ? '[data-line="' + at.getAttribute("data-line") + '"]' : '[data-act="log"]') : null;
+    el.log.innerHTML = html;
+    if (held !== null) {
+      const again = el.log.querySelector(held);
+      if (again) again.focus();
+      else root.focus();
+    }
   }
 
   /** Load one of the scene's clips and seek into it: to `at` seconds, or to `ratio` of its length once known. */

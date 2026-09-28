@@ -234,7 +234,7 @@ export function ShotFields({
    */
   const playsAsBeats = productionShape(production.meta).playsAsBeats;
   const beatLinesToPlan = useMemo(
-    () => (playsAsBeats ? deriveRehearsalLines(scene, world.sheets, { narration: true }).filter((line) => line.reason === undefined) : []),
+    () => (playsAsBeats ? deriveRehearsalLines(scene, world.sheets, { narration: true }) : []),
     [playsAsBeats, scene, world.sheets],
   );
   const tableRead = useTableReadPlan({ worldId: world.meta.worldId, production, scene, lines: beatLinesToPlan });
