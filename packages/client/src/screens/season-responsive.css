@@ -312,6 +312,8 @@
 }
 @media (max-width: 599px) {
  .fy-episode-scene { margin: 0; }
+ .fy-episode-scene > div, .fy-episode-scene > .fy-mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ .fy-episode-scene .fy-linkbtn { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
  [data-screen="episode-detail"] .fy-listhead { margin-bottom: 0; }
  .fy-episodes-board { gap: 10px !important; }
  .fy-seasonrack { margin-top: 0; }

@@ -320,6 +320,7 @@ export function BranchMapScreen() {
   // Opens fitted to the window (turn 157), once per production; after that the view is the person's.
   // Only once there is a canvas to fit: opened narrow, the list shows and nothing is fitted, and a
   // window widened afterwards found the map at actual size, mostly off screen.
+  useEffect(() => { fittedRef.current = false; }, [compact]);
   useEffect(() => {
     if (fittedRef.current || !geometry || narrow || !viewportRef.current) return;
     fittedRef.current = true;
@@ -328,13 +329,13 @@ export function BranchMapScreen() {
 
   const zoomBy = useCallback((factor: number, about?: { x: number; y: number }) => {
     setView((v) => {
-      const k = Math.min(2, Math.max(0.2, v.k * factor));
+      const k = Math.min(2, Math.max(compact ? .65 : .2, v.k * factor));
       const el = viewportRef.current;
       const cx = about?.x ?? (el ? el.clientWidth / 2 : 0);
       const cy = about?.y ?? (el ? el.clientHeight / 2 : 0);
       return { k, x: cx - ((cx - v.x) * k) / v.k, y: cy - ((cy - v.y) * k) / v.k };
     });
-  }, []);
+  }, [compact]);
 
   // Wheel pans; with Ctrl or Cmd it zooms about the pointer. Native and non-passive, because a
   // passive listener cannot stop Electron zooming the whole window on Ctrl+wheel.
@@ -629,10 +630,11 @@ export function BranchMapScreen() {
     if(!base || touches.current.size<2) return;
     event.stopPropagation();event.preventDefault();
     const [a,b]=[...touches.current.values()],mid={x:(a!.x+b!.x)/2,y:(a!.y+b!.y)/2};
-    const k=Math.min(2,Math.max(.2,base.view.k*Math.hypot(b!.x-a!.x,b!.y-a!.y)/base.distance));
+    const k=Math.min(2,Math.max(compact ? .65 : .2,base.view.k*Math.hypot(b!.x-a!.x,b!.y-a!.y)/base.distance));
     setView({k,x:mid.x-(base.mid.x-base.view.x)*k/base.view.k,y:mid.y-(base.mid.y-base.view.y)*k/base.view.k});
   };
   const endTouch = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.type === "pointercancel") suppressClick.current = false;
     touches.current.delete(event.pointerId);
     if(pinch.current) {event.stopPropagation();pinch.current=null;panRef.current=null;setPanning(false);}
   };

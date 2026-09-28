@@ -449,7 +449,7 @@ export function ProductionLayout() {
   // The switch card counts what the format counts: seconds of cut for video, chapters for story.
   const switchSub = production
     ? shape?.isEpisodic
-      ? phone ? `${shape.displayLabel.toLowerCase()} · season ${Math.max(1,(world?.series.find(series=>series.seasons.includes(production.meta.id))?.seasons.indexOf(production.meta.id) ?? 0)+1)} · ${production.season?.defaults?.episodeCount ?? production.episodes.length} episodes` : `series · ${production.episodes.length} episode${production.episodes.length === 1 ? "" : "s"} · ${production.scenes.length} scene${production.scenes.length === 1 ? "" : "s"}`
+      ? phone ? `${shape.displayLabel.toLowerCase()} · season ${Math.max(1,(world?.series.find(series=>series.seasons.includes(production.meta.id))?.seasons.indexOf(production.meta.id) ?? 0)+1)} · ${Math.max(production.episodes.length, production.season?.defaults?.episodeCount ?? production.episodes.length)} episodes` : `series · ${production.episodes.length} episode${production.episodes.length === 1 ? "" : "s"} · ${production.scenes.length} scene${production.scenes.length === 1 ? "" : "s"}`
       : isStory
       ? `${shape!.displayLabel.toLowerCase()} · ${production.chapters.length} chapter${production.chapters.length === 1 ? "" : "s"}`
       : `${shape!.displayLabel.toLowerCase()}${phone ? ` · ${production.scenes.length} scenes` : ""}${cut ? ` · ${cutFigure} cut` : ""}`
