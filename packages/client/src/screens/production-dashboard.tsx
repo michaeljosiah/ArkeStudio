@@ -156,7 +156,14 @@ export function ProductionDashboardScreen() {
   // A visual novel's work is its pictures: a clip left from when it was an interactive movie is
   // no picture, and accepting one would cover nothing, so the lists leave clips out (codex round 14).
   const beats = productionShape(production.meta).playsAsBeats;
-  const takes = beats ? production.takes.filter((t) => t.kind === "frame" || t.kind === "still") : production.takes;
+  // Nor is a picture made for a shot that now keeps the one before: the story shows the kept
+  // picture there, so accepting it would put nothing in the story (codex round 17).
+  const retained = new Set(beats
+    ? production.scenes.flatMap((scene) => orderedShots(scene).flatMap((shot, _, sceneShots) => (beatPictureShotId(sceneShots, shot.id) === shot.id ? [] : [shot.id])))
+    : []);
+  const takes = beats
+    ? production.takes.filter((t) => (t.kind === "frame" || t.kind === "still") && !t.coversShots.some((shotId) => retained.has(shotId)))
+    : production.takes;
   const pending = takes.filter((t) => decisions[t.id] === "pending");
   const shots = production.scenes.flatMap((s) => orderedShots(s));
   // A visual novel's shot is a picture, not a clip (turn 174): it is covered when the picture its

@@ -104,6 +104,14 @@ describe("productionShape resolves the legacy discriminator", () => {
     assert.equal(shape.dispatchCapability, "video");
   });
 
+  it("the visual-novel kind on a story is no visual novel (codex round 17)", () => {
+    const shape = productionShape({ format: "story", medium: "story", kind: "visual-novel" });
+    assert.equal(shape.hasChapters, true);
+    assert.equal(shape.isBranching, false, "a story does not route");
+    assert.equal(shape.playsAsBeats, false, "nor read as beats");
+    assert.equal(shape.dispatchCapability, "video", "nor dispatch pictures as a visual novel does");
+  });
+
   it("a linear season is never branching (turn 78, rule 3)", () => {
     assert.equal(productionShape({ format: "video", medium: "video", kind: "microdrama" }).isBranching, false);
   });

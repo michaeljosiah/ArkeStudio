@@ -940,13 +940,16 @@ export function mountInteractivePlayer(root, options) {
     const heard = target.closest("[data-line]");
     if (heard) {
       // Heard again from the log, on its own player. One voice at a time: the beat's own stops,
-      // and a beat stopped mid-line waits for the reader as a line read, not heard (codex round 15).
+      // as a line read rather than heard (codex round 15) — but no failure schedules anything:
+      // Auto waits for the line heard again to end before it reads on (codex round 17).
       const b = beatsOf(state.sceneId)[Number(heard.getAttribute("data-line"))];
       if (b && b.audio) {
         if (!voiceDone) {
           voice.pause && voice.pause();
-          voiceLost();
+          voiceDone = true;
+          voiceFailed = true;
         }
+        if (holdByAuto) stopHold();
         logVoice.setAttribute("src", b.audio);
         const p = logVoice.play && logVoice.play();
         if (p && p.catch) p.catch(() => undefined);
@@ -1103,6 +1106,8 @@ export function mountInteractivePlayer(root, options) {
     }
   };
   voice.addEventListener("ended", onVoiceEnded);
+  // A line heard again from the log hands the beat back to Auto when it ends.
+  logVoice.addEventListener("ended", () => { if (mode === "playing" && isBeats(state.sceneId)) schedule(false); });
   voice.addEventListener("error", onVoiceError);
   root.addEventListener("animationend", onAnimationEnd);
 

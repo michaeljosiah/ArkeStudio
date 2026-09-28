@@ -109,15 +109,18 @@ export function productionShape(meta: {
   const isEpisodic = medium === "video" && EPISODIC_KINDS.has(kind);
   const mediumLabel = MEDIUM_LABEL[medium];
   const kindLabel = KIND_LABEL[kind] ?? kind;
+  // A visual novel is a video production's kind (turn 174): the same word on a story, which
+  // has chapters and no scenes, is no visual novel, and must not route, play or dispatch as one.
+  const visualNovel = medium === "video" && kind === VISUAL_NOVEL_KIND;
   return {
     medium,
     kind,
     isEpisodic,
     hasChapters: medium === "story",
     hasScenes: medium !== "story",
-    isBranching: BRANCHING_KINDS.has(kind),
-    playsAsBeats: kind === VISUAL_NOVEL_KIND,
-    dispatchCapability: kind === "stills" || kind === VISUAL_NOVEL_KIND ? "image" : "video",
+    isBranching: kind === VISUAL_NOVEL_KIND ? visualNovel : BRANCHING_KINDS.has(kind),
+    playsAsBeats: visualNovel,
+    dispatchCapability: kind === "stills" || visualNovel ? "image" : "video",
     mediumLabel,
     kindLabel,
     displayLabel: kind === DEFAULT_KIND[medium] ? mediumLabel : kindLabel,

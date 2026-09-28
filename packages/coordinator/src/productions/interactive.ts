@@ -5,8 +5,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, open as openFile, readFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { copyFile, lstat, mkdir, open as openFile, readFile, readdir, realpath } from "node:fs/promises";
+import { join, sep } from "node:path";
 import {
   ConversationActionSemanticIdSchema,
   deriveCut,
@@ -30,6 +30,7 @@ import {
   type TraversalEvidence,
   orderedShots,
 } from "@arke-studio/contracts";
+import { containedArtifactFile } from "../artifacts/contained.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { JsonFile, sha256 } from "../world/text-files.js";
@@ -858,6 +859,27 @@ export interface BeatVoices {
   narrator: () => Promise<unknown>;
 }
 
+/**
+ * The real path of a world-relative file a package will copy, when it is a plain file inside the
+ * world once links are followed — or null. A name that reads as inside the world can still be a
+ * symlink out of it in a world copied in from elsewhere, and `copyFile` follows it: the check has
+ * to be on the real path, just before the copy (codex round 17). An artifact must be a plain file
+ * directly on the world's own shelf, as every other pass that reads one requires.
+ */
+async function containedWorldFile(worldDir: string, rel: string): Promise<string | null> {
+  if (rel.startsWith("artifacts/")) return containedArtifactFile(worldDir, rel.slice("artifacts/".length));
+  try {
+    const [root, target] = await Promise.all([
+      realpath(toExtendedLength(worldDir)),
+      realpath(toExtendedLength(join(worldDir, fromPortable(rel)))),
+    ]);
+    if (!target.startsWith(root + sep)) return null;
+    return (await lstat(toExtendedLength(target))).isFile() ? target : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A voice the table read names, if it is a file inside the world rather than a way out of it. */
 function safeWorldFile(path: string): boolean {
   return path.split("/").every((part) => part !== "" && part !== "." && part !== "..") && !path.includes("\\");
@@ -990,10 +1012,20 @@ async function exportBeats(
     if (!/^iv_[0-9A-HJKMNP-TV-Z]{26}$/.test(exportId)) throw new Error("invalid interactive export id");
     const outName = `interactive-${production.meta.id}-${exportId}`;
     const outDir = join(store.dir, "exports", outName);
+    // Every source is resolved to the world's own file before anything is written: one that
+    // leaves the world refuses the package whole, rather than half-copying it first.
+    const sources: Array<[file: string, real: string]> = [];
+    const outside: string[] = [];
+    for (const [file, source] of [...copies].sort(([a], [b]) => a.localeCompare(b))) {
+      const real = await containedWorldFile(store.dir, source);
+      if (real === null) outside.push(source);
+      else sources.push([file, real]);
+    }
+    if (outside.length > 0) return { ok: false, blockers: outside.map((source) => `${source} is not a file inside this world — the package would carry something else`) };
     await mkdir(toExtendedLength(join(outDir, "media")), { recursive: true });
     const files: Array<{ file: string; hash: string }> = [];
-    for (const [file, source] of [...copies].sort(([a], [b]) => a.localeCompare(b))) {
-      await copyFile(toExtendedLength(join(store.dir, fromPortable(source))), toExtendedLength(join(outDir, file)));
+    for (const [file, real] of sources) {
+      await copyFile(toExtendedLength(real), toExtendedLength(join(outDir, file)));
       files.push({ file, hash: fullHash(await readFile(toExtendedLength(join(outDir, file)))) });
     }
     const manifest = {

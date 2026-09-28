@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { INTERACTIVE_PLAYER_SOURCE, migrateLegacyScene, RoutingSchema, type ProductionBundle, type Routing, type Take } from "@arke-studio/contracts";
 import {
@@ -14,7 +14,7 @@ import {
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld, WORLD_ID } from "../world/helpers.js";
-import { closeOnCleanup } from "../tmp.js";
+import { closeOnCleanup, tempDir } from "../tmp.js";
 
 /**
  * Interactive video through the coordinator (epic 401): the routing record on the gate's own
@@ -653,6 +653,22 @@ describe("a visual novel's package (turn 174)", () => {
     const result = await exportInteractive(store, production, CLOCK, { voices, current: () => now as ProductionBundle });
     assert.ok(!result.ok);
     assert.deepEqual(result.blockers, ["the production changed while the package was made — export again"]);
+  });
+
+  it("refuses a package whose file reads as the world's but links out of it (codex round 17)", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await novel(dir, bundle.productions[0]!);
+    await appendTraversal(store, production.meta.id, walked);
+    // A world copied in from elsewhere: a folder under .cache is a link to the host.
+    const outside = await tempDir("arke-host-");
+    await writeFile(join(outside, "secret.mp3"), Buffer.from("not the world's"));
+    await mkdir(join(dir, ".cache"), { recursive: true });
+    await symlink(outside, join(dir, ".cache", "linked"), process.platform === "win32" ? "junction" : "dir");
+    const voices = { plan: async (sceneId: string) => ({ sceneVersion: 1, files: new Map(sceneId === "sc_i1" ? [["sc_i1/sh_v1/blk_wash", ".cache/linked/secret.mp3"]] : []) }), narrator: async () => null };
+    const result = await exportInteractive(store, production, CLOCK, { voices, current: () => production });
+    assert.ok(!result.ok);
+    assert.deepEqual(result.blockers, [".cache/linked/secret.mp3 is not a file inside this world — the package would carry something else"]);
+    assert.deepEqual(await readdir(join(dir, "exports")).catch(() => []), [], "nothing was written, not even a half package");
   });
 
   it("a voice path the plan names outside the world never reaches the package", async () => {

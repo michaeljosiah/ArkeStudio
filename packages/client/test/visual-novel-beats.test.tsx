@@ -503,6 +503,16 @@ describe("a visual novel's dashboard lists (codex round 14)", () => {
     assert.equal(all(mounted, ".fy-clip").length, pictures);
     assert.match(q(mounted, '[data-screen="production-dashboard"]')?.textContent ?? "", new RegExp(`All ${pictures} pictures`));
   });
+
+  it("leaves out a picture made for a shot that now keeps the one before (codex round 17)", async () => {
+    const state = visualNovel();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    // A still made for sh_13 before it was set to keep sh_12's picture.
+    production.takes.push({ ...structuredClone(production.takes.find((take) => take.kind === "frame")!), id: "tk_01J8A0000000000000000000A9", coversShots: ["sh_13"] });
+    const pictures = production.takes.filter((take) => (take.kind === "frame" || take.kind === "still") && !take.coversShots.includes("sh_13")).length;
+    const mounted = await mountState(state, `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
+    assert.equal(all(mounted, ".fy-clip").length, pictures, "sh_13's own still would be shown nowhere in the story");
+  });
 });
 
 describe("a visual novel keeps to its own workflow (codex round 15)", () => {
