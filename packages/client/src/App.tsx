@@ -17,6 +17,7 @@ import {
   SettingsAboutScreen,
   SettingsAppearanceScreen,
   SettingsLayout,
+  SettingsIndex,
   SettingsHarnessScreen,
   SettingsNotificationsScreen,
   SettingsSampleWorldScreen,
@@ -185,7 +186,7 @@ function SettingsRoutes() {
   return (
     <Routes>
       <Route path="/settings" element={<SettingsLayout />}>
-        <Route index element={<Navigate to="providers" replace />} />
+        <Route index element={<SettingsIndex />} />
         <Route path="providers" element={<SettingsProvidersScreen />} />
         {/* Every model, cloud and local, under the kind it makes (SPEC-042 R-1). Providers
             keeps the credential; this is where the switch is. */}

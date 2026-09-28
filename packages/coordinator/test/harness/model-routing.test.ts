@@ -899,14 +899,24 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     adapter.list = async () => CLOUD_ONLY;
     // The gate waits on the publication and its reload; a session whose agent has a model of
     // its own runs on it whatever discovery says, so it does not wait.
-    const test = await fixture({ adapter, localModels: PULLED, agents: { "world-builder": { model: CHAT } } });
+    let release!: () => void;
+    const publication = new Promise<void>((resolve) => { release = resolve; });
+    const test = await fixture({ adapter, localModels: PULLED, agents: { "world-builder": { model: CHAT } }, onPublish: () => publication });
+    let pending: ReturnType<typeof test.chat> | undefined;
     try {
       // The send also awaits the conversation's naming pass, which is not a chosen session and
       // does wait; the turn's own session is what must not.
-      const pending = test.chat();
-      await until(() => test.adapter.sessions.some((session) => session.agent === "world-builder"), "the turn's session, before the reload delay", 3_000);
+      pending = test.chat();
+      void pending.catch(() => {});
+      await until(() => test.adapter.sessions.some((session) => session.agent === "world-builder"), "the chosen session while publication is held", CHAT_POLL_MS);
+      release();
       assert.equal((await pending)?.config.agents?.["world-builder"]?.model, CHAT);
-    } finally { await test.close(); }
+    } finally {
+      release();
+      // A failed assertion must still drain the chat before closing its writable world.
+      await pending?.catch(() => {});
+      await test.close();
+    }
   });
 
   it("does not trust a previous lifecycle's sign-in read on a returned harness", async () => {

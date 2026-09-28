@@ -40,7 +40,7 @@ function desktopChromeAt(path: string): string {
 }
 
 function proposalControl(html: string): string {
-  const label = html.indexOf('aria-label="Proposals"');
+  const label = html.indexOf('aria-label="Proposals');
   const start = html.lastIndexOf("<button", label);
   const end = html.indexOf("</button>", label);
   return html.slice(start, end);
@@ -117,7 +117,7 @@ describe("app chrome", () => {
         return;
       }
       const right = html.indexOf("fy-titlebar__side--right");
-      const activity = html.indexOf('aria-label="Activity"');
+      const activity = html.indexOf('aria-label="Activity');
       const settings = html.indexOf('aria-label="Settings"');
       const account = html.indexOf('aria-label="Arke account"');
       assert.ok(right >= 0, "the right-hand side of the bar exists");
@@ -131,20 +131,20 @@ describe("app chrome", () => {
     it(`${screen.id} puts proposals before activity, never between it and settings`, () => {
       const html = renderAt(screen.samplePath);
       if (WITHOUT_CHROME.has(screen.id) || WITHOUT_CONTROLS.has(screen.id)) return;
-      const proposals = html.indexOf('aria-label="Proposals"');
+      const proposals = html.indexOf('aria-label="Proposals');
       if (proposals < 0) return; // no world open: the icon has nowhere to go, which is its own test
-      const activity = html.indexOf('aria-label="Activity"');
+      const activity = html.indexOf('aria-label="Activity');
       assert.ok(
         proposals < activity,
         "proposals prepends — activity and settings are a settled pair and splitting them reopens it",
       );
-      assert.equal(count(html, 'aria-label="Proposals"'), 1, "one way to proposals, not two");
+      assert.equal(parseHTML(html).document.querySelectorAll('button.fy-iconbtn[aria-label^="Proposals"]').length, 1, "one way to proposals, not two");
     });
   }
 
   it("shows proposals only while a world is open, and dots it only when something waits", () => {
     const world = renderAt(`/w/${FIXTURE_WORLD_ID}`);
-    assert.ok(world.includes('aria-label="Proposals"'), "a world is open, so the icon exists");
+    assert.ok(world.includes('aria-label="Proposals'), "a world is open, so the icon exists");
     assert.ok(
       world.includes("Proposals — 1 awaiting a decision"),
       "the title counts what waits rather than saying something vague",

@@ -57,6 +57,7 @@ import { initStore } from "./lib/store.js";
 import { isRemoteSession } from "./lib/remote-session.js";
 import { RemoteEntry } from "./components/remote-entry.js";
 import "./screens/remote-access.css";
+import "./screens/settings-responsive.css";
 import { initializeTheme } from "./lib/theme.js";
 
 /*

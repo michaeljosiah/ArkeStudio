@@ -62,12 +62,24 @@ type Audio = Extract<DomainEvent, { type: "voice.audio" }>;
 class Reader extends FakeProvider {
   refuse: string | null = null;
   pieces: readonly string[] = [];
+  holdUntilCancelled = false;
   /** Every request, the refused one included — `submitCount` counts only those the fake answered. */
   attempts = 0;
-  override async submit(key: string, request: Parameters<FakeProvider["submit"]>[1]): ReturnType<FakeProvider["submit"]> {
+  override async submit(key: string, request: Parameters<FakeProvider["submit"]>[1] & { signal?: AbortSignal }): ReturnType<FakeProvider["submit"]> {
     this.attempts += 1;
     const text = String(request.params["text"]);
     if (text === this.refuse) throw new ProviderRequestRejectedError("mistral: refused this line");
+    if (this.holdUntilCancelled) {
+      // Keep siblings in flight until cancellation reaches them; a 500ms reply can beat a
+      // busy Windows runner's journal writes and turn this into a race with completed audio.
+      const signal = request.signal;
+      assert.ok(signal, "the dispatcher supplies cancellation for the held request");
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) resolve();
+        else signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      throw new ProviderRequestRejectedError("mistral: cancelled before accepting this line");
+    }
     // Answered per request rather than through the fake's shared `inlineArtifacts`: two pieces
     // in flight at once would otherwise hand each other's wav back.
     const result = await super.submit(key, request);
@@ -341,13 +353,14 @@ describe("a read over the reader's cap (issue 1208)", () => {
       const { pieces } = await h.narrate();
       // The Essence's pieces go first, so the Appearance is still queued when the first fails.
       h.reader.refuse = pieces[0]!;
-      h.reader.submitDelayMs = 500;
+      h.reader.holdUntilCancelled = true;
       const page = (confirmationToken?: string) =>
         h.send({ kind: "read-sheet-page", requestId: PAGE, worldId: WORLD_ID, sheetId: "maren-kest", sections: ["Essence", "Appearance"], ...(confirmationToken !== undefined ? { confirmationToken } : {}) });
       await page();
       const asked = h.audio(PAGE).find((event) => event.status === "confirmation-required")!;
       await page(asked.confirmationToken);
       await until(() => h.jobs(PAGE).length === pieces.length + 1 && h.jobs(PAGE).every((status) => status === "failed" || status === "cancelled"), "every job of the page to settle", PATIENCE);
+      await until(() => h.audio(PAGE).some((event) => event.status === "failed"), "the refused block to fail the page", PATIENCE);
       await settle();
       assert.deepEqual(h.jobs(PAGE).sort(), [...pieces.slice(1).map(() => "cancelled"), "cancelled", "failed"].sort(), "the Appearance's job cancelled with the Essence's other pieces");
       assert.ok(h.reader.attempts < pieces.length + 1, `the Appearance never reached the reader: ${h.reader.attempts} sent`);
@@ -412,14 +425,14 @@ describe("a read over the reader's cap (issue 1208)", () => {
     try {
       const { pieces } = await h.narrate();
       h.reader.refuse = pieces[0]!;
-      // A sibling the lane had already sent when the first piece failed is answered slowly, so
-      // it is still in flight for the cancel to reach: the queue's accounting is what the test
-      // is about, not how far a fast fake got before the failure was processed.
-      h.reader.submitDelayMs = 500;
+      // A sibling already sent stays in flight until cancellation reaches it.
+      h.reader.holdUntilCancelled = true;
       await readSection(h.send, REQUEST);
       const asked = h.audio(REQUEST).find((event) => event.status === "confirmation-required")!;
       await readSection(h.send, REQUEST, asked.confirmationToken);
       await until(() => h.jobs(REQUEST).length === pieces.length && h.jobs(REQUEST).every((status) => status === "failed" || status === "cancelled"), "every piece's job to settle", PATIENCE);
+      // Queue cancellation is published before the read failure; a busy disk can separate them.
+      await until(() => h.audio(REQUEST).some((event) => event.status === "failed"), "the refused piece to fail the read", PATIENCE);
       assert.deepEqual(h.jobs(REQUEST).sort(), [...pieces.slice(1).map(() => "cancelled"), "failed"].sort(), "one failed, the rest cancelled unpaid");
       assert.ok(h.reader.attempts < pieces.length, `the siblings still queued never reached the reader: ${h.reader.attempts} of ${pieces.length} were sent`);
       await settle();

@@ -32,8 +32,9 @@ and any local generation. The other device only shows the browser frontend.
    Studio** action to stop it. The PC must be awake and signed in. This is not wake-on-LAN or a
    service that starts before user login.
 
-Desktop and phone operate the same coordinator and world session. A paired device has the
-owner's ordinary Studio access; pairing management is available only on the PC. Revoke a device
+Desktop and phone operate the same coordinator and world session. A paired device can work on
+worlds, choose models and defaults, and read diagnostics. Keys, sign-ins, machine controls,
+diagnostic exports and pairing management stay on the PC. Revoke a device
 in Settings to stop its active connections and future access. The remote gateway uses a secure,
 HttpOnly, same-site cookie; the private process capability never reaches the browser.
 Copy link uses the desktop's native clipboard. If it fails, the address remains visible for
@@ -44,6 +45,19 @@ so a browser unused beyond that period can require pairing again even though its
 no scheduled expiry. Timed approvals always keep their original deadline.
 Native file selection, dropped host files and desktop-rendered playblasts require the desktop
 app. The gateway rejects their host-file commands, including manually supplied filesystem paths.
+These commands and the other named PC-only commands receive a typed `host-only` refusal;
+the socket remains connected. The client shows the relevant state with **On your PC**.
+Conversation cards that choose host files or render desktop playblasts also require approval
+on the PC. The gateway restricts every remote decision, and the conversation lifecycle checks
+the stored action before approval or replay; ordinary authored decisions and denial remain available.
+Provider keys are displayed only as set or not set, never as a key or fingerprint.
+
+On a paired browser, **Settings → Remote access** shows only that browser's name and pairing
+dates. **Notify this phone** requests permission on that device and remembers the preference
+in that browser. Notifications cover new work and decisions while Studio is open in a background
+browser tab; they do not enable push delivery after the browser closes or change PC notifications.
+Settings, Activity and Account use sheets below 600px; wider touch screens retain the dialog
+and side panel with larger controls (design turn 175, #1373).
 
 **Disable remote access** stops hosting, removes only its matching Serve mapping and turns off
 automatic startup. Ordinary Quit removes the mapping before releasing the local hosting port;

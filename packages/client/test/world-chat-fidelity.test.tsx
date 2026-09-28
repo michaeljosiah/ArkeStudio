@@ -156,7 +156,7 @@ function renderMediaConversation(): string {
 
 function renderActionConversation(
   family: "authored-diff" | "generation" | "take-review" = "authored-diff",
-  options: { status?: "pending" | "stale" | "queued" | "running" | "completed"; older?: boolean; cancellable?: boolean; delivered?: boolean } = {},
+  options: { status?: "pending" | "stale" | "queued" | "running" | "completed"; older?: boolean; cancellable?: boolean; delivered?: boolean; host?: boolean; blocked?: boolean } = {},
 ): string {
   const state = stateWithConversation();
   const turnId = "turn_01J8F3K2QW9VZX4N7M0RTYB6HC";
@@ -169,7 +169,7 @@ function renderActionConversation(
     worldId: FIXTURE_WORLD_ID,
     actorId: "local-user",
     scope: "world",
-    actionKind: "rename-world",
+    actionKind: options.host ? "world-chat-artifact-import" : "rename-world",
     authorityKind: "world-store",
     cardFamily: family,
     targets: [{ kind: "world", id: FIXTURE_WORLD_ID, label: "This world" }],
@@ -230,7 +230,8 @@ function renderActionConversation(
         mediaPath: "productions/saltlight/takes/tk_01J8F0000000000000000000B2/clip.mp4", posterPath: "productions/saltlight/takes/tk_01J8F0000000000000000000B2/frame.png",
       }] },
     } } : {}),
-    availableDecisions: options.status === "stale" ? ["deny"] : options.status && options.status !== "pending" ? [] : ["approve", "deny"],
+    ...(options.blocked ? { blockedReason: "The required adapter is unavailable." } : {}),
+    availableDecisions: options.blocked || options.status === "stale" ? ["deny"] : options.status && options.status !== "pending" ? [] : ["approve", "deny"],
   }] as never;
   if (options.older) {
     state.worldChat!.messages = Array.from({ length: 50 }, (_, index) => ({
@@ -265,6 +266,22 @@ describe("World Chat is built on the Genesis split", () => {
 });
 
 describe("conversation permission cards", () => {
+  it("directs a paired browser to PC approval only when that action can be approved", () => {
+    const originals = new Map(["window", "document"].map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
+    const remote = parseHTML('<html><head><meta name="arke-remote" content="true"></head><body></body></html>');
+    Object.assign(remote.window, { getComputedStyle: () => ({ direction: "ltr" }), location: { origin: "https://studio.test" } });
+    try {
+      Object.defineProperty(globalThis, "window", { configurable: true, value: remote.window });
+      Object.defineProperty(globalThis, "document", { configurable: true, value: remote.document });
+      const allowed = renderActionConversation("authored-diff", { host: true });
+      assert.match(allowed, /choose files and approve/); assert.match(allowed, /<button[^>]*>Deny<\/button>/); assert.doesNotMatch(allowed, /<button[^>]*>Approve<\/button>/);
+      const blocked = renderActionConversation("authored-diff", { host: true, blocked: true });
+      assert.match(blocked, /The required adapter is unavailable/); assert.match(blocked, /<button[^>]*>Deny<\/button>/); assert.doesNotMatch(blocked, /choose files and approve/);
+    } finally {
+      for (const [name, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); }
+    }
+  });
+
   it("keeps unresolved older cards reachable without duplicating visible cards", () => {
     for (const status of ["pending", "stale", "running"] as const) {
       const html = renderActionConversation("authored-diff", { older: true, status });

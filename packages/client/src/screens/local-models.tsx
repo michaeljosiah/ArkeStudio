@@ -1,3 +1,5 @@
+import { OnYourPC } from "../components/on-your-pc.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 import { useEffect } from "react";
 import {
   FIT_LABEL,
@@ -345,6 +347,7 @@ export function LocalModelRow({
         </div>
         {entry.recommended && <span className="fy-prov__unverified">recommended</span>}
         <RuntimeStatus tone={elsewhere ? undefined : STATE_TONE[state]}>{line}</RuntimeStatus>
+        {isRemoteSession() ? <OnYourPC>model installation and removal</OnYourPC> : <>
         {!elsewhere && entry.component !== undefined && <SetupTransferControl component={entry.component} />}
         {/*
          * Starting work stays where the decision is made; watching it belongs to Downloads
@@ -393,6 +396,7 @@ export function LocalModelRow({
             Downloads
           </button>
         )}
+        </>}
       </div>
       {/* Stated by count, and only by count (R-41). `Install ComfyUI 0.3.48 and its nodes` is the
           machine's sentence; the components themselves are behind the detail. */}

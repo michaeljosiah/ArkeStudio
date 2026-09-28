@@ -8,6 +8,7 @@ import {
   isOwnSceneCreate,
   subscribeQueueResults,
   subscribeCommandFailures,
+  subscribeRemoteRefusals,
   subscribeSceneCreateResults,
   subscribeSceneRefusals,
   useStore,
@@ -19,6 +20,7 @@ import {
 import { mediaUrl } from "../lib/media.js";
 import { enqueueNote, failedNote, queueNoteId, readyNote, type QueueNote } from "./queue-note.js";
 import { followLink, openActivityPanel } from "../lib/activity-panel.js";
+import { useDeviceNotifications } from "./device-notifications.js";
 import { Button, cx } from "./ui.js";
 
 /**
@@ -142,6 +144,7 @@ function LiveNote({
 
 export function QueueToaster() {
   const navigate = useNavigate();
+  useEffect(() => subscribeRemoteRefusals(() => toast("On your PC", { description: "This action is available in Studio on your PC." })), []);
   useEffect(() => subscribeCommandFailures((event) => {
     toast.custom((id) => (
       <ToastNote
@@ -153,6 +156,7 @@ export function QueueToaster() {
   }), []);
   const update = useUpdateStatus();
   const { state } = useStore();
+  useDeviceNotifications(state);
 
   // Subscriptions register once; the callbacks read the latest jobs through a ref rather than
   // re-subscribing on every store frame.

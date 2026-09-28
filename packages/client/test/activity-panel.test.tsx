@@ -130,7 +130,7 @@ function render(state: ClientState, tab: ActivityTab): string {
 }
 
 function activityControl(html: string): string {
-  const label = html.indexOf('aria-label="Activity"');
+  const label = html.indexOf('aria-label="Activity');
   assert.ok(label > 0, "the bell is drawn");
   return html.slice(html.lastIndexOf("<button", label), html.indexOf("</button>", label));
 }
@@ -186,7 +186,7 @@ describe("the panel and its tabs (design turn 136, R-20, R-21)", () => {
         <ActivityPanel />
       </MemoryRouter>,
       async (container) => {
-        const bell = container.querySelector<HTMLButtonElement>('button[aria-label="Activity"]')!;
+        const bell = container.querySelector<HTMLButtonElement>('button[data-activity-bell]')!;
         await act(async () => bell.click());
         assert.equal(container.querySelector(".fy-ap")?.getAttribute("data-tab"), "inbox");
         await act(async () => bell.click());
@@ -202,7 +202,7 @@ describe("the panel and its tabs (design turn 136, R-20, R-21)", () => {
         <ActivityPanel />
       </MemoryRouter>,
       async (container) => {
-        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Activity"]')!.click());
+        await act(async () => container.querySelector<HTMLButtonElement>('button[data-activity-bell]')!.click());
         assert.equal(container.querySelector(".fy-ap")?.getAttribute("data-tab"), "new");
       },
     );

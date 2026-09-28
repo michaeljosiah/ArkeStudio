@@ -1,3 +1,4 @@
+import { useMediaQuery } from "../lib/media-query.js";
 import { useNavigate } from "react-router";
 import { Bell, ChevronLeft, Cog, Inbox } from "./icons.js";
 import { AccountControl } from "./account-menu.js";
@@ -61,6 +62,7 @@ export function AppChrome({
   divided?: boolean;
 }) {
   const navigate = useNavigate();
+  const phone = useMediaQuery("(max-width: 599px)");
   const { state } = useStore();
   // Same derivation as Activity: rare unattended proposals must light this from every screen,
   // alongside reconciliation, paused providers, external edits and paid work awaiting review.
@@ -123,7 +125,7 @@ export function AppChrome({
                     ? `Proposals — ${waiting} awaiting a decision`
                     : "Proposals — nothing waiting"
                 }
-                aria-label="Proposals"
+                aria-label={waiting > 0 ? `Proposals — ${waiting} awaiting a decision` : "Proposals"}
                 aria-current={current === "proposals" ? "page" : undefined}
                 onClick={() => navigate(`/w/${openWorldId}/proposals`)}
               >
@@ -138,7 +140,7 @@ export function AppChrome({
               type="button"
               className={cx("fy-iconbtn", (current === "activity" || panel.open) && "fy-iconbtn--current")}
               title={attention ? "Activity — something needs you" : fresh ? "Activity — something new" : "Activity"}
-              aria-label="Activity"
+              aria-label={attention ? "Activity — something needs you" : fresh ? "Activity — something new" : "Activity"}
               aria-expanded={panel.open}
               data-activity-bell=""
               onClick={() => (panel.open ? closeActivityPanel() : openActivityPanel(attention ? "inbox" : "new"))}
@@ -159,7 +161,7 @@ export function AppChrome({
               // sheet returns you (SPEC-042 R-6, design turn 150) — remembered by the app on every
               // change of address, so a remedy's button into Settings counts the same as this one.
               // The sheet carries its own close; no surface under it ever shows a gear to leave by.
-              onClick={() => navigate("/settings/providers")}
+              onClick={() => navigate(phone ? "/settings" : "/settings/providers")}
             >
               <Cog size={13} />
             </button>

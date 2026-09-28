@@ -20,6 +20,8 @@ import {
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
 import { Cloud, Monitor, RefreshCw } from "../components/icons.js";
+import { OnYourPC } from "../components/on-your-pc.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import {
   setModelEnabled,
@@ -201,6 +203,8 @@ function CloudSection({ provider, models, visual }: { provider: ProviderId; mode
   const right =
     remedy === null ? (
       <span className="fy-by__state">{`${on} of ${models.length} on`}</span>
+    ) : isRemoteSession() ? (
+      <OnYourPC>{external ? "sign-in" : `the key · ${status?.configured ? "set" : "not set"}`}</OnYourPC>
     ) : (
       <button type="button" className="fy-by__fix" aria-expanded={open} onClick={() => setOpen(!open)}>
         {remedy}
@@ -276,7 +280,7 @@ interface LocalFacts {
 function entryFacts(entry: Entry, onOpenDownloads: () => void): LocalFacts {
   const elsewhere = entry.locality === "remote";
   const moving = entry.component !== undefined && (entry.component.state === "downloading" || entry.component.state === "paused");
-  const controls = elsewhere ? null : (
+  const controls = elsewhere ? null : isRemoteSession() ? <OnYourPC>model installation and removal</OnYourPC> : (
     <>
       {entry.component !== undefined && <SetupTransferControl component={entry.component} />}
       {entry.state === "available" && entry.closure !== undefined && (
@@ -340,7 +344,7 @@ function recipeTileFacts(
   residency?: string,
 ): LocalFacts {
   const facts = recipeFacts(recipe, weights, gated);
-  const controls = (
+  const controls = isRemoteSession() ? <OnYourPC>model installation and repair</OnYourPC> : (
     <>
       {weights?.state === "available" && (
         <Button onClick={() => setupRetry(weights.id)}>Download · {sizeMb(weights.sizeMb)}</Button>

@@ -47,8 +47,8 @@ it("only the desktop exposes owner pairing and revocation controls", async () =>
   const browser = document.createElement("div"); document.body.append(browser); const browserRoot = createRoot(browser);
   try {
     await act(async () => browserRoot.render(<SettingsRemoteAccessScreen />));
-    assert.equal(browser.querySelectorAll("button").length, 0);
-    assert.ok(browser.textContent?.includes("on your PC"));
+    assert.equal(browser.querySelectorAll("button:not([role=switch])").length, 0);
+    assert.ok(browser.textContent?.includes("On your PC"));
   } finally { await act(async () => browserRoot.unmount()); browser.remove(); }
 });
 it("desktop duration offers all four choices, uses saved replies and labels Never devices", async () => {

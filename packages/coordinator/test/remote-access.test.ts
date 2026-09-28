@@ -6,12 +6,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
-import { ClientMessageSchema, type RemotePairingDuration } from "@arke-studio/contracts";
+import { hostOnlyCommandFixtures } from "./remote-host-commands.js";
+import { ClientMessageSchema, REMOTE_HOST_ONLY_COMMANDS, RemoteCommandRefusalSchema, RemoteDeviceInfoSchema, type RemotePairingDuration } from "@arke-studio/contracts";
 import { RemoteDevices } from "../src/remote-access/devices.js";
 import { RemoteGateway, remotePage } from "../src/remote-access/gateway.js";
 
 const origin = "https://studio.example.ts.net";
 const temporary = () => mkdtemp(join(tmpdir(), "arke-remote-"));
+it("independently enumerated valid host payloads cover every refused command name", () => {
+  assert.deepEqual([...new Set(hostOnlyCommandFixtures("C:/fixture.png").map(c => c.kind))].sort(), [...REMOTE_HOST_ONLY_COMMANDS].sort());
+});
 async function paired(devices: RemoteDevices, name = "Phone", duration: RemotePairingDuration = 90) {
   const { code } = devices.createCode();
   const proof = devices.request(code, name)!;
@@ -231,31 +235,37 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     ClientMessageSchema.parse(upload);
     const uploaded = once(phone, "message"); phone.send(JSON.stringify(upload));
     assert.deepEqual(JSON.parse((await uploaded)[0].toString()), upload, "paired device uploads use bytes rather than host paths");
-    const sourcePath = join(root, "private.txt");
-    const playblast = { worldId, productionId: "pilot", sceneFile: "sc-one.md", sceneId: "sc_one", shotId: "sh_one",
-      baseVersion: 1, stagingVersion: 1, durationSec: 1, aspect: "16:9", sourcePath, openingFrameSourcePath: sourcePath,
-      referenceFrames: [{ kind: "last", at: 1, sourcePath }, { kind: "overview", at: 0, sourcePath }] };
-    const hostCommands = [
-      { kind: "file-artifact", worldId, sourcePath },
-      { kind: "genesis-attach", genesisId: "new-world", sourcePath },
-      { kind: "world-chat-attach", worldId, conversationId, sourcePath },
-      { kind: "import-folder", worldId, sourcePath },
-      { kind: "upload-artifacts", worldId, requestId: worldId, sourcePaths: [sourcePath] },
-      { kind: "upload-artifacts", worldId, requestId: worldId },
-      { kind: "stage-playblast", ...playblast },
-      { kind: "conversation-action-stage-playblast-complete", ...playblast, conversationId, actionId: "act_" + worldId, status: "completed" },
-    ];
-    for (const [index, command] of hostCommands.entries()) {
-      ClientMessageSchema.parse(command); // Each attack is a valid host command, not just malformed input.
-      const remote = connect(port, proof); sockets.push(remote);
-      await once(remote, index % 2 ? "message" : "open");
-      const closed = once(remote, "close"); remote.send(JSON.stringify(command));
-      const [code, reason] = await closed;
-      assert.equal(code, 1008); assert.match(reason.toString(), /host file access/);
+    const commands = hostOnlyCommandFixtures(join(root, "private.txt"));
+    for (const command of commands) {
+      ClientMessageSchema.parse(command);
+      const answer = once(phone, "message"); phone.send(JSON.stringify(command));
+      const refused = RemoteCommandRefusalSchema.parse(JSON.parse((await answer)[0].toString()));
+      assert.deepEqual(refused, { kind: "command-refused", refused: "host-only", command: command.kind });
+      assert.equal(phone.readyState, WebSocket.OPEN, command.kind + " keeps the session alive");
     }
     assert.deepEqual(received.filter((message: any) => message.kind !== "hello"), [JSON.parse(dictation), upload],
-      "host file commands reach neither a connecting nor an established upstream session");
+      "no host command or secret reaches the upstream session");
+    const decision = ClientMessageSchema.parse({ kind: "conversation-action-decide", worldId, conversationId,
+      actionId: "act_" + worldId, expectedConversationSeq: 2, expectedStatus: "pending", decision: "approve", requestId: worldId });
+    const scoped = once(phone, "message"); phone.send(JSON.stringify(decision));
+    assert.deepEqual(JSON.parse((await scoped)[0].toString()), { ...decision, hostActions: "refuse" },
+      "omitting the restriction cannot let a paired peer approve native work");
+    const allowed = once(phone, "message"); phone.send(JSON.stringify({ kind: "refresh-diagnostics" }));
+    assert.equal(JSON.parse((await allowed)[0].toString()).kind, "refresh-diagnostics", "allowed commands still work after all refusals");
+    // The trusted desktop transport bypasses this remote-only boundary.
+    const desktop = new WebSocket(`ws://127.0.0.1:${upstreamPort}`); sockets.push(desktop); await once(desktop, "open");
+    const ready = once(desktop, "message"); desktop.send(JSON.stringify({ kind: "hello", token })); await ready;
+    for (const command of commands) { const result = once(desktop, "message"); desktop.send(JSON.stringify(command)); assert.deepEqual(JSON.parse((await result)[0].toString()), command); }
+    const trustedDecision = once(desktop, "message"); desktop.send(JSON.stringify(decision));
+    assert.deepEqual(JSON.parse((await trustedDecision)[0].toString()), decision, "desktop decisions keep their native authority");
     const laptopDevice = await paired(devices, "Laptop");
+    const own = await get(port, "/remote/device", { headers: { Cookie: credentialCookie } });
+    assert.equal(own.status, 200);
+    const deviceInfo = RemoteDeviceInfoSchema.parse(JSON.parse(own.body));
+    assert.equal(deviceInfo.name, "Phone"); assert.ok(deviceInfo.pairedAt > 0); assert.ok(deviceInfo.expiresAt! > deviceInfo.pairedAt);
+    assert.ok(!own.body.includes("Laptop") && !own.body.includes(proof) && !own.body.includes(id));
+    assert.equal((await get(port, "/remote/device")).status, 401);
+
     const laptop = connect(port, laptopDevice.proof); sockets.push(laptop); await once(laptop, "message");
     assert.deepEqual(received[0], { kind: "hello", token });
     const closed = once(phone, "close");

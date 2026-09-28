@@ -1,3 +1,5 @@
+import { OnYourPC } from "../components/on-your-pc.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 import { useState } from "react";
 import { Link } from "react-router";
 import { adapterCommand, useStore } from "../lib/store.js";
@@ -34,11 +36,11 @@ export function SettingsAdaptersScreen() {
       <Button disabled={!connected || !library?.scannerAvailable} onClick={() => adapterCommand({ action: "scan" })}>Run compliance assessment</Button>
       <Button disabled={!connected} onClick={() => adapterCommand({ action: "refresh" })}>Refresh status</Button>
       {!library?.scannerAvailable && <p>No compliance agent is connected. Assessments remain pending.</p>}
-      <Button disabled={!connected || !installable.length} onClick={() => adapterCommand({ action: "install", releaseIds: installable.map(row => row.release.id) })}>
+      {isRemoteSession() ? <OnYourPC>adapter installation and files</OnYourPC> : <Button disabled={!connected || !installable.length} onClick={() => adapterCommand({ action: "install", releaseIds: installable.map(row => row.release.id) })}>
         Install selected · {Math.ceil(bytes / 1_000_000).toLocaleString()} MB
-      </Button>
+      </Button>}
       {rows.map(row => <article key={row.release.id} className="fy-fact">
-        <label><input type="checkbox" checked={selected.includes(row.release.id)} disabled={!!row.reason || row.installed}
+        <label><input type="checkbox" hidden={isRemoteSession()} checked={selected.includes(row.release.id)} disabled={!!row.reason || row.installed}
           onChange={event => setSelected(current => event.target.checked ? [...current, row.release.id] : current.filter(id => id !== row.release.id))} /> {row.release.displayName}</label>
         <p>{row.release.publisher} · {Math.ceil(row.release.source.bytes / 1_000_000).toLocaleString()} MB · {row.installed ? "On disk" : "Not installed"}</p>
         <p>{row.reason ?? "Compliance approved"}</p>
@@ -48,11 +50,11 @@ export function SettingsAdaptersScreen() {
           <p>SHA-256: <code style={{ overflowWrap: "anywhere" }}>{row.release.source.sha256}</code></p>
           <p>License source: <a href={row.release.license.url} target="_blank" rel="noreferrer">{row.release.license.name}</a></p>
         </details>
-        <Button disabled={!connected || !!row.reason || row.installed} onClick={() => adapterCommand({ action: "install", releaseIds: [row.release.id] })}>Install</Button>
+        {!isRemoteSession() && <Button disabled={!connected || !!row.reason || row.installed} onClick={() => adapterCommand({ action: "install", releaseIds: [row.release.id] })}>Install</Button>}
         <Button disabled={!connected || row.removed} onClick={() => adapterCommand({ action: "disable", releaseId: row.release.id })}>Disable</Button>
         {row.reason && <Button disabled={!connected} onClick={() => adapterCommand({ action: "restore", releaseId: row.release.id })}>Request fresh review</Button>}
         <Button disabled={!connected || row.removed} onClick={() => adapterCommand({ action: "remove", releaseId: row.release.id, deleteOwnedFile: false })}>Remove from catalogue</Button>
-        {row.owned && row.installed && <Button disabled={!connected} onClick={() => adapterCommand({ action: "remove", releaseId: row.release.id, deleteOwnedFile: true })}>Remove downloaded file</Button>}
+        {!isRemoteSession() && row.owned && row.installed && <Button disabled={!connected} onClick={() => adapterCommand({ action: "remove", releaseId: row.release.id, deleteOwnedFile: true })}>Remove downloaded file</Button>}
       </article>)}
     </>}
     <EditorDialog open={acknowledging} onClose={close} labelledBy="adult-content-title" width="32rem">

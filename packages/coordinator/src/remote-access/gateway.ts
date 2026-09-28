@@ -4,7 +4,7 @@ import { createReadStream } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
-import { ClientMessageSchema, type ClientMessage } from "@arke-studio/contracts";
+import { ClientMessageSchema, isRemoteHostCommand, type RemoteCommandRefusal, type ClientMessage } from "@arke-studio/contracts";
 import { RemoteDevices } from "./devices.js";
 
 const deviceCookie = "__Host-arke-device";
@@ -89,6 +89,13 @@ export class RemoteGateway {
     if (url.origin !== this.origin.origin) { res.writeHead(403).end(); return; }
     const proof = cookie(req, deviceCookie);
     const authenticated = this.options.devices.authenticate(proof);
+    if (url.pathname === "/remote/device" && req.method === "GET") {
+      if (!authenticated) { res.writeHead(401).end(); return; }
+      const device = this.options.devices.list().find(row => row.id === authenticated);
+      if (!device) { res.writeHead(401).end(); return; }
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ name: device.name, pairedAt: device.createdAt, expiresAt: device.expiresAt })); return;
+    }
     if (url.pathname === "/remote/session" && req.method === "GET") {
       const seconds = this.options.devices.cookieMaxAge(proof);
       if (seconds !== null) res.setHeader("Set-Cookie", setCookie(deviceCookie, proof!, seconds));
@@ -174,11 +181,15 @@ export class RemoteGateway {
       try { input = JSON.parse(raw.toString()); } catch { client.close(1002); return; }
       const parsed = ClientMessageSchema.safeParse(input);
       if (!parsed.success) { client.close(1008, "invalid Studio command"); return; }
-      if (Object.hasOwn(hostFileCommands, parsed.data.kind)) {
-        client.close(1008, "host file access requires the desktop app"); return;
+      if (Object.hasOwn(hostFileCommands, parsed.data.kind) || isRemoteHostCommand(parsed.data)) {
+        const refusal = { kind: "command-refused", refused: "host-only", command: parsed.data.kind } as RemoteCommandRefusal;
+        client.send(JSON.stringify(refusal)); return;
       }
       if (parsed.data.kind === "hello") return;
-      const message = JSON.stringify(parsed.data);
+      // A decision names a stored card, not its effect. Impose this after parsing so the peer
+      // cannot omit it; the lifecycle resolves the authoritative kind before approval or replay.
+      const message = JSON.stringify(parsed.data.kind === "conversation-action-decide"
+        ? { ...parsed.data, hostActions: "refuse" } : parsed.data);
       if (upstream.readyState === WebSocket.OPEN) upstream.send(message);
       else if (pending.length < 32 && (pendingBytes += Buffer.byteLength(message)) <= frameLimit) pending.push(message);
       else client.close(1008, "too many pending commands");

@@ -133,6 +133,35 @@ function decision(
 }
 
 describe("conversation action folding and decisions", () => {
+  it("remote decisions refuse native pickers before approval or replay while desktop approval and remote denial remain available", async () => {
+    for (const source of ["files", "folder"] as const) {
+      const worldPath = await tempDir("arke-remote-actions-");
+      const conversationId = await conversation(worldPath);
+      const counter = { executions: 0 };
+      const native: ConversationActionAuthorityAdapter = {
+        ...adapter(counter), actionKind: "world-chat-artifact-import",
+        prepare: async ({ intent }) => ({ authority: { kind: "artifact-store", id: intent.actionId }, authorityRevision: 1,
+          shown: { ...shown(), permissionReason: "host-file-access", body: { family: "host-action", action: "Import", effect: "Choose files on the PC" } } }),
+      };
+      const lifecycle = new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [native, adapter(counter)], now: NOW });
+      const create = () => lifecycle.prepare(preparationInput(conversationId, { actionKind: native.actionKind,
+        payload: { kind: native.actionKind, worldId: WORLD_ID, action: { kind: "artifact-import", source, checkReceiptIds: [newId("check")] } },
+        baseObservations: [{ requirement: "artifacts", target: WORLD_ID, revisionOrDigest: "v1", complete: true }],
+      }));
+      const action = await create();
+      const request = decision(action, (await loaded(worldPath, conversationId)).seq);
+      const blocked = await lifecycle.decide({ ...request, hostActions: "refuse" });
+      assert.equal(blocked.reason, "host-only"); assert.equal(counter.executions, 0);
+      assert.equal((await loaded(worldPath, conversationId)).actions[0]!.status, "pending");
+      assert.equal((await lifecycle.decide(request)).status, "completed"); assert.equal(counter.executions, 1);
+      assert.equal((await lifecycle.decide({ ...request, hostActions: "refuse" })).reason, "host-only", "replay checks before resuming an existing decision");
+      assert.equal(counter.executions, 1);
+      const denied = await create();
+      assert.equal((await lifecycle.decide(decision(denied, (await loaded(worldPath, conversationId)).seq, { decision: "deny", hostActions: "refuse" }))).status, "denied");
+      const authored = await prepare(lifecycle, conversationId);
+      assert.equal((await lifecycle.decide(decision(authored, (await loaded(worldPath, conversationId)).seq, { hostActions: "refuse" }))).status, "completed");
+    }
+  });
   it("folds an immutable pending card beside its turn", async () => {
     const worldPath = await tempDir("arke-actions-");
     const conversationId = await conversation(worldPath);

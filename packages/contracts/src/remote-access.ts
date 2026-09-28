@@ -1,3 +1,4 @@
+import { REMOTE_COMMAND_ACCESS, type RemoteHostCommand } from "./remote-command-access.js";
 import { z } from "zod";
 
 export const RemotePairingDurationSchema = z.union([z.literal(30), z.literal(90), z.literal(120), z.literal("never")]);
@@ -33,3 +34,18 @@ export interface RemoteAccessReply {
   pairing?: { code: string; expiresAt: number };
   copied?: boolean;
 }
+
+/** Named refusals include mixed commands whose host-only payload is checked separately. */
+export { REMOTE_COMMAND_ACCESS, REMOTE_PREPARED_ACTION_ACCESS, isRemoteHostCommand, isRemoteHostConversationAction } from "./remote-command-access.js";
+export const REMOTE_HOST_ONLY_COMMANDS = Object.entries(REMOTE_COMMAND_ACCESS)
+  .filter(([, access]) => access === "host" || access === "payload").map(([kind]) => kind) as [RemoteHostCommand, ...RemoteHostCommand[]];
+export const RemoteCommandRefusalSchema = z.object({
+  kind: z.literal("command-refused"), refused: z.literal("host-only"),
+  command: z.enum(REMOTE_HOST_ONLY_COMMANDS),
+}).strict();
+export type RemoteCommandRefusal = z.infer<typeof RemoteCommandRefusalSchema>;
+/** Only the authenticating device, with no registry IDs, proofs or other devices. */
+export const RemoteDeviceInfoSchema = z.object({
+  name: z.string(), pairedAt: z.number(), expiresAt: z.number().nullable(),
+}).strict();
+export type RemoteDeviceInfo = z.infer<typeof RemoteDeviceInfoSchema>;
