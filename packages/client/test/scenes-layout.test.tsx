@@ -88,6 +88,17 @@ it("offers the synopsis from the phone page menu as a sheet", async () => {
   await mount(); await click(find('.fy-scene-back > button:last-child'));
   await click(textButton('Scene details', '.fy-scene-page-menu[open]'));
   assert.ok(find('.fy-page-sheet[open] .fy-sbsynopsis'));
+  await click(find('.fy-page-sheet[open] .fy-sbsynopsis'));
+  const input = find('.fy-page-sheet[open] textarea') as HTMLTextAreaElement;
+  input.value = 'The harbour falls silent.';
+  await act(async () => { find('.fy-page-sheet[open]').dispatchEvent(new dom.Event('cancel', { bubbles: false, cancelable: true })); });
+  assert.ok(input.isConnected);
+  await click(find('.fy-scene-back > button:last-child'));
+  await click(textButton('Scene details', '.fy-scene-page-menu[open]'));
+  assert.equal(find('.fy-page-sheet[open] textarea'), input);
+  assert.equal(input.value, 'The harbour falls silent.');
+  await act(async () => input.dispatchEvent(new dom.Event('focusout', { bubbles: true })));
+  assert.deepEqual(commands(), [{ kind: 'edit-scene', synopsis: 'The harbour falls silent.' }]);
 });
 
 it("opens a shot's page actions and inspector without leaving a floating button over Stage", async () => {
