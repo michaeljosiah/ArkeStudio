@@ -56,6 +56,7 @@ import {
   NewCanonScreen,
   NewCharacterScreen,
   NewLocationScreen,
+  NewFactionScreen,
   NewProductionScreen,
   ProductionsScreen,
   WorldLayout,
@@ -308,6 +309,7 @@ export function App() {
           <Route path="props" element={<PropsScreen />} />
           <Route path="props/:propId" element={<PropDetailScreen />} />
           <Route path="factions" element={<FactionsScreen />} />
+          <Route path="factions/new" element={<NewFactionScreen />} />
           <Route path="factions/:sheetId" element={<LocationDetailScreen />} />
           <Route path="canon" element={<CanonScreen />} />
           <Route path="canon/new" element={<NewCanonScreen />} />

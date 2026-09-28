@@ -309,6 +309,35 @@ coarse-pointer folding, resize across the phone breakpoint, season/episode Arke 
 Run alongside the existing new-production, dashboard, development and production-navigation tests.
 Typecheck after test changes.
 
+## Art direction on phones and Fold7
+
+Run `node scripts/smoke-art-direction-layout.mjs` with Chrome installed (or set
+`ARKE_CHROME`). It uses the real app and schema-checked local fixtures for accepted and
+empty pictures, long descriptions, staged changes and generation previews. Captures cover
+360, 375, 390, 600, 984 and 1360px, including the Models sheet and the held acceptance action.
+The printed directory includes all seven turn 167 master frames and measured geometry.
+`--viewport phone` narrows a run; `--hover --viewport desktop` checks invisible picture
+doors using Chrome's real pointer/hover media queries. Add `--baseline <revision>` to
+render the earlier desktop with the same fixture. Touch controls are checked at every width.
+
+Client `test/art-direction-layout.test.tsx` covers touch doors, full titles, model access
+and the authored/staged footer commands. Run alongside art-direction-step, generation-dialog,
+dispatch-bar and chrome tests. Typecheck after test changes.
+
+## Cast on phones and Fold7
+
+Run `node scripts/smoke-cast-layout.mjs` with Chrome installed (`ARKE_CHROME` overrides
+its location). The real app and complete CSS cascade use an isolated fixture and local media,
+without a coordinator or paid generation. Captures cover Cast, Locations, Factions, Props,
+character overview, long names and prop creation at 360, 375, 390, 600, 984 and 1360px.
+The printed directory includes PNGs, measurements and all eight turn 161 master frames.
+`--viewport phone` narrows a run; `--baseline <revision> --viewport desktop` checks the
+unchanged desktop with the same fixture. Compare geometry and images; counts and sheet
+content remain live data. Character rename, duplicate, promote and retire remain available.
+
+Run client `test/cast-layout.test.tsx` alongside props, pending-sheets, character-pages
+and world-card-heights tests, and typecheck after changing tests.
+
 ## CI
 
 For Gemini preset activation, run providers `test/gemini-activation.test.ts` and

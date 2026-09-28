@@ -19,6 +19,7 @@ import { flushSync } from "react-dom";
 import { MemoryRouter } from "react-router";
 import { VoicePickerDialog } from "./components/voice-picker";
 import { NarratorDialog } from "./screens/audiobook-narrator";
+import { DesignVoiceDialog } from "./components/design-voice-dialog";
 import { __setStateForTest, __setBridgeForTest, __applyEventForTest } from "./lib/store";
 import { FIXTURE_STATE } from "../test/fixture-state";
 const SHIPPED_MANIFEST = ${JSON.stringify(SHIPPED_MANIFEST)};
@@ -35,7 +36,9 @@ window.mountPicker = async mode => {
  __setBridgeForTest({ send: json => window.sent.push(JSON.parse(json)) });
  __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, manifest: SHIPPED_MANIFEST } });
  renderer = createRoot(document.getElementById("root"));
- flushSync(() => renderer.render(<MemoryRouter>{mode === "book"
+ flushSync(() => renderer.render(<MemoryRouter>{mode === "design"
+ ? <DesignVoiceDialog worldId={FIXTURE_STATE.world.meta.worldId} name="Maren's voice" description="Low, patient, coastal British storyteller. Warm, with a slightly weathered timbre." onClose={() => {}} onUse={() => {}} />
+ : mode === "book"
  ? <NarratorDialog worldId={FIXTURE_STATE.world.meta.worldId} productionId="saltlight" narratorLabel="Existing voice" appLabel="George" bookNarrator={voices[0]} trial={null} data="" onClose={() => {}} />
  : <VoicePickerDialog open use="narration" chosenId="old" chosenProvider="elevenlabs" chosenModel="eleven-v3" onClose={() => {}} onPick={() => {}} />}</MemoryRouter>));
  flushSync(() => __applyEventForTest({ type: "voice.catalogue", at: "2026-09-27T12:00:00Z", voices }));
@@ -63,17 +66,18 @@ async function electronMain() {
   await window.loadFile(join(__dirname, "index.html"));
   for (const [width, height] of [[1200, 790], [1024, 640]]) {
     window.setContentSize(width, height);
-    for (const mode of ["book", "routine"]) {
+    for (const mode of ["book", "routine", "design"]) {
       await window.webContents.executeJavaScript(`window.mountPicker(${JSON.stringify(mode)})`);
       const state = await window.webContents.executeJavaScript(`({ text: document.body.innerText, sent: window.sent,
         selected: document.querySelector('[aria-selected="true"], .fy-voices__row--on')?.textContent,
         nameWidths: [...document.querySelectorAll('.fy-abnarr__who')].map(e => e.getBoundingClientRect().width),
         overflow: document.documentElement.scrollWidth > innerWidth })`);
-      assert.match(state.text, mode === "book" ? /Gemini Flash · Recommended/ : /Gemini Flash-Lite · Recommended/);
-      assert.match(state.selected, /Existing voice/);
+      assert.match(state.text, mode === "design" ? /Generate one candidate.*est\./s : mode === "book" ? /Gemini Flash · Recommended/ : /Gemini Flash-Lite · Recommended/);
+      if (mode !== "design") assert.match(state.selected, /Existing voice/);
       assert.equal(state.overflow, false);
       assert.ok(state.nameWidths.every(width => width > 120), "price copy must leave room for the voice identity");
       assert.ok(state.sent.every(message => message.kind === "voice-catalogue"));
+      if (mode === "design") assert.equal(state.sent.length, 0, "opening the form must be free");
       await writeFile(join(__dirname, `${mode}-${width}.png`), (await window.webContents.capturePage()).toPNG());
     }
   }

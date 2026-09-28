@@ -1,0 +1,4 @@
+.fy-designed-voice { min-height: 0; overflow-y: auto; padding-bottom: 16px; }
+.fy-designed-voice audio { width: 100%; min-width: 0; }
+.fy-designed-voice section, .fy-designed-voice details[open] { display: flex; flex-direction: column; gap: 12px; }
+.fy-designed-voice summary { cursor: pointer; }

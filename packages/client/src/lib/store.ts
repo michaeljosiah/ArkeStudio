@@ -618,6 +618,18 @@ export function generateCharacterVoiceSample(input: Omit<Extract<ClientMessage, 
   return requestId;
 }
 const voiceAssignmentListeners = new Set<(result: VoiceAssignmentResult) => void>();
+type DesignedVoiceSaved = Extract<DomainEvent, { type: "voice.designed-saved" }>;
+type DesignedVoiceAudition = Extract<DomainEvent, { type: "voice.design-audition" }>;
+const designedVoiceListeners = new Set<(result: DesignedVoiceSaved) => void>();
+const designedAuditionListeners = new Set<(result: DesignedVoiceAudition) => void>();
+export function subscribeDesignedVoices(listener: (result: DesignedVoiceSaved) => void): () => void {
+  designedVoiceListeners.add(listener);
+  return () => { designedVoiceListeners.delete(listener); };
+}
+export function subscribeDesignedAuditions(listener: (result: DesignedVoiceAudition) => void): () => void {
+  designedAuditionListeners.add(listener);
+  return () => { designedAuditionListeners.delete(listener); };
+}
 export type VoiceUploadConfirmationRequired = Extract<
   DomainEvent,
   { type: "voice.upload-confirmation-required" }
@@ -1441,6 +1453,8 @@ function handleFrame(json: string): void {
     if (event.type === "voice.assignment-result") {
       for (const listener of voiceAssignmentListeners) listener(event);
     }
+    if (event.type === "voice.designed-saved") for (const listener of designedVoiceListeners) listener(event);
+    if (event.type === "voice.design-audition") for (const listener of designedAuditionListeners) listener(event);
     if (event.type === "voice.deleted") for (const listener of voiceDeleteListeners) listener(event);
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
@@ -3796,6 +3810,22 @@ export function setNarrator(
 
 export function requestVoiceCatalogue(worldId?: string): void {
   send({ kind: "voice-catalogue", ...(worldId ? { worldId } : {}) });
+}
+
+export function designVoice(worldId: string, draft: import("@arke-studio/contracts").VoiceDesignDraft, confirmedEstimateMicroUsd: number): string {
+  const requestId = queueRequest("design-voice");
+  send({ kind: "design-voice", requestId, worldId, draft, confirmedEstimateMicroUsd });
+  return requestId;
+}
+export function saveVoiceDesign(worldId: string, source: { jobId: string } | { remoteId: string }): string {
+  const requestId = ulid();
+  send({ kind: "save-designed-voice", requestId, worldId, ...source });
+  return requestId;
+}
+export function hearDesignedVoice(worldId: string, model: string, voiceId: string, text: string, confirmedSpeechMicroUsd: number): string {
+  const requestId = queueRequest("hear-designed-voice");
+  send({ kind: "hear-designed-voice", requestId, worldId, model, voiceId, text, confirmedSpeechMicroUsd });
+  return requestId;
 }
 
 /**
