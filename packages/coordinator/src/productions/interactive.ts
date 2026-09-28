@@ -667,6 +667,12 @@ export async function exportInteractive(
      * read's answer). Absent, every line reads as text — an unvoiced line never blocks.
      */
     voices?: BeatVoices;
+    /**
+     * The production as it stands now, read again under the export's gate: a visual novel waits
+     * on its voices between the snapshot and the write, and a picture accepted in between must
+     * not ship as the one before it. The store's, unless a caller holds its own.
+     */
+    current?: () => ProductionBundle | undefined;
   } = {},
 ): Promise<InteractiveExportResult> {
   const routing = production.routing;
@@ -861,7 +867,7 @@ async function exportBeats(
   routing: Routing,
   blockers: string[],
   clock: () => string,
-  options: { exportId?: string; precondition?: WorldStatePrecondition; voices?: BeatVoices },
+  options: { exportId?: string; precondition?: WorldStatePrecondition; voices?: BeatVoices; current?: () => ProductionBundle | undefined },
 ): Promise<InteractiveExportResult> {
   const artifacts = store.getBundle().artifacts;
   const sheets = store.getBundle().sheets;
@@ -873,9 +879,21 @@ async function exportBeats(
     copies.set(file, source);
     return file;
   };
+  /** Each picture the beats show, by the shot it is resolved from, to check again under the gate. */
+  const pictures = new Map<string, string | null>();
   const scenes: Array<{ sceneId: string; beats: PlayerBeat[] }> = [];
   for (const scene of production.scenes.filter((candidate) => !excluded.has(candidate.id))) {
-    const planned = options.voices ? await options.voices(scene.id).catch(() => null) : null;
+    // A resolver that fails is not a scene with no voices: shipping every prepared line as text
+    // would pass for a finished package (codex round 9).
+    let planned: Awaited<ReturnType<BeatVoices>> | null = null;
+    if (options.voices) {
+      try {
+        planned = await options.voices(scene.id);
+      } catch {
+        blockers.push(`${scene.id}'s voices could not be gathered — export again`);
+        continue;
+      }
+    }
     // The plan reads the store's scene; the beats read the snapshot. A scene edited in between
     // would ship its old lines beside voices for new ones, or without the ones it had, so the
     // package is refused rather than mixed (codex round 8).
@@ -889,6 +907,7 @@ async function exportBeats(
       beats = playerBeats(scene, {
         picture: (shotId) => {
           const source = beatPicturePath(production, artifacts, shotId);
+          pictures.set(shotId, source);
           return source === null ? undefined : packaged(source, `picture-${shotId}`);
         },
         audio: (lineId) => {
@@ -913,6 +932,23 @@ async function exportBeats(
   if (blockers.length > 0) return { ok: false, blockers };
 
   return store.gateOp(async () => {
+    // Under the gate, the production is read again: an edited scene or a frame accepted while the
+    // voices were gathered would ship beside the snapshot's (codex round 9). A frame choice is
+    // not a scene edit and moves no scene version, so each picture is resolved again as well.
+    const now = (options.current ?? (() => store.getBundle().productions.find((candidate) => candidate.meta.id === production.meta.id)))();
+    const nowArtifacts = store.getBundle().artifacts;
+    const moved = scenes.filter(({ sceneId }) =>
+      now?.scenes.find((scene) => scene.id === sceneId)?.version !== production.scenes.find((scene) => scene.id === sceneId)?.version);
+    const reframed = now === undefined || [...pictures].some(([shotId, source]) => beatPicturePath(now, nowArtifacts, shotId) !== source);
+    if (moved.length > 0 || reframed) {
+      return {
+        ok: false,
+        blockers: [
+          ...moved.map(({ sceneId }) => `${sceneId} changed while the package was made — export again`),
+          ...(reframed && moved.length === 0 ? ["a picture changed while the package was made — export again"] : []),
+        ],
+      };
+    }
     const exportId = options.exportId ?? `iv_${ulid()}`;
     if (!/^iv_[0-9A-HJKMNP-TV-Z]{26}$/.test(exportId)) throw new Error("invalid interactive export id");
     const outName = `interactive-${production.meta.id}-${exportId}`;

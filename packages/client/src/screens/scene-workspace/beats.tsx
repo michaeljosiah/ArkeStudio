@@ -128,7 +128,7 @@ export function SceneBeatPreview({
   const worldId = world.meta.worldId;
   const productionId = production.meta.id;
   const [opened] = useState(() => Date.now());
-  const voices = useProductionVoiceFiles({ worldId, productionId, sceneIds: production.scenes.map((scene) => scene.id), key: opened });
+  const voices = useProductionVoiceFiles({ worldId, productionId, scenes: production.scenes, key: opened });
   const [served, setServed] = useState<RoutingFinding[] | null>(null);
   useEffect(() => {
     const off = subscribeRoutingFindings((event) => {

@@ -85,12 +85,13 @@ export function lineVoices(plan: TableReadPlan | null): ReadonlyMap<string, Line
 export function useProductionVoiceFiles({
   worldId,
   productionId,
-  sceneIds,
+  scenes: sceneList,
   key,
 }: {
   worldId: string | undefined;
   productionId: string | undefined;
-  sceneIds: readonly string[];
+  /** The scenes the preview will read, at the versions it will read them. */
+  scenes: ReadonlyArray<{ id: string; version: number }>;
   /** Null asks nothing; each new value asks again. */
   key: number | null;
 }): { files: ReadonlyMap<string, string>; ready: boolean } {
@@ -99,7 +100,9 @@ export function useProductionVoiceFiles({
   const [ready, setReady] = useState(false);
   /** The key whose answers are all in: the preview it opened has mounted, and is not asked again. */
   const settled = useRef<number | null>(null);
-  const scenes = sceneIds.join("|");
+  // Versions ride in the key, so a scene edited while its plan is asked restarts the batch: a
+  // line keeps its id through an edit, and a voice for its old text must not ride the new one.
+  const scenes = sceneList.map((scene) => `${scene.id}@${scene.version}`).join("|");
   useEffect(() => {
     if (key !== null && settled.current === key) return;
     setFiles(new Map());
@@ -112,20 +115,26 @@ export function useProductionVoiceFiles({
       setReady(true);
       return;
     }
-    const pending = new Set<string>();
+    /** Each request, with the scene version its answer must be for. */
+    const pending = new Map<string, number>();
     const found = new Map<string, string>();
     const off = subscribeRehearsalResults((result) => {
-      if (!pending.delete(result.requestId)) return;
-      for (const item of result.plan?.items ?? []) if (item.file !== undefined) found.set(item.lineId, item.file);
+      const version = pending.get(result.requestId);
+      if (version === undefined) return;
+      pending.delete(result.requestId);
+      // A plan for another version than the one the preview reads is not this scene's: its lines
+      // read as text rather than in a voice made for other words (codex round 9).
+      if (result.plan?.sceneVersion === version) for (const item of result.plan.items) if (item.file !== undefined) found.set(item.lineId, item.file);
       if (pending.size === 0) {
         settled.current = key;
         setFiles(new Map(found));
         setReady(true);
       }
     });
-    for (const sceneId of scenes === "" ? [] : scenes.split("|")) {
-      const requestId = planTableRead(worldId, productionId, sceneId);
-      if (requestId !== null) pending.add(requestId);
+    for (const entry of scenes === "" ? [] : scenes.split("|")) {
+      const at = entry.lastIndexOf("@");
+      const requestId = planTableRead(worldId, productionId, entry.slice(0, at));
+      if (requestId !== null) pending.set(requestId, Number(entry.slice(at + 1)));
     }
     if (pending.size === 0) {
       settled.current = key;

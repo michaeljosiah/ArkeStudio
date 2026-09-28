@@ -355,7 +355,7 @@ export function BranchMapScreen() {
   const previewVoices = useProductionVoiceFiles({
     worldId,
     productionId: prodId,
-    sceneIds: playsAsBeats ? scenes.map((scene) => scene.id) : [],
+    scenes: playsAsBeats ? scenes : [],
     key: playsAsBeats && preview !== null ? preview.at : null,
   });
 

@@ -481,7 +481,7 @@ describe("a visual novel's package (turn 174)", () => {
     await writeFile(join(dir, ".cache", "voice-previews", "wash.mp3"), Buffer.from("the narrator reads"));
     const voices = async (sceneId: string) => ({ sceneVersion: 1, files: new Map(sceneId === "sc_i1" ? [["sc_i1/sh_v1/blk_wash", ".cache/voice-previews/wash.mp3"]] : []) });
     const exportId = "iv_01J8F3K2QW9VZX4N7M0RTYB6HD";
-    const result = await exportInteractive(store, production, CLOCK, { exportId, voices });
+    const result = await exportInteractive(store, production, CLOCK, { exportId, voices, current: () => production });
     assert.ok(result.ok, `expected export, got ${result.ok ? "" : result.blockers.join("; ")}`);
     const manifest = JSON.parse(await readFile(join(dir, result.dir, "manifest.json"), "utf8")) as {
       media: unknown[];
@@ -523,12 +523,37 @@ describe("a visual novel's package (turn 174)", () => {
     assert.deepEqual(result.blockers, ["sc_i1 changed while the package was made — export again"]);
   });
 
+  it("refuses a scene whose voices could not be gathered, rather than shipping its lines as text (codex round 9)", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await novel(dir, bundle.productions[0]!);
+    await appendTraversal(store, production.meta.id, walked);
+    const voices = async (sceneId: string) => {
+      if (sceneId === "sc_i2") throw new Error("the narrator could not be read");
+      return { sceneVersion: 1, files: new Map<string, string>() };
+    };
+    const result = await exportInteractive(store, production, CLOCK, { voices, current: () => production });
+    assert.ok(!result.ok);
+    assert.deepEqual(result.blockers, ["sc_i2's voices could not be gathered — export again"]);
+  });
+
+  it("refuses a package whose picture was replaced while its voices were gathered (codex round 9)", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await novel(dir, bundle.productions[0]!);
+    await appendTraversal(store, production.meta.id, walked);
+    // A frame accepted meanwhile is operational state: no scene version moves.
+    const now = { ...production, selections: { ...production.selections, sh_v3: { acceptedTakeId: production.takes[0]!.id, trimInSec: 0 } } };
+    const voices = async () => ({ sceneVersion: 1, files: new Map<string, string>() });
+    const result = await exportInteractive(store, production, CLOCK, { voices, current: () => now });
+    assert.ok(!result.ok);
+    assert.deepEqual(result.blockers, ["a picture changed while the package was made — export again"]);
+  });
+
   it("a voice path the plan names outside the world never reaches the package", async () => {
     const { dir, store, bundle } = await open();
     const production = await novel(dir, bundle.productions[0]!);
     await appendTraversal(store, production.meta.id, walked);
     const voices = async () => ({ sceneVersion: 1, files: new Map([["sc_i1/sh_v1/blk_wash", "../outside.mp3"]]) });
-    const result = await exportInteractive(store, production, CLOCK, { voices });
+    const result = await exportInteractive(store, production, CLOCK, { voices, current: () => production });
     assert.ok(result.ok, `expected export, got ${result.ok ? "" : result.blockers.join("; ")}`);
     const manifest = JSON.parse(await readFile(join(dir, result.dir, "manifest.json"), "utf8")) as { files: Array<{ file: string }> };
     assert.equal(manifest.files.some((entry) => entry.file.startsWith("media/voice-")), false, "read as text instead");

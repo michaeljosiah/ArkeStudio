@@ -224,6 +224,24 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     assert.equal(q(mounted, ".fy-swlightbox img")?.getAttribute("src"), kept, "sh_13 keeps sh_12's picture");
   });
 
+  it("a voice planned for another version of the scene is not the preview's: the line reads as text (codex round 9)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(visualNovel(), SCENE_PATH);
+    const asked = sent.length;
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Preview")!);
+    const plans = sent.slice(asked).filter((message): message is Extract<ClientMessage, { kind: "plan-table-read" }> => message.kind === "plan-table-read");
+    await act(async () => {
+      for (const request of plans) {
+        __applyEventForTest({ at: "2026-09-27T10:00:00.000Z", type: "rehearsal.result", requestId: request.requestId, worldId: FIXTURE_WORLD_ID, status: "planned", reason: "",
+          plan: request.sceneId === "sc_04" ? { ...plan, sceneVersion: 3 } : { ...plan, sceneId: request.sceneId, items: [] } } as never);
+      }
+    });
+    const player = q(mounted, ".bm-player")!;
+    assert.ok(player, "the preview still opens");
+    assert.equal(player.querySelector("audio")?.hasAttribute("src"), false, "sc_04 is at version 2; a plan for 3 names another text");
+  });
+
   it("a studio lost while the voices are asked for opens the preview as text, rather than waiting forever", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
