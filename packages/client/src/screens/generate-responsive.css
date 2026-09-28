@@ -2,6 +2,11 @@
 .fy-takes__verdict { display: contents; }
 .fy-contact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
 .fy-gen__shot { flex: 1; min-width: 0; }
+@media (min-width: 1100px) {
+  .fy-gen__shot { display: contents; }
+  .fy-gen__shot .ui-select__control { appearance: auto; text-overflow: clip; }
+  .fy-gen__shot > svg { display: none; }
+}
 .fy-reject-take h3 { margin: 0 0 10px; font: var(--type-label); color: var(--muted-foreground); }
 .fy-reject-take__citations { display: grid; gap: 8px; }
 .fy-reject-take__citations button { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 10px; color: var(--foreground); background: var(--background); text-align: left; cursor: pointer; }
@@ -68,30 +73,11 @@
 @media (max-width: 599px) {
   .fy-generate-wrap { display: block; overflow: auto; scrollbar-width: none; }
   .fy-generate-wrap .fy-takes { padding: 14px 20px calc(180px + env(safe-area-inset-bottom, 0px)); gap: 14px; overflow: visible; }
-  .fy-generate-wrap .fy-takes__head { position: static; padding-bottom: 0; border: 0; }
   .fy-generate-wrap .fy-takes__filters { gap: 10px; }
-  .fy-generate-wrap .fy-takes__filter { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
   .fy-generate-wrap .fy-takes__filter-label { font: var(--type-label); }
   .fy-generate-wrap .fy-takechips { flex-wrap: nowrap; overflow-x: auto; gap: 6px; margin-right: -20px; padding-right: 20px; scrollbar-width: none; }
   .fy-generate-wrap .fy-takechip { flex: none; white-space: nowrap; padding: 0 14px; }
   .fy-generate-wrap .fy-takechip__scene-label { white-space: nowrap; }
-  .fy-takes__phone-title { display: flex; gap: 10px; align-items: flex-end; }
-  .fy-takes__phone-title > div { flex: 1; min-width: 0; }
-  .fy-takes__phone-title span { font: var(--type-label); text-transform: uppercase; letter-spacing: .08em; color: var(--muted-foreground); }
-  .fy-takes__phone-title h1 { margin: 4px 0 0; font: 600 var(--text-lg)/1.25 var(--font-sans); }
-  .fy-takes__phone-title small { flex: none; border: 1px solid var(--border); border-radius: 999px; padding: 3px 8px; font: var(--type-meta); }
-  .fy-generate-wrap .fy-take { padding: 0; gap: 0; border: 0; background: transparent; overflow: visible; box-shadow: none; }
-  .fy-generate-wrap .fy-take--on { grid-column: 1 / -1; }
-  .fy-generate-wrap .fy-take__frame { border-radius: 12px; }
-  .fy-generate-wrap .fy-take--on .fy-take__frame { outline: 2px solid var(--foreground); outline-offset: 2px; }
-  .fy-generate-wrap .fy-take__play { background: color-mix(in srgb, var(--neutral-950) 55%, transparent); color: var(--neutral-50); }
-  .fy-generate-wrap .fy-take--on .fy-take__play { width: 56px; height: 56px; }
-  .fy-generate-wrap .fy-take__foot { padding: 8px 0 0; flex-wrap: wrap; gap: 6px; }
-  .fy-generate-wrap .fy-take__name { font: var(--type-ui); }
-  .fy-generate-wrap .fy-take__name small { display: inline; font: var(--type-meta); color: var(--muted-foreground); overflow-wrap: anywhere; margin-left: 8px; }
-  .fy-generate-wrap .fy-take__foot .fy-mono { font: var(--type-meta); }
-  .fy-takes__diagnostics { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--foreground); font: var(--type-ui); text-align: left; }
-  .fy-takes__diagnostics span { margin-left: auto; }
   .fy-generate-wrap .fy-takes__foot { display: flex; flex-direction: column; align-items: stretch; margin: 0; gap: 10px; }
   .fy-generate-wrap .fy-takes__links > button { flex: 1; }
   .fy-takes__verdict, .fy-gen__phone-foot { position: fixed; z-index: 9; bottom: 0; left: 0; right: 0; display: flex; gap: 8px; padding: 12px 20px calc(14px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border); background: var(--background); box-shadow: var(--shadow-lg); }
@@ -110,6 +96,7 @@
   .fy-gen__left > div:first-child .fy-seg { display: none; }
   .fy-gen__cta > .ui-btn, .fy-gen__cta > .fy-h1row__push { display: none; }
   .fy-gen__take-menu { position: absolute; z-index: 5; top: 8px; right: 8px; width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--background) 88%, transparent); color: var(--foreground); }
+  .fy-gen__arke { position: fixed; z-index: 8; right: 16px; bottom: calc(82px + env(safe-area-inset-bottom, 0px)); display: flex; align-items: center; height: 52px; gap: 8px; padding: 0 18px 0 14px; border: 0; border-radius: 99px; background: var(--primary); color: var(--primary-foreground); box-shadow: var(--shadow-lg); font: var(--type-ui); }
   [data-screen="stills-contact-sheet"].fy-prodmain { padding: 14px 20px; }
   .fy-contact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .fy-contact-grid .fy-shotcard { min-width: 0; }
@@ -117,36 +104,16 @@
   .fy-contact-grid .fy-shotcard__actions button, [data-screen="stills-contact-sheet"] .fy-seg__item { min-height: 44px; }
   .fy-swgen { top: min(118px, 18dvh); }
   .fy-swgen__panel { gap: 16px; border: 0; border-radius: 22px 22px 0 0; }
-  .fy-swgen__head { min-height: 44px; padding: 0 8px 0 20px; position: static; }
-  .fy-swgen__head h2 { font: var(--type-h3); }
-  .fy-swgen__head button { width: 44px; height: 44px; display: grid; place-items: center; border: 0; background: transparent; color: var(--foreground); }
   .fy-swgen__scene { display: none; }
-  .fy-swgen__section { padding: 0 20px; gap: 8px; }
-  .fy-swgen__section h3 { font: var(--type-label); text-transform: none; letter-spacing: 0; }
-  .fy-swgen__methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .fy-swgen__methods button { padding: 12px; }
-  .fy-swgen__methods strong { font: var(--type-ui); }
-  .fy-swgen__methods span { font: var(--type-meta); }
   .fy-swgen__packing { display: none; }
   .fy-swgen__scope { width: 100%; }
   .fy-swgen__scope button { flex: 1; font: var(--type-ui); padding-inline: 6px; }
-  .fy-swgen__models { display: grid; gap: 0; }
-  .fy-swgen__models button { position: relative; min-height: 56px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 8px 0 8px 28px; display: flex; align-items: flex-start; flex-direction: column; gap: 4px; font: var(--type-ui); text-align: left; }
-  .fy-swgen__models button::before { content: ""; position: absolute; left: 0; top: 14px; width: 18px; height: 18px; border: 1px solid var(--neutral-400); border-radius: 50%; }
-  .fy-swgen__models button[data-on]::before { border: 5px solid var(--foreground); }
-  .fy-swgen__models button span { font: var(--type-meta); }
-  .fy-swgen__references { display: flex; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
-  .fy-swgen__references article { flex: 0 0 84px; padding: 0; border: 0; background: transparent; flex-direction: column; align-items: stretch; }
-  .fy-swgen__reference-image { width: 84px; height: 58px; flex-basis: 58px; }
-  .fy-swgen__reference-copy strong, .fy-swgen__reference-copy > span { font: var(--type-meta); white-space: normal; }
   .fy-swgen__guard { max-width: none; font: var(--type-meta); }
   .fy-swgen__hint { font: var(--type-meta); }
   .fy-swgen__context-body { flex: none; margin: 0; padding: 0 20px; overflow-wrap: anywhere; }
   .fy-swgen__foot { margin-top: auto; }
-  .fy-swgen__actions { flex-wrap: wrap; }
   .fy-swgen__estimate { flex-basis: 100%; font: var(--type-meta); }
   .fy-swgen__actions > button { flex: 1; }
-  .fy-swgen__actions > [role="status"] { order: -1; flex-basis: 100%; }
   .fy-swrun { position: fixed; z-index: 10; inset: auto 0 0; display: grid; grid-template-columns: auto 1fr auto; gap: 10px 8px; padding: 12px 20px calc(14px + env(safe-area-inset-bottom, 0px)); width: auto; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: var(--background); box-shadow: var(--shadow-lg); }
   .fy-swrun > strong { grid-column: 1; grid-row: 1; font: var(--type-ui); }
   .fy-swrun__count { grid-column: 2; grid-row: 1; font: var(--type-meta); }
@@ -211,7 +178,7 @@
   .fy-swgen__section h3 { font: var(--type-label); text-transform: none; letter-spacing: 0; }
   .fy-swgen__methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .fy-swgen__methods button { padding: 12px; }
-  .fy-swgen__methods strong { font: var(--type-ui); }
+  .fy-swgen__methods strong { font: var(--type-ui); color: var(--foreground); }
   .fy-swgen__methods span { font: var(--type-meta); }
   .fy-swgen__models { display: grid; gap: 0; }
   .fy-swgen__models button { position: relative; min-height: 56px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 8px 0 8px 28px; display: flex; align-items: flex-start; flex-direction: column; gap: 4px; font: var(--type-ui); text-align: left; }
@@ -219,8 +186,8 @@
   .fy-swgen__models button[data-on]::before { border: 5px solid var(--foreground); }
   .fy-swgen__models button span { font: var(--type-meta); }
   .fy-swgen__references { display: flex; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
-  .fy-swgen__references article { flex: 0 0 84px; padding: 0; border: 0; background: transparent; flex-direction: column; align-items: stretch; }
-  .fy-swgen__reference-image { width: 84px; height: 58px; flex-basis: 58px; }
+  .fy-swgen__references article { flex: 0 0 112px; padding: 0; border: 0; background: transparent; flex-direction: column; align-items: stretch; }
+  .fy-swgen__reference-image { width: 112px; height: 72px; flex-basis: 72px; border-radius: 10px; }
   .fy-swgen__reference-copy strong, .fy-swgen__reference-copy > span { font: var(--type-meta); white-space: normal; }
 
   .fy-generate-wrap .fy-takes__head { position: static; padding-bottom: 0; border: 0; }
@@ -265,7 +232,7 @@
   .fy-generate-wrap .fy-take--on { grid-column: 1 / -1; }
   .fy-reject-take { top: min(252px, 32dvh); }
   .fy-swgen { top: min(138px, 18dvh); }
-  .fy-swgen__head { padding-inline: 20px 8px; }
+  .fy-swgen__head { padding-inline: 20px 8px; margin-top: -8px; }
   .fy-swgen__section, .fy-swgen__foot { padding-inline: 20px; }
   .fy-swgen__estimate { flex-basis: auto; }
   .fy-swgen__head + .fy-swgen__section { margin-top: -8px; }

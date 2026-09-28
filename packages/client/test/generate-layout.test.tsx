@@ -85,6 +85,15 @@ it('uses the styled Shot control and a named Add reference on the phone bench',a
   assert.ok(find('.fy-gen__phone-foot'));
   await click(find('.fy-gen__model-row')); assert.ok(find('.fy-page-sheet[open]'));
 });
+it('opens the bench assistant on request and keeps its draft while resizing',async()=>{
+  await mount('/generate?view=bench&shot=sh_12'); assert.equal(find('.fy-scene-dock'),null);
+  await click(find('.fy-gen__arke')); const editor=find('.fy-scene-dock [role="textbox"]'); assert.ok(editor); editor.textContent='Keep this direction';
+  await act(async()=>props(editor).onInput!({currentTarget:editor} as never));
+  await act(async()=>{width=1360;for(const listener of listeners)listener();});
+  assert.equal(find('.fy-scene-dock[open]'),null); assert.equal(find('.fy-scene-dock [role="textbox"]'),editor);
+  await act(async()=>{width=390;for(const listener of listeners)listener();});
+  assert.equal(find('.fy-scene-dock [role="textbox"]'),editor); assert.equal(editor.textContent,'Keep this direction');
+});
 for (const size of [390,1360]) it('steps the review with arrow keys and horizontal swipes at '+size,async()=>{
   await mount('/scenes/sc_04',size,'completed'); await click(find('.fy-swrun__review'));
   const title=()=>find('.fy-swlightbox img')?.getAttribute('alt');

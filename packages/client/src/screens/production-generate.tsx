@@ -1,6 +1,7 @@
 import { useMediaQuery } from "../lib/media-query.js";
 import { RejectTakeChoice } from "../components/reject-take-choice.js";
 import { PageSheet } from "../components/page-sheet.js";
+import { ProductionConversation } from "../components/conversation.js";
 import { ModelsCard } from "../components/models-card.js";
 import { downloadMedia } from "../lib/download.js";
 import {
@@ -18,7 +19,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { productionModel } from "../components/dispatch-bar.js";
 import { BenchPlayer } from "../components/bench-player.js";
-import { PlaySolid, Plus, More } from "../components/icons.js";
+import { PlaySolid, Plus, More, Sparkle } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Button, Select } from "../components/ui.js";
@@ -43,6 +44,8 @@ export function GenerateScreen() {
   const [reject, setReject] = useState<Take | null>(null);
   const [takeMenu, setTakeMenu] = useState(false);
   const [modelsOpen, setModelsOpen] = useState(false);
+  const [benchArke, setBenchArke] = useState(false);
+  const [benchArkeSeen, setBenchArkeSeen] = useState(false);
   const { world, production } = useProduction(worldId, prodId);
   const { connection, state } = useStore();
   const navigate = useNavigate();
@@ -494,6 +497,10 @@ export function GenerateScreen() {
         <Button variant="outline" disabled={!take || !shotId || take.id === accepted} onClick={() => worldId && prodId && take && shotId && acceptTake(worldId, prodId, take.id, shotId)}>Accept{take ? ' take '+(takes.indexOf(take)+1) : ' take'}</Button>
         <Button variant="primary" disabled={generatorPending || !shotId} onClick={() => shotId && openGenerator(shotId)}>{generatorPending ? "Opening…" : "Generate"}</Button>
       </footer>}
+      {phone && <button type="button" className="fy-gen__arke" aria-haspopup="dialog" onClick={() => { setBenchArkeSeen(true); setBenchArke(true); }}><Sparkle size={16} />Arke</button>}
+      {benchArkeSeen && <PageSheet open={phone && benchArke} keepMounted onClose={() => setBenchArke(false)} title="Arke" className="fy-scene-dock">
+        <ProductionConversation worldId={worldId} productionId={prodId} entry={scene ? {kind:"scene",productionId:prodId ?? "",sceneId:scene.id} : undefined} dock={{onPutAway:()=>setBenchArke(false),title:"Arke · Generate",subject:shot?.title ?? "This production"}} emptyLine="Say what to change in this shot." placeholder="Say what to change" pointsEmpty="Nothing understood yet." />
+      </PageSheet>}
       {reject && world && prodId && <RejectTakeChoice key={reject.id} world={world} productionId={prodId} take={reject} number={takes.indexOf(reject)+1} shotId={shotId ?? undefined} onClose={() => setReject(null)} />}
       <PageSheet open={modelsOpen} onClose={() => setModelsOpen(false)} title="Generation model"><ModelsCard state={state} capabilities={["video"]} choices={production?.meta.models} scopeWord="this production" onChange={(capability,id) => { if(worldId && prodId) setProductionModel(worldId,prodId,capability,id); }} /></PageSheet>
       <PageSheet open={takeMenu} onClose={() => setTakeMenu(false)} title={take ? 'Take '+(takes.indexOf(take)+1) : "Take actions"}><div className="fy-scene-menu">

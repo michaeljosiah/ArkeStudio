@@ -44,7 +44,7 @@ window.mountLayout=async(route="cast",mode="normal")=>{
  renderer?.unmount();const state=generateLayoutFixture(mode),world=state.world;
 
  const sheetRefs=Object.fromEntries(world.sheets.map(s=>[s.id,{tiles:6,productions:["saltlight","ledger"],artifacts:["a1","a2"],scenes:["s1","s2"],takesByVersion:{4:2},incomingLinks:[]}]));
- window.commands=[];const bridge={connect(){},send(raw){const m=JSON.parse(raw);window.commands.push(m);if(m.kind==="frame-run-quote")queueMicrotask(()=>__applyEventForTest({type:"production.frame-run-quote",at:"2026-08-30T12:00:01Z",quote:generateQuote(m)}));},subscribe(){return()=>{};},coordinatorHttpBase:()=>location.origin};window.arke=bridge;__setBridgeForTest(bridge);__setStateForTest(state,{sheetRefs});__connectionStatusForTest("open");
+ window.commands=[];const bridge={connect(){},send(raw){const m=JSON.parse(raw);window.commands.push(m);if(m.kind==="frame-run-quote")queueMicrotask(()=>__applyEventForTest({type:"production.frame-run-quote",at:"2026-08-30T12:00:01Z",quote:generateQuote(m,state.app.models.disabled.includes(m.modelId)?"This model is turned off in AI models":null)}));},subscribe(){return()=>{};},coordinatorHttpBase:()=>location.origin};window.arke=bridge;__setBridgeForTest(bridge);__setStateForTest(state,{sheetRefs});__connectionStatusForTest("open");
  renderer=createRoot(document.getElementById("root"));flushSync(()=>renderer.render(<MemoryRouter initialEntries={["/w/"+world.meta.worldId+"/"+route]}><Navigation/><App/></MemoryRouter>));await window.settleLayout();
 };
 window.measureLayout=()=>{
@@ -110,7 +110,7 @@ try {
     if(only&&name!==only)continue;
     await size(width,height,touch);await cdp("Emulation.setTouchEmulationEnabled",{enabled:!process.argv.includes("--hover")});
     await js('document.documentElement.style.setProperty("--smoke-safe-bottom",'+JSON.stringify(width<600?"20px":"0px")+')');
-    for(const [label,route,mode] of [["takes","p/saltlight/generate?shot=sh_12","normal"],["bench","p/saltlight/generate?view=bench&shot=sh_12","normal"],["contact","p/saltlight/generate?view=stills","stills"],["frames","p/saltlight/scenes/sc_04","normal"],["running","p/saltlight/scenes/sc_04","running"],["completed","p/saltlight/scenes/sc_04","completed"]]) {
+    for(const [label,route,mode] of [["takes","p/saltlight/generate?shot=sh_12","normal"],["bench","p/saltlight/generate?view=bench&shot=sh_12","normal"],["contact","p/saltlight/generate?view=stills","stills"],["frames","p/saltlight/scenes/sc_04","normal"],["unavailable","p/saltlight/scenes/sc_04","unavailable"],["running","p/saltlight/scenes/sc_04","running"],["completed","p/saltlight/scenes/sc_04","completed"]]) {
       await js('window.mountLayout('+JSON.stringify(route)+','+JSON.stringify(mode)+')');await check(name+'-'+label);
       if(label==='takes'&&!baseline) {
         await click('.fy-takes__verdict > button:last-child');await check(name+'-reject');
@@ -121,8 +121,8 @@ try {
         if(width<600){await click('.fy-takes__diagnostics');await check(name+'-diagnostics');await escape();}
         if(width<1100){await click('.fy-generate-wrap > .fy-sw__rail');await check(name+'-arke');await escape();}
       }
-      if(label==='bench'&&!baseline&&width<600) {await click('.fy-gen__take-menu');await check(name+'-bench-actions');await escape();await click('.fy-gen__model-row');await check(name+'-model');await escape();}
-      if(label==='frames') {await click('.fy-sw__actions > button:last-child');await check(name+'-dialog');if(!baseline){assert.ok(await js('document.querySelector(".fy-swgen__foot").getBoundingClientRect().bottom<=innerHeight+1'));if(width<1100)assert.ok(await js('Array.from(document.querySelectorAll(".fy-swgen__scope button,.fy-swgen__models button,.fy-swgen__foot button")).every(e=>e.getBoundingClientRect().height>=44)'));}await escape();}
+      if(label==='bench'&&!baseline&&width<600) {assert.ok(await js('document.querySelector(".fy-gen__strip .fy-bench__takeframe").getBoundingClientRect().height>=47'));await click('.fy-gen__arke');await check(name+'-bench-arke');await escape();await click('.fy-gen__take-menu');await check(name+'-bench-actions');await escape();await click('.fy-gen__model-row');await check(name+'-model');await escape();}
+      if(label==='frames'||label==='unavailable') {await click('.fy-sw__actions > button:last-child');if(!baseline&&width<1100)await click('.fy-swgen__methods button:first-child');await check(name+'-'+(label==='frames'?'dialog':'unavailable-dialog'));if(label==='unavailable'&&!baseline&&width<1100)assert.ok(await js('document.querySelector(".fy-swgen__unavailable").getBoundingClientRect().height>0'));if(!baseline){assert.ok(await js('document.querySelector(".fy-swgen__foot").getBoundingClientRect().bottom<=innerHeight+1'));if(width<1100)assert.ok(await js('Array.from(document.querySelectorAll(".fy-swgen__scope button,.fy-swgen__models button,.fy-swgen__foot button")).every(e=>e.getBoundingClientRect().height>=44)'));}await escape();}
       if(label==='running'&&!baseline&&width<600){assert.ok(await js('getComputedStyle(document.querySelector(".fy-sw__rail")).display==="none"'));assert.ok(await js('document.querySelector(".fy-swrun").getBoundingClientRect().bottom<=innerHeight+1'));}
       if(label==='completed') {
         await click('.fy-swrun__review');await check(name+'-review');

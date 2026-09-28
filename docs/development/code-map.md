@@ -113,6 +113,11 @@ For an unfamiliar feature, search its visible label in client source, follow the
 Production generation is composed by `screens/production-generate.tsx`; take filtering and
 playback live together in `production-takes.tsx`, the episode picker in
 `production-episode-picker.tsx`, and the voice-line route in `production-voice-line.tsx`.
+`screens/generate-responsive.css` applies design turn 169 to the takes, Advanced lens and frame
+run. `components/reject-take-choice.tsx` sends the provenance sheet and note chosen by the user;
+`scene-workspace/lightbox.tsx` owns keyboard/swipe review and its phone variants sheet. The run
+dialog, quote and command ownership remain in `scene-workspace/frame-run.tsx`. Validate these
+surfaces with `test/generate-layout.test.tsx` and `scripts/smoke-generate-layout.mjs`.
 `production-dashboard.tsx` owns the home route and dashboard. `production-shell.tsx` retains
 layout, navigation and the providers for the single scene/chapter creation contexts declared
 in `production-story.tsx`. Take media and verdict presentation live in `lib/take-presentation.ts`;

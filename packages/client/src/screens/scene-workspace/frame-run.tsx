@@ -405,7 +405,7 @@ function GenerateFramesDialogOpen({
                 onClick={() => setMode(candidate)}
               >
                 <strong>{candidate === "per-shot" ? "Per shot" : "Shot board"}</strong>
-                <span>{compact ? candidate === "per-shot" ? "Fastest · each retry is cheap" : "Holds cast and light together" : candidate === "per-shot" ? "Fastest, cheap to retry, but characters and light drift between shots." : "Holds cast, light and grade together — a retry redoes the whole board."}</span>
+                <span>{compact ? candidate === "per-shot" ? "Fast; drifts between shots" : "Holds cast and light" : candidate === "per-shot" ? "Fastest, cheap to retry, but characters and light drift between shots." : "Holds cast, light and grade together — a retry redoes the whole board."}</span>
               </button>
             ))}
           </div>

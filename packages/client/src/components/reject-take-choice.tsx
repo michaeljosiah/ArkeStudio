@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Take, WorldBundle } from "@arke-studio/contracts";
 import { PageSheet } from "./page-sheet.js";
-import { Portrait, sheetPortraitPath } from "./portrait.js";
+import { Portrait, characterPortraitPath, locationPortraitPath } from "./portrait.js";
 import { Button } from "./ui.js";
 import { rejectTake, useStore } from "../lib/store.js";
 
@@ -24,7 +24,7 @@ export function RejectTakeChoice({ world, productionId, take, number, shotId, on
       {citations.map(([id, version]) => {
         const source = world.sheets.find(candidate => candidate.id === id);
         return <button key={id} type="button" aria-pressed={sheet === id} onClick={() => setSheet(id)}>
-          <Portrait worldSlug={world.meta.slug} path={sheetPortraitPath(id)} label={source?.name ?? id} radius={8} />
+          <Portrait worldSlug={world.meta.slug} path={source?.type === "location" ? locationPortraitPath(world, id) : characterPortraitPath(world, id)} label={source?.name ?? id} radius={8} />
           <span><b>{source?.name ?? id}</b><small>appearance · v{version}</small></span><i aria-hidden="true">{sheet === id ? "✓" : ""}</i>
         </button>;
       })}

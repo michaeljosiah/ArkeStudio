@@ -364,3 +364,17 @@ For the embeddable Node package, run `npm test --workspace @arke-studio/engine`.
 From the repository root, run `node scripts/smoke-scenes-layout.mjs`. It bundles the actual app and all client styles with `scenes-layout-fixture.ts`, serves local fixture media, and uses headless Chrome at 360, 375, 390, 600, 984 and 1360 CSS pixels. The check renders all eight turn-168 master frames beside the live Scenes, scene, shot, field, action sheet, Arke and Stage views. It checks horizontal overflow, native sheets, omitted phone Flow, and all four Stage gestures through real touch input. The printed temporary directory retains PNGs, layout measurements and the gesture camera poses. Set `ARKE_CHROME` if Chrome is elsewhere.
 
 `--viewport phone`, `--viewport fold`, and `--viewport desktop --hover` narrow the run. `--baseline <git-ref> --viewport desktop --hover` renders the previous implementation with the same fixture for desktop comparison. The renderer test `scenes-layout.test.tsx` covers reorder/insert without drag, delete confirmation, synopsis, Rename, additional Camera settings, and resizing out of Flow. Keep the existing scene-workspace, shot-page, Stage and frame-run suites in the regression set; the browser check does not substitute for their write/acceptance tests.
+
+## Generate and the frame run on touch (turn 169)
+
+Run `node scripts/smoke-generate-layout.mjs` from the repository root. It renders the actual
+takes, Advanced lens, contact sheet, generation dialog, run bar and Review at 360, 375, 390,
+984 and 1360 pixels, alongside all eight master frames. It exercises explicit rejection
+citations, model availability, touch targets, native sheets, arrow navigation and a real touch
+swipe. The printed temporary directory keeps the PNGs and geometry. The fixture uses FFmpeg
+to make a local landscape clip; no provider is contacted. Set `ARKE_CHROME` if needed.
+
+Use `--viewport phone`, `--viewport fold`, or `--viewport desktop --hover` to narrow the run,
+and `--baseline <git-ref> --viewport desktop --hover` to compare the previous implementation.
+The `generate-layout.test.tsx` renderer suite covers payloads, offline rejection, variants
+acceptance and run commands; retain takes-view, frame-run and scene-workspace-preview tests.
