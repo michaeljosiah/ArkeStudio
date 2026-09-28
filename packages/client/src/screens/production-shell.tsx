@@ -452,7 +452,7 @@ export function ProductionLayout() {
   // The switch card counts what the format counts: seconds of cut for video, chapters for story.
   const switchSub = production
     ? shape?.isEpisodic
-      ? phone ? `${shape.displayLabel.toLowerCase()} · season ${Math.max(1,(world?.series.find(series=>series.seasons.includes(production.meta.id))?.seasons.indexOf(production.meta.id) ?? 0)+1)} · ${production.season?.defaults?.episodeCount ?? production.episodes.length} episodes` : `series · ${production.episodes.length} episode${production.episodes.length === 1 ? "" : "s"} · ${production.scenes.length} scene${production.scenes.length === 1 ? "" : "s"}`
+      ? phone ? `${shape.displayLabel.toLowerCase()} · season ${Math.max(1,(world?.series.find(series=>series.seasons.includes(production.meta.id))?.seasons.indexOf(production.meta.id) ?? 0)+1)} · ${Math.max(production.episodes.length, production.season?.defaults?.episodeCount ?? production.episodes.length)} episodes` : `series · ${production.episodes.length} episode${production.episodes.length === 1 ? "" : "s"} · ${production.scenes.length} scene${production.scenes.length === 1 ? "" : "s"}`
       : isStory
       ? `${shape!.displayLabel.toLowerCase()} · ${production.chapters.length} chapter${production.chapters.length === 1 ? "" : "s"}`
       : `${shape!.displayLabel.toLowerCase()}${phone ? ` · ${production.scenes.length} scenes` : ""}${cut ? ` · ${cutFigure} cut` : ""}`
@@ -796,13 +796,14 @@ export function ProductionChatScreen() {
    */
   const file = shape?.isEpisodic ? "season.json" : "story.json";
   // The style the book is written in is settled here too (turn 128), in its own file.
+  const eligible = (world?.proposals ?? []).filter(sp => proposalDecisionOf(sp.proposal, world?.conversations ?? []).mode === "attended");
   const candidate =
-    (world?.proposals ?? []).find((sp) =>
+    eligible.find((sp) =>
       sp.proposal.targets.some((t) => t.path === `productions/${prodId}/${file}`),
     ) ??
     (shape?.isEpisodic
       ? null
-      : (world?.proposals ?? []).find((sp) =>
+      : eligible.find((sp) =>
           sp.proposal.targets.some((t) => t.path === `productions/${prodId}/prose-style.json`),
         ) ?? null);
   const staged = candidate && proposalDecisionOf(candidate.proposal, world?.conversations ?? []).mode === "attended" ? candidate : null;

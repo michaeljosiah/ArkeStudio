@@ -255,7 +255,7 @@ export function DevelopmentWorkspace() {
   }
   const season = production.season ?? null;
   const episodes = production.episodes;
-  const count = season?.defaults?.episodeCount ?? episodes.length;
+  const count = Math.max(episodes.length, season?.defaults?.episodeCount ?? episodes.length);
   return (
     <div className="fy-arkewrap">
     <div className="fy-prodmain" data-screen="development">
@@ -844,7 +844,7 @@ function EpisodeSceneCard({
         </button>
       </div>
       <div className="fy-mono" style={{ marginTop: 8 }} title={scene.id}>
-        {phone ? [place,scene.inherits?.timeOfDay,scene.status === "draft" ? "no script yet" : "script written"].filter(Boolean).join(" · ") : <>Scene {scene.number} · {complete ? "done" : "in progress"}</>}
+        {phone ? [place,scene.inherits?.timeOfDay,scene.script?.blocks.length ? "script written" : "no script yet"].filter(Boolean).join(" · ") : <>Scene {scene.number} · {complete ? "done" : "in progress"}</>}
       </div>
     </div>
   );

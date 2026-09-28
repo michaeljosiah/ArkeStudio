@@ -73,3 +73,24 @@ it('setup keeps the draft, no autofocus, and a phone-accessible writing model',a
  await mount('productions/setup/'+CHAT_ID,390,'setup');assert.equal(find('.fy-cx__editor').hasAttribute('autofocus'),false);await draft('Keep the two endings');await click(find('.fy-thread-peek'));assert.ok(find('.fy-setup-outline-sheet[open] [aria-label="Writing model"]'));
  for(const next of [984,390]){await act(async()=>{width=next;for(const listener of listeners)listener();});assert.equal(find('.fy-cx__editor').innerText,'Keep the two endings');}
 });
+it('episode script labels follow authored blocks independently of lifecycle status',async()=>{
+ await mount('p/bell-watch/episodes/ep_night-3',390,'episode');const state=seasonLayoutFixture('episode');
+ const scenes=state.world!.productions[0]!.scenes;scenes[6]!.script={blocks:[{id:'blk_bell',kind:'action',text:'She rings the bell.'}]};
+ await act(async()=>__setStateForTest(state));const rows=[...document.querySelectorAll('.fy-episode-scene')];assert.match(rows[0]!.textContent!,/script written/);assert.match(rows[1]!.textContent!,/no script yet/);
+});
+it('season totals grow beyond the original target',async()=>{
+ await mount();const state=seasonLayoutFixture();state.world!.productions[0]!.season!.defaults!.episodeCount=2;await act(async()=>__setStateForTest(state));
+ assert.match(find('.fy-season-summary').parentElement!.textContent!,/3 of 3/);assert.match(find('.fy-production-mobile-nav').textContent!,/3 episodes/);
+});
+it('compact pinch clamps to the readable floor and cancelled touches do not eat the next tap',async()=>{
+ await mount('p/low-water/branch-map',984,'branch');const canvas=find('.bm-viewport');const event=(id:number,x:number,type='pointermove')=>({type,pointerType:'touch',pointerId:id,clientX:x,clientY:10,currentTarget:canvas,preventDefault(){},stopPropagation(){}});
+ await act(async()=>{props(canvas).onPointerDownCapture!(event(1,0) as never);props(canvas).onPointerDownCapture!(event(2,100) as never);});
+ await act(async()=>props(canvas).onPointerMoveCapture!(event(2,1) as never));assert.match(find('.bm-stage').style.transform,/scale\(0\.65\)/);
+ await act(async()=>props(canvas).onPointerCancelCapture!(event(1,0,'pointercancel') as never));let swallowed=false;
+ await act(async()=>props(canvas).onClickCapture!({preventDefault(){swallowed=true;},stopPropagation(){}} as never));assert.equal(swallowed,false);
+});
+it('crossing the compact breakpoint refits the new map geometry',async()=>{
+ await mount('p/low-water/branch-map',1360,'branch');const desktop=find('.bm-stage').style.transform;
+ await act(async()=>{width=984;for(const listener of listeners)listener();});const fold=find('.bm-stage').style.transform;assert.notEqual(fold,desktop);assert.ok(Number(fold.match(/scale\(([^)]+)/)![1])>=.65);
+ await act(async()=>{width=1360;for(const listener of listeners)listener();});assert.equal(find('.bm-stage').style.transform,desktop);
+});

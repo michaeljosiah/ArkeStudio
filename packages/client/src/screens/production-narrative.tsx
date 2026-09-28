@@ -57,7 +57,7 @@ export function ProductionNarrativeScreen() {
         <span>{{ question: "Dramatic question", direction: "Through-line", ending: "Ending", arcNotes: "Arc notes" }[field]}{(draft[field] ?? "") !== (original[field] ?? "") && <small>edited</small>}</span>
         <textarea value={draft[field] ?? ""} maxLength={20_000} rows={field === "direction" ? 5 : 3} disabled={pending}
           style={{ padding: 12, font: "inherit", lineHeight: 1.6, color: "inherit", background: "transparent", border: "1px solid var(--line)", borderRadius: 6 }}
-          onChange={event => { setDraft(previous => ({ ...previous, [field]: event.target.value })); setDirty(true); }} />
+          onChange={event => { const next = { ...draft, [field]: event.target.value }; setDraft(next); setDirty(fields.some(key => (next[key] ?? "") !== (original[key] ?? ""))); }} />
       </label>)}
       <HeldBar className="fy-narrative__save"><Button disabled={!dirty || changes === 0 || pending || !worldId || !prodId || (narrative?.version ?? null) !== base} onClick={() => {
         const requestId = ulid(); request.current = requestId; setFailure(null);
