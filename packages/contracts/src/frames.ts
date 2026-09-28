@@ -826,6 +826,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   /** Device-selected bytes; a paired browser never supplies a host path (turn 171). */
   z.object({
     kind: z.literal("world-chat-upload"),
+    requestId: z.string().min(1).optional(),
     worldId: UlidSchema,
     conversationId: ConversationIdSchema,
     name: z.string().min(1).max(255),

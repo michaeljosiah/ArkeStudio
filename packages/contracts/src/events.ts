@@ -1460,6 +1460,14 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z
     .object({
       ...base,
+      type: z.literal("world-chat.upload-result"),
+      requestId: z.string().min(1),
+      worldId: z.string().min(1),
+      conversationId: z.string().min(1),
+      reason: z.string().optional(),
+    }).strict(),
+
+  z.object({ ...base,
       type: z.literal("world-chat.attachment-refused"),
       conversationId: z.string().min(1),
       name: z.string().min(1),

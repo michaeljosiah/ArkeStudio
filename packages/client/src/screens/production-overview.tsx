@@ -41,7 +41,7 @@ export function CompactOverview({ worldId, production, staged, read }: {
       {story?.spine && <ProseCard label="Spine"><ClampedText>{story.spine}</ClampedText>{actions("spine", story.spine)}</ProseCard>}
       {(["question", "ending"] as const).map(field => story?.[field] ? <ProseCard key={field} label={field === "question" ? "Dramatic question" : "Ending"}><p>{story[field]}</p>{actions(field, story[field])}</ProseCard> : null)}
       {(story?.acts?.length ?? 0) > 0 && <section className="fy-overview-acts fy-texthost"><h2>Acts <span>{story!.acts!.length}</span></h2>
-        <div className="fy-overview-acts__grid">{story!.acts!.map((act, index) => <article key={index} className="fy-overview-act fy-texthost">
+        <div className="fy-overview-acts__grid">{story!.acts!.map((act, index) => <article key={`${index}:${act.title}:${act.summary ?? ""}`} className="fy-overview-act fy-texthost">
           <span className="fy-overview-act__number">{index + 1}</span><span className="fy-overview-act__label">Act {index + 1}</span>
           <div><h3>{act.title}</h3>{act.summary && <p>{act.summary}</p>}
             <ReadAloud source={{ of: "story", productionId: id, field: "acts", act: index }} title={`Act ${index + 1} · ${act.title}`} text={`${act.title}${act.summary ? " — " + act.summary : ""}`} />

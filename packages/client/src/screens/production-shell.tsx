@@ -7,6 +7,7 @@ import {
   isMediaOnly,
   pickableSheets,
   productionShape,
+  proposalDecisionOf,
   resolvePictureTimeline,
   sortScenes,
   type ProductionBundle,
@@ -790,7 +791,7 @@ export function ProductionChatScreen() {
    */
   const file = shape?.isEpisodic ? "season.json" : "story.json";
   // The style the book is written in is settled here too (turn 128), in its own file.
-  const staged =
+  const candidate =
     (world?.proposals ?? []).find((sp) =>
       sp.proposal.targets.some((t) => t.path === `productions/${prodId}/${file}`),
     ) ??
@@ -799,6 +800,7 @@ export function ProductionChatScreen() {
       : (world?.proposals ?? []).find((sp) =>
           sp.proposal.targets.some((t) => t.path === `productions/${prodId}/prose-style.json`),
         ) ?? null);
+  const staged = candidate && proposalDecisionOf(candidate.proposal, world?.conversations ?? []).mode === "attended" ? candidate : null;
   const stagedStyle = staged?.proposal.targets.some((t) => t.path.endsWith("/prose-style.json")) ?? false;
   return (
     <div className="fy-story" data-screen="production-chat">

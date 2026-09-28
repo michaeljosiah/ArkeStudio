@@ -918,6 +918,7 @@ export function ProductionConversation({
     text: string;
     attach?: boolean;
     files?: readonly File[];
+    onAttached?: (refusals: readonly {name:string;reason:string}[]) => void;
     was: string | null;
     subject?: WorldChatSubject;
     modelId?: string;
@@ -933,6 +934,7 @@ export function ProductionConversation({
   const compact = useMediaQuery("(max-width: 1099px)");
   const [modelsOpen, setModelsOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(false);
+  const [omittedAttachments, setOmittedAttachments] = useState<ReadonlySet<string>>(new Set());
   const [attachmentTrouble, setAttachmentTrouble] = useState<readonly { name: string; reason: string }[]>([]);
   const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
@@ -953,6 +955,7 @@ export function ProductionConversation({
    */
   useEffect(() => {
     setMessage("");
+    setOmittedAttachments(new Set());
     setLanguageModelId(undefined);
     pendingRemember.current = undefined;
     setOpening(null);
@@ -1035,7 +1038,7 @@ export function ProductionConversation({
     // Said only on a connection that can carry it (codex on PR 1232): a send that does not leave
     // keeps the line waiting for its thread, rather than dropping the wait to be made again.
     if (connection !== "open") return;
-    if (opening.files) void attachHostFiles(worldChatAttachTarget(worldId, opened), opening.files).then(setAttachmentTrouble);
+    if (opening.files) void attachHostFiles(worldChatAttachTarget(worldId, opened), opening.files).then(refusals => { setAttachmentTrouble(refusals); opening.onAttached?.(refusals); });
     else if (opening.attach) worldChatAttachFiles(worldId, opened);
     else {
       const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
@@ -1045,6 +1048,7 @@ export function ProductionConversation({
     setOpening(null);
   }, [opening, worldId, workspace?.conversationId, conversationId, connection]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
+  const turnAttachments = (loaded?.attachments ?? []).slice(-20).filter(attachment => !omittedAttachments.has(attachment.id));
   const attachRefusals = useWorldChatRefusals(conversationId ?? undefined);
   const loadedRef = useRef(loaded);
   loadedRef.current = loaded;
@@ -1131,7 +1135,7 @@ export function ProductionConversation({
     // Only the turn's explicit choice travels as an override. The coordinator resolves the
     // captured agent preference before the production default; sending the displayed fallback
     // here would promote that default above the agent and run a different model.
-    const requestId = sendWorldChat(worldId, conversationId, text, (loaded?.attachments ?? []).map(attachment => attachment.id), about, languageModelId, replyOnly, again);
+    const requestId = sendWorldChat(worldId, conversationId, text, turnAttachments.map(attachment => attachment.id), about, languageModelId, replyOnly, again);
     if (requestId === null) return false;
     setLanguageModelId(undefined);
     onSent?.(requestId);
@@ -1304,7 +1308,7 @@ export function ProductionConversation({
    * The first attachment opens the thread before invoking its private file picker, just as
    * the world composer does. No assistant turn is needed to start collecting references.
    */
-  const attachChips = (loaded?.attachments ?? []).map((a) => ({
+  const attachChips = turnAttachments.map((a) => ({
     id: a.id,
     file: attachmentChipLabel(a),
     kind: a.kind,
@@ -1312,13 +1316,13 @@ export function ProductionConversation({
   }));
   const attachProps = {
     attachments: attachChips,
+    onRemoveAttachment: (id: string) => setOmittedAttachments(previous => new Set([...previous, id])),
     refusals: [...attachmentTrouble, ...attachRefusals],
     ...(worldId ? { onAttachFiles: (files: readonly File[]) => {
       if (opening || running) return Promise.resolve(files.map(file => ({ name: file.name, reason: "Wait for the current turn to finish." })));
       if (conversationId) return attachHostFiles(worldChatAttachTarget(worldId, conversationId), files);
       if (!createWorldChat(worldId, "Production references", crypto.randomUUID(), context)) return Promise.resolve(files.map(file => ({ name: file.name, reason: "The studio is disconnected. Attach the file again when it reconnects." })));
-      setOpening({ text: "", files, was: workspace?.conversationId ?? null });
-      return Promise.resolve([]);
+      return new Promise<readonly {name:string;reason:string}[]>(resolve => setOpening({ text: "", files, was: workspace?.conversationId ?? null, onAttached: resolve }));
     } } : {}),
     ...(worldId
       ? { onAttach: () => {

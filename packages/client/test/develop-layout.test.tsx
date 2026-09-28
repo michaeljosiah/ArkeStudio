@@ -8,7 +8,7 @@ import { type ClientMessage } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { Composer } from "../src/components/composer.js";
 import { attachHostText, worldChatAttachTarget } from "../src/lib/store.js";
-import { __clearWorldChatHoldsForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __clearWorldChatHoldsForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { developLayoutFixture, CHAT_ID } from "./develop-layout-fixture.js";
 
@@ -22,15 +22,15 @@ Object.assign(dom.window, {
 Object.assign(dom.HTMLElement.prototype,{getBoundingClientRect:()=>({x:0,y:0,left:0,top:0,right:44,bottom:44,width:44,height:44}),showModal(this:HTMLElement){this.setAttribute("open","");},close(this:HTMLElement){this.removeAttribute("open");},scrollIntoView(){}});
 Object.defineProperty(dom.HTMLElement.prototype,"innerText",{configurable:true,get(){return this.textContent;},set(value){this.textContent=value;}});
 Object.assign(globalThis,{window:dom.window,document:dom.document,HTMLElement:dom.HTMLElement,Element:dom.Element,Node:dom.Node,Event:dom.Event,IS_REACT_ACT_ENVIRONMENT:true});
-let root:Root|null=null, sent:ClientMessage[]=[];
+let root:Root|null=null, sent:ClientMessage[]=[], acknowledgeUploads=true;
 const find=(selector:string)=>document.querySelector<HTMLElement>(selector)!;
 const props=(element:HTMLElement)=>{const key=Object.keys(element).find(key=>key.startsWith('__reactProps$'))!;return (element as unknown as Record<string,Record<string,(event:never)=>void>>)[key]!;};
 const click=async(element:HTMLElement)=>{assert.ok(element);await act(async()=>element.click());};
 async function mount(route='p/saltlight/story',size=390,mode='normal',remote=false,touch=true){
-  width=size;coarse=touch;sent=[];
+  width=size;coarse=touch;sent=[];acknowledgeUploads=true;
   const host=document.createElement('div');document.body.append(host);root=createRoot(host);
   if(remote){const marker=document.createElement('meta');marker.name='arke-remote';marker.content='true';document.head.append(marker);}
-  const bridge={connect(){},subscribe(){return()=>{};},send(raw:string){sent.push(JSON.parse(raw));}} as unknown as ArkeBridge;
+  const bridge={connect(){},subscribe(){return()=>{};},send(raw:string){const message=JSON.parse(raw);sent.push(message);if(message.kind==="world-chat-upload" && acknowledgeUploads)queueMicrotask(()=>__applyEventForTest({type:"world-chat.upload-result",at:"2026-09-28T12:00:00Z",requestId:message.requestId,worldId:message.worldId,conversationId:message.conversationId}));}} as unknown as ArkeBridge;
   Object.assign(dom.window,{arke:remote?undefined:bridge});
   const state=developLayoutFixture(mode);
   await act(async()=>{__setBridgeForTest(bridge);__setStateForTest(state);__connectionStatusForTest('open');root!.render(<MemoryRouter initialEntries={['/w/'+state.world!.meta.worldId+'/'+route]}><App/></MemoryRouter>);});
@@ -132,4 +132,26 @@ it('accepting changed style text replaces its reader instead of retaining old au
  const state=developLayoutFixture('style');state.world!.productions[1]!.proseStyle!.samples=['An entirely different sample.'];
  await act(async()=>__setStateForTest(state));const after=find('.fy-overview-card:last-child [aria-label="Read aloud"]');assert.notEqual(before,after);
  await click(after);assert.equal(sent.find(m=>m.kind==='read-prose')?.source.of,'story');
+});
+
+it('Send waits through byte reading and the authoritative upload acknowledgement',async()=>{
+ await mount(undefined,390,'normal',true);acknowledgeUploads=false;await draft('Use the new reference');
+ const input=find('input[type="file"]');await act(async()=>props(input).onChange!({currentTarget:{files:[new File(['A fresh fact'],'fact.txt')],value:'fact.txt'}} as never));
+ assert.ok(find('.fy-cx__send').hasAttribute('disabled'));const upload=sent.find(m=>m.kind==='world-chat-upload');assert.ok(upload?.requestId);assert.equal(sent.some(m=>m.kind==='world-chat-send'),false);
+ const state=developLayoutFixture();state.worldChat!.attachments=[{id:'att_fresh',fileName:'fact.txt',kind:'document',readability:'text-readable',promoted:false}];
+ await act(async()=>{__setStateForTest(state);__applyEventForTest({type:'world-chat.upload-result',at:'2026-09-28T12:00:00Z',requestId:upload.requestId!,worldId:upload.worldId,conversationId:CHAT_ID});});
+ assert.equal(find('.fy-cx__send').hasAttribute('disabled'),false);await click(find('.fy-cx__send'));assert.deepEqual(sent.find(m=>m.kind==='world-chat-send')?.attachmentIds,['att_fresh']);
+});
+it('Develop links at most 20 visible references and lets the author omit one',async()=>{
+ await mount();const state=developLayoutFixture();state.worldChat!.attachments=Array.from({length:23},(_,i)=>({id:'att_'+i,fileName:'note'+i+'.txt',kind:'document' as const,readability:'text-readable' as const,promoted:false}));
+ await act(async()=>__setStateForTest(state));assert.equal(document.querySelectorAll('.fy-cx__chipx').length,20);await click(find('.fy-cx__chipx'));await draft('Use these');await click(find('.fy-cx__send'));
+ assert.deepEqual(sent.find(m=>m.kind==='world-chat-send')?.attachmentIds,Array.from({length:19},(_,i)=>'att_'+(i+4)));
+});
+it('unattended Develop proposals show understood points instead of an empty decision sheet',async()=>{
+ await mount(undefined,390,'staged');const state=developLayoutFixture('staged');state.world!.proposals[0]!.proposal.decision={mode:'unattended'};await act(async()=>__setStateForTest(state));
+ assert.match(find('.fy-thread-peek').textContent!,/What it understood/);await click(find('.fy-thread-peek'));assert.ok(find('.fy-panel__point'));assert.equal(find('.dom-proposal'),null);
+});
+it('replaced Overview acts cannot retain a reader for the former text',async()=>{
+ await mount('p/ledger/overview',984);const before=find('.fy-overview-act [aria-label="Read aloud"]');const state=developLayoutFixture();state.world!.productions[1]!.story!.acts![0]!.summary='A different accepted act.';
+ await act(async()=>__setStateForTest(state));assert.notEqual(find('.fy-overview-act [aria-label="Read aloud"]'),before);
 });

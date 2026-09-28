@@ -7147,9 +7147,16 @@ export class Coordinator {
       }
       case "world-chat-upload": {
         const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        await this.attachBytesToWorldChat(store, msg.conversationId, msg.name, Buffer.from(msg.data, "base64"));
-        await this.openWorldChat(store, msg.conversationId);
+        let reason: string | undefined;
+        if (!store || store.worldId !== msg.worldId) reason = "That world is no longer open.";
+        else {
+          try {
+            reason = await this.attachBytesToWorldChat(store, msg.conversationId, msg.name, Buffer.from(msg.data, "base64"));
+            // The authoritative workspace precedes the result on the ordered transport.
+            await this.openWorldChat(store, msg.conversationId);
+          } catch { reason = "The attachment could not be confirmed. Try again."; }
+        }
+        if (msg.requestId) this.emit({at:this.nowIso(),type:"world-chat.upload-result",worldId:msg.worldId,conversationId:msg.conversationId,requestId:msg.requestId,...(reason ? {reason} : {})});
         return;
       }
       case "world-chat-attach": {
@@ -16927,18 +16934,17 @@ export class Coordinator {
     await this.attachBytesToWorldChat(store, conversationId, name, bytes);
   }
 
-  private async attachBytesToWorldChat(store: WorldStore, conversationId: ConversationId, name: string, bytes: Uint8Array): Promise<void> {
-    const refuse = (reason: string) => this.emit({ at: new Date().toISOString(), type: "world-chat.attachment-refused", conversationId, name, reason });
+  private async attachBytesToWorldChat(store: WorldStore, conversationId: ConversationId, name: string, bytes: Uint8Array): Promise<string | undefined> {
+    const refuse = (reason: string) => { this.emit({ at: new Date().toISOString(), type: "world-chat.attachment-refused", conversationId, name, reason }); return reason; };
     const unreadable = refuseUnreadable(name, bytes);
     if (unreadable) {
-      refuse(unreadable);
-      return;
+      return refuse(unreadable);
     }
 
     try {
       await new WorldChatAttachmentStore(store.dir).ingest(conversationId, { fileName: name, bytes });
     } catch (err) {
-      refuse(err instanceof AttachmentError ? err.message : "it could not be attached");
+      return refuse(err instanceof AttachmentError ? err.message : "it could not be attached");
     }
   }
 

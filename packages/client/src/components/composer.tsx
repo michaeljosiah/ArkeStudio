@@ -133,13 +133,14 @@ export function Composer(props: ComposerProps) {
   const remote = isRemoteSession();
   const off = disabledReason !== undefined;
   const locked = off || busy;
-  const canSend = !locked && value.trim().length > 0;
+
 
   // Drag state, counted rather than flagged: dragging over a child fires dragleave on the
   // parent, and a plain boolean makes the overlay flicker as the pointer crosses the chips.
   const [dragging, setDragging] = useState(false);
   const depth = useRef(0);
   const [taking, setTaking] = useState(0);
+  const canSend = !locked && taking === 0 && value.trim().length > 0;
   const [trouble, setTrouble] = useState<readonly Trouble[]>([]);
   // Dismissed by name-and-reason rather than by identity, so the × works on refusals the caller
   // owns as well as ones raised here. Without it the button is decoration on half the chips.

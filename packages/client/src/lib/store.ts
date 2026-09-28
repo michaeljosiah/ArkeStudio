@@ -692,6 +692,8 @@ export function borrowArtifacts(
   return { requestId };
 }
 
+const browserUploadResults = new Map<string, (reason?: string) => void>();
+
 export type WorldChatMediaOpened = Extract<DomainEvent, { type: "world-chat.media-opened" }>;
 const worldChatMediaListeners = new Set<(answer: WorldChatMediaOpened) => void>();
 export function subscribeWorldChatMediaOpened(listener: (answer: WorldChatMediaOpened) => void): () => void {
@@ -2118,6 +2120,8 @@ function handleFrame(json: string): void {
     } else if (event.type === "world-chat.send-result") {
       sendResults = new Map([...sendResults, [event.requestId, event] as const].slice(-50));
       for (const listener of sendResultListeners) listener(event);
+    } else if (event.type === "world-chat.upload-result") {
+      browserUploadResults.get(event.requestId)?.(event.reason);
     } else if (event.type === "world-chat.attachment-refused") {
       // The last few only: a refusal is news for a moment, not a list to work through — the same
       // rule the composer applies to the ones it raises itself.
@@ -2517,8 +2521,15 @@ export async function attachHostFiles(
         const bytes = new Uint8Array(await file.arrayBuffer());
         const chunks: string[] = [];
         for (let offset = 0; offset < bytes.length; offset += 32768) chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 32768)));
-        if (!send({ kind: "world-chat-upload", worldId: target.worldId, conversationId: target.conversationId, name, data: btoa(chunks.join("")) }))
-          trouble.push({ name, reason: "The studio is disconnected. Attach the file again when it reconnects." });
+        const requestId = crypto.randomUUID();
+        const reason = await new Promise<string | undefined>(resolve => {
+          const finish = (reason?: string) => { clearTimeout(timeout); browserUploadResults.delete(requestId); resolve(reason); };
+          const timeout = setTimeout(() => finish("The upload was not confirmed. Check the connection before trying again."), 60_000);
+          browserUploadResults.set(requestId, finish);
+          if (!send({ kind: "world-chat-upload", requestId, worldId: target.worldId, conversationId: target.conversationId, name, data: btoa(chunks.join("")) }))
+            finish("The studio is disconnected. Attach the file again when it reconnects.");
+        });
+        if (reason) trouble.push({ name, reason });
       } catch { trouble.push({ name, reason: "It could not be read." }); }
     }
     return trouble;
