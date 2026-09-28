@@ -11,7 +11,8 @@ import {
 } from "../../src/productions/scene-commands.js";
 import { acceptCharacterLook, attachCharacterLook, readKit } from "../../src/references/kit.js";
 import { WorldStore } from "../../src/world/store.js";
-import { BEAT_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
+import { VISUAL_NOVEL_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
+import { createProduction } from "../../src/productions/ops.js";
 import { SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -755,7 +756,7 @@ describe("a visual novel's beat fences the world (turn 174, codex round 15)", ()
     const before = await sceneOnDisk(store);
     const [first] = orderedShots(before);
     assert.ok(first);
-    assert.ok(store.getBundle().meta.schemaVersion < BEAT_SCHEMA_VERSION);
+    assert.ok(store.getBundle().meta.schemaVersion < VISUAL_NOVEL_SCHEMA_VERSION);
     await applySceneCommand(store, {
       productionId: PRODUCTION,
       sceneFile: SCENE,
@@ -764,8 +765,23 @@ describe("a visual novel's beat fences the world (turn 174, codex round 15)", ()
       command: { kind: "edit-shot", shotId: first.id, change: { beat: { advance: "voice" } } },
     });
     assert.deepEqual(orderedShots(await sceneOnDisk(store))[0]?.beat, { advance: "voice" });
-    assert.equal(store.getBundle().meta.schemaVersion, BEAT_SCHEMA_VERSION);
-    assert.ok(BEAT_SCHEMA_VERSION <= SUPPORTED_SCHEMA_VERSION, "this build reads what it writes");
+    assert.equal(store.getBundle().meta.schemaVersion, VISUAL_NOVEL_SCHEMA_VERSION);
+    assert.ok(VISUAL_NOVEL_SCHEMA_VERSION <= SUPPORTED_SCHEMA_VERSION, "this build reads what it writes");
+  });
+
+  it("creating a visual novel raises the world too, before any beat is set (codex round 16)", async () => {
+    const { store } = await open();
+    assert.ok(store.getBundle().meta.schemaVersion < VISUAL_NOVEL_SCHEMA_VERSION);
+    await createProduction(store, { title: "Low Water", medium: "video", productionKind: "visual-novel" });
+    assert.equal(store.getBundle().meta.schemaVersion, VISUAL_NOVEL_SCHEMA_VERSION, "an older build would read it as plain video");
+  });
+
+  it("a plain video production leaves the world where it was", async () => {
+    const { store } = await open();
+    const before = store.getBundle().meta.schemaVersion;
+    await createProduction(store, { title: "Low Tide", medium: "video", productionKind: "interactive" });
+    assert.ok(store.getBundle().meta.schemaVersion < VISUAL_NOVEL_SCHEMA_VERSION);
+    assert.ok(store.getBundle().meta.schemaVersion >= before);
   });
 });
 

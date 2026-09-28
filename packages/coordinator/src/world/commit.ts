@@ -27,8 +27,9 @@ import {
   carriesStagePerformance,
   carriesStageRig,
   carriesBeat,
+  carriesVisualNovel,
   upgradeLegacySceneCandidate,
-  BEAT_SCHEMA_VERSION,
+  VISUAL_NOVEL_SCHEMA_VERSION,
   GRAPH_SCENE_SCHEMA_VERSION,
   STAGE_BLOCKING_SCHEMA_VERSION,
   STAGE_EASING_SCHEMA_VERSION,
@@ -788,7 +789,9 @@ export class Committer {
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageSpeed(f.newContent)) ? 21 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStagePerformanceEase(f.newContent)) ? 22 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageEvaluatorVersion(f.newContent)) ? 26 : 0,
-      files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesBeat(f.newContent)) ? BEAT_SCHEMA_VERSION : 0,
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesBeat(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
+      // The kind as much as the beat: a visual novel created or converted, before any beat is set.
+      files.some(f => classify(f.path).track === "production-meta" && f.newContent != null && carriesVisualNovel(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
       // Probe metadata is also written by ordinary artifact filing/backfill.
       sidecarBoundary(files),
       landsProseStyle ? PROSE_STYLE_SCHEMA_VERSION : 0,

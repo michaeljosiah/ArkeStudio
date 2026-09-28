@@ -1,4 +1,4 @@
-import { orderedShots } from "@arke-studio/contracts";
+import { orderedShots, VISUAL_NOVEL_KIND } from "@arke-studio/contracts";
 import {
   isGraphScene,
   linearizeSceneFlow,
@@ -44,11 +44,12 @@ export const STAGE_PERFORMANCE_SCHEMA_VERSION = 7;
 export const STAGE_EASING_SCHEMA_VERSION = 8;
 export const STAGE_RIG_SCHEMA_VERSION = 9;
 /**
- * A visual novel's beat on a shot (turn 174): how it moves on and whether it keeps the picture
- * before. `ShotSchema` is strict, so a build without the field would drop the scene rather than
- * refuse the world — the boundary says so first.
+ * A visual novel (turn 174). Its beat on a shot — how it moves on, whether it keeps the picture
+ * before — is a strict field a build without it would drop the scene over; and the kind itself
+ * changes how the production plays and exports, which an older build would read as plain video
+ * and let be cut as clips (codex round 16). Either one landing fences the world.
  */
-export const BEAT_SCHEMA_VERSION = 41;
+export const VISUAL_NOVEL_SCHEMA_VERSION = 41;
 
 /**
  * A write refused because the graph it would land is not one path (R-59, R-61).
@@ -339,6 +340,16 @@ export function carriesStageRig(raw: string): boolean {
       return typeof staging === "object" && staging !== null &&
         ("rig" in staging || "seed" in staging || "rigIntensity" in staging);
     });
+  } catch {
+    return false;
+  }
+}
+
+/** Do these production.json bytes make the production a visual novel (turn 174)? */
+export function carriesVisualNovel(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return typeof value === "object" && value !== null && (value as Record<string, unknown>)["kind"] === VISUAL_NOVEL_KIND;
   } catch {
     return false;
   }
