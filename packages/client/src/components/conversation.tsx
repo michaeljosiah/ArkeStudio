@@ -959,7 +959,7 @@ export function ProductionConversation({
     setOmittedAttachments(new Set());
     setLanguageModelId(undefined);
     pendingRemember.current = undefined;
-    setOpening(null);
+    setOpening(previous => { previous?.onAttached?.([]); return null; });
     setBusyMedia(null);
     setMediaRefusal(null);
     mediaRequest.current = null;

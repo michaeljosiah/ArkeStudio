@@ -792,13 +792,14 @@ export function ProductionChatScreen() {
    */
   const file = shape?.isEpisodic ? "season.json" : "story.json";
   // The style the book is written in is settled here too (turn 128), in its own file.
+  const eligible = (world?.proposals ?? []).filter(sp => proposalDecisionOf(sp.proposal, world?.conversations ?? []).mode === "attended");
   const candidate =
-    (world?.proposals ?? []).find((sp) =>
+    eligible.find((sp) =>
       sp.proposal.targets.some((t) => t.path === `productions/${prodId}/${file}`),
     ) ??
     (shape?.isEpisodic
       ? null
-      : (world?.proposals ?? []).find((sp) =>
+      : eligible.find((sp) =>
           sp.proposal.targets.some((t) => t.path === `productions/${prodId}/prose-style.json`),
         ) ?? null);
   const staged = candidate && proposalDecisionOf(candidate.proposal, world?.conversations ?? []).mode === "attended" ? candidate : null;
