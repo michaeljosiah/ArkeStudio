@@ -238,6 +238,9 @@ export type ProviderOperation =
   | "lookup-by-key"
   | "list-recent"
   | "list-voices"
+  | "design-voice"
+  | "get-designed-voice"
+  | "list-designed-voices"
   | "save-voice"
   | "delete-voice"
   | "lookup-voice"
@@ -281,6 +284,43 @@ export interface VoiceCatalogueClient extends ProviderClient {
   listVoicesCatalog(key: string): Promise<
     Array<{ provider: string; model: string; voiceId: string; label: string; attributes: string[]; local: boolean; canClone: boolean }>
   >;
+}
+
+/** Protocol only. A coordinator must durably authorise a verified creation quote before calling. */
+export interface VoiceDesignInput {
+  model: string;
+  name: string;
+  description: string;
+  language: string;
+  gender?: "female" | "male" | "neutral";
+}
+
+/** Vendor metadata, not a portable Arke identity or proof of access with another credential. */
+export interface DesignedVoice {
+  remoteId: string;
+  model: string;
+  name: string;
+  description: string;
+  language: string;
+  expiresAt: string;
+}
+
+export interface VoiceDesignResult {
+  /** Preserve a witnessed id even if the remaining response or audition is unusable. */
+  remoteId?: string;
+  voice?: DesignedVoice;
+  sample?: FetchedArtifact;
+  speechUsage?: SpeechUsage;
+  problem?: string;
+}
+
+export interface VoiceDesignClient extends ProviderClient {
+  /** No retries or lookup-by-name: a lost create response has an unknown, potentially paid outcome. */
+  createDesignedVoice(key: string, input: VoiceDesignInput, signal?: AbortSignal): Promise<VoiceDesignResult>;
+  /** Exact-id lookup only; this cannot recover a create whose id was never witnessed. */
+  getDesignedVoice(key: string, remoteId: string, signal?: AbortSignal): Promise<VoiceDesignResult | null>;
+  /** One bounded page of the active project's designed voices, without sample downloads. */
+  listDesignedVoices(key: string, pageToken?: string, signal?: AbortSignal): Promise<{ voices: DesignedVoice[]; nextPageToken?: string }>;
 }
 
 /**

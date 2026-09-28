@@ -5,6 +5,7 @@
  */
 export { AnthropicClient } from "./clients/anthropic.js";
 export { GoogleClient, GEMINI_TTS_MODELS, GEMINI_PRESETS } from "./clients/google.js";
+export { GEMINI_VOICE_DESIGN_AVAILABILITY } from "./clients/google-voices.js";
 export { geminiSpeechModel } from "./gemini-tts-models.js";
 export { cloudVoiceSources } from "./voice-catalogues.js";
 export {
@@ -93,6 +94,10 @@ export {
   type ProviderTransport,
   type ProviderTransportScope,
   type VoiceCatalogueClient,
+  type VoiceDesignClient,
+  type VoiceDesignInput,
+  type VoiceDesignResult,
+  type DesignedVoice,
   type VoiceSlotClient,
   type SubmitRequest,
   type SubmitResult,

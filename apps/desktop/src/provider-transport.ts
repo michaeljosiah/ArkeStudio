@@ -27,7 +27,7 @@ export function providerHttpProfile(scope: ProviderTransportScope): ProviderHttp
   if (scope.operation === "submit") return scope.provider === "fal" ? "enqueue" : "synchronous";
   // Saving a clip as a hosted voice is a generation in all but name: the vendor transcribes and
   // builds the voice before it answers (SPEC-046 R-13), on the deadline a read gets, not a poll's.
-  if (scope.operation === "save-voice") return "synchronous";
+  if (scope.operation === "save-voice" || scope.operation === "design-voice") return "synchronous";
   return "control";
 }
 

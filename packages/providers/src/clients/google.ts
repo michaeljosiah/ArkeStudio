@@ -2,6 +2,8 @@ import type { CapabilityProbe, ClientDeclarations, SpeechUsage } from "@arke-stu
 import { randomUUID } from "node:crypto";
 import { speechInputFits } from "@arke-studio/contracts";
 import { GEMINI_SPEECH_INPUT_BYTES, geminiSpeechModel } from "../gemini-tts-models.js";
+import { googleVoiceDesignBody, googleVoiceDesignResult, googleDesignedVoicePage, requireGoogleVoiceId } from "./google-voices.js";
+import type { VoiceDesignClient, VoiceDesignInput } from "../types.js";
 import { ProviderAuthError, ProviderBusyError, ProviderRequestRejectedError,
   type FetchLike, type PollResult, type SubmitRequest, type SubmitResult, type VoiceCatalogueClient } from "../types.js";
 
@@ -69,13 +71,48 @@ export function geminiWav(data: Uint8Array): boolean {
  * guide and API reference. No idempotency or lookup promise: a lost synchronous response is
  * uncertain. Custom-voice creation and project-scoped bindings belong to separate operations.
  */
-export class GoogleClient implements VoiceCatalogueClient {
+export class GoogleClient implements VoiceCatalogueClient, VoiceDesignClient {
   readonly id = "google" as const;
   readonly declarations: ClientDeclarations = { supportsIdempotencyKey: false, supportsLookupByKey: false, supportsListRecent: false, reportsCost: false };
 
   constructor(private readonly fetchImpl: FetchLike, private readonly baseUrl = "https://generativelanguage.googleapis.com") {}
 
   private headers(key: string): Record<string, string> { return { "x-goog-api-key": key, "Content-Type": "application/json" }; }
+
+  async createDesignedVoice(key: string, input: VoiceDesignInput, signal?: AbortSignal) {
+    const body = googleVoiceDesignBody(input);
+    const response = await this.fetchImpl(`${this.baseUrl}/v1beta/voices`, {
+      method: "POST", headers: this.headers(key), body: JSON.stringify(body), signal, redirect: "error",
+    });
+    await this.checkStatus(response);
+    // There is no documented idempotency key or unique-name lookup. A broken/lost response
+    // is uncertain, not proof that no voice was created, and is never retried by this client.
+    let result: unknown;
+    try { result = await response.json(); }
+    catch { return { problem: "Google voice creation outcome is uncertain; do not repeat the creation" }; }
+    return googleVoiceDesignResult(result, { model: input.model });
+  }
+
+  async getDesignedVoice(key: string, remoteId: string, signal?: AbortSignal) {
+    requireGoogleVoiceId(remoteId);
+    const response = await this.fetchImpl(`${this.baseUrl}/v1beta/voices/${encodeURIComponent(remoteId)}`, {
+      headers: this.headers(key), signal, redirect: "error",
+    });
+    if (response.status === 404) return null;
+    await this.checkStatus(response);
+    return googleVoiceDesignResult(await response.json(), { remoteId });
+  }
+
+  async listDesignedVoices(key: string, pageToken?: string, signal?: AbortSignal) {
+    if (pageToken !== undefined && (typeof pageToken !== "string" || pageToken.length === 0 || pageToken.length > 4096)) throw new ProviderRequestRejectedError("Google: invalid voice page token");
+    const query = new URLSearchParams({ type: "prompted", page_size: "50" });
+    if (pageToken) query.set("page_token", pageToken);
+    const response = await this.fetchImpl(`${this.baseUrl}/v1beta/voices?${query}`, {
+      headers: this.headers(key), signal, redirect: "error",
+    });
+    await this.checkStatus(response);
+    return googleDesignedVoicePage(await response.json(), pageToken);
+  }
 
   private async models(key: string): Promise<Set<string>> {
     const available = new Set<string>();

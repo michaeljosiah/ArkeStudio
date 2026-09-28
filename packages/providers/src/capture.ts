@@ -19,6 +19,7 @@ import type {
   ProviderTransport,
   VoiceCatalogueClient,
   VoiceSlotClient,
+  VoiceDesignClient,
 } from "./types.js";
 
 interface Scope extends ProviderCallContext {
@@ -133,6 +134,9 @@ function summarizeMedia(value: unknown, key = ""): unknown {
     );
   }
   if (typeof value === "string") {
+    // Stateless Google voice keys are bearer-like credentials, including in unexpected error
+    // fields. Never retain one just because the current client asks for stored voices only.
+    if (value.includes("voicekey_")) return value.replace(/voicekey_[A-Za-z0-9_-]+/g, "[redacted voice key]");
     // A data URI is media regardless of its field name or length. Strip its header before
     // hashing: provenance describes the decoded bytes, not a base64 decoder's view of the URI.
     const uri = /^data:([^;,]*)(?:;[^,]*)?,([\s\S]*)$/i.exec(value);
@@ -529,7 +533,7 @@ export function captureProviderClient(
             run("list-recent", context, () => client.listRecent!(key, context)),
         }
       : {}),
-  } as ProviderClient & Partial<Pick<VoiceCatalogueClient, "listVoicesCatalog">> & Partial<Pick<VoiceSlotClient, "saveVoice" | "deleteVoice" | "findVoice" | "hasVoice">>;
+  } as ProviderClient & Partial<Pick<VoiceCatalogueClient, "listVoicesCatalog">> & Partial<Pick<VoiceSlotClient, "saveVoice" | "deleteVoice" | "findVoice" | "hasVoice">> & Partial<Pick<VoiceDesignClient, "createDesignedVoice" | "getDesignedVoice" | "listDesignedVoices">>;
   const catalogue = (client as Partial<VoiceCatalogueClient>).listVoicesCatalog;
   if (catalogue)
     wrapped.listVoicesCatalog = (key) => run("list-voices", undefined, () => catalogue.call(client, key));
@@ -545,5 +549,12 @@ export function captureProviderClient(
     wrapped.findVoice = (key, name, signal) => run("lookup-voice", undefined, () => slots.findVoice!.call(client, key, name, signal));
   if (slots.hasVoice)
     wrapped.hasVoice = (key, voiceId, signal) => run("lookup-voice", undefined, () => slots.hasVoice!.call(client, key, voiceId, signal));
+  const designs = client as Partial<VoiceDesignClient>;
+  if (designs.createDesignedVoice)
+    wrapped.createDesignedVoice = (key, input, signal) => run("design-voice", { model: input.model }, () => designs.createDesignedVoice!.call(client, key, input, signal));
+  if (designs.getDesignedVoice)
+    wrapped.getDesignedVoice = (key, remoteId, signal) => run("get-designed-voice", undefined, () => designs.getDesignedVoice!.call(client, key, remoteId, signal));
+  if (designs.listDesignedVoices)
+    wrapped.listDesignedVoices = (key, pageToken, signal) => run("list-designed-voices", undefined, () => designs.listDesignedVoices!.call(client, key, pageToken, signal));
   return wrapped;
 }
