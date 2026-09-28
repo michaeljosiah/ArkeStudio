@@ -1598,7 +1598,7 @@ export function SettingsLayout() {
   const { pathname, search } = useLocation();
   const slug = pathname.split("/")[2];
   const section = SETTINGS_SECTIONS.find(([id]) => id === slug);
-  const provider = slug === "providers" ? new URLSearchParams(search).get("provider") : null;
+  const providerDetail = slug === "providers" && ["provider", "component"].some(key => new URLSearchParams(search).has(key));
   const theme = useThemePreference();
   const summary = (id: string): string => {
     if (id === "providers") return `${state?.app.providers.filter(p => p.configured).length ?? 0} connected`;
@@ -1615,7 +1615,7 @@ export function SettingsLayout() {
   };
   if (phone) return <PageSheet open onClose={leave} title={section?.[1] ?? "Settings"} className="fy-settings-phone"
     footer={<span>{slug === "general" ? "new work only" : slug === "remote-access" && isRemoteSession() ? "connected through your PC" : `Arke Studio ${state?.app.version ?? "—"}${isRemoteSession() ? " · remote" : ""}`}</span>}
-    {...(slug ? { onBack: () => navigate(provider ? "/settings/providers" : "/settings") } : {})}>
+    {...(slug ? { onBack: () => navigate(providerDetail ? "/settings/providers" : "/settings") } : {})}>
     <div className="fy-settings-phone__content" data-screen="settings">
       {slug ? <Outlet /> : <nav className="fy-settings-sections" aria-label="Settings sections">{SETTINGS_SECTIONS.map(([id, label, Glyph]) =>
         <NavLink key={id} to={`/settings/${id}`}><Glyph size={20} /><span><strong>{label}</strong><small>{summary(id)}</small></span><ChevronRight size={18} /></NavLink>)}</nav>}
@@ -2403,10 +2403,10 @@ export function SettingsGeneralScreen() {
       <FactRow
         what="Narrator"
         does={
-          !phone && <>
-            <ActionButton icon={<Pencil size={13} />} onClick={() => setNarratorOpen(true)}>
+          <>
+            {!phone && <ActionButton icon={<Pencil size={13} />} onClick={() => setNarratorOpen(true)}>
               Change
-            </ActionButton>
+            </ActionButton>}
             {narrator !== null && (
               <ActionButton
                 icon={<RotateCcw size={13} />}

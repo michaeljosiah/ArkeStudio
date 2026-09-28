@@ -13,13 +13,14 @@ export function DeviceNotifications() {
   const [error, setError] = useState("");
   const supported = typeof Notification !== "undefined" && "serviceWorker" in navigator;
   const toggle = async () => {
+    const wantOn = !(on && supported && Notification.permission === "granted");
     setBusy(true); setError("");
     try {
-      if (!on) {
+      if (wantOn) {
         if (!supported || await Notification.requestPermission() !== "granted") { setError("Notifications are blocked in this browser."); return; }
         await navigator.serviceWorker.register("/notification-worker.js");
       }
-      localStorage.setItem(KEY, on ? "off" : "on"); window.dispatchEvent(new Event(EVENT));
+      localStorage.setItem(KEY, wantOn ? "on" : "off"); window.dispatchEvent(new Event(EVENT));
     } catch { setError("Notifications could not be enabled in this browser."); }
     finally { setBusy(false); }
   };

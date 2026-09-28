@@ -43,6 +43,16 @@ it("a phone deep link opens General immediately and its defaults still send comm
  await act(async () => props.onChange({ target: { value: "flux-1.1" } }));
  assert.ok(sent.some(m => m.kind === "set-routing-default"));
 });
+it("component deep links go back to the Providers list and a phone can reset its narrator", async () => {
+ await mount("/settings/providers?component=voxa");
+ await click('dialog [aria-label="Back"]');
+ assert.equal(find("dialog h2").textContent, "Providers"); assert.equal(find(".fy-cols--detail"), null);
+ await click('dialog [aria-label="Back"]'); await click('.fy-settings-sections a[href="/settings/general"]');
+ const state = settingsLayoutFixture(); state.app.narrator = { provider: "kokoro", model: "kokoro-82m", voiceId: "bf_emma", label: "Emma" };
+ await act(async () => __setStateForTest(state));
+ await click('[data-testid="narrator-reset"]');
+ assert.deepEqual(sent.at(-1), { kind: "set-narrator", voice: null });
+});
 it("paired browsers at desktop width get states, never host key and sign-in controls", async () => {
  await mount("/settings/providers?provider=fal", 1360);
  assert.match(find('[data-testid="provider-pane"]').textContent!, /Keyset/);
@@ -90,9 +100,13 @@ it("notifications belong to this browser and never change the PC preference", as
   await click('[aria-label="Notify this phone"]');
   assert.equal(find('[aria-label="Notify this phone"]').getAttribute("aria-checked"), "true");
   assert.equal(values.get("arke-device-notifications"), "on");
+  // A browser permission reset must not make the next enable press silently turn it off.
+  notification.permission = "default";
+  await click('[aria-label="Notify this phone"]');
+  assert.equal(values.get("arke-device-notifications"), "on");
   await click('[aria-label="Notify this phone"]');
   assert.equal(values.get("arke-device-notifications"), "off");
-  assert.equal(permissionRequests, 1); assert.equal(registrations, 1);
+  assert.equal(permissionRequests, 2); assert.equal(registrations, 2);
   assert.ok(sent.every(command => command.kind !== "set-background-notifications"));
  } finally {
   await act(async () => root?.unmount()); root = null;
