@@ -1,4 +1,4 @@
-/* Turn 173 / #1369: page reading, captured touch subjects, and one set of movable panels. */
+/* Turn 173 (issue 1369): page reading, captured touch subjects, and one set of movable panels. */
 .fy-chapters-count, .fy-chapter-card__meta, .fy-ab__state-word, .fy-ab__dot svg { display: none; }
 .fy-passage-ask { display: grid; align-items: stretch; border: 1px solid var(--border); border-radius: 16px; padding: 12px; background: var(--background); min-width: 0; }
 .fy-passage-ask > header { display: flex; align-items: center; gap: 8px; min-height: 44px; font: var(--type-meta); }
@@ -257,4 +257,15 @@
 @media (pointer: coarse) {
   .fy-ab__fchip--on .fy-ab__fcount { color: var(--foreground); opacity: 1; }
   .fy-ab__play { min-width: 44px; min-height: 44px; }
+}
+
+@media (max-width: 1099px) {
+  [data-screen="chapter"].fy-sw, [data-screen="chapter"].fy-sw[data-dock] { overflow-y: auto; scrollbar-width: none; height: 100%; min-height: 0; }
+}
+
+.fy-passage-prompts { scrollbar-width: none; }
+@media (max-width: 599px) {
+  .fy-chapter-block-sheet { top: min(311px, 40dvh); }
+  .fy-chapter-notes-sheet .fy-ch__draws > li { width: auto; }
+  .fy-chapter-notes-sheet .fy-ch__draw-name { color: var(--muted-foreground); font-weight: 400; }
 }

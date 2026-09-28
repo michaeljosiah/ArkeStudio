@@ -2426,6 +2426,25 @@ function TouchPassageAsk({ manuscript, paragraph, words, actions, held, onClose,
   const [reserve, setReserve] = useState(0);
   const anchorId = useId();
   useLayoutEffect(() => {
+    if (!phone || !manuscript) return;
+    const panel = document.querySelector<HTMLElement>(".fy-passage-ask");
+    const page = manuscript.closest<HTMLElement>(".fy-sw");
+    if (!panel || !page) return;
+    // Raising the keyboard-aware bar must not leave the native selection behind it.
+    const reveal = () => {
+      const selection = window.getSelection?.();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (!range || !manuscript.contains(range.commonAncestorContainer) || !range.getBoundingClientRect) return;
+      const hidden = range.getBoundingClientRect().bottom - panel.getBoundingClientRect().top + 16;
+      if (hidden > 0) page.scrollTop += hidden;
+    };
+    reveal();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(reveal);
+    observer?.observe(panel);
+    return () => observer?.disconnect();
+  }, [phone, manuscript, paragraph, words]);
+
+  useLayoutEffect(() => {
     if (phone || !manuscript || !bar.current || paragraph === null) { setTop(null); return; }
     const block = manuscript.querySelector<HTMLElement>(`.fy-rme__doc > :nth-child(${paragraph})`);
     if (!block) { setTop(null); return; }

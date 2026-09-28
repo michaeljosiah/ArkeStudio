@@ -128,7 +128,12 @@ try {
       if(label==='blocks'){
         await js(`(()=>{const e=document.querySelector('[data-block="p0.0"] .fy-ab__text'),t=e.firstChild,r=document.createRange();r.setStart(t,0);r.setEnd(t,20);const s=getSelection();s.removeAllRanges();s.addRange(r);document.dispatchEvent(new Event("selectionchange"));})()`);await js('window.settleLayout()');
         await js(`document.querySelector('[data-block="p0.0"]').click();window.settleLayout()`);await check(name+'-block');
-        if(width<1100){assert.ok(await js('!!document.querySelector(".fy-chapter-block-sheet[open]")'));if(!process.argv.includes('--hover')){assert.ok(await js('Array.from(document.querySelectorAll(".fy-chapter-block-sheet button")).some(e=>e.textContent==="Make this a line")'));}}
+        if(width<1100){assert.ok(await js('!!document.querySelector(".fy-chapter-block-sheet[open]")'));if(!process.argv.includes('--hover')){assert.ok(await js('Array.from(document.querySelectorAll(".fy-chapter-block-sheet button")).some(e=>e.textContent==="Make this a line")'));
+          await click('.fy-ab__make-line > button');
+          await js('Array.from(document.querySelectorAll(".fy-ab__make-line [role=menuitem]")).find(e=>e.textContent.includes("Maren Kest")).click();window.settleLayout()');
+          assert.equal(await js('window.commands.findLast(m=>m.kind==="set-voice-pin")?.quote'), 'The ledger of the Vi');
+          assert.equal(await js('window.commands.findLast(m=>m.kind==="set-voice-pin")?.sheet'), 'maren-kest');
+}}
       }
     }
   }
