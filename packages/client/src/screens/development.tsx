@@ -14,6 +14,8 @@ import {
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
 import { Pin } from "../components/icons.js";
+import { PageSheet } from "../components/page-sheet.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { EmptyState } from "../components/layout.js";
 import { Loading } from "../components/loading.js";
 import { Badge } from "../components/ui.js";
@@ -59,6 +61,12 @@ const pad = (n: number) => String(n).padStart(2, "0");
  */
 function ArkeEdge({ children }: { children: (putAway: () => void) => ReactNode }) {
   const [docked, setDocked] = useState(true);
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const [open, setOpen] = useState(false);
+  if (compact) return <>
+    <button type="button" className="fy-season-arke" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><Pin size={18} />Ask Arke</button>
+    <PageSheet open={open} title="Arke" className="fy-season-arke-sheet" onClose={() => setOpen(false)}>{children(() => setOpen(false))}</PageSheet>
+  </>;
   if (docked) return <>{children(() => setDocked(false))}</>;
   return (
     <button type="button" className="fy-sw__rail" title="Pin the assistant back" onClick={() => setDocked(true)}>
@@ -210,6 +218,8 @@ function SeasonTile({
 }
 
 export function DevelopmentWorkspace() {
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const [modelsOpen, setModelsOpen] = useState(false);
   const { worldId, prodId } = useParams();
   const { state } = useStore();
   const { world, production } = useProduction(worldId, prodId);
@@ -274,7 +284,7 @@ export function DevelopmentWorkspace() {
           editing it is the Series' own accept, never a side effect of a season edit. */}
       {/* Each of the three is a block somebody reads, so each carries its own read-aloud
           (issue 857); an unwritten one renders no control, because there is nothing to hear. */}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) 260px", gap: 24 }}>
+      <div className="fy-season-summary">
         <div className="fy-texthost">
           <div className="fy-mono">THE QUESTION IT ANSWERS</div>
           <div style={{ font: "400 13px/1.6 var(--font-sans)", marginTop: 5 }}>
@@ -322,7 +332,12 @@ export function DevelopmentWorkspace() {
         says what is missing; the panel is what to do about it.
       */}
       <EpisodesBoard />
-      {worldId !== undefined && prodId !== undefined && (
+      {compact && <button type="button" className="fy-production-setup-row" aria-haspopup="dialog" aria-expanded={modelsOpen} onClick={() => setModelsOpen(true)}>Models</button>}
+      {worldId !== undefined && prodId !== undefined && (compact ? (
+        <PageSheet open={modelsOpen} title="Production models" className="fy-production-settings-sheet" onClose={() => setModelsOpen(false)}>
+          <ModelsCard state={state} capabilities={PRODUCTION_MODEL_CAPABILITIES} choices={production.meta.models} scopeWord="this production" onChange={(capability, modelId) => setProductionModel(worldId, prodId, capability, modelId)} />
+        </PageSheet>
+      ) : (
         <ModelsCard
           state={state}
           capabilities={PRODUCTION_MODEL_CAPABILITIES}
@@ -330,7 +345,7 @@ export function DevelopmentWorkspace() {
           scopeWord="this production"
           onChange={(capability, modelId) => setProductionModel(worldId, prodId, capability, modelId)}
         />
-      )}
+      ))}
     </div>
       <ArkeEdge>{(putAway) => <SeasonDock onPutAway={putAway} />}</ArkeEdge>
     </div>

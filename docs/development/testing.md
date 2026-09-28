@@ -289,6 +289,26 @@ Run `test/chat-artifacts-layout.test.tsx` from the client package alongside `wor
 phone New, menu confirmation, reply read/copy controls and filtered navigation that retains the selected artifact across
 live insertions. Typecheck after test edits.
 
+## Productions on phones and Fold7
+
+Run `node scripts/smoke-productions-layout.mjs` with Chrome installed (or `ARKE_CHROME`
+pointing to it). It renders the actual app with schema-checked film, story and episodic fixtures,
+without a coordinator or provider. It checks Productions, the door, the reachable CHOOSE step two,
+the production switcher, settings, season/episode Arke sheets, long text and touch navigation drawers at
+360, 375, 390, 600, 984 and 1360px. The Fold also runs at the requested 984×1092. Phone captures
+simulate a 20px bottom safe area; master crops omit the OS status bars.
+
+The printed temporary directory contains screenshots and measured geometry for all seven turn
+166 master frames. `--viewport phone` runs just 390px; `--baseline <revision>` renders desktop
+with that revision's screens. Compare the PNGs and JSON geometry. WATCH still opens its setup
+conversation: the drawn legacy WATCH form is not a reachable step-two fixture. Counts, content,
+media and available model choices remain app data rather than static design copy.
+
+The client `test/productions-layout.test.tsx` covers every format's page destinations, switching,
+coarse-pointer folding, resize across the phone breakpoint, season/episode Arke sheets, desktop menu focus, the held footer and WATCH routing.
+Run alongside the existing new-production, dashboard, development and production-navigation tests.
+Typecheck after test changes.
+
 ## CI
 
 For Gemini preset activation, run providers `test/gemini-activation.test.ts` and

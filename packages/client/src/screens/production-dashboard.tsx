@@ -15,6 +15,9 @@ import { Composer } from "../components/composer.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Portrait } from "../components/portrait.js";
 import { Button } from "../components/ui.js";
+import { PageSheet } from "../components/page-sheet.js";
+import { ChevronRight } from "../components/icons.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, useProduction } from "../lib/selectors.js";
@@ -58,6 +61,8 @@ export function ProductionDashboardScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const newScene = useSharedNewScene(worldId, prodId);
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const resumeHeading = compact ? "Here’s where you left off." : "Here's where you left off.";
   const [today, setToday] = useState(() => storyProgressDay(new Date()));
   useEffect(() => {
     const now = new Date();
@@ -93,7 +98,7 @@ export function ProductionDashboardScreen() {
     return (
       <div className="fy-prodmain" data-screen="production-dashboard">
         <div className="fy-h1row">
-          <h1 className="fy-h1">{chapters.length === 0 ? "Day one." : "Here's where you left off."}</h1>
+          <h1 className="fy-h1">{chapters.length === 0 ? "Day one." : resumeHeading}</h1>
           <span className="fy-h1row__meta">
             {chapters.length === 0
               ? "the spine comes first"
@@ -193,7 +198,7 @@ export function ProductionDashboardScreen() {
           is on the rail, and saying so again here is the announcement that screen deliberately
           dropped. */}
       <div className="fy-h1row">
-        <h1 className="fy-h1">{dayOne ? production.meta.title : "Here's where you left off."}</h1>
+        <h1 className="fy-h1">{dayOne ? production.meta.title : resumeHeading}</h1>
         {!dayOne && (
           <span className="fy-h1row__meta">
             {acceptedShots} of {shots.length} {beats ? "pictures ready" : "shots covered"} · {pending.length} need you
@@ -213,13 +218,11 @@ export function ProductionDashboardScreen() {
           {/* Below the frame's content, not above it: 53b opens on the production's own name and
               a box to type in. Delivery postdates that drawing and is the app's own (issue 389),
               so it sits where it cannot interrupt the opening. */}
-          <DeliveryAspect production={production} worldId={worldId} prodId={prodId} />
-          <ProductionModels production={production} worldId={worldId} prodId={prodId} />
+          <ProductionSetup production={production} worldId={worldId} prodId={prodId} />
         </>
       ) : (
         <>
-          <DeliveryAspect production={production} worldId={worldId} prodId={prodId} />
-          <ProductionModels production={production} worldId={worldId} prodId={prodId} />
+          <ProductionSetup production={production} worldId={worldId} prodId={prodId} />
           <div className="fy-dashrow">
             <div className="fy-threadcard">
               <div className="fy-threadcard__head">
@@ -265,7 +268,7 @@ export function ProductionDashboardScreen() {
                   <div className="fy-nextcard__sub">
                     Scene {nextGap.scene.number} · {nextGap.shot.title} · {seconds(nextGap.shot.durationSec)}
                   </div>
-                  <div style={{ marginTop: 10 }}>
+                  <div className="fy-nextcard__actions">
                     {/* A picture is made on the scene's beats, not in the clip workflow. */}
                     {beats ? (
                       <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${nextGap.scene.id}`)}>
@@ -283,7 +286,7 @@ export function ProductionDashboardScreen() {
           </div>
           <div>
             <div className="fy-listhead">
-              {beats ? "Latest pictures" : "Latest clips"}
+              <span className="fy-dashsection-label">{beats ? "Latest pictures" : "Latest clips"}</span>
               {/* The same keyboard rule as the chapter link: a destination is a button, not a span. */}
               <button
                 type="button"
@@ -298,6 +301,10 @@ export function ProductionDashboardScreen() {
                 <div
                   key={t.id}
                   className="fy-clip"
+                  role="link"
+                  tabIndex={0}
+                  aria-label={`Review ${t.coversShots.join(", ") || t.id}`}
+                  onKeyDown={event => { if (event.key === "Enter") navigate(generatePath(t.coversShots[0])); }}
                   onClick={() => navigate(generatePath(t.coversShots[0]))}
                 >
                   <div className="fy-clip__frame">
@@ -337,7 +344,7 @@ export function ProductionDashboardScreen() {
               decided (design 55). Re-listing the same takes here was a second copy to keep true. */}
           <div className="fy-dashrow">
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="fy-listhead">Activity</div>
+              <div className="fy-listhead"><span className="fy-dashsection-label">Activity</span></div>
               {recentDecided.length === 0 && <div className="fy-mono">no decisions yet</div>}
               {recentDecided.map((t) => (
                 <div key={t.id} className="fy-listrow">
@@ -354,6 +361,26 @@ export function ProductionDashboardScreen() {
       )}
     </div>
   );
+}
+
+function ProductionSetup({ production, worldId, prodId }: {
+  production: { meta: { aspect?: string; models?: ModelChoices } };
+  worldId: string | undefined;
+  prodId: string | undefined;
+}) {
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const [open, setOpen] = useState(false);
+  const { state } = useStore();
+  const models = (["video", "image"] as const).map(capability => {
+    const id = production.meta.models?.[capability] ?? state?.app.routing.defaults[capability];
+    return state?.app.manifest?.models.find(model => model.id === id)?.displayName ?? id;
+  }).filter(Boolean).join(" · ") || "Models";
+  const controls = <><DeliveryAspect production={production} worldId={worldId} prodId={prodId} /><ProductionModels production={production} worldId={worldId} prodId={prodId} /></>;
+  if (!compact) return controls;
+  return <>
+    <button className="fy-production-setup-row" type="button" aria-label="Delivery and models" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><b>{productionAspect(production.meta)}</b><span>· {models}</span><ChevronRight size={16} /></button>
+    <PageSheet open={open} title="Production settings" className="fy-production-settings-sheet" onClose={() => setOpen(false)}>{controls}</PageSheet>
+  </>;
 }
 
 /**
@@ -468,7 +495,7 @@ function DayOne({
       <div style={{ font: "400 14px/1.6 var(--font-sans)", color: "var(--muted-foreground)", maxWidth: 560 }}>
         Nothing written yet. Say what happens, and the first scene takes shape here.
       </div>
-      <div style={{ maxWidth: 640 }}>
+      <div className="fy-dayone-composer">
         <Composer
           value={message}
           onChange={setMessage}
@@ -486,7 +513,7 @@ function DayOne({
           autoFocus
         />
       </div>
-      <div style={{ display: "flex", gap: 12, maxWidth: 640 }}>
+      <div className="fy-dayone-ways">
         <button type="button" className="fy-radio" style={{ flex: 1 }} disabled={newScene.pending} onClick={() => newScene.create()}>
           <div style={{ font: "600 13px var(--font-sans)" }}>Write the first scene</div>
           <div
