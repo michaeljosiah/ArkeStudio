@@ -61,6 +61,7 @@ export * from "./runtime-gate.js";
 export * from "./reference-budget.js";
 export * from "./bench.js";
 export * from "./voice.js";
+export * from "./designed-voice.js";
 export * from "./planning.js";
 export * from "./cut.js";
 export * from "./timeline.js";

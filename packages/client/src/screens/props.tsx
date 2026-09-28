@@ -4,6 +4,7 @@ import { checkPropName, orderedShots, propSlug, parseMentions, type Prop, type P
 import { Portrait } from "../components/portrait.js";
 import { Button, Callout, Input } from "../components/ui.js";
 import { SheetKindNav } from "./world.js";
+import { Plus } from "../components/icons.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import { acceptPropState, addPropState, createProp, importPropStateCandidate } from "../lib/store.js";
 
@@ -40,6 +41,7 @@ export function PropsScreen() {
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
   const props = world?.props ?? [];
   // One mention cites one thing (issue 1116): the slug the name would be cited by has to be free
   // of every other prop's and every sheet's id, and the coordinator refuses the same collision
@@ -62,20 +64,21 @@ export function PropsScreen() {
   return (
     <div data-screen="props">
       <SheetKindNav active="prop" />
-      <div className="fy-hero">
+      <div className="fy-hero fy-kind-head">
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {props.length} prop{props.length === 1 ? "" : "s"}
         </div>
-        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+        <h1 className="fy-hero__title fy-kind-title">
           Props
         </h1>
         <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 480 }}>
           A name and its states. Each shot says which state it is in; nothing carries over.
         </p>
+        <Button variant="primary" className="fy-kind-new" aria-expanded={creating} onClick={() => setCreating(!creating)}><Plus /> New</Button>
       </div>
       {/* The form and ledger share the page's bounded column (issue 999, design turn 105f). */}
-      <div className="scr-form" style={{ margin: "32px auto", padding: "0 var(--gutter)" }}>
-        <div className="fy-sheetsec">
+      <div className="scr-form fy-props-list">
+        <div className={`fy-sheetsec fy-props-create${creating ? " fy-props-create--open" : ""}`}>
           <div className="fy-sheetlabel">New prop</div>
           <div style={{ display: "flex", gap: 8 }}>
             <Input
@@ -104,16 +107,17 @@ export function PropsScreen() {
           ) : null}
         </div>
         <div className="fy-sheetsec">
-          <div className="fy-sheetrefs">
+          <div className="fy-sheetrefs fy-props-grid">
             {props.map((prop) => {
               const cited = citations(world!, prop);
               return (
                 <button
                   key={prop.id}
                   type="button"
-                  className="fy-sheetref"
+                  className="fy-sheetref fy-props-card"
                   onClick={() => navigate(`/w/${worldId}/props/${prop.id}`)}
                 >
+                  <span className="fy-props-card__frame"><Portrait worldSlug={world?.meta.slug} path={prop.states.map(state => referencePath(prop, state)).find(Boolean) ?? ""} label={prop.name} radius={8} /></span>
                   <span style={{ flex: 1, minWidth: 0, font: "500 11.5px var(--font-sans)" }}>{prop.name}</span>
                   <span className="fy-mono">
                     {prop.states.length} state{prop.states.length === 1 ? "" : "s"} · cited in {cited.length} shot

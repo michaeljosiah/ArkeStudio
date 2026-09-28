@@ -35,6 +35,9 @@ it("host installers, deletion, native folders and chooser payloads stay on the P
 });
 it("world content, browser recordings, existing references and Content & safety remain allowed", () => {
   const cases: ClientMessage[] = [
+    { kind: "design-voice", worldId: "01ARZ3NDEKTSV4RRFFQ69G5FAV", requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV", draft: { model: "gemini-3.8-flash-tts", name: "Narrator", description: "Warm and steady", language: "en-GB" }, confirmedEstimateMicroUsd: 100 },
+    { kind: "save-designed-voice", worldId: "01ARZ3NDEKTSV4RRFFQ69G5FAV", requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV", remoteId: "voice_saved" },
+    { kind: "hear-designed-voice", worldId: "01ARZ3NDEKTSV4RRFFQ69G5FAV", requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV", model: "gemini-3.8-flash-tts", voiceId: "designed:dv_01ARZ3NDEKTSV4RRFFQ69G5FAV:1", text: "A line to hear.", confirmedSpeechMicroUsd: 100 },
     { kind: "set-model-enabled", modelId: "kokoro-82m", enabled: true },
     { kind: "refresh-diagnostics" }, { kind: "adapter-command", command: { action: "disable-content" } },
     { kind: "adapter-command", command: { action: "enable", acknowledgement: { adultAge: true, explicitChoice: true, rightsAndConsent: true } } },

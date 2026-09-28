@@ -3,6 +3,7 @@ import { cloudSpeechPreference, estimateMicroUsd, formatMicroUsd, modelPriceCopy
 import { PageSheet } from "../components/page-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { EditorDialog } from "../components/editor-dialog.js";
+import { DesignVoiceDialog } from "../components/design-voice-dialog.js";
 import { Button } from "../components/ui.js";
 import { playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
@@ -20,7 +21,7 @@ const readerOf = (voice: ReadingVoice): AudiobookReader => ({ provider: voice.pr
  * was the one they could not find.
  */
 type Where = "local" | "saved" | "cloud";
-const whereOf = (voice: ReadingVoice): Where => (voice.local ? "local" : voice.readsClone !== undefined ? "saved" : "cloud");
+const whereOf = (voice: ReadingVoice): Where => (voice.local ? "local" : voice.readsClone !== undefined || voice.readsDesigned !== undefined ? "saved" : "cloud");
 const GROUPS: ReadonlyArray<{ where: Where; title: string; chip: string }> = [
   { where: "local", title: "On this machine", chip: "This machine" },
   { where: "saved", title: "Saved for this world", chip: "Saved" },
@@ -75,6 +76,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
   const [mode, setMode] = useState<"app" | "book">(bookNarrator !== undefined ? "book" : "app");
   const [picked, setPicked] = useState<AudiobookReader | null>(bookNarrator ?? null);
   const [search, setSearch] = useState("");
+  const [designing, setDesigning] = useState(false);
   const [where, setWhere] = useState<Where | "all">("all");
   const words = search.trim().toLowerCase().split(/\s+/).filter((word) => word !== "");
   const found = voices.filter((voice) => matches(voice, rowOf(voice), words));
@@ -271,9 +273,12 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
       )}
     </div>
   );
+  if (designing) return <DesignVoiceDialog worldId={worldId} name="Book narrator" useLabel="Choose for this book"
+    onClose={() => setDesigning(false)} onUse={voice => { setPicked(readerOf({ ...voice, usedBy: [] })); setMode("book"); setDesigning(false); }} />;
   return (
     <NarratorSurface data={data} onClose={onClose} width={mode === "book" ? 860 : 580}>
       <div className="fy-abnarr" data-testid="narrator-dialog">
+        {models.some(model => model.provider === "google" && model.capability === "voice-tts") && <Button onClick={() => setDesigning(true)}>Design a narrator</Button>}
         <span className="fy-seg" role="group" aria-label="Narrator">
           <button type="button" className={`fy-seg__item${mode === "app" ? " fy-seg__item--active" : ""}`} aria-pressed={mode === "app"} onClick={() => setMode("app")}>
             App narrator · {appLabel}

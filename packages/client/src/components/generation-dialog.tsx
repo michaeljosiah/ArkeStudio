@@ -9,6 +9,7 @@ import { Loading } from "./loading.js";
 import { Portrait } from "./portrait.js";
 import { ImageDownload } from "./image-actions.js";
 import { StagedReferencePicker } from "./staged-reference-picker.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { Plus, X } from "./icons.js";
 
 /**
@@ -79,6 +80,7 @@ export function GenerationDialog({
   onClearReference,
   workflow,
   characterDialog = false,
+  sheetLayout = characterDialog,
   capability = "image",
   size = true,
   aspect = true,
@@ -171,6 +173,8 @@ export function GenerationDialog({
   workflow: CharacterImageWorkflow;
   /** Character routes opt into turn 162's phone sheet; pricing workflows are shared by other pages. */
   characterDialog?: boolean;
+  /** Art direction shares the preview-first sheet without changing its pricing workflow. */
+  sheetLayout?: boolean;
   capability?: "image" | "video";
   /**
    * Whether size and shape are the author's to choose. Both default on, because this dialog is
@@ -310,11 +314,32 @@ export function GenerationDialog({
     if (!open && node.open) node.close();
   }, [open]);
 
+  const phone = useMediaQuery("(max-width: 599px)");
+  const phoneCommit = sheetLayout && !characterDialog && phone && commit !== undefined && selected !== null;
+  const generateButton = (<Button
+            variant="primary"
+            disabled={pressed || generating || submitDisabled || (!promptOptional && prompt.trim().length === 0)}
+            onClick={() => {
+              setPressed(true);
+              onSubmit();
+            }}
+          >
+            {/*
+              Two windows, one label. `pressed` covers the round trip before any job exists;
+              `generating` covers the run once the host can see it. Saying nothing during the
+              first was the complaint — the button sat unchanged while the money was already
+              being spent — and reverting to "Generate" the moment the job appeared would have
+              swapped one silence for another.
+            */}
+            {pressed || generating ? "Generating…" : submitLabel}
+          </Button>);
   return (
     <dialog
       ref={dialog}
       className={previews === undefined ? "fy-gendialog" : "fy-gendialog fy-gendialog--wide"}
       data-character-dialog={characterDialog ? workflow : undefined}
+      data-generation-sheet={sheetLayout ? workflow : undefined}
+      data-sheet-choice={phoneCommit || undefined}
       aria-labelledby={titleId}
       onClose={() => {
         returnFocus?.current?.focus();
@@ -453,27 +478,10 @@ export function GenerationDialog({
         />
 
         {why && <p className="fy-gendialog__why">{why}</p>}
+        {phoneCommit && <div className="fy-gendialog__make-more">{generateButton}</div>}
         <div className="fy-gendialog__actions">
-          <Button variant="ghost" onClick={() => dialog.current?.close()}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            disabled={pressed || generating || submitDisabled || (!promptOptional && prompt.trim().length === 0)}
-            onClick={() => {
-              setPressed(true);
-              onSubmit();
-            }}
-          >
-            {/*
-              Two windows, one label. `pressed` covers the round trip before any job exists;
-              `generating` covers the run once the host can see it. Saying nothing during the
-              first was the complaint — the button sat unchanged while the money was already
-              being spent — and reverting to "Generate" the moment the job appeared would have
-              swapped one silence for another.
-            */}
-            {pressed || generating ? "Generating…" : submitLabel}
-          </Button>
+          {!phoneCommit && <Button variant="ghost" onClick={() => dialog.current?.close()}>Cancel</Button>}
+          {phoneCommit && commit ? <Button variant="primary" disabled={commit.disabled === true} onClick={commit.onCommit}>{commit.label}</Button> : generateButton}
         </div>
         </div>
 
@@ -545,14 +553,14 @@ export function GenerationDialog({
                     {commit.secondary.label}
                   </Button>
                 )}
-                <Button
+                {!phoneCommit && <Button
                   variant="primary"
                   disabled={commit.disabled === true || selected === null}
                   onClick={commit.onCommit}
                   {...(commit.hint === undefined ? {} : { hint: commit.hint })}
                 >
                   {commit.label}
-                </Button>
+                </Button>}
               </div>
             )}
           </section>

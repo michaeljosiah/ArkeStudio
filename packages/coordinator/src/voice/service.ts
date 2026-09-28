@@ -1,4 +1,4 @@
-import { quoteSpeech, speechInputFits } from "@arke-studio/contracts";
+import { quoteSpeech, speechInputFits, designedVoiceCandidates } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -492,8 +492,14 @@ export class VoiceService {
   async catalogue(
     clonedVoices: readonly ClonedVoice[] = [],
     clonedAvailability: { local?: boolean; unavailableReason?: string } = {},
+    designedVoices: readonly import("@arke-studio/contracts").WorldDesignedVoice[] = [],
   ): Promise<VoiceCandidate[]> {
-    return (await this.rawCatalogue(clonedVoices, clonedAvailability))
+    const keyed = designedVoices.length === 0 || await this.deps.getKey("google") !== null;
+    return [...await this.rawCatalogue(clonedVoices, clonedAvailability),
+      ...designedVoiceCandidates(designedVoices).map(voice => ({ ...voice,
+        ...this.deps.readerAvailability?.("google"),
+        ...(!keyed ? { unavailableReason: "Connect the Google project that owns this voice. Saved audio still plays." } : {}),
+      }))]
       .filter(voice => this.deps.modelEnabled?.(voice.model) !== false);
   }
 
@@ -579,7 +585,7 @@ export class VoiceService {
   ): Promise<void> {
     const written = sheet.sections.find((s) => s.heading === "Voice · written")?.body ?? "";
     const extracted = extractVoiceAttributes(written);
-    const ranked = rankVoices(extracted, await this.catalogue(bundle.clonedVoices, clonedAvailability));
+    const ranked = rankVoices(extracted, await this.catalogue(bundle.clonedVoices, clonedAvailability, bundle.designedVoices));
     const line = previewLineFor(sheet, bundle.productions);
     const previewQuoteByVoice: Record<string, string> = {};
     const previewMicroUsdByVoice = Object.fromEntries(

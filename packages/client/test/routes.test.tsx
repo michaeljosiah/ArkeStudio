@@ -50,7 +50,7 @@ function nestedButtons(html: string): string[] {
 }
 
 describe("screen inventory", () => {
-  it("covers the full screen inventory (65 screens)", () => {
+  it("covers the full screen inventory (66 screens)", () => {
     // The number is written three times on purpose — it is a tripwire, not a fact being derived,
     // so `SCREENS.length` on both sides would assert nothing. It does mean two branches that each
     // add a screen merge cleanly and land a count that was right for neither: #268 and #243 did
@@ -60,8 +60,9 @@ describe("screen inventory", () => {
     // 62 after removing the hosting-choice screen from startup.
     // Publications is independent of any open world (SPEC-048).
     // Remote access adds desktop-only owner controls for phone pairing (issue #1311).
-    assert.equal(SCREENS.length, 65);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 65, "screen ids are unique");
+    // The compact Cast kind header exposes faction authoring (design turn 161).
+    assert.equal(SCREENS.length, 66);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 66, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {

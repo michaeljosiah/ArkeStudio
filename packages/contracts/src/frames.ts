@@ -1,5 +1,6 @@
 import { valueSchema } from "./value-schema.js";
 import { ReviewCitationSchema } from "./take.js";
+import { VoiceDesignDraftSchema } from "./designed-voice.js";
 import { GenesisDraftSchema } from "./genesis.js";
 import { GenesisImportResolveSchema } from "./genesis-imports.js";
 import { GenesisImageTargetSchema } from "./genesis-images.js";
@@ -1808,6 +1809,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** SPEC-011 R-7: rank the voice catalogue against the sheet's written voice. */
   z.object({ kind: z.literal("voice-candidates"), worldId: UlidSchema, sheetId: SlugSchema }).strict(),
+  z.object({ kind: z.literal("design-voice"), requestId: UlidSchema, worldId: UlidSchema,
+    draft: VoiceDesignDraftSchema, confirmedEstimateMicroUsd: z.number().int().nonnegative(),
+  }).strict(),
+  z.object({ kind: z.literal("save-designed-voice"), requestId: UlidSchema, worldId: UlidSchema,
+    jobId: z.string().regex(/^jb_[0-9A-HJKMNP-TV-Z]{26}$/).optional(), remoteId: z.string().regex(/^voice_[A-Za-z0-9_-]{1,200}$/).optional(),
+  }).strict(),
+  z.object({ kind: z.literal("hear-designed-voice"), requestId: UlidSchema, worldId: UlidSchema,
+    model: z.string().min(1), voiceId: z.string().min(1), text: z.string().trim().min(1).max(4000),
+    confirmedSpeechMicroUsd: z.number().int().nonnegative(),
+  }).strict(),
   /**
    * The plain catalogue, for the bench (design 70). Deliberately NOT `voice-candidates`: that
    * one ranks the catalogue against a character's written voice, which is the wrong question

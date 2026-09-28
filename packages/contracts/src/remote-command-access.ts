@@ -93,6 +93,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "regenerate-tile": "studio", "compile-grid": "studio", "designate-compilation": "studio",
   "set-style-override": "studio", "voice-candidates": "studio", "voice-catalogue": "studio",
   "voice-line": "studio", "voice-preview": "studio", "transcribe-dictation": "studio",
+  "design-voice": "studio", "save-designed-voice": "studio", "hear-designed-voice": "studio",
   "create-production": "studio", "propose-story-overview": "studio", "draft-story-overview": "studio",
   "propose-season": "studio", "create-episode": "studio", "propose-episode": "studio",
   "reorder-episodes": "studio", "draft-scene": "studio", "create-scene": "studio",

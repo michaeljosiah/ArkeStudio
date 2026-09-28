@@ -1,4 +1,5 @@
 import { ProductionSetupOriginSchema } from "@arke-studio/contracts";
+import { parseDesignedVoices, type WorldDesignedVoice } from "@arke-studio/contracts";
 import { isWorldImagePath } from "@arke-studio/contracts";
 import { BorrowedImageOriginSchema, type BorrowedImageOrigin, TakeDialogueFeedbackSchema, type TakeDialogueFeedback } from "@arke-studio/contracts";
 import { RehearsalSessionSchema, deriveRehearsalLines, PerformanceBibleEventSchema, foldPerformanceBible } from "@arke-studio/contracts";
@@ -129,7 +130,7 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Thirty-four is the performed reading, notes and book narrator (SPEC-047 R-44..R-46).
 // Thirty-five adds the durable founding conversation carried into world chat.
 // Forty-one adds a visual novel's beat to strict shots (turn 174).
-export const SUPPORTED_SCHEMA_VERSION = 41;
+export const SUPPORTED_SCHEMA_VERSION = 42;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -437,18 +438,21 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
   // owns — which is also why this does not go through `tryParse`'s all-or-nothing shape. A world
   // with no file simply has none, and that is the normal state until somebody clones something.
   let clonedVoices: ClonedVoice[] = [];
+  let designedVoices: WorldDesignedVoice[] = [];
   if (await exists(join(dir, CLONED_VOICES_PATH))) {
     const parsed = await tryParse(CLONED_VOICES_PATH, (raw) => {
       const doc = JSON.parse(raw) as { voices?: unknown };
       const voices = parseVoiceLibrary(doc);
+      const designed = parseDesignedVoices(doc);
       // Valid JSON whose entries are all unreadable is not an empty library — it is a broken one,
       // and reading it as "nothing was ever cloned" hides the failure SPEC-002 R-2 requires named.
-      if (voices.length === 0 && Array.isArray(doc.voices) && doc.voices.length > 0) {
+      if (voices.length + designed.length === 0 && Array.isArray(doc.voices) && doc.voices.length > 0) {
         throw new Error(`${doc.voices.length} voice entries could not be read`);
       }
-      return voices;
+      return { voices, designed };
     });
-    clonedVoices = parsed ?? [];
+    clonedVoices = parsed?.voices ?? [];
+    designedVoices = parsed?.designed ?? [];
   }
 
   const sheets: Sheet[] = [];
@@ -1227,6 +1231,7 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     referenceReviews,
     artifacts,
     clonedVoices,
+    designedVoices,
     productions,
     series,
     proposals,
