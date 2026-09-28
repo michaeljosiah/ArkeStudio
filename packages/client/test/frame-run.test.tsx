@@ -527,6 +527,38 @@ describe("frame-run quote authorization", () => {
     assert.equal(__stateForTest().frameRunStartResults[`${request.requestId}:${QUOTE_ID}`], undefined, "accepted result is consumed");
   });
 
+  it("a visual novel's scene-wide run stays on the beats: there is no cut to assemble (codex round 6)", async () => {
+    const sent: ClientMessage[] = [];
+    const state = stateWith();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.meta = { ...production.meta, medium: "video", kind: "visual-novel" };
+    const item = await mount(state, sent);
+    await click(named(item, "Generate frames"));
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    await click([...one(item, ".fy-swgen")!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLElement);
+    assert.ok(sent.some((message) => message.kind === "frame-run-start"));
+    await act(async () => emitStartResult({ requestId: request.requestId, quoteId: QUOTE_ID, disposition: "accepted" }));
+    assert.equal(one(item, ".fy-swgen"), null, "the acceptance closes the dialog");
+    assert.deepEqual(all(item, ".fy-sw__tab").map((tab) => tab.textContent), ["Beats", "Preview"], "still on the scene's beats");
+    assert.equal(sent.some((message) => message.kind === "timeline-assemble"), false, "no film cut is assembled");
+  });
+
+  it("a visual novel's run packs the shots it quotes, never a kept picture (codex round 12)", async () => {
+    const sent: ClientMessage[] = [];
+    const state = stateWith();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.meta = { ...production.meta, medium: "video", kind: "visual-novel" };
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")! as unknown as { shots: Array<{ beat?: unknown; durationSec?: number }> };
+    scene.shots[1]!.beat = { samePicture: true };
+    // Two shots this long are two boards under the 15s clip limit; the one the run makes is one.
+    for (const shot of scene.shots) shot.durationSec = 10;
+    const item = await mount(state, sent);
+    await click(named(item, "Generate frames"));
+    const dialog = one(item, ".fy-swgen")!;
+    assert.match(dialog.textContent ?? "", /Packing.*1 shot → 1 board/, "sh_13 keeps sh_12's picture and is no board member");
+    assert.doesNotMatch(dialog.textContent ?? "", /shot undefined/);
+  });
+
   it("quotes and starts only the row whose Generate frame control was clicked", async () => {
     const sent: ClientMessage[] = [];
     const item = await mount(stateWith(), sent);

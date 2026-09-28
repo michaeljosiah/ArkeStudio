@@ -75,6 +75,11 @@ it("gives episodic and branching productions their own page destinations", async
   const state = productionsLayoutFixture(); state.world!.productions[1]!.meta.kind = "interactive";
   await act(async () => __setStateForTest(state));
   assert.ok(labels().includes("Branch map"));
+  assert.ok(labels().includes("Cut"));
+  const novel = productionsLayoutFixture(); novel.world!.productions[1]!.meta.kind = "visual-novel";
+  await act(async () => __setStateForTest(novel));
+  assert.ok(labels().includes("Branch map"));
+  assert.ok(!labels().includes("Cut"), "visual novels are read on the branch map at phone widths too");
 });
 
 it("uses a labelled drawer on a touch Cut, closes on navigation, and keeps the Fold switch menu through resize", async () => {

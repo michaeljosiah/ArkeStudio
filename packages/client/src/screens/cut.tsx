@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { Navigate, useParams, useSearchParams } from "react-router";
 import {
   CLIP_DEFAULT_SEC,
   deriveCut,
   MEDIA_CANVAS_HEADROOM_SEC,
   type MediaDestination,
   productionFrameRate,
+  productionShape,
   type ProductionTimeline,
   resolvePictureTimeline,
   previewEditorRequest,
@@ -194,7 +195,20 @@ function useFileDrag(): DroppedKind[] | null {
   return kinds;
 }
 
+/**
+ * A visual novel has no cut (turn 174): its scenes are read as beats, and its preview and package
+ * are the branch map's. Clips left from an interactive movie would be trimmed here to no effect,
+ * so the address goes to the branch map (codex round 15). A component of its own, so the editor's
+ * hooks never run behind an early return.
+ */
 export function CutScreen() {
+  const { worldId, prodId } = useParams();
+  const { production } = useProduction(worldId, prodId);
+  if (production && productionShape(production.meta).playsAsBeats) return <Navigate to={`/w/${worldId}/p/${prodId}/branch-map`} replace />;
+  return <CutEditorScreen />;
+}
+
+function CutEditorScreen() {
   const { worldId, prodId } = useParams();
   const { connection, state: studio } = useStore();
   const worlds = studio?.worlds ?? [];

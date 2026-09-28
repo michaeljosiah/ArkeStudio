@@ -244,7 +244,7 @@ export function GenerateLineSheet({ world, production, scene, sheet, model, line
             />
           )}
           <div className="fy-linedoor__actions">
-            <Button size="sm" variant="primary" disabled={busy || uploadConfirmation !== null} onClick={() => generate()}>Generate · {quote.estimatedMicroUsd === 0 ? "local" : formatMicroUsd(quote.estimatedMicroUsd)}</Button>
+            <Button size="sm" variant="primary" disabled={busy || uploadConfirmation !== null} onClick={() => generate()}>Generate · {quote.estimatedMicroUsd === 0 ? "local" : `${model.pricing.kind === "perToken" ? "up to " : ""}${formatMicroUsd(quote.estimatedMicroUsd)}`}</Button>
             {busy && <Button size="sm" variant="ghost" onClick={() => send({ kind: "cancel-performance-generation", worldId: world.meta.worldId, operationId: quote.operationId })}>Cancel</Button>}
           </div>
         </div>

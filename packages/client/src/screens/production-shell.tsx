@@ -688,7 +688,8 @@ export function ProductionLayout() {
                   {item("artifacts", "Artifacts", String(artifactCount))}
                   {/* Stills is a lens on Generate now (design 55a), not a rail destination. */}
                   {item("generate", "Generate", String(production?.takes.length ?? 0))}
-                  {item("cut", "Cut", cut ? railFigure : "0:00")}
+                  {/* A visual novel is read as beats, never cut: its preview and package are the branch map's. */}
+                  {shape?.playsAsBeats ? null : item("cut", "Cut", cut ? railFigure : "0:00")}
                 </>
               )}
             </>

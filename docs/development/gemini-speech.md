@@ -2,9 +2,29 @@
 
 The Google unary speech client is implemented, covered by protocol fixtures and smoke-tested
 against both models with an authorised account. It is exported
-from `@arke-studio/providers` for qualification and registered in the provider factory, with
-host-owned credential setup. No Gemini models are yet in the shipped model catalogue, and no
-application default changes in this stage.
+from `@arke-studio/providers` and registered in the provider factory, with host-owned credential
+setup. Both models are in the shipped catalogue. Desktop, development and standalone hosts
+list their available presets after a Google key is configured in Settings → Models.
+
+For new cloud choices, Flash leads creative casting and the audiobook narrator picker;
+Flash-Lite leads routine read-aloud. Character matching still respects the written voice's
+attributes before using the provider preference to break ties. Existing casting, routing and
+book narrators are unchanged. Kokoro remains the app's default narrator, and local choices stay
+first in narrator pickers. Setup and browsing do not synthesize speech or switch a narrator.
+Models disabled in Settings are omitted from the shared catalogue and both narrator pickers
+before recommendation. Character assignment and preview commands also enforce that setting.
+Performance preparation, confirmation and speech queue admission likewise refuse disabled
+models. Saved Gemini shot/performance and Bench choices are checked against the current key's
+catalogue before quotes or take reservation; shared speech queue admission checks again before
+journalling a job. These checks discover only Google's presets and do not synthesize speech.
+Queue batches share discovery for each exact reader and credential; results expire with the
+batch, and a changed key or disabled model invalidates them before another job is admitted.
+A standalone host without a local speech service needs an explicitly selected cloud narrator;
+book, chapter, audition and ordinary/voiced prose reads refuse an unavailable local reader before synthesis.
+Table Read supports both Gemini assignments with model-specific WAV caches, bounded input and
+current-reader validation before preparation. Existing cached reads remain playable offline.
+Token-priced preview, founding audition and performance controls say “up to”; aggregate audiobook and page-read
+confirmations also identify their authorization ceiling, with actual usage settled after generation.
 
 The client targets the exact `gemini-3.8-flash-tts` and `gemini-3.8-flash-lite-tts` IDs through
 `POST /v1beta/interactions`. Spoken text and `speech_metadata.style` remain separate. Requests
@@ -27,13 +47,18 @@ bound each request. Duration is not treated as a guaranteed ceiling. The client 
 rejects compiled text plus style over a conservative 7,000-byte request budget; this is not a
 claim that bytes equal Google tokens. The shared speech packer applies this byte bound before
 quoting plain reads and directed audiobook parts, including a performed character's note.
-Tighter token/output bounds and acoustic long-read qualification still precede activation.
+The author requested preset activation before the broader acoustic qualification on 2026-09-27.
+Tighter token/output bounds and acoustic long-read qualification remain outstanding.
 
-`geminiSpeechModel` exports qualification rows for both models without inserting them into the
-shipped catalogue. Their six deliveries and short phrase compile to separate instructions through
+`geminiSpeechModel` supplies the shipped rows. Their six deliveries and short phrase compile to separate instructions through
 the existing cadence compiler. A delivery span becomes its own request and the surrounding style
 resumes after it. Numeric speed, pause, breath and emphasis remain held; no exact timing or
 acoustic adherence is claimed. Vocal-event authoring and its schema migration are still pending.
+Bench and shot lines also carry their named delivery as separate style. The single-line
+performance path refuses delivery spans; those use the audiobook's directed-part compiler.
+Bench and shot lines validate words plus delivery bytes before reserving a take or creating
+a queue request; oversized lines need shortening or the audiobook's read-in-parts path.
+Character previews validate their normalized wording before quotation and queue construction.
 
 `splitSpeechInput` in contracts packs at sentence/word boundaries and retains source offsets,
 without cutting a surrogate pair. The byte allowance includes the separate instructions. An
@@ -55,7 +80,7 @@ settlement and priced separately from provider-reported charges.
 From the repository root:
 
 ```powershell
-node --import tsx --test packages/providers/test/google-tts.test.ts packages/providers/test/capture.test.ts
+node --import tsx --test packages/providers/test/google-tts.test.ts packages/providers/test/gemini-activation.test.ts packages/providers/test/capture.test.ts
 node --import tsx --test packages/coordinator/test/queue/speech-pricing.test.ts
 node --import tsx --test packages/contracts/test/speech-input.test.ts packages/coordinator/test/productions/gemini-speech-parts.test.ts
 ```
@@ -82,7 +107,8 @@ $0.009247 at the published standard paid rates; this is usage-derived cost, not 
 proof of a particular billing tier. No key was written to the repository or probe files.
 This establishes basic account access and the unary protocol only. Listening quality,
 direction adherence, languages, long reads, custom voices, and rollout qualification remain
-outstanding; no Gemini model is enabled by this smoke test.
+outstanding. The later preset activation is a staged product decision, not a claim that this
+smoke test established full release qualification.
 
 Protocol and rates were checked on 2026-09-27 against Google's [speech guide](https://ai.google.dev/gemini-api/docs/speech-generation),
 [Interactions reference](https://ai.google.dev/api/interactions-api),

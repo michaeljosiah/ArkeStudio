@@ -7,7 +7,28 @@
 export interface InteractivePlayerScene {
   title: string;
   /** Played in order; none plays the scene as a slate (preview only — an export refuses it). */
-  clips: Array<string | InteractivePlayerClip>;
+  clips?: Array<string | InteractivePlayerClip>;
+  /** A visual novel's scene (turn 174): read beat by beat instead of played; wins over `clips`. */
+  beats?: InteractivePlayerBeat[];
+}
+
+/** One beat: a picture and a line, read at the viewer's pace. */
+export interface InteractivePlayerBeat {
+  picture?: string;
+  /** The line; none is the picture alone. */
+  text?: string;
+  /** Who says it, as shown on the tab; none is narration, unless `dialogue` says otherwise. */
+  speaker?: string;
+  /** A line of dialogue still waiting for its speaker: shown as dialogue, never as narration. */
+  dialogue?: boolean;
+  /** Its voice; none reads as text. */
+  audio?: string;
+  /** "voice": on after the voice; "tap": when the reader moves on (the default); "hold": after `holdSec`. */
+  advance?: "voice" | "tap" | "hold";
+  holdSec?: number;
+  motion?: "push" | "drift" | "none";
+  /** Keeps the beat before's picture, still moving: a shot's next line, or a same-picture beat. */
+  keep?: boolean;
 }
 
 /** A window into a file: from `from` seconds (default 0) to `to` (default the file's end). */
@@ -46,6 +67,8 @@ export interface InteractivePlayerOptions {
   storageKey?: string | null;
   /** Preview from here: the route starts at this scene instead of the start. */
   from?: string;
+  /** Where in `from` to begin: a beat scene's beat index, a clip scene's seconds. */
+  at?: number;
   /** Skip the poster and play at once. */
   autoplay?: boolean;
   /** Present in the app's preview only: the author's strip and the walk evidence. */

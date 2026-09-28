@@ -151,6 +151,7 @@ export function rankVoices(extracted: string[], candidates: VoiceCandidate[]): R
     (a, b) =>
       b.overlap - a.overlap ||
       Number(a.candidate.local) - Number(b.candidate.local) ||
+      cloudSpeechPreference(a.candidate) - cloudSpeechPreference(b.candidate) ||
       a.candidate.label.localeCompare(b.candidate.label) ||
       a.candidate.provider.localeCompare(b.candidate.provider) ||
       a.candidate.model.localeCompare(b.candidate.model) ||
@@ -308,6 +309,8 @@ export function firstReadNotice(voice: Pick<ClonedVoice, "remote">, provider: st
  * display name, and with no row as its provider.
  */
 const READER_NAMES: Readonly<Record<string, string>> = {
+  "gemini-3.8-flash-tts": "Gemini Flash",
+  "gemini-3.8-flash-lite-tts": "Gemini Flash-Lite",
   "comfyui-cloned-voice": "IndexTTS",
   "kokoro-82m": "Kokoro",
   "eleven_multilingual_v2": "ElevenLabs",
@@ -316,6 +319,14 @@ const READER_NAMES: Readonly<Record<string, string>> = {
   "breeze-tts-2": "Breeze",
   "fish-s2.1-pro": "Fish Audio",
 };
+
+/** Rank new cloud choices only; never rewrite an assignment or the local app narrator. */
+export function cloudSpeechPreference(target: { provider: string; model?: string | null }, use: "creative" | "routine" = "creative"): number {
+  if (target.provider !== "google") return 2;
+  const preferred = use === "routine" ? "gemini-3.8-flash-lite-tts" : "gemini-3.8-flash-tts";
+  if (target.model === preferred) return 0;
+  return target.model === "gemini-3.8-flash-lite-tts" || target.model === "gemini-3.8-flash-tts" ? 1 : 2;
+}
 
 export function readerName(
   target: { provider: string; model?: string | null },
@@ -355,6 +366,7 @@ export function readerPlace(provider: string, local?: boolean): string {
 export function readerPriceLabel(row: Pick<ManifestModel, "pricing"> | null | undefined): string | null {
   if (!row) return null;
   if (row.pricing.kind === "unmetered") return "free";
+  if (row.pricing.kind === "perToken" && row.pricing.speech !== undefined) return "quoted per read";
   if (row.pricing.kind !== "perCharacter") return null;
   const perThousand = (row.pricing.microUsdPerCharacter / 1000).toFixed(3).replace(/(\.\d\d)0$/, "$1");
   const unit = row.pricing.unit === "utf8-byte" ? " bytes" : row.pricing.unit === "cjk-double" ? " · CJK ×2" : "";
@@ -659,6 +671,8 @@ export type DeliveryMapping =
  * express it (R-15) — never a take that silently ignores the direction.
  */
 export function deliveryParams(provider: string, delivery: Delivery): DeliveryMapping {
+  // Google carries the named delivery as structured language in the provider adapter.
+  if (provider === "google") return { ok: true, params: {} };
   if (provider === "elevenlabs") return { ok: true, params: ELEVENLABS_DELIVERY[delivery] };
   if (provider === "kokoro") {
     const params = KOKORO_DELIVERY[delivery];
@@ -691,7 +705,7 @@ export function deliveryParams(provider: string, delivery: Delivery): DeliveryMa
  * prepares the slot, the clone's language for the R-23 tag — so the door that opens on a
  * cadence declaration and the gate that refuses read one list (codex on PR 1156).
  */
-export const PERFORMANCE_GENERATION_PROVIDERS: readonly string[] = ["kokoro", "elevenlabs", "mistral", "breezeblue", "fishaudio"];
+export const PERFORMANCE_GENERATION_PROVIDERS: readonly string[] = ["kokoro", "google", "elevenlabs", "mistral", "breezeblue", "fishaudio"];
 
 export function supportsPerformanceGeneration(model: Pick<ManifestModel, "provider" | "capability" | "cadence"> | null | undefined): boolean {
   return model !== null && model !== undefined && model.capability === "voice-tts" && model.cadence !== undefined && PERFORMANCE_GENERATION_PROVIDERS.includes(model.provider);

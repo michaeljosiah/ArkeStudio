@@ -311,6 +311,18 @@ Typecheck after test changes.
 
 ## CI
 
+For Gemini preset activation, run providers `test/gemini-activation.test.ts` and
+`test/google-tts.test.ts`, coordinator `test/audio/performance-generation.test.ts` and
+`test/voice/service.test.ts`, `test/audio/table-read.test.ts`, `test/voice/page-read.test.ts` and
+`test/voice/voiced-read.test.ts`; run client `test/gemini-voice-preference.test.tsx`,
+`test/character-dialog.test.tsx` and `test/voice-line.test.tsx` from its package.
+These use fixtures: catalogue discovery is read-only, saved selections survive recommendation
+changes, and setup never generates audio. See [Gemini speech](gemini-speech.md) for the paid
+qualification boundary; fixture tests do not establish listening quality or account quota.
+`node --import tsx scripts/smoke-gemini-voices.mjs` renders both pickers in a sandboxed
+Electron file page at 1200 × 790 and 1024 × 640, blocks network requests, checks retained
+selection/no generation and saves screenshots for visual inspection.
+
 For publications, run coordinator `test/publications/`, desktop `test/publication-host.test.ts`
 with `preload-auth.test.ts` and `transport-auth.test.ts`, and client `test/publications.test.tsx`
 with `routes.test.tsx` from the client package. After building, the real desktop file-page check is:

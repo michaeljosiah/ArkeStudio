@@ -703,7 +703,7 @@ describe("the performance path's readers (SPEC-044 R-14, SPEC-046 issue 1149)", 
   const row = (provider: ManifestModel["provider"], id: string, cadence = true) =>
     ({ id, provider, capability: "voice-tts" as const, ...(cadence ? { cadence: { deliveries: ["measured" as const], speed: null, pause: "unsupported" as const, emphasis: "unsupported" as const, breath: "unsupported" as const, outputTimestamps: "none" as const, deliveryMappings: { measured: { settings: {} } } } } : {}) });
   it("include the hosted readers, and still exclude the recipe and a row with no cadence", () => {
-    assert.deepEqual([...PERFORMANCE_GENERATION_PROVIDERS], ["kokoro", "elevenlabs", "mistral", "breezeblue", "fishaudio"]);
+    assert.deepEqual([...PERFORMANCE_GENERATION_PROVIDERS], ["kokoro", "google", "elevenlabs", "mistral", "breezeblue", "fishaudio"]);
     assert.equal(supportsPerformanceGeneration(row("breezeblue", "breeze-tts-2")), true);
     assert.equal(supportsPerformanceGeneration(row("mistral", "voxtral-mini-tts")), true);
     assert.equal(supportsPerformanceGeneration(row("fishaudio", "fish-s2.1-pro")), true);

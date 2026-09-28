@@ -65,6 +65,7 @@ type Audio = Extract<DomainEvent, { type: "voice.audio" }>;
 async function withHarness(
   cloud: readonly VoiceCandidate[],
   run: (h: { events: DomainEvent[]; spoken: string[]; send: (message: ClientMessage) => Promise<void> }) => Promise<void>,
+  cloudOnly = false,
 ): Promise<void> {
   const { root, worldDir } = await makeTempRoot();
   const castDir = join(worldDir, "productions", LEDGER, ".voices");
@@ -97,7 +98,7 @@ async function withHarness(
     manifest: { manifestVersion: 1, generated: "2026-09-06", models: [ELEVEN] },
     observeEvent: (event) => events.push(event),
     voice: {
-      sidecar: {
+      sidecar: cloudOnly ? null : {
         health: async () => ({ engineStatus: { kokoro: { ready: true } } }),
         listVoices: async () => [{ id: "bm_george", label: "George", attributes: [] }],
         synthesize: async (input: { voiceId: string; text: string }) => {
@@ -121,6 +122,16 @@ async function withHarness(
 
 const readVoiced = (send: (message: ClientMessage) => Promise<void>) =>
   send({ kind: "read-prose-page", requestId: REQUEST, worldId: WORLD_ID, sources: [{ of: "chapter-voiced", productionId: LEDGER, chapterId: "neap" }] });
+
+it("a cloud-only voiced page refuses an unavailable local fallback before synthesis", () =>
+  withHarness([], async ({ events, spoken, send }) => {
+    await readVoiced(send);
+    const failed = events.find(event => event.type === "voice.audio" && event.status === "failed");
+    assert.ok(failed && failed.type === "voice.audio");
+    assert.match(failed.error!, /Choose a configured cloud narrator/);
+    assert.deepEqual(spoken, []);
+    assert.equal(events.some(event => event.type === "job.updated"), false);
+  }, true));
 
 describe("the voiced page through the coordinator (turn 130)", () => {
   it("a speaker whose assigned voice the catalogue does not list reads in the narrator's, and nothing is priced (codex on PR 914)", () =>

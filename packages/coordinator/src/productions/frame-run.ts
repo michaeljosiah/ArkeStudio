@@ -34,6 +34,8 @@ import {
   type SceneRecord,
   type Take,
   type WorldBundle,
+  beatPictureShotId,
+  productionShape,
 } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import { decodePng, encodePng, type RgbaImage } from "../references/png.js";
@@ -289,7 +291,10 @@ async function compileFrameRun(input: CompileFrameRunInput): Promise<FrameRun> {
   if (!input.eligible) throw new Error(`${input.model.displayName} is not currently eligible to run`);
   const shots = orderedShots(input.scene);
   const frameByShot = new Map(shots.map((shot) => [shot.id, selectedFrame(input.production, input.world, shot.id)]));
-  const requested = input.shotId === undefined ? shots : shots.filter((shot) => shot.id === input.shotId);
+  // A visual novel's beat that keeps the picture before shows no picture of its own (turn 174), so
+  // a scene-wide run never spends on one; asked for by name, the shot is generated as asked.
+  const retained = (shotId: string) => productionShape(input.production.meta).playsAsBeats && beatPictureShotId(shots, shotId) !== shotId;
+  const requested = input.shotId === undefined ? shots.filter((shot) => !retained(shot.id)) : shots.filter((shot) => shot.id === input.shotId);
   if (input.shotId !== undefined && requested.length === 0) throw new Error(`shot ${input.shotId} is not in this scene`);
   const included = requested.filter((shot) => input.scope === "all" || frameByShot.get(shot.id) === null);
   if (included.length === 0) throw new Error("nothing to generate - this scope contains zero shots");
@@ -404,7 +409,9 @@ async function compileFrameRun(input: CompileFrameRunInput): Promise<FrameRun> {
     const packed = packBoards(
       packShotsFor({
         scene: input.scene,
-        shots,
+        // A beat keeping the picture before is no panel: packed, it stood as a fixed panel with
+        // no frame of its own and refused the board (turn 174). Asked for by name, it is one.
+        shots: shots.filter((shot) => !retained(shot.id) || shot.id === input.shotId),
         selections: input.production.selections,
         takes: input.production.takes,
         castOf: (shot) =>

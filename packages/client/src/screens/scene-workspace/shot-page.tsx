@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type MutableR
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   DEFAULT_SHOT_SEC,
+  beatPictureShotId,
   legacySceneView,
   orderedShots,
   productionAspect,
+  productionShape,
   resolvedShotStaging,
   shotCardState,
   shotCoverage,
@@ -207,8 +209,13 @@ function ShotWorkspace({
     if (openMember === null) doorFocus.current?.focus();
   }, [openMember]);
 
-  // The frame: the same resolution the row uses, so the page never disagrees with the list.
-  const frame = shotFramePath(production, artifacts, shot.id);
+  // The frame: the same resolution the row uses, so the page never disagrees with the list. A
+  // visual novel's beat that keeps the picture before shows that picture, as the rows, the
+  // preview and the export do (turn 174); its own frame is never played (codex round 6).
+  const playsAsBeats = productionShape(production.meta).playsAsBeats;
+  const pictureShotId = playsAsBeats ? beatPictureShotId(shots, shot.id) : shot.id;
+  const samePicture = pictureShotId !== shot.id;
+  const frame = shotFramePath(production, artifacts, pictureShotId);
   const src = slug === undefined || frame.path === null ? null : mediaUrl(slug, frame.path);
   const takes = takesForShot(production, shot.id);
   const frameVariants = takes.filter((take) => (take.kind === "frame" || take.kind === "still") && take.media !== undefined);
@@ -226,7 +233,8 @@ function ShotWorkspace({
   const accepted = acceptedTakeId(production, shot.id);
   const cardState = shotCardState({
     blankScript: shot.description.trim() === "",
-    clipAccepted: accepted !== null && takes.find((take) => take.id === accepted)?.kind === "clip",
+    // A visual novel's beat plays its picture; a clip accepted on its shot is read by nothing.
+    clipAccepted: !playsAsBeats && accepted !== null && takes.find((take) => take.id === accepted)?.kind === "clip",
     hasFrame: frame.hasFrame,
     coverage,
   });
@@ -412,6 +420,7 @@ function ShotWorkspace({
             {generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>}
             <Filmstrip
               shots={shots}
+              playsAsBeats={playsAsBeats}
               current={shot.id}
               production={production}
               artifacts={artifacts}
@@ -464,7 +473,8 @@ function ShotWorkspace({
                   )}
                   <span className="fy-shot__label">{shot.number}</span>
                   <span className="fy-shot__chipmeta">{durationSec}s</span>
-                  <FrameActions
+                  {samePicture ? <span className="fy-shot__same">Same picture</span> : null}
+                  {samePicture ? null : <FrameActions
                     shotNumber={shot.number}
                     title={shot.title}
                     slug={slug}
@@ -478,7 +488,7 @@ function ShotWorkspace({
                     onUpload={() => importShotFrame(world.meta.worldId, production.meta.id, shot.id)}
                     onClear={() => clearShotFrame(world.meta.worldId, production.meta.id, shot.id)}
                     readAloud={{ source: { of: "shot", productionId: production.meta.id, sceneId: scene.id, shotId: shot.id }, title: `Shot ${shot.number} · script`, text: shot.description }}
-                  />
+                  />}
                   <dialog
                     ref={variantsDialog}
                     className="fy-swvariants"
@@ -609,7 +619,7 @@ function ShotWorkspace({
           scene={scene}
           aspect={aspect}
           videoModel={videoModel}
-          shotId={shot.id}
+          shotId={pictureShotId}
           returnFocus={generateReturnFocus}
           onClose={() => setGenerating(false)}
         />
@@ -666,6 +676,7 @@ function ShotWorkspace({
  */
 function Filmstrip({
   shots,
+  playsAsBeats,
   current,
   production,
   artifacts,
@@ -675,6 +686,8 @@ function Filmstrip({
   onOpen,
 }: {
   shots: readonly Shot[];
+  /** A visual novel's thumb shows the picture its beat shows, kept from the shot before or its own. */
+  playsAsBeats: boolean;
   current: string;
   production: ProductionBundle;
   artifacts: readonly ArtifactSidecar[];
@@ -698,7 +711,7 @@ function Filmstrip({
       </button>
       <ol className="fy-shot__thumbs">
         {shots.map((shot) => {
-          const frame = shotFramePath(production, artifacts, shot.id);
+          const frame = shotFramePath(production, artifacts, playsAsBeats ? beatPictureShotId(shots, shot.id) : shot.id);
           const src = slug === undefined || frame.path === null || !frame.hasFrame ? null : mediaUrl(slug, frame.path);
           return (
             <li key={shot.id}>

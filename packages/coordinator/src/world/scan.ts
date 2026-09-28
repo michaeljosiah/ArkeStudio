@@ -128,7 +128,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Thirty-three is a direction's markers and words on a chapter audiobook (SPEC-047 R-40, R-43).
 // Thirty-four is the performed reading, notes and book narrator (SPEC-047 R-44..R-46).
 // Thirty-five adds the durable founding conversation carried into world chat.
-export const SUPPORTED_SCHEMA_VERSION = 40;
+// Forty-one adds a visual novel's beat to strict shots (turn 174).
+export const SUPPORTED_SCHEMA_VERSION = 41;
 
 export class WorldOpenError extends Error {
   constructor(

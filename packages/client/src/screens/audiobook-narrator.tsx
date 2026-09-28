@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { estimateMicroUsd, formatMicroUsd, modelPriceCopy, readerName, readerPlace, supportsVoiceUse, type AudiobookReader, type ManifestModel } from "@arke-studio/contracts";
+import { cloudSpeechPreference, estimateMicroUsd, formatMicroUsd, modelPriceCopy, readerName, readerPlace, supportsVoiceUse, type AudiobookReader, type ManifestModel } from "@arke-studio/contracts";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { Button } from "../components/ui.js";
 import { playClip } from "../lib/audio.js";
@@ -57,16 +57,18 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
 }) {
   const { state, voiceCatalogue } = useStore();
   const models = state?.app.manifest?.models ?? [];
+  const disabledModels = state?.app.models.disabled;
   const rowOf = (voice: { provider: string; model: string }) => models.find((m) => m.provider === voice.provider && m.id === voice.model && m.capability === "voice-tts");
   const voices = useMemo(
     () =>
       (voiceCatalogue ?? [])
         .filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined)
+        .filter((voice) => !disabledModels?.includes(voice.model))
         .sort((a, b) => {
           const rank = GROUPS.findIndex((g) => g.where === whereOf(a)) - GROUPS.findIndex((g) => g.where === whereOf(b));
-          return rank !== 0 ? rank : readerPlace(a.provider).localeCompare(readerPlace(b.provider)) || a.label.localeCompare(b.label);
+          return rank !== 0 ? rank : cloudSpeechPreference(a) - cloudSpeechPreference(b) || readerPlace(a.provider).localeCompare(readerPlace(b.provider)) || a.label.localeCompare(b.label);
         }),
-    [voiceCatalogue],
+    [voiceCatalogue, disabledModels],
   );
   const [mode, setMode] = useState<"app" | "book">(bookNarrator !== undefined ? "book" : "app");
   const [picked, setPicked] = useState<AudiobookReader | null>(bookNarrator ?? null);
@@ -107,7 +109,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
   const price = (voice: { provider: string; model: string }) => {
     const model = rowOf(voice);
     if (model === undefined) return "";
-    if (model.pricing.kind === "perToken") return modelPriceCopy(model);
+    if (model.pricing.kind === "perToken") return "quoted per read";
     const perK = estimateMicroUsd(model, { characters: 1000 });
     return perK === 0 ? "free" : `${formatMicroUsd(perK)} / 1k`;
   };
@@ -136,6 +138,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
   const chosen = picked === null ? undefined : voices.find((voice) => same(readerOf(voice), picked));
   const option = (voice: ReadingVoice, first: boolean) => {
     const reader = readerOf(voice);
+    const model = rowOf(voice);
     const on = same(picked, reader);
     const current = same(bookNarrator, reader);
     return (
@@ -164,10 +167,10 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
         <span className="fy-abnarr__who">
           <span className="fy-abnarr__name">{voice.label}</span>
           <span className="fy-abnarr__reader fy-mono">
-            {[readerPlace(voice.provider, voice.local), ...(voice.local ? [] : [readerName(voice, rowOf(voice))]), ...voice.attributes.slice(0, 2)].join(" · ")}
+            {[readerPlace(voice.provider, voice.local), ...(voice.local ? [] : [readerName(voice, rowOf(voice))]), ...(cloudSpeechPreference(voice) === 0 ? ["Recommended"] : []), ...voice.attributes.slice(0, 2)].join(" · ")}
           </span>
         </span>
-        <span className="fy-abnarr__price fy-mono">{price(reader)}</span>
+        <span className="fy-abnarr__price fy-mono" title={model === undefined ? undefined : modelPriceCopy(model)}>{price(reader)}</span>
         <span className="fy-abnarr__tick" aria-hidden="true">
           {on ? "✓" : ""}
         </span>
@@ -224,7 +227,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
       ? [
           { k: "Blocks", v: `${quote.stale.toLocaleString()} stale`, warn: quote.stale > 0 },
           ...(quote.directed > 0 ? [{ k: "Direction", v: quote.held === 0 ? `${quote.directed} · none held` : `${quote.held} of ${quote.directed} held`, warn: quote.held > 0 }] : []),
-          { k: "Read the book", v: quote.estimatedMicroUsd === 0 ? "no charge" : formatMicroUsd(quote.estimatedMicroUsd) },
+          { k: "Read the book", v: quote.estimatedMicroUsd === 0 ? "no charge" : `up to ${formatMicroUsd(quote.estimatedMicroUsd)}` },
           { k: "Takes", v: `kept · ${quote.kept.toLocaleString()}` },
         ]
       : quote?.state === "refused"

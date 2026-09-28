@@ -16,7 +16,7 @@ export function defaultEpisodeFor(
 }
 
 /** Turn 166's page strip; scene and episode trees live on their owning pages. */
-export function productionPages(shape: { hasChapters: boolean; isEpisodic: boolean; isBranching: boolean } | null) {
+export function productionPages(shape: { hasChapters: boolean; isEpisodic: boolean; isBranching: boolean; playsAsBeats?: boolean } | null) {
   if (shape?.isEpisodic) return [
     ["", "Overview"], ["season", "Episodes"], ["story-structure", "Story structure"],
     ["cast", "Cast"], ["artifacts", "Artifacts"], ["generate", "Generate"], ["cut", "Cut"],
@@ -28,6 +28,6 @@ export function productionPages(shape: { hasChapters: boolean; isEpisodic: boole
   return [
     ["", "Dashboard"], ["cast", "Cast"], ["story", "Develop"], ["narrative", "Overview"],
     ["scenes", "Scenes"], ...(shape?.isBranching ? [["branch-map", "Branch map"] as const] : []),
-    ["artifacts", "Artifacts"], ["generate", "Generate"], ["cut", "Cut"],
+    ["artifacts", "Artifacts"], ["generate", "Generate"], ...(shape?.playsAsBeats ? [] : [["cut", "Cut"] as const]),
   ] as const;
 }

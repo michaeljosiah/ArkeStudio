@@ -26,6 +26,38 @@ import { makeTempWorld } from "../world/helpers.js";
 import { FakeProvider } from "../queue/fake-provider.js";
 import { AppSettingsFile } from "../../src/app-settings.js";
 import { verifyArtifact } from "../../src/queue/verify.js";
+import { cloudVoiceSources, createProviderClients, SHIPPED_MANIFEST } from "@arke-studio/providers";
+
+it("Google catalogue activation uses only the current configured key and never synthesizes", async () => {
+  let key: string | null = null;
+  let enabled = true;
+  const requestedKeys: string[] = [];
+  const clients = createProviderClients({ fetch: async (_url, init) => {
+    assert.equal(init?.method ?? "GET", "GET");
+    const active = new Headers(init?.headers).get("x-goog-api-key")!;
+    requestedKeys.push(active);
+    if (active === "revoked") return new Response("Forbidden", { status: 403 });
+    return Response.json({ models: [{ name: `models/${active === "flash-project" ? "gemini-3.8-flash-tts" : "gemini-3.8-flash-lite-tts"}` }] });
+  } });
+  const service = new VoiceService({ sidecar: null, localPresets: [], cloudSources: cloudVoiceSources(clients),
+    modelEnabled: () => enabled, getKey: async provider => provider === "google" ? key : null, emit: () => {} });
+  assert.deepEqual(await service.catalogue(), []);
+  assert.deepEqual(requestedKeys, []);
+  key = "flash-project";
+  const flash = await service.catalogue();
+  assert.equal(flash.length, 30);
+  assert.ok(flash.every(v => v.model === "gemini-3.8-flash-tts"));
+  enabled = false;
+  assert.deepEqual(await service.catalogue(), []);
+  enabled = true;
+  key = "lite-project";
+  assert.ok((await service.catalogue()).every(v => v.model === "gemini-3.8-flash-lite-tts"));
+  key = "revoked";
+  assert.deepEqual(await service.catalogue(), []);
+  key = null;
+  assert.deepEqual(await service.catalogue(), []);
+  assert.deepEqual(requestedKeys, ["flash-project", "flash-project", "lite-project", "revoked"]);
+});
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
 
@@ -1201,4 +1233,27 @@ it("requires the displayed speech ceiling for a line and rejects it after a rate
   assert.throws(() => voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151551 }), /price needs confirmation/);
   assert.equal(voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151552 }).estimatedMicroUsd, 151552);
   assert.throws(() => voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151552, at: "2027-01-01T00:00:00.000Z" }), /price needs confirmation/);
+});
+
+it("refuses oversized Gemini shot lines including separate delivery bytes before making a queue input", () => {
+  for (const model of SHIPPED_MANIFEST.models.filter(m => m.provider === "google" && m.capability === "voice-tts")) {
+    const sheet = { ...SHEET, voice: { ...SHEET.voice!, provider: "google", model: model.id, voiceId: "Charon" } };
+    const input = { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", productionId: "book", shotId: "sh_01", sheet, model,
+      delivery: "warm" as const, deliveryParams: {}, deliveryNotice: null, confirmedSpeechMicroUsd: 1000000, at: "2026-09-27T12:00:00.000Z" };
+    assert.throws(() => voiceLineRequest({ ...input, text: "字".repeat(2400) }), /request limit/);
+    const allowance = model.limits.maxSpeechUtf8Bytes! - Buffer.byteLength(model.cadence!.deliveryMappings.warm!.instruction!);
+    assert.equal(voiceLineRequest({ ...input, text: "a".repeat(allowance) }).params.text, "a".repeat(allowance));
+    assert.throws(() => voiceLineRequest({ ...input, text: "a".repeat(allowance + 1) }), /request limit/);
+  }
+});
+
+it("refuses oversized normalized Gemini character previews before quoting or constructing queue inputs", () => {
+  const service = new VoiceService({ sidecar: null, localPresets: [], cloudSources: [], getKey: async () => null, emit: () => {}, clock: () => "2026-09-27T12:00:00.000Z" });
+  for (const model of SHIPPED_MANIFEST.models.filter(m => m.provider === "google" && m.capability === "voice-tts")) {
+    const request = { worldId: "world", sheet: SHEET, provider: "google", voiceId: "Charon", model,
+      line: { text: "字".repeat(2400), source: "own-line" as const } };
+    assert.throws(() => service.queuedPreviewRequest(request), /preview line exceeds/);
+    assert.throws(() => service.queuedPreviewRequest({ ...request, line: { ...request.line, text: "a".repeat(7001) } }), /preview line exceeds/);
+    assert.throws(() => service.queuedPreviewRequest({ ...request, line: { ...request.line, text: "a".repeat(7000) } }), /price changed/, "a fitting line reaches the consent check");
+  }
 });
