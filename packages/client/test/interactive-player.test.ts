@@ -672,6 +672,28 @@ describe("the player reading beats (turn 174)", () => {
     assert.ok(stopped, "the log's voice stops with the scene");
   });
 
+  it("a line played again from the log stops the beat's own voice: one voice at a time (codex round 15)", () => {
+    const p = mount({
+      ...NOVEL,
+      autoplay: true,
+      scenes: { ...NOVEL.scenes, sc_quarter: { title: "Q", beats: [
+        { picture: "media/a.png", text: "One.", audio: "media/one.mp3", advance: "voice" as const },
+        { picture: "media/a.png", text: "Two.", audio: "media/two.mp3", advance: "voice" as const },
+      ] } },
+    });
+    // Beat one heard to its end; beat two's voice is still speaking when its log line is pressed.
+    p.q("audio")!.dispatchEvent(new dom.Event("ended") as unknown as Event);
+    p.key("ArrowRight"); p.key("ArrowRight");
+    assert.equal(p.text(".aip-line"), "Two.");
+    const voice = p.all("audio")[0]! as unknown as HTMLMediaElement;
+    let stopped = false;
+    Object.assign(voice, { pause: () => { stopped = true; } });
+    p.key("l");
+    p.click(p.q('[aria-label="Log"] [data-line="0"]') as unknown as HTMLElement);
+    assert.ok(stopped, "the beat's voice stops for the line heard again");
+    assert.equal(p.q(".aip-hold")!.style.animation, "none", "and the beat waits for the reader rather than moving on");
+  });
+
   it("keeps the focus on the open log's control when the reader moves on beneath it", () => {
     const p = mount({ ...NOVEL, autoplay: true });
     p.key("ArrowRight"); p.key("ArrowRight");

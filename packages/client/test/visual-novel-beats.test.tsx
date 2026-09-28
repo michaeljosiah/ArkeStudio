@@ -505,6 +505,20 @@ describe("a visual novel's dashboard lists (codex round 14)", () => {
   });
 });
 
+describe("a visual novel keeps to its own workflow (codex round 15)", () => {
+  it("the dashboard's pictures open the stills lens, which shows pictures only", async () => {
+    const mounted = await mountState(visualNovel(), `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
+    await click(all(mounted, "button").find((button) => /^All \d+ pictures$/.test(button.textContent ?? ""))!);
+    assert.ok(q(mounted, '[data-screen="stills-contact-sheet"]'), "the contact sheet, not the takes lens");
+  });
+
+  it("has no Cut: the rail leaves it out and its address goes to the branch map", async () => {
+    const mounted = await mountState(visualNovel(), `/w/${FIXTURE_WORLD_ID}/p/saltlight/cut`);
+    assert.ok(q(mounted, '[data-screen="branch-map"]'), "the branch map instead");
+    assert.equal(all(mounted, ".fy-prodrail a, .fy-prodrail button").some((link) => link.textContent?.trim().startsWith("Cut")), false, "no Cut on the rail");
+  });
+});
+
 describe("the Beat card on a visual novel's shot page (turn 174, 174c)", () => {
   it("shows the shot's lines and writes how the beat moves on and how its picture moves", async () => {
     const sent: ClientMessage[] = [];

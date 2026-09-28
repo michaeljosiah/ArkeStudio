@@ -460,9 +460,11 @@ ${player}
 // Playback state only (brief §1/§5), kept with the viewer and keyed by world, production and
 // routing version: a package from a re-cut graph never resumes into a scene it does not have, and
 // two worlds' productions with one slug, served from one origin, never share a viewer's place.
+// A beat package keys apart from a clip one: its place is a beat's index, not seconds, and an
+// interactive movie made a visual novel on the same routing would open on beat 12 for 12s in.
 const manifest = ${json(manifest)};
 const titles = ${json(presentation.titles)};
-const KEY = "arke-iv-" + ${json(presentation.worldId)} + "-" + manifest.provenance.productionId + "-v" + manifest.provenance.routingVersion;
+const KEY = "arke-iv-" + ${json(presentation.worldId)} + "-" + manifest.provenance.productionId + "-v" + manifest.provenance.routingVersion + (manifest.beats ? "-beats" : "");
 mountInteractivePlayer(document.getElementById("app"), {
   title: ${json(presentation.title)},
   eyebrow: ${json(presentation.eyebrow)},

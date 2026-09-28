@@ -167,6 +167,10 @@ export function ProductionDashboardScreen() {
     beats ? shotHasFrame(production, world.artifacts, beatPictureShotId(sceneShots, shot.id)) : Boolean(acceptedTakeId(production, shot.id));
   const acceptedShots = placed.filter(covered).length;
   const nextGap = placed.find((entry) => !covered(entry));
+  // A visual novel's takes are reviewed in the stills lens, which is pictures only: the default
+  // lens would show the clips these lists leave out (codex round 15).
+  const generatePath = (shotId?: string) =>
+    `/w/${worldId}/p/${prodId}/generate${beats ? `?view=stills${shotId ? `&shot=${encodeURIComponent(shotId)}` : ""}` : ""}`;
   const latest = [...takes]
     .sort((a, b) => (b.completedAt ?? b.dispatchedAt).localeCompare(a.completedAt ?? a.dispatchedAt))
     .slice(0, 4);
@@ -226,7 +230,7 @@ export function ProductionDashboardScreen() {
                   : "Every take that came back has a decision. The next move is dispatch."}
               </div>
               <div className="fy-threadcard__actions">
-                <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
+                <Button onClick={() => navigate(generatePath())}>
                   {pending.length > 0 ? "Review takes" : "Open Generate"}
                 </Button>
               </div>
@@ -276,7 +280,7 @@ export function ProductionDashboardScreen() {
               <button
                 type="button"
                 className="fy-linkbtn"
-                onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}
+                onClick={() => navigate(generatePath())}
               >
                 All {takes.length} {beats ? "pictures" : "takes"}
               </button>
@@ -286,7 +290,7 @@ export function ProductionDashboardScreen() {
                 <div
                   key={t.id}
                   className="fy-clip"
-                  onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}
+                  onClick={() => navigate(generatePath(t.coversShots[0]))}
                 >
                   <div className="fy-clip__frame">
                     <Portrait

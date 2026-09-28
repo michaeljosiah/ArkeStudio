@@ -500,6 +500,7 @@ describe("a visual novel's package (turn 174)", () => {
     assert.equal(await readFile(join(dir, result.dir, "media", "voice-sc_i1_sh_v1_blk_wash.mp3"), "utf8"), "the narrator reads");
     const player = await readFile(join(dir, result.file), "utf8");
     assert.match(player, /manifest\.beats/, "the page reads the beats");
+    assert.match(player, /\+ \(manifest\.beats \? "-beats" : ""\)/, "a beat package keeps its place apart from a clip package's (codex round 15)");
     assert.ok(player.includes(INTERACTIVE_PLAYER_SOURCE.replace("export function mountInteractivePlayer", "function mountInteractivePlayer").slice(0, 200)), "the one player");
     assert.equal(await interactiveExportCompleted(store, production.meta.id, exportId), true, "it verifies as complete");
   });

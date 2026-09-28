@@ -939,9 +939,14 @@ export function mountInteractivePlayer(root, options) {
     }
     const heard = target.closest("[data-line]");
     if (heard) {
-      // Heard again from the log, on its own player: the beat being read is not disturbed.
+      // Heard again from the log, on its own player. One voice at a time: the beat's own stops,
+      // and a beat stopped mid-line waits for the reader as a line read, not heard (codex round 15).
       const b = beatsOf(state.sceneId)[Number(heard.getAttribute("data-line"))];
       if (b && b.audio) {
+        if (!voiceDone) {
+          voice.pause && voice.pause();
+          voiceLost();
+        }
         logVoice.setAttribute("src", b.audio);
         const p = logVoice.play && logVoice.play();
         if (p && p.catch) p.catch(() => undefined);

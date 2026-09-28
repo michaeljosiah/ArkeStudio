@@ -11,6 +11,8 @@ import {
 } from "../../src/productions/scene-commands.js";
 import { acceptCharacterLook, attachCharacterLook, readKit } from "../../src/references/kit.js";
 import { WorldStore } from "../../src/world/store.js";
+import { BEAT_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
+import { SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 import { sha256 } from "../../src/world/text-files.js";
@@ -744,6 +746,26 @@ describe("edit-scene names the title as well as the synopsis (SPEC-036 R-2, amen
       (err: unknown) => err instanceof SceneCommandRefused && /names neither a title, a synopsis, the inherited context nor the cast/.test(err.message),
     );
     assert.equal(await worldPrint(dir), print);
+  });
+});
+
+describe("a visual novel's beat fences the world (turn 174, codex round 15)", () => {
+  it("an edit-shot that lands a beat raises the world to the beat's schema, so an older build refuses it rather than dropping the scene", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store);
+    const [first] = orderedShots(before);
+    assert.ok(first);
+    assert.ok(store.getBundle().meta.schemaVersion < BEAT_SCHEMA_VERSION);
+    await applySceneCommand(store, {
+      productionId: PRODUCTION,
+      sceneFile: SCENE,
+      sceneId: SCENE_ID,
+      baseVersion: before.version,
+      command: { kind: "edit-shot", shotId: first.id, change: { beat: { advance: "voice" } } },
+    });
+    assert.deepEqual(orderedShots(await sceneOnDisk(store))[0]?.beat, { advance: "voice" });
+    assert.equal(store.getBundle().meta.schemaVersion, BEAT_SCHEMA_VERSION);
+    assert.ok(BEAT_SCHEMA_VERSION <= SUPPORTED_SCHEMA_VERSION, "this build reads what it writes");
   });
 });
 
