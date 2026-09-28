@@ -42,6 +42,39 @@ pagination. Being listed does not prove quota or paid synthesis access. This sta
 unbound custom voice IDs and reference recordings. Voice design and replication need their
 own project bindings, separately authorised operations, consent handling and verified pricing.
 
+## Designed voice protocol, not product activation
+
+The provider layer implements stored prompted-voice creation, exact-id retrieval and one-page
+listing through Google's Voices API. These methods pass through the captured host transport;
+creation gets a synchronous-generation deadline. Construction and preset discovery do not call
+them. The returned metadata includes the vendor's expiry rather than a locally invented TTL.
+Creation and retrieval return a validated WAV preview when present. If a response contains a
+voice id but an unusable preview, the id and reported usage survive so the future coordinator
+operation can retrieve that identity rather than paying to create another. A lost or malformed
+response is uncertain; there is no retry, idempotency claim or reconciliation by display name.
+Audio payloads and bearer-like stateless voice keys are redacted from provider call capture.
+
+This is the protocol foundation for issues #1331 and #1332, not the completed authoring feature.
+The shipped availability remains false. No renderer command, durable creation operation,
+library migration, assignment or audiobook custom-voice path is enabled by this foundation.
+Custom ids remain refused by speech submission until their bindings can be resolved safely.
+
+On 2026-09-28 the [Voices reference](https://ai.google.dev/api/voices) and
+[voice-design guide](https://ai.google.dev/gemini-api/docs/voice-design) document `CreateVoice`
+and its token usage, but neither establishes its charge or maximum billable output. The
+[pricing page](https://ai.google.dev/gemini-api/docs/pricing) lists speech synthesis rates;
+applying those to creation would be an unverified assumption. There is no verified creation
+quote, including no verified zero price. `GEMINI_VOICE_DESIGN_AVAILABILITY` records that boundary
+under SPEC-049 R-19. Protocol tests inject responses and incur no provider charges.
+
+Before activation, implement the coordinator's flushed intent/result and spend authorization,
+world-owned designed identities with current-project binding checks, and the distinct audition,
+save and assignment flows from SPEC-049 R-12..R-17. Design-master turn 165d's three candidates
+would require three explicitly priced creations; the API returns one voice per create and does
+not accept the chosen character line as its preview transcript. That line needs the normal
+separate quoted speech job. Closing a dialog cannot mean deleting a remote candidate unless
+explicit lifecycle handling is implemented. Book assignment must remain book-scoped.
+
 The pricing foundation uses dated standard rates and the published full service limits to
 bound each request. Duration is not treated as a guaranteed ceiling. The client additionally
 rejects compiled text plus style over a conservative 7,000-byte request budget; this is not a
@@ -81,6 +114,7 @@ From the repository root:
 
 ```powershell
 node --import tsx --test packages/providers/test/google-tts.test.ts packages/providers/test/gemini-activation.test.ts packages/providers/test/capture.test.ts
+node --import tsx --test packages/providers/test/google-voices.test.ts apps/desktop/test/provider-transport.test.ts
 node --import tsx --test packages/coordinator/test/queue/speech-pricing.test.ts
 node --import tsx --test packages/contracts/test/speech-input.test.ts packages/coordinator/test/productions/gemini-speech-parts.test.ts
 ```
