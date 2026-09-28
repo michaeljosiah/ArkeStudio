@@ -20,7 +20,7 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 const focusedElements = new WeakSet<HTMLElement>();
-let viewportWidth = 800;
+let viewportWidth = 1140;
 Object.assign(dom.window, {
   matchMedia: (query: string) => ({
     matches: viewportWidth <= Number.parseInt(query.match(/max-width:\s*(\d+)px/)?.[1] ?? "0", 10),
@@ -115,7 +115,7 @@ function seededState(): ClientState {
 
 afterEach(() => {
   __setBridgeForTest(null);
-  viewportWidth = 800;
+  viewportWidth = 1140;
   document.body.replaceChildren();
 });
 
@@ -155,12 +155,13 @@ describe("durable Picture controls (#678)", () => {
     const screen = await mountCut(state);
     try {
       const toggle = screen.container.querySelector<HTMLButtonElement>(".fy-editorpane-toggle--library");
-      const panel = screen.container.querySelector<HTMLElement>("#cut-library");
+      let panel = screen.container.querySelector<HTMLElement>("#cut-library");
       assert.ok(toggle && panel);
       await act(async () => {
         toggle.click();
         await Promise.resolve();
       });
+      panel = screen.container.querySelector<HTMLElement>("#cut-library")!;
       assert.equal(
         [...panel.querySelectorAll<HTMLElement>("*")].some((element) => focusedElements.has(element)),
         true,
@@ -172,16 +173,17 @@ describe("durable Picture controls (#678)", () => {
         window.dispatchEvent(escape);
         await Promise.resolve();
       });
-      assert.equal(panel.getAttribute("data-open"), "false");
+      assert.equal(screen.container.querySelector("#cut-library")?.getAttribute("data-open"), "false");
       assert.equal(focusedElements.has(toggle), true);
 
-      viewportWidth = 1000;
+      viewportWidth = 1148;
       await act(async () => {
         toggle.click();
         await Promise.resolve();
       });
       // Picking a Library row shows its actions; Locate is what selects on the timeline and
       // opens the details (SPEC-039 R-11, R-16).
+      panel = screen.container.querySelector<HTMLElement>("#cut-library")!;
       const take = panel.querySelector<HTMLButtonElement>('[data-library-item="shot:sh_12"] .fy-artrow__pick');
       const details = screen.container.querySelector<HTMLElement>("#cut-right-pane");
       assert.ok(take && details);
@@ -195,7 +197,7 @@ describe("durable Picture controls (#678)", () => {
         locate.click();
         await Promise.resolve();
       });
-      assert.equal(panel.getAttribute("data-open"), "false");
+      assert.equal(screen.container.querySelector("#cut-library")?.getAttribute("data-open"), "false");
       assert.equal(details.getAttribute("data-open"), "true");
       assert.equal(
         [...details.querySelectorAll<HTMLElement>("*")].some((element) => focusedElements.has(element)),

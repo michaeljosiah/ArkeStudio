@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, useParams, useSearchParams } from "react-router";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   CLIP_DEFAULT_SEC,
   deriveCut,
@@ -41,6 +41,8 @@ import {
   AudioPlus,
   ChevronLeft,
   ChevronRight,
+  FramePrevious,
+  FrameNext,
   Collapse,
   Copy,
   Download,
@@ -104,6 +106,10 @@ import { SpineCutTrack, EmptyEditorTrack, NewLaneStrip, SceneBands } from "./edi
 import { type CutSelection, CutInspector } from "./editor-inspector.js";
 import { ExportSheet, exportViewFor } from "./editor-export.js";
 import { ABSENT_TIMELINE, useRenderPlan } from "./editor-plan.js";
+import { CutTouchContext, EditorSheetSlot, LaneSheet, coarsePointer, cutTime, useCutLayout, useTouchLanes } from "./editor-responsive.js";
+import { PageSheet } from "../components/page-sheet.js";
+import { Grid2x2, More, Pause, SplitMark as Columns, Trash as Trash2, RotateCcw as Undo2, RotateCw as Redo2 } from "../components/icons.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 
 function focusFirstControl(pane: HTMLElement | null): void {
   pane?.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled), [href], [tabindex='0']")?.focus();
@@ -209,6 +215,12 @@ export function CutScreen() {
 }
 
 function CutEditorScreen() {
+  const navigate = useNavigate();
+  const { phone, compact } = useCutLayout();
+  const remote = isRemoteSession();
+  const [arkeOpen, setArkeOpen] = useState(false);
+  const [laneOpen, setLaneOpen] = useState<TimelineTrackId | null>(null);
+  const [addLaneOpen, setAddLaneOpen] = useState(false);
   const { worldId, prodId } = useParams();
   const { connection, state: studio } = useStore();
   const worlds = studio?.worlds ?? [];
@@ -262,7 +274,7 @@ function CutEditorScreen() {
   const [watchToken, setWatchToken] = useState(0);
   const [selected, setSelected] = useState<CutSelection | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [showScenes, setShowScenes] = useState(false);
+  const [showScenes, setShowScenes] = useState(compact);
   const [importing, setImporting] = useState(false);
   const importRequest = useRef<string | null>(null);
   /** Dropped files, listed in the Library as rows until they are real (issue 1035). */
@@ -300,7 +312,7 @@ function CutEditorScreen() {
   const [tool, setTool] = useState<EditorTool>("select");
   const [snap, setSnap] = useState(true);
   /** Timeline zoom (R-19c): a view scale on the canvas, 1× to 4× in halves; never written. */
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(phone ? Math.max(1, 6 * 346 / Math.max(1, (typeof window === "undefined" ? 390 : window.innerWidth) - 44)) : compact ? 2.4 : 1);
   const [keysOpen, setKeysOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   /** The scene the workspace's Generate handed off (R-44): assembled once as the editor opens. */
@@ -366,7 +378,7 @@ function CutEditorScreen() {
     if (!libraryOpen && !rightOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (document.querySelector(".fy-clipmenu")) return;
+      if (document.querySelector(".fy-clipmenu, dialog[open]")) return;
       if (libraryOpen && editorMediaMatches(LIBRARY_DRAWER_QUERY)) {
         setLibraryOpen(false);
         queueMicrotask(() => libraryToggleRef.current?.focus());
@@ -436,6 +448,7 @@ function CutEditorScreen() {
   /** Lane layout and scrubbing get the canvas; playback and the readout get the film. */
   const totalSec = canvasSec;
   const transport = useCutTransport(filmSec);
+  const touchLanes = useTouchLanes({ phone, transport, totalSec, zoom, setZoom });
   // Where the cuts are, so a dragged clip lands on a boundary rather than near one — the snap the
   // LTX port has always offered and nothing had yet asked for.
   /*
@@ -530,6 +543,7 @@ function CutEditorScreen() {
   const activeSelection: CutSelection | null = selectedExists ? selected : null;
   const revealDetails = () => {
     setLibraryOpen(false);
+    if (phone) return;
     setRightOpen(true);
     if (
       editorMediaMatches("(max-width: 899px)") ||
@@ -545,6 +559,7 @@ function CutEditorScreen() {
   const selectCue = (id: string) => {
     setSelected({ kind: "cue", id });
     revealDetails();
+    if (phone) setRightOpen(true);
   };
   const selectedCueId = activeSelection?.kind === "cue" ? activeSelection.id : null;
   // What the cut uses is what the record holds (round four): a legacy placement is a typed clip
@@ -617,7 +632,7 @@ function CutEditorScreen() {
     sendTimelineCommands(worldId, prodId, commands, timelineRevision, fence, label);
   };
   const importMedia = (destination: MediaDestination, files?: File[]) => {
-    if (commandsDisabled || !worldId || !prodId || !fence) return;
+    if (remote || commandsDisabled || !worldId || !prodId || !fence) return;
     setTimelineCommandError(null);
     const result = importEditorMedia(worldId, { productionId: prodId, baseRevision: timelineRevision, sourceFingerprint: fence, destination }, files);
     importRequest.current = result.requestId; setImporting(result.requestId !== null);
@@ -724,6 +739,7 @@ function CutEditorScreen() {
     selectedAny !== null &&
     playheadFrame > selectedAny.clip.startFrame &&
     playheadFrame < selectedAny.clip.startFrame + selectedAny.clip.durationFrames;
+  const unpickedSplit = phone && !selectedAny ? orderedPictureClips.find(clip => playheadFrame > clip.startFrame && playheadFrame < clip.startFrame + clip.durationFrames) : undefined;
   /** Placement from the Library (SPEC-039 R-9, R-10): one `place` command, never a host path. */
   const placeArtifact = (artifact: ArtifactSidecar, trackId: TimelineTrackId | null, frame: number,
     options: { kind?: "picture" | "audio"; newTrack?: boolean } = {}) => {
@@ -953,7 +969,7 @@ function CutEditorScreen() {
   const zoomBy = (delta: number) => setZoom((current) => Math.min(4, Math.max(1, Math.round((current + delta) * 2) / 2)));
   const deselect = (): boolean => {
     // Panes and dialogs own Escape first; the selection is only cleared when nothing else is open.
-    if (keysOpen || document.querySelector(".fy-clipmenu, .fy-editordialog")) return false;
+    if (keysOpen || document.querySelector(".fy-clipmenu, .fy-editordialog, dialog[open]")) return false;
     if (libraryOpen && editorMediaMatches(LIBRARY_DRAWER_QUERY)) return false;
     if (rightOpen && editorMediaMatches("(max-width: 899px)")) return false;
     if (activeSelection === null) return false;
@@ -976,7 +992,7 @@ function CutEditorScreen() {
         event.preventDefault();
         return;
       }
-      if (document.querySelector(".fy-editordialog") !== null) return;
+      if (document.querySelector(".fy-editordialog, dialog[open]") !== null) return;
       if (event.key === " " && interactiveTarget(event.target)) return;
       if (meta && (key === "z" || key === "Z")) {
         if (event.shiftKey ? state.canRedo : state.canUndo) actions.sendHistory(event.shiftKey ? "redo" : "undo");
@@ -1025,7 +1041,9 @@ function CutEditorScreen() {
   );
 
   return (
-    <div className="fy-cutcols" data-screen="cut"
+    <CutTouchContext.Provider value={{ snap, toggleSnap: () => setSnap(value => !value), openLane: setLaneOpen }}>
+    <div className="fy-cutcols" data-screen="cut" data-phone={phone || undefined} data-compact={compact || undefined}
+      style={{ "--cut-aspect": (production?.meta.aspect ?? "16:9").replace(":", "/"), "--cut-zoom": zoom } as CSSProperties}
       // A lane or the Library that took or refused the drag has spoken (issue 1035): its
       // dropEffect stands. What is left is a file over the chrome, which appends — while the
       // record can take it; otherwise the cursor must not promise a copy nothing will make.
@@ -1068,8 +1086,9 @@ function CutEditorScreen() {
         onBorrow={commandsDisabled ? null : borrow}
         onOverlayArtifact={commandsDisabled ? null : artifact => placeArtifact(artifact, null, playheadFrame, { kind: "picture" })}
         onRemoveFromLibrary={commandsDisabled ? null : removeFromLibrary}
-        onImport={commandsDisabled ? null : files => importMedia("library", files)}
+        onImport={commandsDisabled || remote ? null : files => importMedia("library", files)}
         onAddShot={editableTimeline !== null && !commandsDisabled ? placeShot : null}
+        onAppendShot={editableTimeline !== null && !commandsDisabled ? id => placeShot(id, Math.max(0, ...(pictureTrack?.clips ?? []).map(clip => clip.startFrame + clip.durationFrames))) : null}
         onLocate={locateClip}
         initialFilter={libraryFilter}
         open={libraryOpen}
@@ -1080,8 +1099,13 @@ function CutEditorScreen() {
         panelRef={libraryPanelRef}
       />
       <main className="fy-cutmain">
+        {phone && <header className="fy-cut-back">
+          <button type="button" aria-label="Back to production" onClick={() => navigate(`/w/${worldId}/p/${prodId}`)}><ChevronLeft size={20} /></button>
+          <div><span>{production?.meta.title}</span><b>Cut · {cutTime(secondsToFrames(filmSec, frameRate), frameRate).split(".")[0]}</b></div>
+          <Button variant="primary" disabled={timelineError !== null || renderError !== null} onClick={() => setExportOpen(true)}><Upload size={16} />Export</Button>
+        </header>}
         <header className="fy-cuthead">
-          <button type="button" className="fy-tlbtn fy-tlbtn--text" disabled={commandsDisabled} onClick={() => importMedia("append")}><Upload size={12} />{importing ? "Importing…" : "Import media"}</button>
+          <button type="button" className="fy-tlbtn fy-tlbtn--text fy-cut-import" disabled={commandsDisabled || remote} onClick={() => importMedia("append")}><Upload size={12} />{importing ? "Importing…" : "Import media"}{remote && <span>on the desktop app</span>}</button>
           <button
             ref={libraryToggleRef}
             type="button"
@@ -1098,7 +1122,7 @@ function CutEditorScreen() {
             Library
           </button>
           <div className="fy-cuthead__title">
-            <h1>The cut</h1>
+            <h1>{compact ? "Cut" : "The cut"}</h1>
             <span className="fy-cuthead__meta">
               {cutMeta}
               {clipCount > 0 && ` · ${clipCount} clip${clipCount === 1 ? "" : "s"}`}
@@ -1143,6 +1167,7 @@ function CutEditorScreen() {
             <div className="fy-cuttimeline-error" role="status">Preview and export unavailable · {renderError}</div>
           )}
           <CutPreview
+            compact={compact}
             slug={slug}
             spans={spans}
             totalSec={filmSec}
@@ -1152,6 +1177,13 @@ function CutEditorScreen() {
             cueStyle={renderPlan?.ok ? (renderPlan.plan.subtitles?.style ?? null) : null}
           />
         </div>
+        {compact && <div className="fy-cut-clock">
+          <code>{cutTime(playheadFrame, frameRate)}</code>
+          <span><button type="button" aria-label="Previous frame" onClick={() => transport.seek(transport.timeRef.current - 1 / frameRate)}><FramePrevious size={20} /></button>
+            <button type="button" className="fy-cut-clock__play" aria-label={transport.playing ? "Pause" : "Play"} onClick={() => { if (!transport.playing && transport.timeRef.current >= filmSec) transport.seek(0); transport.setPlaying(value => !value); }}>{transport.playing ? <Pause size={22} /> : <Play size={22} />}</button>
+            <button type="button" aria-label="Next frame" onClick={() => transport.seek(transport.timeRef.current + 1 / frameRate)}><FrameNext size={20} /></button></span>
+          <code>{cutTime(secondsToFrames(filmSec, frameRate), frameRate)}</code>
+        </div>}
         <section className="fy-timeline" aria-label="Timeline" data-ghost={ghostTimeline !== null ? "true" : undefined}>
           <div className="fy-timeline__toolbar">
             <strong>TIMELINE</strong>
@@ -1300,6 +1332,8 @@ function CutEditorScreen() {
           )}
           <div
             className="fy-timeline__canvas"
+            ref={touchLanes.canvas}
+            style={{ "--cut-pan": `${touchLanes.pan}px` } as CSSProperties}
             onClick={(event) => {
               const target = event.target as HTMLElement;
               /*
@@ -1317,11 +1351,13 @@ function CutEditorScreen() {
               setSelected(null);
             }}
           >
-            <div className="fy-timeline__zoomwrap" style={{ width: `${zoom * 100}%` }}>
+            <div className="fy-timeline__zoomwrap" style={{ width: `${phone ? 100 : zoom * 100}%` }}>
             <CutScrubber
               totalSec={totalSec}
               frameRate={frameRate}
               transport={transport}
+              held={phone}
+              gutter={compact ? phone ? 44 : 146 : undefined}
             />
             {/*
               * Pressing the lanes moves the playhead.
@@ -1336,6 +1372,7 @@ function CutEditorScreen() {
             <div
               className="fy-tracks"
               onPointerDown={(event) => {
+                if (phone || coarsePointer() || event.pointerType === "touch") return;
                 if (event.button !== 0 || tool !== "select") return;
                 if ((event.target as HTMLElement).closest(LANE_PRESS_OWNERS) !== null) return;
                 // The canvas already clears the selection on a click in empty space; doing it
@@ -1345,7 +1382,7 @@ function CutEditorScreen() {
                 seekFromLane(event);
               }}
             >
-              {totalSec > 0 && <CutPlayhead totalSec={totalSec} frameRate={frameRate} transport={transport} tool={tool} />}
+              {totalSec > 0 && <CutPlayhead totalSec={totalSec} frameRate={frameRate} transport={transport} tool={tool} held={phone} gutter={compact ? phone ? 44 : 146 : undefined} />}
               {editableTimeline && production && subtitleTracksOf(editableTimeline).length > 0 ? (
                 subtitleTracksOf(editableTimeline).map((track) => (
                   <SubtitleTrackRow
@@ -1361,7 +1398,7 @@ function CutEditorScreen() {
                     playheadFrame={playheadFrame}
                   />
                 ))
-              ) : (
+              ) : compact ? null : (
                 <EmptyEditorTrack label="Subtitles" detail={editableTimeline ? "Add a subtitle track in the Inspector" : "No subtitle track yet"} kind="subtitles" />
               )}
               {production && cut ? (
@@ -1374,7 +1411,7 @@ function CutEditorScreen() {
                   />
                 ) : shownTimeline ? (
                   <>
-                    {showScenes && <SceneBands views={views} totalFrames={totalFrames} />}
+                    {showScenes && <SceneBands views={views} totalFrames={totalFrames} names={compact ? new Map(production.scenes.map(scene => [scene.number, scene.title])) : undefined} />}
                     <PictureTrack
                       production={production ?? undefined}
                       artifacts={world?.artifacts ?? []}
@@ -1445,6 +1482,7 @@ function CutEditorScreen() {
               )}
               {editableTimeline && (
                 <NewLaneStrip
+                  onAdd={compact ? () => setAddLaneOpen(true) : undefined}
                   onDrop={commandsDisabled ? null : dropOnNewLane}
                   onFileDrop={commandsDisabled ? null : (files, laneWidth, x) => importMedia({ newTrack: true, frame: stripFrame(laneWidth, x) }, files)}
                   fileKinds={fileKinds}
@@ -1566,6 +1604,8 @@ function CutEditorScreen() {
             &times;
           </button>
         </div>
+        <EditorSheetSlot sheet={phone} open={rightOpen} title={selectedAny ? `${selectedAny.clip.source.kind === "shot" ? `Shot ${selectedAny.clip.source.shotNumber} · ` : ""}${selectedAny.clip.source.label}` : "Details"} onClose={() => setRightOpen(false)} className="fy-cut-trim-sheet"
+          footer={<><span>± one frame · {frameRate} fps</span><Button variant="primary" onClick={() => setRightOpen(false)}>Done</Button></>}>
         <div className="fy-cutside__panel fy-cutside__panel--inspect" id="cut-inspector-panel">
             <CutInspector
               worldId={worldId}
@@ -1595,7 +1635,10 @@ function CutEditorScreen() {
               mintClipId={mintClipId}
               sourceLength={sourceLength}
             />
+            {compact && !phone && selectedAny && <div className="fy-cut-detail-actions"><Button disabled={commandsDisabled || !playheadInsideSelected} onClick={() => selectedAction("split")}><Scissors size={16} />Split</Button><Button disabled={commandsDisabled} onClick={() => selectedAction("delete")}><Trash size={16} />Delete</Button></div>}
           </div>
+        </EditorSheetSlot>
+        <EditorSheetSlot sheet={compact} open={arkeOpen} title="Arke" onClose={() => setArkeOpen(false)} className="fy-cut-arke-sheet">
         <div className="fy-cutside__panel fy-cutside__panel--arke" id="cut-arke-panel">
             {assembly !== null && (
               <div className="fy-arkenotes" data-testid="arke-notes">
@@ -1633,7 +1676,30 @@ function CutEditorScreen() {
               }
             />
         </div>
+        </EditorSheetSlot>
       </aside>
+      {compact && <>
+        {!phone && <button type="button" className="fy-cut-arke-rail" onClick={() => setArkeOpen(true)}><Sparkle size={16} /><span>Ask Arke</span></button>}
+        <div className="fy-cut-tools" data-picked={phone && selectedAny !== null || undefined}>
+          {phone && selectedAny && <div className="fy-cut-tools__selection"><Film size={13} />{selectedAny.clip.source.label} · {(selectedAny.clip.durationFrames / frameRate).toFixed(1)}s</div>}
+          {(!phone || !selectedAny) && <button type="button" onClick={() => setLibraryOpen(true)}><Grid2x2 size={20} /><span>Library</span></button>}
+          <button type="button" disabled={commandsDisabled || !playheadInsideSelected && !unpickedSplit} onClick={() => unpickedSplit ? sendCommands([{ kind: "split", clipId: unpickedSplit.id, atFrame: playheadFrame, newClipId: mintClipId() }], "Split clip") : selectedAction("split")}><Scissors size={20} /><span>Split</span></button>
+          {phone && selectedAny && <button type="button" onClick={() => setRightOpen(true)}><Columns size={20} /><span>Trim</span></button>}
+          {(!phone || selectedAny) && <><button type="button" disabled={commandsDisabled || !selectedAny} onClick={() => selectedAction("duplicate")}><Copy size={20} /><span>Duplicate</span></button>
+            <button type="button" disabled={commandsDisabled || !selectedAny} onClick={() => selectedAction(phone ? "delete" : "ripple")}><Trash2 size={20} /><span>{phone ? "Delete" : "Ripple delete"}</span></button></>}
+          {phone && selectedAny ? <button type="button" onClick={() => document.querySelector<HTMLElement>(`[data-clip="${selectedAny.clip.id}"]`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }))}><More size={20} /><span>More</span></button>
+            : <><button type="button" disabled={!canUndo} onClick={() => sendHistory("undo")}><Undo2 size={20} /><span>Undo</span></button><button type="button" disabled={!canRedo} onClick={() => sendHistory("redo")}><Redo2 size={20} /><span>Redo</span></button></>}
+          {phone && !selectedAny && <button type="button" onClick={() => setArkeOpen(true)}><Sparkle size={20} /><span>Arke</span></button>}
+          {!phone && <><button type="button" aria-label="Zoom out" disabled={zoom <= 1} onClick={() => zoomBy(-.5)}><Minus size={16} /></button><button type="button" aria-label="Zoom in" disabled={zoom >= 4} onClick={() => zoomBy(.5)}><Plus size={16} /></button></>}
+        </div>
+      </>}
+      <LaneSheet track={editableTimeline?.tracks.find(track => track.id === laneOpen) ?? null} baseTrackId={pictureTrack?.id} disabled={commandsDisabled} onCommands={sendCommands} onClose={() => setLaneOpen(null)} />
+      <PageSheet open={addLaneOpen} title="Add lane" onClose={() => setAddLaneOpen(false)} className="fy-cut-sheet fy-cut-lane-sheet">
+        <button type="button" disabled={commandsDisabled} onClick={() => { if (editableTimeline) sendCommands([newAudioTrack(editableTimeline)], "Add audio track"); setAddLaneOpen(false); }}>Audio</button>
+        <button type="button" onClick={() => { setAddLaneOpen(false); setLibraryOpen(true); }}>Picture from Library</button>
+        <button type="button" onClick={() => { setSelected(null); setAddLaneOpen(false); setRightOpen(true); }}>Subtitle settings</button>
+      </PageSheet>
     </div>
+    </CutTouchContext.Provider>
   );
 }

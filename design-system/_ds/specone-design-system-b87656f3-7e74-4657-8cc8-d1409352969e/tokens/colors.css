@@ -30,6 +30,10 @@
   --success:        #16A34A;  /* green-600 — passing / agreement */
   --success-bg:     #F0FDF4;
   --warning:        #D97706;  /* amber-600 — waiting / caution */
+  /* Turn 170: timeline selection and typed lane colours, over either theme. */
+  --timeline-selection: #F5B83D;
+  --timeline-dialogue: #6EA8FE;
+  --timeline-ambience: #34D399;
   --warning-bg:     #FFFBEB;
   --info:           #0A0A0A;  /* monochrome — uses foreground */
   --danger:         var(--destructive);

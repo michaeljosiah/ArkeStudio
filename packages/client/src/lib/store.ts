@@ -4681,6 +4681,7 @@ export function importEditorMedia(
   worldId: string, editor: Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"],
   files?: readonly File[], production?: string,
 ): { requestId: string | null; reason?: string } {
+  if (isRemoteSession()) return { requestId: null, reason: "Import media on the desktop app." };
   if (files && !bridge?.importDroppedMedia) return { requestId: null, reason: "File drops are available in the desktop app. Use Import media instead." };
   if (files && files.length > 16) return { requestId: null, reason: "Import up to 16 files at a time." };
   const requestId = queueRequest("upload-artifacts");

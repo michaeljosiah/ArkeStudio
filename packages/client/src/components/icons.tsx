@@ -455,6 +455,9 @@ export const Monitor = icon(
 export const Cloud = icon(<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />);
 export const Laptop = icon(<path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16" />);
 export const ArrowRight = icon(<><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></>);
+export const FramePrevious = icon(<><path d="M6 5v14" /><path d="m18 5-9 7 9 7Z" /></>);
+export const FrameNext = icon(<><path d="M18 5v14" /><path d="m6 5 9 7-9 7Z" /></>);
+export const MenuLines = icon(<path d="M4 6h16M4 12h16M4 18h16" />);
 /** A studio that does not answer: the plug pulled apart. */
 export const Unplug = icon(
   <>

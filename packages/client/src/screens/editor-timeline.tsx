@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { ClipMenu, ExtractAudioMenuItem } from "./editor-clip-menu.js";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ClipMenu, ClipMenuLabel, ExtractAudioMenuItem } from "./editor-clip-menu.js";
 import {
   artifactPicturePath,
   basePictureTrack,
@@ -28,12 +28,14 @@ import {
   pictureDragCommand,
   previewTimeline,
   timingEntryCommand,
+  timecodeFrames,
   type PictureGesture,
   type TimingField,
 } from "../lib/picture-edit.js";
 import { fileKindsFromTransfer, laneTakesFiles, reorderPreview, type DroppedKind } from "../lib/clip-gesture.js";
 import { Film } from "../components/icons.js";
 import { startClipGesture, type GestureUpdate } from "./editor-gesture.js";
+import { coarsePointer, cutTime, useCutLayout, useCutTouch } from "./editor-responsive.js";
 import { DropTarget, GestureChip, chipSeconds } from "./editor-marks.js";
 import { ARTIFACT_DRAG_TYPE, dragAccepts, libraryDrag } from "./editor-audio.js";
 
@@ -161,6 +163,7 @@ function PictureClip({ view, slug, frameRate, style, className, children, ...res
   className: string;
 } & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "style" | "className">) {
   const ref = useRef<HTMLButtonElement>(null);
+  const { compact } = useCutLayout();
   const width = useMeasuredWidth(ref);
   // A poster that never arrives — a build with no ffmpeg draws none — leaves the kind's mark, not
   // an empty frame with a name on it. Remembered per picture, so a shot that gains a frame, or a
@@ -179,7 +182,7 @@ function PictureClip({ view, slug, frameRate, style, className, children, ...res
             ? <div className="fy-portrait--fallback"><Film size={18} /></div>
             : <Portrait worldSlug={slug} path={view.poster} label="" radius={0} onAvailabilityChange={(available) => setMissingFor(available ? null : pictureKey)} />}
           <Filmstrip slug={slug} footage={view.footage} durationSec={view.clip.durationFrames / frameRate} widthPx={width} />
-          <span className="fy-cutseg__tag">{view.label.replace(/^shot /, "")}</span>
+          <span className="fy-cutseg__tag">{compact && view.clip.source.kind === "shot" ? view.clip.source.shotNumber : view.label.replace(/^shot /, "")}</span>
         </>
       )}
     </button>
@@ -243,6 +246,8 @@ export function PictureTrack({
   const [hover, setHover] = useState<{ frame: number; refused: boolean; files: boolean } | null>(null);
   const [drag, setDrag] = useState<GestureUpdate | null>(null);
   const laneRef = useRef<HTMLDivElement>(null);
+  const { phone } = useCutLayout();
+  const { openLane } = useCutTouch();
   const clips = views.map((view) => view.clip);
   // A drag that ends on another lane, or outside the window, fires no dragleave here.
   useEffect(() => {
@@ -294,7 +299,7 @@ export function PictureTrack({
    */
   const begin = (clipId: TimelineClipId, gesture: PictureGesture) => (event: React.PointerEvent) => {
     if (event.button !== 0 || disabled || tool !== "select") return;
-    onSelect(clipId);
+    if (!coarsePointer() && event.pointerType !== "touch") onSelect(clipId);
     const clip = clips.find((candidate) => candidate.id === clipId);
     const element = event.currentTarget as HTMLElement;
     const lane = element.closest<HTMLElement>(".fy-track__lane");
@@ -314,6 +319,8 @@ export function PictureTrack({
       totalFrames: span,
       clip,
       gesture,
+      selected: clipId === selectedClipId,
+      onLongPress: () => { onSelect(clipId); setMenu({ clipId, x: event.clientX, y: event.clientY }); },
       // The clip's own edges are left out, or a small move would stick where it started. A move
       // on this lane sends an order, not a frame: the relay puts the clip at its ordinal slot,
       // which need not share an edge the ghost snapped to on another lane, and the clip would
@@ -432,6 +439,7 @@ export function PictureTrack({
   return (
     <div className="fy-track" data-track="picture">
       <span className="fy-track__label">
+        {phone && <button type="button" className="fy-cut-lane-open" aria-label="Picture lane" onClick={() => { const track = basePictureTrack(timeline); if (track) openLane(track.id); }}><Film size={16} /></button>}
         <span className="fy-track__icon" aria-hidden="true"><Film size={11} /></span>
         <span className="fy-track__name">Picture</span>
       </span>
@@ -600,13 +608,14 @@ export function PictureTrack({
               type="button"
               role="menuitem"
               className="fy-clipmenu__item"
+              data-action={action}
               disabled={disabled || off}
               onClick={() => {
                 act(menu.clipId, action);
                 setMenu(null);
               }}
             >
-              {label}
+              <ClipMenuLabel action={action}>{label}</ClipMenuLabel>
             </button>
           ))}
         </ClipMenu>
@@ -634,7 +643,11 @@ function TimingRow({
   onEnter: (text: string) => void;
   disabled: boolean;
 }) {
-  const shown = formatFrames(value, frameRate);
+  const { compact } = useCutLayout();
+  const shown = compact ? label === "Duration" ? `${(value / frameRate).toFixed(2)}s` : cutTime(value, frameRate) : formatFrames(value, frameRate);
+  const input = useRef<HTMLInputElement>(null);
+  const editing = useRef<{ shown: string; compact: boolean; onEnter: typeof onEnter } | null>(null);
+  useLayoutEffect(() => { if (input.current && !editing.current) input.current.value = shown; }, [shown]);
   return (
     <div className="fy-cutinspect__row fy-framestep">
       <span>{label}</span>
@@ -643,19 +656,20 @@ function TimingRow({
           −
         </button>
         <input
-          // Remounted when the record moves, so the field always starts from what was written.
-          key={shown}
+          ref={input}
           className="fy-timecode"
           defaultValue={shown}
           aria-label={`${label} timecode`}
+          inputMode="decimal"
           disabled={disabled}
           spellCheck={false}
-          onFocus={(event) => event.currentTarget.select()}
+          onFocus={(event) => { editing.current = { shown, compact, onEnter }; event.currentTarget.select(); }}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
               event.currentTarget.blur();
             } else if (event.key === "Escape") {
+              editing.current = null;
               event.currentTarget.value = shown;
               event.currentTarget.blur();
               // Escape here drops the edit and nothing more: left to bubble, the Cut's pane
@@ -664,8 +678,15 @@ function TimingRow({
             }
           }}
           onBlur={(event) => {
+            const entered = editing.current ?? { shown, compact, onEnter };
+            editing.current = null;
             const text = event.currentTarget.value.trim();
-            if (text !== shown) onEnter(text);
+            if (text !== entered.shown) {
+              if (!entered.compact) entered.onEnter(text);
+              else if (/^\d+:\d{2}\.\d{2}$/.test(text)) entered.onEnter(text.replace(".", ":"));
+              else if (/^\d+(?:\.\d+)?s?$/.test(text)) entered.onEnter(formatFrames(Math.round(Number(text.replace(/s$/, "")) * frameRate), frameRate));
+              else entered.onEnter(text);
+            }
             // Whatever was sent, the row shows the record: a clamped or refused value must not
             // stay on screen as typed, reading as if it had landed.
             event.currentTarget.value = shown;
@@ -752,6 +773,7 @@ export function PictureClipTiming({
   onScrub,
   sourceLength,
   timeline = null,
+  sourceTimes = false,
 }: {
   clip: TimelineClip;
   /** The clip's track, so a typed edge stops where its neighbours and its source do. */
@@ -763,6 +785,7 @@ export function PictureClipTiming({
   sourceLength: SourceLengthFrames;
   /** The record a step is checked against before it is sent, so the viewer never parks on an edge the cut refused. */
   timeline?: ProductionTimeline | null;
+  sourceTimes?: boolean;
 }) {
   const end = clip.startFrame + clip.durationFrames;
   /** Where the viewer goes after a command: the edge it moved, in the record it will produce. */
@@ -781,6 +804,11 @@ export function PictureClipTiming({
     follow(command);
   };
   const typed = (field: TimingField, label: string) => (text: string) => {
+    if (sourceTimes && (field === "in" || field === "out")) {
+      const frames = timecodeFrames(text, frameRate);
+      if (frames === null) return;
+      text = formatFrames(frames + clip.startFrame - clip.sourceInFrames, frameRate);
+    }
     const command = timingEntryCommand(clips, clip.id, field, text, frameRate, sourceLength);
     if (command !== null) send(command, label);
   };
@@ -792,18 +820,18 @@ export function PictureClipTiming({
         onEnter={typed("position", "Move clip")} />
       <TimingRow
         label="In"
-        value={clip.startFrame}
+        value={sourceTimes ? clip.sourceInFrames : clip.startFrame}
         frameRate={frameRate}
         disabled={disabled}
         onStep={(delta) => send({ kind: "trim", clipId: clip.id, edge: "start", deltaFrames: delta }, "Trim clip head")}
         onEnter={typed("in", "Trim clip head")}
       />
-      <TimingRow label="Out" value={end} frameRate={frameRate} disabled={disabled} onStep={trimEnd} onEnter={typed("out", "Trim clip tail")} />
+      <TimingRow label="Out" value={sourceTimes ? clip.sourceInFrames + clip.durationFrames : end} frameRate={frameRate} disabled={disabled} onStep={trimEnd} onEnter={typed("out", "Trim clip tail")} />
       <TimingRow label="Duration" value={clip.durationFrames} frameRate={frameRate} disabled={disabled} onStep={trimEnd} onEnter={typed("duration", "Trim clip tail")} />
-      <div className="fy-cutinspect__row">
+      {!sourceTimes && <div className="fy-cutinspect__row">
         <span>Source in</span>
         <strong>{formatFrames(clip.sourceInFrames, frameRate)}</strong>
-      </div>
+      </div>}
     </div>
   );
 }

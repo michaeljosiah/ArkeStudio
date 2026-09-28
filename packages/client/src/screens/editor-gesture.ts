@@ -31,7 +31,9 @@ export interface GestureUpdate {
 
 export interface GestureOptions {
   /** The press. Its `currentTarget` takes pointer capture. */
-  event: { button: number; pointerId: number; clientX: number; currentTarget: EventTarget | null; preventDefault(): void; stopPropagation(): void };
+  event: { button: number; pointerId: number; clientX: number; clientY?: number; pointerType?: string; currentTarget: EventTarget | null; preventDefault(): void; stopPropagation(): void };
+  selected?: boolean;
+  onLongPress?: () => void;
   /** The lane the clip sits in; its width is the whole span. */
   lane: HTMLElement;
   /** The scroll container, for auto-scroll; null when there is none to scroll. */
@@ -46,11 +48,27 @@ export interface GestureOptions {
   onEnd: (update: GestureUpdate | null) => void;
 }
 
+/** A second finger or a pan cancels the menu; a detached target cannot open one later. */
+export function armClipMenu(event: GestureOptions["event"], open: () => void): void {
+  const element = event.currentTarget as HTMLElement;
+  const clean = () => { clearTimeout(timer); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", clean); window.removeEventListener("pointercancel", clean); window.removeEventListener("pointerdown", extra); };
+  const move = (pointer: PointerEvent) => { if (pointer.pointerId === event.pointerId && Math.hypot(pointer.clientX - event.clientX, (pointer.clientY ?? 0) - (event.clientY ?? 0)) >= 8) clean(); };
+  const extra = (pointer: PointerEvent) => { if (pointer.pointerId !== event.pointerId) clean(); };
+  const timer = setTimeout(() => { clean(); if (element.isConnected) open(); }, 450);
+  window.addEventListener("pointermove", move); window.addEventListener("pointerup", clean); window.addEventListener("pointercancel", clean); window.addEventListener("pointerdown", extra);
+}
+
 /** Attach the gesture to a press. Returns false when the press could not start one. */
 export function startClipGesture(options: GestureOptions): boolean {
   const { event, lane, canvas, clip, gesture } = options;
   const element = event.currentTarget as (HTMLElement & Partial<Pick<HTMLElement, "setPointerCapture" | "releasePointerCapture">>) | null;
   if (element === null) return false;
+  const touch = event.pointerType === "touch" || (typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true);
+  // A first touch belongs to lane panning; selection happens only on its eventual click.
+  if (touch && gesture === "move" && options.selected !== true) {
+    if (options.onLongPress) armClipMenu(event, options.onLongPress);
+    return false;
+  }
   const span = Math.max(options.totalFrames, 1);
   const laneWidth = lane.getBoundingClientRect().width;
   if (laneWidth <= 0) return false;
@@ -67,6 +85,8 @@ export function startClipGesture(options: GestureOptions): boolean {
   let bypass = false;
   let frame = 0;
   let ended = false;
+  let travelled = !touch;
+  let longPress: ReturnType<typeof setTimeout> | undefined;
 
   const compute = (clientX: number): GestureUpdate => {
     const rawDelta = framesFromDelta(clientX - originX + scrolled, laneWidth, span);
@@ -91,7 +111,7 @@ export function startClipGesture(options: GestureOptions): boolean {
       deltaFrames,
       snappedTo,
       pointerX: clientX - laneLeft + scrolled,
-      moved: clientX !== originX || scrolled !== 0,
+      moved: travelled && (clientX !== originX || scrolled !== 0),
     };
   };
   const report = () => options.onUpdate(compute(lastClientX));
@@ -112,7 +132,13 @@ export function startClipGesture(options: GestureOptions): boolean {
     if (step !== 0 && typeof requestAnimationFrame === "function") frame = requestAnimationFrame(tick);
   };
   const move = (pointer: PointerEvent) => {
+    if (pointer.pointerId !== event.pointerId) return;
     lastClientX = pointer.clientX;
+    if (Math.abs((pointer.clientY ?? 0) - (event.clientY ?? 0)) >= 8) clearTimeout(longPress);
+    if (!travelled) {
+      if (Math.abs(lastClientX - originX) < 8) return;
+      travelled = true; clearTimeout(longPress);
+    }
     bypass = pointer.altKey === true;
     report();
     if (frame === 0 && canvas !== null && typeof requestAnimationFrame === "function") {
@@ -122,17 +148,21 @@ export function startClipGesture(options: GestureOptions): boolean {
   };
   const finish = () => {
     ended = true;
+    clearTimeout(longPress);
     if (frame !== 0 && typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
     element.removeEventListener("pointermove", move);
     element.removeEventListener("pointerup", up);
     element.removeEventListener("pointercancel", cancel);
     if (typeof window !== "undefined") window.removeEventListener("keydown", onKey, true);
+    if (touch) window.removeEventListener("pointerdown", anotherFinger);
   };
   const up = (pointer: PointerEvent) => {
+    if (pointer.pointerId !== event.pointerId) return;
     if (typeof element.releasePointerCapture === "function") {
       try { element.releasePointerCapture(pointer.pointerId); } catch { /* never captured */ }
     }
     lastClientX = pointer.clientX;
+    if (Math.abs(lastClientX - originX) >= 8) travelled = true;
     bypass = pointer.altKey === true;
     const final = compute(lastClientX);
     finish();
@@ -144,6 +174,7 @@ export function startClipGesture(options: GestureOptions): boolean {
     finish();
     options.onEnd(null);
   };
+  const anotherFinger = (pointer: PointerEvent) => { if (pointer.pointerId !== event.pointerId) cancel(); };
   // Escape drops the gesture where it is (Clipchamp): the ghost goes home and nothing is sent.
   const onKey = (key: KeyboardEvent) => {
     if (key.key !== "Escape") return;
@@ -154,6 +185,8 @@ export function startClipGesture(options: GestureOptions): boolean {
   element.addEventListener("pointermove", move);
   element.addEventListener("pointerup", up);
   element.addEventListener("pointercancel", cancel);
+  if (touch && gesture === "move" && options.onLongPress) longPress = setTimeout(() => { cancel(); if (element.isConnected) options.onLongPress?.(); }, 450);
   if (typeof window !== "undefined") window.addEventListener("keydown", onKey, true);
+  if (touch) window.addEventListener("pointerdown", anotherFinger);
   return true;
 }

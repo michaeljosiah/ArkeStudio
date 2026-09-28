@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ClipMenu, ExtractAudioMenuItem } from "./editor-clip-menu.js";
+import { ClipMenu, ClipMenuLabel, ExtractAudioMenuItem } from "./editor-clip-menu.js";
 import {
   artifactPicturePath,
   AUDIO_TRACK_KINDS,
@@ -29,6 +29,7 @@ import type { EditorTool } from "./editor-timeline.js";
 import { frameAtPixel, previewTimeline, trackDragCommand, type PictureGesture } from "../lib/picture-edit.js";
 import { fileKindsFromTransfer, laneTakesFiles, type DroppedKind } from "../lib/clip-gesture.js";
 import { startClipGesture, type GestureUpdate } from "./editor-gesture.js";
+import { coarsePointer, useCutLayout, useCutTouch } from "./editor-responsive.js";
 import { DropTarget, GestureChip, chipSeconds } from "./editor-marks.js";
 
 /**
@@ -176,6 +177,8 @@ export function TypedTrackRows({
   const [hover, setHover] = useState<{ trackId: TimelineTrackId; frame: number; refused: boolean; files: boolean } | null>(null);
   const [drag, setDrag] = useState<(GestureUpdate & { trackId: TimelineTrackId; refused: boolean }) | null>(null);
   const [menu, setMenu] = useState<{ clipId: TimelineClipId; x: number; y: number } | null>(null);
+  const { phone } = useCutLayout();
+  const { openLane } = useCutTouch();
   // A drag that ends on another lane, or outside the window, fires no dragleave here.
   useEffect(() => {
     const clear = () => setHover(null);
@@ -189,7 +192,7 @@ export function TypedTrackRows({
   const span = Math.max(totalFrames, 1);
   const anySolo = timeline.tracks.some((track) => track.solo === true);
   const tracks = typedTracksOf(timeline);
-  const menuClip = menu ? tracks.filter(track => track.kind === "picture").flatMap(track => track.clips).find(clip => clip.id === menu.clipId) : undefined;
+  const menuClip = menu ? tracks.flatMap(track => track.clips).find(clip => clip.id === menu.clipId) : undefined;
   const filesOver = fileKinds !== null && fileKinds.length > 0 && !disabled && onFileDrop !== undefined;
   if (tracks.length === 0) return null;
   const percent = (frames: number): string => `${(frames / span) * 100}%`;
@@ -207,7 +210,7 @@ export function TypedTrackRows({
    */
   const begin = (track: TimelineTrack, clipId: TimelineClipId, gesture: PictureGesture) => (event: React.PointerEvent) => {
     if (event.button !== 0 || disabled || tool !== "select") return;
-    onSelect(clipId);
+    if (!coarsePointer() && event.pointerType !== "touch") onSelect(clipId);
     const element = event.currentTarget as HTMLElement;
     const lane = element.closest<HTMLElement>(".fy-track__lane");
     const clips = orderedTrackClips(track);
@@ -228,6 +231,8 @@ export function TypedTrackRows({
       totalFrames: span,
       clip,
       gesture,
+      selected: clipId === selectedClipId,
+      onLongPress: () => { onSelect(clipId); setMenu({ clipId, x: event.clientX, y: event.clientY }); },
       snapFrames: snapFrames === null ? null : snapFrames(clipId),
       onUpdate: (update) => {
         command = trackDragCommand(clips, clipId, gesture, update.deltaFrames, sourceLength);
@@ -339,6 +344,7 @@ export function TypedTrackRows({
         return (
           <div className={cx("fy-track", silenced && "fy-track--silent")} data-track={track.kind === "picture" ? "overlay" : track.kind} data-track-id={track.id} key={track.id}>
             <span className="fy-track__label fy-track__label--typed">
+              {phone && <button type="button" className="fy-cut-lane-open" aria-label={`${track.name} lane`} onClick={() => openLane(track.id)}>{laneIcon(track.kind)}</button>}
               <span className="fy-track__icon" aria-hidden="true">{laneIcon(track.kind)}</span>
               <span className="fy-track__name" title={`${track.name} · ${kindLabel}`}>{track.name}</span>
               <span className="fy-trackbtns" role="group" aria-label={`${track.name} controls`}>
@@ -478,7 +484,6 @@ export function TypedTrackRows({
                     title={label}
                     disabled={disabled}
                     onContextMenu={event => {
-                      if (audio) return;
                       event.preventDefault(); event.stopPropagation();
                       if (disabled) return;
                       event.currentTarget.focus({ preventScroll: true }); onSelect(clip.id);
@@ -517,6 +522,16 @@ export function TypedTrackRows({
         );
       })}
       {menu && menuClip && <ClipMenu at={menu} label={`Actions for ${clipLabel(menuClip)}`} onClose={() => setMenu(null)}>
+        {([ ["split", "Split at playhead"], ["duplicate", "Duplicate"], ["earlier", "Move earlier"], ["later", "Move later"], ["delete", "Delete"], ["ripple-delete", "Ripple delete"] ] as const).map(([action, label]) => <button type="button" role="menuitem" className="fy-clipmenu__item" data-action={action === "ripple-delete" ? "ripple" : action} key={action}
+          disabled={disabled || action === "split" && (playheadFrame <= menuClip.startFrame || playheadFrame >= menuClip.startFrame + menuClip.durationFrames)}
+          onClick={() => {
+            const clipId = menuClip.id;
+            const command: TimelineClipCommand = action === "split" ? { kind: "split", clipId, atFrame: playheadFrame, newClipId: mintClipId() }
+              : action === "duplicate" ? { kind: "duplicate", clipId, newClipId: mintClipId() }
+                : action === "earlier" || action === "later" ? { kind: "move-to-frame", clipId, startFrame: Math.max(0, menuClip.startFrame + (action === "earlier" ? -1 : 1)) }
+                  : { kind: action, clipId };
+            onCommands([command], label); setMenu(null);
+          }}><ClipMenuLabel action={action}>{label}</ClipMenuLabel></button>)}
         <ExtractAudioMenuItem production={production} timeline={timeline} artifacts={artifacts} clip={menuClip}
           disabled={disabled} onCommands={onCommands} mintClipId={mintClipId} onClose={() => setMenu(null)} />
       </ClipMenu>}

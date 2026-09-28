@@ -32,6 +32,7 @@ export function CutPreview({
   transport,
   cueStyle = null,
   cueAt = null,
+  compact = false,
 }: {
   slug: string | undefined;
   spans: PlaybackSpan[];
@@ -42,6 +43,7 @@ export function CutPreview({
   cueStyle?: SubtitleStyle | null;
   /** The cue at a film second, read on the frame clock like the picture (round three). */
   cueAt?: ((sec: number) => ReturnType<typeof cueAtSec>) | null;
+  compact?: boolean;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const { playing, time, timeRef, setPlaying, seek } = transport;
@@ -248,8 +250,7 @@ export function CutPreview({
         {playing ? <PauseSolid size={22} /> : <Play size={22} />}
       </button>
       <span className="fy-viewer__tag">
-        {clock(time)} / {clock(totalSec)}
-        {current ? ` · ${current.label}` : ""}
+        {compact ? current?.label.match(/SHOT \d+/i)?.[0].replace(/SHOT/i, "SH") ?? clock(time) : <>{clock(time)} / {clock(totalSec)}{current ? ` · ${current.label}` : ""}</>}
       </span>
     </div>
   );
