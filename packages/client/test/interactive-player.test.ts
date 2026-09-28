@@ -627,6 +627,21 @@ describe("the player reading beats (turn 174)", () => {
     assert.equal(p.button("Log")?.getAttribute("aria-pressed"), "false");
   });
 
+  it("a line replayed from the log stops when the scene ends, never sounding over the choice (codex round 11)", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    // On to the last beat, the log open, the first line played again on its own player.
+    for (let i = 0; i < 4; i += 1) p.key("ArrowRight");
+    p.key("l");
+    const logVoice = p.all("audio")[1]! as unknown as HTMLMediaElement;
+    let stopped = false;
+    Object.assign(logVoice, { play: () => Promise.resolve(), pause: () => { stopped = true; } });
+    p.click(p.q('[aria-label="Log"] [aria-label="Play line"]') as unknown as HTMLElement);
+    assert.equal(logVoice.getAttribute("src"), "media/wash.mp3");
+    p.key("Escape");
+    p.key("ArrowRight"); p.key("ArrowRight");
+    assert.ok(stopped, "the log's voice stops with the scene");
+  });
+
   it("keeps the focus on the open log's control when the reader moves on beneath it", () => {
     const p = mount({ ...NOVEL, autoplay: true });
     p.key("ArrowRight"); p.key("ArrowRight");

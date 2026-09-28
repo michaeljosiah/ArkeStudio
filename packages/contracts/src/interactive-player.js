@@ -329,6 +329,7 @@ export function mountInteractivePlayer(root, options) {
   }
 
   function play(sceneId, positionSec) {
+    logVoice.pause && logVoice.pause();
     state.sceneId = sceneId;
     state.positionSec = positionSec || 0;
     save();
@@ -509,7 +510,10 @@ export function mountInteractivePlayer(root, options) {
       return;
     }
     stopHold();
+    // A line replayed from the Log stops with the scene too: it would sound over the choice, or
+    // on into the next scene's footage, which never passes through showBeat (codex round 11).
     voice.pause && voice.pause();
+    logVoice.pause && logVoice.pause();
     finishScene();
   }
   /** Back one beat, within the scene: a choice already made is changed from the route, not here. */

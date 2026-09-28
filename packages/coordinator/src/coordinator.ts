@@ -1193,17 +1193,24 @@ export class Coordinator {
    */
   /**
    * A visual novel's package carries the voices its table read has prepared (turn 174): each
-   * scene's plan, read as the scene page reads it, with the narrator resolved once per export.
+   * scene's plan, read as the scene page reads it, with the narrator resolved once per export and
+   * its setting fenced across the export.
    * Both ways to export — the branch map's and World Chat's — ship through this one resolver.
    */
   private interactiveExportVoices(store: WorldStore, productionId: string): BeatVoices | undefined {
     const manifest = this.opts.manifest;
     if (manifest === undefined) return undefined;
     let narrator: Promise<TableReadNarrator | null> | null = null;
-    return async (sceneId) => {
-      narrator ??= this.tableReadNarrator(store, productionId);
-      const { plan } = await planTableRead(store, productionId, sceneId, manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, undefined, await narrator);
-      return { sceneVersion: plan.sceneVersion, files: new Map(plan.items.flatMap((item) => (item.file === undefined ? [] : [[item.lineId, item.file] as const]))) };
+    return {
+      plan: async (sceneId) => {
+        narrator ??= this.tableReadNarrator(store, productionId);
+        const { plan } = await planTableRead(store, productionId, sceneId, manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, undefined, await narrator);
+        return { sceneVersion: plan.sceneVersion, files: new Map(plan.items.flatMap((item) => (item.file === undefined ? [] : [[item.lineId, item.file] as const]))) };
+      },
+      // The narrator as chosen in Settings, read fresh each time: the export compares it before
+      // and under its gate, and the setting is what a person changes — not the catalogue's
+      // resolution of it, which would put a provider listing inside the world's gate.
+      narrator: async () => (this.appSettings ? (await this.appSettings.load()).narrator ?? null : null),
     };
   }
 

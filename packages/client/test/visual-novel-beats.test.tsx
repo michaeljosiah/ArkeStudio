@@ -276,6 +276,24 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     assert.equal(player.querySelector("audio")?.hasAttribute("src"), false, "sc_04 is at version 2; a plan for 3 names another text");
   });
 
+  it("a voice recast while the preview gathers its voices asks every scene again (codex round 11)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = visualNovel();
+    // A second scene only the preview asks about: the scene page plans its own scene alone.
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.scenes.push({ ...structuredClone(production.scenes[0]!), id: "sc_05", number: 5, slug: "the-pier" } as never);
+    const mounted = await mountState(state, SCENE_PATH);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Preview")!);
+    const askedOf = (sceneId: string) => sent.filter((message) => message.kind === "plan-table-read" && message.sceneId === sceneId).length;
+    assert.equal(askedOf("sc_05"), 1, "the preview asks the other scene once");
+    const next = structuredClone(state) as ClientState;
+    const maren = next.world!.sheets.find((sheet) => sheet.id === "maren-kest")!;
+    maren.voice = { ...maren.voice!, voiceId: "v_9Lr3", label: "High water" };
+    await act(async () => { __setStateForTest(next); });
+    assert.equal(askedOf("sc_05"), 2, "and again once Maren is recast, before any answer came");
+  });
+
   it("a studio lost while the voices are asked for opens the preview as text, rather than waiting forever", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
@@ -352,6 +370,21 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     assert.equal(q(mounted, '[data-testid="beat-lines"]'), null);
     assert.equal(q(mounted, ".fy-swvoice"), null);
     assert.equal(sent.some((message) => message.kind === "plan-table-read"), false, "nothing asks a film's table read on the storyboard");
+  });
+});
+
+describe("a visual novel's production dashboard (codex round 11)", () => {
+  it("counts pictures, as the beats read them, and sends a gap to the beats rather than to clips", async () => {
+    const state = visualNovel();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const shots = production.scenes.flatMap((scene) => (scene as unknown as { shots: unknown[] }).shots).length;
+    production.selections.sh_12 = { ...production.selections.sh_12!, acceptedTakeId: "tk_01J8A0000000000000000000A1" };
+    const mounted = await mountState(state, `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
+    const text = q(mounted, '[data-screen="production-dashboard"]')?.textContent ?? "";
+    // sh_12's still, and sh_13 keeping it: two pictures, though neither has an accepted clip.
+    assert.match(text, new RegExp(`2 of ${shots} pictures ready`));
+    assert.doesNotMatch(text, /no clip yet|Latest clips/);
+    if (shots > 2) assert.ok(all(mounted, "button").some((button) => button.textContent === "Open the beats"), "a gap opens its scene's beats");
   });
 });
 

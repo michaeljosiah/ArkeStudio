@@ -845,11 +845,16 @@ function beatPicturePath(production: ProductionBundle, artifacts: readonly Artif
   return `productions/${production.meta.id}/takes/${take.id}/${take.media}`;
 }
 
-/**
- * A scene's prepared voices as the table read planned them, with the scene version that plan was
- * made for — the store's current scene, which may no longer be the snapshot being exported.
- */
-export type BeatVoices = (sceneId: string) => Promise<{ sceneVersion: number; files: ReadonlyMap<string, string> }>;
+/** Where a visual novel's voices come from, and what they are read in. */
+export interface BeatVoices {
+  /**
+   * A scene's prepared voices as the table read planned them, with the scene version that plan was
+   * made for — the store's current scene, which may no longer be the snapshot being exported.
+   */
+  plan: (sceneId: string) => Promise<{ sceneVersion: number; files: ReadonlyMap<string, string> }>;
+  /** The narrator narration is read in, as it stands: read before the plans and again under the gate. */
+  narrator: () => Promise<unknown>;
+}
 
 /** A voice the table read names, if it is a file inside the world rather than a way out of it. */
 function safeWorldFile(path: string): boolean {
@@ -890,14 +895,18 @@ async function exportBeats(
   }))].sort();
   const speakerVoices = () => JSON.stringify(speakers.map((id) => [id, store.getBundle().sheets.find((sheet) => sheet.id === id)?.voice ?? null]));
   const voicesBefore = speakerVoices();
+  // The narrator too: it is no sheet's and moves no scene, and the plans read it once for the
+  // whole package (codex round 11). A failure to read it is a narrator nobody can vouch for.
+  const narratorNow = async () => (options.voices ? JSON.stringify(await options.voices.narrator().catch(() => ({ unreadable: true })) ?? null) : "");
+  const narratorBefore = await narratorNow();
   const scenes: Array<{ sceneId: string; beats: PlayerBeat[] }> = [];
   for (const scene of production.scenes.filter((candidate) => !excluded.has(candidate.id))) {
     // A resolver that fails is not a scene with no voices: shipping every prepared line as text
     // would pass for a finished package (codex round 9).
-    let planned: Awaited<ReturnType<BeatVoices>> | null = null;
+    let planned: Awaited<ReturnType<BeatVoices["plan"]>> | null = null;
     if (options.voices) {
       try {
-        planned = await options.voices(scene.id);
+        planned = await options.voices.plan(scene.id);
       } catch {
         blockers.push(`${scene.id}'s voices could not be gathered — export again`);
         continue;
@@ -952,15 +961,20 @@ async function exportBeats(
     // The routing the package plays is the snapshot's; a choice drawn meanwhile would ship the
     // graph Studio no longer shows (codex round 10).
     const rerouted = JSON.stringify(now?.routing ?? null) !== JSON.stringify(routing);
-    const revoiced = speakerVoices() !== voicesBefore;
-    if (moved.length > 0 || reframed || rerouted || revoiced) {
+    const revoiced = speakerVoices() !== voicesBefore || (await narratorNow()) !== narratorBefore;
+    // Every scene, not only the ones exported: a scene added meanwhile is one the package would
+    // leave out while Studio counts it (codex round 11).
+    const sceneSet = (bundle: ProductionBundle | undefined) => JSON.stringify((bundle?.scenes ?? []).map((scene) => [scene.id, scene.version]).sort());
+    const reshaped = sceneSet(now) !== sceneSet(production);
+    if (moved.length > 0 || reshaped || reframed || rerouted || revoiced) {
       return {
         ok: false,
         blockers: [
           ...moved.map(({ sceneId }) => `${sceneId} changed while the package was made — export again`),
+          ...(reshaped && moved.length === 0 ? ["a scene was added or removed while the package was made — export again"] : []),
           ...(reframed && moved.length === 0 ? ["a picture changed while the package was made — export again"] : []),
           ...(rerouted ? ["the branch map changed while the package was made — export again"] : []),
-          ...(revoiced ? ["a character's voice changed while the package was made — export again"] : []),
+          ...(revoiced ? ["a voice changed while the package was made — export again"] : []),
         ],
       };
     }

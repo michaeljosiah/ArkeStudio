@@ -479,7 +479,7 @@ describe("a visual novel's package (turn 174)", () => {
     await appendTraversal(store, production.meta.id, walked);
     await mkdir(join(dir, ".cache", "voice-previews"), { recursive: true });
     await writeFile(join(dir, ".cache", "voice-previews", "wash.mp3"), Buffer.from("the narrator reads"));
-    const voices = async (sceneId: string) => ({ sceneVersion: 1, files: new Map(sceneId === "sc_i1" ? [["sc_i1/sh_v1/blk_wash", ".cache/voice-previews/wash.mp3"]] : []) });
+    const voices = { plan: async (sceneId: string) => ({ sceneVersion: 1, files: new Map(sceneId === "sc_i1" ? [["sc_i1/sh_v1/blk_wash", ".cache/voice-previews/wash.mp3"]] : []) }), narrator: async () => null };
     const exportId = "iv_01J8F3K2QW9VZX4N7M0RTYB6HD";
     const result = await exportInteractive(store, production, CLOCK, { exportId, voices, current: () => production });
     assert.ok(result.ok, `expected export, got ${result.ok ? "" : result.blockers.join("; ")}`);
@@ -517,7 +517,7 @@ describe("a visual novel's package (turn 174)", () => {
     const { dir, store, bundle } = await open();
     const production = await novel(dir, bundle.productions[0]!);
     await appendTraversal(store, production.meta.id, walked);
-    const voices = async (sceneId: string) => ({ sceneVersion: sceneId === "sc_i1" ? 2 : 1, files: new Map<string, string>() });
+    const voices = { plan: async (sceneId: string) => ({ sceneVersion: sceneId === "sc_i1" ? 2 : 1, files: new Map<string, string>() }), narrator: async () => null };
     const result = await exportInteractive(store, production, CLOCK, { voices });
     assert.ok(!result.ok);
     assert.deepEqual(result.blockers, ["sc_i1 changed while the package was made — export again"]);
@@ -527,9 +527,12 @@ describe("a visual novel's package (turn 174)", () => {
     const { dir, store, bundle } = await open();
     const production = await novel(dir, bundle.productions[0]!);
     await appendTraversal(store, production.meta.id, walked);
-    const voices = async (sceneId: string) => {
-      if (sceneId === "sc_i2") throw new Error("the narrator could not be read");
-      return { sceneVersion: 1, files: new Map<string, string>() };
+    const voices = {
+      plan: async (sceneId: string) => {
+        if (sceneId === "sc_i2") throw new Error("the narrator could not be read");
+        return { sceneVersion: 1, files: new Map<string, string>() };
+      },
+      narrator: async () => null,
     };
     const result = await exportInteractive(store, production, CLOCK, { voices, current: () => production });
     assert.ok(!result.ok);
@@ -542,7 +545,7 @@ describe("a visual novel's package (turn 174)", () => {
     await appendTraversal(store, production.meta.id, walked);
     // A frame accepted meanwhile is operational state: no scene version moves.
     const now = { ...production, selections: { ...production.selections, sh_v3: { acceptedTakeId: production.takes[0]!.id, trimInSec: 0 } } };
-    const voices = async () => ({ sceneVersion: 1, files: new Map<string, string>() });
+    const voices = { plan: async () => ({ sceneVersion: 1, files: new Map<string, string>() }), narrator: async () => null };
     const result = await exportInteractive(store, production, CLOCK, { voices, current: () => now });
     assert.ok(!result.ok);
     assert.deepEqual(result.blockers, ["a picture changed while the package was made — export again"]);
@@ -553,7 +556,7 @@ describe("a visual novel's package (turn 174)", () => {
     const production = await novel(dir, bundle.productions[0]!);
     await appendTraversal(store, production.meta.id, walked);
     const now = { ...production, routing: { ...ROUTING, version: 2, choices: [{ ...ROUTING.choices[0]!, label: "Wade on" }] } };
-    const voices = async () => ({ sceneVersion: 1, files: new Map<string, string>() });
+    const voices = { plan: async () => ({ sceneVersion: 1, files: new Map<string, string>() }), narrator: async () => null };
     const result = await exportInteractive(store, production, CLOCK, { voices, current: () => now });
     assert.ok(!result.ok);
     assert.deepEqual(result.blockers, ["the branch map changed while the package was made — export again"]);
@@ -564,21 +567,53 @@ describe("a visual novel's package (turn 174)", () => {
     const production = await novel(dir, bundle.productions[0]!);
     await appendTraversal(store, production.meta.id, walked);
     const maren = store.getBundle().sheets.find((sheet) => sheet.id === "maren-kest")!;
-    const voices = async (sceneId: string) => {
-      // The first scene is planned; then Maren's voice is replaced before the second.
-      if (sceneId === "sc_i2") (maren as { voice?: unknown }).voice = { provider: "kokoro", voiceId: "bf_emma", label: "Emma", assignedAtVersion: 1 };
-      return { sceneVersion: 1, files: new Map<string, string>() };
+    const voices = {
+      plan: async (sceneId: string) => {
+        // The first scene is planned; then Maren's voice is replaced before the second.
+        if (sceneId === "sc_i2") (maren as { voice?: unknown }).voice = { provider: "kokoro", voiceId: "bf_emma", label: "Emma", assignedAtVersion: 1 };
+        return { sceneVersion: 1, files: new Map<string, string>() };
+      },
+      narrator: async () => null,
     };
     const result = await exportInteractive(store, production, CLOCK, { voices, current: () => production });
     assert.ok(!result.ok);
-    assert.deepEqual(result.blockers, ["a character's voice changed while the package was made — export again"]);
+    assert.deepEqual(result.blockers, ["a voice changed while the package was made — export again"]);
+  });
+
+  it("refuses a package whose narrator was changed while its voices were gathered (codex round 11)", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await novel(dir, bundle.productions[0]!);
+    await appendTraversal(store, production.meta.id, walked);
+    let narrator = { provider: "mistral", voiceId: "en_paul_neutral" };
+    const voices = {
+      plan: async (sceneId: string) => {
+        if (sceneId === "sc_i2") narrator = { provider: "kokoro", voiceId: "bf_emma" };
+        return { sceneVersion: 1, files: new Map<string, string>() };
+      },
+      narrator: async () => narrator,
+    };
+    const result = await exportInteractive(store, production, CLOCK, { voices, current: () => production });
+    assert.ok(!result.ok);
+    assert.deepEqual(result.blockers, ["a voice changed while the package was made — export again"]);
+  });
+
+  it("refuses a package when a scene is added while its voices were gathered (codex round 11)", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await novel(dir, bundle.productions[0]!);
+    await appendTraversal(store, production.meta.id, walked);
+    const extra = { ...production.scenes[1]!, id: "sc_i3", number: 3, slug: "i3", title: "Added meanwhile" };
+    const now = { ...production, scenes: [...production.scenes, extra] };
+    const voices = { plan: async () => ({ sceneVersion: 1, files: new Map<string, string>() }), narrator: async () => null };
+    const result = await exportInteractive(store, production, CLOCK, { voices, current: () => now });
+    assert.ok(!result.ok);
+    assert.deepEqual(result.blockers, ["a scene was added or removed while the package was made — export again"]);
   });
 
   it("a voice path the plan names outside the world never reaches the package", async () => {
     const { dir, store, bundle } = await open();
     const production = await novel(dir, bundle.productions[0]!);
     await appendTraversal(store, production.meta.id, walked);
-    const voices = async () => ({ sceneVersion: 1, files: new Map([["sc_i1/sh_v1/blk_wash", "../outside.mp3"]]) });
+    const voices = { plan: async () => ({ sceneVersion: 1, files: new Map([["sc_i1/sh_v1/blk_wash", "../outside.mp3"]]) }), narrator: async () => null };
     const result = await exportInteractive(store, production, CLOCK, { voices, current: () => production });
     assert.ok(result.ok, `expected export, got ${result.ok ? "" : result.blockers.join("; ")}`);
     const manifest = JSON.parse(await readFile(join(dir, result.dir, "manifest.json"), "utf8")) as { files: Array<{ file: string }> };

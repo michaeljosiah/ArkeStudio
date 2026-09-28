@@ -98,7 +98,7 @@ export function useProductionVoiceFiles({
   /** Null asks nothing; each new value asks again. */
   key: number | null;
 }): { files: ReadonlyMap<string, string>; ready: boolean } {
-  const { connection } = useStore();
+  const { state, connection } = useStore();
   const [files, setFiles] = useState<ReadonlyMap<string, string>>(new Map());
   const [ready, setReady] = useState(false);
   /** The key whose answers are all in: the preview it opened has mounted, and is not asked again. */
@@ -106,6 +106,9 @@ export function useProductionVoiceFiles({
   // Versions ride in the key, so a scene edited while its plan is asked restarts the batch: a
   // line keeps its id through an edit, and a voice for its old text must not ride the new one.
   const scenes = sceneList.map((scene) => `${scene.id}@${scene.version}`).join("|");
+  // So do the voices the lines are read in: a narrator or a character recast mid-batch would
+  // mount one story in two voices (codex round 11).
+  const voicesKey = JSON.stringify([state?.app.narrator ?? null, (state?.world?.sheets ?? []).map((sheet) => [sheet.id, sheet.voice ?? null])]);
   useEffect(() => {
     if (key !== null && settled.current === key) return;
     setFiles(new Map());
@@ -144,6 +147,6 @@ export function useProductionVoiceFiles({
       setReady(true);
     }
     return off;
-  }, [key, worldId, productionId, scenes, connection]);
+  }, [key, worldId, productionId, scenes, voicesKey, connection]);
   return { files, ready };
 }
