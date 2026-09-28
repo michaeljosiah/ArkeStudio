@@ -29,6 +29,7 @@ import {
   ListOrdered,
   Message,
   PanelLeft,
+  MenuLines,
   Plus,
   Scroll,
   Sparkle,
@@ -39,6 +40,7 @@ import {
 import { Loading } from "../components/loading.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
+import { CUT_PHONE_QUERY } from "./editor-responsive.js";
 import { Button } from "../components/ui.js";
 import { cx } from "../components/ui.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
@@ -245,6 +247,8 @@ export function ProductionLayout() {
   const { world, production } = useProduction(worldId, prodId);
   const refusal = useWorldOpenRefusal(worldId);
   const location = useLocation();
+  const cutRoute = /\/cut\/?$/.test(location.pathname);
+  const cutPhone = useMediaQuery(CUT_PHONE_QUERY) && cutRoute;
   const phone = useMediaQuery("(max-width: 599px)");
   const compact = useMediaQuery("(max-width: 1099px)");
   const coarse = useMediaQuery("(pointer: coarse)");
@@ -344,8 +348,8 @@ export function ProductionLayout() {
   const sceneRoute = /\/scenes(?:\/[^/]+(?:\/shots\/[^/]+)?)?\/?$/.test(location.pathname);
   const sceneChrome = compact && sceneRoute ? production?.scenes.find(scene => scene.id === sceneId) : undefined;
   const shotChrome = sceneChrome && orderedShots(sceneChrome).find(shot => shot.id === shotId);
-  const sceneDeepPhone = phone && !refusal && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined);
-  const wantsFold = compact && sceneRoute || (railChoice ?? (location.pathname.endsWith("/cut") || sceneDetailDefault));
+  const sceneDeepPhone = !refusal && (phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
+  const wantsFold = compact && (sceneRoute || cutRoute) || (railChoice ?? (cutRoute || sceneDetailDefault));
   const drawerMode = !phone && wantsFold && (compact || coarse);
   const folded = !phone && wantsFold && !drawerMode;
   useEffect(() => { setDrawerOpen(false); }, [location.pathname, location.search]);
@@ -713,7 +717,7 @@ export function ProductionLayout() {
         </div>
   );
   return (
-    <div className="fy-app fy-production-app" data-scene-route={sceneRoute || undefined} data-deep-phone={sceneDeepPhone || undefined}>
+    <div className="fy-app fy-production-app" data-scene-route={sceneRoute || undefined} data-cut-route={cutRoute || undefined} data-deep-phone={sceneDeepPhone || undefined}>
       {!sceneDeepPhone && <AppChrome
         back={sceneChrome ? { label: shotChrome ? `Scene ${sceneChrome.number}` : "Scenes", to: `${base}/scenes${shotChrome ? `/${sceneChrome.id}` : ""}` } : { label: "World", to: `/w/${worldId}` }}
         context={{
@@ -732,8 +736,8 @@ export function ProductionLayout() {
         </nav></div>
       </div>}
       <div className="fy-prod">
-        {!phone && (drawerMode ? <>
-          <button type="button" className="fy-production-drawer-toggle" aria-label="Open production navigation" aria-haspopup="dialog" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}><PanelLeft size={20} /><span>{sceneRoute ? production?.meta.title : "Pages"}</span></button>
+        {!phone && !cutPhone && (drawerMode ? <>
+          <button type="button" className="fy-production-drawer-toggle" aria-label="Open production navigation" aria-haspopup="dialog" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}>{cutRoute ? <MenuLines size={16} /> : <PanelLeft size={20} />}<span>{sceneRoute || cutRoute ? production?.meta.title : "Pages"}</span></button>
           <dialog ref={drawer} className="fy-production-drawer" aria-label="Production navigation" onCancel={event => { event.preventDefault(); setDrawerOpen(false); }} onClick={event => { if (event.target === event.currentTarget) setDrawerOpen(false); }}>{rail}</dialog>
         </> : rail)}
         <div className="fy-prodwrap">

@@ -35,7 +35,8 @@ import {
   Upload,
   VideoMark,
 } from "../components/icons.js";
-import { EditorDialog } from "../components/editor-dialog.js";
+import { CutDialog as EditorDialog, EditorSheetSlot, useCutLayout } from "./editor-responsive.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 import { Portrait } from "../components/portrait.js";
 import { mediaUrl } from "../lib/media.js";
 import { runtimeSeconds } from "../lib/format.js";
@@ -143,6 +144,7 @@ export function ArtifactPanel({
   onRemoveFromLibrary,
   onImport,
   onAddShot,
+  onAppendShot = null,
   onLocate,
   worlds = [],
   onBorrow = null,
@@ -181,6 +183,7 @@ export function ArtifactPanel({
   onRemoveFromLibrary: ((item: TimelineLibraryItem) => void) | null;
   onImport: ((files?: File[]) => void) | null;
   onAddShot: ((shotId: string) => void) | null;
+  onAppendShot?: ((shotId: string) => void) | null;
   /** Select one use and bring the playhead to it (R-11, R-16). */
   onLocate: (clipId: TimelineClipId, startFrame: number) => void;
   /** The worlds this studio holds, so the Library can browse another one's shelf (issue 1033). */
@@ -194,6 +197,10 @@ export function ArtifactPanel({
   foot?: React.ReactNode;
 }) {
   const navigate = useNavigate();
+  const { phone } = useCutLayout();
+  const touch = useMediaQuery("(pointer: coarse)");
+  const remote = isRemoteSession();
+  const [findOpen, setFindOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LibraryFilter>(initialFilter);
   const [kindFilter, setKindFilter] = useState<LibraryKind>("all");
@@ -345,7 +352,8 @@ export function ArtifactPanel({
       why: null,
       used,
       uses: usesOf(`shot:${shot.id}`),
-      add: onAddShot !== null && !used ? () => onAddShot(shot.id) : null,
+      add: phone && onAppendShot ? () => onAppendShot(shot.id) : onAddShot !== null && !used ? () => onAddShot(shot.id) : null,
+      placeAt: phone && onAddShot ? () => onAddShot(shot.id) : null,
       drag: take !== null && path !== null ? `shot:${shot.id}` : null,
       durationFrames: shot.durationSec !== undefined ? Math.max(1, secondsToFrames(shot.durationSec, frameRate)) : null,
       search: `${scene.number} ${scene.title} ${shot.number} ${shot.title} ${shot.id} ${take?.id ?? ""} ${line}`,
@@ -486,8 +494,11 @@ export function ArtifactPanel({
   const filesOver = fileKinds !== null && fileKinds.length > 0 && onImport !== null;
 
   return (
+    <EditorSheetSlot sheet={phone} open={open} onClose={onClose} title="Library" className="fy-cut-library-sheet"
+      footer={<><span>{shown} items</span><button type="button" className="ui-btn" onClick={onClose}>Done</button></>}>
     <aside ref={panelRef} className={cx("fy-artpanel", filesOver && "fy-artpanel--dropping")} id="cut-library" data-open={open} aria-label="Library"
       onDragOver={event => {
+        if (remote && Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "none"; return; }
         if (!Array.from(event.dataTransfer.types).includes("Files") || onImport === null) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "copy";
@@ -518,7 +529,7 @@ export function ArtifactPanel({
         >
           <Upload size={12} />
         </button>
-        {hasShots && (
+        {hasShots && !phone && (
           <button type="button" className="fy-artpanel__add" disabled={onOpenPicker === null} onClick={() => onOpenPicker?.()}>
             <Plus size={11} />
             Add shots
@@ -528,8 +539,8 @@ export function ArtifactPanel({
           &times;
         </button>
       </div>
-      <div className="fy-artpanel__find">
-        <label className="fy-artpanel__search">
+      <div className="fy-artpanel__find" data-find-open={!phone || findOpen || undefined}>
+        <label className="fy-artpanel__search" hidden={phone && !findOpen}>
           <Search size={12} />
           <input
             type="search"
@@ -651,9 +662,9 @@ export function ArtifactPanel({
                 key={item.key}
                 className={cx("fy-artrow", selected && "fy-artrow--picked", item.subTone === "destructive" && "fy-artrow--missing")}
                 data-library-item={item.key}
-                draggable={item.drag !== null}
+                draggable={!touch && item.drag !== null}
                 onDragStart={(event) => {
-                  if (item.drag === null) return;
+                  if (touch || item.drag === null) return;
                   event.dataTransfer.setData(ARTIFACT_DRAG_TYPE, item.drag);
                   if (item.drag.startsWith("shot:")) event.dataTransfer.setData(SHOT_DRAG_TYPE, "1");
                   event.dataTransfer.setData(item.lane === "Audio" ? LANE_DRAG_SOUND : LANE_DRAG_PICTURE, "1");
@@ -701,7 +712,7 @@ export function ArtifactPanel({
                     {item.add !== null && (
                       <button type="button" className="fy-tlbtn fy-tlbtn--text" onClick={item.add}>
                         {item.placeAt ? null : <Plus size={11} />}
-                        {item.kind === "artifact" ? "Append to timeline" : "Add to timeline"}
+                        {phone ? "Append" : item.kind === "artifact" ? "Append to timeline" : "Add to timeline"}
                       </button>
                     )}
                     {item.overlay && <button type="button" className="fy-tlbtn fy-tlbtn--text" onClick={item.overlay}>Overlay at playhead</button>}
@@ -726,10 +737,15 @@ export function ArtifactPanel({
       </div>
       <div className="fy-artpanel__foot">
         <span className="fy-dot" />
-        <span className="fy-mono">drag onto a lane to place</span>
+        <span className="fy-mono">{touch ? "pick a row, then place" : "drag onto a lane to place"}</span>
         {foot}
       </div>
     </aside>
+    {phone && <>
+      <button type="button" className="fy-cut-library-import" disabled={onImport === null || remote} onClick={() => onImport?.()}><Upload size={20} /><span>Import media{remote && <small>on the desktop app</small>}</span></button>
+      <div className="fy-cut-library-more"><button type="button" aria-expanded={findOpen} onClick={() => setFindOpen(!findOpen)}><Search size={16} />Find media</button>{hasShots && <button type="button" className="fy-artpanel__add" disabled={onOpenPicker === null} onClick={() => onOpenPicker?.()}><Plus size={16} />Add shots</button>}</div>
+    </>}
+    </EditorSheetSlot>
   );
 }
 
@@ -752,12 +768,15 @@ export function AddToLibraryDialog({
   onClose: () => void;
   onAdd: (added: TimelineLibraryItem[], removed: TimelineLibraryItem[]) => void;
 }) {
+  const { phone } = useCutLayout();
+  const [step, setStep] = useState<"scene" | "shot" | "take">("scene");
   const [sceneId, setSceneId] = useState<string | null>(null);
   const [chosen, setChosen] = useState<Set<string>>(() => new Set());
   /** Items already in the Library that were unchecked: the picker removes as well as adds. */
   const [dropped, setDropped] = useState<Set<string>>(() => new Set());
   const present = new Set(library.map(libraryItemKey));
   const dismiss = () => {
+    setStep("scene");
     setChosen(new Set());
     setDropped(new Set());
     onClose();
@@ -788,6 +807,7 @@ export function AddToLibraryDialog({
   const confirm = () => {
     if (chosen.size === 0 && dropped.size === 0) return;
     onAdd([...chosen].map(asItem), [...dropped].map(asItem));
+    setStep("scene");
     setChosen(new Set());
     setDropped(new Set());
   };
@@ -806,8 +826,9 @@ export function AddToLibraryDialog({
   };
   return (
     <EditorDialog open={open} title="Add shots to the library" onClose={dismiss} width={640} labelledBy="add-to-library-title">
+      {phone && <nav className="fy-cut-pick-steps" aria-label="Add shots steps">{(["scene", "shot", "take"] as const).map((page, index) => <button type="button" key={page} aria-current={step === page ? "step" : undefined} onClick={() => setStep(page)}>{index + 1} · {page === "scene" ? "Scene" : page === "shot" ? "Shot" : "Take"}</button>)}</nav>}
       <div className="fy-libpick fy-libpick--shots">
-        <div className="fy-libpick__col">
+        <div className="fy-libpick__col" hidden={phone && step !== "scene"}>
           <div className="fy-libpick__colhead">Scenes</div>
           <div className="fy-libpick__list" role="list">
             {scenes.length === 0 ? (
@@ -818,7 +839,7 @@ export function AddToLibraryDialog({
                 const count = keys.filter((key) => chosen.has(key) || present.has(key)).length;
                 return (
                   <div key={candidate.id} className={cx("fy-libpick__scene", candidate.id === scene?.id && "fy-libpick__scene--current")} role="listitem">
-                    <button type="button" className="fy-libpick__scenepick" aria-pressed={candidate.id === scene?.id} onClick={() => setSceneId(candidate.id)}>
+                    <button type="button" className="fy-libpick__scenepick" aria-pressed={candidate.id === scene?.id} onClick={() => { setSceneId(candidate.id); if (phone) setStep("shot"); }}>
                       <span className="fy-libpick__name">SC {candidate.number} · {candidate.title}</span>
                       <span className="fy-mono fy-libpick__meta">{count}/{keys.length}</span>
                     </button>
@@ -831,7 +852,7 @@ export function AddToLibraryDialog({
             )}
           </div>
         </div>
-        <div className="fy-libpick__col">
+        <div className="fy-libpick__col" hidden={phone && step !== "shot"}>
           <div className="fy-libpick__colhead">{scene ? `Shots · SC ${scene.number}` : "Shots"}</div>
           <div className="fy-libpick__list">
             {shots.length === 0 ? (
@@ -845,6 +866,14 @@ export function AddToLibraryDialog({
           </div>
         </div>
       </div>
+      {phone && step === "take" && <div className="fy-cut-pick-takes">
+        <p>The Library uses each shot’s accepted take.</p>
+        {scenes.flatMap(item => orderedShots(item)).filter(shot => chosen.has(`shot:${shot.id}`) || present.has(`shot:${shot.id}`) && !dropped.has(`shot:${shot.id}`)).map(shot => {
+          const takeId = production ? acceptedTakeId(production, shot.id) : null;
+          const take = production?.takes.find(candidate => candidate.id === takeId);
+          return <div key={shot.id} className="fy-libpick__row"><span>Shot {shot.number} · {shot.title}</span><span>{take ? `${take.model} · accepted` : "No accepted take"}</span></div>;
+        })}
+      </div>}
       <div className="fy-libpick__foot">
         <span className="fy-mono">
           {chosen.size} selected{dropped.size > 0 ? ` · ${dropped.size} leaving` : ""}
@@ -853,8 +882,8 @@ export function AddToLibraryDialog({
         <button type="button" className="fy-libpick__cancel" onClick={dismiss}>
           Cancel
         </button>
-        <button type="button" className="fy-libpick__confirm" data-primary="true" disabled={chosen.size === 0 && dropped.size === 0} onClick={confirm}>
-          {chosen.size === 0 && dropped.size > 0 ? "Update the library" : "Add to the library"}
+        <button type="button" className="fy-libpick__confirm" data-primary="true" disabled={chosen.size === 0 && dropped.size === 0} onClick={phone && step !== "take" ? () => setStep("take") : confirm}>
+          {phone && step !== "take" ? "Review takes" : chosen.size === 0 && dropped.size > 0 ? "Update the library" : "Add to the library"}
         </button>
       </div>
     </EditorDialog>

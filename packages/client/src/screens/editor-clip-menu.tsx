@@ -1,11 +1,30 @@
 import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { detachAudioCommands, type ArtifactSidecar, type ProductionBundle, type ProductionTimeline, type TimelineClip, type TimelineClipCommand, type TimelineClipId } from "@arke-studio/contracts";
+import { PageSheet } from "../components/page-sheet.js";
+import { useMediaQuery } from "../lib/media-query.js";
+import { useCutLayout, useCutTouch } from "./editor-responsive.js";
+import { ChevronLeft, ChevronRight, Copy, Scissors, Trash, Waveform } from "../components/icons.js";
+
+export function ClipMenuLabel({ action, children }: { action: string; children: ReactNode }) {
+  const Mark = action === "split" ? Scissors : action === "duplicate" ? Copy : action === "earlier" ? ChevronLeft : action === "later" ? ChevronRight : action === "extract" ? Waveform : Trash;
+  return <><span className="fy-cut-menu__glyph"><Mark size={20} /></span>{children}</>;
+}
 
 /** Shared by the main Picture lane and video overlays; a menu never owns an edit. */
 export function ClipMenu({ at, label, onClose, children }: {
   at: { x: number; y: number }; label: string; onClose: () => void; children: ReactNode;
 }) {
+  const sheet = useMediaQuery("(pointer: coarse), (max-width: 599px)");
+  const { phone } = useCutLayout();
+  const { snap, toggleSnap } = useCutTouch();
+  if (sheet || phone) return <PageSheet open title={label.replace(/^Actions for /, "")} onClose={onClose} className="fy-cut-sheet fy-cut-menu-sheet">
+    <div role="menu" aria-label={label} className="fy-cut-menu">{children}<button type="button" role="menuitemcheckbox" aria-checked={snap} onClick={toggleSnap}>Snap <span>{snap ? "On" : "Off"}</span></button></div>
+  </PageSheet>;
+  return <DesktopClipMenu at={at} label={label} onClose={onClose}>{children}</DesktopClipMenu>;
+}
+
+function DesktopClipMenu({ at, label, onClose, children }: { at: { x: number; y: number }; label: string; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const close = useRef(onClose); close.current = onClose;
   useLayoutEffect(() => {
@@ -65,13 +84,13 @@ export function ExtractAudioMenuItem({ production, timeline, artifacts = [], cli
   if (production) try { detachAudioCommands(production, timeline, artifacts, clip.id, "cl_detach-preview", true); }
   catch (error) { reason = error instanceof Error ? error.message : String(error); }
   return <>
-    <button type="button" role="menuitem" className="fy-clipmenu__item" disabled={disabled}
+    <button type="button" role="menuitem" className="fy-clipmenu__item" data-action="extract" disabled={disabled}
       aria-disabled={reason !== null || disabled} aria-describedby={reason ? reasonId : undefined}
       onClick={() => {
         if (disabled || reason !== null) return;
         onCommands([{ kind: "detach-audio", clipId: clip.id, newClipId: mintClipId(), newTrack: true }], "Extract audio to new track");
         onClose();
-      }}>Extract audio to new track</button>
+      }}><ClipMenuLabel action="extract">Extract audio to new track</ClipMenuLabel></button>
     {reason && <span id={reasonId} className="fy-clipmenu__note">{reason}</span>}
   </>;
 }

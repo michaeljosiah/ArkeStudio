@@ -15,6 +15,10 @@ import {
   type TimelineTrackId,
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
+import { TextMark as Captions } from "../components/icons.js";
+import { useCutLayout, useCutTouch } from "./editor-responsive.js";
+import { pointerIsTouch, armClipMenu } from "./editor-gesture.js";
+import { ClipMenu } from "./editor-clip-menu.js";
 
 /**
  * Subtitles on the editor (SPEC-038 R-21..R-26; SPEC-039 R-13, R-21; issue 683): one language
@@ -50,9 +54,13 @@ export function SubtitleTrackRow({
 }) {
   const span = Math.max(totalFrames, 1);
   const cues = orderedCues(track.cues ?? []);
+  const { phone } = useCutLayout();
+  const { openLane } = useCutTouch();
+  const [menu, setMenu] = useState<{ cueId: SubtitleCueId; x: number; y: number } | null>(null);
   return (
     <div className={cx("fy-track", track.muted && "fy-track--silent")} data-track="subtitles" data-track-id={track.id}>
       <span className="fy-track__label fy-track__label--typed">
+        {phone && <button type="button" className="fy-cut-lane-open" aria-label={`${track.name} lane`} onClick={() => openLane(track.id)}><Captions size={16} /></button>}
         <span className="fy-track__name" title={`${track.name} · ${track.language ?? ""}`}>
           {track.name}
         </span>
@@ -102,6 +110,8 @@ export function SubtitleTrackRow({
               title={label}
               disabled={disabled}
               onClick={() => onSelectCue(cue.id)}
+              onPointerDown={event => { if (pointerIsTouch(event)) armClipMenu(event, () => setMenu({ cueId: cue.id, x: event.clientX, y: event.clientY })); }}
+              onContextMenu={event => { event.preventDefault(); event.stopPropagation(); setMenu({ cueId: cue.id, x: event.clientX, y: event.clientY }); }}
               onKeyDown={(event) => {
                 if (event.key === "Delete" || event.key === "Backspace") {
                   event.preventDefault();
@@ -115,6 +125,7 @@ export function SubtitleTrackRow({
           );
         })}
       </div>
+      {menu && <ClipMenu at={menu} label="Subtitle" onClose={() => setMenu(null)}><button type="button" role="menuitem" disabled={disabled} onClick={() => { onSelectCue(menu.cueId); setMenu(null); }}>Edit subtitle</button><button type="button" role="menuitem" disabled={disabled} onClick={() => { onCommands([{ kind: "delete-cue", cueId: menu.cueId }], "Delete subtitle"); setMenu(null); }}>Delete</button></ClipMenu>}
     </div>
   );
 }

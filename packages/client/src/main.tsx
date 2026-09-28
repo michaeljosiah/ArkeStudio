@@ -42,6 +42,7 @@ import "./screens/scene-workspace/workspace.css";
 import "./screens/scene-workspace/shot-page.css";
 import "./screens/scene-workspace/responsive.css";
 import "./screens/generate-responsive.css";
+import "./screens/editor-responsive.css";
 import "./screens/branch-map.css";
 // After fidelity.css: the panel re-dresses the provider-call inspector with a rule of equal
 // specificity, and the later sheet wins.

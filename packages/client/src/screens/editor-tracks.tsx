@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import {
   deriveSpineCut,
 } from "@arke-studio/contracts";
@@ -149,7 +149,8 @@ export function EmptyEditorTrack({
  * The target's strip under the last lane: a drop here makes a new lane of the item's own kind.
  * Desktop files land here too (issue 1035): a lane per kind, at the dropped frame.
  */
-export function NewLaneStrip({ onDrop, onFileDrop = null, fileKinds = null }: {
+export function NewLaneStrip({ onDrop, onFileDrop = null, fileKinds = null, onAdd }: {
+  onAdd?: () => void;
   onDrop: ((artifactId: string, laneWidth: number, x: number) => void) | null;
   onFileDrop?: ((files: File[], laneWidth: number, x: number) => void) | null;
   fileKinds?: readonly DroppedKind[] | null;
@@ -159,7 +160,7 @@ export function NewLaneStrip({ onDrop, onFileDrop = null, fileKinds = null }: {
   return (
     <div className={cx("fy-track fy-track--new", over && "fy-track--over", filesOver && "fy-track--files")} data-track="new">
       <span className="fy-track__label">
-        <span className="fy-track__name">+ lane</span>
+        {onAdd ? <button type="button" className="fy-cut-add-lane" onClick={onAdd}>+ Lane</button> : <span className="fy-track__name">+ lane</span>}
       </span>
       <div
         className="fy-track__lane"
@@ -199,7 +200,7 @@ export function NewLaneStrip({ onDrop, onFileDrop = null, fileKinds = null }: {
 }
 
 /** Scene bands over the Picture track: one band per run of clips from the same scene. */
-export function SceneBands({ views, totalFrames }: { views: readonly PictureClipView[]; totalFrames: number }) {
+export function SceneBands({ views, totalFrames, names }: { views: readonly PictureClipView[]; totalFrames: number; names?: ReadonlyMap<number, string> }) {
   const bands: { key: string; number: number | null; startFrame: number; endFrame: number }[] = [];
   for (const view of views) {
     const last = bands[bands.length - 1];
@@ -216,9 +217,9 @@ export function SceneBands({ views, totalFrames }: { views: readonly PictureClip
           <div
             key={band.key}
             className="fy-scenes__band"
-            style={{ left: `${(band.startFrame / span) * 100}%`, width: `${((band.endFrame - band.startFrame) / span) * 100}%` }}
+            style={{ left: `${(band.startFrame / span) * 100}%`, width: `${((band.endFrame - band.startFrame) / span) * 100}%`, "--cut-band-start": band.startFrame / span } as CSSProperties}
           >
-            {band.number === null ? "placed" : `SC ${band.number}`}
+            <span>{band.number === null ? "placed" : names?.has(band.number) ? `${band.number} · ${names.get(band.number)}` : `SC ${band.number}`}</span>
           </div>
         ))}
       </div>

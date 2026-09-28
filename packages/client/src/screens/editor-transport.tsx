@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   type FrameRate,
 } from "@arke-studio/contracts";
@@ -19,15 +19,15 @@ import {
 export const LANE_GUTTER_PX = 88;
 
 /** Where the playhead sits for a fraction of the film, in the one expression all of them use. */
-function lanePosition(fraction: number): string {
-  return `calc(${LANE_GUTTER_PX}px + (100% - ${LANE_GUTTER_PX}px) * ${Math.min(1, Math.max(0, fraction))})`;
+function lanePosition(fraction: number, gutter = LANE_GUTTER_PX): string {
+  return `calc(${gutter}px + (100% - ${gutter}px) * ${Math.min(1, Math.max(0, fraction))})`;
 }
 
 /** The second of the film a pointer is over, for a box whose lanes start at the gutter. */
-function secondsAtPointer(clientX: number, box: DOMRect, totalSec: number): number | null {
-  const laneWidth = box.width - LANE_GUTTER_PX;
+function secondsAtPointer(clientX: number, box: DOMRect, totalSec: number, gutter = LANE_GUTTER_PX): number | null {
+  const laneWidth = box.width - gutter;
   if (laneWidth <= 0 || totalSec <= 0) return null;
-  const laneX = Math.max(0, Math.min(clientX - box.left - LANE_GUTTER_PX, laneWidth));
+  const laneX = Math.max(0, Math.min(clientX - box.left - gutter, laneWidth));
   return (laneX / laneWidth) * totalSec;
 }
 
@@ -44,6 +44,7 @@ export function seekDrag(opts: {
   laneOf: (target: HTMLElement) => HTMLElement | null;
   /** The ruler jumps to where it was pressed; the playhead is already under the hand. */
   seekOnPress: boolean;
+  gutter?: number;
 }): (e: React.PointerEvent) => void {
   const { totalSec, transport, laneOf, seekOnPress } = opts;
   const { seek, setPlaying } = transport;
@@ -62,7 +63,7 @@ export function seekDrag(opts: {
     // Scrubbing while it runs fights the transport for the same value; stop, then seek.
     setPlaying(false);
     const to = (clientX: number) => {
-      const at = secondsAtPointer(clientX, lane.getBoundingClientRect(), totalSec);
+      const at = secondsAtPointer(clientX, lane.getBoundingClientRect(), totalSec, opts.gutter);
       if (at !== null) seek(at);
     };
     if (seekOnPress) to(e.clientX);
@@ -99,10 +100,10 @@ const RULER_STEPS_SEC = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600
 const RULER_LABEL_PX = 64;
 
 /** Every second the ruler prints, at the design's regular interval rather than three fixed spots. */
-export function rulerTicks(totalSec: number, laneWidthPx: number): number[] {
+export function rulerTicks(totalSec: number, laneWidthPx: number, labelWidth = RULER_LABEL_PX): number[] {
   if (totalSec <= 0 || laneWidthPx <= 0) return [];
   const step =
-    RULER_STEPS_SEC.find((candidate) => (candidate / totalSec) * laneWidthPx >= RULER_LABEL_PX) ??
+    RULER_STEPS_SEC.find((candidate) => (candidate / totalSec) * laneWidthPx >= labelWidth) ??
     RULER_STEPS_SEC[RULER_STEPS_SEC.length - 1]!;
   const ticks: number[] = [];
   for (let at = 0; at < totalSec; at += step) ticks.push(at);
@@ -122,11 +123,11 @@ export function rulerTicks(totalSec: number, laneWidthPx: number): number[] {
  * regular interval across the lanes and so does this, every label placed by the same expression
  * the playhead is, so a clip edge under the ruler's `0:20` is at twenty seconds.
  */
-export function CutScrubber({ totalSec, frameRate, transport }: { totalSec: number; frameRate: FrameRate; transport: Transport }) {
+export function CutScrubber({ totalSec, frameRate, transport, held = false, gutter = LANE_GUTTER_PX }: { totalSec: number; frameRate: FrameRate; transport: Transport; held?: boolean; gutter?: number }) {
   const { time } = transport;
   const ref = useRef<HTMLDivElement>(null);
   const width = useMeasuredWidth(ref);
-  const onPointerDown = seekDrag({ totalSec, transport, laneOf: (el) => el, seekOnPress: true });
+  const onPointerDown = held ? undefined : seekDrag({ totalSec, transport, laneOf: (el) => el, seekOnPress: true, gutter });
   return (
     <div
       ref={ref}
@@ -142,8 +143,8 @@ export function CutScrubber({ totalSec, frameRate, transport }: { totalSec: numb
       aria-valuenow={Math.round(time)}
       aria-valuetext={formatTimecode(time, frameRate)}
     >
-      {rulerTicks(totalSec, width - LANE_GUTTER_PX).map((at) => (
-        <span key={at} className="fy-timeline__tick" style={{ left: lanePosition(at / totalSec) }}>
+      {rulerTicks(totalSec, width - gutter, gutter === LANE_GUTTER_PX ? RULER_LABEL_PX : 60).map((at) => (
+        <span key={at} className="fy-timeline__tick" style={{ left: lanePosition(at / totalSec, gutter) }}>
           <span className="fy-mono">{clock(at)}</span>
         </span>
       ))}
@@ -193,13 +194,14 @@ export function followPlayhead(
   // reads, and saying so is what lets the decision be tested without a layout engine.
   line: { offsetLeft: number },
   canvas: { scrollWidth: number; clientWidth: number; scrollLeft: number },
+  gutter = LANE_GUTTER_PX,
 ): void {
   if (canvas.scrollWidth <= canvas.clientWidth) return;
   const at = line.offsetLeft;
   // What is left once the gutter has taken its share; a margin at each end of the rest.
-  const visible = Math.max(0, canvas.clientWidth - LANE_GUTTER_PX);
+  const visible = Math.max(0, canvas.clientWidth - gutter);
   const margin = Math.min(FOLLOW_MARGIN_PX, visible / 4);
-  const lead = LANE_GUTTER_PX + margin;
+  const lead = gutter + margin;
   if (at >= canvas.scrollLeft + lead && at <= canvas.scrollLeft + canvas.clientWidth - margin) return;
   canvas.scrollLeft = Math.max(0, at - lead);
 }
@@ -214,9 +216,17 @@ export function followPlayhead(
  * its own. The band is the only part that takes a pointer and it is only ever where the playhead
  * is, so a clip anywhere else on the lane is untouched by it.
  */
-export function CutPlayhead({ totalSec, frameRate, transport, tool }: { totalSec: number; frameRate: FrameRate; transport: Transport; tool: EditorTool }) {
+export function CutPlayhead({ totalSec, frameRate, transport, tool, held = false, gutter = LANE_GUTTER_PX }: { totalSec: number; frameRate: FrameRate; transport: Transport; tool: EditorTool; held?: boolean; gutter?: number }) {
   const { time, timeRef, playing } = transport;
   const line = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (held || gutter === LANE_GUTTER_PX || typeof requestAnimationFrame === "undefined") return;
+    const paint = requestAnimationFrame(() => {
+      const element = line.current, canvas = element?.closest<HTMLElement>(".fy-timeline__canvas");
+      if (element && canvas) followPlayhead(element, canvas, gutter);
+    });
+    return () => cancelAnimationFrame(paint);
+  }, [time, held, gutter]);
   /*
    * While it runs, the line is drawn on the frame clock and the canvas pages after it.
    *
@@ -233,17 +243,17 @@ export function CutPlayhead({ totalSec, frameRate, transport, tool }: { totalSec
     const element = line.current;
     // The same guard `useTransport` keeps: a window without the frame clock leaves the playhead
     // on React's throttled value rather than throwing on the first frame.
-    if (element === null || !playing || totalSec <= 0 || typeof requestAnimationFrame !== "function") return;
+    if (held || element === null || !playing || totalSec <= 0 || typeof requestAnimationFrame !== "function") return;
     const canvas = element.closest<HTMLElement>(".fy-timeline__canvas");
     let frame = 0;
     const loop = () => {
-      element.style.left = lanePosition(timeRef.current / totalSec);
-      if (canvas !== null) followPlayhead(element, canvas);
+      element.style.left = lanePosition(timeRef.current / totalSec, gutter);
+      if (canvas !== null) followPlayhead(element, canvas, gutter);
       frame = requestAnimationFrame(loop);
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [playing, totalSec, timeRef]);
+  }, [playing, totalSec, timeRef, held, gutter]);
   const onPointerDown = seekDrag({
     totalSec,
     transport,
@@ -251,15 +261,16 @@ export function CutPlayhead({ totalSec, frameRate, transport, tool }: { totalSec
     // Pressing the playhead grabs it where it is; jumping to the centre of the band would move
     // the transport by a few frames for a press that was meant to hold it still.
     seekOnPress: false,
+    gutter,
   });
   return (
-    <div ref={line} className="fy-playhead" style={{ left: lanePosition(time / totalSec) }}>
+    <div ref={line} className="fy-playhead" style={{ left: lanePosition(held ? .5 : time / totalSec, gutter) }}>
       <span
         // Blade cuts where it is pressed and Hand scrolls from under it; both want the lane the
         // band is sitting on, and neither is asking to move the transport. The band stands aside
         // for them rather than swallowing the one press the playhead happens to be over.
         className={cx("fy-playhead__grab", tool !== "select" && "fy-playhead__grab--idle")}
-        onPointerDown={onPointerDown}
+        onPointerDown={held ? undefined : onPointerDown}
         onKeyDown={seekKeys(transport, totalSec)}
         onBlur={(event) => { delete event.currentTarget.dataset.pointerSeeking; }}
         role="slider"

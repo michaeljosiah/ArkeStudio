@@ -1,7 +1,10 @@
 import {
   resolvedAuthoredDuration,
 } from "@arke-studio/contracts";
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { useCutLayout } from "./editor-responsive.js";
+import { PageSheet } from "../components/page-sheet.js";
+import { ChevronRight, Film } from "../components/icons.js";
 import {
   deriveCut,
   deriveSpineCut,
@@ -93,6 +96,8 @@ export function CutInspector({
   /** Bring the viewer to the edge a stepped or typed trim moved (issue 1036). */
   onScrub: (frame: number) => void;
 }) {
+  const { compact } = useCutLayout();
+  const [takesOpen, setTakesOpen] = useState(false);
   const selectedCue =
     selection?.kind === "cue" && timeline !== null
       ? (timeline.tracks
@@ -134,7 +139,7 @@ export function CutInspector({
     const label = selectedClip.source.label;
     const artifact = selectedClip.source.kind === "artifact" ? (artifacts.find((candidate) => candidate.id === (selectedClip.source.kind === "artifact" ? selectedClip.source.artifactId : "")) ?? null) : null;
     return (
-      <div className="fy-cutinspect">
+      <div className={`fy-cutinspect${compact && selectedClip ? " fy-cutinspect--compact" : ""}`}>
         <div className="fy-cutinspect__eyebrow">{selectedTrack.kind.toUpperCase()} CLIP</div>
         <h2>{artifact ? nameOf(artifact) : label}</h2>
         <div className="fy-cutinspect__rows">
@@ -144,7 +149,7 @@ export function CutInspector({
             <InspectorRow label="Voice">{selectedClip.source.sheetId}{selectedClip.source.voiceAssignedAtVersion !== undefined ? ` · sheet v${selectedClip.source.voiceAssignedAtVersion}` : ""}</InspectorRow>
           )}
         </div>
-        <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} />
+        <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
         {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && <ClipGain clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} />}
         {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && timeline !== null && (
           <AudioClipSettings clip={selectedClip} track={selectedTrack} disabled={commandsDisabled} onCommands={onCommands} />
@@ -161,7 +166,7 @@ export function CutInspector({
   if (selectedClip && selectedTrack && selectedTrack.kind === "picture" && selectedClip.source.kind === "artifact" && production) {
     const artifact = artifacts.find((candidate) => candidate.id === (selectedClip.source.kind === "artifact" ? selectedClip.source.artifactId : "")) ?? null;
     return (
-      <div className="fy-cutinspect">
+      <div className={`fy-cutinspect${compact && selectedClip ? " fy-cutinspect--compact" : ""}`}>
         <div className="fy-cutinspect__eyebrow">PLACED PICTURE</div>
         <h2>{artifact ? nameOf(artifact) : selectedClip.source.label}</h2>
         <div className="fy-cutinspect__rows">
@@ -175,7 +180,7 @@ export function CutInspector({
             </div>
           )}
         </div>
-        <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} />
+        <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
         {timeline && selectedTrack?.kind === "picture" && <DetachAudio production={production} timeline={timeline} artifacts={artifacts} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />}
       </div>
     );
@@ -190,9 +195,9 @@ export function CutInspector({
         ? selectedClip.durationFrames / frameRate
         : resolvedAuthoredDuration(selectedStory ?? {});
     return (
-      <div className="fy-cutinspect">
+      <div className={`fy-cutinspect${compact && selectedClip ? " fy-cutinspect--compact" : ""}`}>
         <div className="fy-cutinspect__eyebrow">PICTURE CLIP</div>
-        <h2>{title}</h2>
+        <h2>{compact && selectedClip?.source.kind === "shot" ? `Shot ${selectedClip.source.shotNumber} · ` : ""}{title}</h2>
         <div className="fy-cutinspect__rows">
           {sceneNumber > 0 && <InspectorRow label="Scene">SC {sceneNumber}</InspectorRow>}
           {selectedShotId && <InspectorRow label="Shot">{selectedShotId.replace("sh_", "shot ")}</InspectorRow>}
@@ -201,7 +206,7 @@ export function CutInspector({
           {takeSec !== undefined && <InspectorRow label="Take length">{takeSec.toFixed(1)}s</InspectorRow>}
         </div>
         {selectedClip && (<>
-          <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} />
+          <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
         {timeline && selectedTrack?.kind === "picture" && <DetachAudio production={production} timeline={timeline} artifacts={artifacts} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />}
         </>)}
         {selectedShotId && !savedPictureOrder && (
@@ -216,7 +221,7 @@ export function CutInspector({
             ceiling={ceiling}
           />
         )}
-        {selectedClip && clipShotId !== null && (
+        {selectedClip && clipShotId !== null && !compact && (
           <TakePicker
             production={production}
             shotId={clipShotId}
@@ -224,6 +229,11 @@ export function CutInspector({
             onSwitch={(takeId) => onCommands([{ kind: "switch-take", shotId: clipShotId, takeId }], "Switch take")}
           />
         )}
+        {selectedClip && clipShotId && <>
+          {compact && <button type="button" className="fy-cut-take-open" onClick={() => setTakesOpen(true)}><Film size={18} /><b>{takeIndex >= 0 ? `Take ${takeIndex + 1}` : "Choose take"}</b><span>{takeIndex >= 0 ? shotTakes[takeIndex]!.model : ""}</span><ChevronRight size={16} /></button>}
+          <PageSheet open={takesOpen} onClose={() => setTakesOpen(false)} title="Replace take" className="fy-cut-sheet"><TakePicker production={production} shotId={clipShotId} disabled={commandsDisabled}
+            onSwitch={takeId => { onCommands([{ kind: "switch-take", shotId: clipShotId, takeId }], "Switch take"); setTakesOpen(false); }} /></PageSheet>
+        </>}
         <p className="fy-cutinspect__note">
           {savedPictureOrder
             ? "Picture order is owned by the saved timeline. The accepted take still resolves from this shot; the clip's own in and out points are authored here."
@@ -234,7 +244,7 @@ export function CutInspector({
   }
 
   return (
-    <div className="fy-cutinspect">
+    <div className={`fy-cutinspect${compact && selectedClip ? " fy-cutinspect--compact" : ""}`}>
       <div className="fy-cutinspect__eyebrow">CUT</div>
       <h2>{production?.meta.title ?? "Opening production…"}</h2>
       {/*

@@ -407,3 +407,19 @@ Use `--viewport phone`, `--viewport fold`, or `--viewport desktop --hover` to na
 and `--baseline <git-ref> --viewport desktop --hover` to compare the previous implementation.
 The `generate-layout.test.tsx` renderer suite covers payloads, offline rejection, variants
 acceptance and run commands; retain takes-view, frame-run and scene-workspace-preview tests.
+
+### Cut on phones and Fold (turn 170)
+
+Run `node scripts/smoke-cut-layout.mjs` from the repository root. It mounts the actual Cut with
+saved timeline state at 360, 375, 390, 812 landscape, 984 and 1360 pixels, renders all eight
+turn-170 master frames, and saves screenshots and geometry in the printed temporary directory.
+The phone checks exercise native Trim, Library, Add shots, Export and Arke sheets, plus real
+Chrome touch pan and pinch. FFmpeg creates local clips and audio; no provider is contacted.
+Use `--viewport phone`, `--viewport turned`, `--viewport fold` or `--viewport desktop --hover`;
+`--baseline <git-ref> --viewport desktop --hover` captures the previous mouse layout with the
+same media. Inspect the PNGs alongside the master; geometry alone is not a visual sign-off.
+
+`test/cut-layout.test.tsx` covers touch thresholds, audio menus, canceled long presses, remote
+import refusal, frame stepping, compact timecode entry, draft retention on resize, base-lane
+protection and explicit Library placement. Retain the existing editor drag/drop, trim, playhead,
+Library, export and undo suites when changing these paths.

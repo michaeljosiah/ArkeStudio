@@ -13,7 +13,7 @@ import {
   legacyArtifactScopeRefusal,
   type WorldBundle,
 } from "@arke-studio/contracts";
-import { EditorDialog } from "../components/editor-dialog.js";
+import { CutDialog as EditorDialog, cutTime, useCutLayout } from "./editor-responsive.js";
 import { runtimeSeconds } from "../lib/format.js";
 import { subtitleTracksOf } from "./editor-subtitles.js";
 import {
@@ -63,6 +63,7 @@ export function ExportSheet({
   commandsDisabled: boolean;
 }) {
   const exportsState = useExports();
+  const { compact } = useCutLayout();
   const [selection, setSelection] = useState<{ worldId: string | undefined; prodId: string | undefined; preset: keyof typeof PRESETS } | null>(null);
   const preset = selection && selection.worldId === worldId && selection.prodId === prodId
     ? selection.preset : defaultExportPreset(production?.meta ?? {});
@@ -130,7 +131,8 @@ export function ExportSheet({
   const meta =
     cut === null || nothingPlaced
       ? blockedBy ?? ""
-      : `${runtimeSeconds(runtimeSec ?? cut.totalSec)}${shotCount ? ` · ${covered} of ${shotCount} shot${shotCount === 1 ? "" : "s"}` : ""}${gaps > 0 ? ` · ${gaps} gap${gaps === 1 ? "" : "s"}` : ""}`;
+      : compact ? `${cutTime(Math.round((runtimeSec ?? cut.totalSec) * 24), 24).split(".")[0]} · ${shotCount} shots · ${gaps} gaps`
+        : `${runtimeSeconds(runtimeSec ?? cut.totalSec)}${shotCount ? ` · ${covered} of ${shotCount} shot${shotCount === 1 ? "" : "s"}` : ""}${gaps > 0 ? ` · ${gaps} gap${gaps === 1 ? "" : "s"}` : ""}`;
   return (
     <EditorDialog open={open} title="Export film" subtitle={meta} onClose={onClose} width={430} labelledBy="export-sheet-title">
       <div className="fy-exsheet" data-testid="export-sheet">
@@ -264,7 +266,7 @@ export function ExportSheet({
         )}
       </div>
       <div className="fy-exsheet__foot">
-        <span className="fy-mono">renders locally · no provider call</span>
+        <span className="fy-mono"><span className="fy-cut-export-desktop">renders locally · no provider call</span><span className="fy-cut-export-compact">{meta}</span></span>
         <span className="fy-h1row__push" />
         <button type="button" className="fy-libpick__cancel" onClick={onClose}>
           Cancel
