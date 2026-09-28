@@ -60,7 +60,10 @@ export function deriveRehearsalLines(scene: SceneRecord, sheets: readonly Pick<S
         ...(!speaker ? { reason: "This line has no available character speaker." } : {}) });
     } else if (existing) ordered.push(existing);
   }
-  return [...ordered, ...byId.values()];
+  // What no beat reads is left out: a shot's stale cover beside an action block, or a legacy line
+  // with no text, is a refusal for a line the player never shows (codex round 6). The visual
+  // novel voices exactly its beats.
+  return ordered;
 }
 
 export const TableReadPlanSchema = z.object({ productionId: z.string().min(1), sceneId: SceneIdSchema, sceneVersion: z.number().int().positive(),

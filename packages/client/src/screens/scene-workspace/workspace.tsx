@@ -818,7 +818,9 @@ export function SceneWorkspace({
           {...(generateTarget?.shotId === undefined ? {} : { shotId: generateTarget.shotId })}
           returnFocus={generateReturnFocus}
           onClose={() => setGenerateTarget(null)}
-          onStarted={() => { if (generateTarget?.shotId === undefined) navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`); }}
+          // A scene-wide run hands a film to the Cut to assemble; a visual novel has no cut to
+          // assemble, its pictures play as beats, so it stays on the beats (codex round 6).
+          onStarted={() => { if (generateTarget?.shotId === undefined && !playsAsBeats) navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`); }}
         />
         {openMember === null ? null : (
           <CharacterDialog

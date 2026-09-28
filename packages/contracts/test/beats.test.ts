@@ -82,6 +82,20 @@ describe("a scene read as beats", () => {
     assert.equal(line.text, "Still here.");
   });
 
+  it("plans no line that no beat reads: a stale cover beside an action block, or covers that are all gone (codex round 6)", () => {
+    const stale = SceneSchema.parse({
+      id: "sc_left", number: 1, slug: "left", title: "Left", status: "draft", version: 1,
+      script: { blocks: [{ id: "blk_act", kind: "action", text: "The water rose." }] },
+      shots: [
+        { id: "sh_a", number: 1, title: "A", description: "", covers: [cover("blk_act"), cover("blk_gone")] },
+        { id: "sh_b", number: 2, title: "B", description: "", covers: [cover("blk_also_gone")] },
+      ],
+    });
+    const lines = deriveRehearsalLines(stale, [], { narration: true });
+    assert.deepEqual(lines.map((l) => [l.id, l.narration ?? false, l.reason ?? null]), [["sc_left/sh_a/blk_act", true, null]]);
+    assert.deepEqual(lines.map((l) => l.id), sceneBeats(stale).flatMap((b) => (b.lineId === undefined ? [] : [b.lineId])));
+  });
+
   it("without narration the table read is the characters' alone, as before", () => {
     const lines = deriveRehearsalLines(scene, [{ id: "maren", type: "character" }, { id: "bray", type: "character" }]);
     assert.ok(lines.every((l) => l.narration === undefined));

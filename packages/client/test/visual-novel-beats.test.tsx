@@ -324,6 +324,19 @@ describe("the Beat card on a visual novel's shot page (turn 174, 174c)", () => {
     assert.equal(box.disabled, false, "clearable, though nothing comes before it");
   });
 
+  it("a beat that keeps the picture before shows that picture on its page and in the filmstrip (codex round 6)", async () => {
+    const state = visualNovel();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.selections.sh_12 = { ...production.selections.sh_12!, acceptedTakeId: "tk_01J8A0000000000000000000A1" };
+    const mounted = await mountState(state, `${SCENE_PATH}/shots/sh_13`);
+    const kept = "productions/saltlight/takes/tk_01J8A0000000000000000000A1/frame.png";
+    assert.match(q(mounted, ".fy-shot__img")?.getAttribute("src") ?? "", new RegExp(kept.replaceAll("/", "(/|%2F)")), "sh_12's picture, not sh_13's own");
+    assert.match(q(mounted, ".fy-shot__same")?.textContent ?? "", /Same picture/);
+    const thumbs = all(mounted, ".fy-shot__thumb img").map((img) => img.getAttribute("src"));
+    assert.equal(thumbs.length, 2, "both thumbs show the one picture");
+    assert.equal(thumbs[0], thumbs[1]);
+  });
+
   it("a film's shot page has no Beat card", async () => {
     const mounted = await mountState(FIXTURE_STATE, `${SCENE_PATH}/shots/sh_12`);
     assert.equal(q(mounted, 'section[aria-label="Beat"]'), null);
