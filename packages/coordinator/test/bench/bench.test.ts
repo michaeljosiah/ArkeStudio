@@ -30,6 +30,23 @@ import { comfyUiRecipeById, SHIPPED_MANIFEST } from "@arke-studio/providers";
 
 const CLOCK = () => "2026-08-16T12:00:00.000Z";
 
+it("refuses oversized Gemini Bench lines before reserving takes, counting delivery beside Unicode words", async () => {
+  const { dir, store } = await open();
+  const opened = await freshBench(dir);
+  const at = "2026-09-27T12:00:00.000Z";
+  for (const model of SHIPPED_MANIFEST.models.filter(m => m.provider === "google" && m.capability === "voice-tts")) {
+    const allowance = model.limits.maxSpeechUtf8Bytes! - Buffer.byteLength(model.cadence!.deliveryMappings.warm!.instruction!);
+    for (const [brief, fits] of [["字".repeat(2400), false], ["a".repeat(allowance + 1), false], ["a".repeat(allowance), true]] as const) {
+      await opened.store.append({ type: "composer-set", mode: "voice", provider: model.provider, model: model.id,
+        params: { kind: "voice", count: 1, voiceId: "Charon", voiceProvider: "google", voiceModel: model.id, delivery: "warm" }, brief }, { at });
+      const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST,
+        { worldId: store.worldId, requestId: "gemini-byte-limit", at, speechAuthorisation: { maximumMicroUsd: 1000000 } });
+      assert.equal(plan.ok, fits, plan.ok ? undefined : plan.reason);
+      if (!plan.ok) assert.match(plan.reason, /request limit/);
+    }
+  }
+});
+
 it("adapter quotes and re-runs retain the same recipe identity and refuse changed graphs", async () => {
   const { dir, store } = await open();
   const model = SHIPPED_MANIFEST.models.find(row => row.id === "comfyui-h3-video")!;

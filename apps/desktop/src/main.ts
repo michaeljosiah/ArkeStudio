@@ -50,6 +50,7 @@ import {
   COMFYUI_RECIPES,
   comfyUiRecipeIdentity,
   createProviderClients,
+  cloudVoiceSources,
   discoverHiggsfield,
   lazyHiggsfieldRunner,
   recipeNodeClasses,
@@ -62,7 +63,6 @@ import {
   BREEZE_MODEL,
   FISH_MODEL,
   VOXTRAL_MODEL,
-  type VoiceCatalogueClient,
   type VoiceSlotClient,
 } from "@arke-studio/providers";
 import {
@@ -1483,25 +1483,7 @@ async function initialize(): Promise<{ port: number }> {
         voxaClient.dispose();
       },
       localPresets: localCandidates(KOKORO_PRESETS),
-      cloudSources: [
-        {
-          provider: "elevenlabs",
-          list: (key: string) => (providerClients.elevenlabs as VoiceCatalogueClient).listVoicesCatalog(key),
-        },
-        // The hosted readers' own presets (SPEC-046 R-32): Voxtral's thirty, Breeze's ranked first page.
-        {
-          provider: "mistral",
-          list: (key: string) => (providerClients.mistral as VoiceCatalogueClient).listVoicesCatalog(key),
-        },
-        {
-          provider: "breezeblue",
-          list: (key: string) => (providerClients.breezeblue as VoiceCatalogueClient).listVoicesCatalog(key),
-        },
-        {
-          provider: "fishaudio",
-          list: (key: string) => (providerClients.fishaudio as VoiceCatalogueClient).listVoicesCatalog(key),
-        },
-      ],
+      cloudSources: cloudVoiceSources(providerClients),
       // And the library's own voices read through them (R-10), when keyed.
       hostedReaders: [
         { provider: "mistral", model: VOXTRAL_MODEL },

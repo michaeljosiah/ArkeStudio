@@ -4,7 +4,7 @@ import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { agentForPurpose, skillFor, ROSTER, effectiveHarnessEngine } from "@arke-studio/contracts";
-import { createProviderClients, SHIPPED_MANIFEST } from "@arke-studio/providers";
+import { createProviderClients, cloudVoiceSources, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { KOKORO_PRESETS, localCandidates } from "@arke-studio/voice";
 import { AppSettingsFile } from "./app-settings.js";
 import { ChildLedger } from "./child-ledger.js";
@@ -191,7 +191,7 @@ const { coordinator, server } = createStudioHost({
   // The dev coordinator carries the app's own preset speakers so the voice picker has a
   // catalogue to show without a sidecar or a provider key. No cloud sources: unkeyed
   // providers contribute nothing anyway, and dev should never reach for one.
-  voice: { sidecar: null, localPresets: localCandidates(KOKORO_PRESETS), cloudSources: [] },
+  voice: { sidecar: null, localPresets: localCandidates(KOKORO_PRESETS), cloudSources: cloudVoiceSources(providerClients) },
 });
 if (opencodeSupervisor) coordinator.superviseAs("harness", opencodeSupervisor);
 

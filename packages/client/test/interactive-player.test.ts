@@ -425,3 +425,364 @@ describe("the player, as a viewer meets the package (156a–156f)", () => {
     assert.equal(p.all(".aip-chip").length, 0, "no walk marks in a package");
   });
 });
+
+/**
+ * A visual novel's scenes (design turn 174, 174d–174g): the same player reads a scene of beats —
+ * a picture and a line each — at the viewer's pace. What moves a beat on by itself is a voice
+ * ending or a CSS animation ending, so the tests tell the player those the way a browser would.
+ */
+describe("the player reading beats (turn 174)", () => {
+  const NOVEL: Partial<InteractivePlayerOptions> = {
+    title: "The Lantern Road",
+    start: "sc_quarter",
+    scenes: {
+      sc_quarter: {
+        title: "The drowned quarter",
+        beats: [
+          { picture: "media/quarter.png", text: "They hung the washing out the morning the water came.", audio: "media/wash.mp3", advance: "voice" },
+          { picture: "media/rail.png", text: "Somebody lit a window down there.", speaker: "Maren", motion: "drift" },
+          { picture: "media/rail.png", text: "Then it isn't somebody.", speaker: "Bray", advance: "hold", holdSec: 3 },
+        ],
+      },
+      sc_causeway: { title: "The causeway", beats: [{ picture: "media/causeway.png", text: "The tide came in." }] },
+      sc_towers: { title: "The bell towers", beats: [{ picture: "media/towers.png" }] },
+      sc_pier: { title: "The pier at dusk", beats: [{ picture: "media/pier.png", text: "Level." }] },
+    },
+  };
+  const animationEnd = (target: HTMLElement | null) => {
+    assert.ok(target);
+    target.dispatchEvent(new dom.Event("animationend", { bubbles: true }) as unknown as Event);
+  };
+  const tap = (p: ReturnType<typeof mount>) => p.click(p.q(".aip-stage"));
+
+  it("shows a beat's picture and its line, narration without a name, a line under its speaker", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    assert.equal(p.root.getAttribute("data-kind"), "beats");
+    assert.equal(p.q(".aip-pic img")?.getAttribute("src"), "media/quarter.png");
+    assert.equal(p.q(".aip-box")?.getAttribute("data-kind"), "narration");
+    assert.equal(p.q(".aip-who")?.hidden, true, "narration has no name tab");
+    assert.equal(p.text(".aip-line"), "They hung the washing out the morning the water came.");
+    assert.equal(p.all(".aip-ticks > i").length, 3, "a tick a beat");
+    assert.equal(p.q("audio")?.getAttribute("src"), "media/wash.mp3", "its voice");
+    assert.ok(p.button("Auto") && p.button("Log") && p.button("Route"), "the reader's chrome replaces the transport");
+  });
+
+  it("a tap shows the rest of the line first, then reads on; a voice's end moves an after-the-voice beat on", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    tap(p);
+    assert.equal(p.q(".aip-box")?.hasAttribute("data-typed"), true, "the first tap completes the line");
+    assert.equal(p.q(".aip-pic img")?.getAttribute("src"), "media/quarter.png", "and does not move on");
+    p.q("audio")!.dispatchEvent(new dom.Event("ended") as unknown as Event);
+    const hold = p.q(".aip-hold")!;
+    assert.match(hold.style.animation, /aip-hold 1\.2s/, "a breath after the voice, as an animation, not a timer");
+    animationEnd(hold);
+    assert.equal(p.text(".aip-line"), "Somebody lit a window down there.");
+    assert.equal(p.text(".aip-who"), "Maren");
+    assert.equal(p.q(".aip-pic img")?.className, "m-drift");
+    assert.equal(JSON.parse(store.get("k") ?? "null"), null, "no key, nothing kept");
+  });
+
+  it("a tap beat waits for the reader; a hold beat moves on after its hold; the last beat opens the choices over its line", () => {
+    const p = mount({ ...NOVEL, autoplay: true, from: "sc_quarter" });
+    animationEnd(p.q(".aip-hold"));
+    assert.equal(p.text(".aip-line"), "They hung the washing out the morning the water came.", "no hold was set, so nothing moves it on");
+    p.key("ArrowRight"); p.key("ArrowRight");
+    assert.equal(p.text(".aip-who"), "Maren");
+    p.key("ArrowRight"); p.key(" ");
+    assert.equal(p.text(".aip-who"), "Bray");
+    assert.match(p.q(".aip-hold")!.style.animation, /aip-hold 3s/, "the hold starts when the beat shows");
+    animationEnd(p.q(".aip-hold"));
+    assert.equal(p.root.getAttribute("data-mode"), "choice");
+    assert.equal(p.q(".aip-box")?.hidden, false, "the last line stays under the choices");
+    assert.deepEqual(p.all(".aip-choice .l").map((el) => el.textContent), ["Follow the lantern", "Stay with the boat"]);
+    p.key("1");
+    assert.equal(p.text(".aip-scene"), "The causeway");
+  });
+
+  it("a beat with no picture shows none, rather than holding the last one as if kept", () => {
+    const p = mount({
+      ...NOVEL,
+      autoplay: true,
+      scenes: { ...NOVEL.scenes, sc_quarter: { title: "Q", beats: [{ picture: "media/quarter.png", text: "One." }, { text: "Two." }] } },
+    });
+    assert.equal(p.q(".aip-pic img")?.getAttribute("src"), "media/quarter.png");
+    p.key("ArrowRight"); p.key("ArrowRight");
+    assert.equal(p.text(".aip-line"), "Two.");
+    assert.equal(p.q(".aip-pic img")?.hasAttribute("src"), false);
+  });
+
+  it("a voice that will not play reads as text and waits, rather than moving on as if heard", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    p.q("audio")!.dispatchEvent(new dom.Event("error") as unknown as Event);
+    assert.equal(p.q(".aip-hold")!.style.animation, "none", "an after-the-voice beat whose voice failed waits for the reader");
+    assert.equal(p.q(".aip-box")?.getAttribute("data-kind"), "narration", "still on the first beat");
+  });
+
+  it("a kept picture goes on moving; the same file shown by another shot moves as its own", () => {
+    const beats = (keep: boolean) => ({
+      ...NOVEL,
+      autoplay: true,
+      scenes: { ...NOVEL.scenes, sc_quarter: { title: "Q", beats: [
+        { picture: "media/rail.png", text: "One.", motion: "push" as const },
+        { picture: "media/rail.png", text: "Two.", motion: "none" as const, ...(keep ? { keep: true } : {}) },
+      ] } },
+    });
+    const kept = mount(beats(true));
+    kept.key("ArrowRight"); kept.key("ArrowRight");
+    assert.equal(kept.q(".aip-pic img")?.className, "m-push", "kept: the first beat's movement goes on");
+    const own = mount(beats(false));
+    own.key("ArrowRight"); own.key("ArrowRight");
+    assert.equal(own.q(".aip-pic img")?.className, "m-none", "not kept: its own movement");
+  });
+
+  it("Auto off takes back the hold Auto started on a beat whose voice failed", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    p.key("a");
+    p.q("audio")!.dispatchEvent(new dom.Event("error") as unknown as Event);
+    assert.match(p.q(".aip-hold")!.style.animation, /aip-hold/, "Auto reads the unvoiced line on after a reading time");
+    p.key("a");
+    assert.equal(p.q(".aip-hold")!.style.animation, "none", "off again, it waits for the reader");
+  });
+
+  it("a voice the browser holds back for a gesture plays on the next tap, rather than being read as text (codex round 12)", async () => {
+    const audioProto = Object.getPrototypeOf(dom.document.createElement("audio")) as { play?: () => Promise<void> };
+    const had = Object.prototype.hasOwnProperty.call(audioProto, "play");
+    const before = audioProto.play;
+    let plays = 0;
+    audioProto.play = () => {
+      plays += 1;
+      // The first start comes with no gesture behind it; the tap's is allowed.
+      return plays === 1 ? Promise.reject(Object.assign(new Error("no gesture"), { name: "NotAllowedError" })) : Promise.resolve();
+    };
+    try {
+      const p = mount({
+        ...NOVEL,
+        autoplay: true,
+        scenes: { ...NOVEL.scenes, sc_quarter: { title: "Q", beats: [
+          { picture: "media/a.png", text: "One.", audio: "media/one.mp3", advance: "voice" as const },
+          { picture: "media/a.png", text: "Two." },
+        ] } },
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      p.key("ArrowRight");
+      assert.equal(plays, 2, "the tap starts the voice");
+      assert.equal(p.text(".aip-line"), "One.", "and does not move on past it");
+      p.q("audio")!.dispatchEvent(new dom.Event("ended") as unknown as Event);
+      assert.match(p.q(".aip-hold")!.style.animation, /aip-hold 1\.2s/, "heard, so it moves on after its breath");
+    } finally {
+      if (had) audioProto.play = before; else delete audioProto.play;
+    }
+  });
+
+  it("a start refused after the reader moved on does not mark the next beat's voice lost", async () => {
+    const audioProto = Object.getPrototypeOf(dom.document.createElement("audio")) as { play?: () => Promise<void> };
+    const had = Object.prototype.hasOwnProperty.call(audioProto, "play");
+    const before = audioProto.play;
+    const rejects: Array<() => void> = [];
+    audioProto.play = () => new Promise<void>((_, reject) => { rejects.push(() => reject(new Error("aborted"))); });
+    try {
+      const p = mount({
+        ...NOVEL,
+        autoplay: true,
+        scenes: { ...NOVEL.scenes, sc_quarter: { title: "Q", beats: [
+          { picture: "media/a.png", text: "One.", audio: "media/one.mp3", advance: "voice" as const },
+          { picture: "media/a.png", text: "Two.", audio: "media/two.mp3", advance: "voice" as const },
+        ] } },
+      });
+      p.key("ArrowRight"); p.key("ArrowRight");
+      assert.equal(p.text(".aip-line"), "Two.");
+      rejects[0]!();
+      await new Promise((resolve) => setImmediate(resolve));
+      p.q("audio")!.dispatchEvent(new dom.Event("ended") as unknown as Event);
+      assert.match(p.q(".aip-hold")!.style.animation, /aip-hold 1\.2s/, "beat two's voice was heard, so it moves on after its breath");
+    } finally {
+      if (had) audioProto.play = before; else delete audioProto.play;
+    }
+  });
+
+  it("back one beat with the left arrow, never across a choice", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    p.key("ArrowRight"); p.key("ArrowRight");
+    assert.equal(p.text(".aip-who"), "Maren");
+    p.key("ArrowLeft");
+    assert.equal(p.q(".aip-box")?.getAttribute("data-kind"), "narration");
+    p.key("ArrowLeft");
+    assert.equal(p.q(".aip-box")?.getAttribute("data-kind"), "narration", "the scene's first beat is as far back as it goes");
+  });
+
+  it("Auto moves a tap beat on after a reading time, and off again waits", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    p.key("ArrowRight"); p.key("ArrowRight");
+    assert.equal(p.q(".aip-hold")!.style.animation, "none", "a tap beat waits");
+    p.click(p.button("Auto"));
+    assert.equal(p.button("Auto")?.getAttribute("aria-pressed"), "true");
+    assert.match(p.q(".aip-hold")!.style.animation, /aip-hold 3\.3s/, "1.5s and 0.3s a word");
+    p.key("a");
+    assert.equal(p.q(".aip-hold")!.style.animation, "none", "Auto off, it waits again");
+  });
+
+  it("the log lists the scene's lines so far and plays one again without moving the story", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    p.key("ArrowRight"); p.key("ArrowRight");
+    p.key("l");
+    const log = p.q('[aria-label="Log"]')!;
+    assert.equal(log.hidden, false);
+    assert.deepEqual(p.all(".aip-log-line .t").map((el) => el.textContent), ["They hung the washing out the morning the water came.", "Somebody lit a window down there."]);
+    p.click(log.querySelector('[aria-label="Play line"]') as unknown as HTMLElement);
+    assert.equal(p.all("audio")[1]?.getAttribute("src"), "media/wash.mp3", "heard on its own player");
+    assert.equal(p.text(".aip-who"), "Maren", "the story has not moved");
+    p.key("Escape");
+    assert.equal(log.hidden, true, "Escape closes the log first");
+  });
+
+  it("dialogue still waiting for its speaker reads as dialogue, never as narration (codex round 8)", () => {
+    const p = mount({
+      ...NOVEL,
+      autoplay: true,
+      scenes: { ...NOVEL.scenes, sc_quarter: { title: "Draft", beats: [{ picture: "media/quarter.png", text: "Who said this?", dialogue: true }] } },
+    });
+    assert.equal(p.q(".aip-box")?.getAttribute("data-kind"), "dialogue");
+    assert.equal(p.q(".aip-who")?.hidden, true, "no name to show on the tab");
+    p.key("l");
+    assert.equal(p.all(".aip-log-line.narration").length, 0, "nor as narration in the log");
+  });
+
+  it("R opens the route over an open log by closing the log, one panel at a time (codex round 10)", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    p.key("l");
+    assert.equal(p.q('[aria-label="Log"]')!.hidden, false);
+    p.key("r");
+    assert.equal(p.q("[data-ref=panel]")!.hasAttribute("hidden"), false, "the route opens");
+    assert.equal(p.q('[aria-label="Log"]')!.hidden, true, "and the log steps aside");
+    assert.equal(p.button("Log")?.getAttribute("aria-pressed"), "false");
+  });
+
+  it("a line replayed from the log stops when the scene ends, never sounding over the choice (codex round 11)", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    // On to the last beat, the log open, the first line played again on its own player.
+    for (let i = 0; i < 4; i += 1) p.key("ArrowRight");
+    p.key("l");
+    const logVoice = p.all("audio")[1]! as unknown as HTMLMediaElement;
+    let stopped = false;
+    Object.assign(logVoice, { play: () => Promise.resolve(), pause: () => { stopped = true; } });
+    p.click(p.q('[aria-label="Log"] [aria-label="Play line"]') as unknown as HTMLElement);
+    assert.equal(logVoice.getAttribute("src"), "media/wash.mp3");
+    p.key("Escape");
+    p.key("ArrowRight"); p.key("ArrowRight");
+    assert.ok(stopped, "the log's voice stops with the scene");
+  });
+
+  it("a line played again from the log stops the beat's own voice: one voice at a time (codex round 15)", () => {
+    const p = mount({
+      ...NOVEL,
+      autoplay: true,
+      scenes: { ...NOVEL.scenes, sc_quarter: { title: "Q", beats: [
+        { picture: "media/a.png", text: "One.", audio: "media/one.mp3", advance: "voice" as const },
+        { picture: "media/a.png", text: "Two.", audio: "media/two.mp3", advance: "voice" as const },
+      ] } },
+    });
+    // Beat one heard to its end; beat two's voice is still speaking when its log line is pressed.
+    p.q("audio")!.dispatchEvent(new dom.Event("ended") as unknown as Event);
+    p.key("ArrowRight"); p.key("ArrowRight");
+    assert.equal(p.text(".aip-line"), "Two.");
+    const voice = p.all("audio")[0]! as unknown as HTMLMediaElement;
+    let stopped = false;
+    Object.assign(voice, { pause: () => { stopped = true; } });
+    p.key("l");
+    p.click(p.q('[aria-label="Log"] [data-line="0"]') as unknown as HTMLElement);
+    assert.ok(stopped, "the beat's voice stops for the line heard again");
+    assert.equal(p.q(".aip-hold")!.style.animation, "none", "and the beat waits for the reader rather than moving on");
+  });
+
+  it("with Auto on, a line heard again from the log is heard out before Auto reads on (codex round 17)", () => {
+    const p = mount({
+      ...NOVEL,
+      autoplay: true,
+      scenes: { ...NOVEL.scenes, sc_quarter: { title: "Q", beats: [
+        { picture: "media/a.png", text: "One.", audio: "media/one.mp3", advance: "voice" as const },
+        { picture: "media/a.png", text: "Two.", audio: "media/two.mp3", advance: "voice" as const },
+      ] } },
+    });
+    p.q("audio")!.dispatchEvent(new dom.Event("ended") as unknown as Event);
+    p.key("ArrowRight"); p.key("ArrowRight");
+    p.key("a");
+    p.key("l");
+    p.click(p.q('[aria-label="Log"] [data-line="0"]') as unknown as HTMLElement);
+    assert.equal(p.q(".aip-hold")!.style.animation, "none", "Auto does not read on over the line being heard");
+    p.all("audio")[1]!.dispatchEvent(new dom.Event("ended") as unknown as Event);
+    assert.match(p.q(".aip-hold")!.style.animation, /aip-hold/, "and reads on once it has been heard");
+  });
+
+  it("with Auto on, a line that cannot be heard again hands the beat back at once (codex round 18)", () => {
+    const p = mount({
+      ...NOVEL,
+      autoplay: true,
+      scenes: { ...NOVEL.scenes, sc_quarter: { title: "Q", beats: [
+        { picture: "media/a.png", text: "One.", audio: "media/one.mp3", advance: "voice" as const },
+        { picture: "media/a.png", text: "Two.", audio: "media/two.mp3", advance: "voice" as const },
+      ] } },
+    });
+    p.q("audio")!.dispatchEvent(new dom.Event("ended") as unknown as Event);
+    p.key("ArrowRight"); p.key("ArrowRight");
+    p.key("a");
+    p.key("l");
+    p.click(p.q('[aria-label="Log"] [data-line="0"]') as unknown as HTMLElement);
+    assert.equal(p.q(".aip-hold")!.style.animation, "none");
+    p.all("audio")[1]!.dispatchEvent(new dom.Event("error") as unknown as Event);
+    assert.match(p.q(".aip-hold")!.style.animation, /aip-hold/, "Auto reads on rather than waiting for an end that never comes");
+  });
+
+  it("a beat's own hold waits while a line is heard again from the log, and starts over after (codex round 19)", () => {
+    const p = mount({
+      ...NOVEL,
+      autoplay: true,
+      scenes: { ...NOVEL.scenes, sc_quarter: { title: "Q", beats: [
+        { picture: "media/a.png", text: "One.", audio: "media/one.mp3", advance: "voice" as const },
+        { picture: "media/a.png", text: "Two.", advance: "hold" as const, holdSec: 3 },
+      ] } },
+    });
+    p.q("audio")!.dispatchEvent(new dom.Event("ended") as unknown as Event);
+    p.key("ArrowRight"); p.key("ArrowRight");
+    assert.equal(p.text(".aip-line"), "Two.");
+    assert.match(p.q(".aip-hold")!.style.animation, /aip-hold 3s/, "the authored hold runs");
+    p.key("l");
+    p.click(p.q('[aria-label="Log"] [data-line="0"]') as unknown as HTMLElement);
+    assert.equal(p.q(".aip-hold")!.style.animation, "none", "and waits for the line being heard");
+    p.all("audio")[1]!.dispatchEvent(new dom.Event("ended") as unknown as Event);
+    assert.match(p.q(".aip-hold")!.style.animation, /aip-hold 3s/, "then holds again");
+  });
+
+  it("keeps the focus on the open log's control when the reader moves on beneath it", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    p.key("ArrowRight"); p.key("ArrowRight");
+    p.key("l");
+    const log = p.q('[aria-label="Log"]')!;
+    const close = log.querySelector('[data-act="log"]') as unknown as HTMLElement;
+    close.focus();
+    p.key("a");
+    assert.equal(focused(), close, "a redraw that changes nothing replaces nothing");
+    (log.querySelector('[aria-label="Play line"]') as unknown as HTMLElement).focus();
+    // The first press finishes the line typing; the second reads on, and the log gains a line.
+    p.key("ArrowRight"); p.key("ArrowRight");
+    assert.equal(p.all(".aip-log-line").length, 3, "the next line joined the log");
+    const again = focused() as HTMLElement;
+    assert.ok(log.contains(again), "focus stays in the log, inside the player");
+    assert.equal(again.getAttribute("data-line"), "0", "on the same line's Play button");
+  });
+
+  it("keeps the place as a beat, in the same four fields, and reopens on it", () => {
+    const KEY = "arke-iv-test-beats";
+    const p = mount({ ...NOVEL, autoplay: true, storageKey: KEY });
+    p.key("ArrowRight"); p.key("ArrowRight");
+    const saved = JSON.parse(store.get(KEY)!);
+    assert.deepEqual(Object.keys(saved).sort(), ["positionSec", "route", "sceneId", "updatedAt"]);
+    assert.equal(saved.positionSec, 1, "the second beat");
+    p.handle.destroy();
+    const again = mount({ ...NOVEL, storageKey: KEY });
+    assert.equal(again.root.getAttribute("data-mode"), "poster");
+    assert.match(again.text(".aip-place"), /beat 2 of 3/);
+    assert.equal(again.q(".aip-pic img")?.getAttribute("src"), "media/rail.png", "the poster is the saved beat's picture");
+    again.click(again.button("Continue"));
+    assert.equal(again.text(".aip-who"), "Maren");
+  });
+});

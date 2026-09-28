@@ -1,4 +1,5 @@
 import {
+  beatPictureShotId,
   orderedShots,
   productionAspect,
   productionShape,
@@ -28,6 +29,7 @@ import {
 } from "../lib/store.js";
 import { decisionTone, takeMediaPath } from "../lib/take-presentation.js";
 import { DevelopmentWorkspace } from "./development.js";
+import { shotHasFrame } from "./scene-workspace/boards.js";
 import { ChapterOutlineRow, ChapterPlan, useNewScene, useSharedNewScene } from "./production-story.js";
 
 // ---- Dashboard (11a; day-one variant from 33a) -----------------------------
@@ -151,16 +153,36 @@ export function ProductionDashboardScreen() {
   }
   const dayOne = isDayOne(production);
   const decisions = takeDecisions(production);
-  const pending = production.takes.filter((t) => decisions[t.id] === "pending");
+  // A visual novel's work is its pictures: a clip left from when it was an interactive movie is
+  // no picture, and accepting one would cover nothing, so the lists leave clips out (codex round 14).
+  const beats = productionShape(production.meta).playsAsBeats;
+  // Nor is a picture made for a shot that now keeps the one before: the story shows the kept
+  // picture there, so accepting it would put nothing in the story (codex round 17).
+  const retained = new Set(beats
+    ? production.scenes.flatMap((scene) => orderedShots(scene).flatMap((shot, _, sceneShots) => (beatPictureShotId(sceneShots, shot.id) === shot.id ? [] : [shot.id])))
+    : []);
+  const takes = beats
+    // Nor a board sheet's composite: no shot can select it; its panel crops are the pictures.
+    ? production.takes.filter((t) => (t.kind === "frame" || t.kind === "still") && t.boardSheetParent !== true && !t.coversShots.some((shotId) => retained.has(shotId)))
+    : production.takes;
+  const pending = takes.filter((t) => decisions[t.id] === "pending");
   const shots = production.scenes.flatMap((s) => orderedShots(s));
-  const acceptedShots = shots.filter((s) => acceptedTakeId(production, s.id)).length;
-  const nextGap = production.scenes
-    .flatMap((scene) => orderedShots(scene).map((shot) => ({ scene, shot })))
-    .find(({ shot }) => !acceptedTakeId(production, shot.id));
-  const latest = [...production.takes]
+  // A visual novel's shot is a picture, not a clip (turn 174): it is covered when the picture its
+  // beat shows is there — a filed frame or an accepted still, the one before where it keeps that
+  // one — as the Beats view and the export read it (codex round 11).
+  const placed = production.scenes.flatMap((scene) => orderedShots(scene).map((shot, _, sceneShots) => ({ scene, shot, sceneShots })));
+  const covered = ({ shot, sceneShots }: (typeof placed)[number]) =>
+    beats ? shotHasFrame(production, world.artifacts, beatPictureShotId(sceneShots, shot.id)) : Boolean(acceptedTakeId(production, shot.id));
+  const acceptedShots = placed.filter(covered).length;
+  const nextGap = placed.find((entry) => !covered(entry));
+  // A visual novel's takes are reviewed in the stills lens, which is pictures only: the default
+  // lens would show the clips these lists leave out (codex round 15).
+  const generatePath = (shotId?: string) =>
+    `/w/${worldId}/p/${prodId}/generate${beats ? `?view=stills${shotId ? `&shot=${encodeURIComponent(shotId)}` : ""}` : ""}`;
+  const latest = [...takes]
     .sort((a, b) => (b.completedAt ?? b.dispatchedAt).localeCompare(a.completedAt ?? a.dispatchedAt))
     .slice(0, 4);
-  const recentDecided = production.takes
+  const recentDecided = takes
     .filter((t) => decisions[t.id] !== "pending")
     .slice(-3)
     .reverse();
@@ -174,7 +196,7 @@ export function ProductionDashboardScreen() {
         <h1 className="fy-h1">{dayOne ? production.meta.title : "Here's where you left off."}</h1>
         {!dayOne && (
           <span className="fy-h1row__meta">
-            {acceptedShots} of {shots.length} shots covered · {pending.length} need you
+            {acceptedShots} of {shots.length} {beats ? "pictures ready" : "shots covered"} · {pending.length} need you
           </span>
         )}
       </div>
@@ -210,11 +232,13 @@ export function ProductionDashboardScreen() {
               </div>
               <div className="fy-threadcard__sub">
                 {pending.length > 0
-                  ? "Accept locks the clip into the cut; a rejection cites the sheet it drifted from."
+                  ? beats
+                    ? "Accept puts the picture in the story; a rejection cites the sheet it drifted from."
+                    : "Accept locks the clip into the cut; a rejection cites the sheet it drifted from."
                   : "Every take that came back has a decision. The next move is dispatch."}
               </div>
               <div className="fy-threadcard__actions">
-                <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
+                <Button onClick={() => navigate(generatePath())}>
                   {pending.length > 0 ? "Review takes" : "Open Generate"}
                 </Button>
               </div>
@@ -235,16 +259,23 @@ export function ProductionDashboardScreen() {
                 </div>
                 <div className="fy-nextcard__body">
                   <div className="fy-nextcard__title">
-                    {nextGap.shot.id.replace("sh_", "Shot ")} has no clip yet
+                    {nextGap.shot.id.replace("sh_", "Shot ")} has no {beats ? "picture" : "clip"} yet
                     <span className="fy-dot fy-dot--warn" />
                   </div>
                   <div className="fy-nextcard__sub">
                     Scene {nextGap.scene.number} · {nextGap.shot.title} · {seconds(nextGap.shot.durationSec)}
                   </div>
                   <div style={{ marginTop: 10 }}>
-                    <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
-                      Open in Generate
-                    </Button>
+                    {/* A picture is made on the scene's beats, not in the clip workflow. */}
+                    {beats ? (
+                      <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${nextGap.scene.id}`)}>
+                        Open the beats
+                      </Button>
+                    ) : (
+                      <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
+                        Open in Generate
+                      </Button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -252,14 +283,14 @@ export function ProductionDashboardScreen() {
           </div>
           <div>
             <div className="fy-listhead">
-              Latest clips
+              {beats ? "Latest pictures" : "Latest clips"}
               {/* The same keyboard rule as the chapter link: a destination is a button, not a span. */}
               <button
                 type="button"
                 className="fy-linkbtn"
-                onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}
+                onClick={() => navigate(generatePath())}
               >
-                All {production.takes.length} takes
+                All {takes.length} {beats ? "pictures" : "takes"}
               </button>
             </div>
             <div className="fy-cliprow">
@@ -267,7 +298,7 @@ export function ProductionDashboardScreen() {
                 <div
                   key={t.id}
                   className="fy-clip"
-                  onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}
+                  onClick={() => navigate(generatePath(t.coversShots[0]))}
                 >
                   <div className="fy-clip__frame">
                     <Portrait

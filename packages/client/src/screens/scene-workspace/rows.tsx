@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { createPortal } from "react-dom";
 import {
   assembleBoardPrompt,
+  beatPlayback,
   boardPromptFor,
   DEFAULT_SHOT_SEC,
   stageLineCrossings,
@@ -16,6 +17,7 @@ import {
   type Job,
   type PackedBoard,
   type ProductionBundle,
+  type SceneBeat,
   type SceneRecord,
   type Sheet,
   type Shot,
@@ -33,6 +35,8 @@ import { ChevronRight, Grid2x2, Grip, ImageMark, Lines, More, Pencil, Plus } fro
 import { characterPortraitPath, locationPortraitPath } from "../../components/portrait.js";
 import { Button } from "../../components/ui.js";
 import { mentionNames, scriptWords } from "./mentions.js";
+import { BeatLines, advanceWord } from "./beats.js";
+import type { LineVoice } from "./table-read.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 
@@ -106,6 +110,7 @@ export function StoryboardRows({
   onTalkToArke,
   onPlanVideo,
   onRenderBoard,
+  beats,
 }: {
   layout?: "list" | "grid";
   scene: SceneRecord;
@@ -139,6 +144,8 @@ export function StoryboardRows({
   onTalkToArke: () => void;
   onPlanVideo: () => void;
   onRenderBoard: (memberShotIds: string[]) => void;
+  /** Present when the production plays as beats (turn 174): each row reads as a beat. */
+  beats?: BeatsView;
 }) {
   const shots = orderedShots(scene);
   const lineFindings = useMemo(() => stageLineCrossings(scene, aspect), [scene, aspect]);
@@ -361,10 +368,15 @@ export function StoryboardRows({
                 run={frameRun}
                 onRetryFinalization={retryFinalizationId === null ? null : () => retryJobFinalization(retryFinalizationId)}
                 worldId={worldId}
-                onGenerateFrame={(trigger) => onGenerateFrame(shot.id, trigger)}
+                // A beat that keeps the picture before generates that picture: its own frame is
+                // never shown, so paying for one is paying for nothing (codex round 10).
+                onGenerateFrame={(trigger) => onGenerateFrame(beats === undefined ? shot.id : beats.pictureShotId(shot.id), trigger)}
                 onEdit={() => onEditShot(shot.id)}
                 onOpenInGenerator={() => onOpenShotInGenerator(shot.id)}
                 onPreview={() => onPreviewShot(shot.id)}
+                {...(beats === undefined ? {} : {
+                  beat: rowBeat(beats, shot.id, newShotIds),
+                })}
               />
             </li>
           );
@@ -396,7 +408,29 @@ export function StoryboardRows({
   );
 }
 
+/** What the rows read when the production plays as beats (turn 174). */
+export interface BeatsView {
+  byShot: ReadonlyMap<string, SceneBeat[]>;
+  voices: ReadonlyMap<string, LineVoice>;
+  /** The shot whose picture a beat shows: its own, or the one before it keeps. */
+  pictureShotId: (shotId: string) => string;
+}
+
+interface RowBeat {
+  lines: readonly SceneBeat[];
+  voices: ReadonlyMap<string, LineVoice>;
+  pictureShotId: string;
+  /** Whether the picture's own shot is staged as new — the kept shot's, not the keeper's. */
+  pictureNew: boolean;
+}
+
+function rowBeat(beats: BeatsView, shotId: string, newShotIds: ReadonlySet<string>): RowBeat {
+  const pictureShotId = beats.pictureShotId(shotId);
+  return { lines: beats.byShot.get(shotId) ?? [], voices: beats.voices, pictureShotId, pictureNew: newShotIds.has(pictureShotId) };
+}
+
 /** 9:16 stands up; 16:9, 1:1 and anything wider lies down. An aspect that does not parse lies down too. */
+
 export function aspectIsPortrait(aspect: string): boolean {
   const [w, h] = aspect.split(":").map(Number);
   return Number.isFinite(w) && Number.isFinite(h) && h! > 0 && w! > 0 && w! < h!;
@@ -753,6 +787,7 @@ function Row({
   onPreview,
   prevShotId,
   nextShotId,
+  beat,
 }: {
   lineWarning: string;
   shot: Shot;
@@ -791,6 +826,7 @@ function Row({
   /** The rows either side, for moving without a pointer. */
   prevShotId: string | null;
   nextShotId: string | null;
+  beat?: RowBeat;
 }) {
   const band = useRef<HTMLDivElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement | null>(null);
@@ -816,11 +852,18 @@ function Row({
   const takes = takesForShot(production, shot.id);
   const acceptedTake = accepted === null ? undefined : takes.find((take) => take.id === accepted);
   const coverage = shotCoverage(shot, digests);
-  const frame = shotFramePath(production, artifacts, shot.id, newShot);
+  // A beat that keeps the picture before shows that picture (turn 174); its own is not played.
+  // The kept shot's accepted frame is read as the kept shot's — a new shot keeping an accepted
+  // one still shows it (codex round 5).
+  const samePicture = beat !== undefined && beat.pictureShotId !== shot.id;
+  const frame = samePicture
+    ? shotFramePath(production, artifacts, beat.pictureShotId, beat.pictureNew)
+    : shotFramePath(production, artifacts, shot.id, newShot);
   const hasFrame = frame.hasFrame;
   const state = shotCardState({
     blankScript: shot.description.trim() === "",
-    clipAccepted: acceptedTake?.kind === "clip",
+    // A beat plays its picture; a clip accepted on its shot is read by nothing (codex round 13).
+    clipAccepted: beat === undefined && acceptedTake?.kind === "clip",
     hasFrame,
     coverage,
   });
@@ -1150,9 +1193,10 @@ function Row({
             <img className="fy-swrow__img fy-swrow__open" alt={shot.title} src={src} draggable={false} onClick={(event) => { event.stopPropagation(); if (!staged) onEdit(); }} />
           )}
           <span className="fy-swrow__chipmeta">
-            {durationSec}s
+            {beat === undefined ? `${durationSec}s` : advanceWord(beatPlayback(shot).advance, beatPlayback(shot).holdSec)}
           </span>
-          <FrameActions
+          {samePicture ? <span className="fy-swrow__same">Same picture</span> : null}
+          {samePicture ? null : <FrameActions
             shotNumber={shot.number}
             title={shot.title}
             slug={slug}
@@ -1166,7 +1210,7 @@ function Row({
             onUpload={() => importShotFrame(worldId, production.meta.id, shot.id)}
             onClear={() => clearShotFrame(worldId, production.meta.id, shot.id)}
             readAloud={{ source: { of: "shot", productionId: production.meta.id, sceneId: scene.id, shotId: shot.id }, title: `Shot ${shot.number} · script`, text: shot.description }}
-          />
+          />}
           <dialog
             ref={variantsDialog}
             className="fy-swvariants"
@@ -1259,6 +1303,7 @@ function Row({
             </div>
           ) : null}
         </div>
+        {beat === undefined ? null : <BeatLines beats={beat.lines} sheets={sheets} voices={beat.voices} />}
         <section className="fy-swrow__descwrap">
           {scriptEditor}
         </section>

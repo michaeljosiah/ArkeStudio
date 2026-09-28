@@ -294,7 +294,7 @@ describe("the Audiobook door (turn 146)", () => {
     assert.ok(use().disabled, "the press waits for what the switch costs");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.narrator-quote", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: ask.requestId, stale: 40, held: 2, directed: 9, estimatedMicroUsd: 1_200_000, kept: 40 }));
     const facts = ([...dialog.querySelectorAll('[data-testid="narrator-quote"] > div')] as HTMLElement[]).map((f) => f.textContent);
-    assert.deepEqual(facts, ["Blocks40 stale", "Direction2 of 9 held", "Read the book$1.20", "Takeskept · 40"]);
+    assert.deepEqual(facts, ["Blocks40 stale", "Direction2 of 9 held", "Read the bookup to $1.20", "Takeskept · 40"]);
     assert.ok(!use().disabled);
     await act(async () => use().click());
     const set = m.sent.findLast((message) => message.kind === "set-audiobook-narrator") as Extract<ClientMessage, { kind: "set-audiobook-narrator" }>;
@@ -316,7 +316,7 @@ describe("the Audiobook door (turn 146)", () => {
     const m = await mount(inkbound("cast"));
     await answerDoor(m, door("cast", { price: { ...PRICE, voices: LINES } }));
     const press = q(m, '[data-testid="read-book"]')!;
-    assert.equal(press.textContent, "Read the book · 9 chapters · $10.87");
+    assert.equal(press.textContent, "Read the book · 9 chapters · up to $10.87");
     await act(async () => press.click());
     const presses = () => m.sent.filter((message) => message.kind === "read-audiobook-book");
     assert.equal(presses().length, 1);
@@ -341,14 +341,14 @@ describe("the Audiobook door (turn 146)", () => {
     assert.match(text(m), /9 chapters · 108,700 characters · 41 cloud lines/);
     const lines = all(m, '[data-testid="read-book-line"]').map((line) => line.textContent);
     assert.deepEqual(lines, [
-      "Charlottenarrator · ElevenLabs · cloud99,000 · $9.90",
-      "AnnaElevenLabs · cloud9,400 · $0.94",
+      "Charlottenarrator · ElevenLabs · cloud99,000 · up to $9.90",
+      "AnnaElevenLabs · cloud9,400 · up to $0.94",
       "TideKokoro · this machine1,200 · free",
-      "Odile Sarnno voice · narrator · ElevenLabs · cloud300 · $0.03",
+      "Odile Sarnno voice · narrator · ElevenLabs · cloud300 · up to $0.03",
     ]);
     assert.match(text(m), /words and the voice to ElevenLabs · text in Activity/);
     const confirm = q(m, '[data-testid="read-book-confirm"]')!;
-    assert.equal(confirm.textContent, "Confirm 108,700 characters · $10.87");
+    assert.equal(confirm.textContent, "Confirm 108,700 characters · up to $10.87");
     await act(async () => confirm.click());
     const answered = m.sent.findLast((message) => message.kind === "read-audiobook-book") as Extract<ClientMessage, { kind: "read-audiobook-book" }>;
     assert.equal(answered.confirmationToken, "tok");

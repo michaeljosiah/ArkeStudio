@@ -73,6 +73,7 @@ export const CLEARABLE_SHOT_FIELDS = [
   "covers",
   "promptOverride",
   "notes",
+  "beat",
 ] as const;
 
 /** One bounded scene mutation. Arbitrary graph replacement is deliberately absent. */

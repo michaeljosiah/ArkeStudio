@@ -32,6 +32,7 @@ export async function preparePerformanceGeneration(store: WorldStore, model: Man
   const language = source.kind === "cloned" ? source.voice.language : undefined;
   const mapped = mapCadence(text, audioHash(Buffer.from(normalizeSpeechText(text))), request.cadencePlan, model, language);
   if (mapped.controls.some(c => c.status === "unsupported")) throw new Error("Remove unsupported cadence controls or choose a compatible model.");
+  if (model.provider === "google" && mapped.controls.some(c => c.method === "parts")) throw new Error("Use one delivery for this line, or read the directed passage in the audiobook.");
   if (model.limits.maxPromptChars !== undefined && mapped.providerText.length > model.limits.maxPromptChars) throw new Error("The decorated line exceeds this model's character limit.");
   if (!speechInputFits(mapped.providerText, model.limits, mapped.instructions)) throw new Error("The line and its direction exceed this model's request limit.");
   const quote = PerformanceGenerationQuoteSchema.parse({ operationId: randomUUID(), target, authoredText: text, voiceAssignment: sheet.voice,
