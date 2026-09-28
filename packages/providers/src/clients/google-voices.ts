@@ -3,11 +3,11 @@ import { ProviderRequestRejectedError } from "../types.js";
 import { GEMINI_TTS_MODELS, geminiSpeechUsage, geminiWav } from "./google.js";
 
 // SPEC-049 R-14/R-19. Reviewed 2026-09-28 against /api/voices and /docs/voice-design.
-// Google's speech token prices do not establish a CreateVoice tariff or serving ceiling.
-// This status is deliberately separate from the presence of the protocol methods.
+// Uses published model rates as an explicitly labelled estimate (SPEC-049 R-19).
+// CreateVoice has no documented per-request spending cap.
 export const GEMINI_VOICE_DESIGN_AVAILABILITY = {
-  available: false,
-  reason: "Voice creation pricing and a spending bound have not been verified",
+  available: true,
+  pricingBasis: "published-model-rate-estimate",
 } as const;
 
 const record = (value: unknown): Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};

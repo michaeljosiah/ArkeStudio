@@ -16,6 +16,9 @@ import type {
  */
 
 export interface SubmitRequest {
+  voiceDesign?: true;
+  /** Host-resolved stable world target, never supplied directly by the renderer. */
+  designedVoice?: { target: string; remoteId: string };
   model: string;
   capability: Capability;
   /** Host cancellation for work still inside a synchronous submit. Never serialized or sent. */

@@ -43,6 +43,21 @@ async function harness(usage?: SpeechUsage, state: "succeeded" | "failed" = "suc
   return { queue, create, client, ledger, dir, submissions: () => submissions, expire: () => { expire = true; } };
 }
 
+it("never repeats an uncertain voice creation after restart and retains its estimate basis", async () => {
+  const h = await harness();
+  let calls = 0;
+  h.client.submit = async (_key, request) => { assert.equal(request.voiceDesign, true); calls++; throw new Error("lost response"); };
+  try {
+    await h.queue.enqueue({ ...input, target: { kind: "voice-design" }, params: { text: "A warm storyteller", operation: "voice-design" } });
+    await until(() => h.queue.listJobs()[0]?.status === "needs-reconciliation", "uncertain creation", 30000);
+    assert.equal(h.queue.listJobs()[0]?.speechQuote?.costBasis, "estimate");
+    h.queue.dispose();
+    const restored = h.create();
+    try { await restored.start(); assert.equal(restored.listJobs()[0]?.status, "needs-reconciliation"); assert.equal(calls, 1); }
+    finally { restored.dispose(); }
+  } finally { h.queue.dispose(); }
+});
+
 it("refuses under-authorised token speech and rechecks rates after asynchronous preparation", async () => {
   const h = await harness();
   try {

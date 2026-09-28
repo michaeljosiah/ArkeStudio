@@ -32,6 +32,7 @@ export const SpeechUsageSchema = z.object({
 export type SpeechUsage = z.infer<typeof SpeechUsageSchema>;
 
 export const SpeechQuoteSchema = z.object({
+  costBasis: z.literal("estimate").optional(),
   model: z.string().min(1),
   provider: z.string().min(1),
   quotedAt: z.string().datetime(),

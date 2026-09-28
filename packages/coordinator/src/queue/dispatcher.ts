@@ -3,6 +3,8 @@ import { dirname, extname, join } from "node:path";
 import {
   canDeleteJob,
   quoteSpeech,
+  quoteVoiceDesign,
+  isDesignedVoiceTarget,
   speechQuoteIsCurrent,
   speechSettlement,
   SpeechUsageSchema,
@@ -90,6 +92,8 @@ export interface DispatchClient {
       capability: Capability;
       signal?: AbortSignal;
       params: Record<string, unknown>;
+      designedVoice?: { target: string; remoteId: string };
+      voiceDesign?: true;
       imageReferences?: DispatchImageReference[];
       audioReferences?: DispatchVoiceReference[];
       mediaAudioReferences?: Array<DispatchVoiceReference & { durationSec: number }>;
@@ -154,6 +158,7 @@ export interface EnqueueInput {
 }
 
 export interface JobQueueOptions {
+  readDesignedVoice?: (worldId: string, target: string) => Promise<{ target: string; remoteId: string }>;
   /** Resolve qualified speech pricing at admission and immediately before paid I/O. */
   speechModel?: (provider: string, model: string) => ManifestModel | undefined;
   /** Recheck host authorization after preparation and before the durable submission boundary. */
@@ -614,7 +619,7 @@ export class JobQueue {
     const now = this.clock();
     const model = input.capability === "voice-tts" ? this.opts.speechModel?.(input.provider, input.model) : undefined;
     const speechQuote = model?.pricing.kind === "perToken"
-      ? quoteSpeech(model, String(input.params.text ?? ""), { at: now }) : undefined;
+      ? (input.target.kind === "voice-design" ? quoteVoiceDesign(model, String(input.params.text ?? ""), now) : quoteSpeech(model, String(input.params.text ?? ""), { at: now })) : undefined;
     if (speechQuote && speechQuote.authorisedMicroUsd > input.estimatedMicroUsd) {
       throw new Error("Speech pricing changed. Review the new quote before reading.");
     }
@@ -884,6 +889,16 @@ export class JobQueue {
     let mediaAudioReferences: Array<DispatchVoiceReference & { durationSec: number }> | undefined;
     let imageReferences: DispatchImageReference[] | undefined;
     let voiceReference: DispatchVoiceReference | undefined;
+    let designedVoice: { target: string; remoteId: string } | undefined;
+    if (job.provider === "google" && typeof job.params.voiceId === "string" && isDesignedVoiceTarget(job.params.voiceId)) {
+      try {
+        if (!this.opts.readDesignedVoice) throw new Error("Saved voice resolution is unavailable.");
+        designedVoice = await this.opts.readDesignedVoice(job.worldId, job.params.voiceId);
+      } catch (error) {
+        if (this.stillQueued(job)) await this.terminalize(job, "failed", describeCoordinatorError(error));
+        return;
+      }
+    }
     let videoSource: DispatchVideoSource | undefined;
     let videoReferences: DispatchVideoSource[] | undefined;
     const referencePaths = job.params["references"];
@@ -1082,7 +1097,7 @@ export class JobQueue {
       if (job.speechQuote) {
         const model = this.opts.speechModel?.(job.provider, job.model);
         if (!model || !speechQuoteIsCurrent(job.speechQuote, this.clock())) throw new Error("Speech quote expired. Review the new price before reading.");
-        const current = quoteSpeech(model, String(job.params.text ?? ""), { at: this.clock() });
+        const current = job.target.kind === "voice-design" ? quoteVoiceDesign(model, String(job.params.text ?? ""), this.clock()) : quoteSpeech(model, String(job.params.text ?? ""), { at: this.clock() });
         if (current.rateVersion !== job.speechQuote.rateVersion || current.authorisedMicroUsd > job.speechQuote.authorisedMicroUsd) {
           throw new Error("Speech pricing changed. Review the new quote before reading.");
         }
@@ -1122,6 +1137,8 @@ export class JobQueue {
           capability: job.capability,
           signal: submitAbort.signal,
           params: providerParams(job.params),
+          ...(designedVoice ? { designedVoice } : {}),
+          ...(job.target.kind === "voice-design" ? { voiceDesign: true as const } : {}),
           ...(imageReferences ? { imageReferences } : {}),
           ...(audioReferences ? { audioReferences } : {}),
           ...(mediaAudioReferences ? { mediaAudioReferences } : {}),

@@ -1,4 +1,5 @@
 import { valueSchema } from "./value-schema.js";
+import { DesignedVoiceSchema } from "./designed-voice.js";
 import { AdapterLibraryStateSchema } from "./adapters.js";
 import { BorrowedImageOriginSchema } from "./take.js";
 import { TakeDialogueFeedbackSchema } from "./take-feedback.js";
@@ -311,6 +312,7 @@ export const WorldBundleSchema = valueSchema(z
      * still parse. A world with no `voices/voices.json` simply has none.
      */
     clonedVoices: z.array(ClonedVoiceSchema).default([]),
+    designedVoices: z.array(DesignedVoiceSchema).optional(),
     productions: z.array(ProductionBundleSchema),
     /**
      * series/<slug>.json records (SPEC-023 R-9). Defaulted: this schema is a read path, and

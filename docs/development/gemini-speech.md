@@ -38,44 +38,65 @@ for these responses, preserving the usage and audio. That receipt does not imply
 stores the result or that it can be polled after a restart.
 
 Model readiness and the 30 preset candidates use read-only model discovery, including
-pagination. Being listed does not prove quota or paid synthesis access. This stage refuses
-unbound custom voice IDs and reference recordings. Voice design and replication need their
-own project bindings, separately authorised operations, consent handling and verified pricing.
+pagination. Being listed does not prove quota or paid synthesis access. Unbound custom voice
+IDs and reference recordings remain refused. Stored designed voices use the binding flow below;
+replication and its recording/consent workflow are separate work.
 
-## Designed voice protocol, not product activation
+## Designing and saving a voice
 
 The provider layer implements stored prompted-voice creation, exact-id retrieval and one-page
 listing through Google's Voices API. These methods pass through the captured host transport;
 creation gets a synchronous-generation deadline. Construction and preset discovery do not call
 them. The returned metadata includes the vendor's expiry rather than a locally invented TTL.
 Creation and retrieval return a validated WAV preview when present. If a response contains a
-voice id but an unusable preview, the id and reported usage survive so the future coordinator
+voice id but an unusable preview, the id and reported usage survive so the coordinator
 operation can retrieve that identity rather than paying to create another. A lost or malformed
 response is uncertain; there is no retry, idempotency claim or reconciliation by display name.
 Audio payloads and bearer-like stateless voice keys are redacted from provider call capture.
 
-This is the protocol foundation for issues #1331 and #1332, not the completed authoring feature.
-The shipped availability remains false. No renderer command, durable creation operation,
-library migration, assignment or audiobook custom-voice path is enabled by this foundation.
-Custom ids remain refused by speech submission until their bindings can be resolved safely.
+Character Voice offers **Design a voice**, seeded from the written voice. The audiobook narrator
+dialog offers **Design a narrator**. Editing costs nothing; Generate explicitly creates one
+candidate. Each candidate is a durable queue job, with its intent flushed before the request,
+reported usage retained and its provider audition stored locally. Reopening the dialog shows
+recent candidates; unknown outcomes are held, never automatically recreated. Save verifies the
+exact remote identity using the current Google key, then publishes a world-owned audition and
+library record in one owned transaction. Verification can recover a known ID whose first preview
+was unusable. An existing stored ID can also be imported and is labelled as imported.
+
+Save, auditioning an author's line, and Use are separate actions. Provider previews do not claim
+to speak the selected character line: **Hear this line** is a separately quoted normal speech job
+and matching cached reads replay without provider calls. Using a voice for a book returns to the
+existing narrator impact/confirmation flow and does not change the app narrator. Both Flash and
+Lite can read a saved designed voice through the existing character, performance and audiobook
+pipelines. No real-person replication or consent-upload control is offered.
+
+The first save raises the world schema to 42. `voices/voices.json` contains a distinct `designed`
+variant, without a fake reference clip. Its stable Arke ID and immutable acoustic revision form
+the namespaced target carried by assignments, narrator settings, jobs, takes and caches. The
+Google ID is a separate binding, verified with the executing credential immediately before a new
+read. The API does not expose an account/project identifier; Arke does not invent one or persist
+an API-key fingerprint as a project identity. Missing access and expiry refuse new reads without
+changing assignments or deleting audio. The saved library in the design dialog plays auditions
+locally, including expired ones. A replacement is a new explicit identity and assignment; no
+automatic regeneration or rebinding occurs. Remote deletion and replication remain separate work.
 
 On 2026-09-28 the [Voices reference](https://ai.google.dev/api/voices) and
 [voice-design guide](https://ai.google.dev/gemini-api/docs/voice-design) document `CreateVoice`
-and its token usage, but neither establishes its charge or maximum billable output. The
-[pricing page](https://ai.google.dev/gemini-api/docs/pricing) lists speech synthesis rates;
-applying those to creation would be an unverified assumption. There is no verified creation
-quote, including no verified zero price. `GEMINI_VOICE_DESIGN_AVAILABILITY` records that boundary
-under SPEC-049 R-19. Protocol tests inject responses and incur no provider charges.
+and its token usage. At the author's direction, creation estimates use the selected model's
+published Standard rates from the [pricing page](https://ai.google.dev/gemini-api/docs/pricing).
+The assumptions are explicit: these are model rates, not a separately verified CreateVoice
+tariff; the full model token limits are a budgeting allowance, not an endpoint-enforced spending
+cap. Creation quotes carry `costBasis: estimate` and no `tokenLimits`. The UI says **estimate**,
+never **up to**, for creation. Free-tier availability and quotas are Google's decision; no
+account is assumed to be free and no missing usage becomes a zero charge. Reported usage is
+priced at the frozen published rates and labelled usage-derived, not provider-reported billing.
+Rates change on 2027-01-01 and are rechecked before submission. Tests incur no provider charges.
 
-Before activation, implement the coordinator's flushed intent/result and spend authorization,
-world-owned designed identities with current-project binding checks, and the distinct audition,
-save and assignment flows from SPEC-049 R-12..R-17. Design-master turn 165d's three candidates
-would require three explicitly priced creations; the API returns one voice per create and does
-not accept the chosen character line as its preview transcript. That line needs the normal
-separate quoted speech job. Closing a dialog cannot mean deleting a remote candidate unless
-explicit lifecycle handling is implemented. Book assignment must remain book-scoped.
+Design-master turn 165d's comparison is delivered as successive individually priced candidates:
+the API returns one voice per creation. Three candidates require three explicit Generate actions.
+Closing the dialog keeps jobs and auditions and does not delete remote candidates.
 
-The pricing foundation uses dated standard rates and the published full service limits to
+For ordinary synthesis, the pricing foundation uses dated standard rates and the published full service limits to
 bound each request. Duration is not treated as a guaranteed ceiling. The client additionally
 rejects compiled text plus style over a conservative 7,000-byte request budget; this is not a
 claim that bytes equal Google tokens. The shared speech packer applies this byte bound before
@@ -116,8 +137,11 @@ From the repository root:
 node --import tsx --test packages/providers/test/google-tts.test.ts packages/providers/test/gemini-activation.test.ts packages/providers/test/capture.test.ts
 node --import tsx --test packages/providers/test/google-voices.test.ts apps/desktop/test/provider-transport.test.ts
 node --import tsx --test packages/coordinator/test/queue/speech-pricing.test.ts
+node --import tsx --test packages/coordinator/test/voice/designed.test.ts
 node --import tsx --test packages/contracts/test/speech-input.test.ts packages/coordinator/test/productions/gemini-speech-parts.test.ts
 ```
+
+From `packages/client`, run `node --import tsx --test test/design-voice.test.tsx test/gemini-voice-preference.test.tsx`.
 
 These checks use injected responses, not paid provider calls. They do not establish model
 quality, latency, supported-language quality, project access or actual billing. Live
