@@ -467,7 +467,7 @@ export function SceneWorkspace({
             <button type="button" disabled={locked} onClick={() => setRenameOpen(true)}>Rename</button>
           </SceneBackRow>}
           {renameOpen && <SceneRenameSheet title="Rename scene" value={scene.title} locked={locked} onClose={() => setRenameOpen(false)} onCommit={title => write({ kind: "edit-scene", title })} />}
-          <PageSheet open={synopsisOpen} onClose={() => setSynopsisOpen(false)} title="Scene details"><SceneSynopsis scene={legacySceneView(scene)} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} /></PageSheet>
+          <PageSheet open={synopsisOpen} onClose={() => setSynopsisOpen(false)} title="Scene details" keepMounted><SceneSynopsis scene={legacySceneView(scene)} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} /></PageSheet>
           {fullscreen ? (
             <>
               <div className="fy-sw__fullpill">
