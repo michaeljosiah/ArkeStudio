@@ -1,3 +1,7 @@
+import { RejectTakeChoice } from "../components/reject-take-choice.js";
+import { ResponsiveSheet } from "../components/responsive-sheet.js";
+import { useMediaQuery } from "../lib/media-query.js";
+import { SceneDock, useSceneDock } from "./scene-workspace/responsive-chrome.js";
 import {
   legacySceneView,
   orderedShots,
@@ -16,7 +20,7 @@ import { playbackSnapshot, togglePlayback } from "../lib/audio.js";
 import { seconds } from "../lib/format.js";
 import { mediaUrl } from "../lib/media.js";
 import { acceptedTakeId, reviewableTakesForShot, useProduction } from "../lib/selectors.js";
-import { acceptTake, rejectTake } from "../lib/store.js";
+import { acceptTake } from "../lib/store.js";
 import { takeMediaView } from "../lib/take-presentation.js";
 import { EpisodePicker, type TakeEpisodeOption } from "./production-episode-picker.js";
 
@@ -150,6 +154,11 @@ export function TakesView({
   onContact: (shotId: string | null) => void;
 }) {
   const { world, production } = useProduction(worldId, prodId);
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const [dock, setDock] = useSceneDock();
+  const [reject, setReject] = useState<Take | null>(null);
+  const [diagnostics, setDiagnostics] = useState(false);
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [selectedEpisodeId, setSelectedEpisodeId] = useState<string | null>(null);
   const [showAllScenes, setShowAllScenes] = useState(false);
@@ -271,9 +280,10 @@ export function TakesView({
   );
   if (!scene || !shot) {
     return (
-      <div className="fy-arkewrap">
+      <div className="fy-arkewrap fy-generate-wrap">
         <div className="fy-prodmain fy-takes" data-screen="generate-workspace">
           <header className="fy-takes__head">
+          {compact && !phone && <div className="fy-takes__page-title"><span>{production.meta.title} · Generate</span><h1>Takes</h1></div>}
             <nav className="fy-takes__filters" aria-label="Take filters">{episodeFilter}</nav>
           </header>
           <EmptyState
@@ -289,14 +299,15 @@ export function TakesView({
     );
   }
   return (
-    <div className="fy-arkewrap">
+    <div className="fy-arkewrap fy-generate-wrap">
       <div className="fy-prodmain fy-takes" data-screen="generate-workspace">
         <header className="fy-takes__head">
+          {compact && !phone && <div className="fy-takes__page-title"><span>{production.meta.title} · Generate</span><h1>Takes</h1></div>}
           <nav className="fy-takes__filters" aria-label="Take filters">
             {episodeFilter}
             {scenes.length > 1 && (
               <div className={cx("fy-takes__filter", selectedEpisode !== null && "fy-takes__filter--episode-scenes")}>
-                <span className="fy-takes__filter-label">SCENE</span>
+                <span className="fy-takes__filter-label">{compact ? "Scene" : "SCENE"}</span>
                 <div className="fy-takechips" role="group" aria-label="Scene">
                   <button
                     type="button"
@@ -337,7 +348,7 @@ export function TakesView({
               </div>
             )}
             <div className="fy-takes__filter">
-              <span className="fy-takes__filter-label">SHOT</span>
+              <span className="fy-takes__filter-label">{compact ? "Shot" : "SHOT"}</span>
               <div className="fy-takechips fy-takechips--shots" role="group" aria-label="Shot">
                 {shots.map((candidate) => {
                   const done = acceptedTakeId(production, candidate.id) !== null;
@@ -360,14 +371,14 @@ export function TakesView({
                           background: done ? "var(--foreground)" : has ? "var(--warning)" : "var(--neutral-300)",
                         }}
                       />
-                      Shot {candidate.number}
+                      {compact ? `${candidate.number} · ${candidate.title}` : `Shot ${candidate.number}`}
                     </button>
                   );
                 })}
               </div>
             </div>
           </nav>
-          <div className="fy-h1row">
+          {compact ? <div className="fy-takes__phone-title"><div><span>Shot {shot.number} · {seconds(shot.durationSec)}</span><h1>{shot.title}</h1></div><small>{acceptedCount} of {shots.length} accepted</small></div> : <>          <div className="fy-h1row">
             <h1 className="fy-h1">Shot {shot.number}</h1>
             <span className="fy-h1row__meta">
               {shot.title} · {seconds(shot.durationSec)}
@@ -376,7 +387,7 @@ export function TakesView({
             <span className="fy-mono">
               {acceptedCount} of {shots.length} accepted
             </span>
-          </div>
+          </div></>}
         </header>
         {takes.length === 0 ? (
           <EmptyState
@@ -400,6 +411,8 @@ export function TakesView({
                     onClick={() => setPickedId(t.id)}
                   />
                   <span className="fy-take__frame">
+                    {compact && <span className="fy-take__badge">Take {i + 1}</span>}
+                    {compact && picked?.id === t.id && <span className="fy-take__selected">✓ Selected</span>}
                     <TakeTileMedia
                       production={production}
                       take={t}
@@ -410,10 +423,10 @@ export function TakesView({
                     />
                   </span>
                   <span className="fy-take__foot">
-                    <span className="fy-take__name">Take {i + 1}</span>
+                    <span className="fy-take__name">Take {i + 1}{compact && <small>{t.model} · {seconds(durationSec)}</small>}</span>
                     <span style={{ flex: 1 }} />
                     <span className="fy-mono">
-                      {t.id === accepted ? "✓ SELECTED" : seconds(durationSec)}
+                      {t.id === accepted ? compact ? "Accepted" : "✓ SELECTED" : seconds(durationSec)}
                     </span>
                   </span>
                 </article>
@@ -421,7 +434,11 @@ export function TakesView({
             })}
           </div>
         )}
-        {picked && worldId && shotId && <TakeDialogueFeedbackPanel key={`${picked.id}/${shotId}`} worldId={worldId} production={production} take={picked} shotId={shotId} />}
+        {picked && worldId && shotId && <>
+          {compact && <button type="button" className="fy-takes__diagnostics" aria-haspopup="dialog" onClick={() => setDiagnostics(true)}>Take diagnostics<span aria-hidden="true">›</span></button>}
+          <ResponsiveSheet sheet={compact} open={diagnostics} title="Take diagnostics" onClose={() => setDiagnostics(false)} className="fy-takes-diagnostics-sheet"><TakeDialogueFeedbackPanel key={picked.id+shotId} embedded={compact} worldId={worldId} production={production} take={picked} shotId={shotId} /></ResponsiveSheet>
+        </>}
+        {reject && world && <RejectTakeChoice key={reject.id} world={world} productionId={production.meta.id} take={reject} number={takes.indexOf(reject)+1} shotId={shotId ?? undefined} onClose={() => setReject(null)} />}
         <div className="fy-takes__foot">
           {/* The two verdicts and the one thing that spends (review 2026-08-22): the first cut
               of this view had no way to generate and no way to reject, so "Generate frame" from
@@ -434,6 +451,7 @@ export function TakesView({
           >
             {generating ? "Opening…" : "Open in generator"}
           </Button>
+          <div className="fy-takes__verdict">
           <Button
             disabled={!picked || picked.id === accepted}
             onClick={() => {
@@ -445,21 +463,11 @@ export function TakesView({
           <Button
             variant="ghost"
             disabled={!picked || Object.keys(picked.provenance.sheets).length === 0}
-            title="A rejection cites the sheet the take drifted from"
-            onClick={() => {
-              const sheet = picked ? Object.keys(picked.provenance.sheets)[0] : undefined;
-              if (worldId && prodId && picked && sheet)
-                rejectTake(
-                  worldId,
-                  prodId,
-                  picked.id,
-                  { sheet, field: "appearance", note: "rejected in review" },
-                  shotId ?? undefined,
-                );
-            }}
+            onClick={() => setReject(picked)}
           >
             Reject
           </Button>
+          </div>
           {/* A state when there is one; what accepting does is the rule's, not the row's. */}
           {acceptedHidden && (
             <span className="fy-mono fy-takes__explanation">
@@ -477,11 +485,13 @@ export function TakesView({
         </div>
       </div>
       {/* Layer two, in the same column it holds everywhere else (turns 99, 100, 102). */}
+      <SceneDock open={dock} onOpen={() => setDock(true)} onClose={() => setDock(false)}>
       <ProductionConversation
         worldId={worldId}
         productionId={prodId}
         entry={{ kind: "scene", productionId: prodId ?? "", sceneId: scene.id }}
         dock={{
+          onPutAway: () => setDock(false),
           title: `Arke · Shot ${shot.number}`,
           subject: `${shot.title} · ${takes.length} take${takes.length === 1 ? "" : "s"}`,
         }}
@@ -490,6 +500,7 @@ export function TakesView({
         placeholder="Say what to change"
         pointsEmpty="Nothing understood yet. As you talk, what the studio takes from it appears here."
       />
+      </SceneDock>
     </div>
   );
 }

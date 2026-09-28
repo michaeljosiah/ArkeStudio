@@ -62,7 +62,7 @@ import { RoutingSchema } from "./routing.js";
 import { SelectionsSchema } from "./scene.js";
 import { SceneRecordSchema } from "./scene-flow.js";
 import { EpisodeIdSchema, SceneIdSchema } from "./ids.js";
-import { ReviewDecisionSchema, TakeSchema } from "./take.js";
+import { HistoricalReviewDecisionSchema as ReviewDecisionSchema, TakeSchema } from "./take.js";
 import { ClonedVoiceSchema, VoiceRuntimeStatusSchema } from "./voice.js";
 import { IDLE_UPDATE_STATE, UpdateStateSchema } from "./update.js";
 import { sheetDir } from "./sheet-shapes.js";

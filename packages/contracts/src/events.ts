@@ -63,7 +63,7 @@ import {
 import { SetupStatusSchema } from "./setup.js";
 import { AdapterLibraryStateSchema } from "./adapters.js";
 import { VendorAuthStatusSchema } from "./vendor-auth.js";
-import { ReviewDecisionSchema, TakeSchema } from "./take.js";
+import { HistoricalReviewDecisionSchema as ReviewDecisionSchema, TakeSchema } from "./take.js";
 import { DesignedVoiceSchema } from "./designed-voice.js";
 import {
   RankedVoiceSchema,

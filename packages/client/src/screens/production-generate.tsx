@@ -1,3 +1,9 @@
+import { useMediaQuery } from "../lib/media-query.js";
+import { RejectTakeChoice } from "../components/reject-take-choice.js";
+import { PageSheet } from "../components/page-sheet.js";
+import { ProductionConversation } from "../components/conversation.js";
+import { ModelsCard } from "../components/models-card.js";
+import { downloadMedia } from "../lib/download.js";
 import {
   frameDispatchFor,
   legacySceneView,
@@ -7,20 +13,21 @@ import {
   takeMediaFacts,
   type CompiledPass,
   type TakeMediaMeasurements,
+  type Take,
 } from "@arke-studio/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { productionModel } from "../components/dispatch-bar.js";
 import { BenchPlayer } from "../components/bench-player.js";
-import { PlaySolid, Plus } from "../components/icons.js";
+import { PlaySolid, Plus, More, Sparkle } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
-import { Button } from "../components/ui.js";
+import { Button, Select } from "../components/ui.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
 import {
   acceptTake,
-  rejectTake,
+  setProductionModel,
   sendBenchOpenSubject,
   subscribeBenchSubjectOpened,
   useStore,
@@ -32,6 +39,13 @@ import { TakesView } from "./production-takes.js";
 
 export function GenerateScreen() {
   const { worldId, prodId } = useParams();
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const [reject, setReject] = useState<Take | null>(null);
+  const [takeMenu, setTakeMenu] = useState(false);
+  const [modelsOpen, setModelsOpen] = useState(false);
+  const [benchArke, setBenchArke] = useState(false);
+  const [benchArkeSeen, setBenchArkeSeen] = useState(false);
   const { world, production } = useProduction(worldId, prodId);
   const { connection, state } = useStore();
   const navigate = useNavigate();
@@ -153,6 +167,7 @@ export function GenerateScreen() {
   if (contactLens) {
     return (
       <ContactSheet
+        world={world}
         production={production}
         worldSlug={world?.meta.slug}
         worldId={worldId}
@@ -227,7 +242,7 @@ export function GenerateScreen() {
               Contact sheet
             </button>
           </span>
-          <select
+          <Select label="Shot" wrapClassName="fy-gen__shot"
             value={shotId ?? ""}
             disabled={generatorPending}
             onChange={(e) => {
@@ -250,7 +265,7 @@ export function GenerateScreen() {
                 {s.id.replace("sh_", "shot ")} · {s.title}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div className="fy-gen__label">
           References <span className="fy-mono">sent with every take</span>
@@ -272,10 +287,11 @@ export function GenerateScreen() {
           <button
             type="button"
             className="fy-refstrip__add"
+            aria-label="Add reference"
             title="References ride from the kits"
             onClick={() => navigate(`/w/${worldId}/cast`)}
           >
-            <Plus size={14} />
+            <Plus size={14} />{compact && <span>Add</span>}
           </button>
         </div>
         <div className="fy-mono" style={{ marginTop: 6 }}>
@@ -341,7 +357,7 @@ export function GenerateScreen() {
           )}
         </div>
         <div className="fy-gen__cta">
-          {model && (
+          {compact ? <button type="button" className="fy-gen__model-row" aria-haspopup="dialog" onClick={() => setModelsOpen(true)}>{model?.displayName ?? "Choose model"}<span aria-hidden="true">›</span></button> : model && (
             <span className="fy-modelchip">
               {model.displayName}
               <span className="fy-mono">{modelCapabilityCopy(model)}</span>
@@ -395,6 +411,7 @@ export function GenerateScreen() {
               </div>
             )}
             <div className="fy-bench__media">
+              {phone && <button type="button" className="fy-gen__take-menu" aria-label="Take actions" aria-haspopup="dialog" onClick={() => setTakeMenu(true)}><More size={20} /></button>}
               {view !== null && slug ? (
                 view.isVideo ? (
                   <BenchPlayer
@@ -426,18 +443,7 @@ export function GenerateScreen() {
                 disabled={
                   Object.keys(take.provenance.sheets).length === 0 || decisions[take.id] === "rejected"
                 }
-                title="A rejection cites the sheet the take drifted from"
-                onClick={() => {
-                  const sheet = Object.keys(take.provenance.sheets)[0];
-                  if (worldId && prodId && sheet)
-                    rejectTake(
-                      worldId,
-                      prodId,
-                      take.id,
-                      { sheet, field: "appearance", note: "rejected in review" },
-                      shotId ?? undefined,
-                    );
-                }}
+                onClick={() => setReject(take)}
               >
                 Reject · cite the sheet
               </Button>
@@ -487,6 +493,21 @@ export function GenerateScreen() {
           );
         })}
       </div>
+      {phone && <footer className="fy-gen__phone-foot">
+        <Button variant="outline" disabled={!take || !shotId || take.id === accepted} onClick={() => worldId && prodId && take && shotId && acceptTake(worldId, prodId, take.id, shotId)}>Accept{take ? ' take '+(takes.indexOf(take)+1) : ' take'}</Button>
+        <Button variant="primary" disabled={generatorPending || !shotId} onClick={() => shotId && openGenerator(shotId)}>{generatorPending ? "Opening…" : "Generate"}</Button>
+      </footer>}
+      {phone && <button type="button" className="fy-gen__arke" aria-haspopup="dialog" onClick={() => { setBenchArkeSeen(true); setBenchArke(true); }}><Sparkle size={16} />Arke</button>}
+      {benchArkeSeen && <PageSheet open={phone && benchArke} keepMounted onClose={() => setBenchArke(false)} title="Arke" className="fy-scene-dock">
+        <ProductionConversation worldId={worldId} productionId={prodId} entry={scene ? {kind:"scene",productionId:prodId ?? "",sceneId:scene.id} : undefined} dock={{onPutAway:()=>setBenchArke(false),title:"Arke · Generate",subject:shot?.title ?? "This production"}} emptyLine="Say what to change in this shot." placeholder="Say what to change" pointsEmpty="Nothing understood yet." />
+      </PageSheet>}
+      {reject && world && prodId && <RejectTakeChoice key={reject.id} world={world} productionId={prodId} take={reject} number={takes.indexOf(reject)+1} shotId={shotId ?? undefined} onClose={() => setReject(null)} />}
+      <PageSheet open={modelsOpen} onClose={() => setModelsOpen(false)} title="Generation model"><ModelsCard state={state} capabilities={["video"]} choices={production?.meta.models} scopeWord="this production" onChange={(capability,id) => { if(worldId && prodId) setProductionModel(worldId,prodId,capability,id); }} /></PageSheet>
+      <PageSheet open={takeMenu} onClose={() => setTakeMenu(false)} title={take ? 'Take '+(takes.indexOf(take)+1) : "Take actions"}><div className="fy-scene-menu">
+        <button type="button" disabled={!take || !Object.keys(take.provenance.sheets).length} onClick={() => {setTakeMenu(false);setReject(take);}}>Reject</button>
+        <button type="button" disabled={!view || !slug} onClick={() => {if(view) void downloadMedia(slug, view.sourcePath, shot?.title, "take").then(outcome => {if(!outcome.ok && !outcome.cancelled) setGeneratorError(outcome.reason);});setTakeMenu(false);}}>Download</button>
+        <button type="button" onClick={() => {setTakeMenu(false);void navigate('/w/'+worldId+'/p/'+prodId+'/cut');}}>Open in the Cut</button>
+      </div></PageSheet>
     </div>
   );
 }
@@ -516,18 +537,21 @@ export function passRow(pass: CompiledPass): string {
  * sheet now lives inside the workspace and the seg is the way between the lenses.
  */
 function ContactSheet({
+  world,
   production,
   worldSlug,
   worldId,
   prodId,
   onShotLens,
 }: {
+  world: ReturnType<typeof useProduction>["world"];
   production: ReturnType<typeof useProduction>["production"];
   worldSlug: string | undefined;
   worldId: string | undefined;
   prodId: string | undefined;
   onShotLens: () => void;
 }) {
+  const [reject, setReject] = useState<Take | null>(null);
   const stills = useMemo(
     () => production?.takes.filter((t) => t.kind === "frame" || t.kind === "still") ?? [],
     [production],
@@ -549,9 +573,7 @@ function ContactSheet({
       {stills.length === 0 ? (
         <EmptyState title="No stills yet" />
       ) : (
-        <div
-          style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}
-        >
+        <div className="fy-contact-grid">
           {stills.map((take) => {
             const decision = decisions[take.id];
             const shotId = take.coversShots[0];
@@ -592,18 +614,7 @@ function ContactSheet({
                     <Button
                       variant="ghost"
                       disabled={Object.keys(take.provenance.sheets).length === 0}
-                      title="A rejection cites the sheet the take drifted from (R-10)"
-                      onClick={() => {
-                        const sheet = Object.keys(take.provenance.sheets)[0];
-                        if (worldId && prodId && sheet)
-                          rejectTake(
-                            worldId,
-                            prodId,
-                            take.id,
-                            { sheet, field: "appearance", note: "rejected from the contact sheet" },
-                            shotId,
-                          );
-                      }}
+                      onClick={() => setReject(take)}
                     >
                       Reject
                     </Button>
@@ -614,6 +625,7 @@ function ContactSheet({
           })}
         </div>
       )}
+      {reject && world && prodId && <RejectTakeChoice key={reject.id} world={world} productionId={prodId} take={reject} number={stills.indexOf(reject)+1} shotId={reject.coversShots[0]} onClose={() => setReject(null)} />}
     </div>
   );
 }

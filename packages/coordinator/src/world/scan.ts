@@ -34,7 +34,7 @@ import {
   checkPropName,
   propSlug,
   ReferenceKitSchema,
-  ReviewDecisionSchema,
+  HistoricalReviewDecisionSchema as ReviewDecisionSchema,
   RipplePreviewSchema,
   SeasonSchema,
   SeriesSchema,
