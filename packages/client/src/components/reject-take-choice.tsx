@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Take, WorldBundle } from "@arke-studio/contracts";
+import { REVIEW_NOTE_MAX, type Take, type WorldBundle } from "@arke-studio/contracts";
 import { PageSheet } from "./page-sheet.js";
 import { Portrait, characterPortraitPath, locationPortraitPath } from "./portrait.js";
 import { Button } from "./ui.js";
@@ -29,6 +29,6 @@ export function RejectTakeChoice({ world, productionId, take, number, shotId, on
         </button>;
       })}
     </div>
-    <label className="fy-reject-take__note">Note<textarea value={note} onChange={event => setNote(event.target.value)} /></label>
+    <label className="fy-reject-take__note">Note<textarea value={note} maxLength={REVIEW_NOTE_MAX} onChange={event => setNote(event.target.value.slice(0, REVIEW_NOTE_MAX))} /></label>
   </PageSheet>;
 }

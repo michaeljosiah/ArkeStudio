@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import type { ClientMessage } from "@arke-studio/contracts";
+import { REVIEW_NOTE_MAX, type ClientMessage } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __applyEventForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -122,4 +122,37 @@ it('keeps pause and cancel commands on the running phone bar',async()=>{
 it('names a stranded model reason on its phone row',async()=>{
   await mount('/scenes/sc_04',390,'unavailable'); await click(textButton('Generate frames'));
   assert.match(find('.fy-swgen__models [data-unavailable] .fy-swgen__unavailable').textContent??'',/turned off in AI models/);
+});
+
+it('retains diagnostic drafts and the pending save across responsive changes', async () => {
+  await mount(undefined,390,'diagnostics'); await click(find('.fy-takes__diagnostics'));
+  const tag=find('.fy-takes-diagnostics-sheet input[type="checkbox"]');
+  await act(async()=>props(tag).onChange!({target:{checked:true}} as never));
+  await act(async()=>props(find('.fy-takes-diagnostics-sheet textarea')).onChange!({target:{value:'Keep the framing'}} as never));
+  await act(async()=>{width=1360;for(const listener of listeners)listener();});
+  const note=()=>find('textarea') as HTMLTextAreaElement;
+  assert.equal(note().value,'Keep the framing');
+  await click(textButton('Save diagnostic feedback'));
+  const saved=sent.find(m=>m.kind==='record-dialogue-feedback'); assert.ok(saved); assert.equal(saved.note,'Keep the framing');
+  await act(async()=>{width=390;for(const listener of listeners)listener();});
+  assert.ok(textButton('Save diagnostic feedback').hasAttribute('disabled'));
+  await act(async()=>__applyEventForTest({type:'dialogue.result',at:'2026-09-28T12:00:00Z',worldId:saved.worldId,requestId:saved.requestId,status:'saved',reason:'Diagnostic saved'}));
+  assert.equal(note().value,''); assert.match(find('.fy-takes-diagnostics-sheet').textContent??'',/Diagnostic saved/);
+  assert.equal(sent.filter(m=>m.kind==='record-dialogue-feedback').length,1);
+});
+
+it('New frames never steps onto a shot whose frame was not produced by that run',async()=>{
+  await mount('/scenes/sc_04',390,'completed-one-output'); await click(find('.fy-swrun__review'));
+  assert.equal(find('.fy-swlightbox__dots').getAttribute('aria-label'),'Frame 1 of 1');
+  const title=()=>find('.fy-swlightbox img')?.getAttribute('alt'), initial=title();
+  await click(find('.fy-swlightbox__phone-caption button:last-child')); assert.equal(title(),initial);
+  const event=new dom.Event('keydown',{bubbles:true});Object.assign(event,{key:'ArrowRight'});await act(async()=>find('.fy-swlightbox').dispatchEvent(event)); assert.equal(title(),initial);
+});
+
+it('limits the new rejection note before the wire boundary',async()=>{
+  await mount(); await click(find('.fy-takes__verdict > button:last-child'));
+  const input=find('.fy-reject-take textarea'); assert.equal(input.getAttribute('maxLength'),String(REVIEW_NOTE_MAX));
+  await act(async()=>props(input).onChange!({target:{value:'a'.repeat(REVIEW_NOTE_MAX+20)}} as never));
+  await click(find('.fy-reject-take .fy-page-sheet__foot button:last-child'));
+  assert.equal(sent.find(m=>m.kind==='reject-take')?.citation.note?.length,REVIEW_NOTE_MAX);
 });

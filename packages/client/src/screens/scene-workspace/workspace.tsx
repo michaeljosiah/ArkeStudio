@@ -133,7 +133,7 @@ export function SceneWorkspace({
   // The one lightbox: the row preview, the run bar's Review and Preview's Larger all open it,
   // and its arrows walk the scene's shots carrying the selection with them.
   const [lightboxShotId, setLightboxShotId] = useState<string | null>(null);
-  const [reviewingRun, setReviewingRun] = useState(false);
+  const [reviewingRun, setReviewingRun] = useState<{ id: string; shots: string[] } | null>(null);
   const [generateTarget, setGenerateTarget] = useState<{ shotId?: string } | null>(null);
   const [sceneReviewOpen, setSceneReviewOpen] = useState(false);
   const [boardSheetKey, setBoardSheetKey] = useState<string | null>(null);
@@ -285,7 +285,9 @@ export function SceneWorkspace({
   const frameRun = visibleSceneRuns.find((candidate) => candidate.status === "active" || candidate.status === "paused")
     ?? visibleSceneRuns.find((candidate) => candidate.status === "completed")
     ?? null;
-  const reviewShotId = frameRun === null ? null : firstProducedShot(frameRun, artifacts);
+  const producedShotIds = frameRun === null ? [] : producedShots(frameRun, artifacts);
+  const reviewShotId = producedShotIds[0] ?? null;
+  const retryRun = reviewingRun ? sceneRuns.find(candidate => candidate.run.id === reviewingRun.id) ?? null : frameRun;
   const dismissedCancelled = useRef(new Set<string>());
   useEffect(() => {
     for (const candidate of visibleSceneRuns) {
@@ -602,7 +604,7 @@ export function SceneWorkspace({
                 // (R-19): a frame is the run's when one of its own jobs produced the artifact, so a
                 // shot whose retry failed over an older frame is never shown as new output, and a
                 // run that put down nothing has nothing to review.
-                {...(reviewShotId === null ? {} : { onReview: () => { setReviewingRun(true); setLightboxShotId(reviewShotId); } })}
+                {...(reviewShotId === null || frameRun === null ? {} : { onReview: () => { setReviewingRun({ id: frameRun.run.id, shots: producedShotIds }); setLightboxShotId(reviewShotId); } })}
               />
             ) : shots.length === 0 ? null : (
               <span className="fy-sw__coverage" data-ready={framed > 0 || undefined}>
@@ -890,15 +892,16 @@ export function SceneWorkspace({
         <ShotLightbox
           worldId={world.meta.worldId}
           locked={locked}
-          review={reviewingRun}
+          review={reviewingRun !== null}
+          {...(reviewingRun === null ? {} : { reviewShotIds: reviewingRun.shots })}
           retry={shotId => {
-            if (!frameRun || locked) return null;
-            const view = frameRunShotState(frameRun, shotId);
+            if (!retryRun || locked) return null;
+            const view = frameRunShotState(retryRun, shotId);
             if (!view) return null;
-            const finalization = finalizationRetryJobId(frameRun, view.stepIndex, state?.app.jobs ?? []);
+            const finalization = finalizationRetryJobId(retryRun, view.stepIndex, state?.app.jobs ?? []);
             if (finalization) return () => retryJobFinalization(finalization);
-            if (frameRun.run.sceneVersion !== scene.version) return null;
-            return retryForShot(frameRun, view, shotId, world.meta.worldId, production.meta.id);
+            if (retryRun.run.sceneVersion !== scene.version) return null;
+            return retryForShot(retryRun, view, shotId, world.meta.worldId, production.meta.id);
           }}
           scene={scene}
           production={production}
@@ -906,7 +909,7 @@ export function SceneWorkspace({
           worldSlug={world.meta.slug}
           aspect={aspect}
           shotId={lightboxShotId}
-          onClose={() => { setLightboxShotId(null); setReviewingRun(false); }}
+          onClose={() => { setLightboxShotId(null); setReviewingRun(null); }}
           onSelectShot={(shotId) => {
             setLightboxShotId(shotId);
             setSubject({ kind: "shot", shotId: shotId as never });
@@ -932,17 +935,17 @@ export function SceneWorkspace({
   );
 }
 
-/** The first shot, in run order, that one of the run's OWN jobs put a frame on — or null when it put down none. */
-function firstProducedShot(run: FrameRunState, artifacts: readonly ArtifactSidecar[]): string | null {
+/** Shots, in run order, that one of the run's own jobs put a frame on. */
+function producedShots(run: FrameRunState, artifacts: readonly ArtifactSidecar[]): string[] {
   const jobs = new Set(run.run.steps.flatMap((step) => (step.jobId === null ? [] : [`frame-run:${step.jobId}`])));
   return (
     run.run.steps
       .flatMap((step) => step.updateShotIds)
-      .find((shotId) =>
+      .filter((shotId) =>
         artifacts.some(
           (artifact) =>
             artifact.kind === "image" && artifact.origin.by === "system" && jobs.has(artifact.origin.producedBy) && artifact.links.includes(shotId),
         ),
-      ) ?? null
+      ).filter((shotId, index, ids) => ids.indexOf(shotId) === index)
   );
 }

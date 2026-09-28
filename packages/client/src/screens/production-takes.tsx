@@ -1,5 +1,5 @@
 import { RejectTakeChoice } from "../components/reject-take-choice.js";
-import { PageSheet } from "../components/page-sheet.js";
+import { ResponsiveSheet } from "../components/responsive-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { SceneDock, useSceneDock } from "./scene-workspace/responsive-chrome.js";
 import {
@@ -434,10 +434,10 @@ export function TakesView({
             })}
           </div>
         )}
-        {picked && worldId && shotId && (compact ? <>
-          <button type="button" className="fy-takes__diagnostics" aria-haspopup="dialog" onClick={() => setDiagnostics(true)}>Take diagnostics<span aria-hidden="true">›</span></button>
-          <PageSheet open={diagnostics} title="Take diagnostics" onClose={() => setDiagnostics(false)}><TakeDialogueFeedbackPanel key={picked.id+shotId} embedded worldId={worldId} production={production} take={picked} shotId={shotId} /></PageSheet>
-        </> : <TakeDialogueFeedbackPanel key={picked.id+shotId} worldId={worldId} production={production} take={picked} shotId={shotId} />)}
+        {picked && worldId && shotId && <>
+          {compact && <button type="button" className="fy-takes__diagnostics" aria-haspopup="dialog" onClick={() => setDiagnostics(true)}>Take diagnostics<span aria-hidden="true">›</span></button>}
+          <ResponsiveSheet sheet={compact} open={diagnostics} title="Take diagnostics" onClose={() => setDiagnostics(false)} className="fy-takes-diagnostics-sheet"><TakeDialogueFeedbackPanel key={picked.id+shotId} embedded={compact} worldId={worldId} production={production} take={picked} shotId={shotId} /></ResponsiveSheet>
+        </>}
         {reject && world && <RejectTakeChoice key={reject.id} world={world} productionId={production.meta.id} take={reject} number={takes.indexOf(reject)+1} shotId={shotId ?? undefined} onClose={() => setReject(null)} />}
         <div className="fy-takes__foot">
           {/* The two verdicts and the one thing that spends (review 2026-08-22): the first cut

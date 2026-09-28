@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   CutFileSchema,
   CutOverlaySchema,
+  ReviewDecisionSchema,
   newId,
   sortScenes,
   trimCeilingSec,
@@ -247,6 +248,7 @@ export async function rejectTake(
       by: input.by,
       citation: input.citation,
     };
+    ReviewDecisionSchema.parse(decision);
     await store.commitUnserialised({
       kind: "take-review",
       source: options.source ?? `review:${input.by}`,
