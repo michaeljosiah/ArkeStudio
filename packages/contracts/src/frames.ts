@@ -1,4 +1,5 @@
 import { valueSchema } from "./value-schema.js";
+import { ReviewCitationSchema } from "./take.js";
 import { GenesisDraftSchema } from "./genesis.js";
 import { GenesisImportResolveSchema } from "./genesis-imports.js";
 import { GenesisImageTargetSchema } from "./genesis-images.js";
@@ -2603,9 +2604,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       takeId: z.string().min(1),
       shotId: ShotIdSchema.optional(),
-      citation: z
-        .object({ sheet: SlugSchema, field: z.string().min(1), note: z.string().optional() })
-        .strict(),
+      citation: ReviewCitationSchema.extend({ field: z.string().min(1) }),
     })
     .strict(),
   /**

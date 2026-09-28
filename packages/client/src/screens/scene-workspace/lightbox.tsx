@@ -71,6 +71,7 @@ export function ShotLightbox({
   worldSlug,
   worldId,
   review = false,
+  reviewShotIds,
   locked = false,
   retry,
   aspect,
@@ -86,6 +87,7 @@ export function ShotLightbox({
   worldSlug: string | undefined;
   worldId?: string;
   review?: boolean;
+  reviewShotIds?: readonly string[];
   locked?: boolean;
   retry?: (shotId: string) => (() => void) | null;
   aspect: string;
@@ -113,7 +115,7 @@ export function ShotLightbox({
     return () => { if (opener instanceof HTMLElement && opener.isConnected) opener.focus(); };
   }, [open]);
   if (shotId === null) return null;
-  const shots = orderedShots(scene);
+  const shots = orderedShots(scene).filter(shot => reviewShotIds === undefined || reviewShotIds.includes(shot.id));
   const index = shots.findIndex((candidate) => candidate.id === shotId);
   const shot = shots[index];
   if (shot === undefined) return null;

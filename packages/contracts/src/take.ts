@@ -259,6 +259,14 @@ export function takeMediaFacts(take: Pick<Take, "params" | "segment" | "kind">, 
 // Review decisions — reviews.jsonl (§2.3.6). Append-only; later lines win.
 // ---------------------------------------------------------------------------
 
+export const REVIEW_NOTE_MAX = 4000;
+export const ReviewCitationSchema = z.object({
+  sheet: SlugSchema,
+  field: z.string().optional(),
+  note: z.string().max(REVIEW_NOTE_MAX).optional(),
+}).strict();
+
+/** New journal entries are bounded; older rows remain readable without rewriting their bytes. */
 export const ReviewDecisionSchema = z
   .object({
     ts: IsoDateTimeSchema,
@@ -267,14 +275,11 @@ export const ReviewDecisionSchema = z
     decision: z.enum(["accept", "reject"]),
     by: z.string().min(1),
     /** A rejection may cite the sheet field the take drifted from (§10.5). */
-    citation: z
-      .object({
-        sheet: SlugSchema,
-        field: z.string().optional(),
-        note: z.string().optional(),
-      })
-      .strict()
-      .optional(),
+    citation: ReviewCitationSchema.optional(),
   })
   .strict();
 export type ReviewDecision = z.infer<typeof ReviewDecisionSchema>;
+/** Compatibility boundary for scanning and transporting pre-bound review history, never writes. */
+export const HistoricalReviewDecisionSchema = ReviewDecisionSchema.extend({
+  citation: ReviewCitationSchema.extend({ note: z.string().optional() }).optional(),
+});

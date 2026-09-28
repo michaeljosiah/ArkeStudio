@@ -1,4 +1,4 @@
-import { FrameRunSchema, FrameRunStateSchema, foldFrameRun, type FrameRunJobFacts, type FrameRunState, type FrameRunQuote, type ClientMessage, type ClientState, type ManifestModel } from "@arke-studio/contracts";
+import { assessDialogueShot, dialogueShotFacts, orderedShots, FrameRunSchema, FrameRunStateSchema, foldFrameRun, type FrameRunJobFacts, type FrameRunState, type FrameRunQuote, type ClientMessage, type ClientState, type ManifestModel } from "@arke-studio/contracts";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { scenesLayoutFixture } from "./scenes-layout-fixture.js";
 const RUN_ID = "fr_01J8E0000000000000000000R1";
@@ -146,6 +146,12 @@ export function generateLayoutFixture(mode = "normal"): ClientState {
   const frames = production.takes.filter(take => take.kind === "frame" || take.kind === "still");
   production.takes = Array.from({length:4}, (_,i) => ({...structuredClone(clip), id:'layout-take-'+i, kind:mode==='stills'?'frame':'clip', coversShots:['sh_12'], model:'Seedance 2.0', media:mode==='stills'?'frame.png':'clip.mp4', provenance:{...clip.provenance, sheets:{'maren-kest':4,'the-vigil':2}}}));
   production.selections.sh_12 = {acceptedTakeId:production.takes[1]!.id, trimInSec:0};
+  if (mode === "diagnostics") {
+    const shot = orderedShots(scene).find(shot => shot.id === "sh_12")!;
+    const facts = dialogueShotFacts(shot, [], { frameMode: "none", audioIntent: "none", shotDurationSec: 4, audioDurationSec: null });
+    const assessment = assessDialogueShot({ engineVersion: 1, manifestVersion: 1, modelId: "fixture", providerRoute: "fixture/text", endpointVersion: "v1", now: "2026-08-30T12:00:00Z", facts, guidance: [], hardBlocks: [], acknowledgedRecommendationIds: [] }).assessment;
+    for (const take of production.takes) take.provenance.dialogueAssessments = { sh_12: assessment };
+  }
   state.app.manifest!.models.push({...IMAGE_MODEL, displayName:'FLUX.2 Pro'});
   state.app.routing.defaults.image = IMAGE_MODEL.id;
   if (mode === 'unavailable') {
@@ -153,13 +159,17 @@ export function generateLayoutFixture(mode = "normal"): ClientState {
     state.app.models.disabled.push(IMAGE_MODEL.id);
     state.app.manifest!.models.push({...IMAGE_MODEL,id:'other-frame-image',displayName:'Other image'});
   }
-  if (mode === 'running' || mode === 'completed') {
+  if (mode === 'running' || mode === 'completed' || mode === 'completed-one-output') {
     production.takes.push(...frames);
-    const complete = mode === 'completed';
+    const complete = mode !== 'running';
     const run = generateFrameRun(complete ? {sceneVersion:scene.version,first:{status:'succeeded'},second:{status:'succeeded'},firstLanding:'filed',secondLanding:'filed'} : {sceneVersion:scene.version,second:{status:'failed',error:'Provider returned a dark frame',failureClass:'transient'}});
     state.frameRuns = [run];
     world.artifacts.push({id:'ar_layout_frame',kind:'image',file:'layout-frame.png',hash:'sha256:0123456789abcdef',links:['saltlight','sh_12'],production:'saltlight',created:'2026-08-30T12:01:00Z',origin:{by:'system',producedBy:'frame-run:'+JOB_1}});
     production.selections.sh_12.startFrameArtifactId = 'ar_layout_frame';
+    if (mode === "completed") {
+      world.artifacts.push({id:'ar_layout_frame_two',kind:'image',file:'layout-frame-two.png',hash:'sha256:0123456789abcdef',links:['saltlight','sh_13'],production:'saltlight',created:'2026-08-30T12:01:00Z',origin:{by:'system',producedBy:'frame-run:'+JOB_2}});
+      production.selections.sh_13 = { trimInSec: 0, ...production.selections.sh_13, startFrameArtifactId: 'ar_layout_frame_two' };
+    }
   }
   return state;
 }
