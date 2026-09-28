@@ -7,12 +7,15 @@ import { join } from "node:path";
 import { it } from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
 import { hostOnlyCommandFixtures } from "./remote-host-commands.js";
-import { ClientMessageSchema, RemoteCommandRefusalSchema, RemoteDeviceInfoSchema, type RemotePairingDuration } from "@arke-studio/contracts";
+import { ClientMessageSchema, REMOTE_HOST_ONLY_COMMANDS, RemoteCommandRefusalSchema, RemoteDeviceInfoSchema, type RemotePairingDuration } from "@arke-studio/contracts";
 import { RemoteDevices } from "../src/remote-access/devices.js";
 import { RemoteGateway, remotePage } from "../src/remote-access/gateway.js";
 
 const origin = "https://studio.example.ts.net";
 const temporary = () => mkdtemp(join(tmpdir(), "arke-remote-"));
+it("independently enumerated valid host payloads cover every refused command name", () => {
+  assert.deepEqual([...new Set(hostOnlyCommandFixtures("C:/fixture.png").map(c => c.kind))].sort(), [...REMOTE_HOST_ONLY_COMMANDS].sort());
+});
 async function paired(devices: RemoteDevices, name = "Phone", duration: RemotePairingDuration = 90) {
   const { code } = devices.createCode();
   const proof = devices.request(code, name)!;

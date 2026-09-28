@@ -446,14 +446,16 @@ navigation, stacked defaults, overflow, 44px touch targets, two Fold model cards
 device-only pairing facts, and Activity surviving an outside scroll before closing on a tap.
 Use `--viewport acceptance`, `--viewport fold`, or `--viewport desktop --hover` for a focused
 run; `--baseline <revision>` renders the earlier desktop sources. Visually inspect the emitted
-PNGs against the master. These are emulated Chrome viewports, not physical-device testing.
+PNGs against the master. Add `--remote` to a desktop run to check paired-browser ownership at
+wide widths. These are emulated Chrome viewports, not physical-device testing.
 
 Run `node --import tsx scripts/smoke-remote-host-boundary.mts` for a real Chrome session paired
 over local HTTPS against the gateway. It verifies every named host command returns a typed
 refusal without disconnecting, an allowed command still works, and the trusted transport
 still passes the same commands. Chrome and OpenSSL must be installed (`ARKE_CHROME` and
 `ARKE_OPENSSL` override their paths); the temporary certificate and pairing state stay local.
-Keep coordinator `test/remote-access.test.ts`, client `test/settings-responsive.test.tsx`,
+Keep contracts `test/remote-command-access.test.ts` (exhaustive command ownership and mixed
+payloads), coordinator `test/remote-access.test.ts`, client `test/settings-responsive.test.tsx`,
 the existing Settings/Activity/account/chrome suites, and desktop transport/preload auth tests
 in the gate. The browser notification preference is device-local and tested separately from
 the PC's background-notification command.

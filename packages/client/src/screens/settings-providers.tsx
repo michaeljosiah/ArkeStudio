@@ -462,7 +462,7 @@ function ServicePane({ id }: { id: ProviderId }) {
   if (compact && isRemoteSession()) return <div className="fy-pane fy-provider-detail" data-testid="provider-pane">
     <div><div className="fy-set__eyebrow">PROVIDER</div><h1 className="fy-pane__name">{info.displayName}</h1></div>
     <div className="fy-provider-state"><div><strong>{on > 0 ? "On" : "Off"}</strong><small><i className={cx("fy-set__dot", tone === "ok" && "fy-set__dot--ok")} />{word}{status?.lastValidated ? ` · checked ${shortDateTime(status.lastValidated)}` : " · not checked"}</small></div>
-      <button type="button" role="switch" aria-label={`${info.displayName} models`} aria-checked={on > 0} disabled={!status?.configured || models.length === 0} className={cx("fy-prov__switch", on > 0 && "is-on")} onClick={() => { for (const m of models) setModelEnabled(m.id, on === 0); }}><span /></button></div>
+      <button type="button" role="switch" aria-label={`${info.displayName} models`} aria-checked={on > 0} disabled={!models.some(model => unlocked.has(model.capability))} className={cx("fy-prov__switch", on > 0 && "is-on")} onClick={() => { for (const m of models) setModelEnabled(m.id, on === 0); }}><span /></button></div>
     <OnYourPC>{info.credential === "external" ? "sign-in" : `the key · ${status?.configured ? "set" : "not set"}, never shown here`}</OnYourPC>
     <div className="fy-provider-models-label">Models · {models.length}</div>
     <div className="fy-provider-models">{models.map(model => { const enabled = unlocked.has(model.capability) && !disabled.has(model.id); return <div key={model.id} className="fy-provider-model"><div className="fy-provider-model__row"><strong>{model.displayName}</strong><button type="button" role="switch" aria-label={model.displayName} aria-checked={enabled} disabled={!unlocked.has(model.capability)} className={cx("fy-prov__switch", enabled && "is-on")} onClick={() => setModelEnabled(model.id, !enabled)}><span /></button></div><small>{CAPABILITY_LABEL[model.capability]} · {modelPriceCopy(model)}</small></div>; })}</div>
@@ -481,7 +481,7 @@ function ServicePane({ id }: { id: ProviderId }) {
         {info.credential === "external" ? <ProviderToolLine id={id} /> : <ProviderKeyLine id={id} />}
       </div>
       {compact && models.length > 0 && <div className="fy-provider-models">{models.map(model => {
-        const enabled = !disabled.has(model.id);
+        const enabled = unlocked.has(model.capability) && !disabled.has(model.id);
         return <div key={model.id} className="fy-provider-model"><div><strong>{model.displayName}</strong><small>{CAPABILITY_LABEL[model.capability]} · {modelPriceCopy(model)}</small></div>
           <button type="button" role="switch" aria-label={model.displayName} aria-checked={enabled} disabled={!unlocked.has(model.capability)} className={cx("fy-prov__switch", enabled && "is-on")} onClick={() => setModelEnabled(model.id, !enabled)}><span /></button></div>;
       })}</div>}
@@ -639,7 +639,7 @@ export function SettingsProvidersScreen() {
   const column = (rowsOf: Row[]) =>
     rowsOf.map((r) => compact ? (() => {
       const models = (state?.app.manifest?.models ?? []).filter(m => r.kind === "engine" ? ENGINE_PROVIDERS[r.id as EngineId].includes(m.provider) : m.provider === r.id);
-      const usable = r.kind === "service" ? providerStatus.some(p => p.id === r.id && p.configured) : models.length > 0;
+      const usable = models.some(model => deriveCapabilityAvailability(providerStatus).some(a => a.capability === model.capability && a.via.includes(model.provider)));
       const on = usable && models.some(m => !(state?.app.models.disabled ?? []).includes(m.id));
       return <div className={cx("fy-provider-row", r.id === current && "is-current")} key={r.id}>
         <button type="button" className="fy-src" onClick={() => setSearchParams({ provider: r.id }, { replace: true })}>

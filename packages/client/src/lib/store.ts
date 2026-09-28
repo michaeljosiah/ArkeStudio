@@ -1,4 +1,4 @@
-import { REMOTE_HOST_ONLY_COMMANDS, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
+import { isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
 import type { AudiobookReader, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
@@ -2442,7 +2442,7 @@ export function initStore(): void {
 }
 
 export function send(msg: ClientMessage): boolean {
-  if (isRemoteSession() && (REMOTE_HOST_ONLY_COMMANDS as readonly string[]).includes(msg.kind)) {
+  if (isRemoteSession() && isRemoteHostCommand(msg)) {
     const refusal = RemoteCommandRefusalSchema.parse({ kind: "command-refused", refused: "host-only", command: msg.kind });
     for (const listener of remoteRefusalListeners) listener(refusal);
     return false;

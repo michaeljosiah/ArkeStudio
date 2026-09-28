@@ -4,7 +4,7 @@ import { createReadStream } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
-import { ClientMessageSchema, REMOTE_HOST_ONLY_COMMANDS, type RemoteCommandRefusal, type ClientMessage } from "@arke-studio/contracts";
+import { ClientMessageSchema, isRemoteHostCommand, type RemoteCommandRefusal, type ClientMessage } from "@arke-studio/contracts";
 import { RemoteDevices } from "./devices.js";
 
 const deviceCookie = "__Host-arke-device";
@@ -19,7 +19,6 @@ const hostFileCommands: Record<HostFileCommand["kind"], true> = {
   "world-chat-attach": true, "stage-playblast": true, "conversation-action-stage-playblast-complete": true,
   "upload-artifacts": true, "file-artifact": true, "genesis-attach": true, "import-folder": true,
 };
-const hostOnlyCommands = new Set<string>(REMOTE_HOST_ONLY_COMMANDS satisfies readonly ClientMessage["kind"][]);
 function cookie(req: IncomingMessage, name: string): string | undefined {
   const values = (req.headers.cookie ?? "").split(";").map(part => part.trim()).filter(part => part.startsWith(name + "="));
   return values.length === 1 ? values[0]!.slice(name.length + 1) : undefined;
@@ -182,7 +181,7 @@ export class RemoteGateway {
       try { input = JSON.parse(raw.toString()); } catch { client.close(1002); return; }
       const parsed = ClientMessageSchema.safeParse(input);
       if (!parsed.success) { client.close(1008, "invalid Studio command"); return; }
-      if (Object.hasOwn(hostFileCommands, parsed.data.kind) || hostOnlyCommands.has(parsed.data.kind)) {
+      if (Object.hasOwn(hostFileCommands, parsed.data.kind) || isRemoteHostCommand(parsed.data)) {
         const refusal = { kind: "command-refused", refused: "host-only", command: parsed.data.kind } as RemoteCommandRefusal;
         client.send(JSON.stringify(refusal)); return;
       }

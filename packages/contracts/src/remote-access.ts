@@ -1,3 +1,4 @@
+import { REMOTE_COMMAND_ACCESS, type RemoteHostCommand } from "./remote-command-access.js";
 import { z } from "zod";
 
 export const RemotePairingDurationSchema = z.union([z.literal(30), z.literal(90), z.literal(120), z.literal("never")]);
@@ -34,21 +35,10 @@ export interface RemoteAccessReply {
   copied?: boolean;
 }
 
-/** Paired devices can edit studio content, but host credentials and machine controls stay local. */
-export const REMOTE_HOST_ONLY_COMMANDS = [
-  "world-chat-attach", "stage-playblast", "conversation-action-stage-playblast-complete",
-  "upload-artifacts", "file-artifact", "genesis-attach", "import-folder",
-  "set-credential", "clear-credential", "submit-vendor-key", "begin-vendor-sign-in",
-  "submit-vendor-sign-in-code", "cancel-vendor-sign-in", "remove-vendor-connection",
-  "sign-in-provider-tool", "cancel-provider-tool-sign-in", "select-provider-workspace",
-  "account-sign-in", "account-sign-out", "account-create", "account-open", "set-background-notifications", "account-cancel-sign-in",
-  "install-update-and-restart", "install-update-on-close", "open-data-folder",
-  "restart-voxa", "comfyui-restart", "set-harness-engine", "generate-diagnostics",
-  "choose-claude-executable", "clear-claude-executable", "choose-codex-executable", "clear-codex-executable",
-  "choose-voxa-executable", "clear-voxa-executable", "use-bundled-voxa",
-  "choose-comfyui-path", "choose-comfyui-models-dir", "clear-comfyui-models-dir",
-  "set-comfyui-url", "clear-comfyui-engine", "use-detected-comfyui",
-] as const;
+/** Named refusals include mixed commands whose host-only payload is checked separately. */
+export { REMOTE_COMMAND_ACCESS, isRemoteHostCommand } from "./remote-command-access.js";
+export const REMOTE_HOST_ONLY_COMMANDS = Object.entries(REMOTE_COMMAND_ACCESS)
+  .filter(([, access]) => access !== "studio").map(([kind]) => kind) as [RemoteHostCommand, ...RemoteHostCommand[]];
 export const RemoteCommandRefusalSchema = z.object({
   kind: z.literal("command-refused"), refused: z.literal("host-only"),
   command: z.enum(REMOTE_HOST_ONLY_COMMANDS),

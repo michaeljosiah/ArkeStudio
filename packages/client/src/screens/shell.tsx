@@ -1614,6 +1614,7 @@ export function SettingsLayout() {
     return id === "diagnostics" ? "studio health" : "a world to explore";
   };
   if (phone) return <PageSheet open onClose={leave} title={section?.[1] ?? "Settings"} className="fy-settings-phone"
+    resetKey={pathname + search}
     footer={<span>{slug === "general" ? "new work only" : slug === "remote-access" && isRemoteSession() ? "connected through your PC" : `Arke Studio ${state?.app.version ?? "—"}${isRemoteSession() ? " · remote" : ""}`}</span>}
     {...(slug ? { onBack: () => navigate(providerDetail ? "/settings/providers" : "/settings") } : {})}>
     <div className="fy-settings-phone__content" data-screen="settings">
@@ -2544,7 +2545,7 @@ export function SettingsAboutScreen() {
           <div className="fy-set__title">Updates</div>
           <div className="fy-set__caps">{updateCopy}</div>
         </div>
-        {update?.status === "available" && (
+        {update?.status === "available" && (isRemoteSession() ? <OnYourPC>download and install updates</OnYourPC> :
           <Button variant="primary" onClick={() => downloadUpdate()}>
             Download
           </Button>

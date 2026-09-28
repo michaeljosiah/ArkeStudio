@@ -4,11 +4,13 @@ import { IconButton } from "./ui.js";
 import { ChevronLeft, X } from "./icons.js";
 
 /** Turn 163 uses the character sheet's shape with native focus containment and an inert page. */
-export function PageSheet({ open, onClose, title, children, footer, className, onBack, keepMounted = false }: {
+export function PageSheet({ open, onClose, title, children, footer, className, onBack, resetKey, keepMounted = false }: {
   open: boolean;
   onClose: () => void;
   title: string;
   onBack?: () => void;
+  /** A new in-sheet page starts at its heading without remounting the dialog or its opener. */
+  resetKey?: string;
   children: ReactNode;
   footer?: ReactNode;
   className?: string;
@@ -30,6 +32,12 @@ export function PageSheet({ open, onClose, title, children, footer, className, o
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
   }, [open, mounted]);
+  useLayoutEffect(() => {
+    if (!open || resetKey === undefined) return;
+    const body = ref.current?.querySelector(".fy-page-sheet__body");
+    if (body) body.scrollTop = 0;
+    ref.current?.querySelector("h2")?.focus({ preventScroll: true });
+  }, [open, mounted, resetKey]);
   if (!mounted || (!open && !keepMounted)) return null;
   return createPortal(
     <dialog ref={ref} className={["fy-page-sheet", className].filter(Boolean).join(" ")} aria-labelledby={heading}

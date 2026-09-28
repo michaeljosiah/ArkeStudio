@@ -1,3 +1,5 @@
+import { OnYourPC } from "../components/on-your-pc.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 import { useNavigate } from "react-router";
 import {
   componentIsSettled,
@@ -60,6 +62,7 @@ function ProgressRow({ component, progress, sizeLabel }: { component: SetupCompo
               ? `${component.leftovers!.length} file${component.leftovers!.length === 1 ? "" : "s"}`
               : component.state}
         </RuntimeStatus>
+        {isRemoteSession() ? <OnYourPC>downloads and installed files</OnYourPC> : <>
         <SetupTransferControl component={component} />
         {/* Only what is still waiting can be skipped. Pause preserves one range-capable transfer;
             Stop all remains the destructive action for the whole setup run. */}
@@ -91,6 +94,7 @@ function ProgressRow({ component, progress, sizeLabel }: { component: SetupCompo
             Reclaim
           </button>
         )}
+        </>}
       </div>
       {(progress.active || component.state === "paused") && (
         <div className="fy-set__bar">
@@ -167,9 +171,7 @@ export function SettingsDownloadsScreen() {
       {moving.length > 0 && (
         <>
           <RuntimeSection label="IN FLIGHT">
-            <button type="button" className="fy-set__link" onClick={() => setupCancel()}>
-              Stop all
-            </button>
+            {isRemoteSession() ? <OnYourPC>downloads</OnYourPC> : <button type="button" className="fy-set__link" onClick={() => setupCancel()}>Stop all</button>}
           </RuntimeSection>
           {moving.map((c) => (
             <ProgressRow key={c.id} component={c} progress={transferProgress(c)} sizeLabel={sizeLabel(c)} />

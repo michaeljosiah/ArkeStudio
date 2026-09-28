@@ -122,3 +122,43 @@ it("a provider without a key stays off and AI models renders its remedy as a PC 
  assert.match(document.body.textContent!, /On your PC/);
  assert.equal([...document.querySelectorAll('button')].some(e => /^(Add a key|Replace key|Sign in again)$/.test(e.textContent!)), false);
 });
+it("phone pane and provider navigation starts at the top and focuses the heading", async () => {
+ await mount(); const body = find('.fy-page-sheet__body'), heading = find('dialog h2'); let focus = 0;
+ heading.focus = () => { focus++; }; body.scrollTop = 400;
+ await click('.fy-settings-sections a[href="/settings/providers"]');
+ assert.equal(body.scrollTop, 0); assert.equal(focus, 1);
+ body.scrollTop = 250; await click('.fy-provider-row .fy-src');
+ assert.equal(body.scrollTop, 0); assert.equal(focus, 2);
+});
+it("compact local provider switches remain off when the capability is unavailable", async () => {
+ const marker = document.querySelector('meta[name="arke-remote"]')!; marker.setAttribute('content', 'false');
+ try {
+  await mount('/settings/providers?provider=fal', 984);
+  const state = settingsLayoutFixture(); state.app.providers = state.app.providers.map(p => p.id === "fal" ? { ...p, configured: false, validation: "untested", probes: [] } : p);
+  await act(async () => __setStateForTest(state));
+  const switches = [...document.querySelectorAll('[data-testid="provider-pane"] [role="switch"]')];
+  assert.ok(switches.length > 0); assert.ok(switches.every(button => button.getAttribute('aria-checked') === 'false' && !button.classList.contains('is-on')));
+ } finally { marker.setAttribute('content', 'true'); }
+});
+it("an outstanding decision only notifies once when its diagnostic detail changes", async () => {
+ const originals = new Map(["Notification", "navigator", "localStorage"].map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
+ const visibility = Object.getOwnPropertyDescriptor(document, "visibilityState"); const shown: string[] = [];
+ try {
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+  Object.defineProperty(globalThis, "Notification", { configurable: true, value: { permission: "granted" } });
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { serviceWorker: { async getRegistration() { return { async showNotification(_title: string, options: { tag: string }) { shown.push(options.tag); } }; }, addEventListener() {}, removeEventListener() {} } } });
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: () => "on" } });
+  await mount(); const state = settingsLayoutFixture();
+  const job = state.app.jobs.find(job => job.status === "running")!; assert.ok(job);
+  job.status = "needs-reconciliation"; job.error = "connection lost";
+  await act(async () => { __setStateForTest(state); await Promise.resolve(); });
+  assert.equal(shown.length, 1);
+  const changed = structuredClone(state); changed.app.jobs.find(j => j.id === job.id)!.error = "outcome still unknown";
+  await act(async () => { __setStateForTest(changed); await Promise.resolve(); });
+  assert.equal(shown.length, 1);
+ } finally {
+  await act(async () => root?.unmount()); root = null;
+  for (const [name, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); }
+  if (visibility) Object.defineProperty(document, "visibilityState", visibility); else Reflect.deleteProperty(document, "visibilityState");
+ }
+});

@@ -689,7 +689,7 @@ function UpdateCard({ update }: { update: UpdateState }) {
         </div>
       )}
       <div className="fy-ap__actions">
-        {update.status === "available" && (
+        {update.status === "available" && (isRemoteSession() ? <OnYourPC>download and install updates</OnYourPC> :
           <Button size="sm" variant="primary" onClick={() => downloadUpdate()}>
             Download
           </Button>

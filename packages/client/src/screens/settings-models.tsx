@@ -280,7 +280,7 @@ interface LocalFacts {
 function entryFacts(entry: Entry, onOpenDownloads: () => void): LocalFacts {
   const elsewhere = entry.locality === "remote";
   const moving = entry.component !== undefined && (entry.component.state === "downloading" || entry.component.state === "paused");
-  const controls = elsewhere ? null : (
+  const controls = elsewhere ? null : isRemoteSession() ? <OnYourPC>model installation and removal</OnYourPC> : (
     <>
       {entry.component !== undefined && <SetupTransferControl component={entry.component} />}
       {entry.state === "available" && entry.closure !== undefined && (
@@ -344,7 +344,7 @@ function recipeTileFacts(
   residency?: string,
 ): LocalFacts {
   const facts = recipeFacts(recipe, weights, gated);
-  const controls = (
+  const controls = isRemoteSession() ? <OnYourPC>model installation and repair</OnYourPC> : (
     <>
       {weights?.state === "available" && (
         <Button onClick={() => setupRetry(weights.id)}>Download · {sizeMb(weights.sizeMb)}</Button>
