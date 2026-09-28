@@ -57,14 +57,8 @@ export function useTableReadPlan({
     const sheet = state?.world?.sheets.find((candidate) => candidate.id === id);
     return [id, sheet?.voice ?? null, sheet?.retired ?? false];
   }));
-  // And so is a voice provider made ready — validated, repaired, its speech probe answering — or
-  // a model turned on or off: a line the plan called unavailable may be preparable now (codex
-  // round 12). Only what the plan reads of a provider is watched, not when it was last checked.
-  const readiness = JSON.stringify([
-    (state?.app.providers ?? []).map((provider) => [provider.id, provider.configured, provider.validation, provider.fault,
-      provider.probes.some((probe) => probe.capability === "voice-tts" && probe.available)]),
-    state?.app.models.disabled ?? [],
-  ]);
+  // And so is a voice provider made ready, or a model turned on or off (codex round 12).
+  const readiness = speechReadiness(state);
   useEffect(() => {
     // The last line gone takes its plan with it: the plan names lines no longer there, and its
     // token would prepare them (codex round 10).
@@ -79,6 +73,20 @@ export function useTableReadPlan({
     if (prepareRequest.current === null) { setPreparing(false); setNotice("The studio is disconnected."); }
   }, [plan, worldId, production.meta.id, scene.id]);
   return { plan, notice, preparing, prepare };
+}
+
+/**
+ * What a table-read plan reads of the studio's speech: each provider's readiness — validated,
+ * repaired, its speech probe answering — and the models turned off. A line the plan called
+ * unavailable may be preparable once it changes. Only what the plan reads of a provider is
+ * watched, not when it was last checked, so a re-check that changes nothing asks nothing.
+ */
+function speechReadiness(state: ReturnType<typeof useStore>["state"]): string {
+  return JSON.stringify([
+    (state?.app.providers ?? []).map((provider) => [provider.id, provider.configured, provider.validation, provider.fault,
+      provider.probes.some((probe) => probe.capability === "voice-tts" && probe.available)]),
+    state?.app.models.disabled ?? [],
+  ]);
 }
 
 export type LineVoice = "voiced" | "voicing" | "unvoiced";
@@ -129,6 +137,8 @@ export function useProductionVoiceFiles({
     (state?.world?.sheets ?? []).map((sheet) => [sheet.id, sheet.voice ?? null, sheet.retired ?? false]),
     review?.reviewHash ?? null,
     review?.selectionHash ?? null,
+    // And the speech it can be read with: a provider made ready or faulted mid-batch (codex round 19).
+    speechReadiness(state),
   ]);
   useEffect(() => {
     if (key !== null && settled.current === key) return;

@@ -416,6 +416,23 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     assert.equal(askedOf("sc_05"), 2, "a plan made before the selection names other audio");
   });
 
+  it("a voice provider made ready while the preview gathers its voices asks every scene again (codex round 19)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = visualNovel();
+    state.app.providers = [{ id: "elevenlabs", configured: true, validation: "unvalidated", probes: [], fault: null }] as never;
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.scenes.push({ ...structuredClone(production.scenes[0]!), id: "sc_05", number: 5, slug: "the-pier" } as never);
+    const mounted = await mountState(state, SCENE_PATH);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Preview")!);
+    const askedOf = (sceneId: string) => sent.filter((message) => message.kind === "plan-table-read" && message.sceneId === sceneId).length;
+    assert.equal(askedOf("sc_05"), 1);
+    const next = structuredClone(state) as ClientState;
+    next.app.providers = [{ id: "elevenlabs", configured: true, validation: "valid", probes: [{ capability: "voice-tts", available: true }], fault: null }] as never;
+    await act(async () => { __setStateForTest(next); });
+    assert.equal(askedOf("sc_05"), 2, "a plan made before the provider was ready would read that scene as text");
+  });
+
   it("a studio lost while the voices are asked for opens the preview as text, rather than waiting forever", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

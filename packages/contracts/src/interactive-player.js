@@ -949,7 +949,9 @@ export function mountInteractivePlayer(root, options) {
           voiceDone = true;
           voiceFailed = true;
         }
-        if (holdByAuto) stopHold();
+        // Any hold waits too — an authored one as much as Auto's: it would read on over the line
+        // and cut it off (codex round 19). It starts over when the line has been heard.
+        stopHold();
         logVoice.setAttribute("src", b.audio);
         const p = logVoice.play && logVoice.play();
         // A line that cannot be heard again hands the beat back at once, as one heard out would:
@@ -1110,7 +1112,7 @@ export function mountInteractivePlayer(root, options) {
   voice.addEventListener("ended", onVoiceEnded);
   // A line heard again from the log hands the beat back to Auto when it ends — or fails to play.
   function replayDone() {
-    if (mode === "playing" && isBeats(state.sceneId)) schedule(false);
+    if (mode === "playing" && isBeats(state.sceneId)) schedule(true);
   }
   logVoice.addEventListener("ended", replayDone);
   logVoice.addEventListener("error", replayDone);
