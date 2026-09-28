@@ -16,8 +16,8 @@ import {
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
 import { TextMark as Captions } from "../components/icons.js";
-import { coarsePointer, useCutLayout, useCutTouch } from "./editor-responsive.js";
-import { armClipMenu } from "./editor-gesture.js";
+import { useCutLayout, useCutTouch } from "./editor-responsive.js";
+import { pointerIsTouch, armClipMenu } from "./editor-gesture.js";
 import { ClipMenu } from "./editor-clip-menu.js";
 
 /**
@@ -110,7 +110,7 @@ export function SubtitleTrackRow({
               title={label}
               disabled={disabled}
               onClick={() => onSelectCue(cue.id)}
-              onPointerDown={event => { if (event.pointerType === "touch" || coarsePointer()) armClipMenu(event, () => setMenu({ cueId: cue.id, x: event.clientX, y: event.clientY })); }}
+              onPointerDown={event => { if (pointerIsTouch(event)) armClipMenu(event, () => setMenu({ cueId: cue.id, x: event.clientX, y: event.clientY })); }}
               onContextMenu={event => { event.preventDefault(); event.stopPropagation(); setMenu({ cueId: cue.id, x: event.clientX, y: event.clientY }); }}
               onKeyDown={(event) => {
                 if (event.key === "Delete" || event.key === "Backspace") {

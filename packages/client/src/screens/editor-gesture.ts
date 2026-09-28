@@ -58,12 +58,17 @@ export function armClipMenu(event: GestureOptions["event"], open: () => void): v
   window.addEventListener("pointermove", move); window.addEventListener("pointerup", clean); window.addEventListener("pointercancel", clean); window.addEventListener("pointerdown", extra);
 }
 
+/** A connected mouse or pen stays direct on a device whose primary pointer is touch. */
+export const pointerIsTouch = (event: { pointerType?: string }) => event.pointerType
+  ? event.pointerType === "touch"
+  : typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true;
+
 /** Attach the gesture to a press. Returns false when the press could not start one. */
 export function startClipGesture(options: GestureOptions): boolean {
   const { event, lane, canvas, clip, gesture } = options;
   const element = event.currentTarget as (HTMLElement & Partial<Pick<HTMLElement, "setPointerCapture" | "releasePointerCapture">>) | null;
   if (element === null) return false;
-  const touch = event.pointerType === "touch" || (typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true);
+  const touch = pointerIsTouch(event);
   // A first touch belongs to lane panning; selection happens only on its eventual click.
   if (touch && gesture === "move" && options.selected !== true) {
     if (options.onLongPress) armClipMenu(event, options.onLongPress);

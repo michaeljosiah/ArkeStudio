@@ -117,7 +117,7 @@ export function useTouchLanes({ phone, transport, totalSec, zoom, setZoom }: {
     const click = (event: MouseEvent) => { if (moved) { event.preventDefault(); event.stopPropagation(); moved = false; } };
     const wheel = (event: WheelEvent) => {
       const state = live.current;
-      if (!state.phone) return;
+      if (!state.phone || !event.ctrlKey) return;
       event.preventDefault();
       state.setZoom(Math.max(1, Math.min(32, state.zoom * Math.exp(-event.deltaY * .002))));
     };

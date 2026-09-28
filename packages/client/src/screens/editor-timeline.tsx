@@ -34,8 +34,8 @@ import {
 } from "../lib/picture-edit.js";
 import { fileKindsFromTransfer, laneTakesFiles, reorderPreview, type DroppedKind } from "../lib/clip-gesture.js";
 import { Film } from "../components/icons.js";
-import { startClipGesture, type GestureUpdate } from "./editor-gesture.js";
-import { coarsePointer, cutTime, useCutLayout, useCutTouch } from "./editor-responsive.js";
+import { pointerIsTouch, startClipGesture, type GestureUpdate } from "./editor-gesture.js";
+import { cutTime, useCutLayout, useCutTouch } from "./editor-responsive.js";
 import { DropTarget, GestureChip, chipSeconds } from "./editor-marks.js";
 import { ARTIFACT_DRAG_TYPE, dragAccepts, libraryDrag } from "./editor-audio.js";
 
@@ -299,7 +299,7 @@ export function PictureTrack({
    */
   const begin = (clipId: TimelineClipId, gesture: PictureGesture) => (event: React.PointerEvent) => {
     if (event.button !== 0 || disabled || tool !== "select") return;
-    if (!coarsePointer() && event.pointerType !== "touch") onSelect(clipId);
+    if (!pointerIsTouch(event)) onSelect(clipId);
     const clip = clips.find((candidate) => candidate.id === clipId);
     const element = event.currentTarget as HTMLElement;
     const lane = element.closest<HTMLElement>(".fy-track__lane");

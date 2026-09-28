@@ -127,7 +127,7 @@ export function CutScrubber({ totalSec, frameRate, transport, held = false, gutt
   const { time } = transport;
   const ref = useRef<HTMLDivElement>(null);
   const width = useMeasuredWidth(ref);
-  const onPointerDown = held ? undefined : seekDrag({ totalSec, transport, laneOf: (el) => el, seekOnPress: gutter === LANE_GUTTER_PX, gutter });
+  const onPointerDown = held ? undefined : seekDrag({ totalSec, transport, laneOf: (el) => el, seekOnPress: true, gutter });
   return (
     <div
       ref={ref}

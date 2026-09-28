@@ -498,6 +498,7 @@ export function ArtifactPanel({
       footer={<><span>{shown} items</span><button type="button" className="ui-btn" onClick={onClose}>Done</button></>}>
     <aside ref={panelRef} className={cx("fy-artpanel", filesOver && "fy-artpanel--dropping")} id="cut-library" data-open={open} aria-label="Library"
       onDragOver={event => {
+        if (remote && Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "none"; return; }
         if (!Array.from(event.dataTransfer.types).includes("Files") || onImport === null) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "copy";
@@ -806,6 +807,7 @@ export function AddToLibraryDialog({
   const confirm = () => {
     if (chosen.size === 0 && dropped.size === 0) return;
     onAdd([...chosen].map(asItem), [...dropped].map(asItem));
+    setStep("scene");
     setChosen(new Set());
     setDropped(new Set());
   };

@@ -28,8 +28,8 @@ import { Portrait } from "../components/portrait.js";
 import type { EditorTool } from "./editor-timeline.js";
 import { frameAtPixel, previewTimeline, trackDragCommand, type PictureGesture } from "../lib/picture-edit.js";
 import { fileKindsFromTransfer, laneTakesFiles, type DroppedKind } from "../lib/clip-gesture.js";
-import { startClipGesture, type GestureUpdate } from "./editor-gesture.js";
-import { coarsePointer, useCutLayout, useCutTouch } from "./editor-responsive.js";
+import { pointerIsTouch, startClipGesture, type GestureUpdate } from "./editor-gesture.js";
+import { useCutLayout, useCutTouch } from "./editor-responsive.js";
 import { DropTarget, GestureChip, chipSeconds } from "./editor-marks.js";
 
 /**
@@ -210,7 +210,7 @@ export function TypedTrackRows({
    */
   const begin = (track: TimelineTrack, clipId: TimelineClipId, gesture: PictureGesture) => (event: React.PointerEvent) => {
     if (event.button !== 0 || disabled || tool !== "select") return;
-    if (!coarsePointer() && event.pointerType !== "touch") onSelect(clipId);
+    if (!pointerIsTouch(event)) onSelect(clipId);
     const element = event.currentTarget as HTMLElement;
     const lane = element.closest<HTMLElement>(".fy-track__lane");
     const clips = orderedTrackClips(track);

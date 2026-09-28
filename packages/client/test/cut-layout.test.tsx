@@ -10,6 +10,7 @@ import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest, impor
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { startClipGesture, type GestureUpdate } from "../src/screens/editor-gesture.js";
 import { cutLayoutFixture } from "./cut-layout-fixture.js";
+import { AddToLibraryDialog } from "../src/screens/editor-library.js";
 
 const dom = parseHTML("<!doctype html><html><head></head><body></body></html>");
 let width = 390;
@@ -33,13 +34,15 @@ let root: Root | null = null;
 let sent: ClientMessage[] = [];
 const fixture = cutLayoutFixture();
 const base = "/w/" + fixture.world!.meta.worldId + "/p/saltlight";
-async function mount(size = 390, remote = false) {
+async function mount(size = 390, remote = false, tail?: number) {
   width = size; sent = [];
   const host = dom.document.createElement("div"); dom.document.body.append(host); root = createRoot(host);
   if (remote) { const marker = dom.document.createElement("meta"); marker.name = "arke-remote"; marker.content = "true"; dom.document.head.append(marker); }
   const bridge = { connect() {}, subscribe() { return () => {}; }, send(raw: string) { sent.push(JSON.parse(raw)); } } as unknown as ArkeBridge;
   Object.assign(dom.window, { arke: remote ? undefined : bridge });
-  await act(async () => { __setBridgeForTest(bridge); __setStateForTest(cutLayoutFixture()); __connectionStatusForTest("open"); root!.render(<MemoryRouter initialEntries={[base + "/cut"]}><App /></MemoryRouter>); });
+  const state = cutLayoutFixture(), timeline = state.world!.productions[0]!.timeline;
+  if (tail !== undefined && timeline?.status === "ready") timeline.timeline.tracks[0]!.endFrame = tail;
+  await act(async () => { __setBridgeForTest(bridge); __setStateForTest(state); __connectionStatusForTest("open"); root!.render(<MemoryRouter initialEntries={[base + "/cut"]}><App /></MemoryRouter>); });
 }
 afterEach(async () => { await act(async () => root?.unmount()); root = null; dom.document.body.replaceChildren(); dom.document.head.replaceChildren(); __setBridgeForTest(null); __connectionStatusForTest("closed"); });
 const find = (selector: string) => dom.document.querySelector<HTMLElement>(selector)!;
@@ -126,4 +129,51 @@ it("phone Split cuts the picture at the held playhead before a clip is picked", 
   await click(find('.fy-cut-tools button:nth-child(2)'));
   const command = timelineCommands()[0]; assert.equal(command?.kind, "split");
   if (command?.kind === "split") { assert.equal(command.clipId, "cl_6"); assert.equal(command.atFrame, 1); }
+});
+
+it("Fold ruler presses seek without a drag", async () => {
+  await mount(984); const ruler = find('[aria-label="Seek"]');
+  await act(async () => { pointer(ruler, "pointerdown", 500); pointer(ruler, "pointerup", 500); });
+  assert.ok(Number(ruler.getAttribute("aria-valuenow")) > 0);
+});
+it("ordinary phone wheel input scrolls and only a pinch modifier zooms", async () => {
+  await mount(); const canvas = find('.fy-timeline__canvas');
+  const wheel = (ctrlKey: boolean) => { const event = new dom.Event("wheel", {bubbles:true,cancelable:true}); Object.assign(event,{deltaY:-100,ctrlKey}); canvas.dispatchEvent(event); return event; };
+  let ordinary: Event | undefined, pinch: Event | undefined;
+  await act(async () => { ordinary = wheel(false); pinch = wheel(true); });
+  assert.equal(ordinary!.defaultPrevented, false); assert.equal(pinch!.defaultPrevented, true);
+});
+for (const pointerType of ["mouse", "pen"]) it(`${pointerType} starts a direct drag on a coarse-pointer device`, () => {
+  const target = document.createElement("button"); document.body.append(target);
+  const clip: TimelineClip = {id:"cl_test",startFrame:100,durationFrames:100,sourceInFrames:0,source:{kind:"artifact",artifactId:"ar_sound",label:"Sound"}};
+  const started = startClipGesture({event:{button:0,pointerId:1,pointerType,clientX:100,currentTarget:target,preventDefault(){},stopPropagation(){}},selected:false,lane:target,canvas:null,clip,totalFrames:1000,gesture:"move",snapFrames:null,onUpdate(){},onEnd(){}});
+  assert.equal(started, true); pointer(target,"pointerup",100);
+});
+it("compact scene labels follow the breakpoint until the person chooses", async () => {
+  await mount(1360); assert.equal(find('[aria-label="Scene labels"]').getAttribute("aria-pressed"), "false");
+  await act(async () => { width=984; for(const listener of listeners) listener(); });
+  assert.equal(find('[aria-label="Scene labels"]').getAttribute("aria-pressed"), "true");
+  await act(async () => { width=1360; for(const listener of listeners) listener(); });
+  await click(find('[aria-label="Scene labels"]')); await click(find('[aria-label="Scene labels"]'));
+  await act(async () => { width=984; for(const listener of listeners) listener(); });
+  assert.equal(find('[aria-label="Scene labels"]').getAttribute("aria-pressed"), "false");
+});
+it("Append preserves the remembered empty tail", async () => {
+  await mount(390,false,90*24); await click(find('.fy-cut-tools button:first-child')); await click(find('.fy-artrow__pick'));
+  await click([...document.querySelectorAll<HTMLElement>('.fy-artrow__actions button')].find(button=>button.textContent==='Append')!);
+  const command=timelineCommands()[0]; assert.equal(command?.kind,"place"); if(command?.kind==='place')assert.equal(command.clip.startFrame,90*24);
+});
+it("remote file drops show a refusal and never advertise a copy", async () => {
+  await mount(390,true); const outer = find('[data-screen="cut"]'), transfer={types:["Files"],files:[new File(["test"],"test.mp4")],dropEffect:"copy"};
+  await act(async()=>{props(outer).onDragOver!({defaultPrevented:false,dataTransfer:transfer,preventDefault(){}} as never);props(outer).onDrop!({defaultPrevented:false,dataTransfer:transfer,preventDefault(){}} as never);});
+  assert.equal(transfer.dropEffect,"none"); assert.match(document.body.textContent!,/Import media on the desktop app/); assert.equal(sent.some(message=>message.kind==='upload-artifacts'),false);
+});
+it("confirming Add shots resets the phone picker to Scene", async () => {
+  width=390; const host=document.createElement("div"); document.body.append(host); root=createRoot(host);
+  const render=(open:boolean)=>root!.render(<AddToLibraryDialog open={open} production={fixture.world!.productions[0]!} library={[]} onClose={()=>render(false)} onAdd={()=>render(false)} />);
+  await act(async()=>render(true));
+  await act(async()=>props(find('.fy-libpick__row input')).onChange!({} as never));
+  await click(find('.fy-libpick__confirm')); await click(find('.fy-libpick__confirm'));
+  await act(async()=>render(true));
+  assert.match(find('.fy-cut-pick-steps [aria-current="step"]').textContent!,/Scene/);
 });

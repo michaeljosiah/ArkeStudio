@@ -1,3 +1,4 @@
+import { pointerIsTouch } from "./editor-gesture.js";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import {
@@ -24,6 +25,7 @@ import {
   type TimelineClipCommand,
   type TimelineTrackId,
   basePictureTrack,
+  trackEndFrame,
   mediaPlacementCommands,
   newAudioTrack,
   orderedTrackClips,
@@ -106,7 +108,7 @@ import { SpineCutTrack, EmptyEditorTrack, NewLaneStrip, SceneBands } from "./edi
 import { type CutSelection, CutInspector } from "./editor-inspector.js";
 import { ExportSheet, exportViewFor } from "./editor-export.js";
 import { ABSENT_TIMELINE, useRenderPlan } from "./editor-plan.js";
-import { CutTouchContext, EditorSheetSlot, LaneSheet, coarsePointer, cutTime, useCutLayout, useTouchLanes } from "./editor-responsive.js";
+import { CutTouchContext, EditorSheetSlot, LaneSheet, cutTime, useCutLayout, useTouchLanes } from "./editor-responsive.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { Grid2x2, More, Pause, SplitMark as Columns, Trash as Trash2, RotateCcw as Undo2, RotateCw as Redo2 } from "../components/icons.js";
 import { isRemoteSession } from "../lib/remote-session.js";
@@ -274,7 +276,8 @@ function CutEditorScreen() {
   const [watchToken, setWatchToken] = useState(0);
   const [selected, setSelected] = useState<CutSelection | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [showScenes, setShowScenes] = useState(compact);
+  const [sceneLabels, setSceneLabels] = useState<boolean | null>(null);
+  const showScenes = sceneLabels ?? compact;
   const [importing, setImporting] = useState(false);
   const importRequest = useRef<string | null>(null);
   /** Dropped files, listed in the Library as rows until they are real (issue 1035). */
@@ -1049,10 +1052,12 @@ function CutEditorScreen() {
       // record can take it; otherwise the cursor must not promise a copy nothing will make.
       onDragOver={event => {
         if (event.defaultPrevented || commandsDisabled || !Array.from(event.dataTransfer.types).includes("Files")) return;
+        if (remote) { event.preventDefault(); event.dataTransfer.dropEffect = "none"; return; }
         event.preventDefault(); event.dataTransfer.dropEffect = "copy";
       }}
       onDrop={event => {
         if (event.defaultPrevented || commandsDisabled || !event.dataTransfer.files?.length) return;
+        if (remote) { event.preventDefault(); setTimelineCommandError("Import media on the desktop app."); return; }
         event.preventDefault(); importMedia("append", Array.from(event.dataTransfer.files));
       }}>
       <ArtifactPanel
@@ -1088,7 +1093,7 @@ function CutEditorScreen() {
         onRemoveFromLibrary={commandsDisabled ? null : removeFromLibrary}
         onImport={commandsDisabled || remote ? null : files => importMedia("library", files)}
         onAddShot={editableTimeline !== null && !commandsDisabled ? placeShot : null}
-        onAppendShot={editableTimeline !== null && !commandsDisabled ? id => placeShot(id, Math.max(0, ...(pictureTrack?.clips ?? []).map(clip => clip.startFrame + clip.durationFrames))) : null}
+        onAppendShot={editableTimeline !== null && !commandsDisabled ? id => placeShot(id, pictureTrack ? trackEndFrame(pictureTrack) : 0) : null}
         onLocate={locateClip}
         initialFilter={libraryFilter}
         open={libraryOpen}
@@ -1231,7 +1236,7 @@ function CutEditorScreen() {
             <button type="button" className="fy-tlbtn fy-tip" data-tip="Add audio track" aria-label="Add audio track" disabled={commandsDisabled} onClick={() => editableTimeline && sendCommands([newAudioTrack(editableTimeline)], "Add audio track")}>
               <AudioPlus size={12} />
             </button>
-            <button type="button" className="fy-tlbtn fy-tlbtn--toggle fy-tip" data-tip="Scene labels" aria-label="Scene labels" aria-pressed={showScenes} onClick={() => setShowScenes(value => !value)}>
+            <button type="button" className="fy-tlbtn fy-tlbtn--toggle fy-tip" data-tip="Scene labels" aria-label="Scene labels" aria-pressed={showScenes} onClick={() => setSceneLabels(value => !(value ?? compact))}>
               <Tag size={12} />
             </button>
             <span className="fy-timeline__group" role="group" aria-label="Order">
@@ -1372,7 +1377,7 @@ function CutEditorScreen() {
             <div
               className="fy-tracks"
               onPointerDown={(event) => {
-                if (phone || coarsePointer() || event.pointerType === "touch") return;
+                if (phone || pointerIsTouch(event)) return;
                 if (event.button !== 0 || tool !== "select") return;
                 if ((event.target as HTMLElement).closest(LANE_PRESS_OWNERS) !== null) return;
                 // The canvas already clears the selection on a click in empty space; doing it
