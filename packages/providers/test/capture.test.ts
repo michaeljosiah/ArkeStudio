@@ -74,7 +74,7 @@ it("carries designed voice methods through captured host assembly and redacts sa
     transport: { async run(scope, operation) { scopes.push(scope); return operation(async () => {
       // The host transport is the fetch owner even for the auxiliary voice methods.
       return scope.operation === "list-designed-voices" ? Response.json({ voices: [metadata] }) : Response.json({ ...metadata,
-        key: "voicekey_never_keep_this", message: "unexpected voicekey_never_keep_that", sample_audio: { mime_type: "audio/wav", data: encoded },
+        key: "voicekey_never_keep_this", message: "unexpected voicekey_never_keep_that.opaque/+/=tail", sample_audio: { mime_type: "audio/wav", data: encoded },
         usage: { total_input_tokens: 20, total_output_tokens: 100 } });
     }); } },
   });
@@ -90,7 +90,7 @@ it("carries designed voice methods through captured host assembly and redacts sa
   assert.deepEqual(scopes.map(row => row.operation), operations);
   assert.equal(scopes[0]?.model, metadata.model);
   const saved = JSON.stringify({ started: log.started, finished: log.finished });
-  for (const secret of ["never-log-this-key", "voicekey_never_keep_this", "voicekey_never_keep_that", encoded]) assert.equal(saved.includes(secret), false);
+  for (const secret of ["never-log-this-key", "voicekey_never_keep_this", "voicekey_never_keep_that", "opaque/+/=tail", encoded]) assert.equal(saved.includes(secret), false);
   assert.ok(saved.includes('"total_output_tokens":100'));
   assert.ok(saved.includes('"sizeBytes":96'));
 });

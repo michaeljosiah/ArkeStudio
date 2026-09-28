@@ -136,7 +136,7 @@ function summarizeMedia(value: unknown, key = ""): unknown {
   if (typeof value === "string") {
     // Stateless Google voice keys are bearer-like credentials, including in unexpected error
     // fields. Never retain one just because the current client asks for stored voices only.
-    if (value.includes("voicekey_")) return value.replace(/voicekey_[A-Za-z0-9_-]+/g, "[redacted voice key]");
+    if (value.includes("voicekey_")) return "[redacted voice key]";
     // A data URI is media regardless of its field name or length. Strip its header before
     // hashing: provenance describes the decoded bytes, not a base64 decoder's view of the URI.
     const uri = /^data:([^;,]*)(?:;[^,]*)?,([\s\S]*)$/i.exec(value);
