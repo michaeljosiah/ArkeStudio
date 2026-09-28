@@ -233,7 +233,8 @@ function ShotWorkspace({
   const accepted = acceptedTakeId(production, shot.id);
   const cardState = shotCardState({
     blankScript: shot.description.trim() === "",
-    clipAccepted: accepted !== null && takes.find((take) => take.id === accepted)?.kind === "clip",
+    // A visual novel's beat plays its picture; a clip accepted on its shot is read by nothing.
+    clipAccepted: !playsAsBeats && accepted !== null && takes.find((take) => take.id === accepted)?.kind === "clip",
     hasFrame: frame.hasFrame,
     coverage,
   });

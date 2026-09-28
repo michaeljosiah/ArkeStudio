@@ -52,7 +52,11 @@ export function useTableReadPlan({
   // So is a speaker's voice assigned, cleared or replaced — by World Chat, say — while the lines
   // stay as they were: the plan quoted and cached the voice they had (codex round 8).
   const speakers = [...new Set(lines.flatMap((line) => (line.speakerSheetId === undefined ? [] : [line.speakerSheetId])))].sort();
-  const speakerVoices = JSON.stringify(speakers.map((id) => [id, state?.world?.sheets.find((sheet) => sheet.id === id)?.voice ?? null]));
+  // A speaker retired or restored changes whether their lines can be read at all (codex round 13).
+  const speakerVoices = JSON.stringify(speakers.map((id) => {
+    const sheet = state?.world?.sheets.find((candidate) => candidate.id === id);
+    return [id, sheet?.voice ?? null, sheet?.retired ?? false];
+  }));
   // And so is a voice provider made ready — validated, repaired, its speech probe answering — or
   // a model turned on or off: a line the plan called unavailable may be preparable now (codex
   // round 12). Only what the plan reads of a provider is watched, not when it was last checked.

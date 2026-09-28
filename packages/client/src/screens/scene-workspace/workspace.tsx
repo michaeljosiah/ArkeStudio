@@ -234,8 +234,13 @@ export function SceneWorkspace({
     if (!playsAsBeats) return undefined;
     const byShot = new Map<string, SceneBeat[]>();
     for (const beat of sceneBeats(workingScene)) byShot.set(beat.shot.id, [...(byShot.get(beat.shot.id) ?? []), beat]);
-    return { byShot, voices: lineVoices(tableRead.plan), pictureShotId: (shotId) => beatPictureShotId(workingShots, shotId) };
-  }, [playsAsBeats, workingScene, workingShots, tableRead.plan]);
+    // The plan is the accepted scene's. A staged proposal that rewrites a line keeps its id, and
+    // its words were never read: they show unvoiced, never as the old words' audio (codex round 13).
+    const accepted = new Map(sceneBeats(scene).flatMap((beat) => (beat.lineId === undefined ? [] : [[beat.lineId, beat.text] as const])));
+    const proposed = new Map(sceneBeats(workingScene).flatMap((beat) => (beat.lineId === undefined ? [] : [[beat.lineId, beat.text] as const])));
+    const voices = new Map([...lineVoices(tableRead.plan)].filter(([lineId]) => proposed.get(lineId) === accepted.get(lineId)));
+    return { byShot, voices, pictureShotId: (shotId) => beatPictureShotId(workingShots, shotId) };
+  }, [playsAsBeats, scene, workingScene, workingShots, tableRead.plan]);
   const framed = shots.filter((shot) => shotHasFrame(production, artifacts, playsAsBeats ? beatPictureShotId(shots, shot.id) : shot.id)).length;
   const focus = selectedShotId(subject);
   const focused = focus === null ? undefined : workingShots.find((shot) => shot.id === focus);
@@ -581,7 +586,8 @@ export function SceneWorkspace({
                 <span aria-hidden="true" />{framed} of {shots.length} {playsAsBeats ? "pictures" : "frames"} ready
               </span>
             )}
-            {playsAsBeats ? (
+            {/* Voicing prepares the accepted lines, so it waits while a proposal is staged over them. */}
+            {playsAsBeats && staged === undefined ? (
               <VoiceLinesControl
                 plan={tableRead.plan}
                 preparing={tableRead.preparing}

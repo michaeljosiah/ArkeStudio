@@ -626,6 +626,17 @@ describe("a visual novel's package (turn 174)", () => {
     assert.deepEqual(result.blockers, ["a scene was added or removed while the package was made — export again"]);
   });
 
+  it("refuses a package whose production was renamed or recast as another kind meanwhile (codex round 13)", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await novel(dir, bundle.productions[0]!);
+    await appendTraversal(store, production.meta.id, walked);
+    const now = { ...production, meta: { ...production.meta, kind: "interactive", title: "Low Water, again" } };
+    const voices = { plan: async () => ({ sceneVersion: 1, files: new Map<string, string>() }), narrator: async () => null };
+    const result = await exportInteractive(store, production, CLOCK, { voices, current: () => now as ProductionBundle });
+    assert.ok(!result.ok);
+    assert.deepEqual(result.blockers, ["the production changed while the package was made — export again"]);
+  });
+
   it("a voice path the plan names outside the world never reaches the package", async () => {
     const { dir, store, bundle } = await open();
     const production = await novel(dir, bundle.productions[0]!);

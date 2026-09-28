@@ -862,7 +862,8 @@ function Row({
   const hasFrame = frame.hasFrame;
   const state = shotCardState({
     blankScript: shot.description.trim() === "",
-    clipAccepted: acceptedTake?.kind === "clip",
+    // A beat plays its picture; a clip accepted on its shot is read by nothing (codex round 13).
+    clipAccepted: beat === undefined && acceptedTake?.kind === "clip",
     hasFrame,
     coverage,
   });

@@ -219,6 +219,57 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     assert.equal(sent.filter((message) => message.kind === "plan-table-read").length, before + 1);
   });
 
+  it("a shot's accepted clip is no picture: the beat still needs one (codex round 13)", async () => {
+    // The fixture's sh_12 has an accepted clip and no frame of its own.
+    const mounted = await mountState(visualNovel(), SCENE_PATH);
+    const band = q(mounted, '[data-testid="workspace-row-sh_12"] .fy-swrow__band')!;
+    assert.notEqual(band.dataset.state, "rendered", "the clip is read by nothing");
+    assert.match(band.textContent ?? "", /Needs frame/);
+  });
+
+  it("asks the plan again when a speaking character is retired, since their lines can no longer be read (codex round 13)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = visualNovel();
+    await mountState(state, SCENE_PATH);
+    const before = sent.filter((message) => message.kind === "plan-table-read").length;
+    const next = structuredClone(state) as ClientState;
+    (next.world!.sheets.find((sheet) => sheet.id === "maren-kest")! as { retired?: boolean }).retired = true;
+    await act(async () => { __setStateForTest(next); });
+    assert.equal(sent.filter((message) => message.kind === "plan-table-read").length, before + 1);
+  });
+
+  it("a staged rewrite of a line shows it unvoiced, and nothing is prepared over the proposal (codex round 13)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = visualNovel();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const accepted = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const path = "productions/saltlight/scenes/04-the-verse-rises.json";
+    const proposed = structuredClone(accepted) as unknown as { script: { blocks: Array<{ id: string; text: string }> } };
+    proposed.script.blocks.find((block) => block.id === "blk_wash")!.text = "They took the washing in before the water came.";
+    state.world!.proposals = [{
+      proposal: {
+        id: "pr_01J8H0000000000000000000Q2", kind: "scene-edit", summary: "A change to scene 4",
+        targets: [{ path, baseVersion: accepted.version, baseHash: `sha256:${"a".repeat(64)}` }],
+        baseCanonRevision: 42, reservedCanonIds: [], source: "chat:scene",
+        decision: { mode: "attended", owner: { kind: "proposal-conversation", surface: "scene-workspace", targetPath: path } },
+        created: "2026-08-30T12:00:00Z", draftRevision: 1,
+      },
+      ripple: null,
+      scenes: { [path]: proposed },
+    }] as never;
+    const mounted = await mountState(state, SCENE_PATH);
+    const asked = sent.find((message) => message.kind === "plan-table-read")!;
+    await act(async () => {
+      __applyEventForTest({ at: "2026-09-27T10:00:00.000Z", type: "rehearsal.result", requestId: (asked as { requestId: string }).requestId, worldId: FIXTURE_WORLD_ID, status: "planned", reason: "", plan } as never);
+    });
+    const lines = all(mounted, '[data-testid="workspace-row-sh_12"] .fy-swbeat__line');
+    assert.equal(lines[0]!.querySelector(".fy-swbeat__text")?.textContent, "They took the washing in before the water came.");
+    assert.equal((lines[0]!.querySelector(".fy-swbeat__voice") as HTMLElement).dataset.voice, "unvoiced", "the old words' audio is not the new words'");
+    assert.equal(q(mounted, ".fy-swvoice") === null, true, "no preparation over staged lines");
+  });
+
   it("Preview reads the scene in the beat player over the window, once its voices are in, and closes back to the beats", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

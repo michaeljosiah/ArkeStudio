@@ -970,17 +970,20 @@ async function exportBeats(
     // leave out while Studio counts it (codex round 11).
     const sceneSet = (bundle: ProductionBundle | undefined) => JSON.stringify((bundle?.scenes ?? []).map((scene) => [scene.id, scene.version]).sort());
     const reshaped = sceneSet(now) !== sceneSet(production);
-    if (moved.length > 0 || reshaped || reframed || rerouted || revoiced) {
-      return {
-        ok: false,
-        blockers: [
-          ...moved.map(({ sceneId }) => `${sceneId} changed while the package was made — export again`),
-          ...(reshaped && moved.length === 0 ? ["a scene was added or removed while the package was made — export again"] : []),
-          ...(reframed && moved.length === 0 ? ["a picture changed while the package was made — export again"] : []),
-          ...(rerouted ? ["the branch map changed while the package was made — export again"] : []),
-          ...(revoiced ? ["a voice or a speaker's name changed while the package was made — export again"] : []),
-        ],
-      };
+    // And anything else the production holds: its name, its kind, a take landed — none moves a
+    // scene or the routing, and each round of review found another (codex round 13). The package
+    // is the snapshot's, so a production that is no longer the snapshot refuses it whole; the
+    // named cases above only say which change it was.
+    const drifted = JSON.stringify(now ?? null) !== JSON.stringify(production);
+    if (moved.length > 0 || reshaped || reframed || rerouted || revoiced || drifted) {
+      const named = [
+        ...moved.map(({ sceneId }) => `${sceneId} changed while the package was made — export again`),
+        ...(reshaped && moved.length === 0 ? ["a scene was added or removed while the package was made — export again"] : []),
+        ...(reframed && moved.length === 0 ? ["a picture changed while the package was made — export again"] : []),
+        ...(rerouted ? ["the branch map changed while the package was made — export again"] : []),
+        ...(revoiced ? ["a voice or a speaker's name changed while the package was made — export again"] : []),
+      ];
+      return { ok: false, blockers: named.length > 0 ? named : ["the production changed while the package was made — export again"] };
     }
     const exportId = options.exportId ?? `iv_${ulid()}`;
     if (!/^iv_[0-9A-HJKMNP-TV-Z]{26}$/.test(exportId)) throw new Error("invalid interactive export id");
