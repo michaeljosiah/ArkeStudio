@@ -42,6 +42,7 @@ function Navigation(){window.go=useNavigate();return null;}
 window.settleLayout=async()=>{await new Promise(r=>setTimeout(r,450));await document.fonts.ready;await Promise.all([...document.images].map(i=>i.decode().catch(()=>{})));for(const a of document.getAnimations()){if(Number.isFinite(a.effect?.getComputedTiming().endTime))a.finish();else{a.pause();a.currentTime=0;}}};
 window.mountLayout=async(route="cast",mode="normal")=>{
  renderer?.unmount();const state=castLayoutFixture(),world=state.world;
+ if(mode==="empty")world.sheets=world.sheets.filter(s=>s.type!=="character");
  if(mode==="long")for(const sheet of world.sheets){sheet.name="UnbrokenCharacterName".repeat(12);sheet.role="UnbrokenRole".repeat(20);}
  const sheetRefs=Object.fromEntries(world.sheets.map(s=>[s.id,{tiles:6,productions:["saltlight","ledger"],artifacts:["a1","a2"],scenes:["s1","s2"],takesByVersion:{4:2},incomingLinks:[]}]));
  window.commands=[];const bridge={connect(){},send(raw){window.commands.push(JSON.parse(raw));},subscribe(){return()=>{};},coordinatorHttpBase:()=>location.origin};window.arke=bridge;__setBridgeForTest(bridge);__setStateForTest(state,{sheetRefs});__connectionStatusForTest("open");
@@ -56,7 +57,7 @@ window.measureLayout=()=>{
   plugins:[{name:"fixture-cascade",setup(build) {
     build.onLoad({filter:/\.(css|tsx)$/}, async ({path}) => {
       const name=relative(root,path).replaceAll("\\","/");
-      const old=baseline && ["packages/client/src/screens/world.tsx","packages/client/src/screens/props.tsx","packages/client/src/screens/fidelity.css","packages/client/src/components/wave.tsx"].includes(name);
+      const old=baseline && ["packages/client/src/App.tsx","packages/client/src/screens/world.tsx","packages/client/src/screens/props.tsx","packages/client/src/screens/fidelity.css","packages/client/src/components/wave.tsx"].includes(name);
       return {loader:path.endsWith(".css")?"css":"tsx",resolveDir:dirname(path),contents:(old?execFileSync("git",["show",baselineRef+":"+name],{cwd:root,encoding:"utf8"}):await readFile(path,"utf8")).replace(/env\(safe-area-inset-bottom(?:,\s*0px)?\)/g,"var(--smoke-safe-bottom, 0px)")};
     });
   }}],loader:{".woff":"file",".woff2":"file"},outfile:join(dir,"view.js")
@@ -114,7 +115,8 @@ try {
      await js('document.querySelector(".fy-content").scrollTop=document.querySelector(".fy-content").scrollHeight');await check(name+'-sheet-bottom');
     }
    }
-   if(!baseline&&width<600){await js('window.mountLayout("props")');await click('.fy-kind-new');assert.ok(await js('document.querySelector(".fy-props-create").getBoundingClientRect().height>0'));await check(name+'-new-prop');}
+   if(!baseline&&width<1100){await js('window.mountLayout("props")');assert.equal(await js('document.querySelector(".fy-props-create").getBoundingClientRect().height'),0);await click('.fy-kind-new');assert.ok(await js('document.querySelector(".fy-props-create").getBoundingClientRect().height>0'));await check(name+'-new-prop');}
+   if(!baseline&&width<1100){await js('window.mountLayout("cast","empty")');await check(name+"-empty-cast");assert.ok(await js('document.querySelector(".fy-cast-mobile-head .fy-kind-new").getBoundingClientRect().height>=44'));}
    if(!baseline&&width<1100){await js('window.mountLayout("cast/maren-kest","long")');await check(name+'-long-character');}
   }
   const masterRecords=[];

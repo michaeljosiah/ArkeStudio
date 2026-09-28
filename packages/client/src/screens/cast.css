@@ -18,6 +18,9 @@
 .fy-gridcard__foot--spaced { margin-top: 9px; }
 
 @media (max-width: 1099px) {
+  .fy-cast-mobile-head { padding: 26px 48px 0; }
+  .fy-props-create { display: none; }
+  .fy-props-create--open { display: flex; }
   .fy-content--cast [data-screen="cast"] > .fy-corner, .fy-content--cast [data-screen="locations"] > .fy-corner { display: none; }
   .fy-kind-new { display: inline-flex; flex: none; min-height: 44px; }
   .fy-content--cast { --cast-gutter: 48px; --cast-feature: 330px; --cast-gap: 36px; --cast-portrait-width: 308px; --cast-portrait-height: 360px; }

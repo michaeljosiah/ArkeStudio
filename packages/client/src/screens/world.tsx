@@ -1174,6 +1174,7 @@ function SheetGrid({
   const navigate = useNavigate();
   const sheetRefs = useSheetRefs();
   const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
   // Ledgers are the world's, so guests are absent from the list and from both tallies — a
   // retired count that included another production's one-offs would not add up to anything the
   // user could click through to (SPEC-020 R-8).
@@ -1235,7 +1236,7 @@ function SheetGrid({
         </Button>
       </div>
       <SheetKindNav active={kind} />
-      {phone && <div className="fy-cast-mobile-head">{ledgerHead}</div>}
+      {(phone || (compact && sheets.length === 0 && pending.length === 0)) && <div className="fy-cast-mobile-head">{ledgerHead}</div>}
       {/* An empty state means "nothing here", never "something is on its way" (issue 228). One
           drafting row is enough to make this list a list. */}
       {sheets.length === 0 && pending.length === 0 ? (
@@ -2980,6 +2981,9 @@ export const NewCharacterScreen = () => (
 );
 export const NewLocationScreen = () => (
   <NewSheetScreen screenId="new-location" title="New location" sheetType="location" />
+);
+export const NewFactionScreen = () => (
+  <NewSheetScreen screenId="new-faction" title="New faction" sheetType="faction" />
 );
 
 // ---- Canon -----------------------------------------------------------------

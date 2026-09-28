@@ -17,8 +17,9 @@ Object.assign(dom.HTMLElement.prototype, { scrollIntoView(this: Element) { scrol
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Element: dom.Element, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root | undefined;
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; dom.document.body.replaceChildren(); width = 390; scrolled.clear(); __setBridgeForTest(null); });
-async function mount(route: string) {
+async function mount(route: string, empty = false) {
   const state = castLayoutFixture();
+  if (empty) state.world!.sheets = state.world!.sheets.filter(s => s.type !== "character");
   __setStateForTest(state); __setBridgeForTest({ connect() {}, subscribe() { return () => {}; }, send() {} } as unknown as ArkeBridge); __connectionStatusForTest("open");
   const container = dom.document.createElement("div"); dom.document.body.append(container); root = createRoot(container as unknown as HTMLElement);
   await act(async () => root!.render(<MemoryRouter initialEntries={[`/w/${state.world!.meta.worldId}/${route}`]}><App /></MemoryRouter>));
@@ -63,4 +64,16 @@ it("opens the new prop form without submitting a creation", async () => {
   await click(".fy-kind-new");
   assert.ok(dom.document.querySelector('.fy-props-create--open input[aria-label="Prop name"]'));
   assert.equal(dom.document.querySelector(".fy-kind-new")?.getAttribute("aria-expanded"), "true");
+});
+
+it("keeps New reachable for the empty Fold cast", async () => {
+  width = 984; await mount("cast", true);
+  assert.ok(dom.document.querySelector(".fy-cast-mobile-head .fy-kind-new"));
+  await click(".fy-cast-mobile-head .fy-kind-new");
+  assert.ok(dom.document.querySelector('[data-screen="new-character"]'));
+});
+
+it("opens the faction authoring screen from its New action", async () => {
+  await mount("factions"); await click(".fy-kind-new");
+  assert.ok(dom.document.querySelector('[data-screen="new-faction"]'));
 });
