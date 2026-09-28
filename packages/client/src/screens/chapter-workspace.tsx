@@ -38,7 +38,7 @@ import {
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
-import { FileText, Pin, Play, RotateCcw, Sparkle, X } from "../components/icons.js";
+import { FileText, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
 import { EmptyState, Screen } from "../components/layout.js";
@@ -529,7 +529,7 @@ function askAtSource(host: HTMLElement | null, area: HTMLTextAreaElement): AskAt
     // Keep the line's height, but put the press in the source's reserved right gutter. The
     // selection can end mid-line, where anchoring at its last word would cover the next ones.
     box.right,
-    box.top + border(style.borderTopWidth) + offsetTop + offsetHeight - area.scrollTop,
+    box.top + border(style.borderTopWidth) + offsetTop + offsetHeight - (area.scrollTop || 0),
   );
 }
 
@@ -1704,7 +1704,7 @@ export function ChapterWorkspace({
                 Audiobook
               </button>
             </nav>
-            {compact && <div className="fy-ch__compact-actions">{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && <PageReadControl read={read} label={<><Play size={18} /><span className="fy-sr-only">Read the chapter</span></>} />}<button type="button" className="ui-btn" aria-label="Notes" onClick={() => setNotesOpen(true)}><FileText size={18} />{!phone && "Notes"}</button></div>}
+            {compact && <div className="fy-ch__compact-actions">{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && !voicedRead.reading && <PageReadControl read={read} label={<><Play size={18} /><span className="fy-sr-only">Read the chapter</span></>} />}{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && voicesRecord !== null && !pageRead.reading && <PageReadControl read={readVoiced} label={phone ? <><Speaker size={18} /><span className="fy-sr-only">Read voiced chapter</span></> : "Voiced"} />}<button type="button" className="ui-btn" aria-label="Notes" onClick={() => setNotesOpen(true)}><FileText size={18} />{!phone && "Notes"}</button></div>}
             {view === "audiobook" && (
               <>
                 <ReadingMenu
@@ -1969,7 +1969,7 @@ export function ChapterWorkspace({
                       : {})}
               />
             )}
-            {selection !== null && !locked && coarse && <TouchPassageAsk manuscript={manuscriptRef.current} paragraph={selection.paragraph} words={countWords(selection.text)} actions={passageActions(style !== null)} held={draftConflict || saveRefusal !== null ? "not saved" : saving || draft !== null ? "saving…" : asking ? "asking…" : undefined} onClose={() => setSelection(null)} onAsk={askPassage} value={passageLine} onChange={setPassageLine} onSubmit={() => { askPassage({ ...TIGHTEN, line: passageLine.trim(), replyOnly: false }); setPassageLine(""); }} />}
+            {selection !== null && !locked && coarse && <TouchPassageAsk manuscript={manuscriptRef.current} selectionTop={selection.top} paragraph={selection.paragraph} words={countWords(selection.text)} actions={passageActions(style !== null)} held={draftConflict || saveRefusal !== null ? "not saved" : saving || draft !== null ? "saving…" : asking ? "asking…" : undefined} onClose={() => setSelection(null)} onAsk={askPassage} value={passageLine} onChange={setPassageLine} onSubmit={() => { askPassage({ ...TIGHTEN, line: passageLine.trim(), replyOnly: false }); setPassageLine(""); }} />}
             <div className="fy-ch__foot">
               <span className="fy-mono">{foot}</span>
               <span className="fy-ch__foot-push" />
@@ -2310,7 +2310,7 @@ export function ChapterWorkspace({
               )}
             </section>
             {compact && <section className="fy-bible__panel fy-ch__plan"><h2 className="fy-bible__paneltitle">Chapter plan</h2>
-              <label>Title{locked ? <span>{chapter.title}</span> : <EditableText value={chapter.title} placeholder="Chapter title" className="fy-ch__plan-field" rows={1} onCommit={title => plan({ title })} />}</label>
+              <label>Title{locked ? <span>{chapter.title}</span> : <span className="fy-ch__plan-field"><SceneTitle title={chapter.title} label="Chapter title" onCommit={title => plan({ title })} /></span>}</label>
               <label>Synopsis{locked ? <span>{chapter.synopsis}</span> : <EditableText value={chapter.synopsis ?? ""} placeholder="What this chapter is for." className="fy-ch__plan-field" rows={2} onCommit={synopsis => plan({ synopsis: synopsis || null })} />}</label>
               <label>Point of view<select aria-label="Point of view" disabled={locked} value={chapter.pov ?? ""} onChange={event => plan({ pov: event.target.value || null })}><option value="">Not set</option>{characters.map(sheet => <option key={sheet.id} value={sheet.id}>{sheet.name}</option>)}</select></label>
               <label>When{locked ? <span>{chapter.when}</span> : <EditableText value={chapter.when ?? ""} placeholder="When" className="fy-ch__plan-field" rows={1} onCommit={when => plan({ when: when || null })} />}</label>
@@ -2416,8 +2416,8 @@ export function ChapterWorkspace({
 }
 
 /** The touch bar preserves the native selection and its handles; only Close dismisses its subject. */
-function TouchPassageAsk({ manuscript, paragraph, words, actions, held, onClose, onAsk, value, onChange, onSubmit }: {
-  manuscript: HTMLElement | null; paragraph: number | null; words: number; actions: readonly PassageAction[]; held?: string;
+function TouchPassageAsk({ manuscript, selectionTop, paragraph, words, actions, held, onClose, onAsk, value, onChange, onSubmit }: {
+  manuscript: HTMLElement | null; selectionTop: number; paragraph: number | null; words: number; actions: readonly PassageAction[]; held?: string;
   onClose: () => void; onAsk: (action: PassageAction) => void; value: string; onChange: (value: string) => void; onSubmit: () => void;
 }) {
   const phone = useMediaQuery("(max-width: 599px)");
@@ -2434,30 +2434,39 @@ function TouchPassageAsk({ manuscript, paragraph, words, actions, held, onClose,
     const reveal = () => {
       const selection = window.getSelection?.();
       const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-      if (!range || !manuscript.contains(range.commonAncestorContainer) || !range.getBoundingClientRect) return;
-      const hidden = range.getBoundingClientRect().bottom - panel.getBoundingClientRect().top + 16;
+      const source = manuscript.querySelector(".fy-ch__source");
+      if (!source && (!range || !manuscript.contains(range.commonAncestorContainer) || !range.getBoundingClientRect)) return;
+      const bottom = source ? manuscript.getBoundingClientRect().top + selectionTop + 22 : range!.getBoundingClientRect().bottom;
+      const hidden = bottom - panel.getBoundingClientRect().top + 16;
       if (hidden > 0) page.scrollTop += hidden;
     };
     reveal();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(reveal);
     observer?.observe(panel);
     return () => observer?.disconnect();
-  }, [phone, manuscript, paragraph, words]);
+  }, [phone, manuscript, paragraph, words, selectionTop]);
 
   useLayoutEffect(() => {
     if (phone || !manuscript || !bar.current || paragraph === null) { setTop(null); return; }
     const block = manuscript.querySelector<HTMLElement>(`.fy-rme__doc > :nth-child(${paragraph})`);
-    if (!block) { setTop(null); return; }
+    const source = manuscript.querySelector<HTMLTextAreaElement>(".fy-ch__source");
+    if (!block && !source) { setTop(null); return; }
     // Style outside ProseMirror's document. Mutating a paragraph makes its DOM observer
     // replace that node, collapsing the native selection and invalidating its coordinates.
     manuscript.dataset.touchAsk = anchorId;
-    const measure = () => { const current = manuscript.querySelector<HTMLElement>(`.fy-rme__doc > :nth-child(${paragraph})`); if (!bar.current || !current) return; setReserve(bar.current.getBoundingClientRect().height + 40); setTop(current.getBoundingClientRect().bottom - manuscript.getBoundingClientRect().top + 20); };
+    const measure = () => {
+      const current = manuscript.querySelector<HTMLElement>(`.fy-rme__doc > :nth-child(${paragraph})`);
+      if (!bar.current) return;
+      setReserve(bar.current.getBoundingClientRect().height + 40);
+      // The source mirror captures a textarea selection; it has no native DOM Range.
+      setTop(current ? current.getBoundingClientRect().bottom - manuscript.getBoundingClientRect().top + 20 : selectionTop + 42);
+    };
     measure();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(bar.current); window.addEventListener("resize", measure);
     return () => { observer?.disconnect(); window.removeEventListener("resize", measure); delete manuscript.dataset.touchAsk; };
-  }, [phone, manuscript, paragraph, words, anchorId]);
-  return <div ref={bar} style={top === null ? undefined : { position: "absolute", top, left: 0, right: 0 }} className="fy-passage-anchor">{!phone && reserve > 0 && <style>{`[data-touch-ask="${anchorId}"] .fy-rme__doc > :nth-child(${paragraph}) { margin-bottom: ${reserve}px; }`}</style>}<HeldBar className="fy-passage-ask">
+  }, [phone, manuscript, paragraph, words, anchorId, selectionTop]);
+  return <div ref={bar} style={top === null ? undefined : { position: "absolute", top, left: 0, right: 0 }} className="fy-passage-anchor">{!phone && reserve > 0 && <style>{`[data-touch-ask="${anchorId}"] .fy-rme__doc > :nth-child(${paragraph}), [data-touch-ask="${anchorId}"] .fy-ch__source { margin-bottom: ${reserve}px; }`}</style>}<HeldBar className="fy-passage-ask">
     <header><Sparkle size={16} /><strong>About this passage</strong><span>{words} words · paragraph {paragraph ?? "—"}</span><button type="button" aria-label="Close passage" onClick={onClose}><X size={18} /></button></header>
     <div className="fy-passage-prompts">{actions.filter(action => !action.draft).sort((a,b) => (["tighten","style","simplify"].includes(a.id) ? ["tighten","style","simplify"].indexOf(a.id) : 99) - (["tighten","style","simplify"].includes(b.id) ? ["tighten","style","simplify"].indexOf(b.id) : 99)).map(action => <button key={action.id} type="button" disabled={held !== undefined} onMouseDown={event => event.preventDefault()} onClick={() => onAsk(action)}>{action.id === "tighten" ? "Tighten this" : action.id === "style" ? "Hold it against the style" : action.id === "simplify" ? "Say it plainer" : action.label}</button>)}</div>
     <Composer value={value} onChange={onChange} onSubmit={onSubmit} onDictate={line => onChange(value ? `${value} ${line}` : line)} placeholder="Ask about this passage…" disabledReason={held} />

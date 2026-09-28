@@ -63,3 +63,32 @@ it('a compact waiting passage has an attended decision without opening Arke',asy
  await mount('p/ledger/story/chapters/neap',390,'waiting');await openChapter();assert.ok(find('.fy-passage-decision'));assert.equal(find('.fy-season-arke-sheet[open]'),null);
  const edits=[...document.querySelectorAll<HTMLButtonElement>('.fy-passage-edits button')];assert.ok(edits.length>1);await click(edits[0]!);assert.equal(edits[0]!.getAttribute('aria-pressed'),'false');assert.match(edits[0]!.textContent!,/Refused/);
 });
+it('an open chapter menu resolves its file against a replacement snapshot', async () => {
+ await mount(); await click([...document.querySelectorAll<HTMLElement>('.fy-chapter-card__more')][1]!);
+ const fresh=chapterLayoutFixture(); await act(async()=>__setStateForTest(fresh));
+ await click([...document.querySelectorAll<HTMLElement>('.fy-chapter-menu button')].find(b=>b.textContent==='Move down')!);
+ const command=sent.findLast(m=>m.kind==='reorder-chapters');assert.ok(command);
+ assert.deepEqual(command.orderedFiles,['01-chapter','03-chapter','02-chapter','04-chapter']);
+});
+it('a newer chapter title closes the Notes editor without writing its stale draft', async () => {
+ await mount('p/ledger/story/chapters/neap'); await openChapter(); await click(find('[aria-label="Notes"]'));
+ await click(find('.fy-ch__plan [role="textbox"]'));
+ const field=find('.fy-ch__plan input') as HTMLInputElement;assert.ok(field);field.value='My stale name';const blur=props(field).onBlur!;
+ const fresh=chapterLayoutFixture();fresh.world!.productions[0]!.chapters[0]!.title='Name from another window';
+ await act(async()=>__setStateForTest(fresh));
+ await act(async()=>blur({currentTarget:field} as never));
+ assert.equal(sent.filter(m=>m.kind==='edit-chapter-plan').length,0);assert.match(find('.fy-ch__plan').textContent!,/Name from another window/);
+});
+for(const route of ['neap/','01-chapter'])it('chapter alias '+route+' keeps only the deep phone chrome',async()=>{
+ await mount('p/ledger/story/chapters/'+route);await openChapter();assert.equal(document.querySelectorAll('.fy-titlebar').length,0);assert.ok(find('[data-screen="chapter"]'));
+});
+it('Fold source selections position the ask at the captured line rather than after the textarea',async()=>{
+ await mount('p/ledger/story/chapters/neap',984);await openChapter();const area=find('.fy-ch__source') as HTMLTextAreaElement;
+ Object.defineProperty(document,'activeElement',{value:area,configurable:true});area.selectionStart=0;area.selectionEnd=31;
+ await act(async()=>document.dispatchEvent(new Event('selectionchange')));assert.equal(find('.fy-passage-anchor').style.position,'absolute');assert.ok(Number.parseFloat(find('.fy-passage-anchor').style.top)>=20);
+});
+it('compact chapters retain voiced playback whenever a voice record exists',async()=>{
+ await mount('p/ledger/story/chapters/neap');const ask=sent.findLast(m=>m.kind==='open-chapter');assert.ok(ask);
+ await act(async()=>__applyEventForTest({type:'chapter.open-result',at:'2026-09-28T14:00:00Z',requestId:ask.requestId,worldId:ask.worldId,productionId:ask.productionId,chapterId:'neap',disposition:'opened',body:CHAPTER_BODY+'\n\n<br>',version:4,hash:CHAPTER_HASH,versions:[3,2],voices:{version:4,hash:CHAPTER_HASH,derivedAt:'2026-09-28T14:00:00Z',passes:1,dropped:0,omitted:0,lines:[]}}));
+ assert.match(find('.fy-ch__compact-actions').textContent!,/Read voiced chapter/);
+});
