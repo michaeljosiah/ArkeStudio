@@ -38,12 +38,13 @@ import {
 import { ProductionConversation, StagedDecision } from "../../components/conversation.js";
 import { SceneReview, SceneSynopsis, SceneTitle, useBlockDigests } from "../storyboard.js";
 import { SceneFlow } from "./flow.js";
-import { StoryboardRows, type BeatsView } from "./rows.js";
+import { StoryboardRows, retryForShot, type BeatsView } from "./rows.js";
 import { SceneBeatPreview, VoiceLinesControl } from "./beats.js";
 import { lineVoices, useTableReadPlan } from "./table-read.js";
 import { SelectionProvider, selectedShotId, subjectMatchesBoard, type WorkspaceSubject } from "./selection.js";
 import { boardsForScene, shotHasFrame } from "./boards.js";
-import { FrameRunBar, FrameRunBoardFailures, GenerateFramesDialog } from "./frame-run.js";
+import { FrameRunBar, FrameRunBoardFailures, GenerateFramesDialog, frameRunShotState, finalizationRetryJobId } from "./frame-run.js";
+import { retryJobFinalization } from "../../lib/store.js";
 import { ShotLightbox } from "./lightbox.js";
 import { CastPicker, SheetPicture, sceneCast, type CastPickerMode } from "./cast-picker.js";
 import { CharacterDialog } from "./character-dialog.js";
@@ -132,6 +133,7 @@ export function SceneWorkspace({
   // The one lightbox: the row preview, the run bar's Review and Preview's Larger all open it,
   // and its arrows walk the scene's shots carrying the selection with them.
   const [lightboxShotId, setLightboxShotId] = useState<string | null>(null);
+  const [reviewingRun, setReviewingRun] = useState(false);
   const [generateTarget, setGenerateTarget] = useState<{ shotId?: string } | null>(null);
   const [sceneReviewOpen, setSceneReviewOpen] = useState(false);
   const [boardSheetKey, setBoardSheetKey] = useState<string | null>(null);
@@ -600,7 +602,7 @@ export function SceneWorkspace({
                 // (R-19): a frame is the run's when one of its own jobs produced the artifact, so a
                 // shot whose retry failed over an older frame is never shown as new output, and a
                 // run that put down nothing has nothing to review.
-                {...(reviewShotId === null ? {} : { onReview: () => setLightboxShotId(reviewShotId) })}
+                {...(reviewShotId === null ? {} : { onReview: () => { setReviewingRun(true); setLightboxShotId(reviewShotId); } })}
               />
             ) : shots.length === 0 ? null : (
               <span className="fy-sw__coverage" data-ready={framed > 0 || undefined}>
@@ -886,13 +888,25 @@ export function SceneWorkspace({
           />
         )}
         <ShotLightbox
+          worldId={world.meta.worldId}
+          locked={locked}
+          review={reviewingRun}
+          retry={shotId => {
+            if (!frameRun || locked) return null;
+            const view = frameRunShotState(frameRun, shotId);
+            if (!view) return null;
+            const finalization = finalizationRetryJobId(frameRun, view.stepIndex, state?.app.jobs ?? []);
+            if (finalization) return () => retryJobFinalization(finalization);
+            if (frameRun.run.sceneVersion !== scene.version) return null;
+            return retryForShot(frameRun, view, shotId, world.meta.worldId, production.meta.id);
+          }}
           scene={scene}
           production={production}
           artifacts={artifacts}
           worldSlug={world.meta.slug}
           aspect={aspect}
           shotId={lightboxShotId}
-          onClose={() => setLightboxShotId(null)}
+          onClose={() => { setLightboxShotId(null); setReviewingRun(false); }}
           onSelectShot={(shotId) => {
             setLightboxShotId(shotId);
             setSubject({ kind: "shot", shotId: shotId as never });

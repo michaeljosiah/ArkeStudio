@@ -830,6 +830,7 @@ function Row({
   beat?: RowBeat;
 }) {
   const phone = useMediaQuery("(max-width: 599px)");
+  const failureBelow = phone && runState !== null && (["failed", "missing", "needs-reconciliation"].includes(runState.status) || runState.failureClass === "provider-fault" || runState.failureClass === "offline");
   const compact = useMediaQuery("(max-width: 1099px)");
   const band = useRef<HTMLDivElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement | null>(null);
@@ -1267,7 +1268,7 @@ function Row({
               </div>
             </div>
           </dialog>
-          {runState === null ? null : (
+          {runState === null || failureBelow ? null : (
             <FrameState
               state={runState}
               onRetry={run === null ? null : retryForShot(run, runState, shot.id, worldId, production.meta.id)}
@@ -1289,6 +1290,7 @@ function Row({
           {shot.number}
         </span>
       </div>
+      {failureBelow && runState && <FrameState state={runState} onRetry={run === null ? null : retryForShot(run, runState, shot.id, worldId, production.meta.id)} onRetryFinalization={onRetryFinalization} />}
       {/* One body for the row and the card, so an editor keeps its place in the tree — and its
           focus and draft — across List and Grid (turn 138). */}
       <div className="fy-swrow__body">
@@ -1443,7 +1445,7 @@ function failureCopy(state: Pick<NonNullable<ReturnType<typeof frameRunShotState
   return state.error ?? "came back dark";
 }
 
-function retryForShot(
+export function retryForShot(
   run: FrameRunState,
   state: NonNullable<ReturnType<typeof frameRunShotState>>,
   shotId: string,

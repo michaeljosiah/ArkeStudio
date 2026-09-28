@@ -462,6 +462,7 @@ export function ScenePreview({
       </div>
       <p className="fy-swpreview__script">{current?.shot.description ?? ""}</p>
       <ShotLightbox
+        worldId={worldId}
         scene={scene}
         production={production}
         artifacts={artifacts}

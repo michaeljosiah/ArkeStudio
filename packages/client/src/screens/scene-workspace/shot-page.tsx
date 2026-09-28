@@ -639,6 +639,8 @@ function ShotWorkspace({
           onClose={() => setGenerating(false)}
         />
         <ShotLightbox
+          worldId={world.meta.worldId}
+          locked={disabled}
           scene={scene}
           production={production}
           artifacts={artifacts}
