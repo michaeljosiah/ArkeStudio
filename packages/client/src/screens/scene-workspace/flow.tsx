@@ -1,3 +1,4 @@
+import { useMediaQuery } from "../../lib/media-query.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   DEFAULT_SHOT_SEC,
@@ -191,6 +192,7 @@ export function SceneFlow({
   const deleteReturnNode = useRef<string | null>(null);
   const menuPanel = useRef<HTMLDivElement | null>(null);
   const liveShotIds = useRef(new Set<string>());
+  const touchList = useMediaQuery("(hover: none)");
   const [pan, setPan] = useState({ x: 24, y: 20 });
   const [zoom, setZoom] = useState(1);
   const [moved, setMoved] = useState<Record<string, { x: number; y: number }>>({});
@@ -662,6 +664,11 @@ export function SceneFlow({
         ...(onOpenStage === undefined ? [] : [{ label: "Stage this shot", act: () => { closeMenu(false); onOpenStage(shotId); } }]),
         ...(onEditShot === undefined ? [] : [{ label: "Open the shot", disabled: locked, act: () => { closeMenu(false); onEditShot(shotId); } }]),
         { label: "Duplicate", disabled: locked, act: () => { closeMenu(true); onCommand({ kind: "duplicate-shot", shotId }); } },
+        ...(touchList ? [
+          { label: "Move up", disabled: locked || shots[0]?.id === shotId, act: () => { const previous = shots[shots.findIndex(shot => shot.id === shotId) - 1]; if (previous) onCommand({ kind: "move-shot", shotId, to: { before: previous.id } }); closeMenu(true); } },
+          { label: "Move down", disabled: locked || shots.at(-1)?.id === shotId, act: () => { const next = shots[shots.findIndex(shot => shot.id === shotId) + 1]; if (next) onCommand({ kind: "move-shot", shotId, to: { after: next.id } }); closeMenu(true); } },
+          { label: "Insert a shot after", disabled: locked, act: () => { onCommand({ kind: "insert-shot", at: { after: shotId }, shot: { title: UNTITLED_SHOT, description: "" } }); closeMenu(true); } },
+        ] : []),
         {
           label: "Delete",
           danger: true,
@@ -708,19 +715,20 @@ export function SceneFlow({
   const openNodeMenuFrom = (node: FlowNode, trigger: HTMLElement) => {
     const anchor = trigger.getBoundingClientRect();
     openNodeMenu(node, anchor.left, anchor.bottom + 4);
+    if (touchList) setMenu({ nodeId: node.id, left: Math.max(12, Math.min(anchor.left, window.innerWidth - 216)), top: Math.max(12, Math.min(anchor.bottom + 4, window.innerHeight - 340)) });
   };
   const menuItems = menu === null ? [] : menuItemsFor(menuNode);
   const menuTitle = menuNode?.name ?? "canvas";
   return (
     <div
       className="fy-swcanvas"
-      data-testid="workspace-flow"
+      data-testid="workspace-flow" data-touch-list={touchList || undefined}
       data-layout={compact ? "compact" : "wide"}
       ref={canvas}
       onPointerDownCapture={blockDeleteBackground}
       onMouseDownCapture={blockDeleteBackground}
       onClickCapture={blockDeleteBackground}
-      onMouseDown={panFrom}
+      onMouseDown={touchList ? undefined : panFrom}
       onMouseMove={trackLinkPointer}
       onDragOver={trackLinkPointer}
       onContextMenu={(event) => {
@@ -737,6 +745,7 @@ export function SceneFlow({
       role="application"
       aria-label={`Flow of scene ${scene.number}`}
     >
+      {touchList && <div className="fy-flow-list-head"><span>Flow · sequence and references</span><Button disabled={locked || deleteOpen} onClick={menuItemsFor(undefined)[0]!.act}>Add shot</Button></div>}
       <div
         className="fy-swlayer"
         data-testid="workspace-flow-layer"
@@ -796,7 +805,7 @@ export function SceneFlow({
             aria-label={ariaFor(node, joins.get(node.id))}
             aria-disabled={node.staged ? "true" : undefined}
             aria-current={subjectSelectsNode(subject, node, current) ? "true" : undefined}
-            onMouseDown={(event) => !node.staged && dragNode(node, event)}
+            onMouseDown={touchList ? undefined : (event) => !node.staged && dragNode(node, event)}
             onContextMenu={(event) => {
               if (deleteOpen || !hasMenu(node)) return;
               event.preventDefault();

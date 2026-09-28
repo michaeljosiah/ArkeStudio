@@ -1,3 +1,5 @@
+import { StageInspectorSheet } from "./responsive-chrome.js";
+import { useMediaQuery } from "../../lib/media-query.js";
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Link as RouterLink } from "react-router";
 import {
@@ -199,6 +201,19 @@ export function SceneStage({
   // Where the shot's form puts the reference rows; null while another form is up (turn 144).
   const [referenceSlot, setReferenceSlot] = useState<HTMLElement | null>(null);
   const stageRoot = useRef<HTMLElement | null>(null);
+  const phone = useMediaQuery("(max-width: 599px)");
+  const touch = useMediaQuery("(hover: none)");
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const [stageWidth, setStageWidth] = useState(Number.POSITIVE_INFINITY);
+  const [touchMode, setTouchMode] = useState<"camera" | "figures" | "set">("figures");
+  const inspectorSheet = phone || ((touch || compact) && stageWidth < 756);
+  useEffect(() => {
+    const element = stageRoot.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const measure = () => setStageWidth(element.getBoundingClientRect().width);
+    measure(); const observer = new ResizeObserver(measure); observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   const keyDrag = useRef<{ pointerId: number; which: number; lane?: MotionLane; left: number; width: number; low: number; high: number } | null>(null);
   const [ghost, setGhost] = useState(false);
   const [staging, setStaging] = useState(false);
@@ -991,7 +1006,7 @@ export function SceneStage({
       const original = draft, cameraWasDirty = cameraDirty.current, blockingWasDirty = blockingDirty.current;
       return () => { cameraDirty.current = cameraWasDirty; blockingDirty.current = blockingWasDirty; setDraft(original); };
     }}>
-    <section ref={stageRoot} className="fy-swstage" data-testid="workspace-stage" aria-label="Stage" tabIndex={0} onKeyDown={timelineKey}>
+    <section ref={stageRoot} className="fy-swstage" data-inspector-sheet={inspectorSheet || undefined} data-testid="workspace-stage" aria-label="Stage" tabIndex={0} onKeyDown={timelineKey}>
       {head || fullscreen !== null ? (
         <div className="fy-swstage__head" data-stepper={head ? "true" : undefined}>
           {head ? (
@@ -1071,7 +1086,7 @@ export function SceneStage({
           {working === null ? null : (
             <>
               <div className="fy-swstage__modes" role="radiogroup" aria-label="View">
-                {(["look", "camera"] as const).map((candidate) => (
+                {!touch && (["look", "camera"] as const).map((candidate) => (
                   <button
                     key={candidate}
                     type="button"
@@ -1083,6 +1098,12 @@ export function SceneStage({
                     {candidate === "look" ? "Look" : "Camera"}
                   </button>
                 ))}
+                {touch && (["camera", "figures", "set"] as const).map(candidate => <button key={candidate} type="button" role="radio" aria-checked={touchMode === candidate} data-on={touchMode === candidate || undefined} onClick={() => {
+                  setTouchMode(candidate); setMode(candidate === "camera" ? "camera" : "look");
+                  if (candidate === "camera") pick({ kind: "rig" });
+                  else if (candidate === "figures") { const first = working.cast[0]; if (first) pick({ kind: "cast", sheetId: first.sheetId }); }
+                  else if (working.sets.length > 0) pick({ kind: "set", index: 0 });
+                }}>{candidate === "camera" ? "Camera" : candidate === "figures" ? "Figures" : "Set"}</button>)}
               </div>
               <div className="fy-swstage__corner">
                 {moved ? (
@@ -1108,7 +1129,7 @@ export function SceneStage({
           )}
         </div>
 
-        <aside className="fy-swstage__panel" aria-label="Stage inspector">
+        <StageInspectorSheet sheet={inspectorSheet}><aside className="fy-swstage__panel" aria-label="Stage inspector">
           {working === null ? (
             <p className="fy-swstage__note">Nothing staged yet.</p>
           ) : (
@@ -1532,9 +1553,11 @@ export function SceneStage({
                 disabled={frozen} onChoose={() => setMode("camera")} slot={referenceSlot} />
             </>
           )}
-        </aside>
+        </aside></StageInspectorSheet>
       </div>
+      {touch && <div className="fy-stage-gestures"><span>1 finger · orbit</span><span>2 fingers · pan / pinch</span><span>Double-tap · follow figure</span></div>}
 
+      {(touch || inspectorSheet) && working !== null && <div className="fy-stage-touch-ways"><Button variant="outline" disabled={!moved || locked || frozen} onClick={keep}>Keep blocking</Button><Button variant="primary" disabled={generatorPending || frozen || moved || stale || filed === undefined} title={moved ? "Keep the move first" : stale || filed === undefined ? "Export the current blockout from the inspector first" : undefined} onClick={() => onRenderShot(shot.id)}>Render with this</Button></div>}
       {working === null ? null : (
         <div className="fy-swstage__timeline">
           <div className="fy-swstage__transport">

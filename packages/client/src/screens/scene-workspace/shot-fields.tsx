@@ -1,3 +1,5 @@
+import { createPortal } from "react-dom";
+import { useMediaQuery } from "../../lib/media-query.js";
 import { useEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode } from "react";
 import {
   DEFAULT_SHOT_SEC,
@@ -23,7 +25,7 @@ import {
 } from "@arke-studio/contracts";
 import { BenchBrief } from "../../components/bench-brief.js";
 import { Checkbox, Select } from "../../components/ui.js";
-import { Archive, FileText, ImageMark, LinkMark, Minus, Plus, Speaker, StickyNote, Timer, VideoMark, X } from "../../components/icons.js";
+import { Archive, FileText, ImageMark, LinkMark, Minus, More, Plus, Speaker, StickyNote, Timer, VideoMark, X } from "../../components/icons.js";
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
 import { mentionNames, scriptWords } from "./mentions.js";
 import { BeatLines } from "./beats.js";
@@ -51,6 +53,7 @@ export const CAMERA_FIELDS: Array<{ key: Exclude<keyof ShotFraming, "grade">; la
  * words in the box to blur again rather than putting the old value back over them.
  */
 export function ShotFields({
+  primarySlot = null,
   world,
   production,
   scene,
@@ -62,6 +65,7 @@ export function ShotFields({
   onCommand,
   onOpenCharacter,
 }: {
+  primarySlot?: HTMLElement | null;
   world: WorldBundle;
   production: ProductionBundle;
   scene: SceneRecord;
@@ -266,60 +270,12 @@ export function ShotFields({
   const uncited = world.props.filter((prop) => !cited.some((entry) => entry.propId === prop.id));
   const [citing, setCiting] = useState(false);
 
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const [cameraExpanded, setCameraExpanded] = useState(false);
+  const cameraOrder = ["size", "angle", "movement", "lens"];
+  const cameraFields = compact && !cameraExpanded ? cameraOrder.map(key => CAMERA_FIELDS.find(field => field.key === key)!) : CAMERA_FIELDS;
   const disabled = locked;
-  return (
-    <div className="fy-shot__fields" data-testid="shot-fields">
-      {playsAsBeats ? (
-        <Section icon={<Speaker size={15} />} name="Beat">
-          <BeatLines beats={shotBeats} sheets={sheets} voices={lineVoices(tableRead.plan)} />
-          <p className="fy-shot__hint">From the scene’s script · narration is read by the narrator, a line by its speaker</p>
-          <div className="fy-shot__row">
-            <span className="fy-shot__rowlabel">advance</span>
-            <span className="fy-shot__choices" role="group" aria-label="Advance">
-              {([["voice", "After the voice"], ["tap", "On tap"], ["hold", "Hold"]] as const).map(([value, label]) => (
-                <button key={value} type="button" aria-pressed={playback.advance === value} disabled={disabled}
-                  onClick={() => beatSet({ advance: value })}>{label}</button>
-              ))}
-            </span>
-            {playback.advance === "hold" ? (
-              <input
-                key={playback.holdSec}
-                className="fy-shot__input fy-shot__input--short"
-                aria-label="Hold for seconds"
-                type="number"
-                min={1}
-                max={60}
-                step={0.5}
-                defaultValue={playback.holdSec}
-                disabled={disabled}
-                onBlur={(event) => {
-                  const next = Number(event.currentTarget.value);
-                  if (!Number.isFinite(next) || next <= 0 || next > 60 || next === playback.holdSec) return;
-                  beatSet({ holdSec: next });
-                }}
-              />
-            ) : null}
-          </div>
-          <div className="fy-shot__row">
-            <span className="fy-shot__rowlabel">movement</span>
-            <span className="fy-shot__choices" role="group" aria-label="Movement">
-              {([["push", "Slow push"], ["drift", "Drift"], ["none", "None"]] as const).map(([value, label]) => (
-                <button key={value} type="button" aria-pressed={playback.motion === value} disabled={disabled}
-                  onClick={() => beatSet({ motion: value })}>{label}</button>
-              ))}
-            </span>
-          </div>
-          <Checkbox
-            className="fy-shot__check"
-            label={previous === null ? "Same picture as the beat before" : `Same picture as shot ${previous.number}`}
-            // The first shot has nothing before it to keep, but a flag left from before a move
-            // must still be clearable, or it silently comes back when the shot moves again.
-            disabled={disabled || (previous === null && shot.beat?.samePicture !== true)}
-            checked={shot.beat?.samePicture ?? false}
-            onChange={(event) => beatSet({ samePicture: event.target.checked || undefined })}
-          />
-        </Section>
-      ) : null}
+  const primaryFields = <>
       <Section icon={<FileText size={15} />} name="Script">
         <div
           className="fy-shot__script fy-swrow__scripteditor"
@@ -417,8 +373,64 @@ export function ShotFields({
         )}
       </Section>
 
+  </>;
+  return (
+    <div className="fy-shot__fields" data-testid="shot-fields">
+      {playsAsBeats ? (
+        <Section icon={<Speaker size={15} />} name="Beat">
+          <BeatLines beats={shotBeats} sheets={sheets} voices={lineVoices(tableRead.plan)} />
+          <p className="fy-shot__hint">From the scene’s script · narration is read by the narrator, a line by its speaker</p>
+          <div className="fy-shot__row">
+            <span className="fy-shot__rowlabel">advance</span>
+            <span className="fy-shot__choices" role="group" aria-label="Advance">
+              {([["voice", "After the voice"], ["tap", "On tap"], ["hold", "Hold"]] as const).map(([value, label]) => (
+                <button key={value} type="button" aria-pressed={playback.advance === value} disabled={disabled}
+                  onClick={() => beatSet({ advance: value })}>{label}</button>
+              ))}
+            </span>
+            {playback.advance === "hold" ? (
+              <input
+                key={playback.holdSec}
+                className="fy-shot__input fy-shot__input--short"
+                aria-label="Hold for seconds"
+                type="number"
+                min={1}
+                max={60}
+                step={0.5}
+                defaultValue={playback.holdSec}
+                disabled={disabled}
+                onBlur={(event) => {
+                  const next = Number(event.currentTarget.value);
+                  if (!Number.isFinite(next) || next <= 0 || next > 60 || next === playback.holdSec) return;
+                  beatSet({ holdSec: next });
+                }}
+              />
+            ) : null}
+          </div>
+          <div className="fy-shot__row">
+            <span className="fy-shot__rowlabel">movement</span>
+            <span className="fy-shot__choices" role="group" aria-label="Movement">
+              {([["push", "Slow push"], ["drift", "Drift"], ["none", "None"]] as const).map(([value, label]) => (
+                <button key={value} type="button" aria-pressed={playback.motion === value} disabled={disabled}
+                  onClick={() => beatSet({ motion: value })}>{label}</button>
+              ))}
+            </span>
+          </div>
+          <Checkbox
+            className="fy-shot__check"
+            label={previous === null ? "Same picture as the beat before" : `Same picture as shot ${previous.number}`}
+            // The first shot has nothing before it to keep, but a flag left from before a move
+            // must still be clearable, or it silently comes back when the shot moves again.
+            disabled={disabled || (previous === null && shot.beat?.samePicture !== true)}
+            checked={shot.beat?.samePicture ?? false}
+            onChange={(event) => beatSet({ samePicture: event.target.checked || undefined })}
+          />
+        </Section>
+      ) : null}
+      {primarySlot ? createPortal(primaryFields, primarySlot) : primaryFields}
+
       {/* One line until written in (turn 143 by way of 145): the line is the card. */}
-      <section className="fy-shot__section fy-shot__section--notes">
+      <section className="fy-shot__section fy-shot__section--notes" data-field="Notes">
         <span className="fy-shot__sectionicon"><StickyNote size={15} /></span>
         <span className="fy-shot__sectionname">Notes</span>
         <textarea
@@ -436,9 +448,9 @@ export function ShotFields({
 
       {/* Turn 97's nine as 145b draws them. 14d's intent line is not carried: the record keeps the
           field and the prompt still reads it, but a control the turn does not draw is not a control. */}
-      <Section icon={<VideoMark size={15} />} name="Camera">
+      <Section icon={<VideoMark size={15} />} name="Camera" head={compact ? <><span className="fy-shot__spacer" /><button type="button" className="fy-shot__camera-more" aria-label={cameraExpanded ? "Fewer camera settings" : "More camera settings"} aria-expanded={cameraExpanded} onClick={() => setCameraExpanded(!cameraExpanded)}><More size={16} /></button></> : undefined}>
         <div className="fy-shot__camera">
-          {CAMERA_FIELDS.map((field) => {
+          {cameraFields.map((field) => {
             const own = shot.framing?.[field.key];
             const inherited = scene.defaults?.[field.key];
             return (
@@ -458,7 +470,7 @@ export function ShotFields({
               </label>
             );
           })}
-          <label className="fy-shot__field" data-own={shot.framing?.grade === undefined ? undefined : "true"}>
+          {!compact || cameraExpanded ? <label className="fy-shot__field" data-own={shot.framing?.grade === undefined ? undefined : "true"}>
             <span>grade{shot.framing?.grade === undefined ? null : <i className="fy-shot__dot" title="overrides the scene" aria-label="overrides the scene" />}</span>
             <input
               key={shot.framing?.grade ?? ""}
@@ -472,7 +484,7 @@ export function ShotFields({
                 framingSet("grade", next === "" ? undefined : next);
               }}
             />
-          </label>
+          </label> : null}
         </div>
       </Section>
 
@@ -659,7 +671,7 @@ export function ShotFields({
 
 function Section({ icon, name, head, children, onBlur }: { icon: ReactNode; name: string; head?: ReactNode; children: ReactNode; onBlur?: (event: FocusEvent<HTMLElement>) => void }) {
   return (
-    <section className="fy-shot__section" aria-label={name} onBlur={onBlur}>
+    <section className="fy-shot__section" data-field={name} aria-label={name} onBlur={onBlur}>
       <div className="fy-shot__sectionhead">
         <span className="fy-shot__sectionicon">{icon}</span>
         <span className="fy-shot__sectionname">{name}</span>

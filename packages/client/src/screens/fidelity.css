@@ -7709,7 +7709,6 @@ p.fy-ab__menu-eb { margin: 0; }
   .fy-swgen__actions { flex-wrap: wrap; }
   .fy-swboard-sheet__panel { width: calc(100vw - 28px); max-height: calc(100vh - 28px); }
   .fy-swboard-sheet__foot { align-items: stretch; flex-direction: column; }
-  .fy-sw > .fy-arke { width: auto; border-left: 0; border-top: 1px solid var(--border); min-height: 520px; }
   .fy-swstage { min-height: 560px; overflow: visible; }
   .fy-swstage__work { flex-direction: column; }
   .fy-swstage__viewport { min-height: 340px; }
