@@ -46,6 +46,15 @@ it("sets the authored look from the held phone footer", async () => {
   await click(".fy-artproposal__foot button:last-child");
   assert.ok(commands.some(c => c.kind === "set-art-direction"));
 });
+it("keeps short wide titles complete and opens the full historical description", async () => {
+  await mount("art-direction", "wide");
+  const title = dom.document.querySelector(".fy-artdirection__detail h1")!;
+  assert.ok(title.textContent!.length <= 70);
+  assert.equal(title.hasAttribute("data-collapsible"), false);
+  await click(".fy-artdirection__history");
+  assert.equal(dom.document.querySelector("dialog[open] .fy-artdirection__history-full")?.textContent,
+    "First sentence. Remaining visual guidance must stay available.");
+});
 it("accepts the staged proposal from the held phone footer", async () => {
   await mount("art-direction/propose", "staged");
   assert.ok(dom.document.querySelector(".fy-artproposal__foot")!.textContent!.includes("Accept · world look"));

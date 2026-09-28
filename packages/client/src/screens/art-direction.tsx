@@ -152,6 +152,7 @@ function directionImage(
  */
 
 function History({ worldSlug, history }: { worldSlug: string; history: ArtDirectionHistoryEntry[] }) {
+  const [selected, setSelected] = useState<ArtDirectionHistoryEntry | null>(null);
   return (
     <section className="fy-artdirection__section">
       <h2>HISTORY</h2>
@@ -163,17 +164,20 @@ function History({ worldSlug, history }: { worldSlug: string; history: ArtDirect
           .map((entry) => {
             const display = splitDescription(entry.description);
             return (
-              <div className="fy-artdirection__history" key={entry.version}>
+              <button type="button" className="fy-artdirection__history" key={entry.version} aria-haspopup="dialog" onClick={() => setSelected(entry)}>
                 <span className="fy-artdirection__thumb">
                   {directionImage(worldSlug, entry.masterLook, `World look v${entry.version}`)}
                 </span>
                 <span className="fy-artdirection__history-version">v{entry.version}</span>
                 <span className="fy-artdirection__history-copy">{display.title}</span>
                 <time>{shortDate(entry.acceptedAt)}</time>
-              </div>
+              </button>
             );
           })
       )}
+      <PageSheet open={selected !== null} onClose={() => setSelected(null)} title={`World look · v${selected?.version ?? ""}`}>
+        <p className="fy-artdirection__history-full">{selected?.description}</p>
+      </PageSheet>
     </section>
   );
 }
@@ -632,7 +636,7 @@ export function ArtDirectionScreen() {
       />
       <div className="fy-artdirection__detail">
         <div className="fy-artdirection__eyebrow">WORLD ART DIRECTION</div>
-        <h1 className={titleExpanded ? "is-expanded" : undefined}>{display.title}</h1>
+        <h1 data-collapsible={display.title.length > 70 || undefined} className={titleExpanded ? "is-expanded" : undefined}>{display.title}</h1>
         {phone && display.title.length > 70 && <button className="fy-artdirection__read-title" aria-expanded={titleExpanded} onClick={() => setTitleExpanded(!titleExpanded)}>{titleExpanded ? "Less" : "Read full title"}</button>}
         {/* Only when there is one. A one-line look used to print the same sentence twice: once
             as the heading and again as its own description. */}

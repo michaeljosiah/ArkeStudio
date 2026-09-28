@@ -10,6 +10,10 @@ export function artDirectionLayoutFixture(mode = "normal") {
   world.masterLookCandidates = ["preview-a.png", "preview-b.png", "preview-c.png", "preview-d.png"];
   world.keyArtCandidates = ["key-art-a.png", "key-art-b.png"];
   if (mode === "empty") { delete world.artDirection.masterLook; world.keyArt = null; world.masterLookCandidates = []; world.keyArtCandidates = []; }
+  if (mode === "wide") {
+    world.artDirection.description = "WWWWWW ".repeat(9).trim();
+    for (const entry of world.artDirection.history) entry.description = "First sentence. Remaining visual guidance must stay available.";
+  }
   if (mode === "long") {
     world.artDirection.description = "A very long and carefully described visual language with weathered stones and cold harbour light ".repeat(8);
     for (const entry of world.artDirection.history) entry.description = "UnbrokenHistoryTitle".repeat(20);

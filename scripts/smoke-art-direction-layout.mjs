@@ -101,7 +101,7 @@ try {
   const escape=async()=>{await cdp("Input.dispatchKeyEvent",{type:"keyDown",key:"Escape",code:"Escape",windowsVirtualKeyCode:27});await cdp("Input.dispatchKeyEvent",{type:"keyUp",key:"Escape",code:"Escape",windowsVirtualKeyCode:27});await js("window.settleLayout()");};
 
 
-  for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["tablet",600,850,true],["fold",984,1060,true],["fold-full",984,1092,true],["desktop",1360,850,false]]){
+  for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["tablet",600,850,true],["fold",984,1060,true],["fold-full",984,1092,true],["edge",1100,850,false],["desktop",1360,850,false]]){
    if(only&&only!==name)continue;
    await js('document.documentElement.style.setProperty("--smoke-safe-bottom",'+JSON.stringify(width<600?"20px":"0px")+')');await size(width,height,touch);await cdp("Emulation.setTouchEmulationEnabled",{enabled:!process.argv.includes("--hover")});
    for(const [label,route,mode] of [["tab","art-direction","normal"],["empty","art-direction","empty"],["long","art-direction","long"],["draft","art-direction/propose","normal"],["staged","art-direction/propose","staged"]]){
@@ -119,6 +119,17 @@ try {
       assert.ok(await js('document.querySelector(".fy-artproposal__foot").getBoundingClientRect().bottom<=innerHeight+1'));
       assert.ok(await js('document.querySelector(".fy-artproposal__foot").textContent.includes('+JSON.stringify(label==='draft'?'Set the look':'Accept · world look')+')'));
     }
+   }
+   if(!baseline && width<600) {
+    await js('window.mountLayout("art-direction","wide")');
+    assert.equal(await js('getComputedStyle(document.querySelector(".fy-artdirection__detail h1")).webkitLineClamp'),"none");
+    await js('document.querySelector(".fy-artdirection__detail").scrollIntoView({block:"start"})');await check(name+'-wide-title');
+    await click('.fy-artdirection__history');await check(name+'-history');
+    assert.ok(await js('document.querySelector("dialog[open]").textContent.includes("Remaining visual guidance")'));await escape();
+   }
+   if(!baseline && width===1100) {
+    await js('window.mountLayout("art-direction")');
+    assert.ok(await js('(()=>{const master=document.querySelector(".fy-artdirection__master"),pictures=document.querySelector(".fy-artdirection__pictures");return Math.abs(master.getBoundingClientRect().width-pictures.getBoundingClientRect().width)<2})()'));
    }
   }
   const masterRecords=[];
