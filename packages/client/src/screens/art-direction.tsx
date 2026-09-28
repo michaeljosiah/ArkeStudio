@@ -14,7 +14,10 @@ import { ArtStyleGrid } from "../components/art-style-picker.js";
 import { resolveModel, worldModel, resolveOutputChoice, strandReason, usableModels } from "../components/dispatch-bar.js";
 import { GenerationDialog } from "../components/generation-dialog.js";
 import { seedFrom } from "../lib/art-styles.js";
-import { Button } from "../components/ui.js";
+import { Button, IconButton } from "../components/ui.js";
+import { X, ChevronRight, Upload } from "../components/icons.js";
+import { PageSheet } from "../components/page-sheet.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { ModelsCard, WORLD_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { Portrait } from "../components/portrait.js";
 import { SingleActFeedback, useSingleAct } from "../components/single-act.js";
@@ -160,7 +163,7 @@ function History({ worldSlug, history }: { worldSlug: string; history: ArtDirect
           .map((entry) => {
             const display = splitDescription(entry.description);
             return (
-              <div className="fy-artdirection__history" key={entry.version} title={entry.description}>
+              <div className="fy-artdirection__history" key={entry.version}>
                 <span className="fy-artdirection__thumb">
                   {directionImage(worldSlug, entry.masterLook, `World look v${entry.version}`)}
                 </span>
@@ -197,53 +200,30 @@ function MasterLookHero({
   generateRef: RefObject<HTMLButtonElement | null>;
   running: boolean;
 }) {
+  const touch = useMediaQuery("(hover: none)");
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const card = touch || compact;
   const controls = (
     <div className="fy-artdirection__hover">
-      <Button ref={generateRef} variant="primary" onClick={onGenerate} disabled={running}>
-        {running ? "Making one…" : "Generate"}
+      <Button ref={generateRef} variant={touch ? "secondary" : "primary"} onClick={onGenerate} disabled={running}>
+        {touch && <Sparkle />}{running ? "Making one…" : "Generate"}
       </Button>
       <Button variant="secondary" onClick={() => uploadMasterLook(world.meta.worldId)}>
-        Upload
+        {touch && <Upload />} Upload
       </Button>
     </div>
   );
 
-  if (direction.masterLook) {
-    return (
-      <div className="fy-artdirection__master fy-imghost">
-        {directionImage(world.meta.slug, direction.masterLook, `${world.meta.name} master look`, 0, true)}
-        {controls}
-        <div className="fy-artdirection__master-caption">
-          <div>
-            <strong>Master look</strong>
-            <span>v{direction.version}</span>
-          </div>
-          <p>
-            {direction.acceptedAt
-              ? `set ${shortDate(direction.acceptedAt)}`
-              : "derived from tone and genre"}{" "}
-            · used by new generations
-          </p>
-        </div>
-      </div>
-    );
-  }
-  /*
-   * No stand-in any more (design 64).
-   *
-   * The accepted key art used to fill this frame whenever no master look was set, on the reasoning
-   * that a page about the world's visual language should not refuse to show the world's one image.
-   * It showed it — under two controls that made a *master look*, so the one gesture the picture
-   * invited was the one gesture it did not perform. Key art has its own block and its own doors on
-   * this page now, so the empty state can be honest again: there is no master look, and that is
-   * what this frame is for.
-   */
-  return (
-    <div className="fy-artdirection__master fy-artdirection__master--empty">
-      <div className="fy-artdirection__empty-mark">NO MASTER LOOK</div>
-      {controls}
-    </div>
-  );
+  const caption = <div className="fy-artdirection__master-caption">
+    <div><strong>Master look</strong><span>v{direction.version}</span></div>
+    <p>{direction.acceptedAt ? `set ${shortDate(direction.acceptedAt)}` : "derived from tone and genre"} · used by new generations</p>
+  </div>;
+  const picture = <div className={direction.masterLook ? "fy-artdirection__master fy-imghost" : "fy-artdirection__master fy-artdirection__master--empty"}>
+    {direction.masterLook ? directionImage(world.meta.slug, direction.masterLook, `${world.meta.name} master look`, 0, true) : <div className="fy-artdirection__empty-mark">NO MASTER LOOK</div>}
+    {!touch && controls}
+    {!card && direction.masterLook && caption}
+  </div>;
+  return card ? <section className="fy-artpicture">{picture}{caption}{touch && controls}</section> : picture;
 }
 
 /**
@@ -260,6 +240,9 @@ function MasterLookHero({
  * two turns this page showed one of them under controls that made the other.
  */
 function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
+  const touch = useMediaQuery("(hover: none)");
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const card = touch || compact;
   const { state } = useStore();
   const [dialogOpen, setDialogOpen] = useState(false);
   // Null is "the words the app would have sent", which is where the box always opens. A draft is
@@ -333,24 +316,24 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
     <div className="fy-artdirection__hover">
       <Button
         ref={generateRef}
-        variant="primary"
+        variant={touch ? "secondary" : "primary"}
         disabled={running}
         onClick={() => {
           setDraft(null);
           setDialogOpen(true);
         }}
       >
-        {running ? "Making one…" : "Generate"}
+        {touch && <Sparkle />}{running ? "Making one…" : "Generate"}
       </Button>
       <Button variant="secondary" onClick={() => uploadWorldImage(worldId)}>
-        Upload
+        {touch && <Upload />} Upload
       </Button>
     </div>
   );
 
   return (
     <>
-      <section className="fy-artdirection__keyartband">
+      <section className={card ? "fy-artdirection__keyartband fy-artpicture" : "fy-artdirection__keyartband"}>
         <div
           className={
             world.keyArt
@@ -372,17 +355,20 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
           ) : (
             <div className="fy-artdirection__empty-mark">NO KEY ART</div>
           )}
-          {doors}
+          {!touch && doors}
+          {card && candidates.length > 0 && <span className="fy-artpicture__tag">{candidates.length} previews waiting</span>}
         </div>
         <div className="fy-artdirection__keyartsay">
-          <h2>WORLD KEY ART</h2>
+          <h2>{card ? "World key art" : "WORLD KEY ART"}</h2>
         {/*
           The set is answered in the dialog's own preview column now (design 65) — this line only
           says one is waiting, and reopens the dialog to deal with it. Two places to answer the
           same offer would be two places to leave it half-answered.
         */}
-        {candidates.length > 0 ? (
-          <p className="fy-artdirection__offer-why">
+        {candidates.length > 0 ? (card ? <>
+          <p className="fy-artdirection__offer-why">choose one of {candidates.length} or discard them</p>
+          <button className="fy-artpicture__review" aria-label="Choose or discard key art previews" onClick={() => setDialogOpen(true)}><ChevronRight /></button>
+        </> : <p className="fy-artdirection__offer-why">
             {candidates.length === 1 ? "One key art is" : `${candidates.length} key art previews are`} waiting on
             you —{" "}
             <button type="button" className="fy-set__link" onClick={() => setDialogOpen(true)}>
@@ -397,10 +383,12 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
           )
         )}
         </div>
+        {touch && doors}
       </section>
       {/* Outside the section on purpose: it is a modal, not section content, and nesting it there
           put its own <h2> under the section's eyebrow styling. */}
       <GenerationDialog
+        sheetLayout
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         returnFocus={generateRef}
@@ -482,6 +470,10 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
 }
 
 export function ArtDirectionScreen() {
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = useMediaQuery("(max-width: 599px)");
+  const [modelsOpen, setModelsOpen] = useState(false);
+  const [titleExpanded, setTitleExpanded] = useState(false);
   const { worldId } = useParams();
   const navigate = useNavigate();
   const world = useWorld();
@@ -555,6 +547,7 @@ export function ArtDirectionScreen() {
         <WorldKeyArtPanel world={world} />
       </div>
       <GenerationDialog
+        sheetLayout
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         returnFocus={generateRef}
@@ -639,7 +632,8 @@ export function ArtDirectionScreen() {
       />
       <div className="fy-artdirection__detail">
         <div className="fy-artdirection__eyebrow">WORLD ART DIRECTION</div>
-        <h1>{display.title}</h1>
+        <h1 className={titleExpanded ? "is-expanded" : undefined}>{display.title}</h1>
+        {phone && display.title.length > 70 && <button className="fy-artdirection__read-title" aria-expanded={titleExpanded} onClick={() => setTitleExpanded(!titleExpanded)}>{titleExpanded ? "Less" : "Read full title"}</button>}
         {/* Only when there is one. A one-line look used to print the same sentence twice: once
             as the heading and again as its own description. */}
         {display.body !== "" && <p className="fy-artdirection__description">{display.body}</p>}
@@ -688,13 +682,22 @@ export function ArtDirectionScreen() {
         )}
         {/* The models the world's own work makes with (design turn 153): its key art, master
             looks and kits. The same card the world was begun with, changed here after. */}
-        <ModelsCard
+        {compact ? <>
+          <button className="fy-artdirection__models-row" aria-haspopup="dialog" aria-expanded={modelsOpen} onClick={() => setModelsOpen(true)}><b>Models</b><span>world choices</span><ChevronRight /></button>
+          <PageSheet open={modelsOpen} title="World models" onClose={() => setModelsOpen(false)}><ModelsCard
           state={state}
           capabilities={WORLD_MODEL_CAPABILITIES}
           choices={world.meta.models}
           scopeWord="this world"
           onChange={(capability, modelId) => setWorldModel(worldId, capability, modelId)}
-        />
+        /></PageSheet>
+        </> : (<ModelsCard
+          state={state}
+          capabilities={WORLD_MODEL_CAPABILITIES}
+          choices={world.meta.models}
+          scopeWord="this world"
+          onChange={(capability, modelId) => setWorldModel(worldId, capability, modelId)}
+        />)}
         <div className="fy-artdirection__spacer" />
         {world.problems.filter((problem) => problem.path.startsWith(".history/art-direction/")).map((problem) => (
           <p role="status" key={problem.path}>{problem.message}</p>
@@ -714,6 +717,8 @@ function Sparkle() {
 }
 
 export function ArtDirectionProposalScreen() {
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = useMediaQuery("(max-width: 599px)");
   const { worldId } = useParams();
   const navigate = useNavigate();
   const world = useWorld();
@@ -738,8 +743,43 @@ export function ArtDirectionProposalScreen() {
     navigate(`/w/${world.meta.worldId}/art-direction`);
   };
 
+  const ripple = <>
+        <div className="fy-artproposal__eyebrow">RIPPLES</div>
+        <strong>{direction.reach.visualAssets} visual assets</strong>
+        <p>stay as they are, but new work sees v{nextVersion}.</p>
+        <div className="fy-artproposal__ripple-list">
+          <div>
+            <i />
+            {direction.reach.referenceKits} reference kits see a newer world look
+          </div>
+          <div>
+            <i />
+            {direction.reach.productions} productions inherit v{nextVersion} next dispatch
+          </div>
+          {/*
+            Everything already behind, plus everything made under the look this replaces.
+
+            The gate's own preview counts both; this screen counted only the first, so the number
+            immediately before Accept was the smaller one — and it is the takes made since the
+            last change, usually the ones being thought about, that the omission dropped.
+          */}
+          <div>
+            <i className="fy-artproposal__dot-muted" />
+            {direction.reach.earlierAcceptedTakes + (direction.reach.acceptedTakesAtCurrentVersion ?? 0)} accepted
+            takes remain pinned to their original look
+          </div>
+          {direction.overrides.length > 0 && (
+            <div>
+              <i className="fy-artproposal__dot-muted" />
+              {direction.overrides.length} overrides keep their own look
+            </div>
+          )}
+        </div>
+  </>;
   return (
     <div className="fy-artproposal" data-screen="art-direction-proposal">
+      {compact && <header className="fy-artproposal__phone-head"><IconButton label="Cancel change" onClick={cancel}><X /></IconButton><strong>Change the look</strong><span>{staged ? "ready" : "draft"}</span></header>}
+      <div className="fy-artproposal__scroll">
       <main className="fy-artproposal__main">
         <header className="fy-artproposal__header">
           <div>
@@ -807,7 +847,7 @@ export function ArtDirectionProposalScreen() {
             <Sparkle />
           </button>
         </div>
-        <div className="fy-artproposal__buttons">
+        {!phone && <div className="fy-artproposal__buttons">
           <Button variant="ghost" onClick={cancel}>
             Cancel
           </Button>
@@ -827,7 +867,7 @@ export function ArtDirectionProposalScreen() {
           >
             {staged ? "Change staged by the agent" : `Set the look · v${nextVersion}`}
           </Button>
-        </div>
+        </div>}
         {sendFailed && (
           <div className="fy-artproposal__seedline" role="alert">
             The studio is disconnected — nothing was changed. Your words are still here; try again
@@ -837,38 +877,8 @@ export function ArtDirectionProposalScreen() {
         <SingleActFeedback result={change.result} undoLabel="Restore previous look" onUndo={change.undo} />
       </main>
       <aside className="fy-artproposal__ripple">
-        <div className="fy-artproposal__eyebrow">RIPPLES</div>
-        <strong>{direction.reach.visualAssets} visual assets</strong>
-        <p>stay as they are, but new work sees v{nextVersion}.</p>
-        <div className="fy-artproposal__ripple-list">
-          <div>
-            <i />
-            {direction.reach.referenceKits} reference kits see a newer world look
-          </div>
-          <div>
-            <i />
-            {direction.reach.productions} productions inherit v{nextVersion} next dispatch
-          </div>
-          {/*
-            Everything already behind, plus everything made under the look this replaces.
-
-            The gate's own preview counts both; this screen counted only the first, so the number
-            immediately before Accept was the smaller one — and it is the takes made since the
-            last change, usually the ones being thought about, that the omission dropped.
-          */}
-          <div>
-            <i className="fy-artproposal__dot-muted" />
-            {direction.reach.earlierAcceptedTakes + (direction.reach.acceptedTakesAtCurrentVersion ?? 0)} accepted
-            takes remain pinned to their original look
-          </div>
-          {direction.overrides.length > 0 && (
-            <div>
-              <i className="fy-artproposal__dot-muted" />
-              {direction.overrides.length} overrides keep their own look
-            </div>
-          )}
-        </div>
-        <div className="fy-artproposal__accept">
+        {compact ? <div className="fy-artproposal__ripple-card">{ripple}</div> : ripple}
+        {!phone && <div className="fy-artproposal__accept">
           <Button
             variant="primary"
             disabled={!staged}
@@ -880,9 +890,17 @@ export function ArtDirectionProposalScreen() {
           >
             Accept · world look v{nextVersion}
           </Button>
-        </div>
+        </div>}
         <p className="fy-artproposal__commit">one commit · prior versions remain in history</p>
       </aside>
+      </div>
+      {phone && <footer className="fy-artproposal__foot">
+        <Button variant="ghost" onClick={cancel}>Cancel</Button>
+        <Button variant="primary" disabled={!staged && draft.trim().length === 0} onClick={() => {
+          if (staged) { acceptProposal(world.meta.worldId, staged.proposal.id); navigate(`/w/${world.meta.worldId}/art-direction`); }
+          else if (!change.track(setArtDirection(world.meta.worldId, draft, direction.masterLook ?? null))) setSendFailed(true);
+        }}>{staged ? `Accept · world look v${nextVersion}` : `Set the look · v${nextVersion}`}</Button>
+      </footer>}
     </div>
   );
 }
