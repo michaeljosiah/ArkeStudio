@@ -2553,6 +2553,7 @@ export async function attachHostText(
   text: string,
   name: string,
 ): Promise<ReadonlyArray<{ name: string; reason: string }>> {
+  if (isRemoteSession()) return attachHostFiles(target, [new File([text], name, { type: "text/plain" })]);
   const host = bridge;
   if (!host?.attachBytes) return [{ name, reason: "attaching needs the desktop app" }];
   try {

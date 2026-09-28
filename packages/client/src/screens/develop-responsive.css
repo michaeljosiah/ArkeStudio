@@ -171,3 +171,9 @@
   .fy-narrative__save > .fy-mono { margin-left: 0 !important; order: -1; color: var(--muted-foreground); font: var(--type-meta); }
   .fy-narrative__save > button { width: 56%; }
 }
+
+@media (min-width: 600px) and (max-width: 899px) {
+  [data-screen="production-chat"] .fy-story__chat { min-width: 0; border: 0; }
+  [data-screen="production-chat"] .fy-story__side { display: contents; }
+  .fy-develop-composer .fy-thread-peek { min-height: 56px; margin-bottom: 14px; width: 100%; }
+}

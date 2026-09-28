@@ -323,7 +323,7 @@ export function Composer(props: ComposerProps) {
       </div>
 
       <div className="fy-cx__bar">
-        {remote && onAttach && <input ref={picker} type="file" multiple hidden aria-label="Choose attachments from this device" onChange={event => {
+        {remote && onAttach && onAttachFiles && <input ref={picker} type="file" multiple hidden aria-label="Choose attachments from this device" onChange={event => {
           const files = Array.from(event.currentTarget.files ?? []);
           event.currentTarget.value = "";
           if (files.length && !locked) void take(() => onAttachFiles ? onAttachFiles(files) : Promise.resolve(files.map(file => ({ name: file.name, reason: "Attachments are unavailable in this conversation." }))), files.length);
@@ -336,7 +336,7 @@ export function Composer(props: ComposerProps) {
               disabled={locked}
               aria-label="Attach images, documents and audio"
               title="Attach images, documents and audio"
-              onClick={() => { if (remote) picker.current?.click(); else onAttach?.(); }}
+              onClick={() => { if (remote && onAttachFiles) picker.current?.click(); else onAttach?.(); }}
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
                 <path className="fy-cx__attachplus" d="M12 5v14M5 12h14" />

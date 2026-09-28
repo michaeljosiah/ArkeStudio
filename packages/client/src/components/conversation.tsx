@@ -929,7 +929,7 @@ export function ProductionConversation({
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
   /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
   const [pointsOpen, setPointsOpen] = useState(false);
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = useMediaQuery("(max-width: 899px)");
   const compact = useMediaQuery("(max-width: 1099px)");
   const [modelsOpen, setModelsOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(false);
@@ -1131,7 +1131,7 @@ export function ProductionConversation({
     // Only the turn's explicit choice travels as an override. The coordinator resolves the
     // captured agent preference before the production default; sending the displayed fallback
     // here would promote that default above the agent and run a different model.
-    const requestId = sendWorldChat(worldId, conversationId, text, [], about, languageModelId, replyOnly, again);
+    const requestId = sendWorldChat(worldId, conversationId, text, (loaded?.attachments ?? []).map(attachment => attachment.id), about, languageModelId, replyOnly, again);
     if (requestId === null) return false;
     setLanguageModelId(undefined);
     onSent?.(requestId);

@@ -6,6 +6,8 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { type ClientMessage } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
+import { Composer } from "../src/components/composer.js";
+import { attachHostText, worldChatAttachTarget } from "../src/lib/store.js";
 import { __clearWorldChatHoldsForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { developLayoutFixture, CHAT_ID } from "./develop-layout-fixture.js";
@@ -92,4 +94,42 @@ it('the held composer follows the visual keyboard viewport but not pinch zoom',a
   Object.assign(dom.window,{visualViewport:viewport});await mount();assert.equal(find('.fy-develop-composer').style.bottom,'277px');
   await act(async()=>{viewport.height=450;for(const changed of changes)changed();});assert.equal(find('.fy-develop-composer').style.bottom,'327px');
   await act(async()=>{viewport.scale=2;for(const changed of changes)changed();});assert.equal(parseFloat(find('.fy-develop-composer').style.bottom),0);
+});
+it('Develop includes the visible reference IDs in the next turn',async()=>{
+ await mount();const state=developLayoutFixture();
+ state.worldChat!.attachments=[{id:'att_reference',fileName:'notes.txt',kind:'document',readability:'text-readable',promoted:false}];
+ await act(async()=>__setStateForTest(state));await draft('Use these notes');await click(find('.fy-cx__send'));
+ const message=sent.find(m=>m.kind==='world-chat-send');assert.deepEqual(message?.attachmentIds,['att_reference']);
+});
+it('remote pasted documents travel through the conversation upload path',async()=>{
+ await mount(undefined,390,'normal',true);const text='Long reference '.repeat(700);
+ assert.deepEqual(await attachHostText(worldChatAttachTarget('saltlight',CHAT_ID),text,'pasted.txt'),[]);
+ const upload=sent.find(m=>m.kind==='world-chat-upload');assert.ok(upload);assert.equal(atob(upload.data),text);
+});
+it('remote composers without byte support retain their supplied attach action',async()=>{
+ await mount(undefined,390,'normal',true);let calls=0;
+ await act(async()=>root!.render(<Composer value="" onChange={()=>{}} onSubmit={()=>{}} placeholder="Write" onAttach={()=>calls++}/>));
+ assert.equal(find('input[type="file"]'),null);await click(find('.fy-cx__attach'));assert.equal(calls,1);
+});
+it('600–899px keeps understood in a sheet with the draft available',async()=>{
+ await mount(undefined,600);await draft('A narrow tablet');assert.ok(find('.fy-thread-peek'));assert.equal(find('.fy-develop-sheet[open]'),null);
+ await click(find('.fy-thread-peek'));assert.ok(find('.fy-develop-sheet[open]'));
+ await act(async()=>{width=984;for(const listener of listeners)listener();});assert.equal(find('.fy-thread-peek'),null);assert.equal(find('.fy-cx__editor').innerText,'A narrow tablet');
+});
+it('an empty compact overview cannot begin an empty page read',async()=>{
+ await mount('p/ledger/overview');const state=developLayoutFixture();state.world!.productions[1]!.story=null;
+ await act(async()=>__setStateForTest(state));assert.equal(find('.fy-overview__read button'),null);
+});
+it('overview decisions disappear when the staged proposal becomes unattended or is removed',async()=>{
+ await mount('p/ledger/overview',390,'staged');const state=developLayoutFixture('staged');state.world!.proposals[0]!.proposal.targets[0]!.path='productions/ledger/story.json';
+ await act(async()=>__setStateForTest(state));await click(find('.fy-overview-waiting'));assert.ok(find('.fy-develop-sheet[open]'));
+ state.world!.proposals[0]!.proposal.decision={mode:'unattended'};
+ await act(async()=>__setStateForTest(state));assert.equal(find('.fy-overview-waiting'),null);assert.equal(find('.fy-develop-sheet[open]'),null);
+ state.world!.proposals=[];await act(async()=>__setStateForTest({...state}));assert.equal(find('.fy-develop-sheet[open]'),null);
+});
+it('accepting changed style text replaces its reader instead of retaining old audio',async()=>{
+ await mount('p/ledger/overview',390,'style');const before=find('.fy-overview-card:last-child [aria-label="Read aloud"]');assert.ok(before);
+ const state=developLayoutFixture('style');state.world!.productions[1]!.proseStyle!.samples=['An entirely different sample.'];
+ await act(async()=>__setStateForTest(state));const after=find('.fy-overview-card:last-child [aria-label="Read aloud"]');assert.notEqual(before,after);
+ await click(after);assert.equal(sent.find(m=>m.kind==='read-prose')?.source.of,'story');
 });
