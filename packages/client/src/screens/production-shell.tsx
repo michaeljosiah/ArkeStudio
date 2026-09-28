@@ -1,4 +1,5 @@
 import {
+  orderedShots,
   audiobookDoorLine,
   buildRenderPlan,
   deriveCut,
@@ -240,7 +241,7 @@ function ProductionSwitcher({
 // ---- the production shell (frames 11a/14a left rail) -----------------------
 
 export function ProductionLayout() {
-  const { worldId, prodId, episodeId, sceneId } = useParams();
+  const { worldId, prodId, episodeId, sceneId, shotId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const refusal = useWorldOpenRefusal(worldId);
   const location = useLocation();
@@ -340,7 +341,11 @@ export function ProductionLayout() {
   // shot's page (turn 145) is the scene's workspace one level down, and folds with it.
   const sceneDetailDefault =
     /\/scenes\/[^/]+(\/shots\/[^/]+)?\/?$/.test(location.pathname) || /\/story\/chapters\/[^/]+\/?$/.test(location.pathname);
-  const wantsFold = railChoice ?? (location.pathname.endsWith("/cut") || sceneDetailDefault);
+  const sceneRoute = /\/scenes(?:\/[^/]+(?:\/shots\/[^/]+)?)?\/?$/.test(location.pathname);
+  const sceneChrome = compact && sceneRoute ? production?.scenes.find(scene => scene.id === sceneId) : undefined;
+  const shotChrome = sceneChrome && orderedShots(sceneChrome).find(shot => shot.id === shotId);
+  const sceneDeepPhone = phone && !refusal && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined);
+  const wantsFold = compact && sceneRoute || (railChoice ?? (location.pathname.endsWith("/cut") || sceneDetailDefault));
   const drawerMode = !phone && wantsFold && (compact || coarse);
   const folded = !phone && wantsFold && !drawerMode;
   useEffect(() => { setDrawerOpen(false); }, [location.pathname, location.search]);
@@ -708,15 +713,15 @@ export function ProductionLayout() {
         </div>
   );
   return (
-    <div className="fy-app fy-production-app">
-      <AppChrome
-        back={{ label: "World", to: `/w/${worldId}` }}
+    <div className="fy-app fy-production-app" data-scene-route={sceneRoute || undefined} data-deep-phone={sceneDeepPhone || undefined}>
+      {!sceneDeepPhone && <AppChrome
+        back={sceneChrome ? { label: shotChrome ? `Scene ${sceneChrome.number}` : "Scenes", to: `${base}/scenes${shotChrome ? `/${sceneChrome.id}` : ""}` } : { label: "World", to: `/w/${worldId}` }}
         context={{
-          label: production && shape ? `${production.meta.title} · ${shape.displayLabel.toLowerCase()}` : "…",
+          label: production && shape ? `${production.meta.title} · ${shotChrome ? `shot ${shotChrome.number}` : sceneChrome ? `scene ${sceneChrome.number}` : shape.displayLabel.toLowerCase()}` : "…",
           to: `/w/${worldId}/productions`,
         }}
-      />
-      {phone && <div className="fy-production-mobile-nav">
+      />}
+      {phone && !sceneDeepPhone && <div className="fy-production-mobile-nav">
         <ProductionSwitcher menuState={switchMenu} world={world} production={production} sub={switchSub} folded={false} chevron={<ChevronDown size={18} />} />
         <div className="fy-production-pages"><nav ref={pages} aria-label="Production pages">
           {productionPages(shape).map(([slug, label]) => {
@@ -728,7 +733,7 @@ export function ProductionLayout() {
       </div>}
       <div className="fy-prod">
         {!phone && (drawerMode ? <>
-          <button type="button" className="fy-production-drawer-toggle" aria-label="Open production navigation" aria-haspopup="dialog" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}><PanelLeft size={20} /><span>Pages</span></button>
+          <button type="button" className="fy-production-drawer-toggle" aria-label="Open production navigation" aria-haspopup="dialog" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}><PanelLeft size={20} /><span>{sceneRoute ? production?.meta.title : "Pages"}</span></button>
           <dialog ref={drawer} className="fy-production-drawer" aria-label="Production navigation" onCancel={event => { event.preventDefault(); setDrawerOpen(false); }} onClick={event => { if (event.target === event.currentTarget) setDrawerOpen(false); }}>{rail}</dialog>
         </> : rail)}
         <div className="fy-prodwrap">

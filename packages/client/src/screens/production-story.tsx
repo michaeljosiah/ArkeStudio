@@ -1,3 +1,4 @@
+import { useMediaQuery } from "../lib/media-query.js";
 import {
   resolvedAuthoredDuration,
   type ProseReadSource,
@@ -19,6 +20,7 @@ import { EmptyState, Screen } from "../components/layout.js";
 import { Badge, Button, IconButton, Input, cx } from "../components/ui.js";
 import {
   Archive,
+  Plus,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -944,6 +946,7 @@ function ManuscriptImportSheet({
 // ---- Scenes ----------------------------------------------------------------
 
 export function ScenesScreen() {
+  const phone = useMediaQuery("(max-width: 599px)");
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
@@ -956,7 +959,7 @@ export function ScenesScreen() {
       <div className="fy-h1row">
         <h1 className="fy-h1">Scenes</h1>
         <span className="fy-h1row__meta">
-          {production?.scenes.length ?? 0} scenes · {seconds(totalSec)}
+          {phone ? `${production?.meta.title ?? ""} · ` : ""}{production?.scenes.length ?? 0} scenes · {seconds(totalSec)}
         </span>
         <span className="fy-h1row__push" />
         <Button
@@ -964,7 +967,7 @@ export function ScenesScreen() {
           disabled={newScene.pending}
           onClick={() => newScene.create(defaultEpisodeFor(production))}
         >
-          New scene
+          {phone ? <><Plus size={16} />New</> : "New scene"}
         </Button>
       </div>
       {production && production.scenes.length > 0 ? (
@@ -997,7 +1000,7 @@ export function ScenesScreen() {
                   <div className="fy-row__sub">
                     {sceneShots.length} shots ·{" "}
                     {seconds(sceneShots.reduce((s, x) => s + resolvedAuthoredDuration(x), 0))}
-                    {scene.inherits?.location ? ` · @${scene.inherits.location}` : ""}
+                    {scene.inherits?.location ? ` · ${phone ? world?.sheets.find(sheet => sheet.id === scene.inherits?.location)?.name ?? scene.inherits.location : `@${scene.inherits.location}`}` : ""}
                     {scene.inherits?.timeOfDay ? ` · ${scene.inherits.timeOfDay}` : ""}
                   </div>
                 </div>

@@ -1,3 +1,6 @@
+import { SceneBackRow, SceneDock, SceneRenameSheet, useSceneDock } from "./responsive-chrome.js";
+import { useMediaQuery } from "../../lib/media-query.js";
+import { PageSheet } from "../../components/page-sheet.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
@@ -46,7 +49,7 @@ import { CastPicker, SheetPicture, sceneCast, type CastPickerMode } from "./cast
 import { CharacterDialog } from "./character-dialog.js";
 import { LocationDialog } from "./location-dialog.js";
 import { Button } from "../../components/ui.js";
-import { Film, Grid2x2, ImageMark, ListBullet, Maximize2, Minimize2, More, Pin, Plus, Timer } from "../../components/icons.js";
+import { Film, Grid2x2, ImageMark, ListBullet, Maximize2, Minimize2, More, Plus, Timer } from "../../components/icons.js";
 import { BoardSheet } from "./board-sheet.js";
 import { ScenePreview } from "./preview.js";
 import { PlansPanel } from "./plans.js";
@@ -83,6 +86,7 @@ export function SceneWorkspace({
   const digests = useBlockDigests(legacySceneView(scene));
   // `?view=preview` is the shot page's Play from here (turn 145): the address opens the view once
   // and the choice stays a choice, never a bookmark.
+  const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
   const [view, setView] = useState<"storyboard" | "flow" | "preview">(() => (searchParams.get("view") === "preview" ? "preview" : "storyboard"));
   useEffect(() => {
     // Read once, then taken out of the address: a Back to this entry must not reopen Preview.
@@ -120,7 +124,7 @@ export function SceneWorkspace({
   const [showBoards, setShowBoards] = useState(false);
   // The Grid is the storyboard's default (turn 145); the choice is remembered per person, not
   // per scene, and never written to the world.
-  const [storyboardLayout, setStoryboardLayoutState] = useState<"list" | "grid">(rememberedLayout);
+  const [storyboardLayout, setStoryboardLayoutState] = useState<"list" | "grid">(() => fold ? "list" : rememberedLayout());
   const setStoryboardLayout = (layout: "list" | "grid") => {
     setStoryboardLayoutState(layout);
     rememberLayout(layout);
@@ -157,7 +161,11 @@ export function SceneWorkspace({
   const generateReturnFocus = useRef<HTMLElement>(null);
   // Arke can be put away (R-28). Local to the session rather than a setting: it is a gesture
   // about right now — "give me the width" — not a preference about how the app should be.
-  const [dock, setDock] = useState(true);
+  const [dock, setDock] = useSceneDock();
+  const [renameOpen, setRenameOpen] = useState(false);
+  const phone = useMediaQuery("(max-width: 599px)");
+  useEffect(() => { if (phone && view === "flow") { setView("storyboard"); setFull(false); } }, [phone, view]);
+  const [synopsisOpen, setSynopsisOpen] = useState(false);
   // The dock title toggles between the shot and the whole scene; this remembers which shot to
   // come back to, since the scene subject carries none.
   const lastShotSubject = useRef<string | null>(null);
@@ -450,6 +458,14 @@ export function SceneWorkspace({
     <SelectionProvider value={selection}>
       <div className="fy-sw" data-screen="scene-detail" data-testid="scene-workspace" data-dock={dock ? "true" : "false"} data-full={fullscreen ? "true" : undefined}>
         <main className="fy-sw__centre">
+          {phone && <SceneBackRow context={`${production.meta.title} · Scenes`} title={`Scene ${scene.number} · ${scene.title}`} onBack={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes`)}>
+            <button type="button" onClick={() => setSynopsisOpen(true)}>Scene details</button>
+            <button type="button" onClick={() => setShowBoards(!showBoards)}>{showBoards ? "Hide boards" : "Show boards"}</button>
+            <button type="button" onClick={() => setDock(true)}>Ask Arke</button>
+            <button type="button" disabled={locked} onClick={() => setRenameOpen(true)}>Rename</button>
+          </SceneBackRow>}
+          {renameOpen && <SceneRenameSheet title="Rename scene" value={scene.title} locked={locked} onClose={() => setRenameOpen(false)} onCommit={title => write({ kind: "edit-scene", title })} />}
+          <PageSheet open={synopsisOpen} onClose={() => setSynopsisOpen(false)} title="Scene details" keepMounted><SceneSynopsis scene={legacySceneView(scene)} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} /></PageSheet>
           {fullscreen ? (
             <>
               <div className="fy-sw__fullpill">
@@ -556,7 +572,7 @@ export function SceneWorkspace({
           <div className="fy-sw__toolbar">
             <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
               {/* A visual novel has no motion to lay out, so Flow is a film's (turn 174). */}
-              {(playsAsBeats ? (["storyboard", "preview"] as const) : (["storyboard", "flow", "preview"] as const)).map((candidate) => (
+              {(playsAsBeats || phone ? (["storyboard", "preview"] as const) : (["storyboard", "flow", "preview"] as const)).map((candidate) => (
                 <button
                   key={candidate}
                   type="button"
@@ -647,7 +663,7 @@ export function SceneWorkspace({
 
           {view === "storyboard" ? (
             <StoryboardRows
-              layout={boardsVisible ? "list" : storyboardLayout}
+              layout={phone ? "grid" : boardsVisible ? "list" : storyboardLayout}
               scene={workingScene}
               acceptedScene={scene}
               world={world}
@@ -759,7 +775,7 @@ export function SceneWorkspace({
           </footer>
         </main>
 
-        {dock ? (
+        <SceneDock open={dock} onOpen={() => setDock(true)} onClose={() => setDock(false)}>
           <ProductionConversation
             worldId={world.meta.worldId}
             productionId={production.meta.id}
@@ -811,14 +827,7 @@ export function SceneWorkspace({
                   ),
                 })}
           />
-        ) : (
-          // Put away, the assistant leaves a slim rail: a way back, and the word that it is here.
-          <button type="button" className="fy-sw__rail" title="Pin the assistant back" onClick={() => setDock(true)}>
-            <span className="fy-sw__rail-dot" aria-hidden="true" />
-            <span className="fy-sw__rail-label">Ask Arke</span>
-            <span className="fy-sw__rail-pin"><Pin size={13} /></span>
-          </button>
-        )}
+        </SceneDock>
         <GenerateFramesDialog
           open={generateTarget !== null}
           state={state}

@@ -1133,7 +1133,7 @@ describe("the shell collapses rather than demanding the width (R-28)", () => {
     assert.ok(q(mounted, ".fy-arke"), "the dock starts open");
     // The put-away lives on the dock itself (a pin in its head), and a slim rail brings it back.
     await click(q(mounted, '.fy-arke__head [aria-label="Unpin the assistant"]')!);
-    assert.equal(q(mounted, ".fy-arke"), null, "put away, not merely hidden");
+    assert.ok(q(mounted, ".fy-arke")?.closest("[hidden]"), "put away while preserving the unsent composer");
     assert.equal(q(mounted, '[data-testid="scene-workspace"]')?.getAttribute("data-dock"), "false");
     assert.ok(q(mounted, '[data-testid="workspace-rows"]'), "and the rows are still there");
     const rail = q(mounted, ".fy-sw__rail")!;

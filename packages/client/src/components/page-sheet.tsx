@@ -1,19 +1,23 @@
-import { useLayoutEffect, useId, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { IconButton } from "./ui.js";
 import { X } from "./icons.js";
 
 /** Turn 163 uses the character sheet's shape with native focus containment and an inert page. */
-export function PageSheet({ open, onClose, title, children, footer, className }: {
+export function PageSheet({ open, onClose, title, children, footer, className, keepMounted = false }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
   footer?: ReactNode;
   className?: string;
+  /** Keep ongoing requests and viewport attachments alive while their sheet is put away. */
+  keepMounted?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const heading = useId();
+  const [mounted, setMounted] = useState(false);
+  useLayoutEffect(() => { setMounted(true); }, []);
   useLayoutEffect(() => {
     const dialog = ref.current;
     if (!dialog || !open) return;
@@ -24,8 +28,8 @@ export function PageSheet({ open, onClose, title, children, footer, className }:
       dialog.close?.();
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
-  }, [open]);
-  if (!open) return null;
+  }, [open, mounted]);
+  if (!mounted || (!open && !keepMounted)) return null;
   return createPortal(
     <dialog ref={ref} className={["fy-page-sheet", className].filter(Boolean).join(" ")} aria-labelledby={heading}
       onCancel={(event) => { event.preventDefault(); onClose(); }}
@@ -41,4 +45,3 @@ export function PageSheet({ open, onClose, title, children, footer, className }:
     </dialog>, document.body,
   );
 }
-

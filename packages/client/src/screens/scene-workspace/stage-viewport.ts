@@ -23,6 +23,7 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   MOUSE,
+  TOUCH,
   Object3D,
   OctahedronGeometry,
   OrthographicCamera,
@@ -356,6 +357,7 @@ export class StageViewport {
     // LEFT must be null, not a preference: with LEFT bound to ROTATE, OrbitControls takes pointer
     // capture before any selection code runs, and stopPropagation cannot reach it.
     controls.mouseButtons = { LEFT: null, MIDDLE: MOUSE.ROTATE, RIGHT: MOUSE.PAN };
+    controls.touches = { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN };
     controls.enableDamping = true;
     controls.dampingFactor = 0.09;
     controls.target.set(0, 0.9, 0);
@@ -394,6 +396,7 @@ export class StageViewport {
     });
     transform.addEventListener("objectChange", () => this.liveProxy());
     this.transform = transform;
+    renderer.domElement.addEventListener("pointerdown", event => { transform.enabled = event.pointerType !== "touch"; }, true);
     this.transformHelper = transform.getHelper();
     this.transformHelper.visible = false;
     this.scene.add(this.transformHelper);
@@ -411,18 +414,40 @@ export class StageViewport {
     this.pip = pip;
     this.pipCaption = caption;
 
+    // Touch belongs to OrbitControls. The mouse's figure-drag path would otherwise steal its
+    // pointer capture and turn a one-finger orbit into a move of authored blocking.
+    const fingers = new Map<number, { x: number; y: number; moved: boolean; multi: boolean }>();
+    let lastTap: { time: number; x: number; y: number } | null = null;
+    let lastTouchAt = Number.NEGATIVE_INFINITY;
     renderer.domElement.addEventListener("pointerdown", (event) => {
-      if (event.button === 0) this.down(event);
+      if (event.pointerType !== "touch") { if (event.button === 0) this.down(event); return; }
+      lastTouchAt = performance.now();
+      if (fingers.size) { for (const finger of fingers.values()) finger.multi = true; lastTap = null; }
+      fingers.set(event.pointerId, { x: event.clientX, y: event.clientY, moved: false, multi: fingers.size > 0 });
+    });
+    renderer.domElement.addEventListener("pointermove", event => {
+      const finger = fingers.get(event.pointerId);
+      if (finger && Math.hypot(event.clientX - finger.x, event.clientY - finger.y) > 8) finger.moved = true;
+    });
+    renderer.domElement.addEventListener("pointercancel", event => { fingers.delete(event.pointerId); lastTap = null; });
+    renderer.domElement.addEventListener("pointerup", event => {
+      const finger = fingers.get(event.pointerId); fingers.delete(event.pointerId);
+      if (!finger || finger.moved || finger.multi || this.recordingAt !== null) { lastTap = null; return; }
+      const time = performance.now();
+      if (lastTap && time - lastTap.time < 350 && Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) < 24) { this.track(event); lastTap = null; }
+      else lastTap = { time, x: event.clientX, y: event.clientY };
     });
     renderer.domElement.addEventListener("contextmenu", (event) => event.preventDefault());
     renderer.domElement.addEventListener("dblclick", (event) => {
       // A recording reads the data the panel holds; a track picked mid-take would change the
       // active key under it and file a take of two stagings under one version.
-      if (this.recordingAt !== null) return;
+      // Chromium follows two taps with a compatibility dblclick; the touch path already
+      // followed this figure, so that synthetic mouse event must not author the move twice.
+      if (this.recordingAt !== null || performance.now() - lastTouchAt < 500) return;
       this.track(event);
     });
     renderer.domElement.addEventListener("pointermove", (event) => {
-      if (this.transform.dragging || this.data.mode === "camera") return;
+      if (event.pointerType === "touch" || this.transform.dragging || this.data.mode === "camera") return;
       const hit = this.probe(event);
       host.style.cursor = hit === null ? "grab" : this.isSelected(hit) ? "grab" : "pointer";
     });

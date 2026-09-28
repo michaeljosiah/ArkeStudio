@@ -1,3 +1,4 @@
+import { useMediaQuery } from "../../lib/media-query.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -828,6 +829,8 @@ function Row({
   nextShotId: string | null;
   beat?: RowBeat;
 }) {
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
   const band = useRef<HTMLDivElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement | null>(null);
   const menuPanel = useRef<HTMLDivElement | null>(null);
@@ -1014,6 +1017,12 @@ function Row({
       setScriptDraft(shot.description);
     }
   };
+  const previousPhone = useRef(phone);
+  useEffect(() => {
+    const becamePhone = phone && !previousPhone.current;
+    previousPhone.current = phone;
+    if (becamePhone && scriptFocused) { commitScript(); setScriptFocused(false); }
+  }, [phone]);
   const durationSec = shot.durationSec ?? DEFAULT_SHOT_SEC;
   // The title opens the page (turn 145); the pencil beside it is the editor.
   const titleControl = editingTitle ? (
@@ -1043,8 +1052,8 @@ function Row({
       <button ref={titleTrigger} type="button" className="fy-swrow__pencil" aria-label={`Edit title for shot ${shot.number}`} title="Rename" disabled={disabled} onClick={(event) => { event.stopPropagation(); setEditingTitle(true); }}><Pencil size={14} /></button>
     </span>
   );
-  const stateChip = state === "needs attention" || state === "story"
-    ? <span className="fy-swchip" data-state={state}><span aria-hidden="true" />{state === "needs attention" ? "Needs attention" : "Needs frame"}</span>
+  const stateChip = compact || state === "needs attention" || state === "story"
+    ? <span className="fy-swchip" data-state={state}><span aria-hidden="true" />{state === "needs attention" ? "Needs attention" : state === "rendered" ? "Rendered" : hasFrame ? "Frame ready" : "Needs frame"}</span>
     : null;
   const durationControl = editingDuration ? (
     <input
@@ -1065,7 +1074,7 @@ function Row({
       }}
     />
   ) : <button ref={durationTrigger} type="button" aria-label={`Edit duration for shot ${shot.number}`} title="Edit duration in seconds" disabled={disabled} onClick={() => setEditingDuration(true)}>{durationSec}s</button>;
-  const scriptEditor = (
+  const scriptEditor = phone ? <p className="fy-swrow__script-read">{scriptWords(shot.description, names, "read")}</p> : (
     <div
       className="fy-swrow__script fy-swrow__scripteditor"
       title="Write what happens · type @ to name anything in the world"
@@ -1129,7 +1138,7 @@ function Row({
           disabled={staged}
           onClick={onEdit}
         >
-          <ChevronRight size={15} />
+          {compact ? "Open shot" : <ChevronRight size={15} />}
         </button>
       </div>
     </div>
@@ -1206,6 +1215,12 @@ function Row({
             canUpload={canPickFiles()}
             canClear={frame.pointer}
             onPreview={onPreview}
+            order={{
+              onUp: prevShotId === null ? null : () => onCommand({ kind: "move-shot", shotId: shot.id, to: { before: prevShotId } }),
+              onDown: nextShotId === null ? null : () => onCommand({ kind: "move-shot", shotId: shot.id, to: { after: nextShotId } }),
+              onInsert: () => onCommand({ kind: "insert-shot", at: { after: shot.id }, shot: { title: UNTITLED_SHOT, description: "" } }),
+              onDelete: () => { menuReturnFocus.current = band.current; openDelete(); },
+            }}
             onVariants={(trigger) => { variantsTrigger.current = trigger; variantsDialog.current?.showModal(); }}
             onUpload={() => importShotFrame(worldId, production.meta.id, shot.id)}
             onClear={() => clearShotFrame(worldId, production.meta.id, shot.id)}
@@ -1381,6 +1396,10 @@ function Row({
                     {generatorPending ? "Opening…" : "Open in generator"}
                   </button>
                   <button type="button" role="menuitem" disabled={disabled} onClick={() => { closeMenu(true); onCommand({ kind: "duplicate-shot", shotId: shot.id }); }}>Duplicate</button>
+                  {compact && <>
+                    <button type="button" role="menuitem" disabled={disabled || prevShotId === null} onClick={() => { closeMenu(true); if (prevShotId !== null) onCommand({ kind: "move-shot", shotId: shot.id, to: { before: prevShotId } }); }}>Move up</button>
+                    <button type="button" role="menuitem" disabled={disabled || nextShotId === null} onClick={() => { closeMenu(true); if (nextShotId !== null) onCommand({ kind: "move-shot", shotId: shot.id, to: { after: nextShotId } }); }}>Move down</button>
+                  </>}
                   <button
                     type="button"
                     role="menuitem"

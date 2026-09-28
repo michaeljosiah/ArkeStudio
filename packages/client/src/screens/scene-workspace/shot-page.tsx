@@ -1,3 +1,5 @@
+import { SceneBackRow, SceneDock, SceneRenameSheet, useSceneDock } from "./responsive-chrome.js";
+import { useMediaQuery } from "../../lib/media-query.js";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import {
@@ -23,7 +25,7 @@ import { productionModel, resolveModel } from "../../components/dispatch-bar.js"
 import { ProductionConversation, StagedDecision } from "../../components/conversation.js";
 import { EmptyState, Screen } from "../../components/layout.js";
 import { Button } from "../../components/ui.js";
-import { ChevronLeft, ChevronRight, ImageMark, Maximize2, More, Pencil, Pin } from "../../components/icons.js";
+import { ChevronLeft, ChevronRight, ImageMark, Maximize2, More, Pencil } from "../../components/icons.js";
 import { mediaUrl } from "../../lib/media.js";
 import { acceptTake, clearShotFrame, frameRunCommand, importShotFrame, sendBenchOpenSubject, subscribeBenchSubjectOpened, useClientState, useStore } from "../../lib/store.js";
 import { acceptedTakeId, takesForShot, useProduction } from "../../lib/selectors.js";
@@ -184,7 +186,11 @@ function ShotWorkspace({
     [shotId, view, scenePath],
   );
 
-  const [dock, setDock] = useState(true);
+  const [dock, setDock] = useSceneDock();
+  const [renameOpen, setRenameOpen] = useState(false);
+  const phone = useMediaQuery("(max-width: 599px)");
+  const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
+  const [primarySlot, setPrimarySlot] = useState<HTMLDivElement | null>(null);
   const [generating, setGenerating] = useState(false);
   const [openMember, setOpenMember] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -335,6 +341,15 @@ function ShotWorkspace({
     <SelectionProvider value={selection}>
       <div className="fy-sw" data-screen="shot" data-testid="shot-page" data-dock={dock ? "true" : "false"} data-full={fullscreen ? "true" : undefined} style={{ "--shot-aspect": aspect.replace(":", " / ") } as CSSProperties}>
         <main className="fy-sw__centre">
+          {phone && <SceneBackRow context={`Scene ${scene.number} · ${scene.title}`} title={`Shot ${shot.number} · ${shot.title}`} onBack={() => navigate(`${scenePath}?shot=${shot.id}`)}>
+            <button type="button" disabled={disabled || generatorPending} onClick={() => openGenerator()}>Open in generator</button>
+            <button type="button" onClick={() => navigate(`${scenePath}?shot=${shot.id}&view=preview`)}>Play from here</button>
+            <button type="button" disabled={disabled} onClick={() => write({ kind: "duplicate-shot", shotId: shot.id })}>Duplicate</button>
+            <button type="button" disabled={disabled} onClick={() => setConfirmDelete(true)}>Delete</button>
+            <button type="button" onClick={() => setDock(true)}>Ask Arke</button>
+            <button type="button" disabled={disabled} onClick={() => setRenameOpen(true)}>Rename</button>
+          </SceneBackRow>}
+          {renameOpen && <SceneRenameSheet title="Rename shot" value={shot.title} locked={disabled} onClose={() => setRenameOpen(false)} onCommit={title => write({ kind: "edit-shot", shotId: shot.id, change: { title } })} />}
           {fullscreen ? (
             <div className="fy-sw__fullpill">
               {production.meta.title} · {episode === undefined ? "" : `episode ${episode.order} · `}scene {scene.number} · shot {shot.number}
@@ -524,9 +539,15 @@ function ShotWorkspace({
                     </div>
                   </dialog>
                 </div>
+                <div className="fy-shot__touch-actions">
+                  <Button variant="primary" disabled={disabled || frameRun?.status === "active" || frameRun?.status === "paused"} onClick={event => { generateReturnFocus.current = event.currentTarget; setGenerating(true); }}>{frame.hasFrame ? "Regenerate" : "Generate frame"}</Button>
+                  <Button variant="outline" disabled={frameVariants.length === 0} onClick={event => { variantsTrigger.current = event.currentTarget; variantsDialog.current?.showModal(); }}>Variants · {frameVariants.length}</Button>
+                </div>
+                {fold && <div className="fy-shot__primary" ref={setPrimarySlot} />}
               </div>
               <div className="fy-shot__column">
                 <ShotFields
+                  primarySlot={fold ? primarySlot : null}
                   world={world}
                   production={production}
                   scene={pageScene}
@@ -566,7 +587,7 @@ function ShotWorkspace({
           </footer>
         </main>
 
-        {dock ? (
+        <SceneDock open={dock} onOpen={() => setDock(true)} onClose={() => setDock(false)} stage={view === "stage"}>
           <ProductionConversation
             worldId={world.meta.worldId}
             productionId={production.meta.id}
@@ -604,13 +625,7 @@ function ShotWorkspace({
                   ),
                 })}
           />
-        ) : (
-          <button type="button" className="fy-sw__rail" title="Pin the assistant back" onClick={() => setDock(true)}>
-            <span className="fy-sw__rail-dot" aria-hidden="true" />
-            <span className="fy-sw__rail-label">Ask Arke</span>
-            <span className="fy-sw__rail-pin"><Pin size={13} /></span>
-          </button>
-        )}
+        </SceneDock>
         <GenerateFramesDialog
           open={generating}
           state={state}
