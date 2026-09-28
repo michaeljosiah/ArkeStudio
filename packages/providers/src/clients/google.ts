@@ -169,14 +169,32 @@ export class GoogleClient implements VoiceCatalogueClient, VoiceDesignClient {
 
   async submit(key: string, request: SubmitRequest): Promise<SubmitResult> {
     if (request.capability !== "voice-tts" || !GEMINI_TTS_MODELS.some(model => model === request.model)) throw new ProviderRequestRejectedError("Google: unsupported speech model");
+    if (request.voiceDesign === true) {
+      const result = await this.createDesignedVoice(key, {
+        model: request.model, name: request.params.name as string,
+        description: request.params.text as string, language: request.params.language as string,
+      }, request.signal);
+      if (!result.remoteId) throw new Error(result.problem ?? "Google voice creation outcome is uncertain; do not repeat it automatically");
+      return { remoteId: result.remoteId, acceptedAt: new Date().toISOString(),
+        ...(result.speechUsage ? { speechUsage: result.speechUsage } : {}),
+        ...(result.sample ? { artifacts: [result.sample] } : {}),
+        ...(result.problem ? { error: result.problem } : {}),
+      };
+    }
     const text = request.params.text;
-    const voice = request.params.voiceId;
+    let voice = request.params.voiceId;
+    if (request.designedVoice) {
+      if (request.designedVoice.target !== voice || typeof voice !== "string" || !voice.startsWith("designed:")) throw new ProviderRequestRejectedError("Google: the saved voice binding does not match this read");
+      const bound = await this.getDesignedVoice(key, request.designedVoice.remoteId, request.signal);
+      if (!bound?.voice || Date.parse(bound.voice.expiresAt) <= Date.now()) throw new ProviderRequestRejectedError("Google: this saved voice is expired or unavailable with the current key");
+      voice = bound.voice.remoteId;
+    }
     const delivery = request.params.delivery;
     const mappings = geminiSpeechModel("flash").cadence!.deliveryMappings;
     if (delivery !== undefined && (typeof delivery !== "string" || !Object.hasOwn(mappings, delivery))) throw new ProviderRequestRejectedError("Google: unsupported speech delivery");
     const instructions = request.params.instructions ?? (typeof delivery === "string" ? mappings[delivery]?.instruction : undefined);
     if (typeof text !== "string" || text.trim() === "") throw new ProviderRequestRejectedError("Google: no words to read");
-    if (typeof voice !== "string" || !GEMINI_PRESETS.some(([id]) => id === voice)) throw new ProviderRequestRejectedError("Google: choose a supported preset voice; saved project voices need a verified binding");
+    if (typeof voice !== "string" || (!request.designedVoice && !GEMINI_PRESETS.some(([id]) => id === voice))) throw new ProviderRequestRejectedError("Google: choose a supported preset voice; saved project voices need a verified binding");
     if (request.voiceReference !== undefined) throw new ProviderRequestRejectedError("Google: a reference recording requires a separately authorised replication operation");
     if (instructions !== undefined && typeof instructions !== "string") throw new ProviderRequestRejectedError("Google: invalid speech direction");
     if (request.params.voiceSettings !== undefined && Object.keys(record(request.params.voiceSettings)).length > 0) throw new ProviderRequestRejectedError("Google: numeric voice settings are unsupported; use structured speech direction");

@@ -1,4 +1,7 @@
-import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, speechInputFits } from "@arke-studio/contracts";
+import { isDesignedVoiceTarget, resolveDesignedVoice, VoiceDesignDraftSchema, quoteVoiceDesign } from "@arke-studio/contracts";
+import type { VoiceDesignClient } from "@arke-studio/providers";
+import { saveDesignedVoice } from "./voice/designed-library.js";
 import { ProductionCreationService } from "./application/production-creation.js";
 import { AdapterLibrary, adapterSetupEntries, type AdapterComplianceClient } from "./local-ai/adapter-library.js";
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
@@ -1227,9 +1230,24 @@ export class Coordinator {
   }
 
   /** Saved Gemini choices are revalidated against the current key before a quote or new job. */
+  private designedVoiceClient(): Pick<VoiceDesignClient, "getDesignedVoice"> {
+    const client = this.opts.dispatchClients?.google as (DispatchClient & Partial<VoiceDesignClient>) | undefined;
+    if (!client?.getDesignedVoice) throw new Error("Google voice creation is unavailable on this host.");
+    return client as Pick<VoiceDesignClient, "getDesignedVoice">;
+  }
+
   private async requireEnabledSpeechReader(model: import("@arke-studio/contracts").ManifestModel, voiceId: string): Promise<void> {
     if (this.readModel.getState().app.models.disabled.includes(model.id)) throw new Error(`${model.displayName} is turned off in AI models.`);
     if (model.provider === "google") {
+      if (isDesignedVoiceTarget(voiceId)) {
+        const voice = resolveDesignedVoice(this.opts.provider.openStore?.()?.getBundle().designedVoices ?? [], voiceId);
+        if (!voice || Date.parse(voice.expiresAt) <= Date.now()) throw new Error("This saved voice is missing or expired. Saved audio still plays.");
+        const key = await this.credentials?.get("google");
+        if (!key) throw new Error("Connect Google in Settings to read with this voice.");
+        const verified = await this.designedVoiceClient().getDesignedVoice(key, voice.remoteId, AbortSignal.timeout(60_000));
+        if (!verified?.voice || Date.parse(verified.voice.expiresAt) <= Date.now()) throw new Error("This voice is unavailable with the current Google key.");
+        return;
+      }
       const catalogue = await this.voiceService?.cloudCatalogue("google");
       if (!catalogue?.some(voice => voice.provider === model.provider && voice.model === model.id && voice.voiceId === voiceId)) {
         throw new Error("That Gemini voice is not available with the current Google key. Choose an available voice or update the key.");
@@ -1246,6 +1264,11 @@ export class Coordinator {
       if (input.provider !== "google") continue;
       const model = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
       if (!model) throw new Error("That Gemini voice model is unavailable.");
+      if (input.target.kind === "voice-design") {
+        VoiceDesignDraftSchema.parse({ model: input.model, name: input.params.name, description: input.params.text, language: input.params.language });
+        this.designedVoiceClient();
+        continue;
+      }
       const voiceId = typeof input.params.voiceId === "string" ? input.params.voiceId : "";
       const key = await this.credentials?.get("google") ?? null;
       const credential = key === null ? null : createHash("sha256").update(key).digest("hex");
@@ -1275,7 +1298,7 @@ export class Coordinator {
   private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[] }> {
     const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
     const clonedVoices = store.getBundle().clonedVoices ?? [];
-    const catalogue = voice === null ? [] : ((await voice.catalogue(clonedVoices, await this.comfyUiVoiceAvailability()).catch(() => null)) ?? []);
+    const catalogue = voice === null ? [] : ((await voice.catalogue(clonedVoices, await this.comfyUiVoiceAvailability(), store.getBundle().designedVoices).catch(() => null)) ?? []);
     const narrationCatalogue = catalogue.filter((candidate) => supportsVoiceUse(candidate, "narration") && candidate.unavailableReason === undefined);
     const book = productionId === undefined ? null : await readAudiobookBook(store, productionId).catch(() => null);
     const own = book === null || book === "unreadable" || book.narrator === undefined ? null : narratorFor(book.narrator, narrationCatalogue);
@@ -1632,7 +1655,7 @@ export class Coordinator {
     const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
     const narratorVoices = this.opts.provider.openStore?.()?.getBundle().clonedVoices ?? [];
     const narrationCatalogue = (
-      await this.voiceService.catalogue(narratorVoices, await this.comfyUiVoiceAvailability())
+      await this.voiceService.catalogue(narratorVoices, await this.comfyUiVoiceAvailability(), this.opts.provider.openStore?.()?.getBundle().designedVoices)
     ).filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
     const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
     const speaking = { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId };
@@ -2018,7 +2041,7 @@ export class Coordinator {
     // The catalogue is what says whether a concrete voice can speak now (codex on PR 914): the
     // manifest still lists a model whose key was removed, whose voice was withdrawn or whose
     // engine is down, and a block sent that way fails instead of falling to the narrator.
-    const catalogue = (await this.voiceService.catalogue(clonedVoices, await this.comfyUiVoiceAvailability()).catch(() => null)) ?? [];
+    const catalogue = (await this.voiceService.catalogue(clonedVoices, await this.comfyUiVoiceAvailability(), store.getBundle().designedVoices).catch(() => null)) ?? [];
     const narrationCatalogue = catalogue.filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
     const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
     const manifest = this.opts.manifest;
@@ -2711,6 +2734,17 @@ export class Coordinator {
               if(!store||store.worldId!==worldId) throw new Error("the owning world is unavailable");
               return read(store);
             },
+            readDesignedVoice: async (worldId, target) => {
+              const read = async (store: WorldStore) => {
+                const voice = resolveDesignedVoice(store.getBundle().designedVoices ?? [], target);
+                if (!voice || Date.parse(voice.expiresAt) <= Date.now()) throw new Error("This saved voice is missing or expired. Existing audio is still available.");
+                return { target, remoteId: voice.remoteId };
+              };
+              if (this.opts.provider.withWorldStore) return this.opts.provider.withWorldStore(worldId, read);
+              const store = this.opts.provider.openStore?.();
+              if (!store || store.worldId !== worldId) throw new Error("The owning world is unavailable.");
+              return read(store);
+            },
             readVoiceReference: async (worldId, provider, model, voiceId, signal) => {
               const prepare = async (store: WorldStore) => {
                 const source = voiceSourceFor(store.getBundle().clonedVoices, provider, model, voiceId);
@@ -2812,7 +2846,10 @@ export class Coordinator {
             },
             // Per-source recovery for local-engine jobs (SPEC-021 §2.11): the pure decision
             // table over the identity frozen at enqueue, against the engine resolved now.
-            beforeSubmit: (job) => this.guardAdapters(job.model, job.params.adapters),
+            beforeSubmit: async (job) => {
+              await this.guardAdapters(job.model, job.params.adapters);
+              if (job.capability === "voice-tts" && this.readModel.getState().app.models.disabled.includes(job.model)) throw new Error("That voice model is turned off in AI models.");
+            },
             recoverLocal: (job) => {
               if (job.status !== "running" && job.status !== "submitting") return null;
               // Kokoro's old ids represented bytes held only in this process. Voxa restarts with
@@ -8330,7 +8367,7 @@ export class Coordinator {
             return;
           }
           const available = await this.voiceService
-            .catalogue(store.getBundle().clonedVoices, await this.comfyUiVoiceAvailability())
+            .catalogue(store.getBundle().clonedVoices, await this.comfyUiVoiceAvailability(), store.getBundle().designedVoices)
             .catch(() => null);
           if (available === null) {
             result("refused", "The voice catalogue could not be read — try again.");
@@ -8391,6 +8428,10 @@ export class Coordinator {
             return;
           }
           assigned = { ...msg.voice, model: model.id };
+          if (isDesignedVoiceTarget(msg.voice.voiceId)) {
+            try { await this.requireEnabledSpeechReader(model, msg.voice.voiceId); }
+            catch (error) { result("refused", describeCoordinatorError(error)); return; }
+          }
         }
         try {
           await applyVoiceAssignment(store, { path: msg.path, voice: assigned });
@@ -8738,7 +8779,7 @@ export class Coordinator {
           if (model === null) return;
           const available = (
             await this.voiceService
-              .catalogue(clonedVoices, await this.comfyUiVoiceAvailability())
+              .catalogue(clonedVoices, await this.comfyUiVoiceAvailability(), this.opts.provider.openStore?.()?.getBundle().designedVoices)
               .catch(() => [])
           ).find(
             (voice) =>
@@ -13938,7 +13979,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         const bundle = store?.getBundle();
         const voices = await this.voiceService
-          .catalogue(bundle?.clonedVoices ?? [], await this.comfyUiVoiceAvailability())
+          .catalogue(bundle?.clonedVoices ?? [], await this.comfyUiVoiceAvailability(), bundle?.designedVoices)
           .catch(() => []);
         const sheets = bundle?.sheets ?? [];
         this.emit({
@@ -14122,6 +14163,79 @@ export class Coordinator {
         await this.enqueueBatch(msg.requestId, msg.kind, [input]);
         return;
       }
+      case "hear-designed-voice": {
+        try {
+          const store = this.opts.provider.openStore?.();
+          if (!store || store.worldId !== msg.worldId) throw new Error("Open the owning world to try this voice.");
+          const voice = resolveDesignedVoice(store.getBundle().designedVoices ?? [], msg.voiceId);
+          if (!voice) throw new Error("Save this voice before trying your own line.");
+          const model = this.opts.manifest?.models.find(row => row.provider === "google" && row.id === msg.model && row.capability === "voice-tts");
+          if (!model) throw new Error("This Gemini model is unavailable.");
+          const text = normalizeSpeechText(msg.text);
+          const file = previewCacheFile("google", msg.voiceId, text, "wav", model.id);
+          const cached = await readFile(toExtendedLength(join(store.dir, fromPortable(file)))).catch(() => null);
+          if (cached && cachedVoiceAudioLooksRight(cached, "wav")) {
+            this.emit({ at: this.nowIso(), type: "voice.design-audition", requestId: msg.requestId, worldId: msg.worldId, file });
+            this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+            return;
+          }
+          if (!speechInputFits(text, model.limits)) throw new Error("Shorten this audition line to fit the voice model.");
+          const amount = estimateSpeechMicroUsd(model, text);
+          if (amount > msg.confirmedSpeechMicroUsd) throw new Error("The reading price changed. Review it again.");
+          await this.enqueueBatch(msg.requestId, msg.kind, [{
+            worldId: msg.worldId, target: { kind: "designed-voice-audition", id: voice.id }, capability: "voice-tts",
+            provider: "google", model: model.id, idempotencyKey: msg.requestId,
+            params: { voiceId: msg.voiceId, text, requestId: msg.requestId }, estimatedMicroUsd: amount,
+            landing: { dir: ".cache/voice-previews", name: file.split("/").pop()! },
+          }]);
+        } catch (error) { this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error)); }
+        return;
+      }
+      case "design-voice": {
+        try {
+          const store = this.opts.provider.openStore?.();
+          if (!store || store.worldId !== msg.worldId) throw new Error("Open the owning world before designing a voice.");
+          const draft = VoiceDesignDraftSchema.parse(msg.draft);
+          const model = this.opts.manifest?.models.find(row => row.provider === "google" && row.id === draft.model && row.capability === "voice-tts");
+          if (!model) throw new Error("This Gemini voice model is unavailable.");
+          if (!await this.credentials?.get("google")) throw new Error("Connect Google in Settings before generating a voice.");
+          this.designedVoiceClient();
+          const quote = quoteVoiceDesign(model, draft.description);
+          if (quote.authorisedMicroUsd > msg.confirmedEstimateMicroUsd) throw new Error("The estimated price changed. Review the new estimate before generating.");
+          await this.enqueueBatch(msg.requestId, msg.kind, [{
+            worldId: msg.worldId, target: { kind: "voice-design", id: msg.requestId }, capability: "voice-tts",
+            provider: "google", model: draft.model, idempotencyKey: msg.requestId,
+            params: { operation: "voice-design", name: draft.name, text: draft.description, language: draft.language, requestId: msg.requestId },
+            estimatedMicroUsd: quote.authorisedMicroUsd,
+            landing: { dir: ".cache/voice-design", name: `${msg.requestId}.wav` },
+          }]);
+        } catch (error) { this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error)); }
+        return;
+      }
+      case "save-designed-voice": {
+        try {
+          const store = this.opts.provider.openStore?.();
+          if (!store || store.worldId !== msg.worldId) throw new Error("The owning world is no longer open.");
+          if (Boolean(msg.jobId) === Boolean(msg.remoteId)) throw new Error("Choose a creation result or an existing Google voice ID.");
+          const job = msg.jobId ? this.jobQueue?.listJobs().find(row => row.id === msg.jobId) : undefined;
+          if (msg.jobId && (!job || job.worldId !== msg.worldId || job.provider !== "google" || job.params.operation !== "voice-design" || !job.providerJobId)) {
+            throw new Error("This creation has no confirmed Google voice ID. An uncertain creation must not be repeated automatically.");
+          }
+          const remoteId = msg.remoteId ?? job!.providerJobId!;
+          const key = await this.credentials?.get("google");
+          if (!key) throw new Error("Connect the Google project that owns this voice.");
+          const result = await this.designedVoiceClient().getDesignedVoice(key, remoteId, AbortSignal.timeout(60_000));
+          if (!result) throw new Error("This voice is not available in the current Google project.");
+          if (job && result.voice?.model !== job.model) throw new Error("The retrieved voice does not match the creation model.");
+          if (await this.credentials?.get("google") !== key) throw new Error("The Google key changed. Verify the voice again.");
+          const voice = await saveDesignedVoice(store, result, { requestId: msg.requestId, ...(job ? { creationJobId: job.id } : {}) });
+          await this.refreshWorldSnapshot(msg.worldId);
+          this.emit({ at: this.nowIso(), type: "voice.designed-saved", requestId: msg.requestId, worldId: msg.worldId, voice, reason: null });
+        } catch (error) {
+          this.emit({ at: this.nowIso(), type: "voice.designed-saved", requestId: msg.requestId, worldId: msg.worldId, voice: null, reason: describeCoordinatorError(error) });
+        }
+        return;
+      }
       case "voice-candidates": {
         const store = this.opts.provider.openStore?.();
         if (!store || !this.voiceService) return;
@@ -14170,7 +14284,7 @@ export class Coordinator {
         )
           return;
         const candidate = (
-          await this.voiceService.catalogue(bundle.clonedVoices, await this.comfyUiVoiceAvailability())
+          await this.voiceService.catalogue(bundle.clonedVoices, await this.comfyUiVoiceAvailability(), bundle.designedVoices)
         ).find(
           (entry) =>
             entry.provider === msg.provider && entry.model === msg.model && entry.voiceId === msg.voiceId,
@@ -18013,6 +18127,7 @@ export class Coordinator {
         const catalogue = await this.voiceService.catalogue(
           store.getBundle().clonedVoices,
           await this.comfyUiVoiceAvailability(),
+          store.getBundle().designedVoices,
         );
         return catalogue.some((candidate) =>
           candidate.provider === voice.provider &&

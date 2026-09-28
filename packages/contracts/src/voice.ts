@@ -25,6 +25,7 @@ export const VoiceCandidateSchema = z
     canClone: z.boolean(),
     /** The library voice this candidate reads, for a hosted reader or the recipe (SPEC-046 R-10). */
     readsClone: z.string().min(1).optional(),
+    readsDesigned: z.string().min(1).optional(),
     /** Why this concrete target cannot execute now. Existing assignments remain visible with it. */
     unavailableReason: z.string().min(1).optional(),
   })

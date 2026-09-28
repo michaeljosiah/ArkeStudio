@@ -23,6 +23,7 @@ import {
 } from "@arke-studio/contracts";
 import { CharacterHeader } from "./character-reference.js";
 import { CloneVoiceDialog } from "../components/clone-voice-dialog.js";
+import { DesignVoiceDialog } from "../components/design-voice-dialog.js";
 import { VoiceSampleFlow } from "../components/character-voice-sample.js";
 import { DegradedBanner } from "../components/layout.js";
 import { PerformanceBiblePanel } from "../components/performance-bible-panel.js";
@@ -79,7 +80,7 @@ type Use = "reads" | "on screen";
  * export sheet uses). A flow interrupted by a reload comes back where it was, and each one is
  * reachable as a link — from a dispatch that refused for want of a voice, say.
  */
-const OVERLAYS = ["choose", "record", "sample"] as const;
+const OVERLAYS = ["choose", "record", "sample", "design"] as const;
 type Overlay = (typeof OVERLAYS)[number];
 
 /** The catalogue's shelves. `?choose=1&tab=mine` opens on the world's own voices. */
@@ -196,6 +197,7 @@ interface CatalogueRow {
   attributes: string[];
   /** The library voice this row is, when it is one. */
   clone: string | null;
+  designed?: string;
   readers: VoiceCandidate[];
 }
 
@@ -213,23 +215,25 @@ function catalogueRows(ranked: readonly RankedVoice[], where: Tab): CatalogueRow
       where === "all"
         ? true
         : where === "mine"
-          ? isClonedVoice(candidate)
+          ? isClonedVoice(candidate) || candidate.readsDesigned !== undefined
           : where === "local"
             ? candidate.local
             : !candidate.local;
     if (!shown) continue;
     const clone = cloneOf(candidate);
-    if (clone === null) {
+    const group = clone !== null ? `clone:${clone}` : candidate.readsDesigned !== undefined ? `designed:${candidate.readsDesigned}` : null;
+    if (group === null) {
       rows.push({ key: voiceTargetKey(candidate), label: candidate.label, attributes: candidate.attributes, clone: null, readers: [candidate] });
       continue;
     }
-    const existing = byClone.get(clone);
+    const existing = byClone.get(group);
     if (existing) {
       existing.readers.push(candidate);
       continue;
     }
-    const row: CatalogueRow = { key: `clone:${clone}`, label: candidate.label, attributes: candidate.attributes, clone, readers: [candidate] };
-    byClone.set(clone, row);
+    const row: CatalogueRow = { key: group, label: candidate.label, attributes: candidate.attributes, clone, readers: [candidate],
+      ...(candidate.readsDesigned ? { designed: candidate.readsDesigned } : {}) };
+    byClone.set(group, row);
     rows.push(row);
   }
   return rows;
@@ -480,6 +484,9 @@ export function CharacterVoiceScreen() {
           <span className="fy-mono">{usage}</span>
         </div>
         <div className="fy-voiceways">
+          {models?.some(model => model.provider === "google" && model.capability === "voice-tts") && <EntranceTile
+            icon={<Waveform size={18} />} title="Design a voice" what="from the written voice" where="Gemini · priced before creation"
+            sets={["reads"]} onOpen={() => open("design")} />}
           <EntranceTile
             icon={<Waveform size={18} />}
             title="Choose a voice"
@@ -514,6 +521,14 @@ export function CharacterVoiceScreen() {
           />
         </div>
       </main>
+      {overlay === "design" && <DesignVoiceDialog worldId={world.meta.worldId} name={`${sheet.name}'s voice`}
+        description={writtenVoice(sheet) ?? ""} line={candidates?.previewLine.text ?? ""}
+        onClose={close} onUse={voice => {
+          clearingRequest.current = assignVoice(world.meta.worldId, sheetPath, { provider: "google", model: voice.model, voiceId: voice.voiceId });
+          if (clearingRequest.current === null) setRefusal("The studio is disconnected — the voice was saved but not assigned.");
+          requestVoiceCandidates(world.meta.worldId, sheet.id);
+          close();
+        }} />}
       {overlay === "choose" && (
         <ChooseVoiceDialog
           world={world}
@@ -809,10 +824,11 @@ function ChooseVoiceDialog({
             const pickedRow = rowFor(models, picked);
             const isPicked = row.readers.some((reader) => voiceTargetKey(reader) === pick);
             const isCurrent = row.readers.some((reader) => voiceTargetKey(reader) === assignedKey);
+            const library = row.clone !== null || row.designed !== undefined;
             return (
               <div
                 key={row.key}
-                className={cx("fy-voicerow", row.clone !== null && "fy-voicerow--readers", isPicked && "fy-voicerow--picked", isCurrent && "fy-voicerow--selected")}
+                className={cx("fy-voicerow", library && "fy-voicerow--readers", isPicked && "fy-voicerow--picked", isCurrent && "fy-voicerow--selected")}
               >
                 <ClipPlayButton
                   small
@@ -841,7 +857,7 @@ function ChooseVoiceDialog({
                     {row.attributes.length > 0 ? row.attributes.join(", ") : row.clone !== null ? "cloned here" : ""}
                   </span>
                 </button>
-                {row.clone === null && (
+                {!library && (
                   <span className="fy-voicerow__where">
                     {picked.local ? <Monitor size={12} /> : <Cloud size={12} />}
                     {/* One expression, so the reader and its price stay one text node: split in
@@ -873,7 +889,7 @@ function ChooseVoiceDialog({
                 )}
                 {/* The readers last in the row and on a line of their own beneath the name: beside
                     the name they left it a word a line, and the tab order stays the visual one. */}
-                {row.clone !== null && (
+                {library && (
                   <span className="fy-readerchips" role="group" aria-label="Reader">
                     {row.readers.map((reader) => {
                       const readerKey = voiceTargetKey(reader);

@@ -19,11 +19,38 @@ function voice() {
     usage: { input_tokens_by_modality: [{ modality: "text", tokens: 20 }], output_tokens_by_modality: [{ modality: "audio", tokens: 100 }] } };
 }
 
-it("keeps product availability gated and does no work when a client is constructed", () => {
+it("the durable submit path creates one candidate and preserves witnessed identity on an invalid preview", async () => {
+  let calls = 0;
+  const client = new GoogleClient(async () => { calls++; return Response.json({ ...voice(), sample_audio: undefined }); });
+  const result = await client.submit("key", { voiceDesign: true, model: input.model, capability: "voice-tts",
+    params: { name: input.name, text: input.description, language: input.language } });
+  assert.equal(calls, 1);
+  assert.equal(result.remoteId, "voice_abc123");
+  assert.ok(result.error);
+  assert.deepEqual(result.speechUsage, { inputTextTokens: 20, outputAudioTokens: 100 });
+});
+
+it("requires a host binding and the current project's exact stored voice before synthesis", async () => {
+  const requests: string[] = [];
+  const target = "designed:dv_01J8F3K2QW9VZX4N7M0RTYB6HC:1";
+  const client = new GoogleClient(async (url, init) => {
+    requests.push(String(url));
+    assert.equal(new Headers(init?.headers).get("x-goog-api-key"), "current-key");
+    if (String(url).includes("/voices/")) return new Response(null, { status: 404 });
+    assert.fail("a missing identity must not reach paid synthesis");
+  });
+  const request = { model: input.model, capability: "voice-tts" as const, params: { text: "Hello", voiceId: target } };
+  await assert.rejects(client.submit("current-key", request), /verified binding/);
+  assert.equal(requests.length, 0);
+  await assert.rejects(client.submit("current-key", { ...request, designedVoice: { target, remoteId: "voice_abc123" } }), /unavailable/);
+  assert.equal(requests.length, 1);
+});
+
+it("declares the published-rate estimate basis and does no work when a client is constructed", () => {
   const client = new GoogleClient(async () => { assert.fail("construction must be free of I/O"); });
   assert.equal(client.id, "google");
-  assert.equal(GEMINI_VOICE_DESIGN_AVAILABILITY.available, false);
-  assert.match(GEMINI_VOICE_DESIGN_AVAILABILITY.reason, /pricing/);
+  assert.equal(GEMINI_VOICE_DESIGN_AVAILABILITY.available, true);
+  assert.equal(GEMINI_VOICE_DESIGN_AVAILABILITY.pricingBasis, "published-model-rate-estimate");
 });
 
 it("creates one stored prompted identity with either pinned model and returns its kept sample and usage", async () => {

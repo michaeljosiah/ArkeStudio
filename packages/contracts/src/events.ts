@@ -64,6 +64,7 @@ import { SetupStatusSchema } from "./setup.js";
 import { AdapterLibraryStateSchema } from "./adapters.js";
 import { VendorAuthStatusSchema } from "./vendor-auth.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
+import { DesignedVoiceSchema } from "./designed-voice.js";
 import {
   RankedVoiceSchema,
   VoiceAudioFormatSchema,
@@ -92,6 +93,8 @@ export type HealthStatus = z.infer<typeof HealthStatusSchema>;
 const base = { at: IsoDateTimeSchema };
 
 export const QueueCommandSchema = z.enum([
+  "design-voice",
+  "hear-designed-voice",
   "dispatch-scene",
   "voice-preview",
   "genesis-voice-generate",
@@ -825,6 +828,10 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       reason: z.string().nullable(),
     })
     .strict(),
+  z.object({ ...base, type: z.literal("voice.designed-saved"), requestId: UlidSchema, worldId: UlidSchema,
+    voice: DesignedVoiceSchema.nullable(), reason: z.string().nullable(),
+  }).strict(),
+  z.object({ ...base, type: z.literal("voice.design-audition"), requestId: UlidSchema, worldId: UlidSchema, file: z.string().min(1) }).strict(),
   /**
    * The outcome of deleting a cloned voice (SPEC-046 R-15): the library's part first, then each
    * copy a hosted reader kept — removed, or kept with the vendor's reason. A copy the vendor
