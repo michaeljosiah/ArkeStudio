@@ -119,8 +119,9 @@ export function useProductionVoiceFiles({
   // line keeps its id through an edit, and a voice for its old text must not ride the new one.
   const scenes = sceneList.map((scene) => `${scene.id}@${scene.version}`).join("|");
   // So do the voices the lines are read in: a narrator or a character recast mid-batch would
-  // mount one story in two voices (codex round 11).
-  const voicesKey = JSON.stringify([state?.app.narrator ?? null, (state?.world?.sheets ?? []).map((sheet) => [sheet.id, sheet.voice ?? null])]);
+  // mount one story in two voices (codex round 11), and a speaker retired mid-batch one voiced in
+  // some scenes and read in others (codex round 14).
+  const voicesKey = JSON.stringify([state?.app.narrator ?? null, (state?.world?.sheets ?? []).map((sheet) => [sheet.id, sheet.voice ?? null, sheet.retired ?? false])]);
   useEffect(() => {
     if (key !== null && settled.current === key) return;
     setFiles(new Map());

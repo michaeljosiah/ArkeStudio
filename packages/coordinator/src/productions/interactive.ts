@@ -894,10 +894,9 @@ async function exportBeats(
   const speakers = [...new Set(production.scenes.filter((scene) => !excluded.has(scene.id)).flatMap((scene) => {
     try { return sceneBeats(scene).flatMap((beat) => (beat.speaker === undefined ? [] : [beat.speaker])); } catch { return []; }
   }))].sort();
-  const speakerVoices = () => JSON.stringify(speakers.map((id) => {
-    const sheet = store.getBundle().sheets.find((candidate) => candidate.id === id);
-    return [id, sheet?.name ?? null, sheet?.voice ?? null];
-  }));
+  // The whole sheet, not the fields each round of review named one at a time — a retirement
+  // decides whether a line is voiced at all (codex round 14) — so any change to a speaker counts.
+  const speakerVoices = () => JSON.stringify(speakers.map((id) => [id, store.getBundle().sheets.find((candidate) => candidate.id === id) ?? null]));
   const voicesBefore = speakerVoices();
   // The narrator too: it is no sheet's and moves no scene, and the plans read it once for the
   // whole package (codex round 11). A failure to read it is a narrator nobody can vouch for.
@@ -981,7 +980,7 @@ async function exportBeats(
         ...(reshaped && moved.length === 0 ? ["a scene was added or removed while the package was made — export again"] : []),
         ...(reframed && moved.length === 0 ? ["a picture changed while the package was made — export again"] : []),
         ...(rerouted ? ["the branch map changed while the package was made — export again"] : []),
-        ...(revoiced ? ["a voice or a speaker's name changed while the package was made — export again"] : []),
+        ...(revoiced ? ["a voice or a speaker changed while the package was made — export again"] : []),
       ];
       return { ok: false, blockers: named.length > 0 ? named : ["the production changed while the package was made — export again"] };
     }

@@ -358,6 +358,47 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     assert.equal(askedOf("sc_05"), 2, "and again once Maren is recast, before any answer came");
   });
 
+  it("a speaker retired while the preview gathers its voices asks every scene again (codex round 14)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = visualNovel();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.scenes.push({ ...structuredClone(production.scenes[0]!), id: "sc_05", number: 5, slug: "the-pier" } as never);
+    const mounted = await mountState(state, SCENE_PATH);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Preview")!);
+    const askedOf = (sceneId: string) => sent.filter((message) => message.kind === "plan-table-read" && message.sceneId === sceneId).length;
+    assert.equal(askedOf("sc_05"), 1);
+    const next = structuredClone(state) as ClientState;
+    (next.world!.sheets.find((sheet) => sheet.id === "maren-kest")! as { retired?: boolean }).retired = true;
+    await act(async () => { __setStateForTest(next); });
+    assert.equal(askedOf("sc_05"), 2, "Maren's lines are no longer read in her voice");
+  });
+
+  it("the lightbox shows a beat's picture or none, never a clip's poster (codex round 14)", async () => {
+    const state = visualNovel();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.selections.sh_12 = { ...production.selections.sh_12!, acceptedTakeId: "tk_01J8A0000000000000000000A1" };
+    // sh_13 keeps nothing and has only a clip steered by a take: no picture the story uses.
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")! as unknown as { shots: Array<{ beat?: unknown }> };
+    delete scene.shots[1]!.beat;
+    production.selections.sh_13 = { acceptedTakeId: "tk_01J8F0000000000000000000B2", startFrameTakeId: "tk_01J8A0000000000000000000A1", trimInSec: 0 };
+    const mounted = await mountState(state, SCENE_PATH);
+    await click(q(mounted, '[data-testid="workspace-row-sh_12"] [aria-label="Expand image for shot 12"]')!);
+    await click(q(mounted, '.fy-swlightbox [aria-label="Next shot"]')!);
+    assert.match(q(mounted, ".fy-swlightbox")?.textContent ?? "", /shot 13/);
+    assert.equal(q(mounted, ".fy-swlightbox img") === null, true, "no poster in place of a picture");
+    assert.match(q(mounted, ".fy-swlightbox")?.textContent ?? "", /no frame yet/);
+  });
+
+  it("a production that becomes a visual novel while Flow is open moves to its beats (codex round 14)", async () => {
+    const film = structuredClone(FIXTURE_STATE) as ClientState;
+    const mounted = await mountState(film, SCENE_PATH);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
+    assert.equal(all(mounted, ".fy-sw__tab").find((tab) => tab.getAttribute("aria-checked") === "true")?.textContent, "Flow");
+    await act(async () => { __setStateForTest(visualNovel()); });
+    assert.equal(all(mounted, ".fy-sw__tab").find((tab) => tab.getAttribute("aria-checked") === "true")?.textContent, "Beats");
+  });
+
   it("a studio lost while the voices are asked for opens the preview as text, rather than waiting forever", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
@@ -449,6 +490,18 @@ describe("a visual novel's production dashboard (codex round 11)", () => {
     assert.match(text, new RegExp(`2 of ${shots} pictures ready`));
     assert.doesNotMatch(text, /no clip yet|Latest clips/);
     if (shots > 2) assert.ok(all(mounted, "button").some((button) => button.textContent === "Open the beats"), "a gap opens its scene's beats");
+  });
+});
+
+describe("a visual novel's dashboard lists (codex round 14)", () => {
+  it("lists pictures only: a clip left from an interactive movie is no picture", async () => {
+    const state = visualNovel();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const pictures = production.takes.filter((take) => take.kind === "frame" || take.kind === "still").length;
+    assert.ok(production.takes.some((take) => take.kind === "clip"), "the fixture carries a clip");
+    const mounted = await mountState(state, `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
+    assert.equal(all(mounted, ".fy-clip").length, pictures);
+    assert.match(q(mounted, '[data-screen="production-dashboard"]')?.textContent ?? "", new RegExp(`All ${pictures} pictures`));
   });
 });
 

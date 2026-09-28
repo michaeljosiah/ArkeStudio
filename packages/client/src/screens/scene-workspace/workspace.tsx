@@ -225,6 +225,11 @@ export function SceneWorkspace({
   // Lines nothing can voice still ask it: the plan's reasons are how Voice lines says what to
   // repair, even when no line in the scene can be voiced yet (codex round 5).
   const playsAsBeats = productionShape(production.meta).playsAsBeats;
+  // A production that becomes a visual novel while Flow is open has no Flow to show: the page
+  // moves to its beats rather than staying on a view with no tab (codex round 14).
+  useEffect(() => {
+    if (playsAsBeats && view === "flow") setView("storyboard");
+  }, [playsAsBeats, view]);
   const beatLines = useMemo(
     () => (playsAsBeats ? deriveRehearsalLines(scene, world.sheets, { narration: true }) : []),
     [playsAsBeats, scene, world.sheets],

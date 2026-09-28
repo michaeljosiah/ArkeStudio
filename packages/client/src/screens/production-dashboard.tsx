@@ -153,21 +153,24 @@ export function ProductionDashboardScreen() {
   }
   const dayOne = isDayOne(production);
   const decisions = takeDecisions(production);
-  const pending = production.takes.filter((t) => decisions[t.id] === "pending");
+  // A visual novel's work is its pictures: a clip left from when it was an interactive movie is
+  // no picture, and accepting one would cover nothing, so the lists leave clips out (codex round 14).
+  const beats = productionShape(production.meta).playsAsBeats;
+  const takes = beats ? production.takes.filter((t) => t.kind === "frame" || t.kind === "still") : production.takes;
+  const pending = takes.filter((t) => decisions[t.id] === "pending");
   const shots = production.scenes.flatMap((s) => orderedShots(s));
   // A visual novel's shot is a picture, not a clip (turn 174): it is covered when the picture its
   // beat shows is there — a filed frame or an accepted still, the one before where it keeps that
   // one — as the Beats view and the export read it (codex round 11).
-  const beats = productionShape(production.meta).playsAsBeats;
   const placed = production.scenes.flatMap((scene) => orderedShots(scene).map((shot, _, sceneShots) => ({ scene, shot, sceneShots })));
   const covered = ({ shot, sceneShots }: (typeof placed)[number]) =>
     beats ? shotHasFrame(production, world.artifacts, beatPictureShotId(sceneShots, shot.id)) : Boolean(acceptedTakeId(production, shot.id));
   const acceptedShots = placed.filter(covered).length;
   const nextGap = placed.find((entry) => !covered(entry));
-  const latest = [...production.takes]
+  const latest = [...takes]
     .sort((a, b) => (b.completedAt ?? b.dispatchedAt).localeCompare(a.completedAt ?? a.dispatchedAt))
     .slice(0, 4);
-  const recentDecided = production.takes
+  const recentDecided = takes
     .filter((t) => decisions[t.id] !== "pending")
     .slice(-3)
     .reverse();
@@ -275,7 +278,7 @@ export function ProductionDashboardScreen() {
                 className="fy-linkbtn"
                 onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}
               >
-                All {production.takes.length} takes
+                All {takes.length} {beats ? "pictures" : "takes"}
               </button>
             </div>
             <div className="fy-cliprow">

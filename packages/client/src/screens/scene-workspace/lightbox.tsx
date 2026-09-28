@@ -12,6 +12,7 @@ import {
 } from "@arke-studio/contracts";
 import { ChevronLeft, ChevronRight, ImageMark, X } from "../../components/icons.js";
 import { mediaUrl } from "../../lib/media.js";
+import { shotFramePath as beatFrame } from "./boards.js";
 import { mediaTakeFor, acceptedTakeId } from "../../lib/selectors.js";
 import { posterNameFor, posterize } from "../../lib/poster.js";
 
@@ -104,8 +105,11 @@ export function ShotLightbox({
   };
   // A visual novel's beat that keeps the picture before shows that picture here too, as the page
   // behind it does (turn 174): the arrows step onto such a beat without remounting (codex round 7).
-  const pictureShotId = productionShape(production.meta).playsAsBeats ? beatPictureShotId(shots, shot.id) : shot.id;
-  const path = shotFramePath(production, artifacts, pictureShotId);
+  const beats = productionShape(production.meta).playsAsBeats;
+  const pictureShotId = beats ? beatPictureShotId(shots, shot.id) : shot.id;
+  // A beat shows its picture or nothing: never a clip's poster or a steering take's, which the
+  // story does not use — the rows' resolution, not the film's fallbacks (codex round 14).
+  const path = beats ? beatFrame(production, artifacts, pictureShotId).path : shotFramePath(production, artifacts, pictureShotId);
   const src = path === null || worldSlug === undefined ? null : mediaUrl(worldSlug, path);
   const durationSec = shot.durationSec ?? DEFAULT_SHOT_SEC;
   // The lens the shot actually has, inherited from the scene when it sets none of its own.

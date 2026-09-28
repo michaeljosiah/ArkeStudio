@@ -577,7 +577,7 @@ describe("a visual novel's package (turn 174)", () => {
     };
     const result = await exportInteractive(store, production, CLOCK, { voices, current: () => production });
     assert.ok(!result.ok);
-    assert.deepEqual(result.blockers, ["a voice or a speaker's name changed while the package was made — export again"]);
+    assert.deepEqual(result.blockers, ["a voice or a speaker changed while the package was made — export again"]);
   });
 
   it("refuses a package whose speaker was renamed while its voices were gathered (codex round 12)", async () => {
@@ -594,7 +594,24 @@ describe("a visual novel's package (turn 174)", () => {
     };
     const result = await exportInteractive(store, production, CLOCK, { voices, current: () => production });
     assert.ok(!result.ok);
-    assert.deepEqual(result.blockers, ["a voice or a speaker's name changed while the package was made — export again"]);
+    assert.deepEqual(result.blockers, ["a voice or a speaker changed while the package was made — export again"]);
+  });
+
+  it("refuses a package whose speaker was retired while its voices were gathered (codex round 14)", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await novel(dir, bundle.productions[0]!);
+    await appendTraversal(store, production.meta.id, walked);
+    const maren = store.getBundle().sheets.find((sheet) => sheet.id === "maren-kest")!;
+    const voices = {
+      plan: async (sceneId: string) => {
+        if (sceneId === "sc_i2") (maren as { retired?: boolean }).retired = true;
+        return { sceneVersion: 1, files: new Map<string, string>() };
+      },
+      narrator: async () => null,
+    };
+    const result = await exportInteractive(store, production, CLOCK, { voices, current: () => production });
+    assert.ok(!result.ok);
+    assert.deepEqual(result.blockers, ["a voice or a speaker changed while the package was made — export again"]);
   });
 
   it("refuses a package whose narrator was changed while its voices were gathered (codex round 11)", async () => {
@@ -611,7 +628,7 @@ describe("a visual novel's package (turn 174)", () => {
     };
     const result = await exportInteractive(store, production, CLOCK, { voices, current: () => production });
     assert.ok(!result.ok);
-    assert.deepEqual(result.blockers, ["a voice or a speaker's name changed while the package was made — export again"]);
+    assert.deepEqual(result.blockers, ["a voice or a speaker changed while the package was made — export again"]);
   });
 
   it("refuses a package when a scene is added while its voices were gathered (codex round 11)", async () => {
