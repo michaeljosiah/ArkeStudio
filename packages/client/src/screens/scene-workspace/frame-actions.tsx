@@ -23,11 +23,18 @@ export function FrameActions({ shotNumber, title, slug, framePath, variants, dis
   onClear: () => void;
   readAloud: ComponentProps<typeof ReadAloudButton>;
 }) {
-  const sheet = useMediaQuery("(hover: none), (max-width: 599px)");
+  const sheet = useMediaQuery("(hover: none), (max-width: 1099px)");
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ left: 0, top: 0 });
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
+  const sheetAudio = useRef<HTMLDivElement>(null), popoverAudio = useRef<HTMLDivElement>(null);
+  const [audioHost, setAudioHost] = useState<HTMLDivElement | null>(null);
+  useLayoutEffect(() => { setAudioHost(document.createElement("div")); }, []);
+  useLayoutEffect(() => {
+    const parent = sheet ? sheetAudio.current : popoverAudio.current;
+    if (parent && audioHost) { audioHost.className = "fy-frame-audio-host"; parent.appendChild(audioHost); }
+  }, [sheet, audioHost]);
   const close = () => { setOpen(false); trigger.current?.focus(); };
   useLayoutEffect(() => {
     if (sheet || !open || !trigger.current || !panel.current) return;
@@ -72,7 +79,7 @@ export function FrameActions({ shotNumber, title, slug, framePath, variants, dis
         <ImageDownload worldSlug={slug} path={framePath ?? ""} name={`Shot ${shotNumber} - ${title}`} ready={framePath !== null} />
         <button ref={trigger} type="button" title="More image actions" aria-label={`More image actions for shot ${shotNumber}`} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}><More size={15} /></button>
       </div>
-      {sheet && <PageSheet open={open} keepMounted onClose={close} title={`Shot ${shotNumber}`} className="fy-frame-actions-sheet">
+      <PageSheet open={sheet && open} keepMounted onClose={close} title={`Shot ${shotNumber}`} className="fy-frame-actions-sheet">
         <div className="fy-scene-menu">
           <button type="button" disabled={framePath === null} onClick={() => { close(); onPreview(); }}><Maximize2 size={20} />Expand</button>
           <button type="button" disabled={variants === 0} onClick={() => { close(); if (trigger.current) onVariants(trigger.current); }}><Copy size={20} />Variants · {variants}</button>
@@ -86,17 +93,18 @@ export function FrameActions({ shotNumber, title, slug, framePath, variants, dis
           <span className="fy-scene-menu__group">Frame</span>
           <button type="button" disabled={disabled || !canUpload} onClick={() => { close(); onUpload(); }}>{framePath === null ? "Upload frame" : "Replace frame"}</button>
           <button type="button" disabled={disabled || !canClear} onClick={() => { close(); onClear(); }}>Clear frame</button>
-          <ReadAloudButton {...readAloud} />
+          <div ref={sheetAudio} className="fy-frame-audio-host" />
         </div>
-      </PageSheet>}
+      </PageSheet>
       {/* Keep read-aloud's request alive while its synthesis finishes, even after menu dismissal. */}
-      {!sheet && typeof document !== "undefined" ? createPortal(
-        <div ref={panel} hidden={!open} className="fy-swimage-menu" role={open ? "dialog" : undefined} aria-label={`Image actions for shot ${shotNumber}`} style={position} onClick={(event) => event.stopPropagation()}>
+      {audioHost ? createPortal(
+        <div ref={panel} hidden={sheet || !open} className="fy-swimage-menu" role={!sheet && open ? "dialog" : undefined} aria-label={`Image actions for shot ${shotNumber}`} style={position} onClick={(event) => event.stopPropagation()}>
           <button type="button" disabled={disabled || !canUpload} title={canUpload ? "Use an image from this computer" : "Upload is available in the desktop app"} onClick={() => { close(); onUpload(); }}>{framePath === null ? "Upload frame" : "Replace frame"}</button>
           <button type="button" disabled={disabled || !canClear} onClick={() => { close(); onClear(); }}>Clear frame</button>
-          <ReadAloudButton {...readAloud} />
+          <div ref={popoverAudio} className="fy-frame-audio-host" />
         </div>, document.body,
       ) : null}
+      {audioHost && createPortal(<ReadAloudButton {...readAloud} />, audioHost)}
     </>
   );
 }

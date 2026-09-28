@@ -342,9 +342,9 @@ export function ProductionLayout() {
   const sceneDetailDefault =
     /\/scenes\/[^/]+(\/shots\/[^/]+)?\/?$/.test(location.pathname) || /\/story\/chapters\/[^/]+\/?$/.test(location.pathname);
   const sceneRoute = /\/scenes(?:\/[^/]+(?:\/shots\/[^/]+)?)?\/?$/.test(location.pathname);
-  const sceneDeepPhone = phone && sceneRoute && !/\/scenes\/?$/.test(location.pathname);
   const sceneChrome = compact && sceneRoute ? production?.scenes.find(scene => scene.id === sceneId) : undefined;
   const shotChrome = sceneChrome && orderedShots(sceneChrome).find(shot => shot.id === shotId);
+  const sceneDeepPhone = phone && !refusal && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined);
   const wantsFold = compact && sceneRoute || (railChoice ?? (location.pathname.endsWith("/cut") || sceneDetailDefault));
   const drawerMode = !phone && wantsFold && (compact || coarse);
   const folded = !phone && wantsFold && !drawerMode;

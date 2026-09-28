@@ -119,7 +119,7 @@ try {
       if(label==='scenes'&&width<600) assert.equal(Math.round((await js('document.querySelector(".fy-row").getBoundingClientRect().height'))),76);
       if(label==='scene'){
         if(width<600){assert.equal(await js('Array.from(document.querySelectorAll("[role=radio]")).some(e=>e.textContent==="Flow")'),false);assert.equal(await js('!!document.querySelector(".fy-production-mobile-nav")'),false);}
-        if(!process.argv.includes('--hover')){await click('.fy-swrow__frameactions > button:last-child');await check(name+'-shot-actions');assert.equal(await js('document.querySelector(".fy-frame-actions-sheet[open]")!==null'),true);await escape();}
+        if(!process.argv.includes('--hover')||width<1100){await click('.fy-swrow__frameactions > button:last-child');await check(name+'-shot-actions');assert.equal(await js('document.querySelector(".fy-frame-actions-sheet[open]")!==null'),true);await escape();}
         if(width<1100){await click('.fy-sw__rail');await check(name+'-arke');await escape();}
         if(width<600){
           await click('.fy-swrow__frameactions > button:last-child');

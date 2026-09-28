@@ -9,15 +9,16 @@ import { App } from "../src/App.js";
 import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { scenesLayoutFixture } from "./scenes-layout-fixture.js";
-import { SceneDock, useSceneDock } from "../src/screens/scene-workspace/responsive-chrome.js";
+import { SceneDock, StageInspectorSheet, useSceneDock } from "../src/screens/scene-workspace/responsive-chrome.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 let width = 390;
+let touch = true;
 const listeners = new Set<() => void>();
 Object.assign(dom.window, {
   innerWidth: 390, innerHeight: 797, getComputedStyle: () => ({ direction: "ltr" }),
   matchMedia: (query: string) => ({
-    matches: query.split(",").some(part => (!part.includes("hover:") || part.includes("hover: none")) && (!part.includes("pointer:") || part.includes("pointer: coarse")) && [...part.matchAll(/\((min|max)-width: (\d+)px\)/g)].every(([, kind, value]) => kind === "min" ? width >= Number(value) : width <= Number(value))),
+    matches: query.split(",").some(part => (!part.includes("hover:") || part.includes("hover: none") === touch) && (!part.includes("pointer:") || part.includes("pointer: coarse") === touch) && [...part.matchAll(/\((min|max)-width: (\d+)px\)/g)].every(([, kind, value]) => kind === "min" ? width >= Number(value) : width <= Number(value))),
     addEventListener: (_: string, listener: () => void) => listeners.add(listener),
     removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
   }),
@@ -46,7 +47,7 @@ async function mount(route = "/sc_04", size = 390) {
     root!.render(<MemoryRouter initialEntries={[base + route]}><App /></MemoryRouter>);
   });
 }
-afterEach(async () => { await act(async () => root?.unmount()); root = null; dom.document.body.replaceChildren(); __setBridgeForTest(null); __connectionStatusForTest("closed"); });
+afterEach(async () => { await act(async () => root?.unmount()); root = null; touch = true; dom.document.body.replaceChildren(); __setBridgeForTest(null); __connectionStatusForTest("closed"); });
 const find = (selector: string) => dom.document.querySelector(selector) as unknown as HTMLElement;
 const textButton = (text: string, scope = "body") => [...find(scope).querySelectorAll("button")].find(button => button.textContent?.trim() === text) as HTMLElement;
 const click = async (element: HTMLElement) => { assert.ok(element); await act(async () => element.click()); };
@@ -172,4 +173,40 @@ it("labels a compact shot with an accepted clip as rendered", async () => {
   production.selections.sh_12 = {acceptedTakeId:clip.id, trimInSec:0};
   await act(async () => __setStateForTest(state));
   assert.equal(find('.fy-swrow__titleline .fy-swchip[data-state="rendered"]').textContent, 'Rendered');
+});
+
+it("preserves the Stage inspector's controls while moving into and out of its sheet", async () => {
+  const host = dom.document.createElement('div'); dom.document.body.append(host); root = createRoot(host);
+  const render = (sheet: boolean) => root!.render(<StageInspectorSheet sheet={sheet}><input aria-label="Reference offset" defaultValue="0" /></StageInspectorSheet>);
+  await act(async () => render(false)); const input = find('[aria-label="Reference offset"]') as HTMLInputElement; input.value = '0.7';
+  await act(async () => render(true)); await click(find('.fy-stage-inspector-open'));
+  assert.equal(find('[aria-label="Reference offset"]'), input); assert.equal(input.value,'0.7');
+  await act(async () => render(false)); assert.equal(find('[aria-label="Reference offset"]'), input); assert.equal(input.value,'0.7');
+});
+
+it("preserves an uncommitted grade while compact camera fields are put away",async()=>{
+  await mount('/sc_04/shots/sh_12',1360); const input=find('[aria-label="Shot grade"]') as HTMLInputElement; input.value='Keep the blue shadows';
+  await act(async()=>{width=390;for(const listener of listeners)listener();});
+  assert.equal(find('[aria-label="Shot grade"]'),input); assert.ok(input.closest('[hidden]'));
+  await click(find('[aria-label="More camera settings"]')); assert.equal(input.value,'Keep the blue shadows'); assert.equal(input.closest('[hidden]'),null);
+});
+
+it("retains app navigation on a refused phone deep link",async()=>{
+  await mount('/sc_04/shots/sh_12'); const state=scenesLayoutFixture(); state.worldOpenFailure={worldId:state.world!.meta.worldId,reason:'The world is locked'}; state.world=null;
+  await act(async()=>__setStateForTest(state));
+  assert.ok(find('.fy-titlebar')); assert.match(dom.document.body.textContent??'',/This world did not open/);
+});
+
+it("keeps one read-aloud instance when the frame action menu crosses breakpoints",async()=>{
+  touch = false;
+  await mount(); const button=find('.fy-frame-audio-host button'); assert.ok(button);
+  await act(async()=>{width=1360;for(const listener of listeners)listener();});
+  assert.equal(find('.fy-frame-audio-host button'),button);
+  await act(async()=>{width=390;for(const listener of listeners)listener();});
+  assert.equal(find('.fy-frame-audio-host button'),button);
+});
+it("offers shot ordering in a hover Fold window",async()=>{
+  touch = false; await mount('/sc_04',984); await click(find('.fy-swrow__frameactions > button:last-child'));
+  await click(textButton('Move down','.fy-frame-actions-sheet[open]'));
+  assert.deepEqual(commands(),[{kind:'move-shot',shotId:'sh_12',to:{after:'sh_13'}}]);
 });

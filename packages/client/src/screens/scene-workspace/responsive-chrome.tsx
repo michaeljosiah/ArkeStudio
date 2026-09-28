@@ -31,7 +31,8 @@ export function SceneDock({ open, onOpen, onClose, stage = false, children }: { 
   const phone = useMediaQuery("(max-width: 599px)");
   const trigger = useRef<HTMLButtonElement>(null);
   const inlineHost = useRef<HTMLDivElement>(null), sheetHost = useRef<HTMLDivElement>(null);
-  const [conversationHost] = useState(() => typeof document === "undefined" ? null : document.createElement("div"));
+  const [conversationHost, setConversationHost] = useState<HTMLDivElement | null>(null);
+  useLayoutEffect(() => { setConversationHost(document.createElement("div")); }, []);
   // Reparent one portal host, not the conversation: its unsent words and thread-opening
   // request must survive both putting the dock away and moving it across a breakpoint.
   useLayoutEffect(() => {
@@ -73,12 +74,20 @@ export function SceneDock({ open, onOpen, onClose, stage = false, children }: { 
 
 export function StageInspectorSheet({ sheet, children }: { sheet: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  if (!sheet) return children;
+  const inlineHost = useRef<HTMLDivElement>(null), sheetHost = useRef<HTMLDivElement>(null);
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+  useLayoutEffect(() => { setHost(document.createElement("div")); }, []);
+  useLayoutEffect(() => {
+    const parent = sheet ? sheetHost.current : inlineHost.current;
+    if (parent && host) { host.style.display = "contents"; parent.appendChild(host); }
+  }, [sheet, host]);
   return <>
-    <button type="button" className="ui-btn ui-btn--outline fy-stage-inspector-open" aria-haspopup="dialog" onClick={() => setOpen(true)}>Inspector</button>
-    <PageSheet open={open} keepMounted onClose={() => setOpen(false)} title="Stage inspector" className="fy-stage-inspector-sheet">
-      <div data-screen="shot">{children}</div>
+    {sheet && <button type="button" className="ui-btn ui-btn--outline fy-stage-inspector-open" aria-haspopup="dialog" onClick={() => setOpen(true)}>Inspector</button>}
+    <div ref={inlineHost} hidden={sheet} className="fy-stage-inspector-inline" />
+    <PageSheet open={sheet && open} keepMounted onClose={() => setOpen(false)} title="Stage inspector" className="fy-stage-inspector-sheet">
+      <div ref={sheetHost} data-screen="shot" />
     </PageSheet>
+    {host ? createPortal(children, host) : children}
   </>;
 }
 
