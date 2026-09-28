@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
+import { Navigate, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
 import { remoteStudio } from "./launch.js";
 import { Button, Callout, IconButton, Input, Select, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
+import { PageSheet } from "../components/page-sheet.js";
+import { OnYourPC } from "../components/on-your-pc.js";
+import { DeviceNotifications } from "../components/device-notifications.js";
+import { isRemoteSession } from "../lib/remote-session.js";
+import { Bell, Key, Sliders, Wifi, Cpu, Palette, Info, Shield, User } from "../components/icons.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { settingsReturnPath } from "../lib/settings-return.js";
 import { renderInlineMarkdown } from "../components/inline-markdown.js";
@@ -1572,6 +1577,15 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
 
 // ---- Settings --------------------------------------------------------------
 
+const SETTINGS_SECTIONS = [
+  ["providers", "Providers", Key], ["models", "AI models", Sparkle], ["adapters", "Content & safety", Shield],
+  ["general", "General", Sliders], ["remote-access", "Remote access", Wifi], ["harness", "Harness", Cpu],
+  ["appearance", "Appearance", Palette], ["notifications", "Notifications", Bell], ["sign-in", "Sign-in", User],
+  ["sample-world", "Sample world", Book], ["diagnostics", "Diagnostics", ChartLine], ["about", "About", Info],
+] as const;
+export function SettingsIndex() {
+  return useMediaQuery("(max-width: 599px)") ? null : <Navigate to="providers" replace />;
+}
 export function SettingsLayout() {
   const { connection, state } = useStore();
   const navigate = useNavigate();
@@ -1579,38 +1593,47 @@ export function SettingsLayout() {
   // to the route the gear remembered (SPEC-042 R-6), which is the screen already showing behind
   // the sheet: a change of address, not of screen.
   const leave = () => navigate(settingsReturnPath());
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const { pathname, search } = useLocation();
+  const slug = pathname.split("/")[2];
+  const section = SETTINGS_SECTIONS.find(([id]) => id === slug);
+  const provider = slug === "providers" ? new URLSearchParams(search).get("provider") : null;
+  const theme = useThemePreference();
+  const summary = (id: string): string => {
+    if (id === "providers") return `${state?.app.providers.filter(p => p.configured).length ?? 0} connected`;
+    if (id === "models") return "images, video, voice, music";
+    if (id === "adapters") return state?.app.adapters?.adultContent.enabled ? "enabled" : "standard";
+    if (id === "general") return "defaults for new work";
+    if (id === "remote-access") return isRemoteSession() ? "this device is paired" : "pairing and devices";
+    if (id === "harness") return state?.app.health.harness.status === "healthy" ? "running" : "unavailable";
+    if (id === "appearance") return theme;
+    if (id === "notifications") return isRemoteSession() ? "on this device" : "background notifications";
+    if (id === "sign-in") return isRemoteSession() ? "on your PC" : "vendor connections";
+    if (id === "about") return `v${state?.app.version ?? "—"}`;
+    return id === "diagnostics" ? "studio health" : "a world to explore";
+  };
+  if (phone) return <PageSheet open onClose={leave} title={section?.[1] ?? "Settings"} className="fy-settings-phone"
+    footer={<span>{slug === "general" ? "new work only" : slug === "remote-access" && isRemoteSession() ? "connected through your PC" : `Arke Studio ${state?.app.version ?? "—"}${isRemoteSession() ? " · remote" : ""}`}</span>}
+    {...(slug ? { onBack: () => navigate(provider ? "/settings/providers" : "/settings") } : {})}>
+    <div className="fy-settings-phone__content" data-screen="settings">
+      {slug ? <Outlet /> : <nav className="fy-settings-sections" aria-label="Settings sections">{SETTINGS_SECTIONS.map(([id, label, Glyph]) =>
+        <NavLink key={id} to={`/settings/${id}`}><Glyph size={20} /><span><strong>{label}</strong><small>{summary(id)}</small></span><ChevronRight size={18} /></NavLink>)}</nav>}
+    </div>
+  </PageSheet>;
   return (
     /* A sheet, not a page (design turn 150; SPEC-042 R-5 amended). The page of turn 124 answered
        a panel whose close went to /worlds from wherever it was opened; R-6 fixed that by
        remembering the route, and with the remembered route rendering behind the sheet the modal
        keeps the one promise it makes. The editor's sheet (SPEC-039 R-5) at 95% of the window,
        with no head of its own — the rail says what it is — and the X as its one added control. */
-    <EditorDialog open onClose={leave} width="95vw" height="95vh" labelledBy="fy-settings-title" panelClassName="fy-settings__sheet">
+    <EditorDialog open onClose={leave} width="95vw" height="95dvh" labelledBy="fy-settings-title" panelClassName="fy-settings__sheet">
       <div className="fy-settings" data-screen="settings">
         <nav className="fy-settings__rail" aria-label="Settings panes">
           <div className="fy-settings__title" id="fy-settings-title">Settings</div>
-          {(
-            [
-              ["providers", "Providers"],
-              ["models", "AI models"],
-              ["adapters", "Content & safety"],
-              ["general", "General"],
-              ["remote-access", "Remote access"],
-              ["harness", "Harness"],
-              ["appearance", "Appearance"],
-              ["notifications", "Notifications"],
-              ["sign-in", "Sign-in"],
-              ["sample-world", "Sample world"],
-              ["diagnostics", "Diagnostics"],
-              ["about", "About"],
-            ] as const
-          ).map(([slug, label]) => (
-            <NavLink
-              key={slug}
-              to={`/settings/${slug}`}
-              className={({ isActive }) => cx("fy-settings__tab", isActive && "fy-settings__tab--active")}
-            >
-              {label}
+          {SETTINGS_SECTIONS.map(([slug, label, Glyph]) => (
+            <NavLink key={slug} to={`/settings/${slug}`} className={({ isActive }) => cx("fy-settings__tab", isActive && "fy-settings__tab--active")}>
+              {compact && <Glyph size={16} />}{label}
             </NavLink>
           ))}
           <div style={{ flex: 1 }} />
@@ -1669,6 +1692,9 @@ export function SettingsSignInScreen() {
     const overrideProvider = agent.model?.split("/")[0];
     if (overrideProvider) authoringProviders.add(overrideProvider);
   }
+  if (isRemoteSession()) return <div data-screen="settings-signin" className="fy-set"><h1 className="fy-pane__name">Sign-in</h1>
+    {(auth?.vendors ?? []).map(v => <FactRow key={v.id} what={v.name}>{v.connections.some(c => c.kind === "stored") ? "connected" : "not connected"}</FactRow>)}
+    <OnYourPC>keys and sign-ins</OnYourPC></div>;
   if (!auth || !auth.available) {
     return (
       <div data-screen="settings-signin" className="fy-set">
@@ -1924,6 +1950,7 @@ function VendorSignInRow({
 export function SettingsNotificationsScreen() {
   const { state } = useStore();
   const preference = state?.app.backgroundNotifications ?? "issues-only";
+  if (isRemoteSession()) return <div data-screen="settings-notifications" className="fy-set"><DeviceNotifications /></div>;
   return (
     <div data-screen="settings-notifications" className="fy-set">
       <div className="fy-set__eyebrow">BACKGROUND NOTIFICATIONS</div>
@@ -2029,6 +2056,12 @@ export function SettingsHarnessScreen() {
   useEffect(() => {
     if (focusAgent !== undefined) setAgentsOpen(true);
   }, [focusAgent]);
+  if (isRemoteSession()) return <div data-screen="settings-harness" className="fy-set"><h1 className="fy-pane__name">Harness</h1>
+    <FactRow what="Engine">{harnesses.find(h => h.id === runningEngine)?.label ?? "—"} · {activeStatus}</FactRow>
+    <OnYourPC>harness and executables</OnYourPC>
+    <div className="fy-set__row"><span className="fy-set__name--wide">Search online</span><button type="button" role="switch" aria-label="Search online" aria-checked={researchOn} className={cx("fy-prov__switch", researchOn && "is-on")} onClick={() => setResearchWeb(!researchOn)}><span /></button></div>
+    <AgentsPanel {...(focusAgent ? { focusAgent } : {})} />
+  </div>;
   if (!hasSnapshot) return (
     <div data-screen="settings-harness" className="fy-set fy-set--runtime">
       {(connection !== "closed" && connection !== "auth-refused") && <WaitingForCoordinator />}
@@ -2275,6 +2308,7 @@ const ROUTED_CAPABILITIES: readonly Capability[] = CAPABILITY_ROWS.flatMap((row)
  * the rail is the route — nothing on a row navigates.
  */
 export function SettingsGeneralScreen() {
+  const phone = useMediaQuery("(max-width: 599px)");
   const { state } = useStore();
   const stored = state?.app.narrator ?? null;
   const narrator = stored && supportsVoiceUse(stored, "narration") ? stored : null;
@@ -2361,15 +2395,15 @@ export function SettingsGeneralScreen() {
       })}
       {/* Its label and the route, with no picker and no sentence (R-17): the absence of a control
           is what says the choice is not made here. */}
-      <FactRow what={CAPABILITY_LABEL.llm}>
+      {!phone && <FactRow what={CAPABILITY_LABEL.llm}>
         <button type="button" className="fy-fact__link" onClick={() => navigate("/settings/harness")}>
           on Harness
         </button>
-      </FactRow>
+      </FactRow>}
       <FactRow
         what="Narrator"
         does={
-          <>
+          !phone && <>
             <ActionButton icon={<Pencil size={13} />} onClick={() => setNarratorOpen(true)}>
               Change
             </ActionButton>
@@ -2386,9 +2420,14 @@ export function SettingsGeneralScreen() {
           </>
         }
       >
-        <span data-testid="narrator-name">{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)}</span>
+        {phone ? <button type="button" className="fy-narrator-default" onClick={() => setNarratorOpen(true)}><span>{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)} · {narrator?.provider ?? "Kokoro"}</span><ChevronDown size={14} /></button> : <span data-testid="narrator-name">{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)}</span>}
         <span className="fy-fact__state">{readerChip}</span>
       </FactRow>
+      {phone && <FactRow what={CAPABILITY_LABEL.llm}>
+        <button type="button" className="fy-fact__link" onClick={() => navigate("/settings/harness")}>
+          on Harness
+        </button>
+      </FactRow>}
       <VoicePickerDialog
         open={narratorOpen}
         use="narration"
@@ -2510,7 +2549,7 @@ export function SettingsAboutScreen() {
             Download
           </Button>
         )}
-        {update?.status === "ready" && (
+        {update?.status === "ready" && (isRemoteSession() ? <OnYourPC>install and restart</OnYourPC> :
           <>
             <Button variant="primary" onClick={() => installUpdateAndRestart()}>
               Install and restart
@@ -2554,9 +2593,7 @@ export function SettingsAboutScreen() {
             %USERPROFILE%\ArkeStudio · worlds, ledger, credentials — uninstalling deletes none of it
           </div>
         </div>
-        <button type="button" className="fy-set__link" onClick={() => openDataFolder()}>
-          Open folder
-        </button>
+        {isRemoteSession() ? <OnYourPC>your data folder</OnYourPC> : <button type="button" className="fy-set__link" onClick={() => openDataFolder()}>Open folder</button>}
       </div>
 
       <div className="fy-set__row">
@@ -2564,9 +2601,7 @@ export function SettingsAboutScreen() {
           <div className="fy-set__title">Diagnostics</div>
           <div className="fy-set__caps">redacted at the boundary — no world content, no keys, no prompts</div>
         </div>
-        <button type="button" className="fy-set__link" onClick={() => generateDiagnostics()}>
-          Generate
-        </button>
+        {isRemoteSession() ? <OnYourPC>export diagnostics</OnYourPC> : <button type="button" className="fy-set__link" onClick={() => generateDiagnostics()}>Generate</button>}
       </div>
       {diagnostics && (
         <Textarea readOnly value={diagnostics} style={{ minHeight: 160, marginTop: 10, font: "var(--type-mono, monospace)" }} />

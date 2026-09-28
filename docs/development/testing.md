@@ -437,3 +437,23 @@ to render its prior implementation. Inspect the emitted screenshots alongside th
 and attended passage decisions; retain the chapter-workspace, chapter-audiobook,
 audiobook-door, production-story, manuscript and player suites. Chrome emulates coarse
 pointers; a real touch-device check is additional when hardware is available.
+
+### Settings, Activity, account and remote ownership (turn 175)
+
+Run `node scripts/smoke-settings-responsive.mjs` for actual React captures at 360, 375, 390,
+984 and 1360px, alongside all eight turn-175 master frames. It checks sections and detail
+navigation, stacked defaults, overflow, 44px touch targets, two Fold model cards across,
+device-only pairing facts, and Activity surviving an outside scroll before closing on a tap.
+Use `--viewport acceptance`, `--viewport fold`, or `--viewport desktop --hover` for a focused
+run; `--baseline <revision>` renders the earlier desktop sources. Visually inspect the emitted
+PNGs against the master. These are emulated Chrome viewports, not physical-device testing.
+
+Run `node --import tsx scripts/smoke-remote-host-boundary.mts` for a real Chrome session paired
+over local HTTPS against the gateway. It verifies every named host command returns a typed
+refusal without disconnecting, an allowed command still works, and the trusted transport
+still passes the same commands. Chrome and OpenSSL must be installed (`ARKE_CHROME` and
+`ARKE_OPENSSL` override their paths); the temporary certificate and pairing state stay local.
+Keep coordinator `test/remote-access.test.ts`, client `test/settings-responsive.test.tsx`,
+the existing Settings/Activity/account/chrome suites, and desktop transport/preload auth tests
+in the gate. The browser notification preference is device-local and tested separately from
+the PC's background-notification command.

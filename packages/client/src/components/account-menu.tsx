@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AccountPerson, AccountState } from "@arke-studio/contracts";
+import { useMediaQuery } from "../lib/media-query.js";
+import { isRemoteSession } from "../lib/remote-session.js";
+import { PageSheet } from "./page-sheet.js";
+import { OnYourPC } from "./on-your-pc.js";
 import { ArrowUpRight, LoaderCircle, LogOut, User } from "./icons.js";
 import { Avatar, Button, cx } from "./ui.js";
 import {
@@ -41,7 +45,7 @@ export function AccountControl() {
         type="button"
         className={cx("fy-iconbtn", "fy-account__control", open && "fy-iconbtn--current")}
         title={expired ? "Arke account — session expired" : "Arke account"}
-        aria-label="Arke account"
+        aria-label={expired ? "Arke account — session expired" : "Arke account"}
         aria-haspopup="menu"
         aria-expanded={open}
         data-account-control=""
@@ -83,11 +87,13 @@ function AccountMenu({
   close: () => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
+  const phone = useMediaQuery("(max-width: 599px)");
 
   // `role="menu"` promises the arrows work, Escape closes, and focus comes back where it left;
   // so they do. An outside press closes it too — the control is not outside, it is the toggle,
   // and taking its press here would close the menu a beat before its own handler reopened it.
   useEffect(() => {
+    if (phone) return;
     root.current?.querySelector<HTMLElement>("[role='menuitem']")?.focus({ preventScroll: true });
     const press = (event: PointerEvent) => {
       const target = event.target;
@@ -108,7 +114,7 @@ function AccountMenu({
       window.removeEventListener("keydown", key, true);
       if (opener?.isConnected) opener.focus({ preventScroll: true });
     };
-  }, [close, control]);
+  }, [close, control, phone]);
 
   // A refusal is the one clause a rejected sign-in leaves; it belongs to the press that earned it
   // and goes with the menu, or a stale line would greet the next opening. Read at unmount and
@@ -123,7 +129,7 @@ function AccountMenu({
     [],
   );
 
-  return (
+  const content = (
     <div
       ref={root}
       className="fy-account__menu"
@@ -143,9 +149,11 @@ function AccountMenu({
       {account.kind === "signed-in" ? <SignedIn account={account} /> : <SignedOut account={account} />}
     </div>
   );
+  return phone ? <PageSheet open onClose={close} title="Arke account" className="fy-account-phone" footer={isRemoteSession() ? <span>{account.kind === "signed-in" ? "signed in on" : "account on"} the PC this phone is paired with</span> : undefined}>{content}</PageSheet> : content;
 }
 
 function SignedOut({ account }: { account: Extract<AccountState, { kind: "signed-out" | "signing-in" }> }) {
+  if (isRemoteSession()) return <><div className="fy-account__title">{account.kind === "signing-in" ? "Waiting for the PC's browser" : "Signed out"}</div><OnYourPC>sign in and sign out</OnYourPC></>;
   return (
     <>
       <div className="fy-account__title">Arke account</div>
@@ -184,6 +192,8 @@ function SignedOut({ account }: { account: Extract<AccountState, { kind: "signed
 
 function SignedIn({ account }: { account: Extract<AccountState, { kind: "signed-in" }> }) {
   const { person, plan, session } = account;
+  const remote = isRemoteSession();
+  const openPage = (page: "plan" | "account") => remote ? window.open("https://arke.studio", "_blank", "noopener,noreferrer") : openAccountPage(page);
   return (
     <>
       <div className="fy-account__who">
@@ -200,10 +210,7 @@ function SignedIn({ account }: { account: Extract<AccountState, { kind: "signed-
           <div className="fy-account__row">
             <span className="fy-account__state fy-account__state--warn">session expired</span>
             <span className="fy-account__end">
-              <button type="button" role="menuitem" className="fy-account__act" onClick={() => signInAccount()}>
-                <span>Sign in</span>
-                <ArrowUpRight size={12} />
-              </button>
+              {remote ? <OnYourPC>sign in and sign out</OnYourPC> : <button type="button" role="menuitem" className="fy-account__act" onClick={() => signInAccount()}><span>Sign in</span><ArrowUpRight size={12} /></button>}
             </span>
           </div>
         ) : (
@@ -221,7 +228,7 @@ function SignedIn({ account }: { account: Extract<AccountState, { kind: "signed-
                     type="button"
                     role="menuitem"
                     className="fy-account__act"
-                    onClick={() => openAccountPage("plan")}
+                    onClick={() => openPage("plan")}
                   >
                     <span>{plan.paid ? "Manage" : "Upgrade"}</span>
                     <ArrowUpRight size={12} />
@@ -233,9 +240,9 @@ function SignedIn({ account }: { account: Extract<AccountState, { kind: "signed-
               type="button"
               role="menuitem"
               className="fy-account__row fy-account__row--item"
-              onClick={() => openAccountPage("account")}
+              onClick={() => openPage("account")}
             >
-              <span className="fy-account__value">Account</span>
+              <span className="fy-account__value">Account{remote && <small className="fy-account__here">arke.studio here</small>}</span>
               <span className="fy-account__end">
                 <ArrowUpRight size={14} />
               </span>
@@ -244,7 +251,7 @@ function SignedIn({ account }: { account: Extract<AccountState, { kind: "signed-
         )}
       </div>
       <div className="fy-account__band">
-        <button
+        {remote ? (session !== "expired" && <OnYourPC>sign in and sign out</OnYourPC>) : <button
           type="button"
           role="menuitem"
           className="fy-account__row fy-account__row--item"
@@ -252,7 +259,7 @@ function SignedIn({ account }: { account: Extract<AccountState, { kind: "signed-
         >
           <LogOut size={14} />
           <span className="fy-account__value">Sign out</span>
-        </button>
+        </button>}
       </div>
     </>
   );

@@ -1,0 +1,212 @@
+/* Turn 175 / issue 1373. Remote ownership applies at every width; compact layouts stop at 1100. */
+.fy-on-pc { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 8px 14px; border-radius: 12px; background: var(--muted); font: 400 13px/1.4 var(--font-sans); }
+.fy-on-pc > svg { flex: none; }
+.fy-on-pc > span { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.fy-on-pc strong { font-weight: 400; flex: none; }
+.fy-on-pc small { color: var(--muted-foreground); font: 400 11px/1.4 var(--font-mono); }
+.fy-paired-device { gap: 18px; }
+.fy-paired-device__card { display: grid; gap: 6px; border: 1px solid var(--border); border-radius: 14px; padding: 14px; }
+.fy-paired-device__card strong { font: 600 15px/1.3 var(--font-sans); }
+.fy-paired-device__card span, .fy-paired-device__card small { font: 400 11px/1.4 var(--font-mono); color: var(--muted-foreground); }
+.fy-device-notifications { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; min-height: 56px; border-bottom: 1px solid var(--border); }
+.fy-device-notifications > div { flex: 1; min-width: 0; }
+.fy-device-notifications strong, .fy-device-notifications small { display: block; }
+.fy-device-notifications strong { font: 500 15px/1.3 var(--font-sans); }
+.fy-device-notifications small { margin-top: 2px; color: var(--muted-foreground); font: 400 11px/1.4 var(--font-mono); }
+.fy-device-notifications p { flex: 0 0 100%; color: var(--muted-foreground); }
+.fy-ap__diagnostic { display: none; }
+.fy-account__here { display: block; color: var(--muted-foreground); font: 400 11px/1.4 var(--font-mono); }
+@media (max-width: 1099px) {
+  .fy-settings__sheet { min-width: 0; }
+  .fy-settings__rail { overflow-y: auto; }
+  .fy-cols__list, .fy-cols__pane { scrollbar-gutter: auto; }
+  .fy-provider-row { display: flex; align-items: center; gap: 10px; border-radius: 10px; min-height: 48px; }
+  .fy-provider-row .fy-src { flex: 1; min-width: 0; min-height: 48px; padding: 8px 10px; }
+  .fy-provider-row .fy-src > span { min-width: 0; }
+  .fy-provider-row .fy-mark { display: none; }
+  .fy-provider-row strong { display: block; font: 500 13.5px/1.25 var(--font-sans); }
+  .fy-provider-row small { display: flex; align-items: center; gap: 6px; margin-top: 2px; font: 400 10.5px/1.4 var(--font-mono); }
+  .fy-provider-row > .fy-prov__switch { margin-right: 8px; }
+  .fy-providers-host-note { display: none; }
+  .fy-provider-detail { gap: 14px; }
+  .fy-provider-detail h1 { margin: 6px 0 0; font-size: var(--text-3xl); }
+  .fy-provider-models-label { margin-top: 10px; font: var(--type-label); color: var(--muted-foreground); }
+  .fy-provider-state { display: flex; align-items: center; gap: 14px; min-height: 48px; border-bottom: 1px solid var(--border); }
+  .fy-provider-state > div { flex: 1; }
+  .fy-provider-state strong { font: 500 15px/1.25 var(--font-sans); display: block; }
+  .fy-provider-state small { display: flex; align-items: center; gap: 6px; margin-top: 2px; font: 400 11px/1.5 var(--font-mono); color: var(--muted-foreground); }
+  .fy-provider-models, .fy-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 10px; }
+  .fy-mtile { width: auto; min-width: 0; }
+  .fy-provider-model { display: grid; gap: 6px; border: 1px solid var(--border); border-radius: 12px; padding: 12px; min-width: 0; }
+  .fy-provider-model__row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .fy-provider-model strong { font: 600 13px/1.3 var(--font-sans); }
+  .fy-provider-model small { font: 400 11px/1.4 var(--font-mono); color: var(--muted-foreground); }
+  .fy-ap__diagnostic { display: block; margin-top: 3px; font: 400 10.5px/1.45 var(--font-mono); color: var(--muted-foreground); overflow-wrap: anywhere; }
+  .fy-ap__rowsub, .fy-ap__rowtitle { white-space: normal; overflow-wrap: anywhere; }
+}
+@media (min-width: 600px) and (max-width: 1099px) {
+  .fy-editordialog:has(.fy-settings__sheet) { padding-top: 52px; }
+  .fy-settings__sheet { max-height: calc(95dvh - 52px); }
+  .fy-settings__rail { padding: 24px 12px 18px 18px; }
+  .fy-settings__title { margin: 0 0 10px 8px; }
+  .fy-settings__tab { padding: 0 10px; border-radius: 10px; }
+  .fy-settings__tab--active { margin-left: 0; box-shadow: none; background: var(--muted); }
+  .fy-settings__pane > .fy-set, .fy-cols__pane { padding: 24px; }
+  .fy-cols__list, [data-screen="settings-providers"] .fy-cols__list { padding: 24px 14px; }
+  .fy-provider-row.is-current { background: var(--muted); }
+  [data-screen="settings-providers"] .fy-cols__list > .fy-half { display: none; }
+  .fy-settings__close { top: 12px; right: 12px; }
+}
+@media (max-width: 1099px) and (pointer: coarse) {
+  .fy-settings__tab, .fy-kind, .fy-settings .fy-set__link, .fy-settings .fy-fact__link, .fy-settings .fy-act, .fy-settings .ui-btn, .fy-settings .ui-iconbtn, .fy-settings .ui-select__control { min-height: 44px; }
+  .fy-settings__close { width: 44px; height: 44px; }
+  .fy-settings .fy-prov__switch, .fy-settings-phone .fy-prov__switch { position: relative; width: 44px; height: 26px; border-radius: 13px; flex: none; padding: 3px; }
+  .fy-settings .fy-prov__switch > span, .fy-settings-phone .fy-prov__switch > span { width: 20px; height: 20px; top: 3px; left: 3px; }
+  .fy-settings .fy-prov__switch.is-on > span, .fy-settings-phone .fy-prov__switch.is-on > span { transform: none; }
+  .fy-settings .fy-prov__switch::before, .fy-settings-phone .fy-prov__switch::before { content: ""; position: absolute; inset: -9px 0; }
+  .fy-ap { top: calc(52px + env(safe-area-inset-top, 0px)); }
+  .fy-ap__head { height: 56px; padding: 0 8px 0 20px; }
+  .fy-ap__close, .fy-ap .ui-iconbtn { width: 44px; height: 44px; }
+  .fy-ap__tabs { height: auto; padding-bottom: 4px; }
+  .fy-ap .fy-seg__item, .fy-ap .ui-btn, .fy-ap__scope button, .fy-ap__back, .fy-ap__readall { min-height: 44px; }
+  .fy-ap__status { height: auto; min-height: 44px; flex-wrap: wrap; }
+  .fy-ap__end { flex-wrap: wrap; }
+  .fy-account__menu .fy-account__row, .fy-account__menu .fy-account__act, .fy-account__menu .ui-btn, .fy-account__menu .fy-account__link { min-height: 44px; }
+}
+@media (max-width: 599px) {
+  .fy-settings-phone .fy-page-sheet__body, .fy-account-phone .fy-page-sheet__body { padding: 16px 20px; }
+  .fy-page-sheet__head > .ui-iconbtn:first-child:not(:last-child) { margin-left: -8px; }
+  .fy-settings-phone__content { min-width: 0; }
+  .fy-settings-sections { display: grid; }
+  .fy-settings-sections > a { display: flex; align-items: center; gap: 14px; min-height: 56px; border-bottom: 1px solid var(--border); color: var(--foreground); text-decoration: none; }
+  .fy-settings-sections > a > svg { flex: none; color: var(--muted-foreground); }
+  .fy-settings-sections > a > span { flex: 1; min-width: 0; }
+  .fy-settings-sections strong { display: block; font: 500 15px/1.25 var(--font-sans); }
+  .fy-settings-sections small { display: block; margin-top: 2px; color: var(--muted-foreground); font: 400 11px/1.4 var(--font-mono); }
+  .fy-settings-phone .fy-cols { display: block; }
+  .fy-settings-phone .fy-cols__list { width: 100%; border: 0; padding: 0; overflow: visible; gap: 0; }
+  .fy-settings-phone .fy-cols__pane { padding: 0; overflow: visible; }
+  .fy-settings-phone [data-screen="settings-providers"]:not(.fy-cols--detail) .fy-cols__pane, .fy-settings-phone .fy-cols--detail .fy-cols__list { display: none; }
+  .fy-settings-phone [data-screen="settings-providers"] .fy-cols__list > .fy-half { display: none; }
+  .fy-providers-host-note { display: block; margin-bottom: 18px; }
+  .fy-provider-row { border-radius: 0; border-bottom: 1px solid var(--border); min-height: 56px; }
+  .fy-provider-row .fy-src { min-height: 56px; padding: 8px 0; }
+  .fy-provider-row strong { font-size: 15px; }
+  .fy-provider-row > .fy-prov__switch { margin-right: 0; }
+  .fy-settings-phone .fy-set > .fy-pane__name, .fy-settings-phone .fy-set > .fy-set__eyebrow:first-child { display: none; }
+  .fy-settings-phone .fy-set__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 0; }
+  .fy-settings-phone .fy-set__name { width: 100%; flex-basis: 100%; }
+  .fy-settings-phone .fy-set__field, .fy-settings-phone .fy-set__row > .ui-select { flex-basis: 100%; width: 100%; }
+  .fy-settings-phone .fy-fact { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .fy-settings-phone .fy-fact__what { width: auto; font: 500 11px/1.4 var(--font-sans); grid-column: 1; grid-row: 1; }
+  .fy-settings-phone .fy-fact__is { display: contents; }
+  .fy-settings-phone .fy-fact__is > * { grid-column: 1 / -1; grid-row: 2; }
+  .fy-settings-phone .fy-fact__is > .fy-fact__state { grid-column: 2; grid-row: 1; justify-self: end; font-size: 11px; }
+  .fy-settings-phone .fy-fact__does { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+  .fy-settings-phone .fy-default, .fy-settings-phone .ui-select { width: 100%; min-width: 0; max-width: 100%; }
+  .fy-settings-phone .fy-fact__input, .fy-settings-phone select, .fy-settings-phone input { min-width: 0; max-width: 100%; }
+  .fy-settings-phone .fy-facts { gap: 0; margin-top: 12px; }
+  .fy-settings-phone .fy-pane__head { flex-wrap: wrap; gap: 10px; }
+  .fy-settings-phone .fy-rt { display: block; }
+  .fy-settings-phone .fy-rt__rail { width: 100%; border-right: 0; padding: 0; }
+  .fy-settings-phone .fy-rt__pane { padding: 16px 0; min-width: 0; }
+  .fy-settings-phone .fy-tiles, .fy-settings-phone .fy-provider-models { grid-template-columns: minmax(0, 1fr); }
+  .fy-settings-phone [data-screen="settings-models"] .fy-cols__list { display: flex; flex-direction: row; flex-wrap: wrap; gap: 4px; margin-bottom: 16px; }
+  .fy-settings-phone .fy-kind { width: auto; }
+  .fy-settings-phone .fy-cols__list > .fy-half { flex-basis: 100%; }
+  .fy-settings-phone .fy-set__link, .fy-settings-phone .fy-fact__link, .fy-settings-phone .fy-act, .fy-settings-phone .ui-btn, .fy-settings-phone .ui-select__control, .fy-settings-phone .fy-kind, .fy-settings-phone .fy-rt__railitem { min-height: 44px; }
+  .fy-settings-phone .ui-iconbtn { min-width: 44px; min-height: 44px; }
+  .fy-settings-phone .fy-rows, .fy-settings-phone .fy-rows__row { min-width: 0; flex-wrap: wrap; }
+  .fy-settings-phone .remote-access__row, .fy-settings-phone .remote-access__share { flex-wrap: wrap; }
+  .fy-settings-phone .fy-theme-options { flex-wrap: wrap; }
+  .fy-activity-phone .fy-page-sheet__body { padding: 16px 20px; overflow: hidden; }
+  .fy-activity-phone .fy-ap { position: static; width: 100%; border: 0; box-shadow: none; background: transparent; flex: 1; min-height: 0; }
+  .fy-activity-phone .fy-ap__head, .fy-activity-phone .fy-ap__status { display: none; }
+  .fy-activity-phone .fy-ap__tabs { padding: 0 0 4px; height: auto; }
+  .fy-activity-phone .fy-ap__body { padding: 0; }
+  .fy-activity-phone .fy-ap__tabs .fy-seg { width: 100%; }
+  .fy-activity-phone .fy-seg__item { min-height: 44px; flex: 1; padding: 0 10px; }
+  .fy-activity-phone .fy-ap__row { flex-wrap: wrap; gap: 8px; padding: 12px 0; align-items: start; }
+  .fy-activity-phone .fy-ap__row > .fy-ap__dot { margin-top: 5px; }
+  .fy-activity-phone .fy-ap__main { flex-basis: calc(100% - 20px); }
+  .fy-activity-phone .fy-ap__actions { gap: 8px; }
+  .fy-activity-phone .fy-ap__end { flex: 1 0 100%; }
+  .fy-activity-phone .ui-btn { min-height: 44px; flex: 1 1 100px; white-space: normal; }
+  .fy-activity-phone .ui-iconbtn { width: 44px; height: 44px; flex: none; }
+  .fy-activity-phone .fy-ap__foot { padding-bottom: 8px; }
+  .fy-activity-phone .fy-page-sheet__foot { justify-content: space-between; }
+  .fy-account-phone .fy-account__menu { position: static; width: 100%; padding: 0; box-shadow: none; border: 0; background: transparent; }
+  .fy-account-phone .fy-account__who { padding: 4px 0 12px; gap: 12px; }
+  .fy-account-phone .fy-account__mark--large { width: 48px; height: 48px; }
+  .fy-account-phone .fy-account__name { font: 600 15px/1.25 var(--font-sans); }
+  .fy-account-phone .fy-account__band { padding: 0; border: 0; }
+  .fy-account-phone .fy-account__row { min-height: 56px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .fy-account-phone .fy-account__act { min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; }
+  .fy-account-phone .fy-account__onpc { margin-top: 18px; }
+  .fy-account-phone .fy-on-pc { margin-top: 18px; }
+  .fy-account-phone .fy-account__buttons { padding: 12px 0; }
+  .fy-account-phone .ui-btn { min-height: 44px; }
+}
+
+@media (max-width: 599px) { .fy-account-phone .fy-account__mark--large .ui-avatar { width: 48px; height: 48px; font-size: 18px; } }
+@media (max-width: 599px) {
+  :is(.fy-settings-phone, .fy-account-phone, .fy-activity-phone) { border: 0; }
+  :is(.fy-settings-phone, .fy-account-phone, .fy-activity-phone) .fy-page-sheet__grab { width: 40px; height: 5px; margin-top: 10px; }
+  :is(.fy-settings-phone, .fy-account-phone, .fy-activity-phone) .fy-page-sheet__head { padding: 6px 8px 6px 20px; gap: 8px; border: 0; }
+  :is(.fy-settings-phone, .fy-account-phone, .fy-activity-phone) .fy-page-sheet__body { padding: 4px 20px 0; }
+  .fy-settings-phone .fy-page-sheet__head:has([aria-label="Back"]) { padding-left: 16px; gap: 6px; }
+  .fy-settings-phone .fy-fact__state:not(.fy-fact__state--warn)::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+  .fy-settings-phone .fy-default .ui-select__mark { display: none; }
+  .fy-settings-phone .fy-default .ui-select__control { padding-left: 10px; font: var(--type-ui); }
+  .fy-settings-phone .fy-fact__what { font: var(--type-label); }
+  .fy-settings-phone .fy-provider-row .fy-src { color: var(--foreground); }
+  .fy-settings-phone .fy-provider-row small { color: var(--muted-foreground); }
+}
+@media (max-width: 1099px) and (pointer: coarse) {
+  .fy-settings .fy-tip::after, .fy-settings-phone .fy-tip::after { display: none; }
+}
+@media (max-width: 1099px) {
+  .fy-ap__eyebrow { font: var(--type-label); letter-spacing: normal; text-transform: none; margin: 24px 0 8px; }
+  .fy-ap__rowtitle { font-weight: 500; }
+}
+@media (max-width: 599px) {
+  :is(.fy-settings-phone, .fy-account-phone, .fy-activity-phone) .fy-page-sheet__body, .fy-activity-phone .fy-ap__body { scrollbar-width: none; }
+  .fy-settings-phone .fy-fact__does:empty { display: none; }
+  .fy-narrator-default { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: var(--type-ui); text-align: left; }
+  .fy-activity-phone .fy-page-sheet__foot { display: flex; align-items: center; gap: 10px; }
+  .fy-activity-phone .fy-page-sheet__foot > span { flex: 1; }
+  .fy-account-phone .fy-account__menu { display: grid; gap: 16px; }
+  .fy-account-phone .fy-account__band { gap: 16px; }
+  .fy-account-phone .fy-on-pc { margin-top: 0; }
+  .fy-account-phone .fy-account__row:has(.fy-account__badge) { display: grid; grid-template-columns: 1fr auto; gap: 2px; height: auto; }
+  .fy-account-phone .fy-account__label { color: var(--foreground); width: auto; font: 500 15px/1.25 var(--font-sans); }
+  .fy-account-phone .fy-account__row:has(.fy-account__badge) .fy-account__value { grid-column: 1; grid-row: 2; }
+  .fy-account-phone .fy-account__row:has(.fy-account__badge) .fy-account__end { grid-column: 2; grid-row: 1 / 3; }
+  .fy-account-phone .fy-account__badge { border: 0; padding: 0; letter-spacing: normal; font: var(--type-meta); }
+  .fy-account-phone .fy-account__row--item { font: 500 15px/1.25 var(--font-sans); }
+  .fy-account-phone .fy-account__act { background: var(--muted); }
+}
+@media (min-width: 600px) and (max-width: 1099px) {
+  .fy-editordialog:has(.fy-settings__sheet) { inset: calc(52px + env(safe-area-inset-top, 0px)) 0 0; padding: 0; }
+  .fy-settings__sheet { width: calc(100vw - 48px) !important; height: calc(100dvh - 104px - env(safe-area-inset-top, 0px)) !important; max-height: none; border: 0; border-radius: 16px; }
+  .fy-settings__sheet .fy-settings__close { position: absolute; }
+  .fy-settings__tab { gap: 10px; }
+  .fy-settings__title { font: var(--type-h3); }
+  .fy-provider-row .fy-src { color: var(--foreground); gap: 8px; }
+  .fy-provider-row .fy-src > span { flex: 1; }
+  .fy-provider-row .fy-src .fy-set__dot { flex: none; }
+  .fy-provider-row .fy-src > svg { margin-left: auto; }
+  .fy-ap__title { font: var(--type-h3); }
+  .fy-ap__close svg { width: 18px; height: 18px; }
+  .fy-ap__status { order: 2; border-bottom: 0; border-top: 1px solid var(--border); }
+  .fy-ap__eyebrow--first { margin-top: 12px; }
+}
+@media (max-width: 1099px) and (pointer: coarse) {
+  .fy-ap__row { flex-wrap: wrap; align-items: start; gap: 8px; padding: 12px 0; }
+  .fy-ap__row > .fy-ap__dot { margin-top: 5px; }
+  .fy-ap__main { flex-basis: calc(100% - 20px); }
+  .fy-ap__end { flex: 1 0 100%; }
+  .fy-ap__actions .ui-btn, .fy-ap__end .ui-btn { flex: 1 1 110px; white-space: normal; }
+  .fy-ap .fy-seg { padding: 0; border-radius: 12px; width: max-content; max-width: 100%; }
+  .fy-ap .fy-seg__item { font: var(--type-ui); min-height: 44px; padding: 0 14px; }
+}

@@ -1,3 +1,4 @@
+import { REMOTE_HOST_ONLY_COMMANDS, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
 import type { AudiobookReader, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
@@ -1255,6 +1256,12 @@ export function __handleFrameForTest(frame: Frame): void {
 }
 
 function handleFrame(json: string): void {
+  // Gateway refusals have no coordinator sequence: they neither advance nor reset replay state.
+  try {
+    const refusal = RemoteCommandRefusalSchema.safeParse(JSON.parse(json));
+    if (refusal.success) { for (const listener of remoteRefusalListeners) listener(refusal.data); return; }
+  } catch { /* The normal frame parser reports malformed input below. */ }
+
   let frame;
   try {
     frame = FrameSchema.parse(JSON.parse(json));
@@ -2435,6 +2442,11 @@ export function initStore(): void {
 }
 
 export function send(msg: ClientMessage): boolean {
+  if (isRemoteSession() && (REMOTE_HOST_ONLY_COMMANDS as readonly string[]).includes(msg.kind)) {
+    const refusal = RemoteCommandRefusalSchema.parse({ kind: "command-refused", refused: "host-only", command: msg.kind });
+    for (const listener of remoteRefusalListeners) listener(refusal);
+    return false;
+  }
   if (!bridge || current.connection !== "open") return false;
   bridge.send(JSON.stringify(msg));
   return true;
@@ -6079,4 +6091,10 @@ export function updateComfyUiRuntime(): void {
 export function generatePerformance(input: Omit<Extract<ClientMessage, { kind: "generate-performance" }>, "kind" | "requestId">): string | null {
   const requestId = queueRequest("generate-performance");
   return send({ kind: "generate-performance", requestId, ...input }) ? requestId : null;
+}
+
+const remoteRefusalListeners = new Set<(refusal: RemoteCommandRefusal) => void>();
+export function subscribeRemoteRefusals(listener: (refusal: RemoteCommandRefusal) => void): () => void {
+  remoteRefusalListeners.add(listener);
+  return () => remoteRefusalListeners.delete(listener);
 }

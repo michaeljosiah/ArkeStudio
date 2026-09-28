@@ -101,7 +101,7 @@ function sectionFor(html: string, name: string): string {
 }
 
 describe("Providers holds the credential (SPEC-042 R-3, R-9, R-18)", () => {
-  it("distinguishes a stored key from a tested connection and shows its fingerprint (#1004)", () => {
+  it("distinguishes a set key from a tested connection without rendering the credential (#1373)", () => {
     const state = stateWith({});
     state.app.providers = [{ id: "fal", configured: true, credentialFingerprint: "1C7D9A20", validation: "untested", probes: [], fault: null }];
     __setStateForTest(state);
@@ -109,7 +109,8 @@ describe("Providers holds the credential (SPEC-042 R-3, R-9, R-18)", () => {
     const pane = plain(html.slice(html.indexOf('data-testid="provider-pane"')));
     assert.match(pane, /untested/);
     assert.match(pane, /Not yet/);
-    assert.match(pane, /fingerprint 1C7D9A20/);
+    assert.match(pane, /Key\s+set/);
+    assert.doesNotMatch(pane, /1C7D9A20|••••/);
     assert.doesNotMatch(pane, /connected/);
   });
   it("a key that authenticates but cannot pay is connected and says so, never rejected (issue 1167)", () => {

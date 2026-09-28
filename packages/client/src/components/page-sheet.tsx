@@ -1,13 +1,14 @@
 import { useLayoutEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { IconButton } from "./ui.js";
-import { X } from "./icons.js";
+import { ChevronLeft, X } from "./icons.js";
 
 /** Turn 163 uses the character sheet's shape with native focus containment and an inert page. */
-export function PageSheet({ open, onClose, title, children, footer, className, keepMounted = false }: {
+export function PageSheet({ open, onClose, title, children, footer, className, onBack, keepMounted = false }: {
   open: boolean;
   onClose: () => void;
   title: string;
+  onBack?: () => void;
   children: ReactNode;
   footer?: ReactNode;
   className?: string;
@@ -39,7 +40,7 @@ export function PageSheet({ open, onClose, title, children, footer, className, k
         if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose();
       }}>
       <div className="fy-page-sheet__grab" />
-      <header className="fy-page-sheet__head"><h2 id={heading} tabIndex={-1}>{title}</h2><IconButton label="Close" onClick={onClose}><X size={20} /></IconButton></header>
+      <header className="fy-page-sheet__head">{onBack && <IconButton label="Back" onClick={onBack}><ChevronLeft size={20} /></IconButton>}<h2 id={heading} tabIndex={-1}>{title}</h2><IconButton label="Close" onClick={onClose}><X size={20} /></IconButton></header>
       <div className="fy-page-sheet__body">{children}</div>
       {footer && <footer className="fy-page-sheet__foot">{footer}</footer>}
     </dialog>, document.body,

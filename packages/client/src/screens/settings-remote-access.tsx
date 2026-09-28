@@ -1,9 +1,32 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { RemotePairingDurationSchema, type RemoteAccessCommand, type RemoteAccessReply, type RemoteAccessStatus } from "@arke-studio/contracts";
+import { RemoteDeviceInfoSchema, type RemoteDeviceInfo, RemotePairingDurationSchema, type RemoteAccessCommand, type RemoteAccessReply, type RemoteAccessStatus } from "@arke-studio/contracts";
 import { Button, Select } from "../components/ui.js";
 
+import { isRemoteSession } from "../lib/remote-session.js";
+import { OnYourPC } from "../components/on-your-pc.js";
+import { DeviceNotifications } from "../components/device-notifications.js";
+
 export function SettingsRemoteAccessScreen() {
+  return isRemoteSession() ? <PairedDeviceSettings /> : <HostRemoteAccessSettings />;
+}
+function PairedDeviceSettings() {
+  const [device, setDevice] = useState<RemoteDeviceInfo | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/remote/device", { credentials: "same-origin", signal: controller.signal })
+      .then(async response => { if (!response.ok) throw new Error("Pairing unavailable"); return RemoteDeviceInfoSchema.parse(await response.json()); })
+      .then(setDevice).catch(() => { if (!controller.signal.aborted) setFailed(true); });
+    return () => controller.abort();
+  }, []);
+  return <div className="fy-set fy-paired-device" data-screen="settings-remote-access">
+    <div className="fy-paired-device__card"><strong>This device</strong>
+      <span>{device ? `${device.name} · paired ${new Date(device.pairedAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })} · ${device.expiresAt === null ? "never expires" : `until ${new Date(device.expiresAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })}`}` : failed ? "Pairing unavailable" : "Loading…"}</span>
+    </div><OnYourPC>pairing, devices and revoking</OnYourPC><DeviceNotifications />
+  </div>;
+}
+function HostRemoteAccessSettings() {
   const bridge = typeof window === "undefined" ? undefined : window.arke?.remoteAccess;
   const [status, setStatus] = useState<RemoteAccessStatus | null>(null);
   const [pairing, setPairing] = useState<RemoteAccessReply["pairing"]>();

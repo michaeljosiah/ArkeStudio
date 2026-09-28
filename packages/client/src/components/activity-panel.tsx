@@ -16,6 +16,10 @@ import {
   type RunningEntry,
   type UpdateState,
 } from "@arke-studio/contracts";
+import { useMediaQuery } from "../lib/media-query.js";
+import { isRemoteSession } from "../lib/remote-session.js";
+import { PageSheet } from "./page-sheet.js";
+import { OnYourPC } from "./on-your-pc.js";
 import { Badge, Button, Callout, IconButton, Input, cx } from "./ui.js";
 import { ChevronLeft, FileText, Trash } from "./icons.js";
 import { ProviderCallInspector } from "./provider-calls.js";
@@ -104,6 +108,8 @@ export function ActivityPanel() {
 function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientState }) {
   const location = useLocation();
   const root = useRef<HTMLDivElement>(null);
+  const phone = useMediaQuery("(max-width: 599px)");
+  const coarse = useMediaQuery("(pointer: coarse)");
   const [scope, setScope] = useState<"active" | "all">("active");
   const sidecar = useVoiceSidecar();
   const exportsState = useExports();
@@ -120,13 +126,19 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   // An outside press or Escape closes it. The bell is not outside: it is the toggle, and taking
   // its press here would close the panel a beat before the bell's own handler reopened it.
   useEffect(() => {
+    if (phone) return;
     const opener = document.activeElement;
+    let outside: { id: number; x: number; y: number } | null = null;
+    const moved = () => { outside = null; };
+    const move = (event: PointerEvent) => { if (outside && (Math.abs(event.clientX - outside.x) > 8 || Math.abs(event.clientY - outside.y) > 8)) moved(); };
+    const release = (event: PointerEvent) => { if (outside?.id === event.pointerId) { moved(); closeActivityPanel(); } };
     root.current?.focus({ preventScroll: true });
     const press = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node) || root.current?.contains(target)) return;
       if (target instanceof Element && target.closest("[data-activity-bell]")) return;
-      closeActivityPanel();
+      if (coarse) outside = { id: event.pointerId, x: event.clientX, y: event.clientY };
+      else closeActivityPanel();
     };
     const key = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -134,13 +146,21 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
       closeActivityPanel();
     };
     window.addEventListener("pointerdown", press, true);
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", release, true);
+    window.addEventListener("pointercancel", moved, true);
+    window.addEventListener("scroll", moved, true);
     window.addEventListener("keydown", key, true);
     return () => {
       window.removeEventListener("pointerdown", press, true);
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", release, true);
+      window.removeEventListener("pointercancel", moved, true);
+      window.removeEventListener("scroll", moved, true);
       window.removeEventListener("keydown", key, true);
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus({ preventScroll: true });
     };
-  }, []);
+  }, [phone, coarse]);
 
   // The two remembered facts (R-25), stamped by the coordinator's clock when a tab is looked at.
   // Reading What's new marks the newest thing on it — the waiting update when there is one, so
@@ -174,8 +194,8 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
     return count > 0 ? `${TAB_LABEL[tab]} · ${count}` : TAB_LABEL[tab];
   };
 
-  return (
-    <div className="fy-ap" role="dialog" aria-label="Activity" ref={root} tabIndex={-1} data-tab={panel.tab}>
+  const content = (
+    <div className="fy-ap" role={phone ? undefined : "dialog"} aria-label="Activity" ref={root} tabIndex={-1} data-tab={panel.tab}>
       <div className="fy-ap__head">
         {panel.calls === undefined ? (
           <span className="fy-ap__title">Activity</span>
@@ -197,7 +217,7 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
         <>
           <div className="fy-ap__tabs">
             <div className="fy-seg" role="tablist">
-              {TABS.map((tab) => (
+              {(phone && needs > 0 ? ["inbox", "new", "spend"] as const : TABS).map((tab) => (
                 <button
                   key={tab}
                   type="button"
@@ -243,6 +263,9 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
       </div>
     </div>
   );
+  return phone ? <PageSheet open onClose={closeActivityPanel} title="Activity" className="fy-activity-phone"
+    {...(panel.calls !== undefined ? { onBack: leaveProviderCalls } : {})}
+    footer={activeWorldId && panel.calls === undefined ? <><span>{scope === "active" ? "this world" : "all worlds"}</span><Button onClick={() => setScope(scope === "active" ? "all" : "active")}>{scope === "active" ? "All worlds" : "This world"}</Button></> : undefined}>{content}</PageSheet> : content;
 }
 
 function Eyebrow({ children, first = false }: { children: ReactNode; first?: boolean }) {
@@ -474,6 +497,7 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
 }
 
 function RunningRow({ entry, activeWorldId }: { entry: RunningEntry; activeWorldId: string | null }) {
+  const compact = useMediaQuery("(max-width: 1099px)");
   const queued = /\b(queued|submitting)$/.test(entry.detail);
   return (
     <div className="fy-ap__row">
@@ -483,6 +507,7 @@ function RunningRow({ entry, activeWorldId }: { entry: RunningEntry; activeWorld
           <span>{entry.title}</span>
         </div>
         <div className="fy-ap__rowsub">{entry.kind === "job" ? entry.detail : `${entry.kind.replaceAll("-", " ")} · ${entry.detail}`}</div>
+        {compact && entry.diagnostic && <div className="fy-ap__diagnostic">{entry.diagnostic}</div>}
       </div>
       <div className="fy-ap__end">
         {entry.percent !== null && <span className="fy-ap__meta">{Math.round(entry.percent)}%</span>}
@@ -528,6 +553,7 @@ function HistoryRow({
   owner: { build: { worldId: string }; item: { key: string } } | null;
   navigate: NavigateFunction;
 }) {
+  const compact = useMediaQuery("(max-width: 1099px)");
   const note = historyNote(job, state.app.manifest);
   const labels = activityJobLabels(state, job);
   const thumb =
@@ -545,6 +571,7 @@ function HistoryRow({
           <span>{note.title}</span>
         </div>
         <div className="fy-ap__rowsub">{sub}</div>
+        {compact && <div className="fy-ap__diagnostic">{diagnostic}</div>}
         {note.reason && <div className="fy-ap__reason">{note.reason}</div>}
         {/* Where this one is re-run from, which is not one place (issue 226): a founding-build job
             retries through the build's own landing (SPEC-031 R-49), reference work from the
@@ -667,7 +694,7 @@ function UpdateCard({ update }: { update: UpdateState }) {
             Download
           </Button>
         )}
-        {update.status === "ready" && (
+        {update.status === "ready" && (isRemoteSession() ? <OnYourPC>install and restart</OnYourPC> :
           <>
             <Button size="sm" variant="primary" onClick={() => installUpdateAndRestart()}>
               Install and restart

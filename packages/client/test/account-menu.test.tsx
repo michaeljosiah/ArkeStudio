@@ -54,7 +54,7 @@ function chrome(): string {
 }
 
 function control(html: string): string {
-  const label = html.indexOf('aria-label="Arke account"');
+  const label = html.indexOf('aria-label="Arke account');
   assert.ok(label > 0, "the control is drawn");
   return html.slice(html.lastIndexOf("<button", label), html.indexOf("</button>", label));
 }
@@ -101,7 +101,7 @@ const press = (container: HTMLElement, selector: string) =>
     target.click();
   });
 
-const open = (container: HTMLElement) => press(container, 'button[aria-label="Arke account"]');
+const open = (container: HTMLElement) => press(container, 'button[data-account-control]');
 
 const items = (container: HTMLElement) =>
   [...container.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitem"]')].map((item) => item.textContent!.trim());
@@ -147,10 +147,10 @@ describe("the control (design turn 151)", () => {
     // draws as a broken image, and the chrome must never show the browser's torn page.
     withAccount(signedIn());
     await mounted(async (container) => {
-      const img = container.querySelector<HTMLImageElement>('button[aria-label="Arke account"] img');
+      const img = container.querySelector<HTMLImageElement>('button[data-account-control] img');
       assert.ok(img, "the picture is tried first");
       await act(async () => img.dispatchEvent(new dom.window.Event("error")));
-      const button = container.querySelector('button[aria-label="Arke account"]')!;
+      const button = container.querySelector('button[data-account-control]')!;
       assert.equal(button.querySelector("img"), null, "the broken picture is gone");
       assert.equal(button.querySelector(".ui-avatar--initials")?.textContent, "HM", "and the initials stand in");
     });
@@ -178,7 +178,7 @@ describe("the menu with no one signed in", () => {
       assert.equal(container.querySelector(".fy-account__title")?.textContent, "Arke account");
       assert.deepEqual(items(container), ["Sign in", "Create account"]);
       assert.equal(container.querySelectorAll('[role="menuitem"] svg').length, 2, "each wears the ↗: both leave the app");
-      assert.equal(container.querySelector('button[aria-label="Arke account"]')?.getAttribute("aria-expanded"), "true");
+      assert.equal(container.querySelector('button[data-account-control]')?.getAttribute("aria-expanded"), "true");
       assert.ok(!menu.textContent!.includes("Settings"), "nothing that lives in Settings is repeated");
 
       await press(container, '[role="menuitem"]');
@@ -302,12 +302,12 @@ describe("the menu keeps role=menu's promises", () => {
       await open(container);
       assert.ok(container.querySelector('[role="menu"]'));
       const onControl = new dom.window.Event("pointerdown", { bubbles: true });
-      await act(async () => container.querySelector('button[aria-label="Arke account"]')!.dispatchEvent(onControl));
+      await act(async () => container.querySelector('button[data-account-control]')!.dispatchEvent(onControl));
       assert.ok(container.querySelector('[role="menu"]'), "the control is the toggle, not outside");
       const outside = new dom.window.Event("pointerdown", { bubbles: true });
       await act(async () => document.body.dispatchEvent(outside));
       assert.equal(container.querySelector('[role="menu"]'), null);
-      assert.equal(container.querySelector('button[aria-label="Arke account"]')?.getAttribute("aria-expanded"), "false");
+      assert.equal(container.querySelector('button[data-account-control]')?.getAttribute("aria-expanded"), "false");
     });
   });
 

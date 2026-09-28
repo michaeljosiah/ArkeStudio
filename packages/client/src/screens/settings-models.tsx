@@ -20,6 +20,8 @@ import {
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
 import { Cloud, Monitor, RefreshCw } from "../components/icons.js";
+import { OnYourPC } from "../components/on-your-pc.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import {
   setModelEnabled,
@@ -201,6 +203,8 @@ function CloudSection({ provider, models, visual }: { provider: ProviderId; mode
   const right =
     remedy === null ? (
       <span className="fy-by__state">{`${on} of ${models.length} on`}</span>
+    ) : isRemoteSession() ? (
+      <OnYourPC>{external ? "sign-in" : `the key · ${status?.configured ? "set" : "not set"}`}</OnYourPC>
     ) : (
       <button type="button" className="fy-by__fix" aria-expanded={open} onClick={() => setOpen(!open)}>
         {remedy}
