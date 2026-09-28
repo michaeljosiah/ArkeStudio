@@ -846,6 +846,7 @@ export function ProductionConversation({
     subject: string;
     thumbnail?: { src: string; alt: string };
     conversationFirst?: boolean;
+    controlsInSheet?: boolean;
     /** Puts the assistant away. The head draws its pin only when there is somewhere to go. */
     onPutAway?: () => void;
     /** Flips the subject between the shot and the whole scene; the title is a button when set. */
@@ -1427,11 +1428,13 @@ export function ProductionConversation({
 
   if (dock) {
     return (
+      <>
       <aside
         className="fy-arke"
         data-dock="conversation"
         data-conversation-first={dock.conversationFirst ? "true" : undefined}
       >
+        {dock.controlsInSheet && compact && <button type="button" className="fy-arke__model-open" aria-label="Story author model" onClick={()=>setModelsOpen(true)}><Sparkle size={16}/></button>}
         <div className="fy-arke__head">
           {/* The slot stays whether or not there is a frame to show in it, so the title does
               not shift left the moment the subject is the scene, a board, or a frameless shot. */}
@@ -1509,7 +1512,7 @@ export function ProductionConversation({
           </div>
         ) : null}
         <div className="fy-arke__foot">
-          {sceneDock ? null : languageControl}
+          {sceneDock || (dock.controlsInSheet && compact) ? null : languageControl}
           {dock.subjectLine !== undefined && <div className="fy-mono fy-arke__subject">{dock.subjectLine}</div>}
           {declinedAsk !== null && (
             <div className="fy-mono fy-arke__declined" role="status">
@@ -1569,6 +1572,8 @@ export function ProductionConversation({
           {dock.note !== undefined && <div className="fy-mono">{dock.note}</div>}
         </div>
       </aside>
+      {dock.controlsInSheet && <PageSheet open={compact && modelsOpen} onClose={()=>setModelsOpen(false)} title="Story author" className="fy-develop-model-sheet">{languageControl}</PageSheet>}
+      </>
     );
   }
 

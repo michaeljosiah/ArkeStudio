@@ -21,10 +21,12 @@ import {
   type RoutingFinding,
   type Sheet,
 } from "@arke-studio/contracts";
+import { ArkeEdge } from "../components/arke-edge.js";
+import { ResponsiveSheet } from "../components/responsive-sheet.js";
 import { ProductionConversation } from "../components/conversation.js";
 import { InteractivePlayerView } from "../components/interactive-player.js";
 import { useMediaQuery } from "../lib/media-query.js";
-import { Expand, EyeOff, Flag, Minus, Play, Plus, Trash, TriangleAlert, X } from "../components/icons.js";
+import { More, Expand, EyeOff, Flag, Minus, Play, Plus, Trash, TriangleAlert, X } from "../components/icons.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, Input, Select, Switch, cx } from "../components/ui.js";
 import {
@@ -235,8 +237,12 @@ export function BranchMapScreen() {
   const [focused, setFocused] = useState<string | null>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
   const [drawing, setDrawing] = useState<{ from: string; x: number; y: number } | null>(null);
-  /** Below 900 wide the map is a list (157i): a canvas that narrow is a sliver to pan about in. */
-  const narrow = useMediaQuery("(max-width: 899px)");
+  /** Turn 172 keeps the list on phones and gives Fold the canvas without a side inspector. */
+  const narrow = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const touches = useRef(new Map<number, {x:number;y:number}>());
+  const pinch = useRef<{distance:number;mid:{x:number;y:number};view:View} | null>(null);
+  const suppressClick = useRef(false);
   /** A selected choice's arrowhead being dragged to another scene (157d). */
   const [retarget, setRetarget] = useState<{ id: string; x: number; y: number } | null>(null);
   const [startPick, setStartPick] = useState<string | null>(null);
@@ -301,14 +307,15 @@ export function BranchMapScreen() {
     return routingFindings(routing, scenes, []);
   }, [served, routing, scenes]);
   const layout = useMemo(() => (routing ? layoutRouting(routing, scenes) : null), [routing, scenes]);
-  const geometry = useMemo(() => (routing && layout ? mapGeometry(routing, scenes, layout) : null), [routing, scenes, layout]);
+  const geometry = useMemo(() => (routing && layout ? mapGeometry(routing, scenes, layout, compact) : null), [routing, scenes, layout, compact]);
 
   const fit = useCallback(() => {
     const el = viewportRef.current;
     if (!el || !geometry) return;
-    const k = fitScale(geometry.width, geometry.height, el.clientWidth, el.clientHeight);
-    setView({ k, x: Math.max(16, (el.clientWidth - geometry.width * k) / 2), y: Math.max(16, (el.clientHeight - geometry.height * k) / 2) });
-  }, [geometry]);
+    const fitted = fitScale(geometry.width, geometry.height, el.clientWidth, el.clientHeight);
+    const k = compact ? Math.max(.65, Math.min(.72, (el.clientWidth - 12) / (geometry.width - 48))) : fitted;
+    setView({ k, x: compact ? (el.clientWidth - geometry.width * k) / 2 : Math.max(16, (el.clientWidth - geometry.width * k) / 2), y: compact ? 0 : Math.max(16, (el.clientHeight - geometry.height * k) / 2) });
+  }, [geometry, compact]);
 
   // Opens fitted to the window (turn 157), once per production; after that the view is the person's.
   // Only once there is a canvas to fit: opened narrow, the list shows and nothing is fitted, and a
@@ -420,25 +427,25 @@ export function BranchMapScreen() {
           )}
         </button>
       )}
-      <Button disabled={!routing} onClick={() => routing && setPreview({ from: routing.start, at: Date.now() })}>
+      <Button className="bm-preview" variant={compact ? "primary" : "secondary"} disabled={!routing} onClick={() => routing && setPreview({ from: routing.start, at: Date.now() })}>
         <Play size={12} />
         Preview
       </Button>
       <Button
-        variant="primary"
+        className="bm-export" variant={compact ? "secondary" : "primary"}
         disabled={!routing || blockers.length > 0}
         onClick={() => worldId && prodId && exportInteractive(worldId, prodId)}
       >
-        {routing && blockers.length > 0 ? `Export blocked · ${blockers.length}` : "Export web package"}
+        {compact ? `Export${blockers.length ? " · " + blockers.length : ""}` : routing && blockers.length > 0 ? `Export blocked · ${blockers.length}` : "Export web package"}
       </Button>
     </header>
   );
 
-  const arke = (
+  const arke = (putAway?: () => void) => (
     <ProductionConversation
       worldId={worldId}
       productionId={prodId}
-      dock={{ title: "Arke", subject: `${production.meta.title} · branch map` }}
+      dock={{ controlsInSheet: true, title: "Arke", subject: `${production.meta.title} · branch map`, ...(compact && putAway ? {onPutAway:putAway} : {}) }}
       openingNote="opening…"
       emptyLine="Ask about a route, or have Arke draw one."
       placeholder="Ask Arke about this map…"
@@ -484,7 +491,7 @@ export function BranchMapScreen() {
             )}
           </div>
         </div>
-        <aside className="bm-side">{arke}</aside>
+        <aside className="bm-side"><ArkeEdge>{putAway => arke(putAway)}</ArkeEdge></aside>
       </div>
     );
   }
@@ -580,7 +587,7 @@ export function BranchMapScreen() {
 
   const onViewportPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
-    if (target.closest("[data-scene], .bm-label, .bm-zoom, button, input, select")) return;
+    if (event.button !== undefined && event.button !== 0 || touches.current.size > 1 || target.closest("[data-scene], .bm-label, .bm-zoom, button, input, select")) return;
     panRef.current = { x: event.clientX, y: event.clientY, vx: view.x, vy: view.y };
     setPanning(true);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -600,6 +607,36 @@ export function BranchMapScreen() {
       setHighlight(new Set());
     }
   };
+
+  const touchPoint = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const r = event.currentTarget.getBoundingClientRect();
+    return {x:event.clientX-r.left,y:event.clientY-r.top};
+  };
+  const beginTouch = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if(event.pointerType !== "touch") return;
+    touches.current.set(event.pointerId,touchPoint(event));
+    if(touches.current.size === 2) {
+      const [a,b]=[...touches.current.values()];
+      pinch.current={distance:Math.max(1,Math.hypot(b!.x-a!.x,b!.y-a!.y)),mid:{x:(a!.x+b!.x)/2,y:(a!.y+b!.y)/2},view};
+      panRef.current=null;setDrawing(null);setRetarget(null);setPanning(false);suppressClick.current=true;
+      event.currentTarget.setPointerCapture(event.pointerId);event.stopPropagation();event.preventDefault();
+    }
+  };
+  const moveTouch = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if(!touches.current.has(event.pointerId)) return;
+    touches.current.set(event.pointerId,touchPoint(event));
+    const base=pinch.current;
+    if(!base || touches.current.size<2) return;
+    event.stopPropagation();event.preventDefault();
+    const [a,b]=[...touches.current.values()],mid={x:(a!.x+b!.x)/2,y:(a!.y+b!.y)/2};
+    const k=Math.min(2,Math.max(.2,base.view.k*Math.hypot(b!.x-a!.x,b!.y-a!.y)/base.distance));
+    setView({k,x:mid.x-(base.mid.x-base.view.x)*k/base.view.k,y:mid.y-(base.mid.y-base.view.y)*k/base.view.k});
+  };
+  const endTouch = (event: ReactPointerEvent<HTMLDivElement>) => {
+    touches.current.delete(event.pointerId);
+    if(pinch.current) {event.stopPropagation();pinch.current=null;panRef.current=null;setPanning(false);}
+  };
+  const pickScene = (id: string) => setSelection(compact ? {kind:"new",from:id,to:null} : {kind:"scene",id});
 
   const walkKeys = (key: string) => (event: ReactKeyboardEvent<HTMLElement>) => {
     const isChoice = key.startsWith("c:");
@@ -653,6 +690,7 @@ export function BranchMapScreen() {
   /** Back from the removal question to the choice it was about, focus included. */
   const cancelRemoval = (id: string) => {
     setSelection({ kind: "choice", id });
+    if (narrow) { document.querySelector<HTMLElement>('.bm-inspector-sheet input[aria-label="Label"]')?.focus(); return; }
     // The choice's label on the canvas, or its row in the narrow list — whichever is showing.
     const label =
       [...(viewportRef.current?.querySelectorAll<HTMLElement>("[data-walk]") ?? [])].find((el) => el.getAttribute("data-walk") === `c:${id}`) ??
@@ -668,7 +706,7 @@ export function BranchMapScreen() {
     const isStart = routing.start === node.id;
     const ending = endings.get(node.id);
     const reason = excluded.get(node.id);
-    const isSelected = selection?.kind === "scene" && selection.id === node.id;
+    const isSelected = selection?.kind === "scene" && selection.id === node.id || selection?.kind === "new" && selection.from === node.id;
     const into = routing.choices.filter((choice) => choice.to === node.id).length;
     // Said as the brief asks: the title, its designations, and the choices in and out (§3).
     const spoken = [
@@ -700,7 +738,7 @@ export function BranchMapScreen() {
         onFocus={() => setFocused(`s:${node.id}`)}
         onKeyDown={walkKeys(`s:${node.id}`)}
         onClick={() => {
-          setSelection({ kind: "scene", id: node.id });
+          pickScene(node.id);
           setHighlight(new Set());
         }}
         className={cx(
@@ -745,11 +783,13 @@ export function BranchMapScreen() {
         {!inTray && (
           <span
             className={cx("bm-port", showPort && "bm-port--on")}
-            aria-hidden
+            role="button" aria-label={`Draw a choice from ${title}`} tabIndex={showPort ? 0 : -1}
+            onKeyDown={event => { if(event.key === "Enter" || event.key === " ") {event.preventDefault();event.stopPropagation();setSelection({kind:"new",from:node.id,to:null});} }}
             title="Drag to another scene to draw a choice"
             onPointerDown={startDraw(node.id)}
             onPointerMove={moveDraw}
             onPointerUp={endDraw}
+            onPointerCancel={() => setDrawing(null)}
             // The click that follows a drag from the port would reach the card and select the
             // scene, closing the New choice panel the drop had just opened.
             onClick={(event) => event.stopPropagation()}
@@ -781,13 +821,15 @@ export function BranchMapScreen() {
                 <button
                   type="button"
                   className={cx("bm-row", selection?.kind === "scene" && selection.id === id && "bm-row--selected")}
-                  onClick={() => setSelection({ kind: "scene", id })}
+                  onClick={() => pickScene(id)}
                 >
-                  <span className="bm-row__title">{titleOf(id)}</span>
+                  {narrow && <span className="bm-row__picture">{frameOf(id) && <img src={frameOf(id)!} alt="" />}</span>}
+                  <span className="bm-row__title">{titleOf(id)}{narrow && <small>{sceneLength(scenes.find(scene=>scene.id===id)!,playsAsBeats)} · {routing.choices.filter(choice=>choice.from===id).length} ways out</small>}</span>
                   {routing.start === id && <span className="bm-tag bm-tag--solid">start</span>}
                   {endings.has(id) && <span className="bm-tag">ending</span>}
                   {excluded.has(id) && <span className="bm-tag">excluded</span>}
                   {unreachable.has(id) && !excluded.has(id) && <span className="bm-tag bm-tag--bad">unreachable</span>}
+                  {narrow && <span className="bm-row__menu" aria-hidden><More size={18}/></span>}
                 </button>
                 {routing.choices
                   .filter((choice) => choice.from === id)
@@ -821,6 +863,9 @@ export function BranchMapScreen() {
     <div
       className={cx("bm-viewport", panning && "bm-viewport--panning")}
       ref={viewportRef}
+      onPointerDownCapture={beginTouch} onPointerMoveCapture={moveTouch} onPointerUpCapture={endTouch} onPointerCancelCapture={endTouch}
+      onClickCapture={event => {if(suppressClick.current){suppressClick.current=false;event.preventDefault();event.stopPropagation();}}}
+      onPointerCancel={() => {panRef.current=null;setPanning(false);setDrawing(null);setRetarget(null);}}
       onPointerDown={onViewportPointerDown}
       onPointerMove={onViewportPointerMove}
       onPointerUp={onViewportPointerUp}
@@ -833,7 +878,7 @@ export function BranchMapScreen() {
     >
       <div
         className="bm-stage"
-        style={{ width: stageWidth, height: geometry.height, transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}
+        style={{ width: stageWidth, height: geometry.height, transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`, "--bm-scale":view.k } as React.CSSProperties}
       >
         {geometry.tray.length > 0 && (
           <div className="bm-tray" style={{ top: geometry.trayY, width: stageWidth - 48 }} aria-hidden>
@@ -905,12 +950,13 @@ export function BranchMapScreen() {
         {selectedChoice && !(selection?.kind === "choice" && selection.removing) && at.has(selectedChoice.to) && (
           <span
             className="bm-handle"
-            aria-hidden
+            role="button" aria-label="Retarget this choice"
             title="Drag to another scene to send this choice there"
             style={{ left: inPort(at.get(selectedChoice.to)!).x - 6, top: inPort(at.get(selectedChoice.to)!).y }}
             onPointerDown={startRetarget(selectedChoice.id)}
             onPointerMove={moveRetarget}
             onPointerUp={endRetarget}
+            onPointerCancel={() => setRetarget(null)}
             onClick={(event) => event.stopPropagation()}
           />
         )}
@@ -976,6 +1022,10 @@ export function BranchMapScreen() {
           from={selection.from}
           to={selection.to}
           sceneOptions={sceneOptions}
+          context={compact && selection.from ? {title:titleOf(selection.from),extras:<div className="bm-new-context">
+            <div className="bm-ways"><span className="bm-eyebrow">{titleOf(selection.from)} · ways out</span>{routing.choices.filter(choice=>choice.from===selection.from).map(choice=><button type="button" className="bm-way" key={choice.id} onClick={()=>setSelection({kind:"choice",id:choice.id})}><span>{choice.label}</span><span className="bm-muted">goes to {titleOf(choice.to)}{unwalked.has(choice.id)?" · not walked":" · walked"}</span><More size={18}/></button>)}</div>
+            <div className="bm-actions"><Button disabled={routing.start===selection.from} onClick={()=>command({operation:"set-start",sceneId:selection.from!})}>Make this the start</Button><Link className="ui-btn" to={`/w/${worldId}/p/${prodId}/scenes/${selection.from}`}>Open scene</Link><button type="button" className="bm-more-settings" aria-label="More scene settings" onClick={()=>setSelection({kind:"scene",id:selection.from!})}><More size={18}/></button></div>
+          </div>} : undefined}
           onChange={(next) => setSelection({ kind: "new", ...next })}
           onCancel={() => setSelection(null)}
           onAdd={(from, label, to) => {
@@ -1280,7 +1330,6 @@ export function BranchMapScreen() {
       <div className="bm-main">
         {header}
         {exportNote !== null && <div className="bm-note">{exportNote}</div>}
-        {narrow && inspector}
         {narrow ? list : canvas}
         {previewOptions !== null && preview !== null && (!playsAsBeats || previewVoices.ready) && (
           <InteractivePlayerView
@@ -1293,8 +1342,8 @@ export function BranchMapScreen() {
         )}
       </div>
       <aside className="bm-side">
-        {!narrow && inspector}
-        {arke}
+        <ResponsiveSheet sheet={narrow} open={selection !== null} onClose={() => setSelection(null)} title={selection?.kind === "new" && selection.from ? `New choice from ${titleOf(selection.from)}` : selection?.kind === "findings" ? "Findings" : selection?.kind === "choice" ? "Choice" : "Scene settings"} className="bm-inspector-sheet">{inspector}</ResponsiveSheet>
+        <ArkeEdge>{putAway => arke(putAway)}</ArkeEdge>
       </aside>
     </div>
   );
@@ -1403,7 +1452,9 @@ function NewChoice({
   onChange,
   onCancel,
   onAdd,
+  context,
 }: {
+  context?: {title:string;extras:React.ReactNode};
   from: string | null;
   to: string | null;
   sceneOptions: React.ReactNode;
@@ -1411,11 +1462,13 @@ function NewChoice({
   onCancel: () => void;
   onAdd: (from: string, label: string, to: string) => void;
 }) {
+  const coarse = useMediaQuery("(pointer: coarse)");
   const [label, setLabel] = useState("");
   const ready = from !== null && to !== null && label.trim() !== "";
   const add = () => ready && onAdd(from, label.trim(), to);
   return (
-    <Inspector title="New choice" onClose={onCancel}>
+    <Inspector title={context?.title ?? "New choice"} onClose={onCancel}>
+      <div className="bm-new-choice">
       <label className="bm-field">
         <span className="bm-field__label">Label</span>
         <Input
@@ -1430,7 +1483,7 @@ function NewChoice({
           }}
         />
       </label>
-      <div className="bm-kv">
+      <div className="bm-kv" hidden={context !== undefined}>
         <span className="bm-kv__k">From</span>
         <Select label="From scene" value={from ?? ""} onChange={(event) => onChange({ from: event.target.value || null, to })}>
           <option value="">choose…</option>
@@ -1444,7 +1497,8 @@ function NewChoice({
           {sceneOptions}
         </Select>
       </div>
-      <div className="bm-actions">
+      {context?.extras}
+      <div className="bm-actions bm-new-actions">
         <Button size="sm" variant="primary" disabled={!ready} onClick={add}>
           Add choice
         </Button>
@@ -1452,7 +1506,8 @@ function NewChoice({
           Cancel
         </Button>
         <span className="bm-spacer" />
-        <span className="bm-muted">Enter · Esc</span>
+        <span className="bm-muted">{coarse ? "through the gate" : "Enter · Esc"}</span>
+      </div>
       </div>
     </Inspector>
   );

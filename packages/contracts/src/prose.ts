@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CanonIdSchema, ConversationIdSchema, MessageIdSchema, SceneIdSchema, ShotIdSchema, SlugSchema } from "./ids.js";
+import { CanonIdSchema, ConversationIdSchema, EpisodeIdSchema, MessageIdSchema, SceneIdSchema, ShotIdSchema, SlugSchema } from "./ids.js";
 
 /**
  * Where a piece of readable prose lives (issue 857).
@@ -83,6 +83,8 @@ export const ProseReadSourceSchema = z.discriminatedUnion("of", [
   z
     .object({ of: z.literal("season"), productionId: SlugSchema, field: z.enum(["question", "ending"]) })
     .strict(),
+  /** One of an episode's three promises (turn 172). */
+  z.object({ of: z.literal("episode"), productionId: SlugSchema, episodeId: EpisodeIdSchema, field: z.enum(["opens", "turn", "closes"]) }).strict(),
   /** The Series' engine, which a season screen shows read-only (SPEC-023 R-9). */
   z.object({ of: z.literal("series"), seriesId: SlugSchema }).strict(),
   /**

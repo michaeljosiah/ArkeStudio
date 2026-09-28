@@ -1,3 +1,8 @@
+import { HeldBar } from "../components/held-bar.js";
+import { ResponsiveSheet } from "../components/responsive-sheet.js";
+import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
+import { ChevronUp } from "../components/icons.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
@@ -15,6 +20,8 @@ import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES, withModelChoice } from "../c
 
 /** Same transcript and composer as production chat; the rail is the authoritative setup draft. */
 export function ProductionSetupScreen() {
+  const phone = useMediaQuery("(max-width: 599px)");
+  const [outlineOpen,setOutlineOpen] = useState(false);
   const { worldId, setupId: routeId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const idResult = ConversationIdSchema.safeParse(routeId);
@@ -89,6 +96,7 @@ export function ProductionSetupScreen() {
   };
   return (
     <div className="fy-production-setup" data-screen="production-setup">
+      {phone && <SceneBackRow context={`${world?.meta.name ?? "World"} · New production`} title={`${draft?.title || "New production"} · setup`} onBack={() => navigate(`/w/${worldId}/productions`)}><Button onClick={() => navigate(`/w/${worldId}/productions`)}>Save for later</Button></SceneBackRow>}
       <header className="fy-production-setup__head">
         <div><div className="fy-eyebrow-sm">{world?.meta.name} · New production</div><h1>What are we making?</h1></div>
         <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/productions`)}>Save for later</Button>
@@ -117,7 +125,8 @@ export function ProductionSetupScreen() {
                 <p>A scene you can see. A character with something to lose. A season you have already mapped out.</p>
                 <p>We’ll shape it here, with {world?.meta.name ?? "your world"} around us.</p></div>} />
           </div>
-          <div className="fy-production-setup__composer">
+          <HeldBar className="fy-production-setup__composer">
+            {phone && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setOutlineOpen(true)}><span><b>Production so far · {draft ? [draft.title,draft.kind,draft.aspect,draft.logline,...draft.scenes.map(scene=>scene.title)].filter(Boolean).length : 0} settled</b><span>{draft ? `${draft.kind} · ${draft.aspect} · ${draft.scenes.length} scenes` : "Opening your draft…"}</span></span><ChevronUp size={18}/></button>}
             <label className="fy-production-setup__model">Writing model
               <select value={modelId} onChange={event => setModelId(event.target.value)} disabled={running}>
                 <option value="">Configured writing model</option>
@@ -126,14 +135,16 @@ export function ProductionSetupScreen() {
             <HarnessModelStatus state={state} />
             <Composer value={message} onChange={setMessage} placeholder="Tell Arke what you have in mind…"
               onSubmit={() => command({ operation: "send", text: message, ...(modelId ? { modelId } : {}) })}
-              agentLabel="Arke" busy={running} autoFocus
+              agentLabel="Arke" busy={running} autoFocus={!phone}
               disabledReason={locked ? "Creation is being resolved." : !draft ? "Opening production setup…" : unavailable}
               onDictate={text => setMessage(value => value ? `${value} ${text}` : text)} />
             <p className="fy-mono">Uses your configured writing model. No media generation starts here.</p>
-          </div>
+          </HeldBar>
         </section>
+        <ResponsiveSheet sheet={phone} open={outlineOpen} onClose={() => setOutlineOpen(false)} title="Production so far" className="fy-setup-outline-sheet">
         <aside id="setup-outline" className="fy-production-setup__outline" aria-label="Production so far">
           <h2>Production so far</h2>
+          {phone && <label className="fy-production-setup__model">Writing model<select aria-label="Writing model" value={modelId} disabled={running} onChange={event=>setModelId(event.target.value)}><option value="">Configured writing model</option><HarnessModelOptions state={state} selected={modelId || undefined}/></select></label>}
           {!draft || !setup ? <p>Opening your draft…</p> : <>
             <p className="fy-mono">Draft · revision {draft.revision}</p>
             <fieldset disabled={!!pending || running || locked} className="fy-production-setup__fields">
@@ -193,6 +204,7 @@ export function ProductionSetupScreen() {
               </div>}
           </>}
         </aside>
+        </ResponsiveSheet>
       </div>
     </div>
   );

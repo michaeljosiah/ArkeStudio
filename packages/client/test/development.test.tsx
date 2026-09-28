@@ -273,10 +273,10 @@ describe("the season page (design turn 91)", () => {
     // first episode. The grid is unchanged and lives behind Story structure.
     assert.doesNotMatch(html, /Arcs · 0/, "the Arcs tab is retired");
     assert.doesNotMatch(html, /fy-seg__item/, "and with it the strip that held it");
-    assert.match(html, /THE QUESTION IT ANSWERS/, "what the season is sits in the header");
+    assert.match(html, /The question it answers/, "what the season is sits in the header");
     assert.match(html, /Who is ringing the drowned bell\?/);
-    assert.match(html, /HOW IT ENDS/);
-    assert.match(html, /SERIES ENGINE · READ-ONLY/, "inheritance is shown, not hidden");
+    assert.match(html, /How it ends/);
+    assert.match(html, /Series engine · read-only/, "inheritance is shown, not hidden");
     assert.match(html, /Every episode answers one bell/);
   });
 

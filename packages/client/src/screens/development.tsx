@@ -2,6 +2,8 @@ import { useState, type ReactNode } from "react";
 import { NavLink, useNavigate, useParams } from "react-router";
 import {
   orderedShots,
+  proposalDecisionOf,
+  resolvedAuthoredDuration,
   seasonFindings,
   sortScenes,
   legacySceneView,
@@ -13,7 +15,10 @@ import {
   type ProseReadSource,
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
-import { Pin } from "../components/icons.js";
+import { More, Plus, ChevronRight } from "../components/icons.js";
+import { ArkeEdge } from "../components/arke-edge.js";
+import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
+import { useSharedNewScene } from "./production-story.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { EmptyState } from "../components/layout.js";
@@ -48,6 +53,7 @@ import { sceneIsComplete } from "./scene-workspace/completion.js";
 
 /** Two digits, so the board reads as an ordered season rather than a list. */
 const pad = (n: number) => String(n).padStart(2, "0");
+const episodeClock = (seconds: number) => `${Math.floor(Math.round(seconds) / 60)}:${pad(Math.round(seconds) % 60)}`;
 
 /**
  * Arke's edge on a page that has one (design turns 120 and 122): the docked panel, or the strip
@@ -59,25 +65,6 @@ const pad = (n: number) => String(n).padStart(2, "0");
  * `.fy-sw__rail`, lifted unchanged, because somebody who learned the affordance on a scene must
  * meet the same one here.
  */
-function ArkeEdge({ children }: { children: (putAway: () => void) => ReactNode }) {
-  const [docked, setDocked] = useState(true);
-  const compact = useMediaQuery("(max-width: 1099px)");
-  const [open, setOpen] = useState(false);
-  if (compact) return <>
-    <button type="button" className="fy-season-arke" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><Pin size={18} />Ask Arke</button>
-    <PageSheet open={open} title="Arke" className="fy-season-arke-sheet" onClose={() => setOpen(false)}>{children(() => setOpen(false))}</PageSheet>
-  </>;
-  if (docked) return <>{children(() => setDocked(false))}</>;
-  return (
-    <button type="button" className="fy-sw__rail" title="Pin the assistant back" onClick={() => setDocked(true)}>
-      <span className="fy-sw__rail-dot" aria-hidden="true" />
-      <span className="fy-sw__rail-label">Ask Arke</span>
-      <span className="fy-sw__rail-pin">
-        <Pin size={13} />
-      </span>
-    </button>
-  );
-}
 
 /**
  * The frame an episode is drawn at (design turn 120) — the first frame filed anywhere in it.
@@ -154,6 +141,8 @@ function SeasonTile({
         state === "staged" ? " fy-seasontile__frame--staged" : ""
       }`}
     >
+      <span className="fy-seasontile__ordinal">{label}</span>
+      {state === "blank" && <span className="fy-seasontile__plus"><Plus size={20} /></span>}
       {state === "written" && frame ? (
         <>
           <img className="fy-seasontile__img" src={frame} alt="" />
@@ -186,7 +175,7 @@ function SeasonTile({
       </div>
       {/* An unwritten tile carries its number and nothing else: the empty frame is already the
           sentence, and four copies of an instruction is noise on a board of seven. */}
-      {state === "blank" ? null : (
+      {state === "blank" ? <div className="fy-seasontile__emptycap"><b>No title yet</b><span>waiting</span></div> : (
         <div className="fy-seasontile__cap">
           <div className="fy-seasontile__name">
             <span className="fy-mono" style={{ color: "var(--neutral-400)" }}>
@@ -266,9 +255,11 @@ export function DevelopmentWorkspace() {
   }
   const season = production.season ?? null;
   const episodes = production.episodes;
+  const count = season?.defaults?.episodeCount ?? episodes.length;
   return (
     <div className="fy-arkewrap">
     <div className="fy-prodmain" data-screen="development">
+      {compact && <div className="fy-eyebrow-sm fy-season-eyebrow">Season {series ? series.seasons.indexOf(production.meta.id) + 1 : 1} · {production.meta.kind ?? "season"} · {episodes.length} of {count} written</div>}
       <div className="fy-h1row">
         <h1 className="fy-h1">{production.meta.title}</h1>
         {/* Page scale (issue 859): the three cards below read through, in the order drawn. The
@@ -286,7 +277,7 @@ export function DevelopmentWorkspace() {
           (issue 857); an unwritten one renders no control, because there is nothing to hear. */}
       <div className="fy-season-summary">
         <div className="fy-texthost">
-          <div className="fy-mono">THE QUESTION IT ANSWERS</div>
+          <div className="fy-mono">The question it answers</div>
           <div style={{ font: "400 13px/1.6 var(--font-sans)", marginTop: 5 }}>
             {season?.question ?? "Not asked yet."}
           </div>
@@ -297,7 +288,7 @@ export function DevelopmentWorkspace() {
           />
         </div>
         <div className="fy-texthost">
-          <div className="fy-mono">HOW IT ENDS</div>
+          <div className="fy-mono">How it ends</div>
           <div style={{ font: "400 13px/1.6 var(--font-sans)", marginTop: 5 }}>
             {season?.ending ?? "Not settled yet."}
           </div>
@@ -308,7 +299,7 @@ export function DevelopmentWorkspace() {
           />
         </div>
         <div className="fy-texthost">
-          <div className="fy-mono">SERIES ENGINE · READ-ONLY</div>
+          <div className="fy-mono">Series engine · read-only</div>
           <div
             style={{ font: "400 12.5px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}
           >
@@ -347,7 +338,7 @@ export function DevelopmentWorkspace() {
         />
       ))}
     </div>
-      <ArkeEdge>{(putAway) => <SeasonDock onPutAway={putAway} />}</ArkeEdge>
+      <ArkeEdge title={`Arke · ${production.meta.title} season`}>{(putAway) => <SeasonDock onPutAway={putAway} />}</ArkeEdge>
     </div>
   );
 }
@@ -365,14 +356,14 @@ function SeasonDock({ onPutAway }: { onPutAway: () => void }) {
   const { world, production } = useProduction(worldId, prodId);
   const staged =
     (world?.proposals ?? []).find((sp) =>
-      sp.proposal.targets.some((t) => t.path === `productions/${prodId}/season.json`),
+      proposalDecisionOf(sp.proposal, world?.conversations ?? []).mode === "attended" && sp.proposal.targets.some((t) => t.path === `productions/${prodId}/season.json`),
     ) ?? null;
   const version = production?.season ? `v${production.season.version}` : "nothing decided";
   return (
     <ProductionConversation
       worldId={worldId}
       productionId={prodId}
-      dock={{ title: `Arke · ${production?.meta.title ?? "…"}`, subject: `season · ${version}`, onPutAway }}
+      dock={{ controlsInSheet: true, title: `Arke · ${production?.meta.title ?? "…"}`, subject: `season · ${version}`, onPutAway }}
       openingNote="opening…"
       emptyLine="Let’s shape the season. What is it about?"
       placeholder="Ask about the season"
@@ -401,7 +392,7 @@ function EpisodeDock({ episode, onPutAway }: { episode: Episode; onPutAway: () =
   const stem = production?.episodeFiles[episode.id];
   const staged = stem
     ? ((world?.proposals ?? []).find((sp) =>
-        sp.proposal.targets.some((t) => t.path === `productions/${prodId}/episodes/${stem}.json`),
+        proposalDecisionOf(sp.proposal, world?.conversations ?? []).mode === "attended" && sp.proposal.targets.some((t) => t.path === `productions/${prodId}/episodes/${stem}.json`),
       ) ?? null)
     : null;
   return (
@@ -409,7 +400,7 @@ function EpisodeDock({ episode, onPutAway }: { episode: Episode; onPutAway: () =
       worldId={worldId}
       productionId={prodId}
       entry={{ kind: "episode", productionId: prodId ?? "", episodeId: episode.id }}
-      dock={{ title: `Arke · Episode ${pad(episode.order)}`, subject: `${episode.title} · v${episode.version}`, onPutAway }}
+      dock={{ controlsInSheet: true, title: `Arke · Episode ${pad(episode.order)}`, subject: `${episode.title} · v${episode.version}`, onPutAway }}
       openingNote="opening…"
       emptyLine={`Develop ${episode.title} here — how it opens, where it turns, how it closes, and the scenes it needs.`}
       placeholder="Ask about the episode"
@@ -433,6 +424,8 @@ function EpisodeDock({ episode, onPutAway }: { episode: Episode; onPutAway: () =
 
 /** Episodes compare across the season, so the board takes the full surface (turn 48). */
 function EpisodesBoard() {
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const [menu, setMenu] = useState<string | null>(null);
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const episodes = production?.episodes ?? [];
@@ -455,8 +448,12 @@ function EpisodesBoard() {
   };
   const artifacts: readonly ArtifactSidecar[] = world?.artifacts ?? [];
   const slug = world?.meta.slug;
+  const count = Math.max(nextOrder, production?.season?.defaults?.episodeCount ?? nextOrder);
+  const add = (order = nextOrder) => { if (worldId && prodId) createEpisode(worldId, prodId, { title: `Episode ${pad(order)}`, order }); };
+  const menuIndex = episodes.findIndex(episode => episode.id === menu);
   return (
-    <div style={{ display: "grid", gap: 16 }}>
+    <div className="fy-episodes-board" style={{ display: "grid", gap: 16 }}>
+      {compact && <div className="fy-season-rack-head"><span>Episodes · {count}</span><button type="button" onClick={() => add()}><Plus size={16} />New</button></div>}
       <div className="fy-seasonrack">
         {episodes.map((episode, index) => (
           <SeasonTile
@@ -469,7 +466,7 @@ function EpisodesBoard() {
             {...(episode.promise?.closes ? { cliff: episode.promise.closes } : {})}
             scenes={episode.scenes.length}
             to={`/w/${worldId}/p/${prodId}/episodes/${episode.id}`}
-            controls={
+            controls={compact ? <button className="fy-seasontile__menu" type="button" aria-label={`Episode ${episode.order} actions`} aria-haspopup="dialog" onClick={() => setMenu(episode.id)}><More size={18} /></button> :
               <span className="fy-seasontile__move">
                 <button type="button" aria-label="Move earlier" onClick={() => move(index, -1)}>
                   ↑
@@ -485,20 +482,19 @@ function EpisodesBoard() {
         {started.map((one) => (
           <SeasonTile key={one.id} number={one.order} title={one.title} state="staged" />
         ))}
-        <button
-          type="button"
-          className="fy-linkbtn"
-          onClick={() => {
-            if (worldId && prodId) createEpisode(worldId, prodId, { title: `Episode ${pad(nextOrder)}`, order: nextOrder });
-          }}
-        >
-          {episodes.length === 0 && started.length === 0 ? "Create the first episode" : "Add episode"}
-        </button>
+        {compact ? Array.from({length: Math.max(0, count-nextOrder+1)}, (_, i) => nextOrder+i).map(order =>
+          <SeasonTile key={order} state="blank" number={order} onOpen={() => add(order)} />) :
+          <button type="button" className="fy-linkbtn" onClick={() => add()}>{episodes.length === 0 && started.length === 0 ? "Create the first episode" : "Add episode"}</button>}
       </div>
       {started.length > 0 && (
         <div className="fy-mono">{started.length} started and waiting on the gate — accept them in Proposals</div>
       )}
       <FindingsPanel findings={findings} />
+      <PageSheet open={menuIndex >= 0} title={episodes[menuIndex]?.title ?? "Episode"} onClose={() => setMenu(null)} className="fy-episode-actions">
+        {menuIndex >= 0 && <><NavLink className="ui-btn" to={`/w/${worldId}/p/${prodId}/episodes/${menu}`}>Open episode</NavLink>
+          <button type="button" className="ui-btn" disabled={menuIndex === 0} onClick={() => {move(menuIndex,-1);setMenu(null);}}>Move earlier</button>
+          <button type="button" className="ui-btn" disabled={menuIndex === episodes.length-1} onClick={() => {move(menuIndex,1);setMenu(null);}}>Move later</button></>}
+      </PageSheet>
     </div>
   );
 }
@@ -650,7 +646,7 @@ export function EpisodeChatScreen() {
   const stem = production.episodeFiles[episode.id];
   const staged = stem
     ? ((world?.proposals ?? []).find((sp) =>
-        sp.proposal.targets.some((t) => t.path === `productions/${prodId}/episodes/${stem}.json`),
+        proposalDecisionOf(sp.proposal, world?.conversations ?? []).mode === "attended" && sp.proposal.targets.some((t) => t.path === `productions/${prodId}/episodes/${stem}.json`),
       ) ?? null)
     : null;
   return (
@@ -659,6 +655,8 @@ export function EpisodeChatScreen() {
         worldId={worldId}
         productionId={prodId}
         entry={{ kind: "episode", productionId: prodId, episodeId }}
+        contextSummary={`${episode.scenes.length} scenes · episode ${episode.order}`}
+        stagedTitle={staged ? `Episode ${episode.order} · waiting on you` : undefined}
         openingNote={`Episode Chat · ${pad(episode.order)} · opening…`}
         eyebrow={`EPISODE CHAT · ${pad(episode.order)}`}
         heading="What happens in this one?"
@@ -694,10 +692,13 @@ export function EpisodeChatScreen() {
  * one-way door.
  */
 export function EpisodeDetailScreen() {
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
   const { worldId, prodId, episodeId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const edit = useSingleAct();
+  const newScene = useSharedNewScene(worldId, prodId);
   const episode: Episode | undefined = production?.episodes.find((e) => e.id === episodeId);
   if (!world) {
     return <div className="fy-prodmain" data-screen="episode-detail"><Loading label="Opening episode…" /></div>;
@@ -721,6 +722,7 @@ export function EpisodeDetailScreen() {
   return (
     <div className="fy-arkewrap">
     <div className="fy-prodmain" data-screen="episode-detail">
+      {phone && <SceneBackRow context={`${production.meta.title} · Episodes`} title={`Episode ${episode.order} · ${episode.title}`} onBack={() => navigate(`/w/${worldId}/p/${prodId}/season`)}><button type="button" className="ui-btn" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/episodes/${episode.id}`)}>Talk through this episode</button></SceneBackRow>}
       <div className="fy-h1row">
         <h1 className="fy-h1" style={{ fontSize: 32 }}>
           {pad(episode.order)} · {episode.title}
@@ -734,26 +736,26 @@ export function EpisodeDetailScreen() {
             is docked on the right. It was the last control on the last level that treated a
             conversation as a destination. */}
       </div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <div className="fy-episode-meta" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <span className="fy-pill">
           {episode.scenes.length} scene{episode.scenes.length === 1 ? "" : "s"}
         </span>
-        <span className="fy-pill">{episode.promise?.opens ? "hook written" : "no hook yet"}</span>
-        <span className="fy-pill">{episode.promise?.closes ? "ending written" : "no ending yet"}</span>
+        {compact ? <><span className="fy-pill">{episode.scenes.flatMap(id => {const scene=scenesById.get(id);return scene ? orderedShots(scene) : [];}).filter(shot => production.selections[shot.id]?.acceptedTakeId).length} shot</span><span className="fy-pill">{episodeClock(episode.scenes.flatMap(id => {const scene=scenesById.get(id);return scene ? orderedShots(scene) : [];}).reduce((sum,shot)=>sum+resolvedAuthoredDuration(shot),0))} planned</span><span className="fy-pill">v{episode.version}</span></> : <><span className="fy-pill">{episode.promise?.opens ? "hook written" : "no hook yet"}</span><span className="fy-pill">{episode.promise?.closes ? "ending written" : "no ending yet"}</span></>}
       </div>
       {/* The promise is three lines: how it opens, where it turns, how it closes (turn 53). */}
-      <div style={{ maxWidth: 900 }}>
+      <div className="fy-episode-promise">
         {(["opens", "turn", "closes"] as const).map((part) => (
           <div key={part} className="fy-actrow">
-            <span className="fy-actrow__label">{part.toUpperCase()}</span>
+            <span className="fy-actrow__label">{compact ? part[0]!.toUpperCase()+part.slice(1) : part.toUpperCase()}</span>
             <span className="fy-actrow__text">{episode.promise?.[part] ?? "—"}</span>
+            {compact && <ReadAloud source={{of:"episode",productionId:prodId!,episodeId:episode.id,field:part}} title={`${episode.title} · ${part}`} text={episode.promise?.[part] ?? ""} />}
           </div>
         ))}
       </div>
       {/* One plural child, so it is a heading rather than a strip of one tab (turn 91). */}
-      <div className="fy-listhead">Scenes · in order</div>
+      <div className="fy-listhead">Scenes · {compact ? `${episode.scenes.length} in order` : "in order"}</div>
       {episode.scenes.length === 0 && <div className="fy-mono">No scenes yet.</div>}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 14 }}>
+      <div className="fy-episode-scenes">
         {episode.scenes.map((sceneId, index) => {
           const scene = scenesById.get(sceneId);
           return scene === undefined || world === null ? (
@@ -773,6 +775,7 @@ export function EpisodeDetailScreen() {
           );
         })}
       </div>
+      {compact && <button type="button" className="fy-episode-add" disabled={newScene.pending} onClick={() => newScene.create(episode.id)}><Plus size={16} />Add scene</button>}
       {/*
        * Until turn 87's cascade lands — an episode's own proposal creating the scenes it needs —
        * scenes are drafted elsewhere and adopted here, which runs the arrow backwards. Said out
@@ -804,7 +807,7 @@ export function EpisodeDetailScreen() {
       )}
       <SingleActFeedback result={edit.result} undoLabel="Restore episode" onUndo={edit.undo} />
     </div>
-      <ArkeEdge>{(putAway) => <EpisodeDock episode={episode} onPutAway={putAway} />}</ArkeEdge>
+      <ArkeEdge title={`Arke · Episode ${episode.order}`}>{(putAway) => <EpisodeDock episode={episode} onPutAway={putAway} />}</ArkeEdge>
     </div>
   );
 }
@@ -822,10 +825,13 @@ function EpisodeSceneCard({
   ordinal: number;
   onOpen: () => void;
 }) {
+  const phone = useMediaQuery("(max-width: 599px)");
+  const state = useStore().state;
+  const place = state?.world?.sheets.find(sheet => sheet.id === scene.inherits?.location)?.name ?? scene.inherits?.location;
   const digests = useBlockDigests(legacySceneView(scene));
   const complete = sceneIsComplete(scene, production, artifacts, digests);
   return (
-    <div className="fy-draftcard" data-complete={complete ? "true" : undefined}>
+    <div className="fy-draftcard fy-episode-scene" data-complete={complete ? "true" : undefined}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
         <span className="fy-mono">{pad(ordinal)}</span>
         <button
@@ -834,11 +840,11 @@ function EpisodeSceneCard({
           style={{ font: "600 13px var(--font-sans)", textAlign: "left" }}
           onClick={onOpen}
         >
-          {scene.title}
+          {scene.title}<span className="fy-episode-scene__chevron"><ChevronRight size={16} /></span>
         </button>
       </div>
       <div className="fy-mono" style={{ marginTop: 8 }} title={scene.id}>
-        Scene {scene.number} · {complete ? "done" : "in progress"}
+        {phone ? [place,scene.inherits?.timeOfDay,scene.status === "draft" ? "no script yet" : "script written"].filter(Boolean).join(" · ") : <>Scene {scene.number} · {complete ? "done" : "in progress"}</>}
       </div>
     </div>
   );

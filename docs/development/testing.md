@@ -411,3 +411,17 @@ bytes rather than host paths, and reuse the conversation attachment writer. Run 
 `test/browser-attachment.test.ts` and coordinator `test/world-chat/browser-upload.test.ts`,
 `test/remote-access.test.ts` and `test/voice/page-read.test.ts` for that boundary and the speech
 source. Preserve the existing conversation, composer, production and page-read regression suites.
+
+### Seasons, episodes, branch map and setup on touch (turn 172)
+
+Run `node scripts/smoke-season-layout.mjs` for the real React screens with the full CSS cascade,
+the fixture in `packages/client/test/season-layout-fixture.ts`, and all eight master frames.
+Chrome checks 390, 360 and 375px phones, 984px Fold and 1360px desktop; episode menu reorder,
+episode promise reading and scene creation, Arke and understood sheets, choice creation without
+dragging, pinch zoom with a 44px screen-space port, and setup without automatic keyboard focus.
+Screenshots and measured geometry are saved to the reported temporary directory.
+Use `--viewport desktop --hover` for the fine-pointer desktop, and `--baseline <revision>`
+to compare the pre-change screen sources. Selection/gesture renderer coverage is in
+`test/season-layout.test.tsx`; run it with the existing development, branch-map, setup and
+interactive-player suites. Coordinator `test/voice/service.test.ts` covers authoritative
+episode promise reads. No hardware touch device is assumed by these checks.

@@ -43,6 +43,7 @@ import "./screens/generate-responsive.css";
 import "./screens/editor-responsive.css";
 import "./screens/develop-responsive.css";
 import "./screens/branch-map.css";
+import "./screens/season-responsive.css";
 // After fidelity.css: the panel re-dresses the provider-call inspector with a rule of equal
 // specificity, and the later sheet wins.
 import "./components/activity-panel.css";
