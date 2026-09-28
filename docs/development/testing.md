@@ -324,6 +324,20 @@ Client `test/art-direction-layout.test.tsx` covers touch doors, full titles, mod
 and the authored/staged footer commands. Run alongside art-direction-step, generation-dialog,
 dispatch-bar and chrome tests. Typecheck after test changes.
 
+## Cast on phones and Fold7
+
+Run `node scripts/smoke-cast-layout.mjs` with Chrome installed (`ARKE_CHROME` overrides
+its location). The real app and complete CSS cascade use an isolated fixture and local media,
+without a coordinator or paid generation. Captures cover Cast, Locations, Factions, Props,
+character overview, long names and prop creation at 360, 375, 390, 600, 984 and 1360px.
+The printed directory includes PNGs, measurements and all eight turn 161 master frames.
+`--viewport phone` narrows a run; `--baseline <revision> --viewport desktop` checks the
+unchanged desktop with the same fixture. Compare geometry and images; counts and sheet
+content remain live data. Character rename, duplicate, promote and retire remain available.
+
+Run client `test/cast-layout.test.tsx` alongside props, pending-sheets, character-pages
+and world-card-heights tests, and typecheck after changing tests.
+
 ## CI
 
 For Gemini preset activation, run providers `test/gemini-activation.test.ts` and

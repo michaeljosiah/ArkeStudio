@@ -12,7 +12,7 @@ export function Wave({ seed, width = 290, height = 16, stretch = false }: { seed
     bars.push(<rect key={x} x={x} y={(height - bar) / 2} width={3} height={bar} rx={1.5} />);
   }
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio={stretch ? "none" : undefined} aria-hidden>
+    <svg width={stretch ? "100%" : width} height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio={stretch ? "none" : undefined} aria-hidden>
       <g fill="currentColor">{bars}</g>
     </svg>
   );

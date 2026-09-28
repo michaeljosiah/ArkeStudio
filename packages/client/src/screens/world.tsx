@@ -37,7 +37,7 @@ import {
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, IconButton, Input, Textarea, cx } from "../components/ui.js";
-import { Archive, ArrowRight, ChevronRight, Copy, More, Pencil, Plus, Search, Sparkle, Upload, Users } from "../components/icons.js";
+import { Archive, ArrowRight, ChevronRight, Copy, Lock, Message, More, Pencil, Plus, Search, Sparkle, Speaker, Upload, Users } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
@@ -147,6 +147,7 @@ function limitedFeatureCopy(copy: string): string {
 }
 
 export function WorldLayout() {
+  const compact = useMediaQuery("(max-width: 1099px)");
   const { worldId } = useParams();
   const location = useLocation();
   /*
@@ -211,7 +212,7 @@ export function WorldLayout() {
     );
   }
   const onArtDirection = path.endsWith("/art-direction");
-  const onCast = path.endsWith("/cast");
+  const onCast = path.endsWith("/cast") || (compact && /\/(cast|locations|factions|props)(\/|$)/.test(path));
   /*
    * The world screens that are a fixed frame rather than a page that scrolls: art direction's
    * two picture bands, and the gate screens, whose two columns each scroll inside themselves.
@@ -913,6 +914,10 @@ function NeedsYou({ worldId, world }: { worldId: string; world: WorldBundle }) {
  * with the counts carried so an empty kind says so before you visit it.
  */
 export function SheetKindNav({ active }: { active: Sheet["type"] | "prop" }) {
+  const nav = useRef<HTMLElement>(null);
+  useEffect(() => {
+    nav.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ inline: "center", block: "nearest" });
+  }, [active]);
   const { worldId } = useParams();
   const world = useWorld();
   // Props sit beside the sheets they are deliberately not one of (design turn 105; issue 537).
@@ -927,7 +932,7 @@ export function SheetKindNav({ active }: { active: Sheet["type"] | "prop" }) {
     ["prop", "Props", "props"],
   ] as const;
   return (
-    <nav className="fy-sheetkinds" aria-label="Kind of sheet">
+    <nav ref={nav} className="fy-sheetkinds" aria-label="Kind of sheet">
       <div className="fy-seg">
         {items.map(([type, label, slug]) =>
           type === active ? (
@@ -1014,11 +1019,9 @@ function pendingSheetState(activity: AuthoringActivity | undefined, destination:
 function PendingSheetCards({
   worldId,
   pending,
-  frameHeight,
 }: {
   worldId: string | undefined;
   pending: readonly PendingSheet[];
-  frameHeight: number;
 }) {
   const authoring = useAuthoring();
   const world = useWorld();
@@ -1042,7 +1045,7 @@ function PendingSheetCards({
             }}
             aria-label={`${sheet.name} — ${state.foot}. ${destination === "here" ? "Review here" : destination === "conversation" ? "Open conversation" : "Open Approvals"}.`}
           >
-            <div className="fy-gridcard__frame fy-gridcard__frame--pending" style={{ height: frameHeight }}>
+            <div className="fy-gridcard__frame fy-gridcard__frame--pending">
               {state.tone === "live" ? (
                 <Loading label={`Drafting ${sheet.name}`} size={40} />
               ) : (
@@ -1057,7 +1060,7 @@ function PendingSheetCards({
                 <span className={`fy-dot fy-dot--${state.tone}`} style={{ width: 6, height: 6 }} />
               </div>
               <div className="fy-gridcard__body">{state.body}</div>
-              <div className="fy-gridcard__foot" style={{ marginTop: 9 }}>
+              <div className="fy-gridcard__foot fy-gridcard__foot--spaced">
                 {state.foot}
               </div>
             </div>
@@ -1170,6 +1173,8 @@ function SheetGrid({
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const sheetRefs = useSheetRefs();
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
   // Ledgers are the world's, so guests are absent from the list and from both tallies — a
   // retired count that included another production's one-offs would not add up to anything the
   // user could click through to (SPEC-020 R-8).
@@ -1216,6 +1221,13 @@ function SheetGrid({
     if (!worldId) return;
     for (const sheet of sheets) requestSheetRefs(worldId, sheet.id);
   }, [worldId, sheets.map((sheet) => sheet.id).join("|")]);
+  const ledgerHead = <div className="fy-ledgerhead">
+    <div className="fy-ledgerhead__copy">
+      <span className="fy-ledgerhead__label">{kind === "character" ? "The cast" : title} · {sheets.length}</span>
+      <span className="fy-ledgerhead__meta">{locked} canon-locked · {sketches} sketch{sketches === 1 ? "" : "es"}{retired > 0 ? ` · ${retired} retired` : ""}{pendingSuffix(pending)}</span>
+    </div>
+    <Button variant="primary" className="fy-kind-new" onClick={() => navigate(newPath)}><Plus /> New</Button>
+  </div>;
   return (
     <div data-screen={screenId}>
       <div className="fy-corner">
@@ -1224,6 +1236,7 @@ function SheetGrid({
         </Button>
       </div>
       <SheetKindNav active={kind} />
+      {(phone || (compact && sheets.length === 0 && pending.length === 0)) && <div className="fy-cast-mobile-head">{ledgerHead}</div>}
       {/* An empty state means "nothing here", never "something is on its way" (issue 228). One
           drafting row is enough to make this list a list. */}
       {sheets.length === 0 && pending.length === 0 ? (
@@ -1259,16 +1272,19 @@ function SheetGrid({
                     />
                   )}
                 </div>
+                <div className="fy-feature__copy">
                 <div className="fy-feature__title">
-                  {featured.name}
+                  <span>{featured.name}</span>
                   <span
                     className={cx("fy-dot", featured.status === "locked" ? "fy-dot--ok" : "fy-dot--sketch")}
                   />
                   <span className="fy-feature__note">
+                    <span className={`fy-dot fy-feature__status-dot fy-dot--${featured.status === "locked" ? "ok" : "sketch"}`} />
                     {featured.status === "locked" ? "canon locked" : "sketch"}
                   </span>
                 </div>
                 <div className="fy-feature__sub">{limitedFeatureCopy(featureCopy(featured))}</div>
+                </div>
                 <div className="fy-feature__actions">
                   <Button variant="primary" size="sm" onClick={() => navigate(detailPath(featured.id))}>
                     Open sheet
@@ -1287,16 +1303,7 @@ function SheetGrid({
             </div>
           )}
           <div className="fy-split__main">
-            <div className="fy-ledgerhead">
-              <span className="fy-ledgerhead__label">
-                {kind === "character" ? "The cast" : title} · {sheets.length}
-              </span>
-              <span className="fy-ledgerhead__meta">
-                {locked} canon-locked · {sketches} sketch{sketches === 1 ? "" : "es"}
-                {retired > 0 ? ` · ${retired} retired` : ""}
-                {pendingSuffix(pending)}
-              </span>
-            </div>
+            {!phone && ledgerHead}
             <div className="fy-ledger">
               <PendingSheetRows worldId={worldId} pending={pending} />
               {sheets.map((sheet) => (
@@ -1321,7 +1328,7 @@ function SheetGrid({
                       radius={6}
                     />
                   </div>
-                  <div style={{ minWidth: 0 }}>
+                  <div className="fy-row__copy" style={{ minWidth: 0 }}>
                     <div className="fy-row__name">{sheet.name}</div>
                     <div className="fy-row__sub">{roleOf(sheet)}</div>
                   </div>
@@ -1382,6 +1389,7 @@ function firstSentence(text: string): string {
 }
 
 export function LocationsScreen() {
+  const phone = useMediaQuery("(max-width: 599px)");
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
@@ -1395,25 +1403,23 @@ export function LocationsScreen() {
         </Button>
       </div>
       <SheetKindNav active="location" />
-      <div className="fy-hero">
+      <div className="fy-hero fy-kind-head">
         <div className="fy-hero__eyebrow">
-          {world?.meta.name} · {places.length} place{places.length === 1 ? "" : "s"}
+          {phone ? `${places.filter(s => s.status === "locked").length} canon-locked · ${places.filter(s => s.status !== "locked").length} sketches` : `${world?.meta.name} · ${places.length} place${places.length === 1 ? "" : "s"}`}
           {pendingSuffix(pending)}
         </div>
-        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
-          Locations
+        <h1 className="fy-hero__title fy-kind-title">
+          {phone ? `Places · ${places.length}` : "Locations"}
         </h1>
+        <Button variant="primary" className="fy-kind-new" onClick={() => navigate(`/w/${worldId}/locations/new`)}><Plus /> New</Button>
       </div>
       <div
-        className="fy-cardgrid"
-        style={{
-          gridTemplateColumns: `repeat(${Math.min(Math.max(places.length + pending.length, 2), 4)}, minmax(0, 1fr))`,
-        }}
+        className={`fy-cardgrid fy-location-grid fy-kind-grid fy-kind-grid--${Math.min(Math.max(places.length + pending.length, 2), 4)}`}
       >
         {/* Pending cards lead, and it has to be the markup rather than a comment: a world with
             a screen's worth of places would otherwise put the one just submitted below the
             fold, which is the same "did that work?" the empty state caused (issue 228). */}
-        <PendingSheetCards worldId={worldId} pending={pending} frameHeight={270} />
+        <PendingSheetCards worldId={worldId} pending={pending} />
         {places.map((s) => (
           <button
             key={s.id}
@@ -1421,7 +1427,7 @@ export function LocationsScreen() {
             className="fy-gridcard fy-gridcard--media fy-gridcard--fixed"
             onClick={() => navigate(`/w/${worldId}/locations/${s.id}`)}
           >
-            <div className="fy-gridcard__frame" style={{ height: 270 }}>
+            <div className="fy-gridcard__frame">
               <Portrait
                 worldSlug={world?.meta.slug}
                 path={locationPortraitPath(world, s.id)}
@@ -1434,7 +1440,7 @@ export function LocationsScreen() {
                 <span className="fy-gridcard__name">{s.name}</span>
               </div>
               <div className="fy-gridcard__body">{sheetLede(s)}</div>
-              <div className="fy-gridcard__foot" style={{ marginTop: 9 }}>
+              <div className="fy-gridcard__foot fy-gridcard__foot--spaced">
                 {s.status === "locked" ? `locked · v${s.version}` : `sketch · v${s.version}`}
                 {s.canonRules.length > 0 ? ` · ${s.canonRules.join(", ")}` : ""}
               </div>
@@ -1461,23 +1467,20 @@ export function FactionsScreen() {
   return (
     <div data-screen="factions">
       <SheetKindNav active="faction" />
-      <div className="fy-hero">
+      <div className="fy-hero fy-kind-head">
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {factions.length} faction{factions.length === 1 ? "" : "s"}
           {pendingSuffix(pending)}
         </div>
-        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+        <h1 className="fy-hero__title fy-kind-title">
           Factions
         </h1>
+        <Button variant="primary" className="fy-kind-new" onClick={() => navigate(`/w/${worldId}/factions/new`)}><Plus /> New</Button>
       </div>
       <div
-        className="fy-cardgrid"
-        style={{
-          gridTemplateColumns: `repeat(${Math.min(Math.max(factions.length + pending.length, 2), 3)}, minmax(0, 1fr))`,
-          padding: "32px 150px 46px",
-        }}
+        className={`fy-cardgrid fy-faction-grid fy-kind-grid fy-kind-grid--${Math.min(Math.max(factions.length + pending.length, 2), 3)}`}
       >
-        <PendingSheetCards worldId={worldId} pending={pending} frameHeight={210} />
+        <PendingSheetCards worldId={worldId} pending={pending} />
         {factions.map((s) => {
           const wants = facet(s, "want");
           const fears = facet(s, "fear");
@@ -1488,14 +1491,14 @@ export function FactionsScreen() {
               className="fy-gridcard fy-gridcard--media fy-gridcard--fixed fy-gridcard--fixed-faction"
               onClick={() => navigate(`/w/${worldId}/factions/${s.id}`)}
             >
-              <div className="fy-gridcard__frame" style={{ height: 210 }}>
+              <div className="fy-gridcard__frame">
                 <Portrait
                   worldSlug={world?.meta.slug}
                   path={sheetPortraitPath(s.id)}
                   label={`${s.name}: emblem or scene`}
                 />
               </div>
-              <div className="fy-gridcard__pad" style={{ padding: "2px 8px 0" }}>
+              <div className="fy-gridcard__pad">
                 {/* No dot: the foot says locked or sketch in words (issue 1010). */}
                 <div className="fy-gridcard__title">
                   <span className="fy-gridcard__name">{s.name}</span>
@@ -1673,11 +1676,11 @@ function VoiceCard({
                 : "Assign a recorded reference or choose a text-to-speech voice"}
           </div>
           {voice && !sample && (
-            <div style={{ color: "var(--neutral-400)", marginTop: 6, overflow: "hidden" }}>
+            <div className="fy-voicecard__wave">
               <Wave
                 seed={`${voice.provider}/${voiceModel ?? "legacy"}/${voice.voiceId}`}
-                width={290}
                 height={22}
+                stretch
               />
             </div>
           )}
@@ -1708,6 +1711,8 @@ function VoiceCard({
 }
 
 function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: string }) {
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
   const { worldId, sheetId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const sheet = useSheet(worldId, sheetId);
@@ -1924,8 +1929,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           </div>
           <div className="fy-designcard__caption">
             <span className="fy-designcard__title">Main photo</span>
-            <span className={`fy-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />
-            <span className="fy-designcard__note">{mainPhoto ? "identity anchor" : "outstanding"}</span>
+            <span className={`fy-dot fy-designcard__desktop-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />
+            <span className="fy-designcard__note"><span className={`fy-dot fy-designcard__compact-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />{mainPhoto ? "identity anchor" : "outstanding"}</span>
           </div>
         </div>
       </div>
@@ -1944,12 +1949,13 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         </span>
         <strong>Character sheet</strong>
         <small>{characterSheet ? "accepted · current" : "outstanding"}</small>
+        <span className="fy-overview-sheet__chevron"><ChevronRight /></span>
       </button>
     </div>
   ) : null;
   const characterTabs = isCharacter && (
-    <nav className="fy-seg fy-character-overview-tabs">
-      <span className="fy-seg__item fy-seg__item--active">Overview</span>
+    <nav className="fy-seg fy-character-overview-tabs" aria-label="Character pages">
+      <span className="fy-seg__item fy-seg__item--active" aria-current="page">Overview</span>
       <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}>
         Reference
       </button>
@@ -1969,21 +1975,21 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
       {sheet.name}
     </h1>
   );
+  const header = <div className="fy-sheet__header">
+    <div className="fy-sheet__eyebrow">{sheet.type}{sheet.role ? ` · ${sheet.role}` : ""}</div>
+    {isCharacter ? <div className="fy-sheet__heading">{sheetHeading}{characterTabs}</div> : sheetHeading}
+  </div>;
   const main = (
     <div
       className={isCharacter ? "fy-sheet__main" : undefined}
       style={isCharacter ? undefined : { display: "grid", gap: "var(--space-4)", alignContent: "start" }}
     >
       <div>
-        <div className="fy-sheet__eyebrow">
-          {sheet.type}
-          {sheet.role ? ` · ${sheet.role}` : ""}
-        </div>
-        {isCharacter ? <div className="fy-sheet__heading">{sheetHeading}{characterTabs}</div> : sheetHeading}
+        {!(phone && isCharacter) && header}
         <div className="fy-sheet__badges">
-          <Badge tone={sheet.status === "sketch" ? "outline" : "neutral"}>
+          {compact && isCharacter ? <><Badge tone="outline">v{sheet.version}</Badge><Badge tone="outline">{sheet.status === "locked" && <Lock size={10} />}{sheet.status === "locked" ? "locked" : "sketch"}</Badge></> : <Badge tone={sheet.status === "sketch" ? "outline" : "neutral"}>
             {sheet.status === "sketch" ? `sketch · v${sheet.version}` : `v${sheet.version} · locked`}
-          </Badge>
+          </Badge>}
           {sheet.retired && <Badge tone="danger">retired</Badge>}
           {/* A guest reached from the world's own address says whose it is, or the sheet reads
                 as a member of a cast it was deliberately kept out of (SPEC-020 R-10). */}
@@ -2000,28 +2006,36 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         {/* Reference, More looks and Voice live in the tab row (design 54): a destination
               appears once per screen, so this row keeps only what the tabs do not offer. */}
         <Button
+          variant={compact && isCharacter ? "primary" : "secondary"}
           onClick={() =>
             navigate(
               `/w/${worldId}/${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${sheet.id}/edit`,
             )
           }
         >
-          Edit the sheet
+          {compact && isCharacter && <Pencil />} Edit the sheet
         </Button>
         <Button
+          className="fy-sheet__icon-action"
+          aria-label={sheetTalkStarting ? "Starting…" : sheet.type === "character" ? "Talk about them" : "Talk about it"}
           onClick={() =>
             talkAboutSheet(sheet.name, { kind: "sheet", sheetKind: sheet.type, sheetId: sheet.id })
           }
           disabled={sheetTalkStarting}
         >
-          {sheetTalkStarting ? "Starting…" : sheet.type === "character" ? "Talk about them" : "Talk about it"}
+          <span className="fy-sheet__action-icon"><Message /></span>
+          <span className="fy-sheet__action-label">{sheetTalkStarting ? "Starting…" : sheet.type === "character" ? "Talk about them" : "Talk about it"}</span>
         </Button>
         {/* Page scale (issue 859). The speaker on each paragraph reads that paragraph; this
               reads the sheet through, in the order declared above. Offered only when there is
               more than one block — a page read of one block is the block read with more words
               on the button. */}
-        {pageBlocks.length > 1 && <PageReadControl read={pageRead} label="Read the sheet" />}
+        {pageBlocks.length > 1 && (compact && isCharacter && !pageRead.reading
+          ? <IconButton label="Read the sheet" onClick={pageRead.begin}><Speaker /></IconButton>
+          : <PageReadControl read={pageRead} label="Read the sheet" />)}
         <Button
+          className="fy-sheet__icon-action"
+          aria-label={sheet.status === "locked" ? "Unlock" : "Lock to canon"}
           onClick={() => {
             if (!worldId) return;
             lifecycle.track(setSheetStatus(worldId, sheetPath, sheet.status === "locked" ? "sketch" : "locked"));
@@ -2032,7 +2046,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
               : "Locking makes the identity settled — no image required first"
           }
         >
-          {sheet.status === "locked" ? "Unlock" : "Lock to canon"}
+          <span className="fy-sheet__action-icon"><Lock /></span>
+          <span className="fy-sheet__action-label">{sheet.status === "locked" ? "Unlock" : "Lock to canon"}</span>
         </Button>
       </div>
       {isCharacter && (
@@ -2083,12 +2098,12 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         </IconButton>
       </div>
       {renaming !== null && (
-        <Card className="scr-form">
+        <Card className="scr-form fy-sheet-inline-form">
           <div className="scr-field">
             <label className="scr-field__label">New name — the id and every citation stay</label>
             <Input value={renaming} onChange={(e) => setRenaming(e.target.value)} />
           </div>
-          <div style={{ display: "flex", gap: "var(--space-2)" }}>
+          <div className="fy-sheet-inline-form__actions">
             <Button
               variant="primary"
               disabled={renaming.trim().length === 0 || renaming.trim() === sheet.name}
@@ -2105,14 +2120,14 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         </Card>
       )}
       {duplicating !== null && (
-        <Card className="scr-form">
+        <Card className="scr-form fy-sheet-inline-form">
           <div className="scr-field">
             <label className="scr-field__label">
               Duplicate as — a sketch recording its origin at v{sheet.version}; {sheet.name} is untouched
             </label>
             <Input value={duplicating} onChange={(e) => setDuplicating(e.target.value)} />
           </div>
-          <div style={{ display: "flex", gap: "var(--space-2)" }}>
+          <div className="fy-sheet-inline-form__actions">
             <Button
               variant="primary"
               disabled={duplicating.trim().length === 0}
@@ -2162,22 +2177,22 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         <Section title="Canon rules" aside={<span>owned by canon — edit in canon, not here</span>}>
           {rules.map((rule) => (
             <div key={rule.id} className="scr-canonrule">
-              <span className="mono" style={{ color: "var(--muted-foreground)" }}>
-                {rule.id}
-              </span>
+              {compact ? (
+                <button className="fy-sheet-canon-link mono" aria-label={`Edit ${rule.id} in canon`} onClick={() => navigate(`/w/${worldId}/canon/${rule.id}`)}>{rule.id}</button>
+              ) : <span className="mono" style={{ color: "var(--muted-foreground)" }}>{rule.id}</span>}
               <span className="scr-prose">{rule.body}</span>
-              <span className="scr-canonrule__note">
+              {!compact && <span className="scr-canonrule__note">
                 <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/canon/${rule.id}`)}>
                   Edit in canon →
                 </Button>
-              </span>
+              </span>}
             </div>
           ))}
         </Section>
       )}
       {(sheet.links.length > 0 || (refs?.incomingLinks.length ?? 0) > 0) && (
         <Section title="Linked">
-          <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+          <div className="fy-sheet-links">
             {sheet.links.map((link) => {
               const other = world.sheets.find((s) => s.id === link);
               if (!other)
@@ -2191,8 +2206,10 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
                 <Button
                   key={link}
                   variant="secondary"
+                  className="fy-sheet-link"
                   onClick={() => navigate(`/w/${worldId}/${base}/${link}`)}
                 >
+                  <span className="fy-sheet-link__face"><Portrait worldSlug={slug} path={sheetPortraitPath(other.id)} label="" radius={16} /></span>
                   {other.name} →
                 </Button>
               );
@@ -2203,7 +2220,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
                 const other = world.sheets.find((s) => s.id === id);
                 const base = other ? (other.type === "character" ? "cast" : `${other.type}s`) : "cast";
                 return (
-                  <Button key={id} variant="ghost" onClick={() => navigate(`/w/${worldId}/${base}/${id}`)}>
+                  <Button key={id} variant="ghost" className="fy-sheet-link" onClick={() => navigate(`/w/${worldId}/${base}/${id}`)}>
+                    {other && <span className="fy-sheet-link__face"><Portrait worldSlug={slug} path={sheetPortraitPath(other.id)} label="" radius={16} /></span>}
                     ← {other?.name ?? id}
                   </Button>
                 );
@@ -2245,6 +2263,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   if (isCharacter) {
     return (
       <div className="fy-sheet" data-screen={screenId}>
+        {phone && header}
         {side}
         {main}
       </div>
@@ -2962,6 +2981,9 @@ export const NewCharacterScreen = () => (
 );
 export const NewLocationScreen = () => (
   <NewSheetScreen screenId="new-location" title="New location" sheetType="location" />
+);
+export const NewFactionScreen = () => (
+  <NewSheetScreen screenId="new-faction" title="New faction" sheetType="faction" />
 );
 
 // ---- Canon -----------------------------------------------------------------
