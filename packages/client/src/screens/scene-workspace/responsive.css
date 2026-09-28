@@ -1,5 +1,7 @@
 /* Turn 168. Desktop hover layouts keep turns 138/145; sheets share turn 162's focus model. */
 .fy-scene-back, .fy-shot__touch-actions { display: none; }
+.fy-scene-dock-content, .fy-scene-dock-inline:not([hidden]) { display: contents; }
+.fy-sw .fy-scene-dock-inline .fy-arke { width: auto; min-width: 0; background: var(--background); border-left: 1px solid var(--border); }
 .fy-scene-menu { display: flex; flex-direction: column; gap: 0; }
 .fy-scene-menu > button, .fy-frame-download { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 0; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--foreground); text-align: left; font: 400 var(--text-md)/1.2 var(--font-sans); cursor: pointer; }
 .fy-scene-menu > button:disabled { opacity: .4; cursor: default; }

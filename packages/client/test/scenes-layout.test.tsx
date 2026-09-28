@@ -9,6 +9,7 @@ import { App } from "../src/App.js";
 import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { scenesLayoutFixture } from "./scenes-layout-fixture.js";
+import { SceneDock, useSceneDock } from "../src/screens/scene-workspace/responsive-chrome.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 let width = 390;
@@ -128,4 +129,47 @@ it("keeps Rename reachable after the phone replaces the editable title", async (
   await act(async () => (input as unknown as Record<string, {onChange: (event: {target: {value: string}}) => void}>)[key]!.onChange({target: {value: 'A new name'}}));
   await click(textButton('Save name', '.fy-scene-rename[open]'));
   assert.deepEqual(commands(), [{kind: 'edit-shot', shotId: 'sh_12', change: {title: 'A new name'}}]);
+});
+
+for (const shot of [false, true]) it(`cancels a stale ${shot ? "shot" : "scene"} rename when another writer changes it`, async () => {
+  await mount(shot ? '/sc_04/shots/sh_12' : '/sc_04');
+  await click(find('.fy-scene-back > button:last-child')); await click(textButton('Rename', '.fy-scene-page-menu[open]'));
+  const state = scenesLayoutFixture(), scene = state.world!.productions[0]!.scenes.find(scene => scene.id === 'sc_04')!;
+  if (shot && 'shots' in scene) scene.shots[0]!.title = 'Renamed elsewhere'; else scene.title = 'Renamed elsewhere';
+  scene.version++;
+  await act(async () => __setStateForTest(state));
+  assert.equal(find('.fy-scene-rename[open]'), null);
+  assert.deepEqual(commands(), []);
+});
+
+it("preserves the same composer while resizing and putting Arke away", async () => {
+  function Dock() { const [open, setOpen] = useSceneDock(); return <SceneDock open={open} onOpen={() => setOpen(true)} onClose={() => setOpen(false)}><textarea aria-label="Unsent draft" /></SceneDock>; }
+  width = 1360; const host = dom.document.createElement('div'); dom.document.body.append(host); root = createRoot(host);
+  await act(async () => root!.render(<Dock />));
+  const editor = find('[aria-label="Unsent draft"]') as HTMLTextAreaElement; editor.value = 'Keep these unsent words';
+  await act(async () => { width = 984; for (const listener of listeners) listener(); });
+  assert.equal(find('[aria-label="Unsent draft"]'), editor);
+  await click(find('.fy-sw__rail')); assert.equal(editor.value, 'Keep these unsent words');
+  await click(find('.fy-scene-dock .ui-iconbtn'));
+  assert.equal(find('[aria-label="Unsent draft"]'), editor);
+  await act(async () => { width = 1360; for (const listener of listeners) listener(); });
+  assert.equal(find('[aria-label="Unsent draft"]'), editor); assert.equal(editor.value, 'Keep these unsent words');
+});
+
+it("commits the focused storyboard script before switching to a phone", async () => {
+  await mount('/sc_04', 984);
+  const editor = find('.fy-swrow__scripteditor'), textarea = editor.querySelector('textarea')!;
+  const props = (node: Element) => (node as unknown as Record<string, Record<string, (event: unknown) => void>>)[Object.keys(node).find(key => key.startsWith('__reactProps$'))!]!;
+  await act(async () => props(editor).onFocus!({}));
+  await act(async () => props(textarea).onChange!({target:{value:'The revised harbour line'}, currentTarget:{value:'The revised harbour line',selectionStart:27}}));
+  await act(async () => { width = 390; for (const listener of listeners) listener(); });
+  assert.ok(commands().some(command => command.kind === 'edit-shot' && command.change.description === 'The revised harbour line'));
+});
+
+it("labels a compact shot with an accepted clip as rendered", async () => {
+  await mount(); const state = scenesLayoutFixture(), production = state.world!.productions[0]!;
+  const clip = production.takes.find(take => take.kind === 'clip' && take.coversShots.includes('sh_12'))!;
+  production.selections.sh_12 = {acceptedTakeId:clip.id, trimInSec:0};
+  await act(async () => __setStateForTest(state));
+  assert.equal(find('.fy-swrow__titleline .fy-swchip[data-state="rendered"]').textContent, 'Rendered');
 });
