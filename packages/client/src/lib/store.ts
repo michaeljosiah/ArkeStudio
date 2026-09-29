@@ -399,6 +399,8 @@ interface StoreState {
   voiceCandidates: Record<string, VoiceCandidatesState>;
   /** Every voice the world can read with (design 70) — unranked, and not per sheet. */
   voiceCatalogue: ReadingVoice[] | null;
+  voiceCatalogueErrors: string[];
+  cataloguePreview: Extract<DomainEvent, { type: "voice.catalogue-preview" }> | null;
   /** SPEC-011: audition results keyed provider/model/voiceId — cached files replay free. */
   voicePreviews: Record<string, { file: string | null; error: string | null }>;
   voiceAudio: Record<string, Extract<DomainEvent, { type: "voice.audio" }>>;
@@ -567,6 +569,8 @@ let current: StoreState = {
   voiceClips: {},
   voiceCloned: null,
   voiceCatalogue: null,
+  voiceCatalogueErrors: [],
+  cataloguePreview: null,
   voicePreviews: {},
   voiceAudio: {},
   voiceParts: {},
@@ -2072,6 +2076,8 @@ function handleFrame(json: string): void {
     let voiceClips = current.voiceClips;
     let voiceCloned = current.voiceCloned;
     let voiceCatalogue = current.voiceCatalogue;
+    let voiceCatalogueErrors = current.voiceCatalogueErrors;
+    let cataloguePreview = current.cataloguePreview;
     let voicePreviews = current.voicePreviews;
     let voiceAudio = current.voiceAudio;
     let voiceParts = current.voiceParts;
@@ -2087,7 +2093,9 @@ function handleFrame(json: string): void {
     let locationViewUpload = current.locationViewUpload;
     if (event.type === "voice.catalogue") {
       voiceCatalogue = event.voices;
+      voiceCatalogueErrors = event.errors ?? [];
     }
+    if (event.type === "voice.catalogue-preview") cataloguePreview = event;
     if (event.type === "voice.clip-staged") {
       voiceClips = {
         ...voiceClips,
@@ -2352,6 +2360,8 @@ function handleFrame(json: string): void {
       voiceClips,
       voiceCloned,
       voiceCatalogue,
+      voiceCatalogueErrors,
+      cataloguePreview,
       voicePreviews,
       voiceAudio,
       voiceParts,
@@ -3856,9 +3866,19 @@ export function setNarrator(
 }
 
 export function requestVoiceCatalogue(worldId?: string): void {
+  emitChange({ ...current, voiceCatalogue: null, voiceCatalogueErrors: [] });
   send({ kind: "voice-catalogue", ...(worldId ? { worldId } : {}) });
 }
 
+export function requestCataloguePreview(voice: ReadingVoice): string {
+  const requestId = ulid();
+  send({ kind: "catalogue-voice-preview", requestId, provider: voice.provider, model: voice.model,
+    voiceId: voice.voiceId, maxMicroUsd: voice.preview?.microUsd ?? 0 });
+  return requestId;
+}
+export function stopCataloguePreview(requestId: string): void {
+  send({ kind: "stop-catalogue-voice-preview", requestId });
+}
 export function designVoice(worldId: string, draft: import("@arke-studio/contracts").VoiceDesignDraft, confirmedEstimateMicroUsd: number): string {
   const requestId = queueRequest("design-voice");
   send({ kind: "design-voice", requestId, worldId, draft, confirmedEstimateMicroUsd });
@@ -5434,6 +5454,8 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     voiceClips: {},
     voiceCloned: null,
     voiceCatalogue: null,
+    voiceCatalogueErrors: [],
+    cataloguePreview: null,
     voicePreviews: {},
     voiceAudio: {},
     voiceParts: {},

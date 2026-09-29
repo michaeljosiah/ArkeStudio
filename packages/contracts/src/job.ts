@@ -10,8 +10,10 @@ import { CapabilitySchema } from "./provider.js";
  * genesis conversation it was made in. Never a placeholder world. When the conversation
  * becomes a world at Begin, the job is re-associated; a ledger entry keeps the scope the money
  * was actually spent under, joinable to the world through its build record's genesisId.
+ * Settings auditions use the explicit app:voice-previews scope (SPEC-011, design 176); they
+ * remain app-owned and are never adopted by a world or a genesis conversation.
  */
-export const JobScopeSchema = z.union([UlidSchema, GenesisIdSchema]);
+export const JobScopeSchema = z.union([UlidSchema, GenesisIdSchema, z.literal("app:voice-previews")]);
 
 /**
  * The job queue (master spec §10.1). App-level, durable, append-only at

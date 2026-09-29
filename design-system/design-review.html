@@ -63,6 +63,24 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 @keyframes fadeUp{from{opacity:0;transform:translateY(26px)}to{opacity:1;transform:none}}
 @keyframes drift{from{transform:translateY(0)}to{transform:translateY(-7px)}}
 @keyframes barFill{from{width:4%}to{width:78%}}@keyframes kenburns{from{transform:scale(1)}to{transform:scale(1.08)}}@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
+/* Turn 127: settings narrator catalogue. Scoped to these proposed drawings. */
+.v176{width:1360px;height:850px;position:relative;overflow:hidden;background:var(--background);color:var(--foreground);font:400 14px/1.5 var(--font-sans)}
+.v176 *{box-sizing:border-box}.v176 button,.v176 input,.v176 select{font:inherit;color:inherit}.v176 button{cursor:pointer}
+.v176-top{height:44px;border-bottom:1px solid var(--border);padding:10px 24px;display:flex;justify-content:space-between}
+.v176-shell{display:flex;padding:32px;gap:44px;color:var(--muted-foreground)}.v176-shell nav{width:170px;line-height:2.5}.v176-shell h2{color:var(--foreground);margin:0 0 24px;font-size:24px}
+.v176-scrim{position:absolute;inset:44px 0 0;background:color-mix(in srgb,var(--foreground) 12%,transparent);display:flex;align-items:center;justify-content:center;padding:24px}
+.v176-dialog{width:960px;max-width:100%;max-height:100%;display:flex;flex-direction:column;background:var(--background);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-xl);overflow:hidden}
+.v176-head{display:flex;gap:16px;align-items:flex-start;padding:20px 24px 14px}.v176-head h3{font-size:20px;letter-spacing:-.025em;margin:0 0 3px;font-weight:600}.v176-muted{color:var(--muted-foreground);font-size:13px}.v176-close{margin-left:auto;border:0;background:none;font-size:22px!important}
+.v176-tools{padding:0 24px 14px}.v176-tabs{display:flex;gap:6px;margin-bottom:14px}.v176-tabs button{background:none;border:0;border-radius:7px;padding:6px 12px;font-size:13px}.v176-tabs .on{background:var(--foreground);color:var(--background)}
+.v176-search{display:block;width:100%;height:40px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--background);margin-bottom:12px}
+.v176-filters{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.v176-filters label{font-size:12px;color:var(--muted-foreground)}.v176-filters select{display:block;width:100%;height:34px;border:1px solid var(--border);background:var(--background);border-radius:6px;padding:4px 8px;margin-top:4px;font-size:13px;color:var(--foreground)}
+.v176-summary{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:12px;color:var(--muted-foreground)}.v176-link{border:0;background:none;text-decoration:underline;text-underline-offset:3px;font-size:12px!important;padding:0}.v176-summary .v176-link{margin-left:auto}
+.v176-list{border-block:1px solid var(--border);overflow:auto;min-height:0;flex:1}.v176-row{display:grid;grid-template-columns:36px minmax(140px,1.2fr) minmax(200px,1.7fr) 100px 74px;align-items:center;gap:14px;min-height:61px;padding:8px 24px;border-bottom:1px solid var(--border)}.v176-row:last-child{border:0}.v176-row.picked{background:var(--secondary);box-shadow:inset 3px 0 var(--foreground)}
+.v176-play{height:34px;width:34px;border:1px solid var(--border);border-radius:50%;background:var(--background);display:flex;align-items:center;justify-content:center}.v176-play svg{width:13px;height:13px}.v176-name{display:flex;align-items:center;gap:9px;font-weight:500}.v176-name small{font-size:11px;font-weight:400;color:var(--muted-foreground)}.v176-pick{border:1px solid var(--border);background:var(--background);border-radius:6px;padding:5px 8px;font-size:12px!important}
+.v176-player{display:flex;gap:16px;align-items:center;padding:12px 24px;background:var(--secondary);font-size:12px;border-bottom:1px solid var(--border)}.v176-track{height:3px;width:140px;background:var(--border);border-radius:2px}.v176-track i{display:block;height:100%;width:36%;background:var(--foreground)}
+.v176-footer{display:flex;align-items:center;gap:12px;padding:16px 24px}.v176-footer .v176-muted{margin-right:auto}.v176-button{border:1px solid var(--border);background:var(--background);padding:8px 14px;border-radius:7px;font-size:13px!important}.v176-primary{background:var(--foreground);color:var(--background)!important;border-color:var(--foreground)}
+.v176-empty{min-height:315px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}.v176-empty strong{font-weight:500;font-size:16px}.v176-empty p{margin:0;color:var(--muted-foreground);font-size:13px}
+
 /* This page's chrome. theme-switch.js writes .dark / data-theme / color-scheme to the root exactly
    as the master does — System, Light, Dark — and the frames re-theme from the tokens alone. */
 html { background: var(--dv-canvas); }
@@ -220,7 +238,7 @@ x-import[hint-size^="100%"] { width: 100%; }
   <main class="main">
     <div class="top">
       <h1>Arke Studio · design review</h1>
-      <p>Generated 2026-09-28 from <code>Arke Studio.dc.html</code> by <code>npm run design:review</code>; this page never edits the master. Each screen is its latest frame, copied verbatim, then what shipped, then the turn's binding rules. A screen the master has deliberately not drawn says so. The build refuses a missing frame, a bitmap in place of a drawing, and a frame that does not carry a control the build shipped.</p>
+      <p>Generated 2026-09-29 from <code>Arke Studio.dc.html</code> by <code>npm run design:review</code>; this page never edits the master. Each screen is its latest frame, copied verbatim, then what shipped, then the turn's binding rules. A screen the master has deliberately not drawn says so. The build refuses a missing frame, a bitmap in place of a drawing, and a frame that does not carry a control the build shipped.</p>
     </div>
     <div class="legend"><span><i class="dot dot--built"></i> built</span><span><i class="dot dot--drifted"></i> built · drifted from the drawing</span><span><i class="dot dot--drawn"></i> drawn · not built</span></div>
     

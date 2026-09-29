@@ -382,6 +382,8 @@ const CLIENT_COMMAND_METADATA = {
   "set-style-override": action("world", "setting", "reference-kit", "authored-change", ["sheets", "art-direction"]),
   "voice-candidates": readOnly(QUERY),
   "voice-catalogue": readOnly(QUERY),
+  "catalogue-voice-preview": humanOnly("The voice picker states the preview price before the person's Play gesture."),
+  "stop-catalogue-voice-preview": humanOnly("Stops the person's transient voice audition."),
   "voice-line": action("production", "generation", "voice", "privacy-sensitive", ["sheets", "voices", "scenes", "shots"], { preparation: GENERATION_QUOTE }),
   "voice-preview": action("world", "generation", "voice", "privacy-sensitive", ["sheets", "voices"], { preparation: GENERATION_QUOTE }),
   "transcribe-dictation": readOnly("Returns transient local transcription and does not mutate a creative target."),
