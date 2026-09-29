@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createServer } from "node:net";
 import { request } from "node:http";
 import { it } from "node:test";
+import { RemoteDevices } from "@arke-studio/coordinator";
 import { DesktopRemoteAccess } from "../src/remote-access.js";
 import { ServeCleanupRequired, TailscaleServe, type TailscaleRun } from "../src/tailscale-serve.js";
 
@@ -59,6 +60,7 @@ it("address selection skips TCP, web and Funnel reservations and preserves a sav
   assert.equal(await fake.client.origin(origin + ":14443"), origin + ":14443");
   assert.equal(await fake.client.origin(origin), origin + ":10443", "old failed enable settings recover automatically");
   await assert.rejects(fake.client.origin("https://other.example.ts.net"), /tailnet address changed/);
+  assert.equal(await fake.client.origin("https://other.example.ts.net", true), origin + ":10443", "Disable permits setup under a changed hostname");
   assert.ok(!fake.commands.some(args => args.includes("--bg") || args.includes("off")));
   fake.set({ TCP: Object.fromEntries([443, 8443, 9443, 10443, 11443, 12443, 13443, 14443, 15443, 16443, 17443, 18443, 19443]
     .map(port => [String(port), { HTTPS: true }])) });
@@ -99,6 +101,36 @@ it("desktop automatically shares an alternate address, copies it, and keeps it a
     assert.equal(host.status().enabled, false);
     assert.ok(fake.commands.filter(args => args.includes("off")).every(args => args.includes("--https=9443")));
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
+});
+it("moving from an occupied saved address revokes every proof before publishing, including after Disable", async () => {
+  for (const enabled of [true, false]) {
+    const root = await mkdtemp(join(tmpdir(), "arke-remote-move-"));
+    await writeFile(join(root, "index.html"), "<head></head>");
+    await mkdir(join(root, "remote"));
+    await writeFile(join(root, "remote/settings.json"), JSON.stringify({ enabled, startOnLogin: false, origin: origin + ":9443" }));
+    const path = join(root, "remote/devices.json");
+    const devices = new RemoteDevices(path); await devices.load();
+    const proof = devices.request(devices.createCode().code, "Old phone")!;
+    await devices.approve(devices.pending()[0]!.id, "never");
+    const fake = tailscale();
+    fake.set({ TCP: { "9443": { HTTPS: true } }, Web: { "studio.example.ts.net:9443": { Handlers: { "/": { Proxy: "http://127.0.0.1:5173" } } } } });
+    const publish = fake.client.enable.bind(fake.client);
+    fake.client.enable = async (...args) => {
+      const restored = new RemoteDevices(path); await restored.load();
+      assert.equal(restored.authenticate(proof), null, "old proofs are durably revoked before the new mapping exists");
+      return publish(...args);
+    };
+    const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+      startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
+    try {
+      await host.initialize(); if (!enabled) await host.command({ kind: "enable" });
+      assert.equal(host.status().running, true); assert.equal(host.status().url, origin);
+      assert.deepEqual(host.status().devices, []); assert.match(host.status().reason!, /Pair your devices again/);
+      await host.command({ kind: "disable" });
+      assert.equal(JSON.parse(await readFile(join(root, "remote/settings.json"), "utf8")).origin, origin, "Disable retains the last address for takeover detection");
+      assert.ok(fake.get().TCP?.["9443"], "the replacement service remains untouched");
+    } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
+  }
 });
 it("recovery discovers alternate mappings and leaves modified or public mappings untouched", async () => {
   const fake = tailscale();

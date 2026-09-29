@@ -67,10 +67,12 @@ Settings, Activity and Account use sheets below 600px; wider touch screens retai
 and side panel with larger controls (design turn 175, #1373).
 
 **Disable remote access** stops hosting, removes only its matching Serve mapping and turns off
-automatic startup. Ordinary Quit removes the mapping before releasing the local hosting port;
+automatic startup, retaining the last address for the next setup. Ordinary Quit removes the mapping before releasing the local hosting port;
 the next app start prefers the same bookmarked address, even when port 443 becomes free.
 If another service has taken that address, Studio chooses a free one; copy or scan the new
-address in Settings. Studio never replaces another service or enables Funnel.
+address in Settings and pair your devices again. Before publishing a changed address (or recovering
+without a recorded address), Studio durably revokes previous device approvals; if that fails,
+hosting does not start. Studio never replaces another service or enables Funnel.
 If Tailscale cannot remove the
 mapping, Studio keeps the port reserved and reports that shutdown failed; restore Tailscale
 and retry Quit. The built desktop page keeps its existing loopback

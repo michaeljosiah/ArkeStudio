@@ -105,6 +105,14 @@ export class RemoteDevices {
       this.reject(id);
     });
   }
+  revokeAll(): Promise<void> {
+    return this.serial(async () => {
+      await this.persist(this.path, { version: 1, devices: [] });
+      this.devices = [];
+      this.requests.clear();
+      this.pairing = null;
+    });
+  }
   authenticate(proof: string | undefined): string | null {
     return this.authorized(proof)?.id ?? null;
   }

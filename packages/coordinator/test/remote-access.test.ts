@@ -86,6 +86,20 @@ it("each approval retains its selected lifetime; Never survives restart and rema
     await assert.rejects(new RemoteDevices(path).load(), "missing expiry is not Never");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+it("bulk revocation is durable and a failed write cannot acknowledge an origin migration", async () => {
+  const root = await temporary();
+  try {
+    const path = join(root, "devices.json");
+    const devices = new RemoteDevices(path); await devices.load();
+    const { proof } = await paired(devices);
+    const failed = new RemoteDevices(path, Date.now, async () => { throw new Error("disk full"); });
+    await failed.load(); await assert.rejects(failed.revokeAll(), /disk full/);
+    assert.ok(failed.authenticate(proof));
+    await devices.revokeAll();
+    const restored = new RemoteDevices(path); await restored.load();
+    assert.equal(restored.authenticate(proof), null);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 it("pairing needs owner approval, codes work once, expire and have a guess limit", async () => {
   const root = await temporary(); let now = Date.now();
   try {

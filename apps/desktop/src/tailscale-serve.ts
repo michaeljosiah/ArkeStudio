@@ -19,7 +19,7 @@ const run: TailscaleRun = args => new Promise((resolve, reject) => {
 /** Never reset Serve or replace a mapping owned by another application. */
 export class TailscaleServe {
   constructor(private readonly execute: TailscaleRun = run) {}
-  async origin(previous: string | null = null): Promise<string> {
+  async origin(previous: string | null = null, allowHostnameChange = false): Promise<string> {
     const status = JSON.parse(await this.execute(["status", "--json"]));
     const name = String(status.Self?.DNSName ?? "").replace(/\.$/, "");
     if (status.BackendState !== "Running") throw new Error("Connect Tailscale on this PC first.");
@@ -28,7 +28,7 @@ export class TailscaleServe {
     }
     const saved = previous ? new URL(previous) : null;
     if (saved && (saved.protocol !== "https:" || saved.origin !== previous)) throw new Error("The saved remote address is invalid. Disable remote access before setting it up again.");
-    if (saved && saved.hostname !== name) throw new Error("The tailnet address changed. Disable remote access before setting up its new address.");
+    if (saved && saved.hostname !== name && !allowHostnameChange) throw new Error("The tailnet address changed. Disable remote access before setting up its new address.");
     const config = await this.configuration();
     // Keep bookmarked addresses stable, but let first-time setup coexist with other apps.
     const ports = [...new Set([...(saved ? [saved.port || "443"] : []), "443", "8443", "9443",
