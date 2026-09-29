@@ -63,7 +63,7 @@ it("saving a recording opens Mine without assigning any reader or changing the c
   await change("clone-description", { value: "Low, dry, warm" });
   await press("clone-save");
   assert.ok(sent.some(message => message.kind === "clone-voice"));
-  state.world!.clonedVoices = [{ id: "harbour", name: "Harbour", clip: "voices/harbour.wav",
+  state.world!.clonedVoices = [{ id: "harbour", name: "Harbour", clip: "voices/harbour.wav", language: "en",
     description: "Low, dry, warm", attributes: ["low", "dry", "warm"], consent: true, created: "2026-09-29T12:00:00Z" }];
   await act(async () => __setStateForTest(state, {
     voiceClips, voiceCloned: { voiceId: "harbour", label: "Harbour", reason: null },
