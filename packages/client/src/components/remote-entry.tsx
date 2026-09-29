@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { initStore } from "../lib/store.js";
-import { prepareRemoteSession } from "../lib/remote-session.js";
+import { prepareRemoteSession, remoteFetch, RemoteBrowserError } from "../lib/remote-session.js";
 import { CloudWay, LaunchFoot, LaunchFrame, remoteStudio } from "../screens/launch.js";
 import { Laptop, Unplug } from "./icons.js";
 
@@ -68,13 +68,13 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
       const current = () => active && checkedRevision === revision.current;
       try {
         try { await prepareRemoteSession(); }
-        catch { if (current()) setState("browser"); return; }
+        catch (error) { if (current()) setState(error instanceof RemoteBrowserError ? "browser" : "offline"); return; }
         if (!current()) return;
-        const session = await fetch("/remote/session", { signal: controller.signal });
+        const session = await remoteFetch("/remote/session", { signal: controller.signal });
         if (!current()) return;
         if (session.status === 204) { initStore(); setState("ready"); }
         else if (session.status === 401) {
-          const pairing = await fetch("/remote/pair", { signal: controller.signal });
+          const pairing = await remoteFetch("/remote/pair", { signal: controller.signal });
           if (!current()) return;
           if (pairing.status === 204) {
             initStore();
@@ -97,7 +97,14 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
     };
     void check();
     const timer = setInterval(() => { if (active) void check(); }, 3000);
-    return () => { active = false; controller.abort(); clearInterval(timer); };
+    const resume = () => { if (document.visibilityState !== "hidden") void check(); };
+    window.addEventListener("online", resume);
+    document.addEventListener("visibilitychange", resume);
+    return () => {
+      active = false; controller.abort(); clearInterval(timer);
+      window.removeEventListener("online", resume);
+      document.removeEventListener("visibilitychange", resume);
+    };
     // `attempt` is Try again: the same check, now, rather than at the next tick.
   }, [attempt, navigate]);
 
@@ -108,7 +115,7 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
     revision.current++;
     setBusy(true); setError(null);
     try {
-      const response = await fetch("/remote/pair", {
+      const response = await remoteFetch("/remote/pair", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, name: name.trim() || "My phone" }),
@@ -196,7 +203,7 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
       <>
         <div className="fy-launch__note" role="status">
           <Unplug size={16} />
-          <div><b>Not answering</b>Is Arke Studio open on your computer?</div>
+          <div><b>Not answering</b>Keep your PC awake, with Studio and Tailscale running. Retrying automatically.</div>
         </div>
         <button type="button" className="fy-launch__action" onClick={() => setAttempt(n => n + 1)}>Try again</button>
       </>

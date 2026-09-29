@@ -122,6 +122,30 @@ it("says a refusal on the way, and the phone can try again", async () => {
   } finally { await offline.unmount(); }
 });
 
+it("recovers from a stalled session probe without refreshing the page", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  let checks = 0;
+  globalThis.fetch = (async (_input, init) => {
+    if (++checks > 1) return new Response(null, { status: 204 });
+    return new Promise<Response>((_resolve, reject) => {
+      init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true });
+    });
+  }) as typeof fetch;
+  const element = document.createElement("div"); document.body.append(element);
+  const root = createRoot(element);
+  try {
+    await act(async () => { root.render(<MemoryRouter><RemoteEntry><div>Private world</div></RemoteEntry></MemoryRouter>); });
+    assert.ok(element.textContent?.includes("Checking"));
+    await act(async () => { t.mock.timers.tick(10_000); });
+    assert.ok(element.textContent?.includes("Not answering"));
+    assert.ok(element.textContent?.includes("Retrying automatically"));
+    assert.ok(!element.textContent?.includes("Browser storage is needed"));
+    await act(async () => { window.dispatchEvent(new window.Event("online")); });
+    assert.equal(checks, 2);
+    assert.ok(element.textContent?.includes("Private world"));
+  } finally { await act(async () => root.unmount()); element.remove(); }
+});
+
 it("goes straight in after a pending request survives a reload", async () => {
   let pairing = 202;
   globalThis.fetch = (async (input: RequestInfo | URL) => new Response(null, {

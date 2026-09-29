@@ -23,7 +23,13 @@ and any local generation. The other device only shows the browser frontend.
    clean HTTPS address. The QR is generated locally and contains only that address, not a
    credential or pairing code. Choose **Pair a device** on the PC. Enter the code and a device name on the phone. Approve the matching request on
    the PC. Codes work once, expire after five minutes and stop working after five wrong guesses.
-4. Bookmark the clean address on the phone. It contains no credential. This browser remains
+4. Bookmark the clean address or add Studio to your home screen. On iPhone, use Safari's
+   **Share → Add to Home Screen**, with **Open as Web App** enabled if shown. On Android,
+   use Chrome's menu → **Install app** or **Add to Home screen**. Studio supplies its app icon
+   and opens in its own window where the browser supports it. Existing shortcuts may need to
+   be removed and added again to pick up the icon. The clean launch address contains no credential.
+   If the installed app opens with separate browser storage, pair and approve it once there too.
+   This browser remains
    authorized across browser and Studio restarts. **Remember approved devices for** offers
    **30 days**, **90 days** (default), **120 days** or **Never**. The setting at approval applies
    to that new device; existing devices keep their expiry. Never approvals remain valid until
@@ -86,7 +92,15 @@ Retry can construct a replacement. An ordinary first launch does not require Tai
 Studio saves its ownership record before publishing HTTPS, so a process exit during Enable
 still leaves enough information for this recovery on the next start.
 
-If the PC or Tailscale is offline, an already open page retries. A new tab may show the browser's
+The installable web app remains a frontend to the PC; installation does not copy worlds to the
+phone or provide offline editing. The manifest is advertised only on the desktop-hosted remote
+page, not on the Electron file page or temporary development sessions. Neither the worker nor
+the gateway caches world data, media or credentials for offline use.
+
+If the PC or Tailscale is offline, an already open page retries. Worker preparation, session
+checks and WebSocket handshakes have ten-second deadlines so a stalled attempt cannot prevent
+retrying indefinitely. Returning to the page or restoring the network also checks the session.
+An installed app's first load or a new tab may show the browser's
 own network error because no page can be served. Resume the PC and connect Tailscale, then reload.
 If connections time out with another VPN active, test with that VPN disconnected; our Windows
 check failed with NordLynx active and succeeded after disconnecting NordVPN. This changes which

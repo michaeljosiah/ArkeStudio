@@ -1,6 +1,60 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { prepareRemoteSession, remoteSocketProtocols } from "../src/lib/remote-session.js";
+import { prepareRemoteSession, remoteSocketProtocols, remoteFetch, RemoteBrowserError } from "../src/lib/remote-session.js";
+
+it("bounds worker registration and activation, then permits another attempt", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const previous = Object.getOwnPropertyDescriptor(navigator, "serviceWorker");
+  const workers = Object.assign(new EventTarget(), {
+    register: () => new Promise<object>(() => {}),
+    ready: new Promise<object>(() => {}), controller: null,
+  });
+  Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: workers });
+  try {
+    const registration = assert.rejects(prepareRemoteSession(), /timed out/);
+    t.mock.timers.tick(10_000);
+    await registration;
+    workers.register = async () => ({});
+    const activation = assert.rejects(prepareRemoteSession(), /timed out/);
+    await Promise.resolve();
+    t.mock.timers.tick(10_000);
+    await activation;
+  } finally {
+    if (previous) Object.defineProperty(navigator, "serviceWorker", previous); else Reflect.deleteProperty(navigator, "serviceWorker");
+  }
+});
+
+it("distinguishes unavailable browser storage from an unavailable network", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "serviceWorker");
+  const workers = Object.assign(new EventTarget(), {
+    register: async () => ({}), ready: Promise.resolve({}),
+    controller: { postMessage: (_message: unknown, ports: MessagePort[]) => {
+      // MessagePort is private and takes no targetOrigin.
+      // oxlint-disable-next-line unicorn/require-post-message-target-origin
+      ports[0]!.postMessage(null);
+    } },
+  });
+  Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: workers });
+  try { await assert.rejects(prepareRemoteSession(), RemoteBrowserError); }
+  finally {
+    if (previous) Object.defineProperty(navigator, "serviceWorker", previous); else Reflect.deleteProperty(navigator, "serviceWorker");
+  }
+});
+
+it("aborts a stalled session request and permits the next check", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const previous = globalThis.fetch;
+  globalThis.fetch = (_input, init) => new Promise((_resolve, reject) => {
+    init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true });
+  });
+  try {
+    const failed = assert.rejects(remoteFetch("/remote/session"), { name: "AbortError" });
+    t.mock.timers.tick(10_000);
+    await failed;
+    globalThis.fetch = async () => new Response(null, { status: 204 });
+    assert.equal((await remoteFetch("/remote/session")).status, 204);
+  } finally { globalThis.fetch = previous; }
+});
 
 it("requests a fresh channel when a legacy notification worker is replaced", { timeout: 2000 }, async () => {
   const browserKey = "d".repeat(64);
@@ -9,7 +63,7 @@ it("requests a fresh channel when a legacy notification worker is replaced", { t
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
   const workers = Object.assign(new EventTarget(), {
-    register: async () => ({}), ready: Promise.resolve({}),
+    register: () => new Promise<object>(() => {}), ready: Promise.resolve({}),
     controller: { postMessage: (_message: unknown, _ports: MessagePort[]) => {} },
   });
   const replacement = { postMessage: (_message: unknown, ports: MessagePort[]) => {
