@@ -19,20 +19,28 @@ export function prepareRemoteSession(): Promise<void> {
     await navigator.serviceWorker.register("/notification-worker.js");
     await navigator.serviceWorker.ready;
     await new Promise<void>((resolve, reject) => {
-      const channel = new MessageChannel();
+      const channels: MessageChannel[] = [];
       const finish = (error?: Error) => {
         clearTimeout(timer); navigator.serviceWorker.removeEventListener("controllerchange", send);
-        channel.port1.close(); channel.port2.close(); error ? reject(error) : resolve();
+        for (const channel of channels) { channel.port1.close(); channel.port2.close(); }
+        error ? reject(error) : resolve();
       };
-      const send = () => navigator.serviceWorker.controller?.postMessage("arke-remote-browser-key", [channel.port2]);
+      const send = () => {
+        const controller = navigator.serviceWorker.controller;
+        if (!controller) return;
+        // An older notification worker cannot answer. Every new controller gets a fresh
+        // channel because the previous worker already owns its transferred port.
+        const channel = new MessageChannel(); channels.push(channel);
+        channel.port1.addEventListener("message", event => {
+          if (typeof event.data !== "string" || !/^[a-f0-9]{64}$/.test(event.data)) { finish(new Error("Browser storage is unavailable.")); return; }
+          browserKey = event.data; finish();
+        });
+        channel.port1.start();
+        controller.postMessage("arke-remote-browser-key", [channel.port2]);
+      };
       const timer = setTimeout(() => finish(new Error("Browser storage is unavailable.")), 10000);
-      channel.port1.addEventListener("message", event => {
-        if (typeof event.data !== "string" || !/^[a-f0-9]{64}$/.test(event.data)) { finish(new Error("Browser storage is unavailable.")); return; }
-        browserKey = event.data; finish();
-      });
-      channel.port1.start();
-      if (navigator.serviceWorker.controller) send();
-      else navigator.serviceWorker.addEventListener("controllerchange", send, { once: true });
+      navigator.serviceWorker.addEventListener("controllerchange", send);
+      send();
     });
   })().catch(error => { preparing = null; browserKey = null; throw error; });
   return preparing;
