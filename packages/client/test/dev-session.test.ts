@@ -57,3 +57,44 @@ it("browser bridge preserves authentication refusal separately from network loss
     if (prior) Object.defineProperty(globalThis, "WebSocket", prior); else Reflect.deleteProperty(globalThis, "WebSocket");
   }
 });
+
+it("retries a stalled browser handshake and ignores late events from that attempt", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { devBridge } = await import("../src/lib/store.js");
+  const prior = Object.getOwnPropertyDescriptor(globalThis, "WebSocket");
+  class Socket extends EventTarget {
+    static OPEN = 1;
+    static CONNECTING = 0;
+    readyState = 0;
+    static latest: Socket;
+    closed = false;
+    constructor(_url: string) { super(); Socket.latest = this; }
+    close() { this.closed = true; }
+  }
+  Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: Socket });
+  try {
+    const statuses: string[] = [], frames: string[] = [];
+    const bridge = devBridge("ws://127.0.0.1:8791");
+    bridge.subscribe(json => frames.push(json), status => statuses.push(status));
+    bridge.connect();
+    const stalled = Socket.latest;
+    t.mock.timers.tick(10_000);
+    assert.equal(stalled.closed, true);
+    assert.equal(statuses.at(-1), "closed");
+    bridge.connect();
+    const retry = Socket.latest;
+    assert.notEqual(retry, stalled);
+    stalled.dispatchEvent(new Event("open"));
+    stalled.dispatchEvent(Object.assign(new Event("message"), { data: "stale" }));
+    stalled.dispatchEvent(Object.assign(new Event("close"), { code: 1006, reason: "" }));
+    assert.equal(statuses.at(-1), "connecting");
+    assert.deepEqual(frames, []);
+    retry.readyState = Socket.OPEN;
+    retry.dispatchEvent(new Event("open"));
+    t.mock.timers.tick(20_000);
+    assert.equal(retry.closed, false);
+    assert.equal(statuses.at(-1), "open");
+  } finally {
+    if (prior) Object.defineProperty(globalThis, "WebSocket", prior); else Reflect.deleteProperty(globalThis, "WebSocket");
+  }
+});

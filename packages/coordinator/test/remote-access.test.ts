@@ -204,6 +204,8 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
   const clientDirectory = join(root, "client"); await mkdir(clientDirectory);
   const desktopPage = '<head><meta http-equiv="Content-Security-Policy" content="connect-src ws://127.0.0.1:*"></head><body>Studio</body>';
   await writeFile(join(clientDirectory, "index.html"), desktopPage);
+  const manifest = await readFile(new URL("../../client/public/manifest.webmanifest", import.meta.url));
+  await writeFile(join(clientDirectory, "manifest.webmanifest"), manifest);
   await writeFile(join(root, "private.txt"), "private");
   const gateway = new RemoteGateway({ origin, clientDirectory, devices, session: { port: upstreamPort, token } });
   const port = await gateway.start(0);
@@ -212,6 +214,11 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     const page = await get(port, "/");
     assert.equal(page.status, 200); assert.ok(page.body.includes('name="arke-remote"'));
     assert.ok(!page.body.includes(token)); assert.ok(!page.body.includes("127.0.0.1"));
+    assert.ok(page.body.includes('rel="manifest" href="/manifest.webmanifest"'));
+    const installed = await get(port, "/manifest.webmanifest");
+    assert.equal(installed.status, 200, "installation metadata is available before pairing");
+    assert.equal(installed.headers["content-type"], "application/manifest+json");
+    assert.equal(installed.body, manifest.toString());
     assert.equal(await readFile(join(clientDirectory, "index.html"), "utf8"), desktopPage, "desktop CSP is unchanged");
     assert.equal((await get(port, "/../private.txt")).status, 404);
     assert.equal((await get(port, "/.dev/transport-8791.json")).status, 404);

@@ -2429,9 +2429,23 @@ export function devBridge(url: string): ArkeBridge {
       if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING))
         return;
       onStatus?.("connecting");
-      socket = new WebSocket(url, remoteSocketProtocols(url));
-      socket.addEventListener("open", () => onStatus?.("open"));
-      socket.addEventListener("close", (event) => {
+      const connecting = new WebSocket(url, remoteSocketProtocols(url));
+      socket = connecting;
+      // Mobile network changes can leave the handshake pending for minutes. Release this
+      // attempt so the store's backoff can reconnect, ignoring any late events from it.
+      const timer = setTimeout(() => {
+        if (socket !== connecting) return;
+        socket = null;
+        connecting.close();
+        onStatus?.("closed");
+      }, 10_000);
+      connecting.addEventListener("open", () => {
+        clearTimeout(timer);
+        if (socket === connecting) onStatus?.("open");
+      });
+      connecting.addEventListener("close", (event) => {
+        clearTimeout(timer);
+        if (socket !== connecting) return;
         socket = null;
         if (isRemoteSession() && event.code === 1008 && event.reason === "session authentication required") {
           window.location.reload();
@@ -2439,8 +2453,8 @@ export function devBridge(url: string): ArkeBridge {
         }
         onStatus?.(event.code === 1008 && event.reason === "session authentication required" ? "auth-refused" : "closed");
       });
-      socket.addEventListener("message", (e) => {
-        if (typeof e.data === "string") onFrame?.(e.data);
+      connecting.addEventListener("message", (e) => {
+        if (socket === connecting && typeof e.data === "string") onFrame?.(e.data);
       });
     },
     send(json) {

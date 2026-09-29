@@ -27,14 +27,14 @@ function cookie(req: IncomingMessage, name: string): string | undefined {
 const setCookie = (name: string, value: string, seconds: number) =>
   `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${seconds}`;
 const mime: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css",
-  ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml",
+  ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml",
   ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".mp4": "video/mp4", ".ico": "image/x-icon" };
 
 export function remotePage(html: string, origin: string): string {
   const policy = `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; ` +
     `media-src 'self' blob:; object-src 'self'; frame-src 'self'; font-src 'self' data:; connect-src 'self' data: blob: ${origin.replace(/^https:/, "wss:")}; base-uri 'self'; form-action 'self'`;
   return html.replace(/(<meta\s+http-equiv="Content-Security-Policy"\s+content=")[^"]*("\s*\/?>)/, `$1${policy}$2`)
-    .replace("</head>", '<meta name="arke-remote" content="true" /></head>');
+    .replace("</head>", '<meta name="arke-remote" content="true" /><link rel="manifest" href="/manifest.webmanifest" /><meta name="mobile-web-app-capable" content="yes" /><meta name="apple-mobile-web-app-capable" content="yes" /></head>');
 }
 
 /** A same-origin browser gateway. Only the host knows the coordinator capability; a paired

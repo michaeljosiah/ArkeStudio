@@ -23,7 +23,11 @@ function PairedDeviceSettings() {
   return <div className="fy-set fy-paired-device" data-screen="settings-remote-access">
     <div className="fy-paired-device__card"><strong>This device</strong>
       <span>{device ? `${device.name} · paired ${new Date(device.pairedAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })} · ${device.expiresAt === null ? "never expires" : `until ${new Date(device.expiresAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })}`}` : failed ? "Pairing unavailable" : "Loading…"}</span>
-    </div><OnYourPC>pairing, devices and revoking</OnYourPC><DeviceNotifications />
+    </div><OnYourPC>pairing, devices and revoking</OnYourPC>
+    <div className="fy-paired-device__card"><strong>Add to your home screen</strong>
+      <span>On iPhone, use Share → Add to Home Screen. On Android, open your browser menu and choose Install app or Add to Home screen.</span>
+      <span>Keep your PC awake, with Studio and Tailscale running. If the installed app asks to pair, approve it on your PC.</span>
+    </div><DeviceNotifications />
   </div>;
 }
 function HostRemoteAccessSettings() {
@@ -86,7 +90,7 @@ function HostRemoteAccessSettings() {
             <a href={status.url} target="_blank" rel="noreferrer">{status.url}</a>
             <div className="remote-access__row"><Button disabled={busy} onClick={() => void command({ kind: "copy-link" })}>Copy link</Button>
               <span role="status">{copied ? "Link copied" : ""}</span></div>
-            <p>Choose Pair a device below, enter the code on your phone, then approve it here. After pairing, bookmark this address.</p>
+            <p>Choose Pair a device below, enter the code on your phone, then approve it here. After pairing, add Studio to your home screen from your phone’s browser menu.</p>
           </div>
         </div>}
         <label><input type="checkbox" checked={status.startOnLogin} disabled={busy || !status.running || !status.startupSupported}

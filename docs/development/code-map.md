@@ -116,6 +116,13 @@ Chapter autosave recovery stays in client `screens/chapter-workspace.tsx`: file-
 
 For an unfamiliar feature, search its visible label in client source, follow the store helper's message kind into contracts and the coordinator switch, then follow the domain operation. Search the emitted event back into the client store. Use nearby tests to discover fixtures and failure cases.
 
+The remote gateway also advertises client `public/manifest.webmanifest` for home-screen
+installation. `index.html` links the favicon and Apple touch icon; `scripts/generate-web-icons.cjs`
+exports the existing desktop mark. `lib/remote-session.ts` bounds worker preparation and
+session probes, while the browser bridge in `lib/store.ts` bounds WebSocket handshakes so the
+existing retry loop can recover. Regressions: client `test/remote-session.test.ts`,
+`test/remote-pairing.test.tsx`, `test/dev-session.test.ts` and the real Serve smoke check.
+
 ## Startup and lifecycle
 
 Production generation is composed by `screens/production-generate.tsx`; take filtering and

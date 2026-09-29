@@ -166,6 +166,23 @@ async function electronMain() {
   await until(owner, "document.querySelector('select[aria-label=\"Remember approved devices for\"]').value === 'never' && !document.querySelector('select[aria-label=\"Remember approved devices for\"]').disabled");
   await phone.loadURL(config.origin + "/#/worlds");
   await until(phone, "document.querySelector('form') !== null");
+  const install = await js(phone, `(async () => {
+    const link = document.querySelector('link[rel="manifest"]');
+    const response = await fetch(link.href);
+    const manifest = await response.json();
+    const icons = [...manifest.icons.map(icon => new URL(icon.src, link.href).href), document.querySelector('link[rel="apple-touch-icon"]').href];
+    const sizes = await Promise.all(icons.map(src => new Promise((resolve, reject) => {
+      const image = new Image(); image.onload = () => resolve([image.naturalWidth, image.naturalHeight]); image.onerror = reject; image.src = src;
+    })));
+    return { type: response.headers.get('Content-Type'), manifest, sizes, favicon: (await fetch(document.querySelector('link[rel="icon"]').href)).status };
+  })()`);
+  assert.equal(install.type, "application/manifest+json");
+  assert.equal(install.manifest.start_url, "/");
+  assert.equal(install.manifest.display, "standalone");
+  assert.deepEqual(install.sizes, [[192, 192], [512, 512], [180, 180]]);
+  assert.equal(install.favicon, 200);
+  assert.equal(await js(owner, "document.querySelector('link[rel=manifest]')"), null, "the desktop file page does not advertise a web install");
+  console.log("[smoke] install manifest, favicon and home-screen icons load before pairing");
   await shot(phone, "phone-pairing");
   await js(owner, "[...document.querySelectorAll('button')].find(b => b.textContent === 'Pair a device').click()");
   await until(owner, "document.querySelector('.remote-access__code') !== null");
