@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { cloudSpeechPreference, DEFAULT_NARRATOR, deliveryParams, modelForCapability, rankVoices, supportsPerformanceGeneration, type VoiceCandidate } from "@arke-studio/contracts";
-import { SHIPPED_MANIFEST, cloudVoiceSources, createProviderClients } from "../src/index.js";
+import { GEMINI_PRESETS, SHIPPED_MANIFEST, cloudVoiceSources, createProviderClients } from "../src/index.js";
 
 it("offers both Gemini rows ahead of ElevenLabs for new cloud choices, preserving explicit routes and local narration", () => {
   const cloud = SHIPPED_MANIFEST.models.filter(m => m.capability === "voice-tts" && ["google", "elevenlabs"].includes(m.provider));
@@ -33,6 +33,7 @@ it("all hosts can list captured Google presets read-only and only for models on 
   const clients = createProviderClients({ fetch: async (url, init) => {
     requests.push(String(url));
     assert.equal(init?.method ?? "GET", "GET");
+    if (String(url).includes("/voices?")) return Response.json({ voices: GEMINI_PRESETS.map(([id]) => ({ id, type: "prebuilt" })) });
     const key = new Headers(init?.headers).get("x-goog-api-key");
     return Response.json({ models: [{ name: `models/${key === "first-project" ? "gemini-3.8-flash-tts" : "gemini-3.8-flash-lite-tts"}` }] });
   } });
@@ -45,5 +46,5 @@ it("all hosts can list captured Google presets read-only and only for models on 
   assert.equal(first.length, 30);
   assert.ok(first.every(v => v.model === "gemini-3.8-flash-tts"));
   assert.ok(next.every(v => v.model === "gemini-3.8-flash-lite-tts"));
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 4);
 });
