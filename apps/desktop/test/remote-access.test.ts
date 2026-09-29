@@ -82,6 +82,13 @@ it("desktop automatically shares an alternate address, copies it, and keeps it a
     const reply = await host.command({ kind: "enable" });
     assert.equal(reply.status.running, true); assert.equal(reply.status.reason, null);
     assert.equal(reply.status.url, origin + ":9443");
+    const pageStatus = (host: string) => new Promise<number | undefined>((resolve, reject) => {
+      request({ hostname: "127.0.0.1", port: 8793, path: "/", headers: { Host: host, Origin: origin + ":9443" } }, response => {
+        response.resume(); response.on("end", () => resolve(response.statusCode));
+      }).on("error", reject).end();
+    });
+    assert.equal(await pageStatus("studio.example.ts.net:9443"), 200);
+    assert.equal(await pageStatus("studio.example.ts.net"), 403, "the gateway requires the selected origin including its port");
     await host.command({ kind: "copy-link" }); assert.deepEqual(copied, [origin + ":9443"]);
     assert.equal(JSON.parse(await readFile(join(root, "remote/settings.json"), "utf8")).origin, origin + ":9443");
     await host.stop(); assert.deepEqual(fake.get(), existing);
