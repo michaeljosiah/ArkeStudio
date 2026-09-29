@@ -1,15 +1,8 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { COMFYUI_RECIPES, comfyUiRecipeById } from "@arke-studio/providers";
+import { COMFYUI_RECIPES } from "@arke-studio/providers";
 import { comfyUiWeightsComponentId } from "@arke-studio/contracts";
 import { comfyUiWeightCatalogue } from "../src/comfyui-setup.js";
-
-it("does not offer a partial IndexTTS install merely because all model artifacts are now pinned", () => {
-  const voice = comfyUiRecipeById("comfyui-cloned-voice")!;
-  assert.equal(voice.requires.checkpoints.length, 26);
-  assert.ok(voice.requires.unavailableReason);
-  assert.ok(!comfyUiWeightCatalogue(COMFYUI_RECIPES).some(entry => entry.id === comfyUiWeightsComponentId(voice.id)));
-});
 
 it("keeps download paths, digests, sizes and runtime prerequisites aligned with recipe verification", () => {
   for (const entry of comfyUiWeightCatalogue(COMFYUI_RECIPES)) {
@@ -31,4 +24,8 @@ it("excludes an empty or explicitly unsupported manifest from the setup catalogu
   const unsupported = structuredClone(COMFYUI_RECIPES[0]!);
   unsupported.requires.unavailableReason = "unsupported_in_build: missing immutable dependencies";
   assert.deepEqual(comfyUiWeightCatalogue([unsupported]), []);
+});
+
+it("has no retired speech component in the setup catalogue", () => {
+  assert.ok(!comfyUiWeightCatalogue(COMFYUI_RECIPES).some(entry => entry.id === comfyUiWeightsComponentId("comfyui-cloned-voice")));
 });

@@ -427,7 +427,6 @@ async function harness() {
     comfyui: {
       service: {
         status: async () => ({ engine: { locality: "remote" }, recipes: [] }),
-        voiceUploadDestination: () => ({ token: "remote-instance-1", label: "voice-box.example:8188" }),
         identityFor: () => undefined,
         instanceId: () => "remote-instance-1",
         engineIdentity: () => null,

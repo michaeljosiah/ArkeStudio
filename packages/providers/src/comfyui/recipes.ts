@@ -3,7 +3,6 @@ import type { ManifestModel, RecipeIdentity, AdapterSelection } from "@arke-stud
 import { KREA2_IMAGE, KREA2_BUCKETS } from "./krea2-recipe.js";
 import { QWEN21_IMAGE, QWEN21_BUCKETS } from "./qwen21-recipe.js";
 import { H3_REFERENCE, H3_REFERENCE_MODEL } from "./h3-reference-recipe.js";
-import { INDEXTTS25_MANIFEST, INDEXTTS25_CHECKPOINTS, INDEXTTS25_BUILD, INDEXTTS25_DEPENDENCY_DIGEST } from "./indextts25.js";
 
 /**
  * The recipe catalogue (SPEC-021 §2.3): hand-authored, shipped, versioned — never fetched,
@@ -69,13 +68,7 @@ export interface ComfyUiRecipe {
   /** Catalogue-only adapter insertion point; absent means no selectable adapter support. */
   adapterSlot?: readonly [nodeId: string, input: string];
   id: string;
-  /**
-   * `voice-tts` joins image and video (SPEC-021, amended 2026-08-19). Voxa covers preset speech and
-   * cannot clone, so a voice whose identity is a reference clip needs a model an ONNX sidecar cannot
-   * host — and everything else a recipe already gets (discovery, weights, gating, pinned nodes)
-   * applies to it unchanged.
-   */
-  capability: "image" | "video" | "voice-tts";
+  capability: "image" | "video";
   displayName: string;
   recipeVersion: number;
   /**
@@ -124,8 +117,6 @@ export interface ComfyUiRecipe {
   requires: {
     checkpoints: readonly RecipeCheckpoint[];
     customNodes: readonly RecipeCustomNode[];
-    /** Pins provisioning inputs beyond model bytes, such as source archives and Python locks. */
-    provisioningDigest?: string;
     /**
      * A shipped graph whose complete immutable dependency closure is not yet known cannot be
      * offered as ready. This is deliberately data on the recipe rather than a UI exception: the
@@ -595,167 +586,7 @@ const H3_VIDEO_768: ComfyUiRecipe = {
   },
 };
 
-/**
- * Local · Cloned Voice — IndexTTS 2.5 through TTS-Audio-Suite (SPEC-022).
- *
- * The first recipe that needs a custom node, and the first whose input is **a file the app owns**
- * rather than a prompt. Both facts are load-bearing, and both were read off a running engine
- * (`/object_info`, 2026-08-19) rather than from documentation, because the documented shape and the
- * real one differ in three ways that would each have produced a recipe that validates and fails:
- *
- *   1. `UnifiedTTSTextNode.narrator_voice` is an enum scanned from the suite's own
- *      `voices_examples/`. A cloned clip cannot be named there. It arrives instead through
- *      `CharacterVoicesNode.opt_audio_input`, whose `NARRATOR_VOICE` feeds the wildcard
- *      `opt_narrator` — and `narrator_voice` stays `"none"` while the connection wins.
- *   2. `UnifiedTTSTextNode` emits an AUDIO tensor, not a file. Without `SaveAudio` after it there is
- *      nothing on disk for `fetchArtifacts` to fetch.
- *   3. `IndexTTSEngineNode` requires sixteen inputs. A dispatch missing three of them is refused by
- *      the engine's own validation, which is how the first attempt at this graph was caught.
- *
- * The clip reaches `LoadAudio` by **filename**, because that input is a combo over the engine's
- * `input/` directory — so a cloned voice's recording is uploaded to the engine (`POST /upload/image`
- * takes audio) and the returned name bound here. See SPEC-022 §2.11. H3's first frame reaches
- * `LoadImage` the same way and over the same upload (issue 863), which is why the client has one
- * upload path rather than one per kind of file.
- *
- * Verified end to end on 2026-08-19: this graph produced 4.59s of cloned speech on an RTX 3080 and
- * the output was fetched back through the same `/view` path the client uses.
- */
-const CLONED_VOICE: ComfyUiRecipe = {
-  id: "comfyui-cloned-voice",
-  capability: "voice-tts",
-  displayName: "Local · Cloned Voice",
-  recipeVersion: 2,
-  engine: { minVersion: "0.3.45", exercisedThroughVersion: "0.33.1" },
-  params: {
-    // The words, verbatim — a line to speak, never a prompt describing a performance
-    // (SPEC-011 turn 70). The cap is ours: the node chunks longer text, and a scene line that
-    // needs chunking is a line that should have been two.
-    /*
-     * One segment's worth, and no more.
-     *
-     * 2000 was this recipe's own guess at "long enough to be someone else's problem", and it was
-     * wrong in the direction that matters: at 300 tokens a segment the engine takes roughly 400
-     * characters, and anything past that is a second full pass over the model rather than a
-     * little more audio. The recipe already held that a line needing chunking is a line that
-     * should have been two; this is that belief with the arithmetic done.
-     */
-    text: { kind: "string", required: true, maxChars: 400, bind: [["4", "text"]] },
-    // The uploaded clip's filename on the engine, resolved from the voice library before dispatch.
-    // Internal because the user picks a VOICE, never a filename.
-    speakerFile: { kind: "string", internal: true, required: true, maxChars: 260, bind: [["1", "audio"]] },
-    seed: { kind: "int", min: 0, max: 2 ** 31 - 1, bind: [["4", "seed"]] },
-  },
-  graph: {
-    "1": { class_type: "LoadAudio", inputs: { audio: "" } },
-    "2": {
-      class_type: "CharacterVoicesNode",
-      // `customized: true` with `voice_name: "none"` is what makes the connected audio the voice
-      // rather than a preset. reference_text stays empty: IndexTTS does not need the clip
-      // transcribed, and inventing one would put words in the reference it never said.
-      inputs: {
-        voice_name: "none",
-        reference_text: "",
-        trim_start: 0.0,
-        trim_end: 0.0,
-        customized: true,
-        opt_audio_input: ["1", 0],
-      },
-    },
-    "3": {
-      class_type: "IndexTTSEngineNode",
-      // All sixteen, at the node's own defaults except model_path. `use_deepspeed: false` matches
-      // SPEC-022 §2.6's constraint; `use_cuda_kernel` is absent from this node entirely, so the
-      // trap measured at 2x slower cannot be set here at all.
-      inputs: {
-        model_path: "IndexTTS-2.5",
-        device: "auto",
-        emotion_alpha: 1.0,
-        use_random: false,
-        // The node's ceiling, not its default of 120 (SPEC-022 §2.6).
-        //
-        // Chunking is not a cost that scales: each segment is a full pass over the model, and on
-        // a 10 GB card the second one thrashes. Measured on the reference machine, a 174-character
-        // line split at 120 and the passes ran 25 steps in 7m49s and then 678s PER STEP — the card
-        // 92% full and ~9 GB of the process paged to disk. One pass is the difference between a
-        // preview that lands and one that never does, so the segment is as large as the node
-        // allows and `text` is capped to fit inside it.
-        max_text_tokens_per_segment: 300,
-        interval_silence: 200,
-        temperature: 0.8,
-        top_p: 0.8,
-        top_k: 30,
-        do_sample: true,
-        length_penalty: 0.0,
-        /*
-         * One beam, not the node's default of three.
-         *
-         * Beam search keeps every candidate sequence alive through decoding, so three beams is
-         * roughly three times the decoder's memory — spent during exactly the stage that ran the
-         * reference machine out of card. It is also the slowest of the decoding strategies the
-         * engine offers. With `do_sample` on, beams were doing very little for a single spoken
-         * line anyway: sampling is what gives the delivery its variation, and the seed is what
-         * makes it repeatable.
-         */
-        num_beams: 1,
-        repetition_penalty: 10.0,
-        /*
-         * 1000, not the node's default of 1500. This is the ceiling on how much audio one pass
-         * may generate, and it costs memory and time in proportion. The published guidance for
-         * cards at or below 10 GB is 1000, and 1000 mel tokens is far more speech than the 400
-         * characters `text` now admits.
-         */
-        max_mel_tokens: 1000,
-        // Half precision on CUDA: about half the memory of fp32 for a very small quality cost,
-        // and the engine's own default on this hardware.
-        use_fp16: true,
-        use_deepspeed: false,
-      },
-    },
-    "4": {
-      class_type: "UnifiedTTSTextNode",
-      inputs: {
-        TTS_engine: ["3", 0],
-        text: "",
-        // Stays "none". The clip arrives on opt_narrator, and a preset named here would compete
-        // with the voice the user actually chose.
-        narrator_voice: "none",
-        seed: 0,
-        opt_narrator: ["2", 0],
-      },
-    },
-    // Core SaveAudio supports FLAC (not WAV). FLAC is therefore the declared end-to-end contract:
-    // provider metadata, sanitizer, verifier, cache and media server all consume this output.
-    "5": { class_type: "SaveAudio", inputs: { audio: ["4", 0], filename_prefix: "arke_voice" } },
-  },
-  outputNode: "5",
-  requires: {
-    // All 2.5 model files, including its auxiliary models and tokenizer/configuration files.
-    // Setup still fails closed until the Python bundle passes the independent build checks.
-    checkpoints: INDEXTTS25_CHECKPOINTS,
-    customNodes: [
-      { id: "TTS-Audio-Suite", pinnedRef: INDEXTTS25_MANIFEST.source.commit },
-    ],
-    provisioningDigest: INDEXTTS25_DEPENDENCY_DIGEST,
-    ...(INDEXTTS25_BUILD.reason ? { unavailableReason: INDEXTTS25_BUILD.reason } : {}),
-  },
-  hardware: {
-    // Raised from 6000 after the first end-to-end dispatch through ComfyUI failed to finish on a
-    // card that cleared the old floor twice over (SPEC-022 §2.6). 5.44 GB was a true measurement
-    // of the model on the Python harness and a false statement of what this recipe needs: the
-    // engine hosting it costs more, and the machine it runs on already had 3.36 GB of its card
-    // spoken for. The gate reads TOTAL VRAM, so the headroom has to live in the floor.
-    minVramMb: 8000,
-    // The measurement above was of a busy card failing: this model wants its floor genuinely
-    // free, which is exactly what that run did not have.
-    minFreeVramMb: 8000,
-    recommendedVramMb: 12000,
-    floorSource:
-      "measured through ComfyUI on Arke reference hardware 2026-08-19: RTX 3080, 3.36 GB already in use by other applications, peak 9.35 GB and still climbing when the run was killed. A lower bound, not a peak — the true peak could not be measured on a card that could not hold it",
-  },
-};
-
-export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([KREA2_IMAGE, QWEN21_IMAGE, DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO, H3_VIDEO_768, H3_REFERENCE, CLONED_VOICE]);
+export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([KREA2_IMAGE, QWEN21_IMAGE, DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO, H3_VIDEO_768, H3_REFERENCE]);
 
 export function comfyUiRecipeById(modelId: string): ComfyUiRecipe | null {
   return COMFYUI_RECIPES.find((recipe) => recipe.id === modelId) ?? null;
@@ -811,7 +642,6 @@ export function recipeDependencyDigest(recipe: ComfyUiRecipe): string {
   const lines = [
     ...recipe.requires.checkpoints.map((c) => `checkpoint:${c.file}:${c.sha256}`),
     ...recipe.requires.customNodes.map((n) => `node:${n.id}:${n.pinnedRef}`),
-    ...(recipe.requires.provisioningDigest ? [`provisioning:${recipe.requires.provisioningDigest}`] : []),
   ].sort();
   return sha256Hex(lines.join("\n"));
 }
@@ -1023,19 +853,6 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     limits: { maxPromptChars: 2000, resolutions: ["1024"], tiers: { "1K": "1024" }, aspects: Object.keys(QWEN21_BUCKETS), referenceSyntax: "qwen-image21" },
     pricing: { kind: "unmetered" },
     requires: { accelerator: ["cuda"], vramMb: QWEN21_IMAGE.hardware.minVramMb, recommendedVramMb: QWEN21_IMAGE.hardware.recommendedVramMb, memMb: QWEN21_IMAGE.hardware.minMemMb },
-  },
-  {
-    id: CLONED_VOICE.id,
-    provider: "comfyui",
-    capability: "voice-tts",
-    displayName: CLONED_VOICE.displayName,
-    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-    // maxPromptChars is the LINE's cap, not a prompt's — the words are the content (turn 70).
-    limits: { maxPromptChars: 400, audioFormat: "flac" },
-    // Unmetered, and therefore no per-character figure: a local read costs nothing, where an
-    // ElevenLabs row states an exact price (SPEC-022 §1.3, turn 70's no-tilde rule).
-    pricing: { kind: "unmetered" },
-    requires: { vramMb: CLONED_VOICE.hardware.minVramMb, diskMb: Math.ceil(INDEXTTS25_CHECKPOINTS.reduce((sum, file) => sum + file.sizeMb, 0)) },
   },
   {
     id: DRAFT_IMAGE.id,

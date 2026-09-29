@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  clonedVoiceCandidates,
   cloudReaderCandidates,
   firstReadNotice,
   normalizeSpeechText,
@@ -11,6 +10,7 @@ import {
   extractVoiceAttributes,
   previewLineFor,
   rankVoices,
+  supportsVoiceUse,
   isGraphScene,
   splitBible,
   type ClonedVoice,
@@ -71,8 +71,8 @@ export interface VoiceServiceDeps {
   cloudSources: CloudVoiceSource[];
   /**
    * The hosted readers of the world's cloned voices (SPEC-046 R-10): a keyed one offers every
-   * library voice as a candidate of its own — the same id, its provider and row — beside the
-   * recipe's. Unkeyed, it offers nothing, like an unkeyed cloud catalogue.
+   * library voice as a candidate of its own — the same id, its provider and row.
+   * Unkeyed, it offers nothing, like an unkeyed cloud catalogue.
    */
   hostedReaders?: Array<{ provider: string; model: string }>;
   /** Why a keyed reader cannot read now — a rejected key, a fault — carried onto its candidates. */
@@ -491,21 +491,19 @@ export class VoiceService {
    */
   async catalogue(
     clonedVoices: readonly ClonedVoice[] = [],
-    clonedAvailability: { local?: boolean; unavailableReason?: string } = {},
     designedVoices: readonly import("@arke-studio/contracts").WorldDesignedVoice[] = [],
   ): Promise<VoiceCandidate[]> {
     const keyed = designedVoices.length === 0 || await this.deps.getKey("google") !== null;
-    return [...await this.rawCatalogue(clonedVoices, clonedAvailability),
+    return [...await this.rawCatalogue(clonedVoices),
       ...designedVoiceCandidates(designedVoices).map(voice => ({ ...voice,
         ...this.deps.readerAvailability?.("google"),
         ...(!keyed ? { unavailableReason: "Connect the Google project that owns this voice. Saved audio still plays." } : {}),
       }))]
-      .filter(voice => this.deps.modelEnabled?.(voice.model) !== false);
+      .filter(voice => supportsVoiceUse(voice, "preview") && this.deps.modelEnabled?.(voice.model) !== false);
   }
 
   private async rawCatalogue(
     clonedVoices: readonly ClonedVoice[],
-    clonedAvailability: { local?: boolean; unavailableReason?: string },
   ): Promise<VoiceCandidate[]> {
     let local = this.deps.localPresets;
     if (this.deps.sidecar) {
@@ -528,7 +526,7 @@ export class VoiceService {
       const health = await this.deps.sidecar.health().catch(() => null);
       const speechEngine = health === null ? "unknown" : health.engineStatus.kokoro.ready ? "ready" : "down";
       if (speechEngine === "down") {
-        return [...(await this.cloudVoices()), ...clonedVoiceCandidates(clonedVoices, clonedAvailability), ...(await this.hostedReaderCandidates(clonedVoices))];
+        return [...(await this.cloudVoices()), ...(await this.hostedReaderCandidates(clonedVoices))];
       }
       const live = await this.deps.sidecar.listVoices().catch(() => []);
       if (live.length > 0) {
@@ -539,14 +537,11 @@ export class VoiceService {
           label: v.label,
           attributes: v.attributes,
           local: true,
-          // Kokoro's presets cannot be cloned from. That is a fact about Kokoro, not about local
-          // voice — SPEC-022 §2.4 retires "local means presets, cloud means cloning" precisely
-          // because the voices appended below are local AND cloned.
           canClone: false,
         }));
       }
     }
-    return [...(await this.cloudVoices()), ...local, ...clonedVoiceCandidates(clonedVoices, clonedAvailability), ...(await this.hostedReaderCandidates(clonedVoices))];
+    return [...(await this.cloudVoices()), ...local, ...(await this.hostedReaderCandidates(clonedVoices))];
   }
 
   /** The library's voices through each keyed hosted reader (SPEC-046 R-10). */
@@ -581,11 +576,10 @@ export class VoiceService {
     bundle: WorldBundle,
     sheet: Sheet,
     manifest: ModelManifest | null,
-    clonedAvailability: { local?: boolean; unavailableReason?: string } = {},
   ): Promise<void> {
     const written = sheet.sections.find((s) => s.heading === "Voice · written")?.body ?? "";
     const extracted = extractVoiceAttributes(written);
-    const ranked = rankVoices(extracted, await this.catalogue(bundle.clonedVoices, clonedAvailability, bundle.designedVoices));
+    const ranked = rankVoices(extracted, await this.catalogue(bundle.clonedVoices, bundle.designedVoices));
     const line = previewLineFor(sheet, bundle.productions);
     const previewQuoteByVoice: Record<string, string> = {};
     const previewMicroUsdByVoice = Object.fromEntries(

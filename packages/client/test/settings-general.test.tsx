@@ -279,9 +279,9 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
 });
 
 describe("General speech choices keep availability out of labels", () => {
-  const clone: ManifestModel = { ...LOCAL_VIDEO, id: "comfyui-cloned-voice", displayName: "Local · Cloned Voice", capability: "voice-tts" };
+  const clone: ManifestModel = { ...LOCAL_VIDEO, id: "test-local-speech", displayName: "Test local speech", capability: "voice-tts" };
   const cloud: ManifestModel = { ...clone, id: "eleven_multilingual_v2", provider: "elevenlabs", displayName: "Multilingual v2" };
-  const diagnostic = "unsupported_in_build: missing immutable TTS-Audio-Suite archive, locked Python dependencies, and complete hashed IndexTTS 2.5 model artifacts.";
+  const diagnostic = "unsupported_in_build: missing immutable source archive, locked Python dependencies, and complete hashed model artifacts.";
   function speechState(readiness: Partial<RecipeReadiness> = {}, selected?: string): ClientState {
     const state = localVideoReady();
     state.app.manifest!.models = [clone, cloud];
@@ -307,10 +307,11 @@ describe("General speech choices keep availability out of labels", () => {
     assert.equal(selectOf(missing).querySelector(`option[value="${clone.id}"]`), null);
   });
 
-  it("offers a ready recipe with its unchanged display label", () => {
+  it("offers a connected speech provider with its unchanged display label, excluding retired providers even when stale status says ready", () => {
     const select = selectOf(speechState({ state: "ready", reason: undefined, reasonKind: undefined }));
-    const option = select.querySelector(`option[value="${clone.id}"]`)!;
-    assert.equal(option.textContent, "ComfyUI · Local · Cloned Voice");
+    assert.equal(select.querySelector(`option[value="${clone.id}"]`), null);
+    const option = select.querySelector(`option[value="${cloud.id}"]`)!;
+    assert.equal(option.textContent, "ElevenLabs · Multilingual v2");
     assert.equal(option.hasAttribute("disabled"), false);
   });
 
@@ -323,7 +324,7 @@ describe("General speech choices keep availability out of labels", () => {
       assert.equal(option.hasAttribute("disabled"), true);
       assert.equal(option.hasAttribute("selected"), true);
       assert.match(html, /fy-fact__state--warn/);
-      assert.doesNotMatch(html, /unsupported_in_build|immutable TTS-Audio-Suite/);
+      assert.doesNotMatch(html, /unsupported_in_build|immutable source archive/);
       assert.equal(state.app.routing.defaults["voice-tts"], saved);
     }
   });
@@ -339,8 +340,8 @@ describe("General speech choices keep availability out of labels", () => {
     assert.equal(selectOf(switchedOff).textContent, "No models");
   });
 
-  it("keeps the detailed build diagnostic on the cloned-voice model tile", () => {
-    const html = render("/settings/models?half=local&kind=voice-clone", speechState());
+  it("keeps the detailed build diagnostic on the provider model tile", () => {
+    const html = render("/settings/models?half=local&kind=voice-tts", speechState());
     const document = parseHTML(html).document;
     const tile = document.querySelector('[data-testid="comfyui-recipe"]');
     assert.ok(tile?.textContent?.includes(diagnostic));

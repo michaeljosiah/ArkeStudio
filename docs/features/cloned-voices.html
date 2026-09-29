@@ -103,298 +103,64 @@
 
       <section id="what">
         <div class="eyebrow">Cloned voices</div>
-        <h1>Give a character somebody's voice.</h1>
-        <p class="lede">
-          Record a few seconds of speech, or pick an audio file you already have. Arke turns it into
-          a voice your characters can use. It runs on your own computer, so it costs nothing per
-          line and nothing leaves the machine.
-        </p>
-        <p>
-          Arke already had voices: six built-in ones that always work, and ElevenLabs' library if you
-          have an account. Both are catalogues you pick from. This is different — it is a voice that
-          did not exist until you made it.
-        </p>
+        <h1>A recording, with a reader you choose.</h1>
+        <p class="lede">Record speech or import an audio file into the world's voice library.
+          A connected hosted reader can use that recording to speak a character's lines.</p>
+        <p>Kokoro supplies local preset voices. Cloned recordings are read through Mistral,
+          BreezeBlue or Fish Audio. ComfyUI is used for images and video.</p>
       </section>
-
       <section id="need">
-        <h2>What you need before you start</h2>
-        <div class="grid">
-          <div class="card">
-            <h3>ComfyUI</h3>
-            <p>
-              A free program that runs AI models on your own machine. Arke does not install it for
-              you — you install it once, and Arke talks to it. Image and video generation use the
-              same program, so if you have set that up you are already done.
-            </p>
-          </div>
-          <div class="card">
-            <h3>One add-on inside it</h3>
-            <p>
-              ComfyUI needs the <code>TTS-Audio-Suite</code> add-on, which is what actually does the
-              speaking. Arke checks it is there and refuses politely if it is not.
-            </p>
-          </div>
-          <div class="card">
-            <h3>A reasonably big graphics card</h3>
-            <p>
-              <strong>8&nbsp;GB of video memory minimum, 12&nbsp;GB recommended.</strong> Below that
-              Arke tells you the figure and offers ElevenLabs instead, rather than letting you wait
-              for something that will not finish.
-            </p>
-          </div>
-          <div class="card">
-            <h3>A recording</h3>
-            <p>
-              A <code>.wav</code> or <code>.mp3</code> file of <strong>at least three seconds</strong>
-              of one person speaking. You can also record it on the spot with your microphone.
-            </p>
-          </div>
-        </div>
-        <p class="note" style="margin-top: 18px">
-          You also need the right to use the voice. Arke asks you to confirm that the person speaking
-          agreed to be cloned, and will not go a step further until you tick it.
-        </p>
+        <h2>What you need</h2>
+        <ul>
+          <li>A supported hosted reader connected in Settings → Providers.</li>
+          <li>A WAV or MP3 recording of one person speaking, at least three seconds long.</li>
+          <li>The speaker's agreement to clone and use their voice.</li>
+        </ul>
+        <p>The recording is saved in the world. Reading it through a hosted provider sends it
+          to that provider; Arke asks for that voice and vendor before the first upload.</p>
       </section>
-
       <section id="setup">
-        <h2>Setting it up, once</h2>
-        <ol class="steps">
-          <li>
-            <h3>Open Settings, then Local AI</h3>
-            <p>You will see a section for ComfyUI listing what Arke can and cannot see.</p>
-          </li>
-          <li>
-            <h3>Point Arke at ComfyUI</h3>
-            <p>
-              If it is already running, Arke usually finds it and offers <strong>Use this install</strong>.
-              Otherwise paste its address — normally <code>http://127.0.0.1:8188</code> — and press
-              <strong>Use this URL</strong>. <em>Restart Arke afterwards</em>; the connection is only
-              picked up on start-up.
-            </p>
-          </li>
-          <li>
-            <h3>Point it at ComfyUI's models folder</h3>
-            <p>
-              Press <strong>Map a folder</strong> and choose the <code>models</code> folder inside your
-              ComfyUI install. Arke needs this to check the add-on is the version it expects.
-            </p>
-          </li>
-          <li>
-            <h3>Check the recipe says ready</h3>
-            <p>
-              Under <strong>Recipes</strong> you should see <em>Local · Cloned Voice</em>. If it is
-              switched off it tells you exactly why — a missing add-on, an unmapped folder, or a card
-              that is too small.
-            </p>
-          </li>
-        </ol>
+        <h2>Connect a reader</h2>
+        <p>Open Settings → Providers and connect Mistral, BreezeBlue or Fish Audio. Their
+          available voices appear in the character's voice chooser, with availability and price.</p>
       </section>
-
       <section id="use">
-        <h2>Making a voice</h2>
+        <h2>Make and assign a voice</h2>
         <ol class="steps">
-          <li>
-            <h3>Open a character and press Change voice</h3>
-            <p>You get the list of every voice available to this world.</p>
-          </li>
-          <li>
-            <h3>Press Clone a voice</h3>
-            <p>
-              Then either <strong>Record</strong> and speak into your microphone, or
-              <strong>Choose a file</strong> and pick an audio file. Arke shows the clip's name and how
-              long it is, and refuses it there and then if it is too short or the wrong format — before
-              you have typed anything.
-            </p>
-          </li>
-          <li>
-            <h3>Tick the consent box</h3>
-            <p>
-              <em>"The person speaking agreed to have their voice cloned."</em> Nothing proceeds until
-              this is ticked. It is asked once, here, and never nagged again.
-            </p>
-          </li>
-          <li>
-            <h3>Give it a name and a description</h3>
-            <p>
-              The description is not decoration. Words like <em>low, dry, unhurried, coastal</em> are
-              what Arke matches against a character's written voice when it ranks the list — a voice
-              with no description sinks to the bottom. You will see the words it picked out as you type.
-            </p>
-          </li>
-          <li>
-            <h3>Save</h3>
-            <p>
-              The voice joins the list straight away, marked <em>cloned — on this machine</em>. Press
-              <strong>Assign</strong> to give it to the character, or <strong>Preview</strong> to hear
-              it read a line first.
-            </p>
-          </li>
+          <li><h3>Open the character's Voice page</h3><p>Choose Upload a recording,
+            then record with your microphone or select a WAV or MP3 file.</p></li>
+          <li><h3>Name and describe the voice</h3><p>State its language and confirm the
+            speaker agreed. The description helps match the voice to a character.</p></li>
+          <li><h3>Save the recording</h3><p>The voice chooser opens on your saved voices.
+            Saving does not select a paid reader or change the character's assignment.</p></li>
+          <li><h3>Choose a reader</h3><p>Select a connected reader for the saved voice,
+            review its price, then preview or assign it. If none is connected, connect one
+            in Settings → Providers.</p></li>
         </ol>
       </section>
-
       <section id="rules">
-        <h2>The rules worth knowing</h2>
-        <div class="scroller">
-          <table>
-            <tr>
-              <th>Rule</th>
-              <th>Why</th>
-            </tr>
-            <tr>
-              <td><strong>The voice belongs to the world, not the character</strong></td>
-              <td>
-                Clone one while casting Maren and every character in that world can use it afterwards.
-                The recording is filed against the character you made it for, but only as a record of
-                where it came from.
-              </td>
-            </tr>
-            <tr>
-              <td><strong>A description is required</strong></td>
-              <td>A voice with no words to match on is ranked last, which makes it useless in practice.</td>
-            </tr>
-            <tr>
-              <td><strong>Consent is required</strong></td>
-              <td>
-                Neither Arke nor the model can tell whether the speaker agreed. Only you know, so only
-                you can say — and the request literally cannot be sent without it.
-              </td>
-            </tr>
-            <tr>
-              <td><strong>WAV and MP3 only</strong></td>
-              <td>
-                M4A — the format iPhone voice memos use — was tried and dropped: it saved fine and then
-                failed every time the voice was actually used. Convert it first.
-              </td>
-            </tr>
-            <tr>
-              <td><strong>About 400 characters a line</strong></td>
-              <td>
-                Past that the model starts a whole second pass, which costs far more than the extra
-                words are worth. A line that long is really two lines.
-              </td>
-            </tr>
-            <tr>
-              <td><strong>Nothing is uploaded to the internet</strong></td>
-              <td>
-                The recording is copied into your world folder and handed to ComfyUI on your own
-                machine. No account, no per-line charge.
-              </td>
-            </tr>
-          </table>
-        </div>
+        <h2>The rules</h2>
+        <p>One recording can be used by several characters and supported readers. Provider
+          upload confirmation and paid-read approval are separate. Removing a reader does not
+          delete the world's recordings, assignments or accepted takes.</p>
       </section>
-
       <section id="behind">
-        <h2>What happens behind the scenes</h2>
-        <p>Four steps, none of which you have to think about:</p>
-        <div class="grid">
-          <div class="card">
-            <h3>1 · The clip is checked</h3>
-            <p>
-              Arke reads the actual contents, not just the file name, so a file renamed to
-              <code>.wav</code> is caught immediately rather than becoming a voice that cannot speak.
-            </p>
-          </div>
-          <div class="card">
-            <h3>2 · It is copied into your world</h3>
-            <p>
-              The clip lives in the world folder and is filed as an artifact, so the voice and its
-              provenance are the same bytes. Deleting the original changes nothing.
-            </p>
-          </div>
-          <div class="card">
-            <h3>3 · It is handed to ComfyUI</h3>
-            <p>
-              When a line is spoken, Arke sends the clip to ComfyUI along with the words, and asks for
-              the line back in that voice.
-            </p>
-          </div>
-          <div class="card">
-            <h3>4 · You can see it working</h3>
-            <p>
-              While it runs, the button says what the engine is actually doing — for example
-              <em>speaking · step 20 of 25</em> — rather than a spinner that tells you nothing.
-            </p>
-          </div>
-        </div>
-        <p style="margin-top: 18px">
-          Everything lives under your world folder: the clip in <code>voices/</code>, the list of
-          voices in <code>voices/voices.json</code>, and a copy filed in <code>artifacts/</code>.
-          They are ordinary files you can look at.
-        </p>
+        <h2>Behind the scenes</h2>
+        <p>The library stores the recording and its identity with the world. Hosted reads
+          follow the normal queue, pricing, verification and caching path. Mistral receives
+          the reference clip with a read; BreezeBlue and Fish Audio use a saved provider voice.</p>
       </section>
-
       <section id="status">
-        <h2>What works today, honestly</h2>
-        <div class="scroller">
-          <table>
-            <tr>
-              <th>Part</th>
-              <th>State</th>
-              <th>Detail</th>
-            </tr>
-            <tr>
-              <td>Making a voice from a file or recording</td>
-              <td><span class="pill pill--yes">Working</span></td>
-              <td>Tested end to end in the installed app. The voice is created, saved, and still there after a restart.</td>
-            </tr>
-            <tr>
-              <td>Seeing it in the list, assigning it</td>
-              <td><span class="pill pill--yes">Working</span></td>
-              <td>It appears alongside the built-in and ElevenLabs voices, ranked against the character's written voice.</td>
-            </tr>
-            <tr>
-              <td>Progress while it runs</td>
-              <td><span class="pill pill--yes">Working</span></td>
-              <td>The engine's own step count, shown on the button.</td>
-            </tr>
-            <tr>
-              <td>Actually speaking a line</td>
-              <td><span class="pill pill--no">Not on a 10&nbsp;GB card</span></td>
-              <td>
-                On the card this was built against it does not finish. The model wants more video memory
-                than is free, so it spills onto the hard disk and slows to a crawl. Two settings were
-                retuned to try to bring it down — beam search off, and a lower ceiling on how much audio
-                one pass makes, both as the published guidance recommends — and measuring afterwards
-                showed <strong>no improvement</strong>: still 9.5&nbsp;GB, still grinding. It needs a
-                bigger card, or a card with less on it.
-              </td>
-            </tr>
-            <tr>
-              <td>Warning you when the card is full</td>
-              <td><span class="pill pill--yes">Working</span></td>
-              <td>
-                Verified on hardware: measures free memory, asks ComfyUI to unload first, then refuses with
-                both figures. Settings shows the same thing before you open a character at all — a recipe on a
-                busy card reads <em>needs 8&nbsp;GB free, this machine has 2&nbsp;GB free of 10&nbsp;GB</em>,
-                which is a different sentence from a card that is simply too small.
-              </td>
-            </tr>
-            <tr>
-              <td>Recording with a microphone</td>
-              <td><span class="pill pill--part">Untested by hand</span></td>
-              <td>
-                The path is built and tested automatically, but has not yet been tried with a real
-                microphone by a person.
-              </td>
-            </tr>
-          </table>
-        </div>
-        <p class="note" style="margin-top: 18px">
-          <strong>If the card is busy, Arke says so before you wait.</strong> Just before speaking a line
-          it asks the graphics card how much memory is actually free — not how big it is. If there is not
-          enough, it first tells ComfyUI to put down anything it is still holding, such as a video model
-          from an earlier job, and measures again. Only if it is still short does it stop, and then it
-          names both figures and what to do. Confirmed on a busy machine: it refused in a quarter of a
-          second with <em>"needs 7.8&nbsp;GB of free graphics memory and this machine has 0.7&nbsp;GB
-          free"</em>, rather than starting work that could not finish.
-        </p>
+        <h2>Available readers</h2>
+        <div class="scroller"><table>
+          <tr><th>Reader</th><th>Use</th></tr>
+          <tr><td>Kokoro</td><td>Local preset speech.</td></tr>
+          <tr><td>Mistral, BreezeBlue, Fish Audio</td><td>Hosted readers for saved recordings.</td></tr>
+          <tr><td>ComfyUI</td><td>Image and video generation; no speech recipe.</td></tr>
+        </table></div>
+        <p class="note">Older assignments to a removed reader remain recorded. Choose an
+          available reader to make new speech; previously saved audio can still be played.</p>
       </section>
-
-      <div class="foot">
-        Arke Studio &middot; cloned voices &middot; SPEC-022, with SPEC-021 for the local engine.
-        Written 19 August 2026.
-      </div>
     </div>
   </body>
 </html>

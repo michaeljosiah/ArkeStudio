@@ -855,20 +855,6 @@ export class ComfyUiEngineService {
     };
   }
 
-  /** The remote destination a renderer may explicitly approve, without URL secrets or paths. */
-  voiceUploadDestination(): { token: string; label: string } | null {
-    const identity = this.engineIdentity();
-    if (identity?.source !== "user-url" || identity.locality !== "remote" || this.resolved.url === null)
-      return null;
-    try {
-      // `host` is canonical ASCII host + port. It excludes userinfo, path, query and fragment.
-      const label = new URL(this.resolved.url).host;
-      return label.length > 0 ? { token: identity.instanceId, label } : null;
-    } catch {
-      return null;
-    }
-  }
-
   /** Only a known owned process's confirmed exit can waive a failed unload request. */
   isManagedEndpointGone(url: string): boolean {
     if (this.resolved.source === "user-url") return false;

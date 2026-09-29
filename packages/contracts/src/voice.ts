@@ -246,15 +246,15 @@ export const ClonedVoiceSchema = z
   .passthrough();
 export type ClonedVoice = z.infer<typeof ClonedVoiceSchema>;
 
-export const CLONED_VOICE_PROVIDER = "comfyui" as const;
-export const CLONED_VOICE_MODEL = "comfyui-cloned-voice" as const;
+// Retained only to read old assignments without rewriting the world or selecting a new reader.
+const RETIRED_LOCAL_VOICE_MODEL = "comfyui-cloned-voice";
 export const KOKORO_VOICE_MODEL = "kokoro-82m" as const;
 export const ELEVENLABS_VOICE_MODEL = "eleven_multilingual_v2" as const;
 
 /**
  * The hosted readers of the world's cloned voices (SPEC-046 D1): one voice, several readers. A
  * library voice addressed as `{provider, model, voiceId}` with one of these rows is the same
- * recording read in the cloud — the recipe row reads it on this machine. Provider id → the one
+ * recording read in the cloud. Provider id → the one
  * `voice-tts` manifest row that reads a clip there.
  */
 export const HOSTED_VOICE_READERS: Readonly<Record<string, string>> = {
@@ -304,15 +304,13 @@ export function firstReadNotice(voice: Pick<ClonedVoice, "remote">, provider: st
 
 /**
  * The reader's short name, as the Voice page's `Reads lines` row and a cloned voice's reader
- * chips say it (SPEC-046 R-30): `IndexTTS · free`, `Voxtral · $0.016 per 1k`. Keyed by model,
- * because the name is the engine behind the row rather than the vendor's brand — the recipe is
- * IndexTTS on this machine whoever serves ComfyUI. A model not named here reads as its row's
+ * chips say it (SPEC-046 R-30): `Voxtral · $0.016 per 1k`. Keyed by model rather than vendor.
+ * A model not named here reads as its row's
  * display name, and with no row as its provider.
  */
 const READER_NAMES: Readonly<Record<string, string>> = {
   "gemini-3.8-flash-tts": "Gemini Flash",
   "gemini-3.8-flash-lite-tts": "Gemini Flash-Lite",
-  "comfyui-cloned-voice": "IndexTTS",
   "kokoro-82m": "Kokoro",
   "eleven_multilingual_v2": "ElevenLabs",
   "eleven-v3": "Eleven v3",
@@ -384,10 +382,8 @@ export function supportsVoiceUse(
   candidate: { provider: string; model?: string; readsClone?: string },
   use: "preview" | "line" | "bench" | "narration",
 ): boolean {
-  if (use !== "narration") return true;
-  if (candidate.readsClone !== undefined) return false;
-  return candidate.provider !== CLONED_VOICE_PROVIDER ||
-    (candidate.model !== undefined && candidate.model !== CLONED_VOICE_MODEL);
+  if (candidate.provider === "comfyui") return false;
+  return use !== "narration" || candidate.readsClone === undefined;
 }
 
 export type VoiceSourceResolution =
@@ -402,7 +398,9 @@ export function voiceSourceFor(
   model: string,
   voiceId: string,
 ): VoiceSourceResolution {
-  if (provider === CLONED_VOICE_PROVIDER && model === CLONED_VOICE_MODEL) {
+  if (provider === "comfyui" && model === RETIRED_LOCAL_VOICE_MODEL) {
+    // Historical takes retain the recording's provenance. Eligibility is checked separately;
+    // resolving this old source must neither offer a reader nor relabel it as licensed stock.
     const voice = voices.find((candidate) => candidate.id === voiceId);
     return voice ? { kind: "cloned", voice } : { kind: "missing-clone" };
   }
@@ -417,7 +415,7 @@ export function voiceSourceFor(
 }
 
 export function isClonedVoice(candidate: Pick<VoiceCandidate, "provider" | "model" | "readsClone">): boolean {
-  return (candidate.provider === CLONED_VOICE_PROVIDER && candidate.model === CLONED_VOICE_MODEL) || candidate.readsClone !== undefined;
+  return candidate.readsClone !== undefined;
 }
 
 /**
@@ -535,32 +533,6 @@ export const CLONE_LANGUAGES: ReadonlyArray<readonly [code: string, name: string
   ["pt", "Portuguese"], ["nl", "Dutch"], ["pl", "Polish"], ["ru", "Russian"], ["tr", "Turkish"],
   ["ar", "Arabic"], ["hi", "Hindi"], ["ja", "Japanese"], ["ko", "Korean"], ["zh", "Chinese"],
 ];
-
-/**
- * The library as picker candidates. Local, and never itself cloneable: cloning a clone would
- * copy a copy, and the original recording is already in the library beside it.
- */
-export function clonedVoiceCandidates(
-  voices: readonly ClonedVoice[],
-  availability: { local?: boolean; unavailableReason?: string } = {},
-): VoiceCandidate[] {
-  return voices.map((v) => ({
-    // The engine is ComfyUI, running a voice recipe (SPEC-022 §2.1). A cloned voice is addressed
-    // like every other candidate — provider plus id — and the recipe is the model behind it, so
-    // swapping the engine later is a recipe edit rather than a change to what a voice IS.
-    provider: CLONED_VOICE_PROVIDER,
-    model: CLONED_VOICE_MODEL,
-    voiceId: v.id,
-    label: v.name,
-    attributes: v.attributes,
-    local: availability.local ?? true,
-    canClone: false,
-    readsClone: v.id,
-    ...(availability.unavailableReason !== undefined
-      ? { unavailableReason: availability.unavailableReason }
-      : {}),
-  }));
-}
 
 // ---------------------------------------------------------------------------
 // Preview lines (R-9, D7): the character's own words, then drafted, then stock
@@ -725,7 +697,7 @@ export function voiceFormatForModel(model: Pick<ManifestModel, "limits">): Voice
 export function legacyVoiceModel(provider: string, voiceId: string, clonedVoices: readonly ClonedVoice[] = []): string | null {
   if (provider === "kokoro") return KOKORO_VOICE_MODEL;
   if (provider === "elevenlabs") return ELEVENLABS_VOICE_MODEL;
-  if (provider === CLONED_VOICE_PROVIDER && clonedVoices.some((voice) => voice.id === voiceId)) return CLONED_VOICE_MODEL;
+  if (provider === "comfyui" && clonedVoices.some((voice) => voice.id === voiceId)) return RETIRED_LOCAL_VOICE_MODEL;
   if (HOSTED_VOICE_READERS[provider] !== undefined) return HOSTED_VOICE_READERS[provider]!;
   return null;
 }
@@ -769,14 +741,9 @@ export function narratorFor(
   catalogue: readonly VoiceCandidate[],
 ): NarratorChoice {
   if (stored !== null) {
-    const model = stored.model ?? (
-      stored.provider === CLONED_VOICE_PROVIDER &&
-      catalogue.some((voice) => isClonedVoice(voice) && voice.voiceId === stored.voiceId)
-        ? CLONED_VOICE_MODEL
-        : legacyVoiceModel(stored.provider, stored.voiceId)
-    );
+    const model = stored.model ?? legacyVoiceModel(stored.provider, stored.voiceId);
     const live = catalogue.find(
-      (v) => v.provider === stored.provider && v.model === model && v.voiceId === stored.voiceId,
+      (v) => v.provider === stored.provider && v.model === model && v.voiceId === stored.voiceId && supportsVoiceUse(v, "narration"),
     );
     if (live) {
       return {

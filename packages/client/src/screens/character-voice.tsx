@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import {
-  CLONED_VOICE_MODEL,
-  CLONED_VOICE_PROVIDER,
   HOSTED_READER_LABELS,
   designatedVoiceSample,
   formatMicroUsd,
@@ -13,6 +11,7 @@ import {
   orderedShots,
   readerName,
   readerPriceLabel,
+  supportsVoiceUse,
   voiceTargetKey,
   type ManifestModel,
   type RankedVoice,
@@ -67,8 +66,8 @@ import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload
  * set and where it came from. The authorities underneath are untouched — their rights, quality
  * checks and attestations all still belong to the flow that sets them.
  *
- * Since SPEC-046 (issue 1149) a cloned voice has several readers — the recipe on this machine,
- * Voxtral, Breeze, Fish — and the row names the one in use with its price; the catalogue draws
+ * Since SPEC-046 (issue 1149) a cloned voice has several hosted readers — Voxtral, Breeze,
+ * Fish — and the row names the one in use with its price; the catalogue draws
  * the voice once with a chip per reader rather than once per reader.
  */
 
@@ -102,7 +101,7 @@ function rowFor(models: readonly ManifestModel[] | undefined, target: { provider
 }
 
 /**
- * A reader as the rows and chips name it (SPEC-046 R-30): `IndexTTS · free`, `Voxtral · $0.016
+ * A reader as the rows and chips name it (SPEC-046 R-30): `Kokoro · free`, `Voxtral · $0.016
  * per 1k`. The row is what knows the price; the catalogue is what knows whether the reader runs
  * on this machine, which is free whatever the row says.
  */
@@ -129,6 +128,10 @@ function readsSource(
 } | null {
   const voice = sheet.voice;
   if (!voice) return null;
+  if (!supportsVoiceUse(voice, "line")) {
+    return { label: voice.label ?? voice.voiceId, detail: "reader unavailable", local: null,
+      clone: (world.clonedVoices ?? []).some(entry => entry.id === voice.voiceId) };
+  }
   const model = voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId, world.clonedVoices ?? []);
   const match = model
     ? candidates?.ranked.find(({ candidate }) => voiceTargetKey(candidate) === voiceTargetKey({ ...voice, model }))
@@ -143,7 +146,7 @@ function readsSource(
     clone: match
       ? isClonedVoice(match)
       : (world.clonedVoices ?? []).some((entry) => entry.id === voice.voiceId) &&
-        (voice.provider === CLONED_VOICE_PROVIDER || isHostedVoiceReader(voice.provider, model ?? undefined)),
+        isHostedVoiceReader(voice.provider, model ?? undefined),
   };
 }
 
@@ -201,16 +204,16 @@ interface CatalogueRow {
   readers: VoiceCandidate[];
 }
 
-/** The library voice a candidate reads, whether it says so or is the recipe's row for it. */
+/** The library voice a candidate reads. */
 function cloneOf(candidate: VoiceCandidate): string | null {
-  if (candidate.readsClone !== undefined) return candidate.readsClone;
-  return candidate.provider === CLONED_VOICE_PROVIDER && candidate.model === CLONED_VOICE_MODEL ? candidate.voiceId : null;
+  return candidate.readsClone ?? null;
 }
 
 function catalogueRows(ranked: readonly RankedVoice[], where: Tab): CatalogueRow[] {
   const rows: CatalogueRow[] = [];
   const byClone = new Map<string, CatalogueRow>();
   for (const { candidate } of ranked) {
+    if (!supportsVoiceUse(candidate, "line")) continue;
     const shown =
       where === "all"
         ? true
@@ -365,7 +368,7 @@ export function CharacterVoiceScreen() {
   // about whether any of them can run here without a key. Every one of them, or how many
   // (issues 1169, 1191): three names of five read as the list of what is on offer, and it was
   // not. The count is the picker's own — voices, a cloned voice's readers folded into one.
-  const providers = [...new Set((candidates?.ranked ?? []).map(({ candidate }) => candidate.provider))];
+  const providers = [...new Set((candidates?.ranked ?? []).filter(({ candidate }) => supportsVoiceUse(candidate, "line")).map(({ candidate }) => candidate.provider))];
   const engines = providers.length > 3 ? [`${providers.length} providers`] : providers;
   const voiceCount = candidates ? catalogueRows(candidates.ranked, "all").length : 0;
   // Delivery examples live beside the performance they were taken from (design 132). The one
@@ -545,16 +548,10 @@ export function CharacterVoiceScreen() {
           worldId={world.meta.worldId}
           sheetId={sheetId}
           onClose={() => close()}
-          onCloned={(voiceId) => {
-            // A clone that leaves the character it was made for still unvoiced is the flow
-            // stopping one press short: the voice exists in the world and nothing reads with it.
-            clearingRequest.current = assignVoice(world.meta.worldId, sheetPath, {
-              provider: CLONED_VOICE_PROVIDER,
-              model: CLONED_VOICE_MODEL,
-              voiceId,
-            });
-            if (clearingRequest.current === null) setRefusal("The studio is disconnected — the voice was not assigned.");
-            close();
+          onCloned={() => {
+            // Saving a recording does not choose a paid reader on the author's behalf.
+            requestVoiceCandidates(world.meta.worldId, sheetId);
+            open("choose", "mine");
           }}
         />
       )}
@@ -799,7 +796,9 @@ function ChooseVoiceDialog({
         )}
         {candidates === undefined && <p className="fy-voicesheet__none">Reading the catalogue…</p>}
         {candidates !== undefined && rows.length === 0 && (
-          <p className="fy-voicesheet__none">No voices here — add a key in Providers, or install a local runtime.</p>
+          <p className="fy-voicesheet__none">{where === "mine" && (world.clonedVoices ?? []).length > 0
+            ? "Your recordings are saved. Connect a cloned-voice reader in Providers to use them for speech."
+            : "No voices here — add a key in Providers, or install a local runtime."}</p>
         )}
         {/* The catalogue scrolls in its own pane rather than growing the sheet: fifty cloud
             voices would otherwise push the press that spends money below the fold. */}

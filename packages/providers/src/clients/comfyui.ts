@@ -41,7 +41,6 @@ export type EngineLocality = () => "local" | "remote";
 const STAGE_WORDS: Record<ComfyUiRecipe["capability"], string> = {
   image: "drawing",
   video: "rendering",
-  "voice-tts": "speaking",
 };
 
 /** The little of a WebSocket this needs: frames in, and a close to reopen on. */
@@ -127,22 +126,6 @@ export function meetsVersionFloor(version: string, floor: string = COMFYUI_VERSI
  */
 const INTERNAL_PARAMS = new Set([
   "adapters",
-  /*
-   * Everything a voice dispatch carries, taken from a real job rather than guessed.
-   *
-   * `voiceId` is the job's own subject and `voiceReference` only marks that the queue must attach
-   * ephemeral host-read bytes. The rest — the correlation id, what the line is for,
-   * whose sheet it came from and how long it is — are the coordinator's bookkeeping, the exact
-   * analogue of `provenance` on an image job. Only `text` and `seed` are controls of the recipe.
-   */
-  "voiceId",
-  "voiceReference",
-  "requestId",
-  "purpose",
-  "sheetId",
-  "sheetVersion",
-  "characterCount",
-  "audioFormat",
   "references",
   "videoReferences",
   "audioReferences",
@@ -422,7 +405,7 @@ export class ComfyUiClient implements ProviderClient {
   }
 
   async validateKey(): Promise<CapabilityProbe[]> {
-    const capabilities = ["image", "video", "voice-tts"] as const;
+    const capabilities = ["image", "video"] as const;
     // Not `require()`: this one answers rather than throws when nothing is configured, so it
     // reads the base itself — and therefore has to normalise it itself.
     const raw = this.baseUrl() ?? this.allBaseUrls?.()[0] ?? null;
@@ -487,22 +470,6 @@ export class ComfyUiClient implements ProviderClient {
     const seedParam = params["seed"];
     const seedValue: RecipeParamValues =
       typeof seedParam === "number" && Number.isInteger(seedParam) ? { seed: seedParam } : {};
-    if (recipe.capability === "voice-tts") {
-      // A line to speak, never a prompt describing a performance (SPEC-011 turn 70) — so this
-      // recipe has no `prompt` at all, and asking it for one refused every dispatch before the
-      // words were even looked at.
-      const text = typeof params["text"] === "string" ? params["text"] : undefined;
-      if (text === undefined || text.length === 0) {
-        throw new Error(`comfyui: ${recipe.displayName} needs a line to speak`);
-      }
-      const clip = request.voiceReference;
-      if (!clip) {
-        throw new Error(`comfyui: ${recipe.displayName} needs the voice's own recording`);
-      }
-      // A placeholder only. `submit` uploads the ephemeral bytes and swaps in the engine's own
-      // filename before graph substitution; no host path exists at this layer.
-      return { ...seedValue, text, speakerFile: clip.name };
-    }
     const prompt = typeof params["prompt"] === "string" ? params["prompt"] : undefined;
     if (prompt === undefined || prompt.length === 0) {
       throw new Error(`comfyui: ${recipe.displayName} needs a prompt`);
@@ -766,13 +733,13 @@ export class ComfyUiClient implements ProviderClient {
     if (this.disposed) throw new Error("comfyui: the provider client is disposed");
     const baseRecipe = comfyUiRecipeById(request.model);
     if (!baseRecipe) throw new Error(`comfyui: "${request.model}" is not a shipped recipe`);
+    if (request.capability !== baseRecipe.capability) {
+      throw new ProviderRequestRejectedError(`comfyui: ${baseRecipe.displayName} does not support ${request.capability}`);
+    }
     const recipe = this.composeAdapterRecipe(baseRecipe, request.params.adapters);
     if (recipe !== baseRecipe) {
       if (!this.adapterGuard) throw new ProviderRequestRejectedError("Adapter authorization is unavailable in this host.");
       await this.adapterGuard(recipe.id, request.params.adapters);
-    }
-    if (recipe.capability === "voice-tts" && request.params["audioFormat"] !== "flac") {
-      throw new ProviderRequestRejectedError("comfyui: the cloned-voice recipe output format must be FLAC");
     }
     // The freeze is only half the guarantee (R-15). A job journalled before an app update
     // carries the identity it was planned, priced and accepted as; this build ships whatever
@@ -887,10 +854,6 @@ export class ComfyUiClient implements ProviderClient {
     // The file becomes a name the engine knows. Done after preflight so a job that was going to
     // be refused never puts a file on the engine, and before the graph is built because the
     // uploaded name IS the graph value.
-    if (recipe.capability === "voice-tts") {
-      const clip = request.voiceReference!;
-      values["speakerFile"] = await this.uploadInput(base, clip, "voice recording", request.signal);
-    }
     for (const [index, frame] of prepared.entries()) {
       values[attachments[index]!.param] = await this.uploadInput(
         base,

@@ -4,7 +4,6 @@ import {
   BREEZE_DELIVERY,
   breezeDirection,
   CLONE_LANGUAGES,
-  clonedVoiceCandidates,
   cloudReaderCandidates,
   DEFAULT_NARRATOR,
   DELIVERIES,
@@ -149,9 +148,8 @@ describe("the voice catalogue belongs to the app, not a world", () => {
 });
 
 /**
- * The cloned-voice library (SPEC-022 §2.3). IndexTTS ships with no voices at all — a voice in its
- * world is a wav file — so this is the adapter that makes a clip addressable as `{provider,
- * voiceId}` the way every other surface already expects.
+ * The cloned-voice library (SPEC-022 §2.3) stores recordings with the world. A connected hosted
+ * reader makes each recording addressable as a voice without changing the saved source.
  */
 describe("a clip becomes a voice", () => {
   const base = {
@@ -196,7 +194,7 @@ describe("a clip becomes a voice", () => {
     const made = newClonedVoice(base);
     assert.ok(made.ok);
     const ranked = rankVoices(extractVoiceAttributes("A low, dry voice. Coastal, unhurried."), [
-      ...clonedVoiceCandidates([made.voice]),
+      ...cloudReaderCandidates([made.voice], { provider: "mistral", model: "voxtral-mini-tts" }),
       {
         provider: "kokoro",
         model: "kokoro-82m",
@@ -209,20 +207,19 @@ describe("a clip becomes a voice", () => {
     ]);
     assert.equal(ranked[0]?.candidate.voiceId, "harbour-glass", "described beats undescribed");
     assert.ok(ranked[0]!.overlap > 0);
-    // Local, and not itself cloneable — the original recording is already in the library.
-    assert.equal(ranked[0]?.candidate.local, true);
+    // The hosted reader uses the original recording already in the library.
+    assert.equal(ranked[0]?.candidate.local, false);
     assert.equal(ranked[0]?.candidate.canClone, false);
   });
 
   it("can remain visible with an execution refusal and remote locality", () => {
     const made = newClonedVoice(base);
     assert.ok(made.ok);
-    const [candidate] = clonedVoiceCandidates([made.voice], {
-      local: false,
-      unavailableReason: "the recipe is not ready",
+    const [candidate] = cloudReaderCandidates([made.voice], { provider: "mistral", model: "voxtral-mini-tts" }, {
+      unavailableReason: "the reader is not ready",
     });
     assert.equal(candidate?.local, false);
-    assert.equal(candidate?.unavailableReason, "the recipe is not ready");
+    assert.equal(candidate?.unavailableReason, "the reader is not ready");
   });
 
   it("names collide readably rather than clobbering", () => {
@@ -527,9 +524,8 @@ describe("one voice, several readers (SPEC-046 D1, R-10, R-13)", () => {
       attributes: ["low", "coastal"], local: false, canClone: false, readsClone: "harbour-glass",
     });
     // The recipe's candidate says the same thing about itself: a picker groups the three by it.
-    assert.equal(clonedVoiceCandidates([harbour])[0]?.readsClone, "harbour-glass");
     assert.ok(isClonedVoice(mistral!));
-    assert.ok(isClonedVoice({ provider: "comfyui", model: "comfyui-cloned-voice" }));
+    assert.equal(isClonedVoice({ provider: "comfyui", model: "comfyui-cloned-voice" }), false);
     assert.equal(isClonedVoice({ provider: "mistral", model: "voxtral-mini-tts" }), false, "a preset through the same reader is not a clone");
     const [unready] = cloudReaderCandidates([harbour], { provider: "breezeblue", model: "breeze-tts-2" }, { unavailableReason: "no key" });
     assert.equal(unready?.unavailableReason, "no key");
@@ -543,6 +539,7 @@ describe("one voice, several readers (SPEC-046 D1, R-10, R-13)", () => {
     assert.deepEqual(voiceSourceFor([], "mistral", "voxtral-mini-tts", "harbour-glass"), { kind: "catalogue" });
     // The recipe keeps its stricter answer: an id it cannot find is a voice that went missing.
     assert.deepEqual(voiceSourceFor([], "comfyui", "comfyui-cloned-voice", "harbour-glass"), { kind: "missing-clone" });
+    assert.deepEqual(voiceSourceFor([harbour], "comfyui", "comfyui-cloned-voice", "harbour-glass"), { kind: "cloned", voice: harbour }, "historical recordings retain their provenance");
     // Only the reader row reads a clip; another model behind the same vendor is a catalogue voice.
     assert.deepEqual(voiceSourceFor([harbour], "mistral", "some-other-model", "harbour-glass"), { kind: "catalogue" });
     assert.ok(isHostedVoiceReader("mistral") && isHostedVoiceReader("breezeblue", "breeze-tts-2"));
@@ -556,6 +553,9 @@ describe("one voice, several readers (SPEC-046 D1, R-10, R-13)", () => {
     assert.equal(supportsVoiceUse(mistral!, "line"), true);
     assert.equal(supportsVoiceUse({ provider: "mistral", model: "voxtral-mini-tts", voiceId: "gb_jane_neutral" } as never, "narration"), true, "a preset narrates");
     assert.equal(supportsVoiceUse({ provider: "comfyui", model: "comfyui-cloned-voice" }, "narration"), false);
+    for (const use of ["preview", "line", "bench"] as const) {
+      assert.equal(supportsVoiceUse({ provider: "comfyui", model: "comfyui-cloned-voice" }, use), false);
+    }
   });
 
   it("a legacy assignment through a hosted reader migrates to the reader's row", () => {
@@ -677,7 +677,7 @@ describe("how the Voice page names a reader and its price (SPEC-046 R-30)", () =
     assert.equal(readerPriceLabel(null), null);
   });
   it("names the engine behind the row, then the row, then the provider", () => {
-    assert.equal(readerName({ provider: "comfyui", model: "comfyui-cloned-voice" }), "IndexTTS");
+    assert.equal(readerName({ provider: "comfyui", model: "comfyui-cloned-voice" }), "comfyui");
     assert.equal(readerName({ provider: "mistral", model: "voxtral-mini-tts" }), "Voxtral");
     assert.equal(readerName({ provider: "breezeblue", model: "breeze-tts-2" }), "Breeze");
     assert.equal(readerName({ provider: "fishaudio", model: "fish-s2.1-pro" }), "Fish Audio");

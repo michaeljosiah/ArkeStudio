@@ -1,6 +1,6 @@
 import { estimateSpeechMicroUsd, speechInputFits, voiceFormatForModel, type ManifestModel } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
-import { CLONED_VOICE_PROVIDER, deriveRehearsalLines, productionShape, TableReadPlanSchema, normalizeSpeechText, legacyVoiceModel, providerModelId,
+import { deriveRehearsalLines, productionShape, TableReadPlanSchema, normalizeSpeechText, legacyVoiceModel, providerModelId,
   type ModelManifest, type Job, type ProviderStatus, type TableReadPlan } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { speechCacheFile, cachedVoiceAudioLooksRight, type SpeechSpec, type VoiceService } from "../voice/service.js";
@@ -59,7 +59,7 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
     // and Fish Audio presets too, which take a voice and the text as the table read sends them —
     // but not a cloned reader, whose upload is confirmed elsewhere and which writes flac.
     const voice = line.narration ? narrator ?? undefined : store.getBundle().sheets.find(s => s.id === line.speakerSheetId)?.voice;
-    if (!voice || (line.narration ? voice.provider === CLONED_VOICE_PROVIDER : !["kokoro", "elevenlabs", "google"].includes(voice.provider))) {
+    if (!voice || (line.narration ? voice.provider === "comfyui" : !["kokoro", "elevenlabs", "google"].includes(voice.provider))) {
       item.reason = line.narration ? "Choose a supported narrator voice in Settings." : "No supported TTS assignment for this character."; continue;
     }
     const model = manifest.models.find(m => m.id === (voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId)) && m.provider === voice.provider && m.capability === "voice-tts");

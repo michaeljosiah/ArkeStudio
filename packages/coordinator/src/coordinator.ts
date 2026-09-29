@@ -121,8 +121,6 @@ import {
   voiceJobReadIdentity,
   voiceJobPart,
   voiceJobIsCandidatePreview,
-  CLONED_VOICE_MODEL,
-  CLONED_VOICE_PROVIDER,
   type LedgerEntry,
   type ModelManifest,
   type ProviderId,
@@ -1237,6 +1235,7 @@ export class Coordinator {
   }
 
   private async requireEnabledSpeechReader(model: import("@arke-studio/contracts").ManifestModel, voiceId: string): Promise<void> {
+    if (!supportsVoiceUse(model, "preview")) throw new Error("This provider no longer supports speech. Choose an available voice reader.");
     if (this.readModel.getState().app.models.disabled.includes(model.id)) throw new Error(`${model.displayName} is turned off in AI models.`);
     if (model.provider === "google") {
       if (isDesignedVoiceTarget(voiceId)) {
@@ -1260,6 +1259,7 @@ export class Coordinator {
   private async requireSpeechInputsAvailable(inputs: readonly EnqueueInput[], checked = new Map<string, Promise<void>>()): Promise<void> {
     for (const input of inputs) {
       if (input.capability !== "voice-tts") continue;
+      if (!supportsVoiceUse(input, "preview")) throw new Error("This provider no longer supports speech. Choose an available voice reader.");
       if (this.readModel.getState().app.models.disabled.includes(input.model)) throw new Error("That voice model is turned off in AI models.");
       if (input.provider !== "google") continue;
       const model = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
@@ -1298,7 +1298,7 @@ export class Coordinator {
   private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[] }> {
     const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
     const clonedVoices = store.getBundle().clonedVoices ?? [];
-    const catalogue = voice === null ? [] : ((await voice.catalogue(clonedVoices, await this.comfyUiVoiceAvailability(), store.getBundle().designedVoices).catch(() => null)) ?? []);
+    const catalogue = voice === null ? [] : ((await voice.catalogue(clonedVoices, store.getBundle().designedVoices).catch(() => null)) ?? []);
     const narrationCatalogue = catalogue.filter((candidate) => supportsVoiceUse(candidate, "narration") && candidate.unavailableReason === undefined);
     const book = productionId === undefined ? null : await readAudiobookBook(store, productionId).catch(() => null);
     const own = book === null || book === "unreadable" || book.narrator === undefined ? null : narratorFor(book.narrator, narrationCatalogue);
@@ -1447,39 +1447,15 @@ export class Coordinator {
     return written;
   }
 
-  private async comfyUiVoiceAvailability(): Promise<{ local: boolean; unavailableReason?: string }> {
-    const service = this.opts.comfyui?.service;
-    if (!service) {
-      return { local: true, unavailableReason: "Cloned voice rendering is unavailable in this build." };
-    }
-    const status = await service
-      .status(this.readModel.getState().app.runtime?.probes ?? null)
-      .catch(() => null);
-    if (status === null) {
-      return { local: true, unavailableReason: "Cloned voice readiness could not be verified." };
-    }
-    const local = status.engine.locality === "local";
-    const recipe = status.recipes.find((candidate) => candidate.recipeId === CLONED_VOICE_MODEL);
-    if (!recipe) return { local, unavailableReason: "The cloned voice recipe is not shipped in this build." };
-    if (recipe.state === "disabled" && !(local && memoryWait(recipe))) {
-      return { local, unavailableReason: recipe.reason ?? "The cloned voice recipe is not ready." };
-    }
-    if (recipe.state === "unknown" && status.engine.locality === "local") {
-      return { local, unavailableReason: recipe.reason ?? "The cloned voice recipe readiness is unknown." };
-    }
-    return { local };
-  }
-
   /**
    * Stop before readiness, clip reads, reservations or jobs when a cloned clip would leave.
    *
-   * Two kinds of destination (SPEC-046 R-16). A remote ComfyUI engine is asked per request, as
-   * before. A hosted reader — a vendor — is asked once per voice per vendor: the answer is written
+   * A hosted reader is asked once per voice per vendor (SPEC-046 R-16): the answer is written
    * onto the library entry the moment it is given, here, so a read with three cloned voices asks
    * three times at most and never twice for the same one. The token names the voice as well as
    * the vendor, so the answer for one voice cannot be replayed for the next on the same page
    * (codex on PR 1153). `reader` names the voice and the provider it is about to be read
-   * through; without it only the engine destination applies.
+   * through.
    */
   private async requireVoiceUploadConfirmation(input: {
     worldId: string;
@@ -1510,22 +1486,9 @@ export class Coordinator {
       });
       return true;
     }
-    // A hosted reader's clip never goes to the engine; only the recipe's does.
-    if (input.reader && input.reader.provider !== CLONED_VOICE_PROVIDER) return false;
-    const destination = this.opts.comfyui?.service.voiceUploadDestination() ?? null;
-    if (destination === null) return false;
-    if (input.voiceUploadConfirmedFor === destination.token) return false;
-    this.emit({
-      at: this.nowIso(),
-      type: "voice.upload-confirmation-required",
-      requestId: input.requestId,
-      worldId: input.worldId,
-      command: input.command,
-      destinationLabel: destination.label,
-      confirmationToken: destination.token,
-    });
-    return true;
+    return false;
   }
+
   /**
    * Narrate a passage of the world, whichever document it came from (2026-08-24).
    *
@@ -1655,7 +1618,7 @@ export class Coordinator {
     const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
     const narratorVoices = this.opts.provider.openStore?.()?.getBundle().clonedVoices ?? [];
     const narrationCatalogue = (
-      await this.voiceService.catalogue(narratorVoices, await this.comfyUiVoiceAvailability(), this.opts.provider.openStore?.()?.getBundle().designedVoices)
+      await this.voiceService.catalogue(narratorVoices, this.opts.provider.openStore?.()?.getBundle().designedVoices)
     ).filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
     const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
     const speaking = { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId };
@@ -2041,7 +2004,7 @@ export class Coordinator {
     // The catalogue is what says whether a concrete voice can speak now (codex on PR 914): the
     // manifest still lists a model whose key was removed, whose voice was withdrawn or whose
     // engine is down, and a block sent that way fails instead of falling to the narrator.
-    const catalogue = (await this.voiceService.catalogue(clonedVoices, await this.comfyUiVoiceAvailability(), store.getBundle().designedVoices).catch(() => null)) ?? [];
+    const catalogue = (await this.voiceService.catalogue(clonedVoices, store.getBundle().designedVoices).catch(() => null)) ?? [];
     const narrationCatalogue = catalogue.filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
     const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
     const manifest = this.opts.manifest;
@@ -8381,7 +8344,7 @@ export class Coordinator {
             return;
           }
           const available = await this.voiceService
-            .catalogue(store.getBundle().clonedVoices, await this.comfyUiVoiceAvailability(), store.getBundle().designedVoices)
+            .catalogue(store.getBundle().clonedVoices, store.getBundle().designedVoices)
             .catch(() => null);
           if (available === null) {
             result("refused", "The voice catalogue could not be read — try again.");
@@ -8793,7 +8756,7 @@ export class Coordinator {
           if (model === null) return;
           const available = (
             await this.voiceService
-              .catalogue(clonedVoices, await this.comfyUiVoiceAvailability(), this.opts.provider.openStore?.()?.getBundle().designedVoices)
+              .catalogue(clonedVoices, this.opts.provider.openStore?.()?.getBundle().designedVoices)
               .catch(() => [])
           ).find(
             (voice) =>
@@ -11915,11 +11878,7 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
           return;
         }
-        const hasClonedVoice = plan.inputs.some(
-          (input) => input.provider === "comfyui" && input.voiceReference === true,
-        );
-        // Every cloned read on the bench asks about its destination — the engine for the recipe,
-        // the vendor for a hosted reader (SPEC-046 R-16) — before anything is priced or queued.
+        // Each cloned read asks about its hosted vendor (SPEC-046 R-16) before it is queued.
         for (const planned of plan.inputs) {
           if (planned.voiceReference !== true) continue;
           const voiceId = typeof planned.params["voiceId"] === "string" ? planned.params["voiceId"] : "";
@@ -11936,13 +11895,6 @@ export class Coordinator {
             })
           )
             return;
-        }
-        if (hasClonedVoice) {
-          const availability = await this.comfyUiVoiceAvailability();
-          if (availability.unavailableReason !== undefined) {
-            this.rejectEnqueue(msg.requestId, msg.kind, availability.unavailableReason);
-            return;
-          }
         }
         const voiceUploadConfirmedFor =
           "voiceUploadConfirmedFor" in msg ? msg.voiceUploadConfirmedFor : undefined;
@@ -13993,7 +13945,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         const bundle = store?.getBundle();
         const voices = await this.voiceService
-          .catalogue(bundle?.clonedVoices ?? [], await this.comfyUiVoiceAvailability(), bundle?.designedVoices)
+          .catalogue(bundle?.clonedVoices ?? [], bundle?.designedVoices)
           .catch(() => []);
         const sheets = bundle?.sheets ?? [];
         this.emit({
@@ -14106,13 +14058,6 @@ export class Coordinator {
           }))
         )
           return;
-        if (model.provider === "comfyui") {
-          const availability = await this.comfyUiVoiceAvailability();
-          if (availability.unavailableReason !== undefined) {
-            this.rejectEnqueue(msg.requestId, msg.kind, availability.unavailableReason);
-            return;
-          }
-        }
         if (source.kind === "missing-clone") {
           this.rejectEnqueue(
             msg.requestId,
@@ -14261,12 +14206,15 @@ export class Coordinator {
             store.getBundle(),
             sheet,
             this.opts.manifest ?? null,
-            await this.comfyUiVoiceAvailability(),
           )
           .catch(() => {});
         return;
       }
       case "voice-preview": {
+        if (!supportsVoiceUse(msg, "preview")) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "This provider no longer supports speech. Choose an available voice reader.");
+          return;
+        }
         if (this.readModel.getState().app.models.disabled.includes(msg.model)) {
           this.rejectEnqueue(msg.requestId, msg.kind, "That voice model is turned off in AI models.");
           return;
@@ -14298,7 +14246,7 @@ export class Coordinator {
         )
           return;
         const candidate = (
-          await this.voiceService.catalogue(bundle.clonedVoices, await this.comfyUiVoiceAvailability(), bundle.designedVoices)
+          await this.voiceService.catalogue(bundle.clonedVoices, bundle.designedVoices)
         ).find(
           (entry) =>
             entry.provider === msg.provider && entry.model === msg.model && entry.voiceId === msg.voiceId,
@@ -14311,8 +14259,8 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, candidate.unavailableReason);
           return;
         }
-        // Kokoro answers synchronously off the sidecar; every catalogue-backed queued provider,
-        // cloud or local recipe, follows the model lookup below without a vendor allow-list.
+        // Kokoro answers synchronously off the sidecar; other catalogue-backed providers
+        // follow the queued model lookup below.
         if (msg.provider === "kokoro" && msg.model === "kokoro-82m") {
           // Local: sidecar synthesis, no queue, no ledger, zero cost (R-2).
           try {
@@ -18144,7 +18092,6 @@ export class Coordinator {
         if (!this.voiceService) return false;
         const catalogue = await this.voiceService.catalogue(
           store.getBundle().clonedVoices,
-          await this.comfyUiVoiceAvailability(),
           store.getBundle().designedVoices,
         );
         return catalogue.some((candidate) =>

@@ -2350,7 +2350,8 @@ export function SettingsGeneralScreen() {
       <h1 className="fy-pane__name">General</h1>
       {ROUTED_CAPABILITIES.map((capability) => {
         const candidates = (manifest?.models ?? []).filter((m) => m.capability === capability);
-        const usable = (m: (typeof candidates)[number]) => modelEligible(m, eligibility);
+        const usable = (m: (typeof candidates)[number]) =>
+          (capability !== "voice-tts" || supportsVoiceUse(m, "preview")) && modelEligible(m, eligibility);
         // Speech setup failures belong on AI models, where the full reason and repair live.
         // Keep identity separate from availability: native option text also sizes the control.
         const options = candidates.filter((m) => capability !== "voice-tts" || usable(m));
@@ -2391,7 +2392,7 @@ export function SettingsGeneralScreen() {
                 after it: where the model runs, or what its credential is doing. Displayed rather
                 than re-derived (R-63). */}
             {selectedModel && !stranded && <span className="fy-fact__state">{runsOn(selectedModel)}</span>}
-            {selectedModel && stranded && warn(strandState(selectedModel))}
+            {selectedModel && stranded && warn(capability === "voice-tts" && !supportsVoiceUse(selectedModel, "preview") ? "reader unavailable" : strandState(selectedModel))}
             {missing && warn("not in the manifest")}
           </FactRow>
         );

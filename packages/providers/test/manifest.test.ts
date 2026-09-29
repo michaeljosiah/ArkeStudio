@@ -900,7 +900,7 @@ describe("the recommendation (SPEC-033 R-33..R-38)", () => {
     const remote = gateLocalRuntimes(SHIPPED_MANIFEST, probes(), detectedAt, { comfyui: "remote" });
     assert.equal(remote.recommended.image, undefined);
     assert.equal(remote.recommended.video, undefined);
-    // Voice falls past the remote cloned-voice recipe to Kokoro, which this machine does host.
+    // Local speech is supplied by Kokoro, independently of the remote image/video engine.
     assert.equal(remote.recommended["voice-tts"], "kokoro-82m");
   });
 });

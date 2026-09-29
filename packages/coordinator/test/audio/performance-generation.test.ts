@@ -3,7 +3,7 @@ import { it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { billableCharacters, ulid, orderedShots, resolvePerformanceLine, normalizeSpeechText, CLONED_VOICES_PATH, CLONED_VOICE_MODEL, CLONED_VOICE_PROVIDER,
+import { billableCharacters, ulid, orderedShots, resolvePerformanceLine, normalizeSpeechText, CLONED_VOICES_PATH,
   type PerformanceGenerationQuote } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
 import { VoiceService } from "../../src/voice/service.js";
@@ -142,13 +142,14 @@ it("a generated read's cloud basis is the voice's own: licensed stock, the sampl
   assert.ok(store.getBundle().referenceKits.find(k => k.sheetId === "maren-kest")?.designatedVoiceSample, "the sample reads back");
   const quoteFor = (provider: string, model: string, voiceId: string) =>
     ({ mapping: { provider, model }, voiceAssignment: { voiceId }, target: { speakerSheetId: "maren-kest" } }) as unknown as PerformanceGenerationQuote;
-  const cloned = (voiceId: string) => quoteFor(CLONED_VOICE_PROVIDER, CLONED_VOICE_MODEL, voiceId);
+  const cloned = (voiceId: string) => quoteFor("mistral", "voxtral-mini-tts", voiceId);
   assert.equal(await generatedVoiceCloudBasis(store, quoteFor("elevenlabs", "eleven-v3", "v_8Kq2")), "licensed", "a catalogue voice is the provider's licensed stock");
   assert.equal(await generatedVoiceCloudBasis(store, cloned("vc_own")), undefined, "nothing acknowledged yet, so nothing carries");
   await appendAudioRights(store, { schemaVersion: 1, action: "acknowledge", id: "ack-sample", audioHash: outputHash, basis: "self", scopes: ["cloud-reference-upload"], statementVersion: 1, at: AT });
   assert.equal(await generatedVoiceCloudBasis(store, cloned("vc_own")), "self", "the sample's basis carries to a clone of its recording");
   assert.equal(await generatedVoiceCloudBasis(store, cloned("vc_other")), undefined, "a clone of another recording borrows nothing from the sample");
-  assert.equal(await generatedVoiceCloudBasis(store, cloned("vc_gone")), undefined, "a clone the library no longer holds says nothing");
+  assert.equal(await generatedVoiceCloudBasis(store, quoteFor("comfyui", "comfyui-cloned-voice", "vc_gone")), undefined, "a historical clone the library no longer holds says nothing");
+  assert.equal(await generatedVoiceCloudBasis(store, quoteFor("comfyui", "comfyui-cloned-voice", "vc_own")), "self", "historical takes keep the recording's rights basis after their reader is retired");
   await appendAudioRights(store, { schemaVersion: 1, action: "withdraw", acknowledgementId: "ack-sample", audioHash: outputHash, at: AT });
   assert.equal(await generatedVoiceCloudBasis(store, cloned("vc_own")), undefined, "a withdrawal folds the basis away");
 });
