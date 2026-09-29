@@ -4,13 +4,12 @@ The Google unary speech client is implemented, covered by protocol fixtures and 
 against both models with an authorised account. It is exported
 from `@arke-studio/providers` and registered in the provider factory, with host-owned credential
 setup. Both models are in the shipped catalogue. Desktop, development and standalone hosts
-list their available presets after a Google key is configured in Settings → Models.
+list their full paginated prebuilt voice library, including supplied filter metadata, after a Google key is configured in Settings → Models.
 
 For new cloud choices, Flash leads creative casting and the audiobook narrator picker;
 Flash-Lite leads routine read-aloud. Character matching still respects the written voice's
 attributes before using the provider preference to break ties. Existing casting, routing and
-book narrators are unchanged. Kokoro remains the app's default narrator, and local choices stay
-first in narrator pickers. Setup and browsing do not synthesize speech or switch a narrator.
+book narrators are unchanged. Kokoro remains the app's default narrator, and the audiobook picker keeps local choices first. Settings sorts search results by name. Setup and browsing do not synthesize speech or switch a narrator.
 Models disabled in Settings are omitted from the shared catalogue and both narrator pickers
 before recommendation. Character assignment and preview commands also enforce that setting.
 Performance preparation, confirmation and speech queue admission likewise refuse disabled

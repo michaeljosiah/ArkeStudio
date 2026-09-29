@@ -62,7 +62,7 @@ export function voiceFacet(voice: VoiceCandidate, facet: VoiceFacet): string {
 export function filterVoices<T extends VoiceCandidate>(voices: readonly T[], query: string, filters: VoiceFilters): T[] {
   const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   return voices.filter(voice => {
-    const text = [voice.label, voice.description, ...voice.attributes, ...Object.values(voice.facets ?? {})].join(" ").toLocaleLowerCase();
+    const text = [voice.label, voice.description, voice.provider, voice.model, ...voice.attributes, ...Object.values(voice.facets ?? {})].join(" ").toLocaleLowerCase();
     return terms.every(term => text.includes(term)) && VOICE_FACETS.every(facet => !filters[facet] || voiceFacet(voice, facet) === filters[facet]);
   }).sort((a, b) => a.label.localeCompare(b.label) || voiceTargetKey(a).localeCompare(voiceTargetKey(b)));
 }

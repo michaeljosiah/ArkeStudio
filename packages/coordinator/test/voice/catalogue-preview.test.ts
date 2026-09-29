@@ -131,3 +131,41 @@ it("Settings local previews work without an open world and their media requires 
     assert.equal(syntheses, 1);
   } finally { await coordinator.stop(); }
 });
+
+it("a filtered extended Gemini voice generates a priced WAV preview through the real queue", async () => {
+  const { GoogleClient } = await import("@arke-studio/providers");
+  const { filterVoices } = await import("@arke-studio/contracts");
+  const root = await tempDir("gemini-catalogue-preview-"); const events: DomainEvent[] = []; const ledger: LedgerEntry[] = [];
+  const model = SHIPPED_MANIFEST.models.find(m => m.id === "gemini-3.8-flash-tts")!;
+  const bytes = Buffer.alloc(48); bytes.write("RIFF"); bytes.writeUInt32LE(40, 4); bytes.write("WAVEfmt ", 8);
+  bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22); bytes.writeUInt32LE(24000, 24);
+  bytes.writeUInt32LE(48000, 28); bytes.writeUInt16LE(2, 32); bytes.writeUInt16LE(16, 34); bytes.write("data", 36); bytes.writeUInt32LE(4, 40);
+  let paidCalls = 0;
+  const google = new GoogleClient(async (url, init) => {
+    if (url.includes("/models")) return Response.json({ models: [{ name: model.id }] });
+    if (url.includes("/voices?")) return Response.json({ voices: [{ id: "ExtendedReader", type: "prebuilt", language_code: "en-GB", gender: "female", accent: "British", persona: "Warm" }] });
+    paidCalls++;
+    assert.equal(JSON.parse(String(init?.body)).generation_config.speech_config[0].voice, "ExtendedReader");
+    return Response.json({ id: "gemini-preview", model: model.id, status: "completed", usage: { total_input_tokens: 10, output_tokens_by_modality: [{ modality: "audio", tokens: 50 }] },
+      steps: [{ type: "model_output", content: [{ type: "audio", mime_type: "audio/wav", data: bytes.toString("base64") }] }] });
+  });
+  let service!: CataloguePreviewService;
+  const queue = new JobQueue({ journalPath: join(root, "jobs.jsonl"), clients: { google }, getKey: async () => "fixture-key", emit: () => {},
+    speechModel: () => model,
+    ledger: { readJobIds: async () => new Set(), has: async id => ledger.some(e => e.jobId === id), append: async e => { ledger.push(e); } },
+    landInWorld: async (scope, fn) => { assert.equal(scope, VOICE_PREVIEW_SCOPE); await fn(root); return true; },
+    onTerminal: job => service.terminal(job), pollIntervalMs: 5, baseIntervalMs: 1 });
+  service = new CataloguePreviewService({ root, sidecar: null, manifest: SHIPPED_MANIFEST, enqueue: input => queue.enqueue(input), cancel: id => queue.cancel(id), emit: e => events.push(e) });
+  const rows = service.catalogue(await google.listVoicesCatalog("fixture-key"));
+  const chosen = filterVoices(rows, "Gemini", { gender: "female", accent: "british", language: "english", style: "warm" })[0]!;
+  assert.ok(chosen); assert.ok(chosen.preview!.microUsd! > 0); assert.equal(paidCalls, 0);
+  await queue.start();
+  try {
+    await service.request({ ...chosen, requestId: "01J8F3K2QW9VZX4N7M0RTYB6P3", maxMicroUsd: chosen.preview!.microUsd! });
+    await until(() => ["ready", "failed"].includes(last(events).status), "Gemini preview settled", 30_000);
+    assert.equal(last(events).status, "ready", JSON.stringify(queue.listJobs()));
+    assert.match(last(events).file!, /\.wav$/); assert.equal(paidCalls, 1); assert.equal(ledger.length, 1);
+    await service.request({ ...chosen, requestId: "01J8F3K2QW9VZX4N7M0RTYB6P4", maxMicroUsd: 0 });
+    assert.equal(last(events).status, "ready"); assert.equal(paidCalls, 1);
+  } finally { service.close(); queue.dispose(); }
+});
