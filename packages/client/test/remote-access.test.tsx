@@ -82,7 +82,7 @@ it("desktop duration offers all four choices, uses saved replies and labels Neve
 });
 it("desktop shares a local QR and copies through its bridge, showing success only after a successful write", async () => {
   const calls: RemoteAccessCommand[] = []; let fail = false;
-  let current = { ...status };
+  let current: RemoteAccessStatus = { ...status, url: "https://studio.example.ts.net:9443" };
   window.arke = { remoteAccess: async command => {
     calls.push(command);
     if (command.kind === "disable") current = { ...current, running: false, enabled: false, url: null };
@@ -93,6 +93,7 @@ it("desktop shares a local QR and copies through its bridge, showing success onl
   try {
     await act(async () => { root.render(<SettingsRemoteAccessScreen />); await flush(); });
     assert.ok(element.querySelector('svg[aria-label="Scan to open Studio on your phone"] path'));
+    assert.equal(element.querySelector("a")?.href, "https://studio.example.ts.net:9443");
     assert.equal(element.querySelectorAll("img").length, 0, "QR rendering uses no external image service");
     const buttons = () => [...element.querySelectorAll("button")];
     const copy = () => buttons().find(button => button.textContent === "Copy link")!.click();

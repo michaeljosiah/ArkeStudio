@@ -102,8 +102,7 @@ export class DesktopRemoteAccess {
   private async start(): Promise<void> {
     if (this.running) return;
     if (this.gateway) await this.stopGateway();
-    const origin = await this.tailscale().origin();
-    if (this.config.origin && this.config.origin !== origin) throw new Error("The tailnet address changed. Disable remote access before setting up its new address.");
+    const origin = await this.tailscale().origin(this.config.origin);
     const gateway = new RemoteGateway({ origin, clientDirectory: this.options.clientDirectory, devices: this.devices, session: this.options.session });
     let published = false;
     try {

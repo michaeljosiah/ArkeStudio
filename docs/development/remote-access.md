@@ -15,9 +15,10 @@ and any local generation. The other device only shows the browser frontend.
    certificates on the Tailscale admin console's DNS page. Certificate issuance publishes the
    machine's full DNS name in the Certificate Transparency log.
 2. In Studio on the PC, open **Settings → Remote access → Enable remote access**. Studio serves
-   the built frontend on loopback port 8793 and configures Tailscale Serve's HTTPS port 443.
-   An existing mapping on 443 is reported rather than overwritten; stop the older development
-   mapping before enabling this mode. Funnel is refused.
+   the built frontend on loopback port 8793 and chooses an available Tailscale HTTPS address.
+   It tries port 443, then 8443, 9443 and 10443–19443 in increments of 1000, skipping existing
+   TCP, web and Funnel mappings. Existing services keep working; no terminal cleanup is needed.
+   The complete address, including any alternate port, appears in the link and QR code.
 3. Scan the QR code in Settings with your phone's camera, or use **Copy link** to transfer the
    clean HTTPS address. The QR is generated locally and contains only that address, not a
    credential or pairing code. Choose **Pair a device** on the PC. Enter the code and a device name on the phone. Approve the matching request on
@@ -61,7 +62,10 @@ and side panel with larger controls (design turn 175, #1373).
 
 **Disable remote access** stops hosting, removes only its matching Serve mapping and turns off
 automatic startup. Ordinary Quit removes the mapping before releasing the local hosting port;
-the next app start recreates it at the same bookmarked address. If Tailscale cannot remove the
+the next app start prefers the same bookmarked address, even when port 443 becomes free.
+If another service has taken that address, Studio chooses a free one; copy or scan the new
+address in Settings. Studio never replaces another service or enables Funnel.
+If Tailscale cannot remove the
 mapping, Studio keeps the port reserved and reports that shutdown failed; restore Tailscale
 and retry Quit. The built desktop page keeps its existing loopback
 policy; only the copy served to the phone gets the remote same-origin policy.
