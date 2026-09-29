@@ -79,7 +79,13 @@ it("filters Gemini metadata and previews the exact selected model and voice", as
       assert.ok([...select.options].some(option => option.value === value), `${name}: ${value}`);
       await act(async () => { Object.defineProperty(select, "value", { configurable: true, value }); select.dispatchEvent(new dom.window.Event("change", { bubbles: true })); });
     };
-    await choose("Provider", "google"); await choose("Language", "english"); await choose("Gender", "female");
+    await choose("Provider", "google"); await choose("Language", "english");
+    assert.equal(host.querySelector('select[aria-label="Gender"] option[value="male"]'), null);
+    assert.equal(host.querySelector('select[aria-label="Accent"] option[value="parisian"]'), null);
+    assert.equal(host.querySelector('select[aria-label="Style"] option[value="firm"]'), null);
+    await choose("Language", "");
+    assert.ok(host.querySelector('select[aria-label="Gender"] option[value="male"]'), "clearing restores available options");
+    await choose("Language", "english"); await choose("Gender", "female");
     await choose("Accent", "british"); await choose("Style", "warm");
     assert.equal(host.querySelectorAll(".fy-voices__row").length, 1);
     assert.match(host.querySelector(".fy-voices__name")!.textContent!, /British Reader/);
