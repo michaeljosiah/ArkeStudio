@@ -6,7 +6,9 @@ The Settings narrator picker searches the complete catalogue by name, descriptio
 attributes, and intersects that query with source, provider, language, accent, gender and style
 filters. Facets preserve provider labels; missing metadata is never inferred from a voice's name
 or sound. Unsupported facets are omitted and mixed catalogues offer “Not specified”. Result and
-facet counts refer to the complete loaded source, including every provider page. Provider failures
+facet counts refer to the complete loaded source, including every provider page. Unselected
+options with no matches under the search and other filters are hidden; they return when those
+constraints are cleared. An active filter remains visible and removable even with no matches. Provider failures
 remain visible with Retry rather than silently becoming empty lists.
 
 Play and Select are independent. The saved narrator is Current, the pending choice is Selected,

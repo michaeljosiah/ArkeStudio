@@ -93,15 +93,22 @@ export function VoicePickerDialog({ open, worldId, chosenId, chosenProvider, cho
       <div className="fy-voice-browser__tools">
         <input ref={search} type="search" aria-label="Search voices by name or description" placeholder="Search voices by name or description" value={query} onChange={e => change(() => setQuery(e.target.value))} />
         <div className="fy-voice-browser__filters">{VOICE_FACETS.map(facet => {
-          const values = [...new Set(scoped.map(v => voiceFacet(v, facet)))].sort();
-          if (values.every(v => v === UNSPECIFIED_VOICE_FACET) && !filters[facet]) return null;
-          if (filters[facet] && !values.includes(filters[facet]!)) values.push(filters[facet]!);
           const other = { ...filters }; delete other[facet];
           const narrowed = filterVoices(scoped, query, other);
+          const counts = new Map<string, number>();
+          for (const voice of narrowed) {
+            const value = voiceFacet(voice, facet);
+            counts.set(value, (counts.get(value) ?? 0) + 1);
+          }
+          // Keep an active filter removable even if a search or source change leaves no matches.
+          const selected = filters[facet];
+          if (selected && !counts.has(selected)) counts.set(selected, 0);
+          const values = [...counts.keys()].sort();
+          if (values.every(v => v === UNSPECIFIED_VOICE_FACET) && !selected) return null;
           const title = facet[0]!.toUpperCase() + facet.slice(1);
           return <label key={facet}>{title}<select aria-label={title} value={filters[facet] ?? ""} onChange={e => change(() => setFilters({ ...filters, [facet]: e.target.value }))}>
             <option value="">Any {facet.toLowerCase()}</option>{values.map(value => <option key={value} value={value}>
-              {value === UNSPECIFIED_VOICE_FACET ? "Not specified" : value} ({narrowed.filter(v => voiceFacet(v, facet) === value).length})
+              {value === UNSPECIFIED_VOICE_FACET ? "Not specified" : value} ({counts.get(value)})
             </option>)}</select></label>;
         })}</div>
         <div className="fy-voice-browser__summary"><span role="status" aria-live="polite">{catalogue === null ? "Loading voices…" : `${rows.length} matches of ${scoped.length} voices${errors.length ? " · incomplete catalogue" : ""}`}</span><span>Name A–Z</span>
