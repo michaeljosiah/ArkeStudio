@@ -1,0 +1,17 @@
+accelerate==1.14.0
+einops==0.8.2
+fugashi==1.5.2
+librosa==1.0.0
+modelscope==1.39.1
+numpy==2.2.6
+omegaconf==2.3.1
+safetensors==0.8.0
+sentencepiece==0.2.1
+setuptools==81.0.0
+soundfile==0.14.0
+tiktoken==0.14.0
+torch==2.12.1+cu130
+torchaudio==2.11.0+cu130
+torchvision==0.27.1+cu130
+transformers==5.12.1
+unidic-lite==1.0.8

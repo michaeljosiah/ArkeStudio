@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { OPENCODE_AVAILABILITY, PROVIDERS, type ClientState, type ManifestModel } from "@arke-studio/contracts";
+import { OPENCODE_AVAILABILITY, PROVIDERS, type ClientState, type ManifestModel, type RecipeReadiness } from "@arke-studio/contracts";
 import { parseHTML } from "linkedom";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
@@ -273,7 +273,84 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
       stateWith({ routing: { defaults: { video: "gone-2.0" }, faults: [{ capability: "video", modelId: "gone-2.0", reason: "gone" }] } }),
     );
     // The control shows what is stored rather than the first option it happens to hold.
-    assert.match(html, /<option value="gone-2.0" selected="">gone-2.0</);
+    assert.match(html, /<option value="gone-2.0" disabled="" selected="">gone-2.0</);
     assert.match(html, /fy-fact__state--warn"><span class="fy-set__dot fy-set__dot--warn"[^>]*><\/span>not in the manifest</);
+  });
+});
+
+describe("General speech choices keep availability out of labels", () => {
+  const clone: ManifestModel = { ...LOCAL_VIDEO, id: "comfyui-cloned-voice", displayName: "Local · Cloned Voice", capability: "voice-tts" };
+  const cloud: ManifestModel = { ...clone, id: "eleven_multilingual_v2", provider: "elevenlabs", displayName: "Multilingual v2" };
+  const diagnostic = "unsupported_in_build: missing immutable TTS-Audio-Suite archive, locked Python dependencies, and complete hashed IndexTTS 2.5 model artifacts.";
+  function speechState(readiness: Partial<RecipeReadiness> = {}, selected?: string): ClientState {
+    const state = localVideoReady();
+    state.app.manifest!.models = [clone, cloud];
+    state.app.providers.push({ id: "elevenlabs", configured: true, validation: "valid", probes: [{ capability: "voice-tts", available: true }], fault: null });
+    state.app.comfyui!.recipes = [{ recipeId: clone.id, recipeVersion: 1, displayName: clone.displayName,
+      capability: "voice-tts", state: "disabled", reasonKind: "catalogue", reason: diagnostic, ...readiness }];
+    state.app.routing.defaults = selected ? { "voice-tts": selected } : {};
+    return state;
+  }
+  const selectOf = (state: ClientState) => parseHTML(render("/settings/general", state)).document.querySelector('select[aria-label="Model for Text-to-Speech"]')!;
+
+  it("excludes unsupported builds, missing artifacts, unhealthy engines and unknown recipes", () => {
+    for (const reasonKind of ["catalogue", "files", "digest", "verification", "engine", "node"] as const) {
+      const select = selectOf(speechState({ reasonKind }));
+      assert.ok(select, "speech selector exists");
+      assert.equal(select.querySelector(`option[value="${clone.id}"]`), null, reasonKind);
+      assert.equal(select.querySelector(`option[value="${cloud.id}"]`)?.textContent, "ElevenLabs · Multilingual v2");
+      assert.doesNotMatch(select.textContent!, /unsupported_in_build|immutable|dependencies|artifacts/);
+    }
+    assert.equal(selectOf(speechState({ state: "unknown" })).querySelector(`option[value="${clone.id}"]`), null);
+    const missing = speechState();
+    missing.app.comfyui!.recipes = [];
+    assert.equal(selectOf(missing).querySelector(`option[value="${clone.id}"]`), null);
+  });
+
+  it("offers a ready recipe with its unchanged display label", () => {
+    const select = selectOf(speechState({ state: "ready", reason: undefined, reasonKind: undefined }));
+    const option = select.querySelector(`option[value="${clone.id}"]`)!;
+    assert.equal(option.textContent, "ComfyUI · Local · Cloned Voice");
+    assert.equal(option.hasAttribute("disabled"), false);
+  });
+
+  it("retains an unavailable saved choice only as a hidden disabled selection and separate status", () => {
+    for (const saved of [clone.id, "removed-speech-model"]) {
+      const state = speechState({}, saved);
+      const html = render("/settings/general", state);
+      const option = selectOf(state).querySelector(`option[value="${saved}"]`)!;
+      assert.equal(option.hasAttribute("hidden"), true);
+      assert.equal(option.hasAttribute("disabled"), true);
+      assert.equal(option.hasAttribute("selected"), true);
+      assert.match(html, /fy-fact__state--warn/);
+      assert.doesNotMatch(html, /unsupported_in_build|immutable TTS-Audio-Suite/);
+      assert.equal(state.app.routing.defaults["voice-tts"], saved);
+    }
+  });
+
+  it("hides a disconnected or switched-off speech provider and handles an empty list", () => {
+    const state = speechState();
+    state.app.providers = [];
+    const select = selectOf(state);
+    assert.equal(select.hasAttribute("disabled"), true);
+    assert.equal(select.textContent, "No models");
+    const switchedOff = speechState({ state: "ready" });
+    switchedOff.app.models.disabled = [clone.id, cloud.id];
+    assert.equal(selectOf(switchedOff).textContent, "No models");
+  });
+
+  it("keeps the detailed build diagnostic on the cloned-voice model tile", () => {
+    const html = render("/settings/models?half=local&kind=voice-clone", speechState());
+    const document = parseHTML(html).document;
+    const tile = document.querySelector('[data-testid="comfyui-recipe"]');
+    assert.ok(tile?.textContent?.includes(diagnostic));
+    for (const option of document.querySelectorAll("option")) assert.ok(!option.textContent?.includes(diagnostic));
+  });
+
+  it("never appends a diagnostic to other General model option labels", () => {
+    const state = localVideoReady();
+    state.app.comfyui!.recipes[0] = { ...state.app.comfyui!.recipes[0]!, state: "disabled", reason: diagnostic };
+    const document = parseHTML(render("/settings/general", state)).document;
+    assert.equal(document.querySelector(`option[value="${LOCAL_VIDEO.id}"]`)?.textContent, "ComfyUI · Draft video");
   });
 });

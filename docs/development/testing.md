@@ -75,6 +75,11 @@ Host Node loads `better-sqlite3`; desktop uses the Electron native build through
 
 ## Local image generation
 
+For the IndexTTS dependency audit and General TTS selector regressions, see
+[IndexTTS 2.5](indextts25.md). `node --import tsx scripts/check-indextts25.mjs` checks manifest
+and lock integrity without installing anything; `--require-ready` additionally enforces the
+currently incomplete production-bundle and offline-inference prerequisites.
+
 Local Qwen Image 2.1 starts an isolated worker after download and has opt-in managed-runtime and provider GPU checks; see
 [Qwen setup and validation](qwen21.md). Its runtime unit tests need Python but no GPU.
 

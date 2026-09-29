@@ -30,6 +30,15 @@ The three Python modules, full licence and file hashes are retained in
 that revision. These files are installed explicitly into the user's ComfyUI; model weights
 are downloaded separately from Comfy-Org under the Krea 2 Community License.
 
+The IndexTTS dependency audit retains TTS-Audio-Suite's requirements input from commit
+`dedd982ab999633d5296c3e5a152ef772941fb82` (MIT, Copyright 2025 Shmuel Ronen), with
+`matplotlib` added for its BigVGAN import. Its licence is retained in
+`vendor/comfyui/indextts25/LICENSE.TTS-Audio-Suite.txt`. The suite archive and model weights
+are referenced by immutable URLs and SHA-256 hashes, not bundled in the installer. The
+IndexTeam IndexTTS-2.5 model licence is a separately hashed artifact in that manifest.
+Dependency-bundle packaging and its transitive notices remain a release prerequisite;
+see [the integration status](docs/development/indextts25.md).
+
 Another component is **source we carry rather than a package we depend on**. Two renderer files are
 derived from **LTX-Desktop** (https://github.com/Lightricks/LTX-Desktop, commit `7ec86f3`),
 Copyright (c) Lightricks Ltd., **Apache-2.0**:

@@ -394,9 +394,10 @@ describe("the recipe catalogue projects into the manifest like any other model",
     assert.equal(voice.requires.customNodes[0]?.id, "TTS-Audio-Suite");
     // No invented files or hashes: production readiness refuses this recipe, so the node cannot
     // perform the old undeclared first-generation download.
-    assert.deepEqual(voice.requires.checkpoints, []);
-    assert.match(voice.requires.unavailableReason ?? "", /immutable TTS-Audio-Suite archive/);
-    assert.match(voice.requires.unavailableReason ?? "", /hashed IndexTTS 2\.5 model files/);
+    assert.equal(voice.recipeVersion, 2);
+    assert.equal(voice.requires.checkpoints.length, 26);
+    assert.match(voice.requires.unavailableReason ?? "", /Python dependency/);
+    assert.doesNotMatch(voice.requires.unavailableReason ?? "", /model files are not published/);
     // 8 GB, not the 6 GB first shipped: the model measured 5.44 GB on a Python harness and the
     // recipe still could not finish on a 10 GB card, because the engine hosting it costs more and
     // the machine had 3.36 GB already spoken for. The floor carries that headroom because the

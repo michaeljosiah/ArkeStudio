@@ -3,6 +3,7 @@ import type { ManifestModel, RecipeIdentity, AdapterSelection } from "@arke-stud
 import { KREA2_IMAGE, KREA2_BUCKETS } from "./krea2-recipe.js";
 import { QWEN21_IMAGE, QWEN21_BUCKETS } from "./qwen21-recipe.js";
 import { H3_REFERENCE, H3_REFERENCE_MODEL } from "./h3-reference-recipe.js";
+import { INDEXTTS25_MANIFEST, INDEXTTS25_CHECKPOINTS, INDEXTTS25_BUILD, INDEXTTS25_DEPENDENCY_DIGEST } from "./indextts25.js";
 
 /**
  * The recipe catalogue (SPEC-021 §2.3): hand-authored, shipped, versioned — never fetched,
@@ -123,6 +124,8 @@ export interface ComfyUiRecipe {
   requires: {
     checkpoints: readonly RecipeCheckpoint[];
     customNodes: readonly RecipeCustomNode[];
+    /** Pins provisioning inputs beyond model bytes, such as source archives and Python locks. */
+    provisioningDigest?: string;
     /**
      * A shipped graph whose complete immutable dependency closure is not yet known cannot be
      * offered as ready. This is deliberately data on the recipe rather than a UI exception: the
@@ -622,7 +625,7 @@ const CLONED_VOICE: ComfyUiRecipe = {
   id: "comfyui-cloned-voice",
   capability: "voice-tts",
   displayName: "Local · Cloned Voice",
-  recipeVersion: 1,
+  recipeVersion: 2,
   engine: { minVersion: "0.3.45", exercisedThroughVersion: "0.33.1" },
   params: {
     // The words, verbatim — a line to speak, never a prompt describing a performance
@@ -727,17 +730,14 @@ const CLONED_VOICE: ComfyUiRecipe = {
   },
   outputNode: "5",
   requires: {
-    // The old path delegated roughly 10.2 GB of model and auxiliary downloads to the node at
-    // first generation. SPEC-028 forbids that. The repository does not yet contain exact URLs,
-    // sizes and sha256 digests for that closure, nor a digest-pinned archive containing the node
-    // and its locked Python dependencies, so this recipe remains explicitly unavailable rather
-    // than pretending an empty checkpoint list is ready.
-    checkpoints: [],
+    // All 2.5 model files, including its auxiliary models and tokenizer/configuration files.
+    // Setup still fails closed until the Python bundle passes the independent build checks.
+    checkpoints: INDEXTTS25_CHECKPOINTS,
     customNodes: [
-      { id: "TTS-Audio-Suite", pinnedRef: "dedd982ab999633d5296c3e5a152ef772941fb82" },
+      { id: "TTS-Audio-Suite", pinnedRef: INDEXTTS25_MANIFEST.source.commit },
     ],
-    unavailableReason:
-      "Cloned voice setup is unavailable in this build: the immutable TTS-Audio-Suite archive, locked Python dependencies, and complete hashed IndexTTS 2.5 model files are not published in the setup catalogue.",
+    provisioningDigest: INDEXTTS25_DEPENDENCY_DIGEST,
+    ...(INDEXTTS25_BUILD.reason ? { unavailableReason: INDEXTTS25_BUILD.reason } : {}),
   },
   hardware: {
     // Raised from 6000 after the first end-to-end dispatch through ComfyUI failed to finish on a
@@ -811,6 +811,7 @@ export function recipeDependencyDigest(recipe: ComfyUiRecipe): string {
   const lines = [
     ...recipe.requires.checkpoints.map((c) => `checkpoint:${c.file}:${c.sha256}`),
     ...recipe.requires.customNodes.map((n) => `node:${n.id}:${n.pinnedRef}`),
+    ...(recipe.requires.provisioningDigest ? [`provisioning:${recipe.requires.provisioningDigest}`] : []),
   ].sort();
   return sha256Hex(lines.join("\n"));
 }
@@ -1034,7 +1035,7 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     // Unmetered, and therefore no per-character figure: a local read costs nothing, where an
     // ElevenLabs row states an exact price (SPEC-022 §1.3, turn 70's no-tilde rule).
     pricing: { kind: "unmetered" },
-    requires: { vramMb: CLONED_VOICE.hardware.minVramMb, diskMb: 10500 },
+    requires: { vramMb: CLONED_VOICE.hardware.minVramMb, diskMb: Math.ceil(INDEXTTS25_CHECKPOINTS.reduce((sum, file) => sum + file.sizeMb, 0)) },
   },
   {
     id: DRAFT_IMAGE.id,

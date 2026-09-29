@@ -36,7 +36,7 @@ import {
 import { FactRow } from "./settings-providers.js";
 // Providers absorbed both surfaces (SPEC-034 R-5), so its pane draws their parts: the engine
 // details unabridged, and one engine's models grouped by the provider that owns them.
-import { eligibilityInputs, strandReason } from "../components/dispatch-bar.js";
+import { eligibilityInputs } from "../components/dispatch-bar.js";
 import { ModelsCard, WORLD_MODEL_CAPABILITIES, modelFacts, withModelChoice } from "../components/models-card.js";
 import { AppChrome } from "../components/chrome.js";
 import { Working } from "../components/working.js";
@@ -2349,14 +2349,15 @@ export function SettingsGeneralScreen() {
     <div data-screen="settings-general" className="fy-set fy-set--general">
       <h1 className="fy-pane__name">General</h1>
       {ROUTED_CAPABILITIES.map((capability) => {
-        // Both halves, in one list (R-15). The picker is where R-61's filter used to be, and what
-        // stands in its place is eligibility — the same answer the routing write consults, so an
-        // option the screen greys out is one the write would refuse anyway (R-15a).
-        const options = (manifest?.models ?? []).filter((m) => m.capability === capability);
+        const candidates = (manifest?.models ?? []).filter((m) => m.capability === capability);
+        const usable = (m: (typeof candidates)[number]) => modelEligible(m, eligibility);
+        // Speech setup failures belong on AI models, where the full reason and repair live.
+        // Keep identity separate from availability: native option text also sizes the control.
+        const options = candidates.filter((m) => capability !== "voice-tts" || usable(m));
         const selected = routing.defaults[capability];
-        const selectedModel = options.find((m) => m.id === selected);
-        const usable = (m: (typeof options)[number]) => modelEligible(m, eligibility);
+        const selectedModel = candidates.find((m) => m.id === selected);
         const stranded = selectedModel !== undefined && !usable(selectedModel);
+        const hiddenSelection = capability === "voice-tts" && (stranded || (selected !== undefined && selectedModel === undefined));
         // A stored default whose model left the manifest (SPEC-008 §2.7). Listed under its own id
         // so the control shows what is stored rather than the first option it happens to hold.
         const missing = selected !== undefined && selectedModel === undefined;
@@ -2371,17 +2372,18 @@ export function SettingsGeneralScreen() {
               onChange={(e) => setRoutingDefault(capability, e.target.value)}
               {...(source === undefined ? {} : { mark: <ProviderMark id={source.id} label={source.label} size="xs" /> })}
             >
-              {options.length === 0 && <option value="">No models</option>}
-              {selected === undefined && options.length > 0 && <option value="">Not set</option>}
-              {missing && <option value={selected}>{selected}</option>}
+              {options.length === 0 && !hiddenSelection && <option value="" disabled>No models</option>}
+              {selected === undefined && options.length > 0 && <option value="" disabled>Not set</option>}
+              {/* Retain a saved default without offering it again or silently picking a replacement. */}
+              {hiddenSelection && <option value={selected} disabled hidden>
+                {selectedModel ? `${sourceOf(selectedModel).label} · ${selectedModel.displayName}` : selected}
+              </option>}
+              {missing && !hiddenSelection && <option value={selected} disabled>{selected}</option>}
               {[...options]
                 .sort((a, b) => Number(usable(b)) - Number(usable(a)))
                 .map((m) => (
                   <option key={m.id} value={m.id} disabled={!usable(m)}>
                     {sourceOf(m).label} · {m.displayName}
-                    {/* Not on the selected one: the collapsed control is read beside the state,
-                        which already says why, and twice on one row reads as two problems. */}
-                    {usable(m) || m.id === selected ? "" : ` — ${strandReason(state, m)}`}
                   </option>
                 ))}
             </Select>
