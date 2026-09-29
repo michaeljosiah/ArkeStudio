@@ -16,6 +16,7 @@ bundling; `scripts/verify-licenses.mjs` gates packaging on this file staying com
 | ffmpeg | GPL-3.0-or-later (GPL build, includes libx264) | **Never linked to Arke** — invoked as a separate subprocess, the same arrangement espeak-ng makes. The GPL build is chosen deliberately: libx264 is GPL-only, and the export presets are expressed as x264 `-crf` values that an LGPL build accepts and silently ignores, encoding every preset identically. Version **3**, not 2: the build carries `--enable-version3` alongside `--enable-gpl`, which FFmpeg's own `LICENSE.md` requires for the LGPLv3 (`gmp`, `libaribb24`) and Apache-2.0 (`libvmaf`) libraries it links, and the archive ships `COPYING.GPLv3` to match. Exact GPL text and FFmpeg's own source archive (commit `9b6c8969e0`) ship beside the binaries. The build also compiles **libx264** into avcodec, whose corresponding source the FFmpeg archive does not contain; Arke conveys the installer from a network server, so that source is covered by **GPLv3 §6(d) directions** rather than a §6(b) offer (6(a) and 6(b) are for object code in a physical product). `WRITTEN-OFFER.ffmpeg.txt` ships alongside and points at the tagged BtbN build tree, where every component's upstream repository and exact revision is pinned, and adds a standing three-year offer against that tree going away. Requests: https://github.com/michaeljosiah/ArkeStudio/issues |
 | better-sqlite3 (native index binding) | MIT | Attribution here. Compiled per target architecture. |
 | SQLite | Public domain | None. |
+| qrcode.react / QR Code Generator | ISC / MIT | Renderer QR generation; both licence texts retained below. |
 | Electron | MIT | Attribution here; Chromium/Node notices ship inside Electron's own LICENSES file, included in the installer. |
 | Geist / Geist Mono fonts | OFL-1.1 | Font files unmodified; OFL text retained at `licenses/LICENSE.Geist.txt`. The desktop redistributes Geist Regular v1.7.2 as `resources/fonts/Geist-Regular.ttf` so ffmpeg slates never depend on host font discovery. Not sold separately. |
 | Kokoro TTS models | Apache-2.0 | **Not installer contents** (R-8) — downloaded on first use; notice recorded here for the downloaded artefact. |
@@ -55,3 +56,125 @@ the package; the code is unmodified, so §4(b)'s change notices do not arise.
 A component appearing in the installer without a row in this table fails
 `npm run verify:licenses`, which runs before every `package` (D5: a licence question found here
 is a task; found at packaging it is a shipping delay).
+
+## Publication ZIP dependencies
+
+The publication services bundle yazl 3.3.1 and yauzl 3.4.0 (Josh Wolfe), with buffer-crc32 1.0.0 (Brian J. Brennan) and pend 1.2.0 (Andrew Kelley). All are MIT licensed. Their unmodified licence texts are retained below and travel in this notices file with the packaged application.
+
+### yazl and yauzl
+
+The MIT License (MIT)
+
+Copyright (c) 2014 Josh Wolfe
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+### buffer-crc32
+
+The MIT License
+
+Copyright (c) 2013-2024 Brian J. Brennan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the
+Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+### pend
+
+The MIT License (Expat)
+
+Copyright (c) 2014 Andrew Kelley
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation files
+(the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of the Software,
+and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+## qrcode.react 4.2.0 (ISC)
+
+ISC License
+
+Copyright (c) 2015, Paul O’Shannessy
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+
+This product bundles QR Code Generator, which is available under a
+"MIT" license. For details, see src/third-party/qrcodegen.
+
+### Bundled QR Code Generator (MIT)
+
+QR Code generator library (TypeScript)
+
+Copyright (c) Project Nayuki.
+https://www.nayuki.io/page/qr-code-generator-library
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

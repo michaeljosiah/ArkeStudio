@@ -20,6 +20,7 @@ import {
 import { toExtendedLength } from "../world/paths.js";
 import { conversationDir, WorldChatStore } from "./store.js";
 import { safeWebGet, type ResolveWebHost, type WebRequest } from "./safe-web.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 
 /**
  * Private conversation attachments (#70 §10.1.1, §13).
@@ -415,7 +416,7 @@ export class WorldChatAttachmentStore {
     try {
       response = await safeWebGet(url, MAX_PAGE_BYTES, deps);
     } catch (err) {
-      throw new FetchRefused(err instanceof Error ? err.message : "that page could not be reached");
+      throw new FetchRefused(describeCoordinatorError(err));
     }
     if (response.status < 200 || response.status >= 300) throw new FetchRefused(`that page answered ${response.status}.`);
     const type = response.contentType ?? "";

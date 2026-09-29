@@ -102,6 +102,14 @@ function renderAt(path: string, state: ClientState): string {
 }
 
 describe("the bench screen (issue 305 §3)", () => {
+  it("keeps the themed app frame and a way back while opening a session (issue 1000)", () => {
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench`, { ...FIXTURE_STATE, bench: null });
+    assert.match(html, /class="fy-app" data-screen="bench"/);
+    assert.match(html, /role="status"/);
+    assert.match(html, /Opening the bench/);
+    assert.match(html, />Artifacts<\/button>/);
+  });
+
   it("restores the session whole: title, brief, token, numbered take, selection", () => {
     const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, stateWithBench());
     assert.match(html, /Harbour night studies/);
@@ -110,6 +118,9 @@ describe("the bench screen (issue 305 §3)", () => {
     assert.match(html, /data-testid="strip-take"/);
     assert.match(html, /TAKE 1/); // the wall names the selected take by its number
     assert.match(html, /Keep · file as artifact/);
+    // A take has no name but its number, and that is the name it saves under (issue 478). The
+    // save is a sibling of the picture, and nothing about it files, discards or selects the take.
+    assert.match(html, /aria-label="Download Take 1\.png"/, "the selected take offers a copy under its number");
   });
 
   it("the counter exists exactly where the model publishes a cap (issue 305 §5.1)", () => {
@@ -1004,4 +1015,19 @@ describe("the bench in music mode (design turn 73)", () => {
     assert.match(html, /data-testid="bench-enhance"/);
     assert.ok(!html.includes('aria-label="Lyrics"'), "and a picture is never asked for words");
   });
+});
+
+
+it("offers the priced composer instead of an unpriced token-speech rerun", () => {
+  const state = stateWithBench();
+  const model: ManifestModel = { ...IMAGE_MODEL, id: "token-reader", provider: "elevenlabs", capability: "voice-tts",
+    pricing: { kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
+      speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25,
+        rates: [{ version: "test", effectiveFrom: "2020-01-01T00:00:00.000Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 }] } } };
+  state.app.manifest!.models.push(model);
+  const take = state.bench!.session.takes[0]!;
+  take.request = { ...take.request, mode: "voice", provider: model.provider, model: model.id, params: { kind: "voice", count: 1 }, brief: "Hello" };
+  const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, state);
+  assert.match(html, /aria-label="Review price to run again"/);
+  assert.doesNotMatch(html, /aria-label="Run it again"/);
 });

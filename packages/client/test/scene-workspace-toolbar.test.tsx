@@ -227,7 +227,7 @@ const click = async (element: HTMLElement) => act(async () => element.click());
 describe("the toolbar row (SPEC-036 R-4, R-17)", () => {
   it("reads the coverage line and a text-pill boards toggle while no run exists", async () => {
     const item = await mount(stateWith());
-    assert.equal(one(item, ".fy-sw__coverage")?.textContent, "2 of 2 without a frame");
+    assert.equal(one(item, ".fy-sw__coverage")?.textContent, "0 of 2 frames ready");
     const toggle = one(item, ".fy-sw__boards-toggle")!;
     assert.equal(toggle.textContent?.trim(), "Show boards");
     assert.equal(toggle.getAttribute("aria-pressed"), "false");
@@ -235,13 +235,13 @@ describe("the toolbar row (SPEC-036 R-4, R-17)", () => {
     await click(toggle);
     assert.equal(toggle.textContent?.trim(), "Boards on");
     assert.equal(toggle.getAttribute("aria-pressed"), "true");
-    assert.equal(one(item, ".fy-sw__context")?.getAttribute("title"), "Every shot inherits these unless it overrides them");
+    assert.ok(one(item, ".fy-sw__context .fy-sw__cast"), "cast shares the compact context row");
     assert.ok(named(item, "Review scene").classList.contains("ui-btn--sm"));
     assert.ok(named(item, "Generate frames").classList.contains("ui-btn--sm"));
     assert.equal(one(item, ".fy-sw__toolbar .fy-sw__spacer") !== null, true);
 
     const framed = await mount(stateWith({ allFramed: true }));
-    assert.equal(one(framed, ".fy-sw__coverage")?.textContent, "every shot has a frame");
+    assert.equal(one(framed, ".fy-sw__coverage")?.textContent, "2 of 2 frames ready");
   });
 
   it("hands the row to the run bar while a run is active and keeps the header primary live", async () => {
@@ -308,7 +308,7 @@ describe("the toolbar row (SPEC-036 R-4, R-17)", () => {
     const sent: ClientMessage[] = [];
     const item = await mount(stateWith({ runs: [cancelled] }), sent);
     assert.equal(one(item, '[data-testid="frame-run-bar"]'), null);
-    assert.equal(one(item, ".fy-sw__coverage")?.textContent, "2 of 2 without a frame");
+    assert.equal(one(item, ".fy-sw__coverage")?.textContent, "0 of 2 frames ready");
     assert.ok(one(item, ".fy-sw__boards-toggle"));
     const dismissals = () => sent.filter((message) => message.kind === "frame-run-dismiss");
     assert.deepEqual(dismissals(), [{ kind: "frame-run-dismiss", worldId: FIXTURE_WORLD_ID, productionId: "saltlight", runId: RUN_ID }]);
@@ -333,7 +333,7 @@ describe("the generate dialog (SPEC-036 R-15, R-16)", () => {
     assert.match(dialog.querySelector(".fy-swgen__packing-head")?.textContent ?? "", /^Packing2 shots → 1 board15s clip limit$/);
     assert.match(dialog.querySelector(".fy-swgen__board-head")?.textContent ?? "", /^Board Ashots 12–1310\.0s \/ 15s$/);
     assert.match(dialog.querySelector(".fy-swgen__board-foot")?.textContent ?? "", /5\.0s spare/);
-    assert.match(dialog.querySelector(".fy-swgen__packing .fy-swgen__hint")?.textContent ?? "", /^Boards break at the clip limit/);
+    assert.equal(dialog.querySelector(".fy-swgen__packing .fy-swgen__hint"), null, "instruction captions remain off the dialog (#1093)");
     assert.match(dialog.querySelector('[aria-label="Image model"] [aria-checked="true"]')?.textContent ?? "", /^Frame image1536×864 · 4 refs$/);
     const context = dialog.querySelector(".fy-swgen__context")?.textContent ?? "";
     assert.match(context, /^applies the scene context · .*16:9$/);
@@ -364,7 +364,8 @@ describe("the generate dialog (SPEC-036 R-15, R-16)", () => {
 
   it("uses singular labels throughout a one-shot scene", async () => {
     const item = await mount(stateWith({ singleShot: true, allFramed: true }));
-    assert.match(one(item, ".fy-sw__metrics")?.textContent ?? "", /^1 shot · .* · 1 frame filed$/);
+    assert.match(one(item, ".fy-sw__metrics")?.textContent ?? "", /1 shot/);
+    assert.equal(one(item, ".fy-sw__coverage")?.textContent, "1 of 1 frames ready");
     await click([...item.container.querySelectorAll("button")].find((button) => button.textContent === "Flow") as HTMLElement);
     assert.equal(one(item, '.fy-swnode[data-kind="board"] .fy-swnode__meta')?.textContent, "shot 12 · 1 cell");
     await click([...item.container.querySelectorAll("button")].find((button) => button.textContent === "Storyboard") as HTMLElement);
@@ -379,5 +380,55 @@ describe("the generate dialog (SPEC-036 R-15, R-16)", () => {
     assert.match(head.textContent ?? "", /shot 12 · 1 cell · one pass/);
     assert.match(head.textContent ?? "", /\d\.\ds \/ 15s/);
     assert.equal(head.querySelector('[aria-label="Close board sheet"] svg')?.getAttribute("width"), "13");
+  });
+});
+
+describe("full screen (SPEC-044 R-37, R-39; T-16)", () => {
+  it("carries the glyph on Flow, and on the shot page's Stage", async () => {
+    const item = await mount(FIXTURE_STATE);
+    const glyph = () => one(item, ".fy-sw__full");
+    assert.equal(glyph(), null, "not on Storyboard");
+    // The Stage left the scene's view row for the shot page (turn 145); Flow keeps the glyph here.
+    for (const [tab, present] of [["Flow", true], ["Preview", false], ["Storyboard", false]] as const) {
+      await click(all(item, ".fy-sw__tab").find((candidate) => candidate.textContent === tab)!);
+      assert.equal(glyph() !== null, present, `${tab}: ${present ? "a" : "no"} glyph`);
+    }
+    await click(one(item, ".fy-swrow__chevron")!);
+    assert.equal(glyph(), null, "not on the shot page's Shot view");
+    await click(all(item, ".fy-sw__tab").find((candidate) => candidate.textContent === "Stage")!);
+    assert.ok(glyph(), "the Stage carries it on the page");
+  });
+
+  it("sits at the row's right end, and fills the frame with the Stage on the shot page as it does with Flow on the scene's", async () => {
+    const item = await mount(FIXTURE_STATE);
+    await click(one(item, ".fy-swrow__chevron")!);
+    await click(all(item, ".fy-sw__tab").find((candidate) => candidate.textContent === "Stage")!);
+    const row = one(item, ".fy-sw__full")!.parentElement!;
+    assert.equal(row.lastElementChild?.className, "fy-sw__full", "the glyph is the row's last control (R-37)");
+    await click(one(item, ".fy-sw__full")!);
+    const workspace = one(item, ".fy-sw")!;
+    assert.equal(workspace.getAttribute("data-full"), "true");
+    const pill = one(item, ".fy-sw__fullpill")?.textContent ?? "";
+    assert.match(pill, /scene 4 · shot 12/);
+    assert.match(pill, /Stage$/);
+    assert.ok(one(item, ".fy-swstage") !== null, "the Stage is the view that fills");
+    // The Stage's way out is on its own head row, where the way in stood (turn 144); the corner
+    // pill of 135h is the Flow's.
+    assert.equal(one(item, ".fy-sw__fullexit"), null, "no corner pill on the Stage");
+    const exit = one(item, ".fy-swstage__head .fy-swstage__exit")!;
+    assert.equal(exit.getAttribute("aria-label"), "Leave full screen");
+    assert.equal(exit.getAttribute("title"), "Leave full screen · Esc");
+    assert.equal(one(item, ".fy-swstage__head")!.lastElementChild, exit, "the row's last control");
+    await click(exit);
+    assert.equal(workspace.getAttribute("data-full"), null, "the reversed glyph returns");
+    assert.equal(one(item, ".fy-swstage__exit"), null, "and leaves with the mode");
+    assert.equal(one(item, ".fy-swstage__head"), null, "and the head row with it: the filmstrip steps");
+
+    await click(one(item, ".fy-sw__back")!);
+    await click(all(item, ".fy-sw__tab").find((candidate) => candidate.textContent === "Flow")!);
+    await click(one(item, ".fy-sw__full")!);
+    assert.ok(one(item, ".fy-sw__fullexit"), "the Flow keeps the corner pill");
+    await click(one(item, ".fy-sw__fullexit")!);
+    assert.equal(one(item, ".fy-sw")!.getAttribute("data-full"), null);
   });
 });

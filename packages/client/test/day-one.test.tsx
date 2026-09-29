@@ -63,7 +63,7 @@ describe("day one is a place to start writing (design turn 53b)", () => {
   it("offers a box to type in, and promises it writes nothing", () => {
     const html = render(state, PATH);
     assert.match(html, /role="textbox"/, "a composer, not a button that opens one elsewhere");
-    assert.match(html, /talking writes nothing · you accept what you keep/);
+    assert.doesNotMatch(html, /talking writes nothing/, "no caption under the composer (turn 137)");
   });
 
   it("offers exactly the two ways in the frame draws", () => {

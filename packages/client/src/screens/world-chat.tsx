@@ -1,11 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import type { WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
+import type { WorldBundle, WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
+import { HeldBar } from "../components/held-bar.js";
+import { PageSheet } from "../components/page-sheet.js";
+import { useMediaQuery } from "../lib/media-query.js";
+import { relativeDate } from "../lib/format.js";
+import { ReadAloud } from "../components/read-aloud.js";
 import { Composer } from "../components/composer.js";
+import { FoundingProgressCard } from "../components/genesis-readiness.js";
 import { attachmentChipLabel, ConversationTranscript } from "../components/conversation.js";
 import { EmptyState } from "../components/layout.js";
 import { Button, IconButton, cx } from "../components/ui.js";
-import { ChevronDown, ChevronRight, More, PanelLeft, Plus } from "../components/icons.js";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, More, PanelLeft, Plus } from "../components/icons.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import {
   archiveWorldChat,
@@ -15,7 +21,7 @@ import {
   cancelWorldChat,
   restoreBible,
   deleteWorldChat,
-  hostCanAttach,
+  canAttachConversationFiles,
   retryWorldChatTurn,
   createWorldChat,
   dismissWorldChatRipples,
@@ -46,7 +52,10 @@ import {
  * made a world already knows this shape, and a second nearly-identical split would teach them
  * that similar-looking screens behave differently.
  *
- * What 71 changed is the way in. There used to be a list screen in front of all of this, and
+ * On phones, turn 164 restores a conversation list at `/chat`; opening a row or pressing New
+ * enters the transcript, with its decisions in a sheet above the held composer.
+ *
+ * What 71 changed on larger screens is the way in. There used to be a list screen in front, and
  * every visit paid for it: arriving at World Chat meant choosing which conversation to read
  * before saying anything. The address is now a conversation nobody has said anything in yet, and
  * the conversations already had are a rail down the left that can be put away. One screen draws
@@ -55,7 +64,7 @@ import {
  * The rule that shapes the rail is that a decision belongs where the point is. Save writes that
  * line to the world and Reject drops it, both from the rail on the right, and Accept all writes
  * what is left and closes the conversation. Talking still changes nothing — it is how a point
- * that is nearly right gets corrected, and the composer still says so.
+ * that is nearly right gets corrected.
  *
  * What did not change is who decides. Saving goes through the accept gate exactly as a reviewed
  * proposal does, so the history, the ripples and the change log are the same; the review is the
@@ -150,6 +159,7 @@ function ConversationRow({
         </span>
         {waiting && <span className="fy-chatnav__waiting">{waiting}</span>}
       </Link>
+      <span className="fy-chatnav__age">{relativeDate(row.updatedAt)}</span>
       <IconButton
         label="More"
         className={cx("fy-chatnav__more", open && "fy-chatnav__more--on")}
@@ -193,17 +203,25 @@ export function RowMenuPanel({
   menu,
   onOpenMenu,
   onCloseMenu,
+  replyActions,
 }: {
   worldId: string;
   row: WorldChatSummary;
   menu: RowMenu;
   onOpenMenu: (menu: RowMenu) => void;
   onCloseMenu: () => void;
+  replyActions?: ReactNode;
 }) {
-  return (
-    <>
-      <div className="fy-chatnav__scrim" onClick={onCloseMenu} />
-      <div className="fy-chatnav__menu" style={{ left: menu.x, top: menu.y }} role="menu">
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const panel = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const node = panel.current;
+    if (compact || !node) return;
+    const bounds = node.getBoundingClientRect();
+    node.style.left = `${Math.max(8, Math.min(menu.x, innerWidth - bounds.width - 8))}px`;
+    node.style.top = `${Math.max(8, Math.min(menu.y, innerHeight - bounds.height - 8))}px`;
+  }, [compact, menu.x, menu.y, menu.confirming]);
+  const actions = <div className="fy-chatnav__menuactions">
         {menu.confirming ? (
           <>
             <div className="fy-chatnav__confirmsay">
@@ -253,9 +271,13 @@ export function RowMenuPanel({
             </button>
           </>
         )}
-      </div>
-    </>
-  );
+  </div>;
+  if (compact) return <PageSheet open title={row.title} onClose={onCloseMenu}>{actions}{!menu.confirming && replyActions}</PageSheet>;
+  return <>
+    <div className="fy-chatnav__scrim" onClick={onCloseMenu} />
+    <div ref={panel} className="fy-chatnav__menu" style={{ left: menu.x, top: menu.y }} role="menu">{actions}</div>
+  </>;
+
 }
 
 /**
@@ -273,6 +295,7 @@ function HistoryRail({
   live,
   archived,
   currentId,
+  phoneList = false,
   open,
   onToggle,
   onNew,
@@ -284,6 +307,7 @@ function HistoryRail({
   live: readonly WorldChatSummary[];
   archived: readonly WorldChatSummary[];
   currentId: string | undefined;
+  phoneList?: boolean;
   open: boolean;
   onToggle: () => void;
   onNew: () => void;
@@ -294,8 +318,11 @@ function HistoryRail({
   const [showArchived, setShowArchived] = useState(false);
   const rowProps = { worldId, onOpenMenu, onCloseMenu };
   return (
-    <div className={cx("fy-chatnav", !open && "fy-chatnav--shut")}>
-      <div className="fy-chatnav__head">
+    <div className={cx("fy-chatnav", !open && "fy-chatnav--shut", phoneList && "fy-chatnav--screen")}>
+      {phoneList ? <div className="fy-chatnav__phonehead">
+        <div><div className="fy-hero__eyebrow">World Chat</div><h1>Conversations</h1></div>
+        <Button variant="primary" onClick={onNew}><Plus size={16} />New</Button>
+      </div> : <div className="fy-chatnav__head">
         {open && (
           <Button variant="outline" size="sm" className="fy-chatnav__new" onClick={onNew}>
             New conversation
@@ -309,7 +336,7 @@ function HistoryRail({
             <Plus size={14} />
           </IconButton>
         )}
-      </div>
+      </div>}
       {open && (
         <>
           <div className="fy-chatnav__list">
@@ -421,6 +448,7 @@ function PointRow({
  * held here until there is somewhere to put it.
  */
 type Opening =
+  | { kind: "new" }
   | { kind: "say"; text: string }
   | { kind: "pick" }
   | { kind: "files"; files: readonly File[] }
@@ -431,6 +459,10 @@ export function WorldChatScreen() {
   useOpenWorldGuard(worldId);
   const { state, connection } = useStore();
   const navigate = useNavigate();
+  const phone = useMediaQuery("(max-width: 599px)");
+  const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
+  const [understoodOpen, setUnderstoodOpen] = useState(false);
+  useEffect(() => { setUnderstoodOpen(false); }, [phone, conversationId]);
   const [draft, setDraft] = useState("");
   /**
    * Chips taken off the composer, for this visit only.
@@ -442,7 +474,8 @@ export function WorldChatScreen() {
    */
   const [dismissed, setDismissed] = useState<string[]>([]);
   /** Whether the history is shown. Kept for the visit, as the rail itself is. */
-  const [historyOpen, setHistoryOpen] = useState(true);
+  const [historyOpen, setHistoryOpen] = useState(!fold);
+  useEffect(() => { if (fold) setHistoryOpen(false); }, [fold, conversationId]);
   /** The row whose menu is open, held here so the menu can be drawn clear of the rail. */
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const refusals = useWorldChatRefusals(conversationId);
@@ -467,6 +500,11 @@ export function WorldChatScreen() {
 
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
+  useEffect(() => {
+    if (row?.entryContext?.kind === "production-setup") {
+      void navigate(`/w/${worldId}/productions/setup/${row.id}`, { replace: true });
+    }
+  }, [row?.entryContext?.kind, row?.id, worldId, navigate]);
 
   // Ask for the workspace on arrival and release it on the way out, so a session that visits
   // twenty conversations still holds one. A new conversation has none to ask for.
@@ -535,7 +573,7 @@ export function WorldChatScreen() {
       worldChatAttachFiles(worldId, opened);
     } else if (act.kind === "files") {
       void attachHostFiles(worldChatAttachTarget(worldId, opened), act.files).then(setDeferredTrouble);
-    } else {
+    } else if (act.kind === "note") {
       void attachHostText(worldChatAttachTarget(worldId, opened), act.text, "pasted-note.txt").then(
         setDeferredTrouble,
       );
@@ -688,13 +726,122 @@ export function WorldChatScreen() {
       promoted: a.promoted,
     }));
 
+  const understoodBody = (
+    <div className="fy-panel__body">
+      {points.length === 0 ? (
+        <div className="fy-panel__empty">Nothing understood yet.</div>
+      ) : (
+        <>
+          {groups.map((group) => (
+            <div key={group.subject} className="fy-panel__group">
+              <div className="fy-panel__grouphead">
+                <div className="fy-panel__subject">{group.subject}</div>
+                <div className="fy-panel__kind">{group.kind}</div>
+              </div>
+              {group.items.map((p) => (
+                <PointRow
+                  key={p.id}
+                  point={p}
+                  busy={busyPoints.includes(p.id) || running || wrappingUp}
+                  onSave={() => decide(p, "save")}
+                  onReject={() => decide(p, "reject")}
+                  onMedia={() => openMedia(p)}
+                />
+              ))}
+            </div>
+          ))}
+          {openThreads.length > 0 && (
+            <div className="fy-panel__group fy-panel__group--open">
+              <div className="fy-panel__grouphead">
+                <div className="fy-panel__subject">Still open</div>
+                <div className="fy-panel__kind">not settled</div>
+              </div>
+              {openThreads.map((p) => (
+                <PointRow
+                  key={p.id}
+                  point={p}
+                  busy={busyPoints.includes(p.id) || running || wrappingUp}
+                  onSave={() => decide(p, "save")}
+                  onReject={() => decide(p, "reject")}
+                  onMedia={() => openMedia(p)}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+  const acceptAll = (
+    <Button
+      variant="primary"
+      size="lg"
+      disabled={carried === 0 || loaded === null || running || wrappingUp}
+      onClick={() => {
+        if (!worldId || !loaded) return;
+        // Waiting only on a command that was actually sent. A press made after the socket
+        // dropped transmits nothing, and nothing can then arrive to end the wait — the
+        // button would sit on "Writing them…" for the rest of the session.
+        //
+        // No confirmation sheet, and no navigation yet either: an earlier design had a
+        // sheet here that said less than the screen it stood in front of, and the version
+        // after it left for the proposals before knowing there were any. The effect above
+        // goes when the conversation closes.
+        const attempt = wrapUpWorldChat(worldId, conversationId!, loaded.seq);
+        if (!attempt) return;
+        asked.current = attempt;
+        setWrappingUp(true);
+      }}
+    >
+      {wrappingUp ? "Writing them…" : `Accept all${carried > 0 ? ` · ${carried}` : ""}`}
+    </Button>
+  );
+  const decisionNotices = <>
+    {wrapUpRefusal && !wrappingUp && (
+      <div className="fy-panel__refused" role="status">
+        {wrapUpRefusal.detail}
+      </div>
+    )}
+    {rippleNotice && (
+      <div className="fy-panel__refused" role="status">
+        <strong>What changed elsewhere</strong>
+        {rippleNotice.items.map((item, index) => (
+          <div key={`${item.kind}:${index}`}>{item.summary}</div>
+        ))}
+        <Button variant="ghost" onClick={() => dismissWorldChatRipples(conversationId!)}>
+          Dismiss
+        </Button>
+      </div>
+    )}
+  </>;
+  const replyActions = loaded && loaded.messages.some(message => message.role === "studio") && (
+    <details className="fy-chat__reply-actions">
+      <summary>Read or copy a reply</summary>
+      {loaded.messages.filter(message => message.role === "studio").map(message => (
+        <div key={message.id}>
+          <p>{message.text}</p>
+          <ReadAloud source={{ of: "reply", conversationId: loaded.conversationId, messageId: message.id }} title="Arke" text={message.text} />
+        </div>
+      ))}
+    </details>
+  );
+  const rowMenu = menuRow && <RowMenuPanel worldId={worldId!} row={menuRow} menu={menu!}
+    onOpenMenu={setMenu} onCloseMenu={() => setMenu(null)}
+    replyActions={(phone || fold) && menuRow.id === loaded?.conversationId ? replyActions : undefined} />;
+  if (phone && !conversationId) return <div data-screen="world-chat" className="fy-chat__listpage">
+    <HistoryRail worldId={worldId!} live={live} archived={archived} currentId={undefined} phoneList open onToggle={() => {}}
+      onNew={() => hold({ kind: "new" })} menu={menu} onOpenMenu={setMenu} onCloseMenu={() => setMenu(null)} />
+    {starting && <div role="status">Starting…</div>}{rowMenu}
+  </div>;
+
   return (
     <div
       data-screen={conversationId ? "world-chat-conversation" : "world-chat"}
       className="fy-chat__wrap"
     >
       <div className="fy-gate">
-        <HistoryRail
+        {fold && historyOpen && <button className="fy-chatnav__drawer-scrim" aria-label="Close history" onClick={() => setHistoryOpen(false)} />}
+        {!phone && <HistoryRail
           worldId={worldId!}
           live={live}
           archived={archived}
@@ -705,9 +852,30 @@ export function WorldChatScreen() {
           menu={menu}
           onOpenMenu={setMenu}
           onCloseMenu={() => setMenu(null)}
-        />
+        />}
 
         <div className="fy-gate__main">
+          {phone ? <>
+            <div className="fy-chat__phonehead">
+              <IconButton label="Conversations" onClick={() => navigate(`/w/${worldId}/chat`)}><ChevronLeft size={22} /></IconButton>
+              <h1>{row?.title ?? "New conversation"}</h1>
+              {row && <IconButton label="Conversation options" onClick={() => setMenu({ id: row.id, x: 0, y: 0, confirming: false })}><More size={20} /></IconButton>}
+            </div>
+            <div className="fy-chat__phonesub">
+              {row?.entryContext && row.entryContext.kind !== "world" && <div className="fy-chat__about">{aboutLabel(row.entryContext, world)}<ChevronDown size={14} /></div>}
+              {loaded && conversationId && worldId && <details className="fy-chat__mode">
+                <summary>{loaded.initiative === "assist" ? "Assist" : loaded.initiative === "develop" ? "Develop" : "Collaborate"}<ChevronDown size={14} /></summary>
+                <div role="group" aria-label="How eagerly the studio proposes">
+                  {([['assist', 'Assist', 'Follow your lead'], ['collaborate', 'Collaborate', 'Propose the next step together'], ['develop', 'Develop', 'Explore and develop ideas']] as const).map(([value, label, explanation]) =>
+                    <button key={value} type="button" aria-pressed={loaded.initiative === value} onClick={(event) => {
+                      setWorldChatInitiative(worldId, conversationId, value);
+                      event.currentTarget.closest('details')?.removeAttribute('open');
+                    }}>{label}<span>{explanation}</span></button>)}
+                  <p>Nothing lands without your acceptance.</p>
+                </div>
+              </details>}
+            </div>
+          </> : <>
           <div className="fy-gate__head">
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-eyebrow-sm">WORLD CHAT</div>
@@ -716,7 +884,7 @@ export function WorldChatScreen() {
             {/* Beside the title rather than beneath it (41a): the head bottom-aligns the two so a
                 named subject reads as one line instead of a stack that grows. */}
             {row?.entryContext && row.entryContext.kind !== "world" && (
-              <div className="fy-chat__about">{aboutLabel(row.entryContext)}</div>
+              <div className="fy-chat__about">{aboutLabel(row.entryContext, fold ? world : undefined)}{fold && <ChevronDown size={14} />}</div>
             )}
             {/* The mode changes initiative, never acceptance authority (SPEC-023 R-21). */}
             {loaded && conversationId && worldId && (
@@ -735,12 +903,16 @@ export function WorldChatScreen() {
                   setWorldChatInitiative(worldId, conversationId, next);
                 }}
               >
-                {loaded.initiative === "assist" ? "Assist" : loaded.initiative === "develop" ? "Develop" : "Collaborate"}
+                {loaded.initiative === "assist" ? "Assist" : loaded.initiative === "develop" ? "Develop" : "Collaborate"}{fold && <ChevronDown size={14} />}
               </button>
             )}
           </div>
 
+          </>}
+
           <div className="fy-gate__body">
+            {state?.app.builds.filter(build => build.worldId === worldId && (!build.noticeDismissed || build.status === "running" || build.items.some(item => item.state === "running")))
+              .map(build => <FoundingProgressCard key={build.worldId} build={build} />)}
             {missing ? (
               <EmptyState
                 title="That conversation is not here"
@@ -750,6 +922,7 @@ export function WorldChatScreen() {
               <div className="fy-chat__loading">Opening this conversation…</div>
             ) : (
               <ConversationTranscript
+                inlineTextActions={!phone && !fold}
                 workspace={loaded}
                 running={running}
                 progress={progress}
@@ -764,7 +937,10 @@ export function WorldChatScreen() {
             )}
           </div>
 
-          <div className="fy-chat__composer">
+          <HeldBar className="fy-chat__composer">
+            {phone && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setUnderstoodOpen(true)}>
+              <span><b>What I’ve understood <span>· {carried} of {points.length} ready</span></b><span>{[...groups.map(group => group.subject), ...(openThreads.length ? [`${openThreads.length} still open`] : [])].join(" · ") || "Nothing understood yet"}</span></span><ChevronUp size={18} />
+            </button>}
             <Composer
               value={draft}
               onChange={setDraft}
@@ -794,7 +970,7 @@ export function WorldChatScreen() {
                     },
                   }
                 : {})}
-              {...(worldId && hostCanAttach() && !wrappingUp
+              {...(worldId && canAttachConversationFiles() && !wrappingUp
                 ? {
                     onAttachFiles: (files: readonly File[]) => {
                       if (conversationId) {
@@ -842,13 +1018,10 @@ export function WorldChatScreen() {
               }
             />
             {/* Stop lives on the working line in the transcript now, beside what it would stop. */}
-            <div className="fy-chat__composernote">
-              world author · talking changes nothing until you save
-            </div>
-          </div>
+          </HeldBar>
         </div>
 
-        <div className="fy-gate__side">
+        {!phone && <div className="fy-gate__side">
           <div className="fy-panel__head">
             <div className="fy-panel__headline">
               <div className="fy-panel__title">What I&rsquo;ve understood</div>
@@ -856,133 +1029,32 @@ export function WorldChatScreen() {
                 {carried} of {points.length} ready
               </div>
             </div>
-            <div className="fy-panel__note">
-              Save writes a line to the world. If one is wrong, say so and it changes — or reject it.
-            </div>
             {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
           </div>
 
-          <div className="fy-panel__body">
-            {points.length === 0 ? (
-              <div className="fy-panel__empty">
-                Nothing understood yet. Say what you know about this world and it lands here.
-              </div>
-            ) : (
-              <>
-                {groups.map((group) => (
-                  <div key={group.subject} className="fy-panel__group">
-                    <div className="fy-panel__grouphead">
-                      <div className="fy-panel__subject">{group.subject}</div>
-                      <div className="fy-panel__kind">{group.kind}</div>
-                    </div>
-                    {group.items.map((p) => (
-                      <PointRow
-                        key={p.id}
-                        point={p}
-                        busy={busyPoints.includes(p.id) || running || wrappingUp}
-                        onSave={() => decide(p, "save")}
-                        onReject={() => decide(p, "reject")}
-                        onMedia={() => openMedia(p)}
-                      />
-                    ))}
-                  </div>
-                ))}
-                {openThreads.length > 0 && (
-                  <div className="fy-panel__group">
-                    <div className="fy-panel__grouphead">
-                      <div className="fy-panel__subject">Still open</div>
-                      <div className="fy-panel__kind">not settled</div>
-                    </div>
-                    {openThreads.map((p) => (
-                      <PointRow
-                        key={p.id}
-                        point={p}
-                        busy={busyPoints.includes(p.id) || running || wrappingUp}
-                        onSave={() => decide(p, "save")}
-                        onReject={() => decide(p, "reject")}
-                        onMedia={() => openMedia(p)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-          <div style={{ flex: 1, minHeight: 16 }} />
-          <div style={{ display: "grid", gap: 8 }}>
-            <Button
-              variant="primary"
-              size="lg"
-              disabled={carried === 0 || loaded === null || running || wrappingUp}
-              onClick={() => {
-                if (!worldId || !loaded) return;
-                // Waiting only on a command that was actually sent. A press made after the socket
-                // dropped transmits nothing, and nothing can then arrive to end the wait — the
-                // button would sit on "Writing them…" for the rest of the session.
-                //
-                // No confirmation sheet, and no navigation yet either: an earlier design had a
-                // sheet here that said less than the screen it stood in front of, and the version
-                // after it left for the proposals before knowing there were any. The effect above
-                // goes when the conversation closes.
-                const attempt = wrapUpWorldChat(worldId, conversationId!, loaded.seq);
-                if (!attempt) return;
-                asked.current = attempt;
-                setWrappingUp(true);
-              }}
-            >
-              {wrappingUp ? "Writing them…" : `Accept all${carried > 0 ? ` · ${carried}` : ""}`}
-            </Button>
-            {/*
-              A refused wrap-up is the one thing this rail must not swallow. Nothing was written,
-              so the panel above is unchanged and says nothing about it — without this line the
-              press leaves no trace at all.
-            */}
-            {wrapUpRefusal && !wrappingUp && (
-              <div className="fy-panel__refused" role="status">
-                {wrapUpRefusal.detail}
-              </div>
-            )}
-            {rippleNotice && (
-              <div className="fy-panel__refused" role="status">
-                <strong>What changed elsewhere</strong>
-                {rippleNotice.items.map((item, index) => (
-                  <div key={`${item.kind}:${index}`}>{item.summary}</div>
-                ))}
-                <Button variant="ghost" onClick={() => dismissWorldChatRipples(conversationId!)}>
-                  Dismiss
-                </Button>
-              </div>
-            )}
-            <div className="fy-panel__caption">
-              {carried === 0
-                ? "Nothing is ready to write yet."
-                : `Writes the ${carried} ready to the world and closes this conversation. Save them one at a time above to keep talking.`}
-            </div>
-          </div>
-        </div>
+          {understoodBody}
+          {!fold && <div style={{ flex: 1, minHeight: 16 }} />}
+          <div className="fy-chat__accept">{acceptAll}{decisionNotices}</div>
+        </div>}
+        <PageSheet className="fy-understood-sheet" open={phone && understoodOpen} title="What I’ve understood" onClose={() => setUnderstoodOpen(false)} footer={<div className="fy-chat__acceptrow"><span>Writes {carried} to the world</span>{acceptAll}</div>}>
+          <div className="fy-panel__count">{carried} of {points.length} ready</div>
+          {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
+          {understoodBody}{decisionNotices}
+        </PageSheet>
       </div>
-      {menuRow && (
-        <RowMenuPanel
-          worldId={worldId!}
-          row={menuRow}
-          menu={menu!}
-          onOpenMenu={setMenu}
-          onCloseMenu={() => setMenu(null)}
-        />
-      )}
+      {rowMenu}
     </div>
   );
 }
 
-function aboutLabel(context: NonNullable<WorldChatSummary["entryContext"]>): string {
+function aboutLabel(context: NonNullable<WorldChatSummary["entryContext"]>, world?: WorldBundle): string {
   switch (context.kind) {
     case "canon-entry":
       return `about ${context.entryId}`;
     case "canon-question":
       return "about a canon question";
     case "sheet":
-      return `about ${context.sheetId}`;
+      return `about ${world?.sheets.find(sheet => sheet.id === context.sheetId)?.name ?? context.sheetId}`;
     case "attachment":
       return "about an attachment";
     case "production":

@@ -17,6 +17,9 @@ import type {
   ProviderClient,
   ProviderOperation,
   ProviderTransport,
+  VoiceCatalogueClient,
+  VoiceSlotClient,
+  VoiceDesignClient,
 } from "./types.js";
 
 interface Scope extends ProviderCallContext {
@@ -66,6 +69,16 @@ function sha256(data: Uint8Array): string {
   return `sha256:${createHash("sha256").update(data).digest("hex")}`;
 }
 
+const SLOT_RESPONSE_KEYS = new Set(["generated_voice_id", "voice_id", "_id", "state", "status", "code", "detail", "error", "message"]);
+
+/** What a voice-slot save's answer keeps in the call history: identity and outcome, never the transcript. */
+export function redactSlotResponse(body: unknown): unknown {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return body;
+  const kept = Object.fromEntries(Object.entries(body as Record<string, unknown>).filter(([key]) => SLOT_RESPONSE_KEYS.has(key)));
+  const dropped = Object.keys(body as Record<string, unknown>).filter((key) => !SLOT_RESPONSE_KEYS.has(key));
+  return dropped.length > 0 ? { ...kept, redacted: dropped } : kept;
+}
+
 async function requestBody(body: RequestInit["body"]): Promise<unknown> {
   if (body === undefined || body === null) return null;
   if (typeof body === "string") {
@@ -111,18 +124,29 @@ async function requestBody(body: RequestInit["body"]): Promise<unknown> {
 function summarizeMedia(value: unknown, key = ""): unknown {
   if (Array.isArray(value)) return value.slice(0, 100).map((item) => summarizeMedia(item, key));
   if (value !== null && typeof value === "object") {
+    const media = value as Record<string, unknown>;
+    const mediaKind = typeof media.type === "string" && ["audio", "image", "video"].includes(media.type)
+      ? media.type : typeof media.mime_type === "string" ? media.mime_type.split("/")[0] : undefined;
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
         .slice(0, 100)
-        .map(([name, item]) => [name, summarizeMedia(item, name)]),
+        .map(([name, item]) => [name, summarizeMedia(item, name === "data" && mediaKind ? `${mediaKind}_base64` : name)]),
     );
   }
   if (typeof value === "string") {
+    // Stateless Google voice keys are bearer-like credentials, including in unexpected error
+    // fields. Never retain one just because the current client asks for stored voices only.
+    if (value.includes("voicekey_")) return "[redacted voice key]";
     // A data URI is media regardless of its field name or length. Strip its header before
     // hashing: provenance describes the decoded bytes, not a base64 decoder's view of the URI.
     const uri = /^data:([^;,]*)(?:;[^,]*)?,([\s\S]*)$/i.exec(value);
     if (/^data:/i.test(value) && !uri) return { binary: true, unavailable: "malformed-media" };
-    if (uri || /(?:b64|base64)/i.test(key) || (/(?:audio|image|video)/i.test(key) && value.length > 4096)) {
+    // A media-named field is media when it is long, or when it is plainly base64 at any length:
+    // a cloned recording small enough to encode under 4 KB is still the recording, and
+    // `ref_audio` carries one on every Mistral read (codex on PR 1153). A short media-named
+    // word like `audio_format: "wav"` is not base64 and stays as it is.
+    const base64Shaped = value.length >= 64 && /^[A-Za-z0-9+/]+={0,2}$/.test(value);
+    if (uri || /(?:b64|base64)/i.test(key) || (/(?:audio|image|video)/i.test(key) && (value.length > 4096 || base64Shaped))) {
       let bytes: Buffer;
       try {
         bytes = uri
@@ -295,8 +319,12 @@ export function captureProviderClient(
   // and history/queue responses can carry it back. What persists is a summary — digest, node
   // count, byte count — because payload history is displayed and copied in Activity, and R-1
   // says no graph reaches a user or a stored file. Other providers pass through untouched.
-  const redact = (direction: "request" | "response", endpoint: string, body: unknown): unknown =>
-    provider === "comfyui" ? redactComfyUiBody(direction, endpoint, body) : body;
+  const redact = (direction: "request" | "response", endpoint: string, body: unknown, operation: ProviderOperation): unknown =>
+    provider === "comfyui" ? redactComfyUiBody(direction, endpoint, body)
+      // A voice-slot save answers with the service's transcript of the recording — words the
+      // person spoke, which the client discards and the call history must not keep (codex on
+      // PR 1153). Only the ids and the state survive into calls.jsonl.
+      : direction === "response" && operation === "save-voice" ? redactSlotResponse(body) : body;
   const observedFetch: FetchLike = async (url, init) => {
     const request = activeFetch.getStore() ?? fetchImpl;
     if (!capture) return request(url, init);
@@ -313,7 +341,7 @@ export function captureProviderClient(
       method: init?.method?.toUpperCase() ?? "GET",
       endpoint,
       headers: headersOf(init?.headers, true),
-      body: redact("request", endpoint, await requestBody(init?.body)),
+      body: redact("request", endpoint, await requestBody(init?.body), current.operation),
     }))().catch(() => null);
     if (id === null) return request(url, init);
     try {
@@ -336,7 +364,7 @@ export function captureProviderClient(
             capture.finish(id, {
               status: response.status,
               headers: headersOf(response.headers),
-              body: redact("response", endpoint, body),
+              body: redact("response", endpoint, body, current.operation),
             }).catch(() => {}),
           ),
         );
@@ -481,6 +509,11 @@ export function captureProviderClient(
       run("fetch-artifacts", context, () => client.fetchArtifacts(key, remoteId, context)),
     cancel: (key, remoteId, context) => run("cancel", context, () => client.cancel(key, remoteId, context)),
     ...(client.resetTransport ? { resetTransport: () => client.resetTransport!() } : {}),
+    ...(client.unload ? { unload: (signal?: AbortSignal, only?: ReadonlySet<string>) => client.unload!(signal, only) } : {}),
+    ...(client.usedModels ? { usedModels: () => client.usedModels!() } : {}),
+    ...(client.residency ? { residency: (signal?: AbortSignal) => client.residency!(signal) } : {}),
+    // A listing, not a call: nothing is charged and nothing is journalled, like residency.
+    ...(client.listModels ? { listModels: (signal?: AbortSignal) => client.listModels!(signal) } : {}),
     ...(client.dispose ? { dispose: () => client.dispose!() } : {}),
     ...(client.release
       ? {
@@ -500,10 +533,28 @@ export function captureProviderClient(
             run("list-recent", context, () => client.listRecent!(key, context)),
         }
       : {}),
-  } as ProviderClient & { listVoicesCatalog?: (key: string) => Promise<unknown> };
-  const catalogue = (client as ProviderClient & { listVoicesCatalog?: (key: string) => Promise<unknown> })
-    .listVoicesCatalog;
+  } as ProviderClient & Partial<Pick<VoiceCatalogueClient, "listVoicesCatalog">> & Partial<Pick<VoiceSlotClient, "saveVoice" | "deleteVoice" | "findVoice" | "hasVoice">> & Partial<Pick<VoiceDesignClient, "createDesignedVoice" | "getDesignedVoice" | "listDesignedVoices">>;
+  const catalogue = (client as Partial<VoiceCatalogueClient>).listVoicesCatalog;
   if (catalogue)
     wrapped.listVoicesCatalog = (key) => run("list-voices", undefined, () => catalogue.call(client, key));
+  // The voice-slot calls ride the same seam, so a saved clip is in calls.jsonl like every other
+  // request that leaves — and so the host cannot reach a method the wrapper forgot to carry
+  // (the cast in desktop main once hid exactly that).
+  const slots = client as Partial<VoiceSlotClient>;
+  if (slots.saveVoice)
+    wrapped.saveVoice = (key, input, signal) => run("save-voice", undefined, () => slots.saveVoice!.call(client, key, input, signal));
+  if (slots.deleteVoice)
+    wrapped.deleteVoice = (key, voiceId, signal) => run("delete-voice", undefined, () => slots.deleteVoice!.call(client, key, voiceId, signal));
+  if (slots.findVoice)
+    wrapped.findVoice = (key, name, signal) => run("lookup-voice", undefined, () => slots.findVoice!.call(client, key, name, signal));
+  if (slots.hasVoice)
+    wrapped.hasVoice = (key, voiceId, signal) => run("lookup-voice", undefined, () => slots.hasVoice!.call(client, key, voiceId, signal));
+  const designs = client as Partial<VoiceDesignClient>;
+  if (designs.createDesignedVoice)
+    wrapped.createDesignedVoice = (key, input, signal) => run("design-voice", { model: input.model }, () => designs.createDesignedVoice!.call(client, key, input, signal));
+  if (designs.getDesignedVoice)
+    wrapped.getDesignedVoice = (key, remoteId, signal) => run("get-designed-voice", undefined, () => designs.getDesignedVoice!.call(client, key, remoteId, signal));
+  if (designs.listDesignedVoices)
+    wrapped.listDesignedVoices = (key, pageToken, signal) => run("list-designed-voices", undefined, () => designs.listDesignedVoices!.call(client, key, pageToken, signal));
   return wrapped;
 }

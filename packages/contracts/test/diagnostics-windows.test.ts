@@ -211,6 +211,7 @@ describe("spend above the previous period (R-20.10)", () => {
     assert.equal(finding.facts.find((f) => f.name === "later-micro-usd")?.value, 6_000_000);
     assert.equal(finding.facts.find((f) => f.name === "earlier-micro-usd")?.value, 3_500_000);
     assert.equal(finding.facts.find((f) => f.name === "largest-share")?.value, "veo-3");
+    assert.equal(finding.cause.statement, "spend rose $2.50 over the seven days before; veo-3 accounts for the largest share");
     assert.equal(finding.remedy, null);
   });
 

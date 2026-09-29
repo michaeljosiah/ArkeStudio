@@ -1,0 +1,201 @@
+{
+  "approvedAt": "2026-09-25T10:02:59.432Z",
+  "approval": "catalogue-owner-acceptance",
+  "recipeId": "comfyui-h3-video",
+  "strength": 1,
+  "seed": 9123,
+  "durationRequestedSec": 5,
+  "width": 864,
+  "height": 480,
+  "fps": 24,
+  "engineVersion": "0.33.1",
+  "engineCommit": "72865f4f27eaf5396f8f36370e0a2be3a9a090ee",
+  "gpu": "NVIDIA GeForce RTX 3080 10 GB",
+  "systemRamMiB": 32676.15625,
+  "results": [
+    {
+      "releaseId": "hearmeman-hmbreastsv2-d260653bdf10775380a44c8f1486bcc4690bd57085cb034002a8fb878f1ad36f",
+      "sha256": "d260653bdf10775380a44c8f1486bcc4690bd57085cb034002a8fb878f1ad36f",
+      "generation": "completed",
+      "outputAccepted": true,
+      "outputSha256": "04dbd689fb39e4cf37ac8431be28b12351f90479512eb459aaa16181c614e222",
+      "elapsedSec": 2868,
+      "before": {
+        "freeVramMb": 4115,
+        "freeRamMb": 6174.59375,
+        "totalRamMb": 32676.15625
+      },
+      "lowestFreeRamMb": null,
+      "lowestFreeVramMb": null,
+      "measurementLimit": "Unavailable: runner stopped persisting during execution"
+    },
+    {
+      "releaseId": "hearmeman-hmbreasts-085e0750-e40-039b6d5399def81c9a459d7cca8ccf749195fcb5f766f0899a387ba2fa6ad967",
+      "sha256": "039b6d5399def81c9a459d7cca8ccf749195fcb5f766f0899a387ba2fa6ad967",
+      "generation": "completed",
+      "outputAccepted": true,
+      "outputSha256": "cfa41716c9a244c27ee7b8bf71c1ef1ff3b48a5cbb827fc005c6a3c7c1670c26",
+      "elapsedSec": 1710.264,
+      "before": {
+        "freeVramMb": 6122,
+        "freeRamMb": 6174.92578125,
+        "totalRamMb": 32676.15625
+      },
+      "lowestFreeRamMb": 263.80859375,
+      "lowestFreeVramMb": 542,
+      "measurementLimit": "Sampled minima; not instantaneous allocation peaks."
+    },
+    {
+      "releaseId": "hearmeman-hmcumshot-v1.0-634c39cfcbfd9421a2d7b5adc62573fc232384c4c75e003c2e11d3408ad0765c",
+      "sha256": "634c39cfcbfd9421a2d7b5adc62573fc232384c4c75e003c2e11d3408ad0765c",
+      "generation": "completed",
+      "outputAccepted": true,
+      "outputSha256": "eefebb5998624966dd79b944c8e67d9c480be1d65bca7bab7402a4bd293ecc7f",
+      "elapsedSec": 1219.94,
+      "before": {
+        "freeVramMb": 6434,
+        "freeRamMb": 5285.80859375,
+        "totalRamMb": 32676.15625
+      },
+      "lowestFreeRamMb": 110.43359375,
+      "lowestFreeVramMb": 334,
+      "measurementLimit": "Sampled minima; not instantaneous allocation peaks."
+    },
+    {
+      "releaseId": "hearmeman-hmcumshot-v2-1a5b7948bb97f27737e62c3dd5497a3afb77517f230787f45e45c7d8fe3dc24d",
+      "sha256": "1a5b7948bb97f27737e62c3dd5497a3afb77517f230787f45e45c7d8fe3dc24d",
+      "generation": "completed",
+      "outputAccepted": true,
+      "outputSha256": "46ce5080f015fa287c568fabac0e6f084a8a192250b360bb32c6d49a651002fb",
+      "elapsedSec": 1343.968,
+      "before": {
+        "freeVramMb": 5956,
+        "freeRamMb": 9671.94921875,
+        "totalRamMb": 32676.15625
+      },
+      "lowestFreeRamMb": 1348.85546875,
+      "lowestFreeVramMb": 405,
+      "measurementLimit": "Sampled minima; not instantaneous allocation peaks."
+    },
+    {
+      "releaseId": "hearmeman-hminnie-v1-e50-499196c9d0e5f81ff575ba39a82987112c3bb1e09fbede858877cd950d6c8833",
+      "sha256": "499196c9d0e5f81ff575ba39a82987112c3bb1e09fbede858877cd950d6c8833",
+      "generation": "completed",
+      "outputAccepted": true,
+      "outputSha256": "a330520ceaa65eb3153b3e91172caef6ef562f48440cb69ffd5ad4d62db47358",
+      "elapsedSec": 1222.498,
+      "before": {
+        "freeVramMb": 5902,
+        "freeRamMb": 9523.08203125,
+        "totalRamMb": 32676.15625
+      },
+      "lowestFreeRamMb": 1165.42578125,
+      "lowestFreeVramMb": 481,
+      "measurementLimit": "Sampled minima; not instantaneous allocation peaks."
+    },
+    {
+      "releaseId": "hearmeman-hmmisdogv2-48e2a82f6bf0049dd42af11085c90bf08c6e2478f22072bebc7666daac2e2113",
+      "sha256": "48e2a82f6bf0049dd42af11085c90bf08c6e2478f22072bebc7666daac2e2113",
+      "generation": "completed",
+      "outputAccepted": true,
+      "outputSha256": "84cbd2e50dcfe7abc84b5eb2d139ff999c08e2b8fe1c25a05bdc2b9ba5a89fe8",
+      "elapsedSec": 1160.791,
+      "before": {
+        "freeVramMb": 6150,
+        "freeRamMb": 9673.6953125,
+        "totalRamMb": 32676.15625
+      },
+      "lowestFreeRamMb": 790.078125,
+      "lowestFreeVramMb": 543,
+      "measurementLimit": "Sampled minima; not instantaneous allocation peaks."
+    },
+    {
+      "releaseId": "hearmeman-hmnsfw-aio-v2.5-a07732a84fd733085eb5d910f602f918fa7a3658117116927e4329f5951a9d2d",
+      "sha256": "a07732a84fd733085eb5d910f602f918fa7a3658117116927e4329f5951a9d2d",
+      "generation": "memory-blocked",
+      "outputAccepted": false
+    },
+    {
+      "releaseId": "hearmeman-hmnsfw-aio-v2-608e4212f2788b6063330ff1196fc1f4b4228cfd9a413a63c198a09d7e4a61cb",
+      "sha256": "608e4212f2788b6063330ff1196fc1f4b4228cfd9a413a63c198a09d7e4a61cb",
+      "generation": "completed",
+      "outputAccepted": true,
+      "outputSha256": "8487758b65b513b18232543d1754260bbe1d4eb00a38030913311e6858034f0d",
+      "elapsedSec": 1208.116,
+      "before": {
+        "freeVramMb": 6084,
+        "freeRamMb": 9587.51953125,
+        "totalRamMb": 32676.15625
+      },
+      "lowestFreeRamMb": 1072.34375,
+      "lowestFreeVramMb": 430,
+      "measurementLimit": "Sampled minima; not instantaneous allocation peaks."
+    },
+    {
+      "releaseId": "hearmeman-hmpenis-v2-e35-c6c58e9fee848b45e99f97d2520aba4ac63dfc354c07e13c29ac5d8a31a68060",
+      "sha256": "c6c58e9fee848b45e99f97d2520aba4ac63dfc354c07e13c29ac5d8a31a68060",
+      "generation": "completed",
+      "outputAccepted": true,
+      "outputSha256": "27f98b350804544851eaaa667fc1d1a29c059e67a37fff10e2760e643d174077",
+      "elapsedSec": 1348.042,
+      "before": {
+        "freeVramMb": 6357,
+        "freeRamMb": 9940.31640625,
+        "totalRamMb": 32676.15625
+      },
+      "lowestFreeRamMb": 587.99609375,
+      "lowestFreeVramMb": 474,
+      "measurementLimit": "Sampled minima; not instantaneous allocation peaks."
+    },
+    {
+      "releaseId": "hearmeman-hmsquirtv0.1-b25cc54db8e12012e9c1a60c514d767208c855cbf6e81605827d86913249cf24",
+      "sha256": "b25cc54db8e12012e9c1a60c514d767208c855cbf6e81605827d86913249cf24",
+      "generation": "memory-blocked",
+      "outputAccepted": false
+    },
+    {
+      "releaseId": "hearmeman-vagina-minimax-h3-epoch20-373c3cad3bf27047fdd754fe111443d97e70e3108a8829f2ec63c48832466eb3",
+      "sha256": "373c3cad3bf27047fdd754fe111443d97e70e3108a8829f2ec63c48832466eb3",
+      "generation": "completed",
+      "outputAccepted": true,
+      "outputSha256": "2acfcefde045cfc5b3ea772566addf6ced7f6041e53effffdd4a54e8d2cea9bf",
+      "elapsedSec": 2156.455,
+      "before": {
+        "freeVramMb": 6419,
+        "freeRamMb": 6103.26171875,
+        "totalRamMb": 32676.15625
+      },
+      "lowestFreeRamMb": 1187.49609375,
+      "lowestFreeVramMb": 345,
+      "measurementLimit": "Sampled minima; not instantaneous allocation peaks."
+    },
+    {
+      "releaseId": "hearmeman-hmmasturbation-v2-f0e4bfbe5baebe972880d2250a227e2f475aa8c18d6d01ed897288d9741659d2",
+      "sha256": "f0e4bfbe5baebe972880d2250a227e2f475aa8c18d6d01ed897288d9741659d2",
+      "generation": "completed",
+      "outputAccepted": true,
+      "outputSha256": "fbac18103621de356ccfd612fca0aaf76d74cdbae6b92cc2dfc6eb33bffc401c",
+      "elapsedSec": 1180.122,
+      "before": {
+        "freeVramMb": 6259,
+        "freeRamMb": 7673.859375,
+        "totalRamMb": 32676.15625
+      },
+      "lowestFreeRamMb": 5077.46484375,
+      "lowestFreeVramMb": 4776,
+      "measurementLimit": "Original runner stopped at user request; memory sampling is incomplete after handoff."
+    },
+    {
+      "releaseId": "hearmeman-hmpussy-v6-epoch30-3080f4fbcbba4fc06bd09240c7eedb6a5128eb0e19feb001cdf97a7a0941a6ee",
+      "sha256": "3080f4fbcbba4fc06bd09240c7eedb6a5128eb0e19feb001cdf97a7a0941a6ee",
+      "generation": "not-run",
+      "outputAccepted": false
+    },
+    {
+      "releaseId": "hearmeman-vagassist-e40-2c2fdb66bf558de1aabda504a81d4ada5f4cebc20e8f519dc6ed3bb6d4be8c9a",
+      "sha256": "2c2fdb66bf558de1aabda504a81d4ada5f4cebc20e8f519dc6ed3bb6d4be8c9a",
+      "generation": "not-run",
+      "outputAccepted": false
+    }
+  ]
+}

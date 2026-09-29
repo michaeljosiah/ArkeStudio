@@ -204,6 +204,30 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
     await store.close();
   });
 
+  it("a Stop during session setup ends the setup as cancelled, and caches no session (issue 1247)", async () => {
+    const { store, gate, proposal } = await setup();
+    const events: DomainEvent[] = [];
+    const adapter = new MockHarnessAdapter();
+    let created = 0;
+    // A setup that ends only when its signal says so: the configuration ahead of it may be
+    // waiting on discovery, and the Stop has nothing else to reach yet.
+    adapter.createSession = (input) => new Promise((_, reject) => {
+      created++;
+      if (input.signal?.aborted) reject(input.signal.reason);
+      input.signal?.addEventListener("abort", () => reject(input.signal!.reason), { once: true });
+    });
+    const authoring = service(adapter, events);
+    const run = authoring.run(store, gate, { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "first" });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(authoring.isRunning(proposal.id), true);
+    await authoring.cancel(proposal.id);
+    await run;
+    assert.ok(events.some((event) => event.type === "authoring.status" && event.proposalId === proposal.id && event.status === "cancelled"), "ended as cancelled, not failed");
+    assert.equal(authoring.isRunning(proposal.id), false);
+    assert.ok(created <= 1, "no session was opened for the stopped turn beyond the one the stop reached");
+    await store.close();
+  });
+
   it("writes the session config into the proposal, runs, and ends completed with the work kept", async () => {
     const { dir, store, gate, proposal } = await setup();
     const events: DomainEvent[] = [];

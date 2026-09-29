@@ -11,6 +11,26 @@ import { skillFor, type Skill } from "./skills.js";
 export interface SessionConfigInput {
   /** Opaque one-use correlation between preparation and the session it configures. */
   preparationId?: string;
+  /**
+   * The roster agent the session is built for, when the caller knows it (issue 1247). Read by
+   * the coordinator's session builder to see whether that agent's own Settings override
+   * already names a model, so a session that would run on it is never refused for lacking a
+   * default. Not written into any harness configuration.
+   */
+  agent?: string;
+  /**
+   * Where the open world's agents keep their own working notes between sessions: a folder the
+   * app owns, one file an agent, never canon and never in the world's folder. Read by a harness
+   * that keeps notes for its agents (Arke's own); hosted harnesses keep their own memory and
+   * ignore it.
+   */
+  memoryDir?: string;
+  /**
+   * The author's page: what agents learn about the person as a writer — voice, preferences, how
+   * they like to work — shared by every agent in every world. A file the app owns, beside the
+   * worlds' notes. Read and ignored the same way as `memoryDir`.
+   */
+  authorNotesFile?: string;
   /** The world-query MCP server URL (loopback), when a world is open. */
   worldQueryUrl?: string;
   /** Concrete model for authoring, e.g. "anthropic/claude-sonnet-5" or "ollama/llama3.3". */
@@ -38,6 +58,8 @@ export interface SessionConfigInput {
    * shaped a draft is worth nothing if it names a document the drafting never saw.
    */
   skillModelId?: string;
+  /** Shipped guidance captured by the coordinator at session construction, keyed by skill id. */
+  skillBodies?: Readonly<Record<string, string>>;
   /**
    * Settings' `research.web`: whether this session may go online (2026-08-23).
    *
@@ -62,4 +84,13 @@ const SKILLED_AGENTS: Record<string, Parameters<typeof skillFor>[0]> = {
 export function skillForAgent(agentName: string, family: string | undefined, modelId?: string): Skill | null {
   const purpose = SKILLED_AGENTS[agentName];
   return purpose === undefined ? null : skillFor(purpose, family, modelId);
+}
+
+/** Resolve the same recorded metadata and require its prepared text; never silently omit it. */
+export function sessionSkillForAgent(agentName: string, input: Pick<SessionConfigInput, "skillFamily" | "skillModelId" | "skillBodies">): (Skill & {body: string}) | null {
+  const skill = skillForAgent(agentName, input.skillFamily, input.skillModelId);
+  if (!skill) return null;
+  const body = input.skillBodies?.[skill.id];
+  if (!body?.trim()) throw new Error(`Authoring skill ${skill.id}@v${skill.version} was not loaded for this session.`);
+  return {...skill, body};
 }

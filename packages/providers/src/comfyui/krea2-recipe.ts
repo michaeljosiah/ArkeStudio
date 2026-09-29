@@ -20,7 +20,10 @@ export const KREA2_IMAGE: ComfyUiRecipe = {
   id: "comfyui-krea2-image",
   capability: "image",
   displayName: "Krea 2",
-  recipeVersion: 1,
+  // Version 2 (issue 1083): the row declares `picture-labels`, so a brief's "@Image N" reaches the
+  // rebalance node as the "Picture N" it labels the picture with. The graph is unchanged; what the
+  // recipe sends is not, and a take's provenance must keep meaning what it meant (SPEC-021 R-13).
+  recipeVersion: 2,
   engine: { minVersion: "0.33.1", exercisedThroughVersion: "0.33.1" },
   params: {
     prompt: { kind: "string", required: true, maxChars: 2000, bind: [["6", "text"], ["16", "text"]] },

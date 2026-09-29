@@ -1,7 +1,8 @@
+import { referencePrompt } from "./reference-prompt.js";
 import { dialogueSlots, type DialogueSlot } from "./dialogue-timing.js";
 import type { ProductionBundle } from "./client-state.js";
 import { resolvedAuthoredDuration, DEFAULT_SHOT_SEC } from "./scene.js";
-import { planCharacterAudio, characterAudioInstructions, type CharacterAudioPlan, type FrozenPerformanceAudio, type FrozenMasterAudio, masterPerformanceShotIds } from "./audio-reference.js";
+import { planCharacterAudio, characterAudioInstructions, type CharacterAudioPlan, type FrozenPerformanceAudio, type FrozenMasterAudio } from "./audio-reference.js";
 import {
   compilationIsStale,
   designatedCompilation,
@@ -38,7 +39,7 @@ import {
 import type { ArtifactSidecar } from "./artifact.js";
 import { chooseReferenceSteering, type ReferenceSteering } from "./storyboard.js";
 import { orderedShots, type SceneRecord } from "./scene-flow.js";
-import { effectiveFraming } from "./scene.js";
+import { effectiveFraming, UNTITLED_SHOT } from "./scene.js";
 import { packBoards, packShotsFor } from "./boards.js";
 import type { Shot, ShotFraming } from "./scene.js";
 import type { Selections } from "./scene.js";
@@ -56,13 +57,40 @@ import type { Prop } from "./prop.js";
 // Mentions (R-9, D5): `@slug` is the source of the shot's cast
 // ---------------------------------------------------------------------------
 
+/**
+ * Every mention in the text, where it sits: the grammar the cast list, the prop chips and the
+ * editors' underlays all read, so a mention drawn as a chip or as a name is exactly a mention
+ * the dispatch will resolve — never a second regex of a screen's own.
+ */
+export function mentionSpans(text: string): Array<{ slug: string; start: number; end: number }> {
+  const out: Array<{ slug: string; start: number; end: number }> = [];
+  for (const match of text.matchAll(/@([a-z0-9][a-z0-9-]*)/g)) {
+    out.push({ slug: match[1]!, start: match.index, end: match.index + match[0].length });
+  }
+  return out;
+}
+
 export function parseMentions(description: string): string[] {
   const out: string[] = [];
-  for (const match of description.matchAll(/@([a-z0-9][a-z0-9-]*)/g)) {
-    const slug = match[1]!;
+  for (const { slug } of mentionSpans(description)) {
     if (!out.includes(slug)) out.push(slug);
   }
   return out;
+}
+
+/**
+ * The text without every mention of one slug, by the grammar `parseMentions` reads: a mention is
+ * `@` and the slug run to its end, wherever it sits — `(@car)` is a mention as much as ` @car `,
+ * and `@car` is never the start of `@carter`. The space a mention leaves is folded, so removing
+ * the chip removes the token and nothing else (SPEC-036 R-10).
+ */
+export function withoutMention(text: string, slug: string): string {
+  const escaped = slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text
+    .replace(new RegExp(`@${escaped}(?![a-z0-9-])`, "g"), "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/^ | $/gm, "")
+    .trim();
 }
 
 export interface ResolvedCast {
@@ -90,6 +118,45 @@ export function propSlug(name: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Whether a prop may carry this name: one mention cites one thing (issue 1116).
+ *
+ * A prop is cited by the slug of its name, and nothing else about it is addressable, so the slug
+ * has to be free: not another prop's ("Tea cup" and "Tea-cup" both answer to `@tea-cup`, and
+ * `resolvePropStates` would put both on the dispatch), not a sheet's id (`@maren-kest` is the
+ * character's), and not empty (a name of punctuation alone has nothing to cite it by). The
+ * screen asks this before it sends and says which holds the word; the coordinator asks it
+ * again as the gate of record; the scan asks it of what is already on disk.
+ */
+export type PropNameCheck =
+  | { ok: true; slug: string }
+  | { ok: false; slug: string; reason: "empty" }
+  | { ok: false; slug: string; reason: "prop" | "sheet"; holder: { id: string; name: string } };
+
+export function checkPropName(
+  name: string,
+  props: readonly Pick<Prop, "id" | "name">[],
+  sheets: readonly Pick<Sheet, "id" | "name">[],
+  except?: string,
+): PropNameCheck {
+  const slug = propSlug(name);
+  if (slug === "") return { ok: false, slug, reason: "empty" };
+  const sheet = sheets.find((candidate) => candidate.id === slug);
+  if (sheet) return { ok: false, slug, reason: "sheet", holder: { id: sheet.id, name: sheet.name } };
+  const prop = props.find((candidate) => candidate.id !== except && propSlug(candidate.name) === slug);
+  if (prop) return { ok: false, slug, reason: "prop", holder: { id: prop.id, name: prop.name } };
+  return { ok: true, slug };
+}
+
+/**
+ * The other half of the same rule, for the side that mints rather than refuses: a sheet's id is
+ * chosen by `uniqueSlug` past every slug already taken, and the props' slugs are taken too — a
+ * sheet named Ledger after a prop named Ledger becomes `ledger-2`, not the prop's twin.
+ */
+export function propSlugs(props: readonly Pick<Prop, "name">[]): string[] {
+  return props.map((prop) => propSlug(prop.name)).filter((slug) => slug !== "");
 }
 
 /** One prop as a shot dispatches it: turn 105's five fields, plus the names a screen shows. */
@@ -166,7 +233,7 @@ function sentence(text: string): string {
 function firstClause(sheet: Sheet, heading: string): string | null {
   const body = sheet.sections.find((s) => s.heading === heading)?.body;
   const clause = body?.split(/[.!?]/)[0]?.trim();
-  return clause !== undefined && clause.length > 0 ? clause : null;
+  return clause !== undefined && clause.length > 0 && !/^[-–—.\s]+$/.test(clause) ? clause : null;
 }
 
 function styleFor(world: WorldMeta, artDirection?: string): string {
@@ -214,11 +281,7 @@ export interface PromptBlocks {
   body: string;
   /** This shot's cinematic intent, camera, authored timing and audio — part of the beat, in a pass. */
   direction: string;
-  /**
-   * Art direction restated as what must not drift. Stated once per clip and never per beat
-   * (R-6): a four-shot pass repeating the world's look four times spends the model's attention
-   * arguing with itself about which mention is authoritative.
-   */
+  /** Empty for shot prompts: the production look is input to the writer (issue 942). */
   persistent: string;
 }
 
@@ -289,16 +352,17 @@ export function framingClause(framing: ShotFraming): string {
 }
 
 export function assembleBlocks(input: AssembleInput): PromptBlocks {
-  const { world, sheets, scene, shot } = input;
+  const { sheets, scene, shot } = input;
   const carried = input.carriedSheetIds ?? new Set<string>();
   const { cast } = resolveCast(shot.description, sheets);
-  const style = styleFor(world, input.artDirection);
   const location =
     scene.inherits?.location !== undefined
       ? sheets.find((s) => s.id === scene.inherits!.location)
       : undefined;
 
-  // 1 — summary: what the clip is, led by the art direction (R-6).
+  // Local subjects and setting remain an editable seed for shots without an authored prompt.
+  // A shot still carrying its birth title has no name, and contributes none: the literal
+  // `Untitled shot.` was reaching the model as content on every unnamed shot in a scene.
   const who = cast.map((c) => c.sheet.name);
   const whoClause =
     who.length === 0
@@ -307,10 +371,10 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
         ? who[0]!
         : `${who.slice(0, -1).join(", ")} and ${who[who.length - 1]!}`;
   const where = [location?.name, scene.inherits?.timeOfDay].filter((s): s is string => !!s).join(", ");
+  const title = shot.title.trim() === UNTITLED_SHOT ? "" : shot.title;
   const summary = [
-    sentence(style),
     whoClause && where ? sentence(`${whoClause} at ${where}`) : sentence(whoClause || where),
-    sentence(shot.title),
+    sentence(title),
   ]
     .filter((s) => s.length > 0)
     .join(" ");
@@ -337,13 +401,18 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
   // 3 — body: the shot's direction, mentions resolved to names. The appearance clause is not
   // inlined here at all now: it is said once above, or carried as an image, never both.
   let description = shot.description;
-  for (const { sheet } of cast) description = description.replaceAll(`@${sheet.id}`, sheet.name);
+  // Match whole mentions, including locations and dangling world slugs. Never send
+  // a missing attachment token to the provider or replace a prefix of another identity.
+  for (const span of mentionSpans(description).reverse()) {
+    const name = sheets.find(sheet => sheet.id === span.slug)?.name ?? span.slug;
+    description = description.slice(0, span.start) + name + description.slice(span.end);
+  }
   const body = sentence(description);
 
   // 4 — the camera's own block, when there is a room to place it in. Verbatim: whatever the shot
   // authored is what the anchor says, so a generic "MCU · slow push-in" stays generic rather than
   // being dressed up as a placement nobody wrote.
-  const authoredCamera = shot.camera?.trim() ?? "";
+  const authoredCamera = input.capability === "image" ? "" : (shot.camera?.trim() ?? "");
   /*
    * The structured camera, said out loud (2026-08-23).
    *
@@ -355,7 +424,8 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
    * Resolved against the scene's defaults rather than read raw, because presence is the override
    * flag (turn 97) — a shot that inherits the scene's lens must still say the lens.
    */
-  const framingLine = framingClause(effectiveFraming(scene, shot));
+  const framing = effectiveFraming(scene, shot);
+  const framingLine = framingClause(input.capability === "image" ? { ...framing, movement: undefined, pace: undefined } : framing);
   const cameraLines = [authoredCamera, framingLine].filter((line) => line.length > 0).join("\n");
   const cameraAnchor = spatial.length > 0 && cameraLines.length > 0 ? `CAMERA ANCHOR\n${cameraLines}` : "";
 
@@ -390,7 +460,7 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
       }
     }
   }
-  if (shot.audio?.kind && shot.audio.kind !== "silence") {
+  if (input.capability !== "image" && shot.audio?.kind && shot.audio.kind !== "silence") {
     directionParts.push(
       sentence(shot.audio.line ? `${shot.audio.kind}: "${shot.audio.line}"` : shot.audio.kind),
     );
@@ -407,15 +477,16 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
   // ambience left behind from before the shot went quiet would otherwise be asked for in the same
   // prompt that `derivedNegatives` ends with "No audio." — a clip told to be silent and to carry
   // a generator. The direction that contradicts the negative is the one that goes.
-  const silent = shot.audio?.kind === "silence";
+  const silent = input.capability === "image" || shot.audio?.kind === "silence";
   const ambience = silent ? "" : (shot.audio?.ambience?.trim() ?? "");
   const effects = silent ? "" : (shot.audio?.effects?.trim() ?? "");
   if (ambience.length > 0) directionParts.push(sentence(`Ambience: ${ambience}`));
   if (effects.length > 0) directionParts.push(sentence(`Sound: ${effects}`));
   const direction = directionParts.filter((s) => s.length > 0).join(" ");
 
-  // 6 — persistent: what must not drift, once at the end (R-6).
-  const persistent = style ? sentence(`Throughout: ${style}`) : "";
+  // The look informs Arke when it writes the shot. Repeating production-wide direction
+  // here drowned out the shot-specific words (issue 942). Mechanical constraints stay outside.
+  const persistent = "";
 
   return { summary, standing, spatial, cameraAnchor, body, direction, persistent };
 }
@@ -440,21 +511,22 @@ export function assembleBoardPrompt(input: {
       scene: input.scene,
       shot,
       ...(input.artDirection !== undefined ? { artDirection: input.artDirection } : {}),
-      capability: "video",
+      capability: "image",
     }),
   );
+  // A board is still imagery. The look is writer context, not a repeated cell instruction.
   const context = [
-    input.artDirection,
     location?.name,
     input.scene.inherits?.timeOfDay,
     input.scene.defaults?.lighting,
     input.aspect,
-    ...contexts.flatMap((blocks) => [blocks.spatial, blocks.standing, blocks.persistent]),
+    ...contexts.flatMap((blocks) => [blocks.spatial, blocks.standing]),
   ].filter((part, index, all): part is string =>
     typeof part === "string" && part.trim().length > 0 && all.indexOf(part) === index,
   );
   const head = `${context.join(", ")}. Continuous cast, light and grade across every cell.`;
   const beats = input.shots.map((shot, index) => {
+    if (shot.promptOverride && shot.promptOverride.capability !== "video") return `${index + 1}. ${shot.promptOverride.text}`;
     const blocks = contexts[index]!;
     const framing = effectiveFraming(input.scene, shot);
     const camera = [framing.size, framing.lens].filter(Boolean).join(", ");
@@ -515,11 +587,12 @@ export function assemblePassBlocks(input: {
       ...(input.capability !== undefined ? { capability: input.capability } : {}),
     });
   const first = input.entries[0];
-  const lead = first ? blocksFor(first.shot) : null;
+  const lead = first && !first.prompt.overridden ? blocksFor(first.shot) : null;
   // The standing description is the union across the pass, deduplicated: one location look, and
   // each uncarried subject named once however many beats they appear in.
   const standing: string[] = [];
   for (const entry of input.entries) {
+    if (entry.prompt.overridden) continue;
     for (const line of blocksFor(entry.shot).standing.split(/(?<=\.)\s+/)) {
       const trimmed = line.trim();
       if (trimmed.length > 0 && !standing.includes(trimmed)) standing.push(trimmed);
@@ -539,9 +612,8 @@ export function assemblePassBlocks(input: {
   return {
     summary: lead?.summary ?? "",
     standing: standing.join(" "),
-    // Derived from the scene, so a pass keeps its room even when every beat in it is overridden —
-    // the same reason the standing block survives an overridden beat today.
-    spatial: input.scene.inherits?.location !== undefined ? (lead?.spatial ?? spatialFromScene()) : "",
+    // An authored pass already describes its room; only un-authored beats need a seed.
+    spatial: input.entries.some(entry => !entry.prompt.overridden) ? spatialFromScene() : "",
     beats,
     persistent: lead?.persistent ?? "",
   };
@@ -592,7 +664,9 @@ export function promptFor(
 ): { text: string; overridden: boolean } {
   // An override owns every word of its body, including whatever it says about the room and the
   // camera. Nothing generated is merged into it (D10's reasoning, one layer up).
-  if (shot.promptOverride) return { text: shot.promptOverride.text, overridden: true };
+  if (shot.promptOverride && (!capability || !shot.promptOverride.capability || shot.promptOverride.capability === capability)) {
+    return { text: shot.promptOverride.text, overridden: true };
+  }
   return {
     text: assemblePrompt(world, sheets, scene, shot, artDirection, carriedSheetIds, capability),
     overridden: false,
@@ -1533,8 +1607,10 @@ export interface ShotDispatchPlan {
 }
 
 export interface ScenePlan {
+  /** What stops the plan, worded for the refusal (SPEC-044 §2.3): shots by number, never by id. */
   timingProblems?: string[];
-  timingWarnings?: string[];
+  /** Shots the Cut does not place, each with the length the per-shot fallback uses (R-25). */
+  timing?: Array<{ shotId: string; number: number; kind: "unanchored"; durationSec: number }>;
   mode: "per-shot" | "whole-scene";
   /** The effective production/world visual language frozen into every assembled prompt. */
   effectiveStyle: string;
@@ -1818,7 +1894,7 @@ function resolveContinuations(
           : typeof predecessor.params["durationSec"] === "number"
             ? predecessor.params["durationSec"]
             : null;
-      const ceiling = model.limits.maxReferenceVideoSec ?? 0;
+      const ceiling = Math.min(model.limits.maxReferenceVideoSec ?? 0, model.limits.maxReferenceVideoFileSec ?? Infinity);
       if (clipSec === null) {
         states.set(shot.id, {
           unavailable: `shot ${from.number}'s accepted take has no known length, and ${model.displayName} budgets a carried clip in seconds`,
@@ -1829,6 +1905,11 @@ function resolveContinuations(
         states.set(shot.id, {
           unavailable: `shot ${from.number}'s take runs ${clipSec}s — longer than the ${ceiling}s of video ${model.displayName} reads as a reference`,
         });
+        continue;
+      }
+      const minimum = Math.max(model.limits.minReferenceVideoFileSec ?? 0, model.limits.minReferenceVideoSec ?? 0);
+      if (clipSec < minimum) {
+        states.set(shot.id, { unavailable: `shot ${from.number}'s take is shorter than the ${minimum}s reference minimum` });
         continue;
       }
     }
@@ -1951,31 +2032,47 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const hasClock = timingProduction !== undefined && (timingProduction.spine !== null || timingProduction.timeline?.status === "ready" || timingProduction.timeline?.status === "invalid");
   const slots = hasClock ? dialogueSlots(timingProduction!) : [];
   const byShot = new Map<string, DialogueSlot>();
-  const timingProblems: string[] = [], timingWarnings: string[] = [];
+  const timingProblems: string[] = [], timing: NonNullable<ScenePlan["timing"]> = [];
+  // Shots by number (SPEC-044 R-25): a problem is read on the plan card and in the refusal, and
+  // a shot id there is exactly what the header used to leak. A shot of another scene keeps its
+  // scene's number beside it, because "shot 3" alone names a different shot in every scene.
+  const shotLabel = (id: string): string => {
+    const own = authored.find(shot => shot.id === id);
+    if (own) return `shot ${own.number}`;
+    for (const other of timingProduction?.scenes ?? []) {
+      const found = orderedShots(other).find(shot => shot.id === id);
+      if (found) return `scene ${other.number} shot ${found.number}`;
+    }
+    return "a shot elsewhere";
+  };
+  const pairLabel = (a: string, b: string): string => {
+    const na = authored.find(shot => shot.id === a)?.number, nb = authored.find(shot => shot.id === b)?.number;
+    return na !== undefined && nb !== undefined ? `shots ${Math.min(na, nb)} and ${Math.max(na, nb)}` : `${shotLabel(a)} and ${shotLabel(b)}`;
+  };
   for (const slot of slots) {
-    if (byShot.has(slot.shotId)) timingProblems.push(`${slot.shotId}: multiple picture placements make generation timing ambiguous.`);
+    if (byShot.has(slot.shotId)) timingProblems.push(`${shotLabel(slot.shotId)} · placed twice on the Cut · fix the timing first`);
     byShot.set(slot.shotId,slot);
   }
-  if (timingProduction?.timeline?.status === "invalid") timingProblems.push("Repair the invalid production timeline before generation.");
-  for (const shot of authored) if (hasClock && !byShot.has(shot.id)) timingWarnings.push(`${shot.id}: unanchored; per-shot generation uses authored fallback and whole-scene packing excludes it.`);
+  if (timingProduction?.timeline?.status === "invalid") timingProblems.push("the Cut is invalid · repair it first");
+  for (const shot of authored) if (hasClock && !byShot.has(shot.id)) timing.push({ shotId: shot.id, number: shot.number, kind: "unanchored", durationSec: resolvedAuthoredDuration(shot) });
   const ordered = authored.filter(shot => mode !== "whole-scene" || !hasClock || byShot.has(shot.id)).map(shot => {
     const slot = byShot.get(shot.id);
     return slot ? { ...shot, durationSec: slot.endSec-slot.startSec } : shot;
   });
-  if (mode === "whole-scene" && hasClock && !ordered.length) timingProblems.push("Place at least one scene shot on the timeline before whole-scene generation.");
+  if (mode === "whole-scene" && hasClock && !ordered.length) timingProblems.push("no shot on the Cut · place one first");
   if (mode === "whole-scene" && hasClock) ordered.sort((a,b)=>byShot.get(a.id)!.startSec-byShot.get(b.id)!.startSec);
   const chronologicalSlots = [...slots].sort((a,b) => a.startSec-b.startSec);
   const sceneShotIds = new Set(authored.map(shot => shot.id));
   let furthest = chronologicalSlots[0];
   for (const slot of chronologicalSlots.slice(1)) {
-    if (furthest && slot.startSec < furthest.endSec && (sceneShotIds.has(slot.shotId) || sceneShotIds.has(furthest.shotId))) timingProblems.push(`${slot.shotId} / ${furthest.shotId}: picture slots overlap across the production.`);
+    if (furthest && slot.startSec < furthest.endSec && (sceneShotIds.has(slot.shotId) || sceneShotIds.has(furthest.shotId))) timingProblems.push(`${pairLabel(slot.shotId, furthest.shotId)} · overlap on the Cut · fix the timing first`);
     if (!furthest || slot.endSec > furthest.endSec) furthest = slot;
   }
   const timingBreaks = new Set<string>();
   if (hasClock) for (let i=1;i<ordered.length;i++) {
     const previous=byShot.get(ordered[i-1]!.id), next=byShot.get(ordered[i]!.id);
     if (!previous || !next || previous.endSec!==next.startSec) timingBreaks.add(ordered[i]!.id);
-    if (previous && next && previous.endSec>next.startSec) timingProblems.push(`${ordered[i]!.id}: picture slots overlap; repair the timing before dispatch.`);
+    if (previous && next && previous.endSec>next.startSec) timingProblems.push(`${pairLabel(ordered[i-1]!.id, ordered[i]!.id)} · overlap on the Cut · fix the timing first`);
   }
 
   // Boundary frames resolved before anything is bound or priced (issue 154): a shot that opens
@@ -2406,21 +2503,24 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
 
   for (const entry of shots) {
     entry.audioReferences = planCharacterAudio({ scene, shots: [entry.shot], sheets, kits, model,
-      imageCount: entry.bound.length, taskMode: entry.continuation?.kind === "extend" ? "continue" : entry.frame ? "first-frame" : "generate",
-      disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences, requiredMasterShots: masterPerformanceShotIds(input.timingProduction) });
+      imageCount: entry.bound.length, videoCount: entry.continuation?.kind === "carry" ? 1 : 0, taskMode: entry.continuation?.kind === "extend" ? "continue" : entry.frame ? "first-frame" : "generate",
+      disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences });
     const audioText = characterAudioInstructions(entry.audioReferences);
     if (audioText) entry.parts.preamble = [entry.parts.preamble, audioText].filter(Boolean).join("\n");
+    const videos = entry.continuation?.kind === "carry" ? 1 : 0;
+    entry.parts.preamble = entry.parts.preamble ? referencePrompt(entry.parts.preamble, model, videos, 0, true) : null;
+    entry.parts.body = referencePrompt(entry.parts.body, model, videos);
   }
   for (const reference of passReferences) {
     const packed = pack.ok ? pack.passes.find(p => p.index === reference.passIndex) : undefined;
     const ids = new Set(packed?.plan.map(p => p.shotId) ?? []);
     reference.audioReferences = planCharacterAudio({ scene, shots: shots.filter(s => ids.has(s.shot.id)).map(s => s.shot),
-      sheets, kits, model, imageCount: reference.bound.length, disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences, requiredMasterShots: masterPerformanceShotIds(input.timingProduction) });
+      sheets, kits, model, imageCount: reference.bound.length, disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences });
   }
 
   return {
     mode,
-    ...(hasClock ? { timingProblems, timingWarnings } : {}),
+    ...(hasClock ? { timingProblems: [...new Set(timingProblems)], timing } : {}),
     effectiveStyle,
     ...(productionStyleOverride !== undefined ? { productionStyleOverride } : {}),
     shots,

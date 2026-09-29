@@ -39,6 +39,7 @@ app.whenReady().then(async () => {
     socket.on("message", bytes => { const frame = JSON.parse(bytes.toString()); frames.push(frame); if (frame.kind === "upload-artifacts") { if (frame.requestId === "smoke-mixed") receiveMixed(frame); else resolve(frame); } });
   }));
   ipcMain.on("arke:startup-state-ready", event => event.sender.send("arke:startup-state", { status: "ready", port: server.address().port, token }));
+  ipcMain.on("arke:get-theme", event => { event.returnValue = { preference: "system", resolved: "light" }; });
   const window = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, preload: ${JSON.stringify(preload)} } });
   await window.loadFile(join(__dirname, "index.html"));
   await window.webContents.executeJavaScript('new Promise(resolve => window.arke.subscribe(() => {}, status => { if (status === "open") resolve(true); }))');

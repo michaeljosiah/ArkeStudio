@@ -29,5 +29,5 @@ it("groups explicit language tags with language names without inventing an accen
 
 it("sends failed app previews back to Settings rather than to a nonexistent character sheet", () => {
   const job = { worldId: "app:voice-previews", target: { kind: "voice-preview", id: "cache-hash" }, params: {} } as Job;
-  assert.equal(jobOrigin(job)?.path, "/settings/appearance");
+  assert.equal(jobOrigin(job)?.path, "/settings/general");
 });

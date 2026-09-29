@@ -1,8 +1,10 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useMediaQuery } from "../../lib/media-query.js";
 import {
   aspectSupport,
   formatMicroUsd,
   isReplayableFinalization,
+  lookHoldingScope,
   orderedShots,
   PROVIDERS,
   resolveCast,
@@ -17,10 +19,13 @@ import {
   type SceneRecord,
   type WorldBundle,
   resolvePropStates,
+  beatPictureShotId,
+  productionShape,
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel, strandReason, usableModels } from "../../components/dispatch-bar.js";
 import { X } from "../../components/icons.js";
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
+import { lookTileLabel } from "../character-reference.js";
 import { Button } from "../../components/ui.js";
 import {
   clearFrameRunQuote,
@@ -149,10 +154,17 @@ function GenerateFramesDialogOpen({
   onClose,
   onStarted,
 }: Omit<Parameters<typeof GenerateFramesDialog>[0], "open">) {
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const sceneShots = orderedShots(scene);
-  const shots = shotId === undefined ? sceneShots : sceneShots.filter((shot) => shot.id === shotId);
+  // A visual novel's beat that keeps the picture before has none of its own to make (turn 174):
+  // a scene-wide run leaves it out, as the coordinator does; asked for by name, it is made.
+  const playsAsBeats = productionShape(production.meta).playsAsBeats;
+  const shots = shotId === undefined
+    ? sceneShots.filter((shot) => !playsAsBeats || beatPictureShotId(sceneShots, shot.id) === shot.id)
+    : sceneShots.filter((shot) => shot.id === shotId);
   const missing = shots.filter((shot) => !shotHasFrame(production, world.artifacts, shot.id));
   const [mode, setMode] = useState<"per-shot" | "board">(shotId === undefined ? "board" : "per-shot");
   const [scope, setScope] = useState<"missing" | "all">(shotId === undefined && missing.length > 0 ? "missing" : "all");
@@ -195,6 +207,9 @@ function GenerateFramesDialogOpen({
     sheets: world.sheets,
     capSec: cap.seconds,
     ...(cap.panels !== undefined ? { panelCap: cap.panels } : {}),
+    // The preview packs the shots it shows and quotes, as the coordinator packs them: a kept
+    // picture is no board member (codex round 12).
+    ...(playsAsBeats && shotId === undefined ? { shots } : {}),
   });
   const [quote, setQuote] = useState<FrameRunQuote | null>(null);
   const [quotePending, setQuotePending] = useState(false);
@@ -308,7 +323,7 @@ function GenerateFramesDialogOpen({
       ? `No available image model supports ${aspect}; turn one on in AI models.`
       : `Choose ${alternativeName}, which supports ${aspect}.`}`
     : blockedReason;
-  const references = matchingOptions ? quoteReferences(quote, scene, world) : [];
+  const references = matchingOptions ? quoteReferences(quote, scene, world, production.meta.id) : [];
   // R-16's second layer: a scope that resolves to nothing swaps the primary for the sentence
   // naming the fix. Only the all-framed case has a fix to name — a scene with no shots keeps
   // the backend's refusal, because switching scope would not change anything there.
@@ -367,9 +382,11 @@ function GenerateFramesDialogOpen({
       onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
     >
       <div className="fy-swgen__panel">
+        {phone && <div className="fy-page-sheet__grab" />}
         <header className="fy-swgen__head">
           <h2 id={titleId}>Generate {displayedCount} frame{displayedCount === 1 ? "" : "s"}</h2>
           <span className="fy-swgen__scene">scene {scene.number}</span>
+          {compact && <button type="button" aria-label="Close" onClick={onClose}><X size={20} /></button>}
         </header>
 
         {shotId === undefined ? <section className="fy-swgen__section">
@@ -388,7 +405,7 @@ function GenerateFramesDialogOpen({
                 onClick={() => setMode(candidate)}
               >
                 <strong>{candidate === "per-shot" ? "Per shot" : "Shot board"}</strong>
-                <span>{candidate === "per-shot" ? "Fastest, cheap to retry, but characters and light drift between shots." : "Holds cast, light and grade together — a retry redoes the whole board."}</span>
+                <span>{compact ? candidate === "per-shot" ? "Fast; drifts between shots" : "Holds cast and light" : candidate === "per-shot" ? "Fastest, cheap to retry, but characters and light drift between shots." : "Holds cast, light and grade together — a retry redoes the whole board."}</span>
               </button>
             ))}
           </div>
@@ -411,7 +428,7 @@ function GenerateFramesDialogOpen({
                 onKeyDown={(event) => moveRadio(event, (at) => setScope((["missing", "all"] as const)[at]!))}
                 onClick={() => setScope(candidate)}
               >
-                {candidate === "missing" ? "Shots without a frame" : "Every shot in the scene"}
+                {compact ? candidate === "missing" ? "Without a frame" : "Every shot" : candidate === "missing" ? "Shots without a frame" : "Every shot in the scene"}
               </button>
             ))}
           </div>
@@ -434,6 +451,7 @@ function GenerateFramesDialogOpen({
                   tabIndex={selected ? 0 : -1}
                   aria-checked={selected}
                   data-on={selected ? "true" : undefined}
+                  data-unavailable={candidateUnavailable || undefined}
                   title={candidate !== null && candidateUnavailable ? strandReason(state, candidate) : undefined}
                   onKeyDown={(event) => moveRadio(event, (at) => setModelId(modelChoices[at]!.id))}
                   onClick={() => setModelId(choice.id)}
@@ -442,6 +460,7 @@ function GenerateFramesDialogOpen({
                   <span>{candidate === null
                     ? "not in the catalogue"
                     : `${output!.width}×${output!.height} · ${candidate.accepts.referenceImages} ref${candidate.accepts.referenceImages === 1 ? "" : "s"}`}</span>
+                  {candidate !== null && candidateUnavailable && <small className="fy-swgen__unavailable">{strandReason(state, candidate)}</small>}
                 </button>
               );
             })}
@@ -464,7 +483,7 @@ function GenerateFramesDialogOpen({
                       ? "rides"
                       : reference.ridingSteps === 0
                         ? "citation only"
-                        : `rides in ${reference.ridingSteps} of ${reference.citedSteps}`}</span>
+                        : `rides in ${reference.ridingSteps} of ${reference.citedSteps}`}{reference.detail === null ? "" : ` · ${reference.detail}`}</span>
                   </span>
                 </article>
               ))}
@@ -480,7 +499,7 @@ function GenerateFramesDialogOpen({
                 <strong>{issue.label}</strong> · {issue.text}
               </p>
             ))}
-            <label className="fy-swgen__hint">
+            <label className="fy-swgen__hint fy-swgen__acknowledge">
               <input
                 type="checkbox"
                 checked={propsAcknowledged}
@@ -491,10 +510,11 @@ function GenerateFramesDialogOpen({
           </section>
         )}
 
+        {phone && <p className="fy-swgen__context fy-swgen__context-body" aria-label="Inherited scene context">{contextValues(scene, world, aspect).join(" · ")}</p>}
         <footer className="fy-swgen__foot">
-          <span className="fy-swgen__context" aria-label="Inherited scene context">
+          {!phone && <span className="fy-swgen__context" aria-label="Inherited scene context">
             applies the scene context · {contextValues(scene, world, aspect).join(", ")}
-          </span>
+          </span>}
           {emptyScope ? (
             <div className="fy-swgen__actions">
               <span className="fy-swgen__empty">
@@ -513,9 +533,9 @@ function GenerateFramesDialogOpen({
                       ? "Checking current price..."
                       : "Quote unavailable"}
               </span>
-              <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+              <Button variant={compact ? "outline" : "ghost"} size="sm" onClick={onClose}>Cancel</Button>
               {startReason === null ? null : <p className="fy-swgen__guard" role="status">{startReason}</p>}
-              {displayedBlockedReason !== null && startPending === null ? <p className="fy-swgen__guard" role="status">{displayedBlockedReason}</p> : <Button variant="primary" size="sm" disabled={!canStart || startPending !== null} onClick={start}>{startPending === null ? "Generate frames" : "Starting..."}</Button>}
+              {displayedBlockedReason !== null && startPending === null ? <p className="fy-swgen__guard" role="status">{displayedBlockedReason}</p> : <Button variant="primary" size="sm" disabled={!canStart || startPending !== null} onClick={start}>{startPending === null ? compact ? "Generate" : "Generate frames" : "Starting..."}</Button>}
             </div>
           )}
         </footer>
@@ -570,7 +590,7 @@ function PackingPreview({
               );
             })}
           </div>
-          <p className="fy-swgen__hint">Boards break at the clip limit and wherever continuity breaks. Frames are sliced back onto the shots; the board is kept as the source for retries.</p>
+
         </>
       )}
     </section>
@@ -586,14 +606,25 @@ function contextValues(scene: SceneRecord, world: WorldBundle, aspect: string): 
     .filter((value): value is string => value !== null);
 }
 
-function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldBundle) {
+function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldBundle, productionId: string) {
   const shotById = new Map(orderedShots(scene).map((shot) => [shot.id, shot]));
   const sheetById = new Map(world.sheets.map((sheet) => [sheet.id, sheet]));
+  // What rides beside the sheet (SPEC-044 R-30): the look in use on a character's row when it is
+  // not the kit's — this scene's, else the production's, the order the resolver prefers — and
+  // the plate on the location's. Voice never applies to stills and is not said here.
+  const detailFor = (sheetId: string): string | null => {
+    const sheet = sheetById.get(sheetId);
+    if (sheet?.type === "location") return "plate";
+    const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId) ?? null;
+    const look = lookHoldingScope(kit, { kind: "scene", productionId, sceneId: scene.id }) ?? lookHoldingScope(kit, { kind: "production", productionId });
+    return look === undefined ? null : `look · ${lookTileLabel(look.prompt, look.kind)}`;
+  };
   const summary = new Map<string, {
     sheet: WorldBundle["sheets"][number];
     path: string | null;
     citedSteps: number;
     ridingSteps: number;
+    detail: string | null;
   }>();
   for (const step of quote.steps) {
     const cited = new Set<string>();
@@ -614,6 +645,7 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
         path: previous?.path ?? riding?.path ?? null,
         citedSteps: (previous?.citedSteps ?? 0) + 1,
         ridingSteps: (previous?.ridingSteps ?? 0) + (riding === undefined ? 0 : 1),
+        detail: previous?.detail ?? detailFor(sheetId),
       });
     }
   }
@@ -626,6 +658,7 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
 }
 
 export function FrameRunBar({ run, worldId, productionId, onReview }: { run: FrameRunState; worldId: string; productionId: string; onReview?: () => void }) {
+  const phone = useMediaQuery("(max-width: 599px)");
   const total = new Set(run.run.steps.filter((step) => step.grain === "initial").flatMap((step) => step.updateShotIds)).size;
   const settled = Math.min(total, run.filedShots + run.failedShots + run.supersededShots);
   const current = run.steps.find((step) => !SETTLED.has(step.status));
@@ -659,8 +692,8 @@ export function FrameRunBar({ run, worldId, productionId, onReview }: { run: Fra
       >
         <span style={{ width: `${pct}%` }} />
       </span>
-      <strong>{run.status === "paused" ? `paused${finishing > 0 ? ` · finishing ${finishing}` : ""}` : currentLabel ?? "Preparing frames"}</strong>
-      <span className="fy-swrun__count">{settled} of {total} frames</span>
+      <strong>{phone ? run.status === "paused" ? "Frames · paused" : "Frames" : run.status === "paused" ? `paused${finishing > 0 ? ` · finishing ${finishing}` : ""}` : currentLabel ?? "Preparing frames"}</strong>
+      <span className="fy-swrun__count">{settled} of {total}{phone ? ` · ${run.failedShots} failed` : " frames"}</span>
       {run.etaSec === null ? null : <span className="fy-swrun__eta">~{Math.ceil(run.etaSec)}s left</span>}
       {run.status === "paused"
         ? <button type="button" data-primary="true" onClick={() => control("frame-run-resume")}>Resume</button>

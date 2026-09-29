@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertNothingForbidden } from "../scripts/verify-packaged-runtimes.mjs";
+import { assertNothingForbidden, assertQwenRuntime } from "../scripts/verify-packaged-runtimes.mjs";
 
 /**
  * The "must never ship" half of the afterPack guard.
@@ -19,6 +19,18 @@ function resources() {
   mkdirSync(join(dir, "resources"), { recursive: true });
   return join(dir, "resources");
 }
+
+it("the installer must carry the verified Qwen guard outside asar", () => {
+  const dir = resources();
+  try {
+    assert.throws(() => assertQwenRuntime(dir));
+    const target = join(dir, "comfyui-nodes", "ArkeQwen21Runtime");
+    cpSync(new URL("../../../vendor/comfyui/ArkeQwen21Runtime", import.meta.url), target, { recursive: true });
+    assert.doesNotThrow(() => assertQwenRuntime(dir));
+    writeFileSync(join(target, "__init__.py"), "changed");
+    assert.throws(() => assertQwenRuntime(dir), /does not match/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 describe("what must never enter the installer", () => {
   it("refuses a build carrying the Claude Code runtime, and names the exclusion that slipped", () => {

@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { parseHTML } from "linkedom";
 import { App } from "../src/App.js";
 import { __applyEventForTest, __connectionStatusForTest, __setStateForTest } from "../src/lib/store.js";
 import { SCREENS } from "../src/screens/registry.js";
+import { stagedReferenceKey } from "@arke-studio/contracts";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { legacySceneView } from "@arke-studio/contracts";
 
@@ -48,14 +50,19 @@ function nestedButtons(html: string): string[] {
 }
 
 describe("screen inventory", () => {
-  it("covers the full screen inventory (60 screens)", () => {
+  it("covers the full screen inventory (66 screens)", () => {
     // The number is written three times on purpose — it is a tripwire, not a fact being derived,
     // so `SCREENS.length` on both sides would assert nothing. It does mean two branches that each
     // add a screen merge cleanly and land a count that was right for neither: #268 and #243 did
     // exactly that, and this is where it surfaced.
-    // 60 with the chapter workspace (turn 126, issue 874).
-    assert.equal(SCREENS.length, 60);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 60, "screen ids are unique");
+    // 63 with the production's own artifacts page (design 134).
+    // Activity left the inventory with design turn 136: it is a panel over every screen, not one.
+    // 62 after removing the hosting-choice screen from startup.
+    // Publications is independent of any open world (SPEC-048).
+    // Remote access adds desktop-only owner controls for phone pairing (issue #1311).
+    // The compact Cast kind header exposes faction authoring (design turn 161).
+    assert.equal(SCREENS.length, 66);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 66, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {
@@ -75,34 +82,44 @@ describe("screen inventory", () => {
     }
   });
 
-  it("smoke-renders the startup screen", () => {
-    const html = renderAt("/starting");
-    // The screen that waits, by what it is rather than by a wordmark: the reel, and — with nothing
-    // left to fetch — a door and a version number. The progress line, the byte counts and the
-    // note about where worlds live all answered "what is it doing", which nobody is asking
-    // once it is done.
-    assert.ok(html.includes('data-screen="startup"'), "/starting mounts the screen that waits");
-    assert.ok(html.includes("setup-reel.mp4"), "the reel plays while the runtimes come down");
-    assert.ok(html.includes("Continue"), "and when it is ready, the way in");
-    assert.ok(html.includes("fy-startup__version"), "with the version under it");
-    for (const chatter of ["Setting up your studio.", "One-time setup", "everything ready"]) {
-      assert.ok(!html.includes(chatter), `"${chatter}" is not shown once there is nothing to wait for`);
+  it("opens every start on the launch surface, two ways in (design turn 158)", () => {
+    const html = renderAt("/");
+    assert.ok(html.includes('data-screen="startup"'), "/ mounts the launch surface");
+    assert.ok(html.includes("launch-harbour.webp"), "the loop's still is up from the first frame");
+    assert.ok(html.includes("Welcome back"));
+    assert.ok(html.includes("Continue Locally"), "the local way is live at once");
+    assert.ok(html.includes("Cloud Login") && html.includes("Coming soon"), "cloud is named, not offered");
+    assert.match(html, /<button[^>]*disabled[^>]*>Coming soon<\/button>/, "and cannot be pressed");
+    assert.ok(html.includes("fy-launch__version"), "with the version on the loop");
+    for (const chatter of ["Setting up your studio", "One-time setup", "everything ready"]) {
+      assert.ok(!html.includes(chatter), `"${chatter}" belongs to the start that is actually setting up`);
     }
   });
 
-  it("waits behind one control on a launch with nothing to fetch", () => {
-    // Setup runs once. Every launch after it only waits for the coordinator to open, and the
-    // panel says so with the same control the whole way through — no title, no step line, no
-    // bar creeping under a sentence about a one-time download that already happened.
+  it("holds the pressed way busy until the studio is ready", () => {
+    // The press is the route: /starting is the same surface after it, going on by itself once
+    // the studio opens. Before then the local way says so rather than doing nothing.
     __connectionStatusForTest("connecting");
     try {
       const html = renderAt("/starting");
-      assert.ok(html.includes("Loading…"), "the door is there from the first frame, and says it is opening");
-      assert.ok(html.includes("fy-startup__version"), "with the version still under it");
-      assert.ok(!html.includes("fy-setupbar"), "nothing is being fetched, so there is no bar");
-      for (const chatter of ["Setting up your studio.", "One-time setup", "checking studio core"]) {
-        assert.ok(!html.includes(chatter), `"${chatter}" belongs to the launch that is actually setting up`);
-      }
+      assert.ok(html.includes('data-screen="startup"'));
+      assert.ok(html.includes("Connecting"), "a browser says it is connecting");
+      assert.ok(html.includes('aria-busy="true"'));
+      assert.ok(!html.includes("fy-launch__track"), "nothing is being fetched, so there is no bar");
+      const rest = renderAt("/");
+      assert.ok(rest.includes("Continue Locally"), "before the press the way in is live, not busy");
+    } finally {
+      __connectionStatusForTest("open");
+    }
+  });
+
+  it("says an expired link on the local way, with nothing to press", () => {
+    __connectionStatusForTest("auth-refused");
+    try {
+      const html = renderAt("/");
+      assert.ok(html.includes("Session link is out of date"), "on the studio's own machine, the developer's instruction");
+      assert.ok(!html.includes("Continue Locally"), "the state replaces the button");
+      assert.equal(html.split("Session link is out of date").length - 1, 1, "said once: the global callout stays off this surface");
     } finally {
       __connectionStatusForTest("open");
     }
@@ -136,10 +153,12 @@ describe("screen inventory", () => {
     });
     try {
       const html = renderAt("/starting");
-      assert.ok(html.includes("Setting up your studio."), "a real download still says what it is");
-      assert.ok(html.includes("fy-setupbar"), "and still shows how far along it is");
+      assert.ok(html.includes("Setting up your studio"), "a real download still says what it is");
+      assert.ok(html.includes("fy-launch__track"), "and still shows how far along it is");
       assert.ok(html.includes("downloading kokoro voice"), "in the product's words, one line");
       assert.ok(html.includes("One-time setup"), "with the promise that this happens once");
+      assert.ok(html.includes("Continue in the background"), "and the way past it");
+      assert.ok(renderAt("/").includes("Continue Locally"), "setup waits for the press: at rest the surface offers the ways in");
     } finally {
       __setStateForTest(FIXTURE_STATE);
     }
@@ -176,7 +195,7 @@ describe("screen inventory", () => {
       assert.match(html, /paused kokoro voice/);
       assert.match(html, />Resume<\/button>/);
       assert.match(html, /44 MB of (?:<!-- -->)?88 MB/);
-      assert.match(html, /fy-setupbar__fill/);
+      assert.match(html, /fy-launch__fill/);
     } finally {
       __setStateForTest(FIXTURE_STATE);
     }
@@ -197,6 +216,7 @@ describe("screen inventory", () => {
       assert.ok(html.includes("The studio could not start"));
       assert.ok(html.includes("Startup failed safely."));
       for (const action of ["Retry", "Open data folder", "Quit"]) assert.ok(html.includes(action));
+      assert.ok(!html.includes("Starting</button>"), "a failed start is not a busy one");
     } finally {
       if (previous === undefined) delete (globalThis as { window?: Window }).window;
       else Object.defineProperty(globalThis, "window", { configurable: true, value: previous });
@@ -206,7 +226,7 @@ describe("screen inventory", () => {
   it("renders the degraded reasons when children are unavailable (R-6)", () => {
     const html = renderAt(SCREENS.find((s) => s.id === "character-edit")!.samplePath);
     assert.ok(html.includes("OpenCode is not configured"), "harness reason is stated, not silent");
-    const voiceHtml = renderAt(SCREENS.find((s) => s.id === "voice-picker")!.samplePath);
+    const voiceHtml = renderAt(SCREENS.find((s) => s.id === "character-voice")!.samplePath);
     assert.ok(voiceHtml.includes("Voxa is not configured"));
   });
 
@@ -228,6 +248,8 @@ describe("screen inventory", () => {
           progressPercent: 100,
           flow: null,
           detail: null,
+          releaseName: null,
+          releaseNotes: null,
         },
       },
     });
@@ -246,6 +268,8 @@ describe("screen inventory", () => {
           progressPercent: 100,
           flow: "restart",
           detail: null,
+          releaseName: null,
+          releaseNotes: null,
         },
       },
     });
@@ -256,7 +280,7 @@ describe("screen inventory", () => {
     __setStateForTest(FIXTURE_STATE);
   });
 
-  it("uses the accepted immutable main photo on World overview and Cast", () => {
+  it("uses the accepted immutable main photo on World overview and both Cast surfaces", () => {
     const world = FIXTURE_STATE.world!;
     const nested = "takes/tk_01J8A0000000000000000000P9/new-main.webp";
     const referenceKits = world.referenceKits.map((kit) =>
@@ -275,6 +299,7 @@ describe("screen inventory", () => {
         `/w/${world.meta.worldId}`,
         `/w/${world.meta.worldId}/cast`,
         `/w/${world.meta.worldId}/cast/maren-kest`,
+        `/w/${world.meta.worldId}/p/${world.productions[0]!.meta.id}/cast`,
       ]) {
         const html = renderAt(path);
         assert.ok(html.includes(expected), `${path} uses the accepted identity`);
@@ -283,6 +308,72 @@ describe("screen inventory", () => {
     } finally {
       __setStateForTest(FIXTURE_STATE);
     }
+  });
+
+  it("shows guest identities and location views, with New guest inside the cast page", () => {
+    const state = structuredClone(FIXTURE_STATE);
+    const world = state.world!;
+    const productionId = world.productions[0]!.meta.id;
+    world.sheets.find((sheet) => sheet.id === "maren-kest")!.production = productionId;
+    world.referenceKits.find((kit) => kit.sheetId === "maren-kest")!.mainPhoto!.file = "main-photo.png";
+    world.referenceKits.push({ sheetId: "the-vigil", tiles: [], looks: [], compilations: [], establishingViewId: "lv_01", locationViews: [
+      { id: "lv_01", name: "Establishing", file: "views/establishing.webp", status: "active",
+        sourceTakeId: "tk_01J8F0000000000000000000B2",
+        sheetVersion: 2, artDirectionVersion: 3, acceptedAt: "2026-08-02T10:00:00Z" },
+    ] });
+    __setStateForTest(state);
+    try {
+      const { document } = parseHTML(renderAt(`/w/${world.meta.worldId}/p/${productionId}/cast`));
+      const page = document.querySelector('[data-screen="production-cast"]')!;
+      assert.ok(page.querySelector('img[src*="references/maren-kest/main-photo.png"]'));
+      assert.ok(page.querySelector('img[src*="references/the-vigil/views/establishing.webp"]'));
+      assert.equal(page.querySelector(".fy-hero button")?.textContent, "New guest");
+      assert.equal(page.querySelector(".fy-corner"), null);
+      assert.ok(!page.textContent?.includes("chandlery"));
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  it("draws production tiles from accepted video posters and keeps media fallbacks usable", () => {
+    const state = structuredClone(FIXTURE_STATE);
+    const world = state.world!;
+    const production = world.productions[0]!;
+    // A board and an earlier unselected still must not hide the accepted clip's hook frame.
+    production.takes.reverse();
+    const image = () => {
+      __setStateForTest(state);
+      return parseHTML(renderAt(`/w/${world.meta.worldId}/productions`)).document
+        .querySelector(".fy-prodcard__frame img")?.getAttribute("src");
+    };
+    try {
+      assert.ok(image()?.includes("takes/tk_01J8F0000000000000000000B2/frame.png"));
+      production.selections = {};
+      production.reviews = [];
+      assert.ok(image()?.endsWith("productions/saltlight/board-v2.png"));
+      delete production.scenes[0]!.board;
+      production.takes.reverse();
+      assert.ok(image()?.includes("takes/tk_01J8F0000000000000000000B2/frame.png"), "unselected video also uses its poster");
+      production.takes = [];
+      assert.ok(image()?.endsWith(world.keyArt!), "the world art remains the last fallback");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  it("keeps Props under Cast with the shared entity navigation and a bounded creation form", () => {
+    __setStateForTest(FIXTURE_STATE);
+    const world = FIXTURE_STATE.world!;
+    const { document } = parseHTML(renderAt(`/w/${world.meta.worldId}/props`));
+    const page = document.querySelector('[data-screen="props"]')!;
+    assert.equal(document.querySelector('.fy-pillnav__item--active')?.textContent, "Cast");
+    assert.equal(document.querySelector('.fy-pillnav__item--active')?.getAttribute("aria-current"), "page");
+    assert.equal(page.querySelector('.fy-sheetkinds [aria-current="page"]')?.textContent, "Props · 0");
+    for (const slug of ["cast", "locations", "factions"]) {
+      assert.ok(page.querySelector(`.fy-sheetkinds a[href="/w/${world.meta.worldId}/${slug}"]`));
+    }
+    assert.ok(page.querySelector('.scr-form input.ui-input[aria-label="Prop name"]'));
+    assert.ok(page.querySelector('.scr-form')?.textContent?.includes("No props yet."));
   });
 
   it("renders the canonical Cast ledger copy, reach, actions, and direct rows", () => {
@@ -428,19 +519,33 @@ describe("screen inventory", () => {
       "Generate character sheet",
       "one composite identity reference",
       "World look · v",
+      // What this generation completes (SPEC-017 R-23) and where the result lands, in the
+      // fewest words that carry both.
       "reference set",
+      "lands here and in Activity",
     ]) {
       assert.ok(generator.includes(copy), `Sheet generator states ${copy}`);
     }
 
     const replace = renderAt(`${base}/main-photo`);
-    assert.ok(replace.includes("Replacing the main photo makes the current character sheet stale."));
+    assert.equal(replace.includes(">Replacing the main photo makes the current character sheet stale.<"), false, "no consequence line on the card (turn 137)");
+    assert.ok(replace.includes('title="Replacing the main photo makes the current character sheet stale."'), "the consequence rides on the commit control");
+    // And reaches a keyboard: `title` is drawn under a cursor and nowhere else (round two on 1089).
+    assert.ok(replace.includes('data-tip="Replacing the main photo makes the current character sheet stale."'), "and is drawn on focus, not only on hover");
     assert.ok(replace.includes("World look · v"));
 
     const looks = renderAt(`${base}/looks`);
-    assert.ok(looks.includes("Optional visual exploration, outside the identity package."));
-    // The note that restated this line under the form is gone (design 54): the lede says it once.
-    assert.ok(!looks.includes("Explorations do not automatically join the identity package."));
+    assert.ok(looks.includes("Explore more looks"), "the page names what it is for");
+    // The word "optional" was on this screen three ways — a heading's subtitle, the dialog's
+    // lede and the empty state — and none of the three is left (issue 1008). The reference
+    // slot still says it, because there it labels the slot rather than arguing for the page.
+    for (const said of [
+      "Optional visual exploration, outside the identity package.",
+      "optional visual exploration, outside the identity package",
+      "Looks remain optional until you accept one.",
+    ]) {
+      assert.ok(!looks.includes(said), `the screen no longer says: ${said}`);
+    }
   });
 
   it("shows the routed image model and the same non-zero batch estimate on every character dialog", () => {
@@ -494,6 +599,61 @@ describe("screen inventory", () => {
     } finally {
       __setStateForTest(FIXTURE_STATE);
     }
+  });
+
+  /*
+   * The one clause the reference slot owes (codex, 2026-09-09). Identity is never displaced:
+   * `withStaged` fills the model's budget with what the surface must carry first, so on a model
+   * with room for one image a staged reference is left behind. That used to be a standing
+   * sentence in the hint, said whether or not it applied; issue 1008 cut it, and cutting it
+   * left the attachment on screen with Generate live and nothing saying it would not be sent.
+   */
+  it("says a staged reference will not ride, and only on a model with no room for it", () => {
+    const roomy = {
+      id: "roomy-image",
+      provider: "fal" as const,
+      capability: "image" as const,
+      displayName: "Roomy Image",
+      accepts: { referenceImages: 4, referenceRoles: false, startFrame: false, endFrame: false },
+      limits: { resolutions: ["1MP"] },
+      pricing: { kind: "perMegapixel" as const, microUsdPerMegapixel: 30000 },
+    };
+    const oneSlot = { ...roomy, id: "one-slot-image", displayName: "One Slot Image",
+      accepts: { referenceImages: 1, referenceRoles: false, startFrame: false, endFrame: false } };
+    const world = FIXTURE_STATE.world!;
+    const staged = {
+      ...world,
+      stagedReferences: {
+        ...world.stagedReferences,
+        [stagedReferenceKey("character-sheet", "maren-kest")]: "artifacts/pose-sheet.png",
+      },
+    };
+    const at = (model: typeof roomy): string => {
+      __setStateForTest({
+        ...FIXTURE_STATE,
+        world: staged,
+        app: {
+          ...FIXTURE_STATE.app,
+          manifest: { ...FIXTURE_STATE.app.manifest!, models: [model, ...FIXTURE_STATE.app.manifest!.models] },
+          routing: { ...FIXTURE_STATE.app.routing, defaults: { ...FIXTURE_STATE.app.routing.defaults, image: model.id } },
+        },
+      });
+      return renderAt(`/w/${world.meta.worldId}/cast/maren-kest/model-sheet`).replace(/<!-- -->/g, "");
+    };
+    try {
+      const tight = at(oneSlot);
+      assert.match(tight, /One Slot Image carries 1 image/, "the model and its budget");
+      assert.match(tight, /this one is not sent/, "and what that means for the staged image");
+      assert.doesNotMatch(at(roomy), /is not sent/, "a model with room says nothing");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  /* SPEC-017 R-23: the character-creation path says when a generation completes the set. */
+  it("says the character sheet completes the reference set", () => {
+    const html = renderAt(`/w/${FIXTURE_STATE.world!.meta.worldId}/cast/maren-kest/model-sheet`).replace(/<!-- -->/g, "");
+    assert.match(html, /Completes Maren Kest.{0,12}s reference set/, "R-23, in the waiting copy");
   });
 
   it("blocks identity-dependent generation when the routed model cannot receive the main photo", () => {
@@ -636,6 +796,21 @@ describe("screen inventory", () => {
     const workspace = renderAt(`/w/${worldId}/p/saltlight/generate?view=bench`);
     assert.ok(workspace.includes("World look · v"));
     assert.ok(workspace.includes("carries as text"));
+  });
+
+  it("draws Advanced's wall with the bench's own viewer, not a cropped still on a --primary box (142a)", () => {
+    const worldId = FIXTURE_STATE.world!.meta.worldId;
+    const workspace = renderAt(`/w/${worldId}/p/saltlight/generate?view=bench`);
+    assert.match(workspace, /class="fy-bench__media"/, "the bench's black, letterboxing box");
+    assert.match(workspace, /<video[^>]*poster=/, "the take plays where it is judged");
+    assert.match(workspace, /data-testid="bench-transport"/, "with the clip's transport inside the box");
+    assert.match(workspace, /fy-bench__overlaychip--name">TAKE 1</);
+    assert.match(workspace, /class="fy-bench__strip fy-gen__strip"/);
+    assert.doesNotMatch(workspace, /fy-viewer"|fy-taketile/, "the old viewer and tiles are gone");
+    assert.ok(
+      workspace.indexOf("Reject · cite the sheet") < workspace.indexOf("Accept take"),
+      "the primary closes the row, as Keep does on the bench",
+    );
   });
 
   it("names a production look instead of claiming the world look is inherited", () => {

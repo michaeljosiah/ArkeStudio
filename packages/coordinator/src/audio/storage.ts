@@ -77,7 +77,7 @@ export async function resolveAudioSource(store: Pick<WorldStore, "dir" | "getBun
   } else if (request.kind === "artifact") {
     ArtifactIdSchema.parse(request.artifactId);
     const artifact = bundle.artifacts.find(a => a.id === request.artifactId);
-    if (!artifact || bundle.artifacts.some(a => a.supersedes === artifact.id)) throw new Error("audio-source-unavailable");
+    if (!artifact || artifact.retiredAt !== undefined || bundle.artifacts.some(a => a.supersedes === artifact.id)) throw new Error("audio-source-unavailable");
     file = `artifacts/${artifact.file}`;
     physicalRange = request.range === undefined ? undefined : AudioRangeSchema.parse(request.range);
     const path = await audioWorldPath(store.dir, file);

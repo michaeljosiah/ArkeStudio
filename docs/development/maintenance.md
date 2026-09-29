@@ -1,5 +1,11 @@
 # Generated files, assets and delivery
 
+Runtime staging retries transient rename locks for up to 30 seconds, starting at 250 ms and
+doubling to a 2-second cap. Exhaustion reports the attempt and elapsed time while retaining
+the filesystem error code. OpenCode's version probe runs on the verified extracted copy before
+it is copied into the stage, so the directory being swapped has not executed a binary (#1227).
+Run `node --test apps/desktop/test/runtime-support.test.mjs` for the retry and staging checks.
+
 Commands below run from the repository root unless stated otherwise. Read the script before running a generator: regeneration can fetch remote data or change many files and is not part of ordinary documentation validation.
 
 | Output or asset | Owner / source | Maintenance route |
@@ -12,6 +18,7 @@ Commands below run from the repository root unless stated otherwise. Read the sc
 | Native SQLite | Desktop `scripts/rebuild-native.mjs` and package aliases | `npm run rebuild:native --workspace @arke-studio/desktop`; preserve host-Node versus Electron ABI separation. |
 | Bundled local runtimes | Desktop `scripts/prepare-runtimes.mjs`, runtime source/support helpers and build resources | `npm run prepare:runtimes:x64 --workspace @arke-studio/desktop` or `prepare:runtimes:arm64`; check matching runtime tests and licence verification. |
 | OpenCode runtime | Desktop `scripts/prepare-opencode2.mjs` | `npm run prepare:opencode2 --workspace @arke-studio/desktop` defaults to x64; inspect script arguments for other targets. |
+| Release cards | `docs/releases/<tag>/notes.md` with its picture, `scripts/release-notes.mjs`, `release.yml` | Every tag needs a card; the workflow refuses one without it and publishes the release's title and body from it. The application bundles the newest eight for What's new. See [the contributing guide](../../CONTRIBUTING.md#cutting-a-release). |
 | Windows packaging | Desktop package scripts, `.github/workflows/package.yml`, `release.yml` | `npm run package --workspace @arke-studio/desktop` prepares runtimes, verifies licences, builds and packages with publish disabled. This is larger than a build check. |
 | Licence inventory | `THIRD-PARTY-NOTICES.md`, `licenses/`, desktop `scripts/verify-licenses.mjs` | `npm run verify:licenses --workspace @arke-studio/desktop`; packaging additionally requires prepared-runtime checks. |
 | Design references | `design-system/`, client theme/components | Prototype HTML is a design input, not a shipped client bundle. Keep implemented UI and intended design distinctions explicit. |

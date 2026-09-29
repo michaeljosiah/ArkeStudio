@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import type { FSWatcher, watch } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { exportWorld, WORLD_EXPORT_EXCLUDED } from "../../src/takes/export.js";
 import { scanWorld } from "../../src/world/scan.js";
+import { WorldWatcher } from "../../src/world/watcher.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { tempDir } from "../tmp.js";
 
@@ -29,13 +32,28 @@ async function worldWith(files: Record<string, string>): Promise<string> {
 
 describe("conversations are operational state, not world content", () => {
   it("is ignored by the external-edit watcher", async () => {
-    // The list is the contract; the watcher reads it on every change event.
-    const source = await readFile(new URL("../../src/world/watcher.ts", import.meta.url), "utf8");
-    assert.match(
-      source,
-      /\/\^\\\.conversations\(\[\/\\\\\]\|\$\)\//,
-      "without this every message the app appends would read as an outside edit",
-    );
+    // Driven through the watcher with a stand-in for fs.watch: an append under .conversations
+    // raises nothing, an edit beside it still does. Without the exclusion every message the app
+    // appends would read as an outside edit.
+    let listener: ((event: string, filename: string) => void) | null = null;
+    const open = ((_dir: string, _options: unknown, cb: (event: string, filename: string) => void) => {
+      listener = cb;
+      return Object.assign(new EventEmitter(), { close() {}, unref() { return this; } }) as unknown as FSWatcher;
+    }) as unknown as typeof watch;
+    let reported = 0;
+    const watcher = new WorldWatcher("/world", () => reported++, { watch: open });
+    watcher.start();
+    try {
+      listener!("change", join(".conversations", "cv_x", "events.jsonl"));
+      listener!("rename", ".conversations");
+      await new Promise((r) => setTimeout(r, 700));
+      assert.equal(reported, 0, "the app's own conversation writes are not an outside edit");
+      listener!("change", "notes.md");
+      await new Promise((r) => setTimeout(r, 700));
+      assert.equal(reported, 1, "an edit to the world beside them still is");
+    } finally {
+      watcher.stop();
+    }
   });
 
   it("is left out of an export", () => {

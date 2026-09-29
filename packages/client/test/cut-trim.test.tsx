@@ -8,13 +8,12 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import {
   ClientStateSchema,
   applyTimelineCommands,
-  deriveCut,
   seedEmptyPictureTimeline,
   seedStoryPictureTimeline,
   type ClientState,
 } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { CutScreen } from "../src/screens/production.js";
+import { CutScreen } from "../src/screens/cut.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -241,7 +240,8 @@ describe("the Cut on the song clock (80a)", () => {
       assert.doesNotMatch(html, /fy-cutseg--black/, "black belongs to the song clock");
       // The scene keeps its grouping in the band; the lane carries the unit of work.
       assert.doesNotMatch(html, /fy-scenes__band/, "scene labels start hidden");
-      await act(async () => [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Scene labels")!.click());
+      // One register in the toolbar (issue 1010): the toggle is a glyph, named by its label.
+      await act(async () => screen.container.querySelector<HTMLButtonElement>('button[aria-label="Scene labels"]')!.click());
       assert.ok(screen.container.querySelector(".fy-scenes__band"), "scene context remains available on request");
       assert.match(html, /fy-cutseg--pick/, "and shots, not scenes, are the cells");
       /*
@@ -266,6 +266,9 @@ describe("the Cut on the song clock (80a)", () => {
     try {
       const inspector = await select(screen, "[data-clip='cl_sh-12']");
       assert.equal(row(inspector, "Shot length"), "4.0s", "the authored duration is the slot");
+      assert.match(row(inspector, "Take") ?? "", /^Take 1 · /);
+      assert.ok(inspector.querySelector(`[title="${CLIP}"]`), "the immutable id stays available in a tooltip");
+      assert.ok(!inspector.textContent?.includes(CLIP), "the id is not the take's visible name");
       assert.ok(row(inspector, "Take length") === null, "no length claimed for unmeasured material");
       assert.doesNotMatch(inspector.textContent ?? "", /budget|Window/, "budget is the song clock's word, not this one's");
     } finally {
@@ -293,9 +296,10 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     const html = renderCut(structuredClone(FIXTURE_STATE) as ClientState);
     assert.match(html, /fy-prodrail--folded/, "the rail folds on the cut");
     assert.match(html, /fy-prodrail__mark/, "and carries marks instead of words");
-    for (const place of ["Dashboard", "Cast", "Scenes", "Exports"]) {
+    for (const place of ["Dashboard", "Cast", "Scenes", "Cut"]) {
       assert.ok(html.includes(`title="${place}"`), `${place} is still reachable, by name on its tooltip`);
     }
+    assert.doesNotMatch(html, /class="fy-prodrail__item[^>]*href="[^"]*\/(?:audio|exports)"/);
   });
 
   it("opens the world's artifacts beside the cut", () => {
@@ -328,7 +332,10 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     assert.match(html, /Add audio track/);
   });
 
-  it("draws a lane for the highest one a clip actually uses", () => {
+  it("folds a legacy lane placement onto a typed track named for its lane, at its own window", () => {
+    // The numbered lanes are gone (issue 1159): a placement still in `cut.json` is drawn on the
+    // track the first write will fold it onto — the bells are sound, so lane 4's sound track —
+    // with the clip id that fold reserves, and nothing is drawn for lanes nothing used.
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions[0]!;
     production.cut = {
@@ -338,11 +345,11 @@ describe("the artifact panel and the overlay lane (82a)", () => {
       ],
     } as typeof production.cut;
     const html = renderCut(ClientStateSchema.parse(state));
-    assert.equal(
-      (html.match(/fy-track__label">Overlay L\d/g) ?? []).length,
-      5,
-      "L4 down to L0, so nothing is hidden",
-    );
+    assert.doesNotMatch(html, /fy-clanes|fy-ovlane|fy-ovclip/, "no legacy lane is drawn");
+    assert.equal((html.match(/fy-track__name"[^>]*>Overlay L\d/g) ?? []).length, 1, "one track, for the one lane used");
+    assert.match(html, /data-track-id="tr_lane-4-sound"/);
+    assert.match(html, /data-clip="cl_ov-01J8G0000000000000000000A1"/, "the id the fold will save");
+    assert.match(html, /The Vigil, 00:00:01:00 to 00:00:03:00/, "the placement's window, to the frame");
   });
 
   it("counts what was placed, not what a split filed", () => {
@@ -381,7 +388,7 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     assert.doesNotMatch(html, /2 of 3 shots/);
   });
 
-  it("marks the sound half of a split, and lays no picture for it", () => {
+  it("folds the sound half of a split onto a sound track, and lays no picture for it", () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions[0]!;
     production.cut = {
@@ -391,8 +398,8 @@ describe("the artifact panel and the overlay lane (82a)", () => {
       ],
     } as typeof production.cut;
     const html = renderCut(ClientStateSchema.parse(state));
-    assert.match(html, /fy-ovclip--sound/, "the sound half reads as sound");
-    assert.match(html, /sound only/, "and says so where a person can read it");
+    assert.match(html, /data-track-id="tr_lane-0-sound"[^>]*>/, "the sound half is an Ambience row");
+    assert.doesNotMatch(html, /data-track-id="tr_lane-0"/, "and no picture row is made for it");
   });
 
   it("places a filed artifact by its own window, and counts it apart from coverage", () => {
@@ -413,7 +420,7 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     };
     const html = renderCut(state);
     assert.match(html, /fy-typedclip/, "the placement is drawn");
-    assert.match(html, /harbour-bells\.wav, 00:00:02:00 to 00:00:06:00/, "by its own window");
+    assert.match(html, /The Vigil, 00:00:02:00 to 00:00:06:00/, "by its own window");
     // A placed artifact is never coverage: it is counted as a clip, and the shot count is untouched.
     assert.match(html, /3 clips/, "two shots and the bells");
     assert.match(html, /1 of 2 shots covered/);
@@ -503,20 +510,21 @@ describe("the unified editor shell (#685)", () => {
     try {
       const inspector = await select(screen, "[data-clip='cl_sh-12']");
       assert.match(inspector.textContent ?? "", /PICTURE CLIP/);
-      assert.match(inspector.textContent ?? "", /tk_01J8F0000000000000000000B2/);
+      assert.match(row(inspector, "Take") ?? "", /^Take 1 · /);
+      assert.ok(inspector.querySelector('[title="tk_01J8F0000000000000000000B2"]'));
       assert.ok(inspector.querySelector("[aria-label='In one frame later']"), "the clip's timing is authored in the reactive Inspector");
     } finally {
       await close(screen);
     }
   });
 
-  it("inspects a real overlay once it is selected", async () => {
+  it("inspects a folded legacy placement as the placed picture it will be saved as", async () => {
     const screen = await mountCut(mediaOnlyState());
     try {
-      const inspector = await select(screen, ".fy-ovclip");
-      assert.match(inspector.textContent ?? "", /OVERLAY CLIP/);
-      assert.match(inspector.textContent ?? "", /plate\.mp4/);
-      assert.match(inspector.textContent ?? "", /Overlay L1/);
+      const inspector = await select(screen, "[data-clip='cl_ov-01J8G0000000000000000000A1']");
+      assert.match(inspector.textContent ?? "", /PLACED PICTURE/);
+      assert.equal(row(inspector, "Source"), "plate.mp4");
+      assert.equal(row(inspector, "Track"), "Overlay L1", "the track named for the lane it came off");
     } finally {
       await close(screen);
     }
@@ -612,17 +620,10 @@ describe("the rail and the switcher on a production with no story (508)", () => 
     assert.doesNotMatch(html, /0s cut/, "an empty cut is not what this production is");
   });
 
-  it("leaves a production with a story on the derived clock", () => {
+  it("keeps an unsaved story Cut empty in both the rail and the switcher (#930)", () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
-    const derived = deriveCut(state.world!.productions[0]!);
     const html = renderCut(state);
-    // The rail states the cut and the switcher states how much of it is covered: two figures,
-    // both derived, and neither of them measured off the timeline.
-    assert.match(html, new RegExp(`fy-prodrail__count">${derived.totalSec}s`), "the rail states the cut");
-    assert.match(
-      html,
-      new RegExp(`fy-prodrail__switchsub">video · ${derived.totalSec - derived.uncoveredSec}s cut`),
-      "the switcher states what is covered",
-    );
+    assert.match(html, /fy-prodrail__count">0s/);
+    assert.match(html, /fy-prodrail__switchsub">video · 0s cut/);
   });
 });

@@ -69,7 +69,7 @@ export function makeArtDirector(
      * would be describing a song rather than writing one.
      */
     answerKey?: "prompt" | "lyrics" | "title";
-    /** The longest answer accepted. Key art keeps its ~60-word posture; the enhancer's
+    /** The longest answer accepted. Key art allows a complete single-image prompt; the enhancer's
         ceiling is the chosen model's own published cap, so a long valid rewrite is never
         thrown away as "no answer". */
     maxChars?: number;
@@ -84,7 +84,7 @@ export function makeArtDirector(
   } = {},
 ): (brief: string) => Promise<string | null> {
   const key = options.answerKey ?? "prompt";
-  const PromptSchema = z.object({ [key]: z.string().min(1).max(options.maxChars ?? 2000) });
+  const PromptSchema = z.object({ [key]: z.string().min(1).max(options.maxChars ?? 6000) });
   return async (brief) => {
     const root=resolve(scratchRoot), sandbox=join(root,`art-${randomUUID()}`);
     let created=false, deadline:ReturnType<typeof setTimeout>|undefined;
@@ -95,7 +95,7 @@ export function makeArtDirector(
       options.signal?.throwIfAborted();
       await mkdir(toExtendedLength(root),{recursive:true});
       await mkdir(toExtendedLength(sandbox));created=true;
-      const session=await createPreparedSession(adapter,sandbox,sessionInput({}),{purpose:"art-prompt",agent:options.agent??"art-director"});
+      const session=await createPreparedSession(adapter,sandbox,sessionInput({agent:options.agent??"art-director"}),{purpose:"art-prompt",agent:options.agent??"art-director"},undefined,options.signal);
       options.signal?.throwIfAborted();
       let finalText="";
       const collected=(async()=>{

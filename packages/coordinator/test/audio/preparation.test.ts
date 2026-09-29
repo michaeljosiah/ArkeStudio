@@ -7,6 +7,7 @@ import { createAudioMediaTools, type MediaProcessRunner } from "../../src/audio/
 import { audioHash } from "../../src/audio/qc.js";
 import { prepareAudio, acceptPreparedAudio, resolveAudioSource, audioWorldPath, cleanupAudioStaging } from "../../src/audio/storage.js";
 import { WorldStore } from "../../src/world/store.js";
+import { retireArtifact } from "../../src/artifacts/filing.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { tempDir } from "../tmp.js";
 import { signal, wav } from "./helpers.js";
@@ -72,6 +73,21 @@ it("artifact preparation and acceptance use real world ownership and retain froz
   await cleanupAudioStaging(store, Date.now() + 1000, new Set([stale.operationId]));
   assert.ok((await readdir(join(dir, ".staging/audio"))).includes(stale.operationId));
   assert.deepEqual(await readFile(join(dir, file)), Buffer.from(source));
+});
+it("refuses new and already-prepared artifact selections after retirement", async t => {
+  const dir = await makeTempWorld(), artifactId = newId("ar");
+  await mkdir(join(dir, "artifacts"), { recursive: true });
+  await writeFile(join(dir, "artifacts", "retired.wav"), source);
+  await writeFile(join(dir, "artifacts", "retired.wav.json"), JSON.stringify({ id: artifactId, kind: "audio", file: "retired.wav",
+    hash: audioHash(source).slice(0, 19), origin: { by: "user" }, links: [], created: "2026-09-05T12:00:00Z" }));
+  const store = await WorldStore.open(dir);
+  t.after(() => store.close());
+  const tools = createAudioMediaTools(runner());
+  const candidate = await prepareAudio(store, tools, { kind: "artifact", artifactId });
+  await retireArtifact(store, artifactId);
+  await assert.rejects(prepareAudio(store, tools, { kind: "artifact", artifactId }), /audio-source-unavailable/);
+  await assert.rejects(acceptPreparedAudio(store, candidate, "references/maren-kest/voice", () => { throw new Error("must not commit"); }), /audio-source-unavailable/);
+  assert.deepEqual(await readFile(join(dir, "artifacts", "retired.wav")), Buffer.from(source));
 });
 it("portable path checks refuse traversal ADS and directory junctions", async () => {
   const dir = await tempDir("audio-paths-");

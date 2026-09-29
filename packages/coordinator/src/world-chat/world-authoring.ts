@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   CanonEntrySchema,
   SHEET_SHAPES,
+  propSlugs,
   SheetSchema,
   sheetDir,
   type ConversationActionPrepareIntent,
@@ -229,7 +230,8 @@ export async function stageWorldChatSheetAction(
     assertSections(change.sheetType, change.sections);
     requireCanonIds(store, change.canonRules);
     requireSheetIds(store, change.links);
-    const slug = uniqueSlug(change.name, change.sheetType, store.getBundle().sheets.map((sheet) => sheet.id));
+    // Past every sheet's id and every prop's slug: a mention cites one thing (issue 1116).
+    const slug = uniqueSlug(change.name, change.sheetType, [...store.getBundle().sheets.map((sheet) => sheet.id), ...propSlugs(store.getBundle().props)]);
     const content = buildSheetContent({
       id: slug,
       type: change.sheetType,
@@ -265,7 +267,7 @@ export async function stageWorldChatSheetAction(
     if (sheet.retired) throw new Error(`${sheet.name} is retired`);
     const live = await readLive(store, sheetPath(sheet.type, sheet.id));
     const copy = MarkdownFile.parse(live);
-    const slug = uniqueSlug(change.newName, sheet.type, store.getBundle().sheets.map((candidate) => candidate.id));
+    const slug = uniqueSlug(change.newName, sheet.type, [...store.getBundle().sheets.map((candidate) => candidate.id), ...propSlugs(store.getBundle().props)]);
     copy.setData({
       id: slug,
       name: change.newName,

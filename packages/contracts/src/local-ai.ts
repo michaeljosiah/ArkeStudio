@@ -41,6 +41,21 @@ export type ActivationState = z.infer<typeof ActivationStateSchema>;
 export const EngineIdSchema = z.enum(["comfyui", "ollama", "voxa"]);
 export type EngineId = z.infer<typeof EngineIdSchema>;
 
+/** A runtime observation, separate from whether weights are installed or a model may run. */
+export const ModelResidencySchema = z.object({
+  provider: z.enum(["ollama", "comfyui"]),
+  model: z.string().min(1),
+  state: z.enum(["gpu", "cpu", "mixed", "unknown"]),
+  vramBytes: z.number().min(0).optional(),
+}).strict();
+export type ModelResidency = z.infer<typeof ModelResidencySchema>;
+
+export function residencyNote(reading: ModelResidency | undefined): string | undefined {
+  if (reading?.state === "cpu") return "Running on the processor; this will be slow. The graphics card may be full. Close other graphics work and retry if you prefer.";
+  if (reading?.state === "mixed") return "Using the processor and graphics card; this may be slower. The graphics card may be full.";
+  return undefined;
+}
+
 export const ENGINE_LABEL: Record<EngineId, string> = {
   comfyui: "ComfyUI",
   ollama: "Ollama",

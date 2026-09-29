@@ -1,3 +1,14 @@
-/* SpecOne webfonts — Geist (shadcn/Vercel default sans) + Geist Mono.
-   Loaded from the Google Fonts CDN; no binaries vendored. See readme → FONTS. */
-@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap");
+/* Webfonts — Geist Sans and Jost, vendored from the same @fontsource packages the app loads
+   (packages/client/src/main.tsx), so the master renders in the product's face and offline.
+
+   Google Fonts served the family as "Geist"; the app registers it as "Geist Sans", and the
+   tokens name "Geist Sans". Nothing resolved and every frame reviewed since the Geist decision
+   was reviewed in Segoe UI (issue 1097). The faces below carry the app's own name. */
+@font-face { font-family: "Geist Sans"; font-style: normal; font-display: swap; font-weight: 400; src: url("../../fonts/geist-sans-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Geist Sans"; font-style: normal; font-display: swap; font-weight: 500; src: url("../../fonts/geist-sans-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Geist Sans"; font-style: normal; font-display: swap; font-weight: 600; src: url("../../fonts/geist-sans-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Geist Sans"; font-style: normal; font-display: swap; font-weight: 700; src: url("../../fonts/geist-sans-latin-700-normal.woff2") format("woff2"); }
+/* Jost is the wordmark face on the launch and loading frames only. */
+@font-face { font-family: "Jost"; font-style: normal; font-display: swap; font-weight: 200; src: url("../../fonts/jost-latin-200-normal.woff2") format("woff2"); }
+@font-face { font-family: "Jost"; font-style: normal; font-display: swap; font-weight: 300; src: url("../../fonts/jost-latin-300-normal.woff2") format("woff2"); }
+@font-face { font-family: "Jost"; font-style: normal; font-display: swap; font-weight: 400; src: url("../../fonts/jost-latin-400-normal.woff2") format("woff2"); }

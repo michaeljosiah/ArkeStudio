@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { filterVoices, formatMicroUsd, supportsVoiceUse, voiceTargetKey, voiceFacet, VOICE_FACETS,
+import { cloudSpeechPreference, readerName, filterVoices, formatMicroUsd, supportsVoiceUse, voiceTargetKey, voiceFacet, VOICE_FACETS,
   UNSPECIFIED_VOICE_FACET, type VoiceFilters } from "@arke-studio/contracts";
 import { requestVoiceCatalogue, requestCataloguePreview, stopCataloguePreview, useStore, type ReadingVoice } from "../lib/store.js";
 import { dismissPlayback, playbackSnapshot, playClip, usePlayback } from "../lib/audio.js";
@@ -7,12 +7,12 @@ import { voicePreviewMediaUrl } from "../lib/media.js";
 import { cx } from "./ui.js";
 import { X } from "./icons.js";
 
-/** Design 127: browsing and hearing are independent of the pending narrator choice. */
+/** Design 176: browsing and hearing are independent of the pending narrator choice. */
 export function VoicePickerDialog({ open, worldId, chosenId, chosenProvider, chosenModel, use = "bench", onClose, onPick }: {
   open: boolean; worldId?: string; chosenId: string | undefined; chosenProvider?: string; chosenModel?: string;
   use?: "bench" | "narration"; onClose: () => void; onPick: (voice: ReadingVoice) => void;
 }) {
-  const { voiceCatalogue: catalogue, voiceCatalogueErrors: errors, cataloguePreview: result } = useStore();
+  const { voiceCatalogue: catalogue, voiceCatalogueErrors: errors, cataloguePreview: result, state } = useStore();
   const [where, setWhere] = useState<"all" | "cloud" | "local">("all");
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<VoiceFilters>({});
@@ -55,7 +55,8 @@ export function VoicePickerDialog({ open, worldId, chosenId, chosenProvider, cho
     void playClip({ id: active.requestId, url: voicePreviewMediaUrl(result.file), title: active.voice.label,
       sub: active.voice.preview?.kind === "sample" ? "Provider sample" : "Voice preview" });
   }, [open, active, result]);
-  const available = useMemo(() => (catalogue ?? []).filter(v => supportsVoiceUse(v, use)), [catalogue, use]);
+  const disabledModels = state?.app.models.disabled;
+  const available = useMemo(() => (catalogue ?? []).filter(v => supportsVoiceUse(v, use) && !disabledModels?.includes(v.model)), [catalogue, use, disabledModels]);
   const scoped = useMemo(() => available.filter(v => where === "all" || (where === "local" ? v.local : !v.local)), [available, where]);
   const rows = useMemo(() => filterVoices(scoped, query, filters), [scoped, query, filters]);
   const selected = available.find(v => voiceTargetKey(v) === pick);
@@ -123,7 +124,7 @@ export function VoicePickerDialog({ open, worldId, chosenId, chosenProvider, cho
             <div className="fy-voice-browser__identity"><span className="fy-voices__name">{voice.label}</span>{key === chosenKey && <small>Current</small>}<p>{voice.description || voice.attributes.join(" · ") || "No description"}</p>
               <span className="fy-voice-browser__preview-label">{label}</span></div>
             <span className="fy-voice-browser__metadata">{[voice.facets?.language, voice.facets?.accent, voice.facets?.gender].filter(Boolean).join(" · ")}</span>
-            <span className="fy-voices__where">{voice.unavailableReason ?? (voice.local ? "On this machine" : voice.provider)}{voice.usedBy.length > 0 && <small>{voice.usedBy.join(", ")}</small>}</span>
+            <span className="fy-voices__where">{voice.unavailableReason ?? (voice.local ? "On this machine" : voice.provider === "google" ? `${readerName(voice)}${cloudSpeechPreference(voice, use === "narration" ? "routine" : "creative") === 0 ? " · Recommended" : ""}` : voice.provider)}{voice.usedBy.length > 0 && <small>{voice.usedBy.join(", ")}</small>}</span>
             <button type="button" className="fy-voice-browser__select" aria-pressed={pick === key} aria-label={`Select ${voice.label}`} disabled={!!voice.unavailableReason} onClick={() => setPick(key)}>{pick === key ? "Selected" : "Select"}</button>
           </div>;
         })}

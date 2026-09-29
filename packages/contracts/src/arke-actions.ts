@@ -582,11 +582,14 @@ export const DecideConversationActionSchema = z
     expectedStatus: z.enum(["pending", "stale"]),
     decision: ConversationActionDecisionKindSchema,
     requestId: UlidSchema,
+    /** The paired gateway always adds this restriction; only stored action facts decide its scope. */
+    hostActions: z.literal("refuse").optional(),
   })
   .strict();
 export type DecideConversationAction = z.infer<typeof DecideConversationActionSchema>;
 
 export const ConversationActionDecisionRefusalSchema = z.enum([
+  "host-only",
   "wrong-world",
   "unknown-conversation",
   "wrong-conversation",

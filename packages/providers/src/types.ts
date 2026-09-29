@@ -1,5 +1,6 @@
 import type {
   PreparedAudioInput,
+  SpeechUsage,
   Capability,
   CapabilityProbe,
   ClientDeclarations,
@@ -16,6 +17,9 @@ import type {
  */
 
 export interface SubmitRequest {
+  voiceDesign?: true;
+  /** Host-resolved stable world target, never supplied directly by the renderer. */
+  designedVoice?: { target: string; remoteId: string };
   model: string;
   capability: Capability;
   /** Host cancellation for work still inside a synchronous submit. Never serialized or sent. */
@@ -26,6 +30,7 @@ export interface SubmitRequest {
   imageReferences?: PreparedImageReference[];
   /** Verified scene audio inputs, ordered by frozen @AudioN bindings. Never journal bytes. */
   audioReferences?: Array<{ name: string; contentType: "audio/wav" | "audio/mpeg"; data: Uint8Array }>;
+  mediaAudioReferences?: Array<{ name: string; contentType: "audio/wav" | "audio/mpeg"; data: Uint8Array; durationSec: number }>;
   /**
    * The footage a continuation extends (SPEC-019 R-50), resolved immediately before submission
    * and never journalled.
@@ -78,6 +83,8 @@ export interface PreparedImageReference {
  * routes all declare a `video_url`, and a data URI needs its type spelled out to be one.
  */
 export interface PreparedVideoSource {
+  durationSec?: number;
+  referenceVideo24fps?: true;
   contentType: "video/mp4" | "video/quicktime" | "video/webm";
   data: Uint8Array;
 }
@@ -87,6 +94,12 @@ export interface PreparedVoiceReference {
   name: string;
   contentType: "audio/wav" | "audio/mpeg";
   data: Uint8Array;
+  /**
+   * For a reader that keeps the clip on its account (SPEC-046 R-13): the id it keeps it under,
+   * ensured by the host before this read. Breeze reads from the slot and never from the bytes;
+   * Mistral sends the bytes and has no id. Absent where the reader has no such state.
+   */
+  remoteVoiceId?: string;
 }
 
 /**
@@ -102,6 +115,11 @@ export interface PreparedAudioSource {
 }
 
 export interface SubmitResult {
+  /** A witnessed terminal result, with any reported usage, that produced no usable artifact. */
+  error?: string;
+  /** Reported quantities, not a provider-reported charge (SPEC-049 R-8). */
+  speechUsage?: SpeechUsage;
+  costMicroUsd?: number;
   remoteId: string;
   acceptedAt: string;
   /** Synchronous providers can return final artifacts without an in-memory poll cache. */
@@ -109,6 +127,7 @@ export interface SubmitResult {
 }
 
 export interface PollResult {
+  speechUsage?: SpeechUsage;
   state: "queued" | "running" | "succeeded" | "failed" | "cancelled";
   /** 0..1 where the provider reports one. */
   progress?: number;
@@ -170,10 +189,21 @@ export class ProviderRequestRejectedError extends Error {
  */
 export class ProviderBusyError extends Error {
   readonly failureClass = "transient" as const;
+  /**
+   * Set when a response proved the request was not taken — a witnessed 429, a "not ready" 425.
+   * Without it the queue cannot tell this from a call that vanished mid-flight, and a cloud
+   * client with no idempotency key is held for the person to reconcile instead of retried on
+   * backoff (codex on PR 1153). A full card names no status and leaves it unset; so does a 5xx,
+   * because a response alone does not prove paid work was rejected. `declare`, not a field: a
+   * class field is defined as `undefined` on every instance, and the ComfyUI client's test reads
+   * the marker's absence with `in`, as the queue's own uncertainty branch could.
+   */
+  declare readonly submissionRejected?: true;
 
-  constructor(message: string) {
+  constructor(message: string, options: { witnessed?: boolean } = {}) {
     super(message);
     this.name = "ProviderBusyError";
+    if (options.witnessed === true) Object.defineProperty(this, "submissionRejected", { value: true, enumerable: true });
   }
 }
 
@@ -212,6 +242,12 @@ export type ProviderOperation =
   | "lookup-by-key"
   | "list-recent"
   | "list-voices"
+  | "design-voice"
+  | "get-designed-voice"
+  | "list-designed-voices"
+  | "save-voice"
+  | "delete-voice"
+  | "lookup-voice"
   | "release";
 
 export interface ProviderTransportScope extends ProviderCallContext {
@@ -252,6 +288,65 @@ export interface VoiceCatalogueClient extends ProviderClient {
   listVoicesCatalog(key: string): Promise<VoiceCandidate[]>;
 }
 
+/** Protocol only. A coordinator must durably authorise a verified creation quote before calling. */
+export interface VoiceDesignInput {
+  model: string;
+  name: string;
+  description: string;
+  language: string;
+  gender?: "female" | "male" | "neutral";
+}
+
+/** Vendor metadata, not a portable Arke identity or proof of access with another credential. */
+export interface DesignedVoice {
+  remoteId: string;
+  model: string;
+  name: string;
+  description: string;
+  language: string;
+  expiresAt: string;
+}
+
+export interface VoiceDesignResult {
+  /** Preserve a witnessed id even if the remaining response or audition is unusable. */
+  remoteId?: string;
+  voice?: DesignedVoice;
+  sample?: FetchedArtifact;
+  speechUsage?: SpeechUsage;
+  problem?: string;
+}
+
+export interface VoiceDesignClient extends ProviderClient {
+  /** No retries or lookup-by-name: a lost create response has an unknown, potentially paid outcome. */
+  createDesignedVoice(key: string, input: VoiceDesignInput, signal?: AbortSignal): Promise<VoiceDesignResult>;
+  /** Exact-id lookup only; this cannot recover a create whose id was never witnessed. */
+  getDesignedVoice(key: string, remoteId: string, signal?: AbortSignal): Promise<VoiceDesignResult | null>;
+  /** One bounded page of the active project's designed voices, without sample downloads. */
+  listDesignedVoices(key: string, pageToken?: string, signal?: AbortSignal): Promise<{ voices: DesignedVoice[]; nextPageToken?: string }>;
+}
+
+/**
+ * A hosted reader that keeps a cloned voice on the account (SPEC-046 R-13): the clip is saved
+ * once as a slot the reads then address, and removed when the library lets go of it (R-15).
+ */
+export interface VoiceSlotClient extends ProviderClient {
+  /**
+   * The slot's id, and the language the vendor saved the voice under when it overrode the one
+   * stated — its own analysis of the recording (Breeze, probed 2026-09-15). Absent when the
+   * stated language stood, or the vendor keeps none.
+   */
+  saveVoice(
+    key: string,
+    input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string },
+    signal?: AbortSignal,
+  ): Promise<{ voiceId: string; language?: string }>;
+  deleteVoice(key: string, voiceId: string, signal?: AbortSignal): Promise<void>;
+  /** The id of the account's own voice saved under exactly this name, or null when the listing answered and holds none; a listing that fails throws. */
+  findVoice(key: string, name: string, signal?: AbortSignal): Promise<string | null>;
+  /** Whether the account still holds the voice: gone, or another account's, is false — never a throw. */
+  hasVoice(key: string, voiceId: string, signal?: AbortSignal): Promise<boolean>;
+}
+
 export interface ProviderClient {
   readonly id: ProviderId;
   readonly declarations: ClientDeclarations;
@@ -268,6 +363,17 @@ export interface ProviderClient {
   cancel(key: string, remoteId: string, context?: ProviderCallContext): Promise<void>;
   /** Drop source-bound optional transports while keeping the client reusable. */
   resetTransport?(): void;
+  /** Coordinator-owned local GPU handover; remote engines must leave their models alone. */
+  /**
+   * Given `only`, just the loaded models named in it: quitting hands back what this run used and
+   * leaves another application's models where they are (issue 1289). A handover takes them all.
+   */
+  unload?(signal?: AbortSignal, only?: ReadonlySet<string>): Promise<void>;
+  /** The local models this client has sent work to since it was made. */
+  usedModels?(): ReadonlySet<string>;
+  residency?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]>;
+  /** The language models a local runtime has pulled, for the writing harness's catalogue (issue 1247). */
+  listModels?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").LocalHarnessModel[]>;
   /** Release optional long-lived transports. No provider call may occur after this. */
   dispose?(): void;
   /**

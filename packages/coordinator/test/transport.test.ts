@@ -3,61 +3,17 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it, type TestContext } from "node:test";
 import WebSocket from "ws";
-import { FrameSchema, vendorAuthUnavailable, type ClientState, type Frame } from "@arke-studio/contracts";
+import { FrameSchema, type Frame } from "@arke-studio/contracts";
 import { Transport } from "../src/transport.js";
 import { FsWorldProvider } from "../src/world/provider.js";
+import { emptyClientState } from "./client-state.js";
 import { tempDir } from "./tmp.js";
 
 const TOKEN = "a".repeat(64);
 const AUTH = { token: TOKEN, allowedOrigins: ["file://", "null", "http://localhost:5173"] };
 
-const STATE: ClientState = {
-  app: {
-    version: "0.0.0-test",
-    health: {
-      coordinator: { status: "healthy" },
-      harness: { status: "unavailable", reason: "not configured" },
-      voice: { status: "unavailable", reason: "not configured" },
-    },
-    jobs: [],
-    builds: [],
-    worldGenesis: {},
-    ledger: [],
-    ledgerUnavailable: false,
-    providers: [],
-    providerTools: [],
-    vendorAuth: vendorAuthUnavailable("not configured"),
-    manifest: null,
-    routing: { defaults: {}, faults: [] },
-    models: { disabled: [] },
-    presets: [],
-    spend: null,
-    backgroundNotifications: "issues-only",
-    research: { web: false },
-  narrator: null,
-    appearance: { theme: "system" },
-    runtime: null,
-    harness: null,
-    comfyui: null,
-    voiceRuntime: null,
-    drift: [],
-    agents: [],
-    harnessModels: [],
-      harnessInfo: null,
-    queues: [],
-    setup: null,
-    update: { status: "idle", targetVersion: null, progressPercent: null, flow: null, detail: null },
-    env: null,
-    sampleWorld: { available: false, installing: false, note: null },
-  },
-  worlds: [],
-  world: null,
-  worldOpenFailure: null,
-  worldChat: null,
-  bench: null,
-  authoringRuns: [],
-  frameRuns: [],
-};
+const STATE = emptyClientState();
+
 
 const EVENT = {
   at: "2026-08-01T10:00:00Z",
@@ -116,6 +72,48 @@ class TestClient {
 }
 
 describe("Transport", () => {
+  it("bounds pending initialization commands and never executes a refused connection's queue", async (t) => {
+    let finish!: () => void;
+    const ready = new Promise<void>(resolve => { finish = resolve; });
+    const seen: unknown[] = [];
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE,
+      beforeInitialSnapshot: () => ready, onMessage: message => seen.push(message) });
+    const port = await transport.start();
+    t.after(() => transport.stop());
+    const client = new TestClient(port);
+    await client.open();
+    const closed = client.closed();
+    client.send({ kind: "hello", token: TOKEN });
+    for (let i = 0; i < 33; i++) client.send({ kind: "open-world", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC" });
+    assert.equal(await closed, 1008);
+    finish();
+    assert.deepEqual(seen, []);
+    assert.deepEqual(client.frames, []);
+  });
+
+  it("retains authenticated routed commands during reconnect reconciliation and sends the snapshot first", async (t) => {
+    let finish!: () => void;
+    const ready = new Promise<void>(resolve => { finish = resolve; });
+    const seen: string[] = [];
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE,
+      beforeInitialSnapshot: () => ready,
+      onMessage: message => { seen.push(message.kind); transport.broadcast(EVENT); },
+    });
+    const port = await transport.start();
+    t.after(() => transport.stop());
+    const client = new TestClient(port);
+    t.after(() => client.close());
+    await client.open();
+    client.send({ kind: "hello", token: TOKEN });
+    client.send({ kind: "open-world", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC" });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.deepEqual(seen, []);
+    finish();
+    await client.nextFrame(2);
+    assert.deepEqual(client.frames.map(frame => frame.kind), ["snapshot", "event"]);
+    assert.deepEqual(seen, ["open-world"]);
+  });
+
   it("refuses missing, wrong and malformed capabilities before snapshots or pipelined commands, and logs no secrets", async (t) => {
     const logs: string[] = [], seen: unknown[] = [];
     const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE, onMessage: msg => seen.push(msg), log: line => logs.push(line) });
@@ -471,4 +469,17 @@ describe("the media route", () => {
       assert.equal((await fetch(`${base}/${path}?token=${TOKEN}`)).status, 404, `served ${path}`);
     }
   });
+});
+
+
+it("session verification identifies Arke only after capability and origin authentication", async (t) => {
+  const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE });
+  const port = await transport.start(0);
+  t.after(() => transport.stop());
+  for (const [token, origin, expected] of [[TOKEN, "http://localhost:5173", 204], ["bad", "http://localhost:5173", 401], [TOKEN, "http://other.invalid", 401]] as const) {
+    const response = await fetch(`http://127.0.0.1:${port}/session`, { method: "HEAD", headers: { Authorization: "Bearer " + token, Origin: origin } });
+    assert.equal(response.status, expected);
+    assert.equal(response.headers.get("X-Arke-Session"), expected === 204 ? "authenticated" : null);
+    assert.equal(await response.text(), "");
+  }
 });

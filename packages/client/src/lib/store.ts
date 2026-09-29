@@ -1,14 +1,19 @@
-import { type MasterAudioRequest, type PerformanceAudioRequest } from "@arke-studio/contracts";
-import type { PromptReview, PromptSourceSnapshot } from "@arke-studio/contracts";
+import { isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
+import type { AudiobookReader, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
+import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
+import { isRemoteSession, remoteSocketUrl, remoteSocketProtocols } from "./remote-session.js";
 import { useSyncExternalStore } from "react";
 import {
   FrameSchema,
+  BROWSER_ATTACHMENT_MAX_BYTES,
+  type AccountPage,
   type AskCandidate,
   type AskResult,
   type BenchParams,
   type BibleHelperKind,
   type Capability,
+  type ModelChoices,
   type ChangeRecord,
   type ClientMessage,
   type ClientState,
@@ -38,6 +43,8 @@ import {
 import type { ArkeBridge, AttachTarget } from "../arke-bridge.js";
 
 /** A conversation nobody has said anything in yet. */
+const discardedGenesis = new Set<string>();
+
 function emptyGenesis(): StoreState["genesis"][string] {
   return {
     turns: [],
@@ -56,7 +63,7 @@ function emptyGenesis(): StoreState["genesis"][string] {
  * as the coordinator's read model. View state (tabs, panels) stays in components.
  */
 
-export type ConnectionStatus = "connecting" | "open" | "closed";
+export type ConnectionStatus = "connecting" | "open" | "closed" | "auth-refused";
 
 /** The last blocked-accept notice per proposal (SPEC-004): why it did not land, and what to offer. */
 export interface GateNotice {
@@ -72,9 +79,13 @@ export interface GateNotice {
     /** #70 SS11.4.1: an in-place edit whose outcome is unknown, so accepting is not offered. */
     | "draft-unresolved"
     /** Issue 239: a turn is writing into the proposal, so it is not settled enough to act on. */
-    | "drafting";
+    | "drafting"
+    /** PR 1232: the draft moved on since the press; the newer one is to be read, not rebased. */
+    | "draft-changed";
   detail?: string;
   authoritativeSignature?: string;
+  /** The request refused, when it carried one: only a screen's own answers it (PR 1232). */
+  requestId?: string;
 }
 
 /** Live authoring activity per proposal (SPEC-005 R-13, R-15). */
@@ -116,6 +127,46 @@ export interface CanonRefsState {
   ripples: Array<{ kind: string; summary: string; targets: string[] }>;
 }
 
+export type NarratorQuote =
+  | { state: "working" }
+  | { state: "refused"; refused: string }
+  | { state: "done"; stale: number; held: number; directed: number; estimatedMicroUsd: number; kept: number };
+
+export type HeardLine = { state: "working" } | { state: "done"; file: string } | { state: "priced"; token: string; authorisedMicroUsd: number; parts: number } | { state: "refused"; refused: string };
+
+/** A script out, or returned files matched and checked, for a recorded speaker (design turn 155d, SPEC-047 R-39). */
+export interface SpeakerLinesState {
+  kind: "script" | "files";
+  state: "working" | "done" | "keeping" | "refused";
+  output?: string;
+  lines?: number;
+  notCast?: number;
+  rows?: Extract<import("@arke-studio/contracts").DomainEvent, { type: "audiobook.lines-staged" }>["rows"];
+  kept?: number;
+  refused?: string;
+}
+
+/** A recording on its way to being a block's take (design turn 155c): what the checks said, and where it stands. */
+export interface StagedTake {
+  worldId: string;
+  productionId: string;
+  block: string;
+  state: "choosing" | "staged" | "keeping" | "refused";
+  file?: string;
+  /** What the checks said, as the dialog shows them (SPEC-047 R-35). */
+  checks?: {
+    durationSec: number | null;
+    sampleRateHz: number | null;
+    channels: number | null;
+    rmsDbfs: number | null;
+    samplePeakDbfs: number | null;
+    noiseFloor: string;
+    words: "match" | "differ" | "unchecked";
+    differences: number;
+  };
+  refused?: string;
+}
+
 interface StoreState {
   connection: ConnectionStatus;
   state: ClientState | null;
@@ -151,7 +202,25 @@ interface StoreState {
   genesis: Record<
     string,
     {
-      turns: Array<{ role: "user" | "gate"; text: string; at: string }>;
+      turns: Array<{ id?: string; role: "user" | "gate"; text: string; at: string }>;
+      conversationId?: string;
+      revision?: number;
+      worldId?: string;
+      review?: import("@arke-studio/contracts").GenesisContentReview;
+      reviewRequestId?: string;
+      images?: import("@arke-studio/contracts").GenesisImages;
+      voices?: import("@arke-studio/contracts").GenesisVoices;
+      readiness?: import("@arke-studio/contracts").GenesisReadiness;
+      readinessPending?: boolean;
+      imports?: import("@arke-studio/contracts").GenesisImports;
+      imageError?: string;
+      importError?: string;
+      reviewPending?: boolean;
+      decisionPending?: "image" | "voice" | "import";
+      founding?: boolean;
+      frozenModels?: ModelChoices;
+      frozenGenerateImages?: boolean;
+      formHandoff?: "pending" | "completed";
       /** The plan so far, folded from the sandbox directory (SPEC-031 R-2). */
       blueprint: import("@arke-studio/contracts").GenesisBlueprint | null;
       status: "running" | "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed" | null;
@@ -180,6 +249,143 @@ interface StoreState {
       reason?: string;
     }
   >;
+  /**
+   * Deriving continuity for a chapter (turn 129), keyed by `worldId/productionId/chapterId` —
+   * the world too, because two worlds can share a production and a chapter slug and a record
+   * finished in one must never be shown in the other (codex on PR 907). What the panel shows
+   * while one runs and how it ended; the record a run finished with rides here as well.
+   */
+  deriving: Record<
+    string,
+    {
+      state: "deriving" | "derived" | "stopped" | "unavailable" | "failed";
+      placed: number;
+      dropped: number;
+      omitted: number;
+      cut: number;
+      /** The record a derivation finished with, so the open panel has the lines without a second read. */
+      record?: import("@arke-studio/contracts").ChapterContinuity;
+      reason?: string;
+    }
+  >;
+  /**
+   * Casting a chapter's lines (turn 130), keyed by `worldId/productionId/chapterId` as deriving
+   * is: what the Voices panel shows while one runs and how it ended, with the record a run
+   * finished with.
+   */
+  /**
+   * A manuscript read for import (turn 131), by request: what the file holds before anything
+   * is written, then what the import made of it. The import sheet reads this.
+   */
+  manuscripts: Record<
+    string,
+    {
+      state: "reading" | "read" | "refused" | "importing" | "imported" | "failed" | "cancelled";
+      fileName?: string;
+      words?: number;
+      chapters?: Array<{ title: string; words: number }>;
+      headingLevel?: string;
+      leftOut?: number;
+      levels?: Array<{ level: "title" | "subtitle" | "heading1" | "heading2" | "document"; label: string; count: number; chosen: boolean }>;
+      notes?: number;
+      links?: number;
+      after?: number;
+      created?: number;
+      reason?: string;
+    }
+  >;
+  casting: Record<
+    string,
+    {
+      state: "casting" | "cast" | "stopped" | "unavailable" | "failed";
+      lines: number;
+      dropped: number;
+      omitted: number;
+      record?: import("@arke-studio/contracts").ChapterVoices;
+      reason?: string;
+      /** A pin refused (SPEC-012 R-62), in its one clause; cleared by the next record. */
+      pinRefused?: string;
+    }
+  >;
+  /**
+   * A chapter being read into kept takes (turn 146, SPEC-047), keyed by
+   * `worldId/productionId/chapterId`: the run's progress while it goes, its price while that
+   * is on the table, and how it ended. The record itself lands on the chapter's open result and
+   * on the finished event; this is only what the Audiobook view says about the run.
+   */
+  audiobook: Record<
+    string,
+    {
+      state: "reading" | "priced" | "read" | "stopped" | "unavailable" | "failed" | "refused";
+      requestId?: string;
+      toMake: number;
+      blocks: number;
+      made: number;
+      flagged: number;
+      /** The last block that landed or was flagged, and why, for the foot. */
+      last?: { block: string; outcome: "made" | "adopted" | "flagged"; reason?: string };
+      price?: { characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[] };
+      record?: import("@arke-studio/contracts").ChapterAudiobook;
+      reason?: string;
+    }
+  >;
+  /**
+   * `Direct this chapter` (turn 146, SPEC-047 R-10), keyed like a run: the card the window
+   * holds until it is accepted whole or discarded, then the acceptance's word. The record a
+   * write outside a run answers with — a block's direction set, a card accepted — lands here
+   * too, so the workspace takes the newest record whoever wrote it.
+   */
+  direction: Record<
+    string,
+    {
+      state: "directing" | "directed" | "accepting" | "accepted" | "stopped" | "unavailable" | "failed";
+      /** The acceptance's own name while it is on its way, so only its answer moves the card. */
+      requestId?: string;
+      directed: number;
+      dropped: number;
+      summary?: string;
+      proposed?: Record<string, import("@arke-studio/contracts").AudiobookDirectionInput>;
+      hash?: string;
+      chapterVersion?: number;
+      reason?: string;
+    }
+  >;
+  audiobookRecords: Record<string, { record?: import("@arke-studio/contracts").ChapterAudiobook; refused?: string; seq: number }>;
+  /**
+   * Recordings on their way to being a block's take (design turn 155c), by the window's request
+   * id: the host's picker open, the checks back, the keep on its way, or refused in one clause.
+   */
+  stagedTakes: Record<string, StagedTake>;
+  /** A recorded speaker's script out and files back (turn 155d), by the window's request id. */
+  speakerLines: Record<string, SpeakerLinesState>;
+  /** What a narrator switch would do (design turn 155h, SPEC-047 R-46), by the dialog's request id. */
+  narratorQuotes: Record<string, NarratorQuote>;
+  /** A line heard as it would be read (R-45, R-46), by request id: waiting, the file to play, or why not. */
+  heardLines: Record<string, HeardLine>;
+  /**
+   * The door (turn 146, SPEC-047 R-29), by production: what every chapter stands at, who
+   * reads, and the price of a press, as the coordinator last answered; and `Read the book`,
+   * the chapter's run over the whole book, keyed by production like the chapters' by chapter.
+   */
+  audiobookDoor: Record<string, { door: import("@arke-studio/contracts").AudiobookDoor | null; requestId: string; refused?: string }>;
+  audiobookBook: Record<
+    string,
+    {
+      state: "reading" | "priced" | "read" | "stopped" | "unavailable" | "failed";
+      requestId?: string;
+      chapters: number;
+      blocks: number;
+      done: number;
+      chaptersRead: number;
+      chaptersRefused: number;
+      made: number;
+      flagged: number;
+      price?: Extract<import("@arke-studio/contracts").DomainEvent, { type: "audiobook.book-priced" }>;
+      reason?: string;
+    }
+  >;
+  /** Directions re-checked against changed readers (R-13): how many controls went, said once on the door. */
+  audiobookNotes: Record<string, { dropped: number; held: number; chapters: number; seq: number }>;
   /** The last word on archiving a world — said once, then dismissed. */
   archiveNote: { worldId: string; text: string; refused: boolean } | null;
   permissions: Record<string, PendingPermission>;
@@ -262,7 +468,9 @@ interface StoreState {
   exportsState: Record<string, ExportState>;
   /** SPEC-015: the last import report and filing notices — transient. */
   importReport: ImportReportState | null;
-  artifactNotices: Array<{ sourcePath: string; outcome: string; reason: string; sizeBytes: number | null }>;
+  /* `production` is the scope the refused filing was attempted at, so a surface can tell its
+     own refusals from another's: `null` is the world, absent is a filing that stated no opinion. */
+  artifactNotices: Array<{ sourcePath: string; outcome: string; reason: string; sizeBytes: number | null; production?: string | null }>;
   /** Filed by attaching to a chat, newest last — what the composer shows as chips. */
   attached: Array<{
     worldId: string;
@@ -286,7 +494,33 @@ interface StoreState {
   frameRunStartResults: Record<string, FrameRunStartResultEvent>;
   /** Bumped on snapshots so open quote dialogs abandon pre-refresh authorization. */
   frameRunRequestEpoch: number;
+  /**
+   * Snapshots that answered a hello: each is a connection made again, and anything this window
+   * was waiting to hear over the one before may have been lost with it. A screen records the
+   * count when it starts waiting, and a larger one means the answer will not come.
+   */
+  rejoins: number;
+  /**
+   * A line just sent into a conversation the screen has not yet seen become a turn, by
+   * conversation (codex on PR 1232). Kept here rather than by whichever dock sent it, so a dock
+   * put away and brought back in the gap still holds: a line said into it would be refused by the
+   * runner as already working. Ended by the coordinator's answer for that request — refused, or
+   * taken and then shown running or moved on. A rejoin may have lost that answer, and its
+   * snapshot can be taken while the line is still being admitted (codex on PR 1232), so the
+   * rejoin does not end it: the coordinator is asked where the line stands, and answers.
+   */
+  worldChatHolds: Record<string, WorldChatHold>;
 }
+
+export type WorldChatHold = {
+  requestId: string;
+  worldId: string;
+  seq: number | null;
+  rejoins: number;
+  takenAt?: number | null;
+  /** Asked where it stands after a rejoin. */
+  asked?: boolean;
+};
 
 export interface VoiceCandidatesState {
   extracted: string[];
@@ -294,6 +528,9 @@ export interface VoiceCandidatesState {
   previewLine: { text: string; source: "own-line" | "drafted" | "stock" };
   cloudPreviewMicroUsd: number | null;
   previewMicroUsdByVoice: Record<string, number>;
+  previewQuoteByVoice?: Record<string, string>;
+  /** What a first read through a reader adds, by target key (SPEC-046 R-14): said on the row before the preview. */
+  notices: Record<string, string>;
 }
 
 let current: StoreState = {
@@ -308,6 +545,19 @@ let current: StoreState = {
   setupStatus: null,
   diagnostics: null,
   reading: {},
+  deriving: {},
+  casting: {},
+  audiobook: {},
+  direction: {},
+  audiobookRecords: {},
+  stagedTakes: {},
+  speakerLines: {},
+  narratorQuotes: {},
+  heardLines: {},
+  audiobookDoor: {},
+  audiobookBook: {},
+  audiobookNotes: {},
+  manuscripts: {},
   archiveNote: null,
   permissions: {},
   askResults: {},
@@ -344,6 +594,8 @@ let current: StoreState = {
   frameRunQuotes: {},
   frameRunStartResults: {},
   frameRunRequestEpoch: 0,
+  rejoins: 0,
+  worldChatHolds: {},
 };
 
 export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-result" }> & {
@@ -372,6 +624,18 @@ export function generateCharacterVoiceSample(input: Omit<Extract<ClientMessage, 
   return requestId;
 }
 const voiceAssignmentListeners = new Set<(result: VoiceAssignmentResult) => void>();
+type DesignedVoiceSaved = Extract<DomainEvent, { type: "voice.designed-saved" }>;
+type DesignedVoiceAudition = Extract<DomainEvent, { type: "voice.design-audition" }>;
+const designedVoiceListeners = new Set<(result: DesignedVoiceSaved) => void>();
+const designedAuditionListeners = new Set<(result: DesignedVoiceAudition) => void>();
+export function subscribeDesignedVoices(listener: (result: DesignedVoiceSaved) => void): () => void {
+  designedVoiceListeners.add(listener);
+  return () => { designedVoiceListeners.delete(listener); };
+}
+export function subscribeDesignedAuditions(listener: (result: DesignedVoiceAudition) => void): () => void {
+  designedAuditionListeners.add(listener);
+  return () => { designedAuditionListeners.delete(listener); };
+}
 export type VoiceUploadConfirmationRequired = Extract<
   DomainEvent,
   { type: "voice.upload-confirmation-required" }
@@ -383,6 +647,11 @@ const jobReadyListeners = new Set<(job: Job) => void>();
 export type FiledBatch = Extract<DomainEvent, { type: "artifact.filed-batch" }>;
 const filedBatchListeners = new Set<(batch: FiledBatch) => void>();
 export type BriefEnhanced = Extract<DomainEvent, { type: "bench.brief-enhanced" }>;
+type StageConstructionResult = Extract<DomainEvent, { type: "stage.construction" }>;
+const stageConstructionListeners = new Set<(result: StageConstructionResult) => void>();
+export function subscribeStageConstruction(listener: (result: StageConstructionResult) => void): () => void {
+  stageConstructionListeners.add(listener); return () => { stageConstructionListeners.delete(listener); };
+}
 const briefEnhancedListeners = new Set<(answer: BriefEnhanced) => void>();
 export function subscribeBriefEnhanced(listener: (answer: BriefEnhanced) => void): () => void {
   briefEnhancedListeners.add(listener);
@@ -402,6 +671,45 @@ export function subscribeBenchSubjectAccepted(listener: (answer: BenchSubjectAcc
   benchSubjectAcceptedListeners.add(listener);
   return () => benchSubjectAcceptedListeners.delete(listener);
 }
+
+export type ReferenceImagesResult = Extract<DomainEvent, { type: "reference.images" }>;
+const referenceImageListeners = new Set<(result: ReferenceImagesResult) => void>();
+export function subscribeReferenceImages(listener: (result: ReferenceImagesResult) => void): () => void {
+  referenceImageListeners.add(listener);
+  return () => { referenceImageListeners.delete(listener); };
+}
+export function browseReferenceImages(slug: string, requestId: string): void {
+  send({ kind: "browse-reference-images", slug, requestId });
+}
+
+/** Another world's placeable files, for the Cut's Library (issue 1033). */
+export type WorldArtifactsResult = Extract<DomainEvent, { type: "world.artifacts" }>;
+const worldArtifactListeners = new Set<(result: WorldArtifactsResult) => void>();
+export function subscribeWorldArtifacts(listener: (result: WorldArtifactsResult) => void): () => void {
+  worldArtifactListeners.add(listener);
+  return () => { worldArtifactListeners.delete(listener); };
+}
+export function browseWorldArtifacts(slug: string, requestId: string): void {
+  send({ kind: "browse-world-artifacts", slug, requestId });
+}
+/**
+ * Copy files from another world into this one, then list or place them as an upload would
+ * (issue 1033). Answered like an upload, through the queue results, under the returned request.
+ */
+export function borrowArtifacts(
+  worldId: string, slug: string, files: readonly string[],
+  editor: Extract<ClientMessage, { kind: "borrow-artifacts" }>["editor"],
+): { requestId: string | null; reason?: string } {
+  if (files.length === 0 || files.length > 16) return { requestId: null, reason: "Copy up to 16 files at a time." };
+  const requestId = queueRequest("borrow-artifacts");
+  if (!send({ kind: "borrow-artifacts", worldId, requestId, slug, files: [...files], editor })) {
+    pendingQueueRequests.delete(requestId);
+    return { requestId: null, reason: "The files could not be copied. Check the connection and try again." };
+  }
+  return { requestId };
+}
+
+const browserUploadResults = new Map<string, (reason?: string) => void>();
 
 export type WorldChatMediaOpened = Extract<DomainEvent, { type: "world-chat.media-opened" }>;
 const worldChatMediaListeners = new Set<(answer: WorldChatMediaOpened) => void>();
@@ -467,9 +775,24 @@ export function subscribeVoiceUploadConfirmations(
   return () => voiceUploadConfirmationListeners.delete(listener);
 }
 
+/** The outcome of deleting a cloned voice (SPEC-046 R-15), by requestId: the library's part and each vendor copy's. */
+export type VoiceDeleteResult = Extract<DomainEvent, { type: "voice.deleted" }>;
+const voiceDeleteListeners = new Set<(result: VoiceDeleteResult) => void>();
+export function subscribeVoiceDeleteResults(listener: (result: VoiceDeleteResult) => void): () => void {
+  voiceDeleteListeners.add(listener);
+  return () => voiceDeleteListeners.delete(listener);
+}
+
 /** The correlated answer to one create-production request (issue 384), by requestId. */
 export type ProductionCreateResult = Extract<DomainEvent, { type: "production.create-result" }>;
 /** Refused direct scene writes (review 2026-08-22), delivered to the storyboard that sent them. */
+type CommandFailure = Extract<DomainEvent, { type: "command.failed" }>;
+const commandFailureListeners = new Set<(event: CommandFailure) => void>();
+export function subscribeCommandFailures(listener: (event: CommandFailure) => void): () => void {
+  commandFailureListeners.add(listener);
+  return () => commandFailureListeners.delete(listener);
+}
+
 const sceneRefusalListeners = new Set<
   (event: { productionId: string; sceneFile: string; reason: string }) => void
 >();
@@ -489,6 +812,17 @@ export function subscribeTimelineRefusals(listener: (event: TimelineCommandRefus
 }
 
 const productionCreateListeners = new Set<(result: ProductionCreateResult) => void>();
+export type ProductionSetupResult = Extract<DomainEvent, { type: "production-setup.result" }>;
+const productionSetupListeners = new Set<(result: ProductionSetupResult) => void>();
+const narrativeSavedListeners = new Set<(result: Extract<DomainEvent, { type: "production-narrative.saved" }>) => void>();
+export function subscribeNarrativeSaved(listener: (result: Extract<DomainEvent, { type: "production-narrative.saved" }>) => void): () => void {
+  narrativeSavedListeners.add(listener);
+  return () => { narrativeSavedListeners.delete(listener); };
+}
+export function subscribeProductionSetupResults(listener: (result: ProductionSetupResult) => void): () => void {
+  productionSetupListeners.add(listener);
+  return () => { productionSetupListeners.delete(listener); };
+}
 export function subscribeProductionCreateResults(
   listener: (result: ProductionCreateResult) => void,
 ): () => void {
@@ -550,6 +884,45 @@ export function subscribeProposalResolutions(
 ): () => void {
   proposalResolutionListeners.add(listener);
   return () => proposalResolutionListeners.delete(listener);
+}
+
+/**
+ * Refusals by the request they answer, kept past the moment they arrive (codex on PR 1232): the
+ * notice on a proposal is only its latest, and another window's refusal on the same proposal
+ * would otherwise overwrite the one a screen is holding its controls for. Only this window's own
+ * requests are kept, and each until the screen holding it lets go or the world closes — not by
+ * count (codex on PR 1232): a chapter put away while others are refused would come back to a
+ * hold whose answer had been dropped. Refreshed with each notice, so a screen reading this on
+ * render sees it as soon as it lands.
+ */
+const gateRequests = new Set<string>();
+const gateAnswers = new Set<string>();
+/** Whether the gate has refused this request, by its id. */
+export function gateAnswered(requestId: string): boolean {
+  return gateAnswers.has(requestId);
+}
+/** The screen that sent this request has settled it; its answer is no longer wanted. */
+export function forgetGateRequest(requestId: string): void {
+  gateRequests.delete(requestId);
+  gateAnswers.delete(requestId);
+}
+
+export type WorldChatSendResult = Extract<DomainEvent, { type: "world-chat.send-result" }>;
+const sendResultListeners = new Set<(result: WorldChatSendResult) => void>();
+/**
+ * The last answers, by request id, kept past the moment they arrive (codex on PR 1232): a screen
+ * that was not listening when its answer came — the dock put away and brought back — still finds
+ * it. A handful is plenty; nobody is waiting on an old send.
+ */
+let sendResults = new Map<string, WorldChatSendResult>();
+/** Whether a line sent into a conversation was taken as a turn, answered for its request id. */
+export function subscribeWorldChatSendResults(listener: (result: WorldChatSendResult) => void): () => void {
+  sendResultListeners.add(listener);
+  return () => sendResultListeners.delete(listener);
+}
+/** The answer already given for a request, if one has arrived. */
+export function worldChatSendResult(requestId: string): boolean | undefined {
+  return sendResults.get(requestId)?.admitted;
 }
 
 export type CanonContradictions = Extract<DomainEvent, { type: "canon.contradictions" }>;
@@ -651,11 +1024,76 @@ function queueRequest(command: QueueCommand, characterName?: string): string {
 const listeners = new Set<() => void>();
 let bridge: ArkeBridge | null = null;
 let lastSeq = 0;
+/**
+ * True from a hello until the snapshot that answers it: that snapshot is a window rejoining,
+ * whose runs may have ended while it was away; every other snapshot is a refresh on a
+ * connection that has missed nothing.
+ */
+let rejoining = false;
 let reconnectAttempts = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+const worldListeners = new Set<(worldId: string | null) => void>();
+/**
+ * Told when the open world changes or closes — not on a snapshot of the same world. For what a
+ * screen keeps beyond itself that belongs to one world's session and must not outlive it.
+ */
+export function onWorldChange(listener: (worldId: string | null) => void): () => void {
+  worldListeners.add(listener);
+  return () => worldListeners.delete(listener);
+}
+
+/** Ends the holds whose line has been answered and shown; after a rejoin, asks where each stands. */
+function settleHolds(next: StoreState): StoreState {
+  let holds: Record<string, WorldChatHold> | null = null;
+  for (const [conversationId, hold] of Object.entries(next.worldChatHolds)) {
+    const workspace = next.state?.worldChat?.conversationId === conversationId ? next.state.worldChat : null;
+    const seq = workspace?.seq ?? null;
+    const running = workspace?.runStatus === "running";
+    const result = sendResults.get(hold.requestId);
+    const answer = result?.admitted;
+    let settled: WorldChatHold | null = hold;
+    if (answer === false) settled = null;
+    else if (hold.takenAt !== undefined) settled = running || seq !== hold.takenAt ? null : hold;
+    // Taken, and asked after a rejoin that brought the turn whole — the line already in the
+    // thread (codex on PR 1232) — the hold has nothing left to wait for. The thread is searched
+    // for the turn the answer names, not for the words: the same words said again in another
+    // window are another turn. A thread that has only moved may have moved for another window's
+    // edit, so otherwise the turn itself is awaited.
+    else if (answer === true) {
+      const shown = hold.asked === true && result?.turnId !== undefined
+        && (workspace?.messages ?? []).some((m) => m.role === "user" && m.turnId === result.turnId);
+      settled = running || shown ? null : { ...hold, takenAt: seq };
+    }
+    else if (next.rejoins !== hold.rejoins && next.connection === "open") {
+      // Asked once per rejoin, after this change has landed.
+      settled = { ...hold, rejoins: next.rejoins, asked: true };
+      queueMicrotask(() => askWorldChatSendStatus(hold.worldId, conversationId, hold.requestId));
+    }
+    if (settled === hold) continue;
+    holds ??= { ...next.worldChatHolds };
+    if (settled === null) delete holds[conversationId];
+    else holds[conversationId] = settled;
+  }
+  return holds === null ? next : { ...next, worldChatHolds: holds };
+}
+
 function emitChange(next: StoreState): void {
+  const was = current.state?.world?.meta.worldId ?? null;
+  const now = next.state?.world?.meta.worldId ?? null;
+  // A line held for a world that has since closed has nothing left to wait for (codex on PR
+  // 1232): its answer belongs to that world's session, and coming back to it is no rejoin, so
+  // it would never be asked after.
+  if (now !== was && Object.values(next.worldChatHolds).some((hold) => hold.worldId !== now)) {
+    next = { ...next, worldChatHolds: Object.fromEntries(Object.entries(next.worldChatHolds).filter(([, hold]) => hold.worldId === now)) };
+  }
+  next = settleHolds(next);
   current = next;
+  if (now !== was) {
+    gateRequests.clear();
+    gateAnswers.clear();
+    for (const l of worldListeners) l(now);
+  }
   for (const l of listeners) l();
 }
 
@@ -738,8 +1176,12 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, narrator: event.voice } };
     case "runtime.status":
       return { ...state, app: { ...state.app, runtime: event.runtime } };
+    case "local-ai.residency":
+      return { ...state, app: { ...state.app, residency: event.residency } };
     case "comfyui.status":
       return { ...state, app: { ...state.app, comfyui: event.comfyui } };
+    case "adapters.changed":
+      return { ...state, app: { ...state.app, adapters: event.adapters } };
     case "harness.status":
       return { ...state, app: { ...state.app, harness: event.harness } };
     case "voice.sidecar":
@@ -757,6 +1199,10 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
     }
     case "update.status":
       return { ...state, app: { ...state.app, update: event.update } };
+    case "activity.seen":
+      return { ...state, app: { ...state.app, activitySeen: event.seen } };
+    case "account.changed":
+      return { ...state, app: { ...state.app, account: event.account } };
     case "entity.changed":
       if (!state.world || state.world.meta.worldId !== event.worldId) return state;
       return { ...state, world: { ...state.world, changes: [...state.world.changes, event.change] } };
@@ -826,6 +1272,12 @@ export function __handleFrameForTest(frame: Frame): void {
 }
 
 function handleFrame(json: string): void {
+  // Gateway refusals have no coordinator sequence: they neither advance nor reset replay state.
+  try {
+    const refusal = RemoteCommandRefusalSchema.safeParse(JSON.parse(json));
+    if (refusal.success) { for (const listener of remoteRefusalListeners) listener(refusal.data); return; }
+  } catch { /* The normal frame parser reports malformed input below. */ }
+
   let frame;
   try {
     frame = FrameSchema.parse(JSON.parse(json));
@@ -850,6 +1302,8 @@ function handleFrame(json: string): void {
       ),
     );
     const changedWorld = current.state?.world?.meta.worldId !== frame.state.world?.meta.worldId;
+    const rejoined = rejoining;
+    rejoining = false;
     const authoring = seedLiveRuns(current.authoring, frame.state.authoringRuns);
     const durableVoiceAudio: StoreState["voiceAudio"] = {};
     for (const job of frame.state.app.jobs) {
@@ -918,6 +1372,30 @@ function handleFrame(json: string): void {
       voicePreviews: changedWorld ? {} : current.voicePreviews,
       voiceAudio: { ...(changedWorld ? {} : current.voiceAudio), ...durableVoiceAudio },
       voiceParts: changedWorld ? {} : current.voiceParts,
+      // A run still going is replayed after the snapshot (turn 129, turn 130); one that finished
+      // while this window was away is not, and would otherwise stay "casting" forever (codex on
+      // PR 914, round two). The snapshot's records say what stands.
+      deriving: {},
+      casting: {},
+      // The audiobook's runs (turn 146) carry what the replay cannot: the counts, and a price
+      // waiting on its answer. A refresh follows every take that lands, on a connection that
+      // has missed nothing, so a refresh keeps them — reset, the replayed start put `reading… 0
+      // of 0` over the head and closed the price sheet (the door's live check on slice 3). A
+      // window that rejoined starts from the replay, which says what is still going and nothing
+      // of what ended while it was away.
+      audiobook: changedWorld || rejoined ? {} : current.audiobook,
+      // A card answered — proposed, accepted, failed — is this window's to put away (turn 146):
+      // a snapshot follows every accept, and would otherwise take the ✓ line with it. Only a
+      // derivation still going is dropped, since the replay restores it when it is.
+      direction: changedWorld ? {} : Object.fromEntries(Object.entries(current.direction).filter(([, held]) => held.state !== "directing")),
+      audiobookRecords: changedWorld ? {} : current.audiobookRecords,
+      stagedTakes: changedWorld ? {} : current.stagedTakes,
+      speakerLines: changedWorld ? {} : current.speakerLines,
+      narratorQuotes: changedWorld ? {} : current.narratorQuotes,
+      heardLines: changedWorld ? {} : current.heardLines,
+      audiobookDoor: changedWorld ? {} : current.audiobookDoor,
+      audiobookBook: changedWorld || rejoined ? {} : current.audiobookBook,
+      audiobookNotes: changedWorld ? {} : current.audiobookNotes,
       // Both are keyed by sheet slug alone, and slugs recur across worlds: a failure left over
       // from one world would otherwise surface under the same-named character in the next one
       // (PR 241 review). They describe an action just taken here, so they do not outlive it.
@@ -931,6 +1409,7 @@ function handleFrame(json: string): void {
       frameRunQuotes: {},
       frameRunStartResults: {},
       frameRunRequestEpoch: current.frameRunRequestEpoch + 1,
+      rejoins: current.rejoins + (rejoined ? 1 : 0),
     });
   } else if (current.state) {
     let gateNotices = current.gateNotices;
@@ -940,12 +1419,29 @@ function handleFrame(json: string): void {
     let buildPlans = current.buildPlans;
     let keyArtPlans = current.keyArtPlans;
     let reading = current.reading;
+    let deriving = current.deriving;
+    let casting = current.casting;
+    let audiobook = current.audiobook;
+    let direction = current.direction;
+    let audiobookRecords = current.audiobookRecords;
+    let stagedTakes = current.stagedTakes;
+    let speakerLines = current.speakerLines;
+    let narratorQuotes = current.narratorQuotes;
+    let heardLines = current.heardLines;
+    let audiobookDoor = current.audiobookDoor;
+    let audiobookBook = current.audiobookBook;
+    let audiobookNotes = current.audiobookNotes;
+    let manuscripts = current.manuscripts;
     let archiveNote = current.archiveNote;
     let setupStatus = current.setupStatus;
     let permissions = current.permissions;
     const event = frame.event;
     let frameRunQuotes = current.frameRunQuotes;
     let frameRunStartResults = current.frameRunStartResults;
+    if (event.type === "command.failed") {
+      if (event.requestId) pendingQueueRequests.delete(event.requestId);
+      for (const listener of commandFailureListeners) listener(event);
+    }
     if (event.type === "queue.enqueue-result") {
       const expected = pendingQueueRequests.get(event.requestId);
       if (expected?.command === event.command) {
@@ -971,11 +1467,20 @@ function handleFrame(json: string): void {
     if (event.type === "voice.assignment-result") {
       for (const listener of voiceAssignmentListeners) listener(event);
     }
+    if (event.type === "voice.designed-saved") for (const listener of designedVoiceListeners) listener(event);
+    if (event.type === "voice.design-audition") for (const listener of designedAuditionListeners) listener(event);
+    if (event.type === "voice.deleted") for (const listener of voiceDeleteListeners) listener(event);
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
     }
     if (event.type === "production.create-result") {
       for (const listener of productionCreateListeners) listener(event);
+    }
+    if (event.type === "production-setup.result") {
+      for (const listener of productionSetupListeners) listener(event);
+    }
+    if (event.type === "production-narrative.saved") {
+      for (const listener of narrativeSavedListeners) listener(event);
     }
     if (event.type === "chapter.create-result") {
       for (const listener of chapterCreateListeners) listener(event);
@@ -1040,6 +1545,7 @@ function handleFrame(json: string): void {
     if (event.type === "production.interactive-export-result") {
       for (const listener of interactiveExportListeners) listener(event);
     }
+    if (event.type === "stage.construction") for (const listener of stageConstructionListeners) listener(event);
     if (event.type === "bench.brief-enhanced") {
       for (const listener of briefEnhancedListeners) listener(event);
     }
@@ -1048,6 +1554,12 @@ function handleFrame(json: string): void {
     }
     if (event.type === "bench.subject-accepted") {
       for (const listener of benchSubjectAcceptedListeners) listener(event);
+    }
+    if (event.type === "reference.images") {
+      for (const listener of referenceImageListeners) listener(event);
+    }
+    if (event.type === "world.artifacts") {
+      for (const listener of worldArtifactListeners) listener(event);
     }
     if (event.type === "world-chat.media-opened") {
       for (const listener of worldChatMediaListeners) listener(event);
@@ -1065,6 +1577,7 @@ function handleFrame(json: string): void {
       for (const listener of filedBatchListeners) listener(event);
     }
     if (event.type === "proposal.blocked") {
+      if (event.requestId !== undefined && gateRequests.has(event.requestId)) gateAnswers.add(event.requestId);
       gateNotices = {
         ...gateNotices,
         [event.proposalId]: {
@@ -1073,6 +1586,7 @@ function handleFrame(json: string): void {
           ...(event.authoritativeSignature !== undefined
             ? { authoritativeSignature: event.authoritativeSignature }
             : {}),
+          ...(event.requestId !== undefined ? { requestId: event.requestId } : {}),
         },
       };
     } else if (event.type === "proposal.resolved") {
@@ -1097,18 +1611,58 @@ function handleFrame(json: string): void {
       };
     } else if (event.type === "setup.status") {
       setupStatus = event.setup;
+    } else if (event.type === "genesis.image-error") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imageError: event.detail, decisionPending: undefined } };
+    } else if (event.type === "genesis.images") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], images: event.images, imageError: undefined, readiness: undefined, decisionPending: genesis[event.genesisId]?.decisionPending === "image" ? undefined : genesis[event.genesisId]?.decisionPending } };
+    } else if (event.type === "genesis.voices") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], voices: event.voices, readiness: undefined, decisionPending: genesis[event.genesisId]?.decisionPending === "voice" ? undefined : genesis[event.genesisId]?.decisionPending } };
+    } else if (event.type === "genesis.readiness") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], readiness: event.review, readinessPending: false } };
+    } else if (event.type === "genesis.import-error") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], importError: event.detail, decisionPending: undefined } };
+    } else if (event.type === "genesis.imports") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imports: event.imports, importError: undefined, readiness: undefined, decisionPending: genesis[event.genesisId]?.decisionPending === "import" ? undefined : genesis[event.genesisId]?.decisionPending } };
+    } else if (event.type === "genesis.review") {
+      if (genesis[event.genesisId]?.reviewRequestId === event.requestId) {
+        genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review, reviewPending: false, readiness: undefined } };
+      }
+    } else if (event.type === "genesis.discarded") {
+      discardedGenesis.add(event.genesisId);
+      genesis = { ...genesis };
+      delete genesis[event.genesisId];
+    } else if (event.type === "genesis.loaded") {
+      if (discardedGenesis.has(event.genesisId)) return;
+      if ((event.revision ?? 0) < (genesis[event.genesisId]?.revision ?? 0)) return;
+      const messages = new Map(event.turns.map(turn => [turn.id, turn]));
+      for (const turn of genesis[event.genesisId]?.turns ?? []) {
+        if (turn.id && !messages.has(turn.id)) messages.set(turn.id, { ...turn, id: turn.id });
+      }
+      genesis = { ...genesis, [event.genesisId]: {
+        ...emptyGenesis(), ...genesis[event.genesisId],
+        turns: [...messages.values()].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)), blueprint: event.blueprint,
+        revision: event.revision, attachments: event.attachments, status: event.status, conversationId: event.conversationId, readiness: undefined, readinessPending: false,
+        founding: event.founding,
+        formHandoff: event.formHandoff,
+        frozenModels: event.frozenModels,
+        frozenGenerateImages: event.frozenGenerateImages,
+        review: undefined, reviewRequestId: ulid(), reviewPending: false,
+        ...(event.detail ? { detail: event.detail } : {}),
+        ...(event.worldId ? { worldId: event.worldId } : {}),
+      } };
     } else if (event.type === "genesis.turn") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
       genesis = {
         ...genesis,
         [event.genesisId]: {
           ...g,
-          turns: [...g.turns, { role: event.role, text: event.text, at: event.at }],
+          turns: event.messageId && g.turns.some(t => t.id === event.messageId) ? g.turns :
+            [...g.turns, { ...(event.messageId ? { id: event.messageId } : {}), role: event.role, text: event.text, at: event.at }],
         },
       };
     } else if (event.type === "genesis.blueprint") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
-      genesis = { ...genesis, [event.genesisId]: { ...g, blueprint: event.blueprint } };
+      genesis = { ...genesis, [event.genesisId]: { ...g, blueprint: event.blueprint, revision: event.revision, readiness: undefined, review: undefined, reviewRequestId: ulid() } };
     } else if (event.type === "world-image.plan") {
       keyArtPlans = {
         ...keyArtPlans,
@@ -1139,6 +1693,7 @@ function handleFrame(json: string): void {
         [event.genesisId]: {
           ...g,
           status: event.status,
+          ...(event.status === "failed" ? { readinessPending: false, reviewPending: false, decisionPending: undefined } : {}),
           // The clock starts when the turn does; a settled turn takes its working line with it.
           runStartedAt: event.status === "running" ? event.at : g.runStartedAt,
           working: event.status === "running" ? g.working : null,
@@ -1191,6 +1746,293 @@ function handleFrame(json: string): void {
           state: event.outcome === "found" ? "found" : event.outcome,
           found: event.found,
           dropped: event.dropped,
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      };
+    } else if (event.type === "continuity.started") {
+      deriving = {
+        ...deriving,
+        [`${event.worldId}/${event.productionId}/${event.chapterId}`]: { state: "deriving", placed: 0, dropped: 0, omitted: 0, cut: 0 },
+      };
+    } else if (event.type === "continuity.finished") {
+      deriving = {
+        ...deriving,
+        [`${event.worldId}/${event.productionId}/${event.chapterId}`]: {
+          state: event.outcome,
+          placed: event.placed,
+          dropped: event.dropped,
+          omitted: event.omitted,
+          cut: event.cut,
+          ...(event.record !== undefined ? { record: event.record } : {}),
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      };
+    } else if (event.type === "manuscript.read-result") {
+      manuscripts = {
+        ...manuscripts,
+        [event.requestId]:
+          event.cancelled === true
+            ? { state: "cancelled" }
+            : event.reason !== undefined
+            ? { state: "refused", ...(event.fileName !== undefined ? { fileName: event.fileName } : {}), reason: event.reason }
+            : {
+                state: "read",
+                fileName: event.fileName ?? "",
+                words: event.words ?? 0,
+                chapters: event.chapters ?? [],
+                ...(event.headingLevel !== undefined ? { headingLevel: event.headingLevel } : {}),
+                leftOut: event.leftOut ?? 0,
+                levels: event.levels ?? [],
+                notes: event.notes ?? 0,
+                links: event.links ?? 0,
+                after: event.after ?? 0,
+              },
+      };
+    } else if (event.type === "manuscript.import-result") {
+      const held = manuscripts[event.requestId] ?? { state: "read" as const };
+      manuscripts = {
+        ...manuscripts,
+        [event.requestId]:
+          event.reason !== undefined
+            ? { ...held, state: "failed", reason: event.reason }
+            : { ...held, state: "imported", created: event.created ?? 0, ...(event.after !== undefined ? { after: event.after } : {}) },
+      };
+    } else if (event.type === "voices.started") {
+      casting = {
+        ...casting,
+        [`${event.worldId}/${event.productionId}/${event.chapterId}`]: { state: "casting", lines: 0, dropped: 0, omitted: 0 },
+      };
+    } else if (event.type === "voices.record") {
+      // A pin written or refused (turn 155): the record as it stands now, which the chapter takes
+      // as it takes a finished cast's, or the refusal beside whatever the cast was.
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const held = casting[key];
+      casting = {
+        ...casting,
+        [key]:
+          event.record !== undefined
+            ? { state: "cast", lines: event.record.lines.length, dropped: event.record.dropped, omitted: event.record.omitted, record: event.record }
+            : { ...(held ?? { state: "cast" as const, lines: 0, dropped: 0, omitted: 0 }), pinRefused: event.refused ?? "refused" },
+      };
+    } else if (event.type === "voices.finished") {
+      casting = {
+        ...casting,
+        [`${event.worldId}/${event.productionId}/${event.chapterId}`]: {
+          state: event.outcome,
+          lines: event.lines,
+          dropped: event.dropped,
+          omitted: event.omitted,
+          ...(event.record !== undefined ? { record: event.record } : {}),
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      };
+    } else if (event.type === "audiobook.started") {
+      // A replayed start carries no counts and reaches every refresh, not only a reconnect: a
+      // window that already holds the run keeps what it knows — its progress, or that it has
+      // finished — and one that does not learns a run is going and can be stopped.
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      if (event.replayed !== true || audiobook[key] === undefined) {
+        audiobook = {
+          ...audiobook,
+          [key]: { state: "reading", requestId: event.requestId, toMake: event.toMake, blocks: event.blocks, made: event.made ?? 0, flagged: 0 },
+        };
+      }
+      // The run's request is minted by the coordinator, so it is registered here rather than
+      // at send time: a cloned voice's upload consent is routed by request (codex on PR 1180),
+      // and without this entry the consent would be dropped on the floor and the run would
+      // wait for an answer no window could give. A chapter read under the book carries the
+      // book's request, whose command is registered already and stands (codex on PR 1187).
+      if (!pendingQueueRequests.has(event.requestId)) pendingQueueRequests.set(event.requestId, { command: "read-audiobook-chapter" });
+    } else if (event.type === "audiobook.priced") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const held = audiobook[key] ?? { toMake: 0, blocks: 0, made: 0, flagged: 0 };
+      audiobook = {
+        ...audiobook,
+        [key]: { ...held, state: "priced", price: { characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices } },
+      };
+    } else if (event.type === "audiobook.progress") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const held = audiobook[key] ?? { state: "reading" as const, toMake: event.toMake, blocks: 0, made: 0, flagged: 0 };
+      audiobook = {
+        ...audiobook,
+        [key]: {
+          ...held,
+          state: "reading",
+          toMake: event.toMake,
+          made: event.made,
+          flagged: held.flagged + (event.outcome === "flagged" ? 1 : 0),
+          last: { block: event.block, outcome: event.outcome, ...(event.reason !== undefined ? { reason: event.reason } : {}) },
+        },
+      };
+    } else if (event.type === "audiobook.finished") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const held = audiobook[key] ?? { toMake: 0, blocks: 0, made: 0, flagged: 0 };
+      audiobook = {
+        ...audiobook,
+        [key]: {
+          ...held,
+          state: event.outcome,
+          made: event.made,
+          flagged: event.flagged,
+          price: undefined,
+          ...(event.record !== undefined ? { record: event.record } : {}),
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      };
+    } else if (event.type === "audiobook.script") {
+      if (speakerLines[event.requestId] !== undefined) {
+        speakerLines = {
+          ...speakerLines,
+          [event.requestId]:
+            event.refused !== undefined
+              ? { kind: "script", state: "refused", refused: event.refused }
+              : { kind: "script", state: "done", ...(event.output !== undefined ? { output: event.output } : {}), ...(event.lines !== undefined ? { lines: event.lines } : {}), ...(event.notCast !== undefined ? { notCast: event.notCast } : {}) },
+        };
+      }
+    } else if (event.type === "audiobook.lines-staged") {
+      if (speakerLines[event.requestId] !== undefined) {
+        speakerLines = {
+          ...speakerLines,
+          [event.requestId]: event.refused !== undefined ? { kind: "files", state: "refused", refused: event.refused } : { kind: "files", state: "done", rows: event.rows },
+        };
+      }
+    } else if (event.type === "audiobook.narrator-quote") {
+      if (narratorQuotes[event.requestId] !== undefined) {
+        narratorQuotes = {
+          ...narratorQuotes,
+          [event.requestId]:
+            event.refused !== undefined
+              ? { state: "refused", refused: event.refused }
+              : { state: "done", stale: event.stale ?? 0, held: event.held ?? 0, directed: event.directed ?? 0, estimatedMicroUsd: event.estimatedMicroUsd ?? 0, kept: event.kept ?? 0 },
+        };
+      }
+    } else if (event.type === "audiobook.heard") {
+      if (heardLines[event.requestId] !== undefined) {
+        heardLines = { ...heardLines, [event.requestId]: event.file !== undefined ? { state: "done", file: event.file } : event.quote !== undefined ? { state: "priced", ...event.quote } : { state: "refused", refused: event.refused ?? "could not hear it" } };
+      }
+    } else if (event.type === "audiobook.lines-kept") {
+      const held = speakerLines[event.requestId];
+      if (held !== undefined) {
+        speakerLines = { ...speakerLines, [event.requestId]: { ...held, state: "done", kept: event.kept, ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
+      }
+    } else if (event.type === "audiobook.take-staged") {
+      const held = stagedTakes[event.requestId];
+      if (held !== undefined) {
+        stagedTakes = {
+          ...stagedTakes,
+          [event.requestId]:
+            event.refused !== undefined
+              ? { ...held, state: "refused", refused: event.refused }
+              : {
+                  ...held,
+                  state: "staged",
+                  ...(event.file !== undefined ? { file: event.file } : {}),
+                  checks: {
+                    durationSec: event.durationSec ?? null,
+                    sampleRateHz: event.sampleRateHz ?? null,
+                    channels: event.channels ?? null,
+                    rmsDbfs: event.rmsDbfs ?? null,
+                    samplePeakDbfs: event.samplePeakDbfs ?? null,
+                    noiseFloor: event.noiseFloor ?? "unavailable",
+                    words: event.words ?? "unchecked",
+                    differences: event.differences ?? 0,
+                  },
+                },
+        };
+      }
+    } else if (event.type === "audiobook.record") {
+      // A recording kept, or refused at the keep (turn 155c): its own answer, by its request id.
+      if (event.requestId !== undefined && stagedTakes[event.requestId] !== undefined) {
+        const { [event.requestId]: kept, ...rest } = stagedTakes;
+        stagedTakes = event.record !== undefined ? rest : { ...rest, [event.requestId]: { ...kept!, state: "staged", refused: event.refused ?? "refused" } };
+      }
+      // A write outside a run (turn 146): the record, or why nothing was written. A card being
+      // accepted takes the answer as its own — accepted, or refused and held for another try.
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const seq = (audiobookRecords[key]?.seq ?? 0) + 1;
+      audiobookRecords = { ...audiobookRecords, [key]: { seq, ...(event.record !== undefined ? { record: event.record } : {}), ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
+      // Only its own answer (codex on PR 1186): another window's block write lands as the same
+      // event, and would otherwise mark the card accepted while the acceptance itself is still
+      // on its way to a refusal it could no longer show.
+      const card = direction[key];
+      if (card?.state === "accepting" && event.requestId !== undefined && event.requestId === card.requestId) {
+        direction = {
+          ...direction,
+          [key]: event.record !== undefined
+            ? { ...card, state: "accepted", dropped: card.dropped + (event.dropped ?? 0), proposed: undefined, requestId: undefined }
+            : { ...card, state: "directed", requestId: undefined, ...(event.refused !== undefined ? { reason: event.refused } : {}) },
+        };
+      }
+    } else if (event.type === "audiobook.door") {
+      // The latest ask's answer alone, and only for the world that is open: a superseded
+      // answer is older news, and one for a world since closed would repopulate a same-named
+      // production in the next (codex on PR 1187).
+      if (doorRequests.get(`${event.worldId}/${event.productionId}`) === event.requestId && current.state?.world?.meta.worldId === event.worldId) {
+        audiobookDoor = { ...audiobookDoor, [event.productionId]: { door: event.door, requestId: event.requestId, ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
+      }
+    } else if (event.type === "audiobook.book-started") {
+      // The book's state is keyed by production, and productions recur by name across worlds:
+      // a run's late word from a world since closed is not this world's (codex on PR 1187).
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        // A replayed start carries the counts the book has reached: a window that holds the
+        // run keeps what it knows, and one that rejoined takes them.
+        if (event.replayed !== true || audiobookBook[event.productionId] === undefined) {
+          audiobookBook = {
+            ...audiobookBook,
+            [event.productionId]: { state: "reading", requestId: event.requestId, chapters: event.chapters, blocks: event.blocks, done: event.done ?? 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 },
+          };
+        }
+        // The book's request is the coordinator's (SPEC-047 R-17): a cloned voice's consent is
+        // routed by it, so it is registered here as the chapter's is.
+        pendingQueueRequests.set(event.requestId, { command: "read-audiobook-book" });
+      }
+    } else if (event.type === "audiobook.book-priced") {
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        const held = audiobookBook[event.productionId] ?? { chapters: event.chapters, blocks: event.blocks, done: 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 };
+        audiobookBook = { ...audiobookBook, [event.productionId]: { ...held, state: "priced", price: event } };
+      }
+    } else if (event.type === "audiobook.book-progress") {
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        const held = audiobookBook[event.productionId] ?? { chapters: event.chapters, blocks: 0, done: 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 };
+        audiobookBook = { ...audiobookBook, [event.productionId]: { ...held, state: "reading", done: event.done, chapters: event.chapters } };
+      }
+    } else if (event.type === "audiobook.book-finished") {
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        const held = audiobookBook[event.productionId] ?? { chapters: 0, blocks: 0, done: 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 };
+        audiobookBook = {
+          ...audiobookBook,
+          [event.productionId]: {
+            ...held,
+            state: event.outcome,
+            price: undefined,
+            chaptersRead: event.chaptersRead,
+            chaptersRefused: event.chaptersRefused,
+            made: event.made,
+            flagged: event.flagged,
+            ...(event.reason !== undefined ? { reason: event.reason } : {}),
+          },
+        };
+      }
+    } else if (event.type === "audiobook.conformed") {
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        audiobookNotes = { ...audiobookNotes, [event.productionId]: { dropped: event.dropped, held: event.held ?? 0, chapters: event.chapters, seq: (audiobookNotes[event.productionId]?.seq ?? 0) + 1 } };
+      }
+    } else if (event.type === "direction.started") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      // A replay reaches every refresh: a window that already holds the run keeps what it knows.
+      if (direction[key]?.state !== "directing") direction = { ...direction, [key]: { state: "directing", directed: 0, dropped: 0 } };
+    } else if (event.type === "direction.finished") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      direction = {
+        ...direction,
+        [key]: {
+          state: event.outcome,
+          directed: event.directed,
+          dropped: event.dropped,
+          ...(event.summary !== undefined ? { summary: event.summary } : {}),
+          ...(event.proposed !== undefined ? { proposed: event.proposed } : {}),
+          ...(event.hash !== undefined ? { hash: event.hash } : {}),
+          ...(event.chapterVersion !== undefined ? { chapterVersion: event.chapterVersion } : {}),
           ...(event.reason !== undefined ? { reason: event.reason } : {}),
         },
       };
@@ -1277,6 +2119,8 @@ function handleFrame(json: string): void {
           previewLine: event.previewLine,
           cloudPreviewMicroUsd: event.cloudPreviewMicroUsd,
           previewMicroUsdByVoice: event.previewMicroUsdByVoice,
+          previewQuoteByVoice: event.previewQuoteByVoice,
+          notices: event.notices,
         },
       };
     } else if (event.type === "voice.preview") {
@@ -1302,6 +2146,11 @@ function handleFrame(json: string): void {
       }
     } else if (event.type === "dictation.result") {
       dictation = { ...dictation, [event.requestId]: { text: event.text, error: event.error } };
+    } else if (event.type === "world-chat.send-result") {
+      sendResults = new Map([...sendResults, [event.requestId, event] as const].slice(-50));
+      for (const listener of sendResultListeners) listener(event);
+    } else if (event.type === "world-chat.upload-result") {
+      browserUploadResults.get(event.requestId)?.(event.reason);
     } else if (event.type === "world-chat.attachment-refused") {
       // The last few only: a refusal is news for a moment, not a list to work through — the same
       // rule the composer applies to the ones it raises itself.
@@ -1391,6 +2240,7 @@ function handleFrame(json: string): void {
           outcome: event.outcome,
           reason: event.reason,
           sizeBytes: event.sizeBytes,
+          ...(event.production !== undefined ? { production: event.production } : {}),
         },
       ];
     }
@@ -1419,6 +2269,7 @@ function handleFrame(json: string): void {
       exportsState = {
         ...exportsState,
         [event.exportId]: {
+          worldId: event.worldId,
           productionId: event.productionId,
           ...(event.episodeId !== undefined ? { episodeId: event.episodeId } : {}),
           status: event.status,
@@ -1485,6 +2336,19 @@ function handleFrame(json: string): void {
       keyArtPlans,
       setupStatus,
       reading,
+      deriving,
+      casting,
+      audiobook,
+      direction,
+      audiobookRecords,
+      stagedTakes,
+      speakerLines,
+      narratorQuotes,
+      heardLines,
+      audiobookDoor,
+      audiobookBook,
+      audiobookNotes,
+      manuscripts,
       archiveNote,
       permissions,
       askResults,
@@ -1527,9 +2391,10 @@ function handleFrame(json: string): void {
 
 function handleStatus(status: ConnectionStatus): void {
   if (status !== "open") pendingQueueRequests.clear();
-  emitChange({ ...current, connection: status });
+  emitChange({ ...current, connection: status, ...(status !== "open" ? { genesis: Object.fromEntries(Object.entries(current.genesis).map(([id, draft]) => [id, { ...draft, readinessPending: false, reviewPending: false, decisionPending: undefined }])) } : {}) });
   if (status === "open") {
     reconnectAttempts = 0;
+    rejoining = true;
     send({ kind: "hello", lastSeq });
   }
   if (status === "closed") {
@@ -1539,8 +2404,21 @@ function handleStatus(status: ConnectionStatus): void {
   }
 }
 
+/**
+ * Try the connection again now rather than at the next backoff step. The launch surface's
+ * "Try again" (design turn 158): someone on a phone who has just woken their computer should not
+ * sit out a ten-second backoff to find out it worked.
+ */
+export function reconnectNow(): void {
+  if (current.connection === "open" || current.connection === "connecting") return;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  reconnectAttempts = 0;
+  bridge?.connect();
+}
+
 /** Dev fallback: the same bridge surface over a plain WebSocket to the dev coordinator. */
-function devBridge(url: string): ArkeBridge {
+export function devBridge(url: string): ArkeBridge {
   let socket: WebSocket | null = null;
   let onFrame: ((json: string) => void) | null = null;
   let onStatus: ((s: ConnectionStatus) => void) | null = null;
@@ -1551,11 +2429,15 @@ function devBridge(url: string): ArkeBridge {
       if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING))
         return;
       onStatus?.("connecting");
-      socket = new WebSocket(url);
+      socket = new WebSocket(url, remoteSocketProtocols(url));
       socket.addEventListener("open", () => onStatus?.("open"));
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (event) => {
         socket = null;
-        onStatus?.("closed");
+        if (isRemoteSession() && event.code === 1008 && event.reason === "session authentication required") {
+          window.location.reload();
+          return;
+        }
+        onStatus?.(event.code === 1008 && event.reason === "session authentication required" ? "auth-refused" : "closed");
       });
       socket.addEventListener("message", (e) => {
         if (typeof e.data === "string") onFrame?.(e.data);
@@ -1578,12 +2460,18 @@ function devBridge(url: string): ArkeBridge {
 export function initStore(): void {
   if (bridge) return;
   const devUrl = (import.meta.env?.VITE_ARKE_WS as string | undefined) ?? "ws://127.0.0.1:8791";
-  bridge = window.arke ?? devBridge(devUrl);
+  bridge = window.arke ?? devBridge(remoteSocketUrl() ?? devUrl);
   bridge.subscribe(handleFrame, handleStatus);
   bridge.connect();
 }
 
 export function send(msg: ClientMessage): boolean {
+  if (isRemoteSession() && isRemoteHostCommand(msg)) {
+    if ("requestId" in msg && typeof msg.requestId === "string") pendingQueueRequests.delete(msg.requestId);
+    const refusal = RemoteCommandRefusalSchema.parse({ kind: "command-refused", refused: "host-only", command: msg.kind });
+    for (const listener of remoteRefusalListeners) listener(refusal);
+    return false;
+  }
   if (!bridge || current.connection !== "open") return false;
   bridge.send(JSON.stringify(msg));
   return true;
@@ -1604,6 +2492,8 @@ export function createWorld(input: {
   bible?: string;
   /** Begun from a conversation: its attachments are filed into the world as it opens. */
   genesisId?: string;
+  /** The genesis card's models (design turn 153), written into the new world. */
+  models?: ModelChoices;
 }): void {
   send({ kind: "create-world", ...input });
 }
@@ -1626,6 +2516,9 @@ export function attachFiles(worldId: string, links?: string[], production?: stri
 export function hostCanAttach(): boolean {
   return typeof bridge?.attachDropped === "function" && typeof bridge?.attachBytes === "function";
 }
+
+/** Conversations accept device bytes through the paired browser's authenticated connection. */
+export function canAttachConversationFiles(): boolean { return isRemoteSession() || hostCanAttach(); }
 
 /** An extension for bytes that arrived with none — from what the clipboard said they are. */
 const EXT_BY_TYPE: Record<string, string> = {
@@ -1653,6 +2546,31 @@ export async function attachHostFiles(
   target: AttachTarget,
   files: readonly File[],
 ): Promise<ReadonlyArray<{ name: string; reason: string }>> {
+  if (isRemoteSession()) {
+    const trouble: Array<{ name: string; reason: string }> = [];
+    for (const file of files) {
+      const name = nameFor(file);
+      if (target.kind !== "world-chat-attach") { trouble.push({ name, reason: "Attach this file in a conversation." }); continue; }
+      if (file.size === 0 || file.size > BROWSER_ATTACHMENT_MAX_BYTES || name.length > 255) {
+        trouble.push({ name, reason: "Choose a non-empty file up to 16 MB with a shorter name." }); continue;
+      }
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const chunks: string[] = [];
+        for (let offset = 0; offset < bytes.length; offset += 32768) chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 32768)));
+        const requestId = crypto.randomUUID();
+        const reason = await new Promise<string | undefined>(resolve => {
+          const finish = (reason?: string) => { clearTimeout(timeout); browserUploadResults.delete(requestId); resolve(reason); };
+          const timeout = setTimeout(() => finish("The upload was not confirmed. Check the connection before trying again."), 60_000);
+          browserUploadResults.set(requestId, finish);
+          if (!send({ kind: "world-chat-upload", requestId, worldId: target.worldId, conversationId: target.conversationId, name, data: btoa(chunks.join("")) }))
+            finish("The studio is disconnected. Attach the file again when it reconnects.");
+        });
+        if (reason) trouble.push({ name, reason });
+      } catch { trouble.push({ name, reason: "It could not be read." }); }
+    }
+    return trouble;
+  }
   const host = bridge;
   if (!host?.attachDropped || !host.attachBytes) {
     return files.map((f) => ({ name: nameFor(f), reason: "attaching needs the desktop app" }));
@@ -1683,6 +2601,7 @@ export async function attachHostText(
   text: string,
   name: string,
 ): Promise<ReadonlyArray<{ name: string; reason: string }>> {
+  if (isRemoteSession()) return attachHostFiles(target, [new File([text], name, { type: "text/plain" })]);
   const host = bridge;
   if (!host?.attachBytes) return [{ name, reason: "attaching needs the desktop app" }];
   try {
@@ -1774,9 +2693,10 @@ export function uploadMasterLook(worldId: string): void {
  * Stage an image for a generation to look at (design 67). Same picker, same one-way street: the
  * renderer asks, and learns from the snapshot that a reference is now attached.
  */
-export function pickStagedReference(worldId: string, key: string): void {
+export function pickStagedReference(worldId: string, key: string, source?: string | { slug: string; path: string }): void {
   send({
     kind: "pick-staged-reference",
+    ...(typeof source === "string" ? { worldFile: source } : source ? { image: source } : {}),
     worldId,
     key,
     requestId: queueRequest("pick-staged-reference"),
@@ -1885,12 +2805,23 @@ export function setArtDirection(worldId: string, description: string, masterLook
   }) ? requestId : null;
 }
 
-export function acceptProposal(worldId: string, proposalId: string, confirmRipples?: string): void {
-  send({
+/** True when the accept went out; false when the transport is down. */
+export function acceptProposal(
+  worldId: string,
+  proposalId: string,
+  confirmRipples?: string,
+  expectedDraftRevision?: number,
+  /** Echoed on a refusal, so the screen that pressed knows the answer is its own (PR 1232). */
+  requestId?: string,
+): boolean {
+  if (requestId !== undefined) gateRequests.add(requestId);
+  return send({
     kind: "proposal-accept",
     worldId,
     proposalId,
+    ...(requestId !== undefined ? { requestId } : {}),
     ...(confirmRipples !== undefined ? { confirmRipples } : {}),
+    ...(expectedDraftRevision !== undefined ? { expectedDraftRevision } : {}),
   });
 }
 
@@ -1930,6 +2861,35 @@ export function resolveProposalChoice(
     proposalId,
     choiceId,
     optionId,
+    expectedDraftRevision,
+  });
+}
+
+/**
+ * Keep part of a staged passage revision (turn 128): the span as the screen drew it, and the edits
+ * kept by index; the gate composes the passage. Fenced to the draft revision shown, as a field
+ * edit is. False when nothing was sent, so the screen does not wait for an answer that cannot come.
+ */
+export function updateProposalPassage(
+  worldId: string,
+  proposalId: string,
+  path: string,
+  span: { before: string; after: string },
+  kept: readonly number[],
+  expectedDraftRevision: number,
+  /** The keep's own id: sent again after a rejoin, the gate makes the same edit once (PR 1232). */
+  requestId: string = crypto.randomUUID(),
+): boolean {
+  gateRequests.add(requestId);
+  return send({
+    kind: "proposal-update-passage",
+    worldId,
+    requestId,
+    proposalId,
+    path,
+    before: span.before,
+    after: span.after,
+    kept: [...kept],
     expectedDraftRevision,
   });
 }
@@ -2001,7 +2961,72 @@ export function refreshDiagnostics(): void {
 }
 
 export function genesisChat(genesisId: string, text: string): void {
+  discardedGenesis.delete(genesisId);
   send({ kind: "genesis-chat", genesisId, text });
+}
+
+export function listGenesisDrafts(): void { send({ kind: "genesis-list" }); }
+export function loadGenesisDraft(genesisId: string): void { if (discardedGenesis.has(genesisId)) return; send({ kind: "genesis-load", genesisId }); }
+function genesisReviewRequest(genesisId: string): string {
+  const requestId = ulid();
+  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...current.genesis[genesisId], reviewRequestId: requestId, reviewPending: true }, }, buildPlans: { ...current.buildPlans, [genesisId]: {} } });
+  return requestId;
+}
+export function reviewGenesisDraft(genesisId: string): void {
+  if (current.genesis[genesisId]?.founding || current.genesis[genesisId]?.worldId) return;
+  send({ kind: "genesis-review", genesisId, requestId: genesisReviewRequest(genesisId) });
+}
+export function reviewGenesisImages(genesisId: string, models?: Partial<Record<import("@arke-studio/contracts").Capability, string>>): void {
+  send({ kind: "genesis-images", genesisId, ...(models ? { models } : {}) });
+}
+export function reviewGenesisVoices(genesisId: string): void { send({ kind: "genesis-voices", genesisId }); }
+function beginReadinessRequest(genesisId: string): boolean {
+  if (!bridge || current.connection !== "open" || (current.genesis[genesisId]?.decisionPending || current.genesis[genesisId]?.readinessPending || current.genesis[genesisId]?.reviewPending || current.genesis[genesisId]?.founding)) return false;
+  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...current.genesis[genesisId], readinessPending: true } } });
+  return true;
+}
+export function reviewGenesisReadiness(genesisId: string): void {
+  if (beginReadinessRequest(genesisId)) send({ kind: "genesis-readiness", genesisId });
+}
+export function leaveGenesisFinding(genesisId: string, findingId: string, digest: string): void {
+  if (!beginReadinessRequest(genesisId)) return;
+  send({ kind: "genesis-readiness-leave", genesisId, requestId: ulid(), findingId, digest });
+}
+function beginGenesisDecision(genesisId: string, kind: "image" | "voice" | "import"): boolean {
+  const draft = current.genesis[genesisId];
+  if (!bridge || current.connection !== "open" || draft?.decisionPending || draft?.readinessPending || draft?.reviewPending || draft?.founding || draft?.worldId) return false;
+  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...draft, decisionPending: kind, readiness: undefined } } });
+  return true;
+}
+export function generateGenesisVoice(genesisId: string, intentId: string, digest: string): void {
+  if (!beginGenesisDecision(genesisId, "voice")) return;
+  send({ kind: "genesis-voice-generate", genesisId, intentId, digest, requestId: ulid() });
+}
+export function decideGenesisVoice(genesisId: string, target: string, decision: "approve" | "reject" | "unassign", candidate?: import("@arke-studio/contracts").GenesisVoiceCandidate): void {
+  if (!beginGenesisDecision(genesisId, "voice")) return;
+  send({ kind: "genesis-voice-decide", genesisId, requestId: ulid(), target, decision,
+    ...(candidate ? { candidateId: candidate.id, hash: candidate.hash } : {}) });
+}
+export function reviewGenesisImports(genesisId: string): void { send({ kind: "genesis-imports", genesisId }); }
+export function resolveGenesisImport(genesisId: string, resolution: import("@arke-studio/contracts").GenesisImportResolve): void {
+  if (!beginGenesisDecision(genesisId, "import")) return;
+  send({ kind: "genesis-import-resolve", genesisId, resolution });
+}
+export function generateGenesisImage(genesisId: string, intentId: string, digest: string, models?: Partial<Record<import("@arke-studio/contracts").Capability, string>>): void {
+  if (!beginGenesisDecision(genesisId, "image")) return;
+  send({ kind: "genesis-image-generate", genesisId, intentId, digest, requestId: ulid(), ...(models ? { models } : {}) });
+}
+export function decideGenesisImage(genesisId: string, target: string, decision: "approve" | "reject" | "unassign", candidate?: import("@arke-studio/contracts").GenesisImageCandidate): void {
+  if (!beginGenesisDecision(genesisId, "image")) return;
+  send({ kind: "genesis-image-decide", genesisId, requestId: ulid(), target, decision, ...(candidate ? { candidateId: candidate.id, hash: candidate.hash } : {}) });
+}
+export function proposeGenesisWorld(genesisId: string, draft: import("@arke-studio/contracts").GenesisDraft): void {
+  send({ kind: "genesis-propose-world", genesisId, draft });
+}
+export function decideGenesisDraft(genesisId: string, choices: Array<{ key: string; digest: string }>, decision: "approve" | "reject"): void {
+  const draft = current.genesis[genesisId];
+  if (draft?.decisionPending || draft?.readinessPending || draft?.reviewPending || draft?.founding || draft?.worldId) return;
+  send({ kind: "genesis-decide", genesisId, choices: choices.slice(0, 300), decision, requestId: genesisReviewRequest(genesisId) });
 }
 
 export function genesisDiscard(genesisId: string): void {
@@ -2010,14 +3035,30 @@ export function genesisDiscard(genesisId: string): void {
 
 // ---- The founding build (SPEC-031) ----------------------------------------
 
-export function planFoundingBuild(genesisId: string, requestId: string, look?: string): void {
+export function planFoundingBuild(genesisId: string, requestId: string, look?: string, models?: ModelChoices, generateImages = true): void {
   // The same look the press will send: the review's master-look note is only true if it asks
   // the carry question against the words the world would actually be founded on (SPEC-031 R-54).
-  send({ kind: "plan-founding-build", genesisId, requestId, ...(look !== undefined ? { look } : {}) });
+  // The same holds for the models: the review prices the build on the model the press will use.
+  send({
+    kind: "plan-founding-build",
+    generateImages,
+    genesisId,
+    requestId,
+    ...(look !== undefined ? { look } : {}),
+    ...(models !== undefined ? { models } : {}),
+  });
 }
 
-export function beginFoundingBuild(genesisId: string, requestId: string, look?: string): void {
-  send({ kind: "begin-founding-build", genesisId, requestId, ...(look !== undefined ? { look } : {}) });
+export function beginFoundingBuild(genesisId: string, requestId: string, look?: string, models?: ModelChoices, approvalDigest?: string, generateImages = true): void {
+  send({
+    kind: "begin-founding-build",
+    generateImages,
+    ...(approvalDigest ? { approvalDigest } : {}),
+    genesisId,
+    requestId,
+    ...(look !== undefined ? { look } : {}),
+    ...(models !== undefined ? { models } : {}),
+  });
 }
 
 export function stopFoundingBuild(worldId: string): void {
@@ -2034,8 +3075,8 @@ export function dismissBuildNotice(worldId: string): void {
 }
 
 /** One picture of the look, from inside the conversation (SPEC-031 R-50) — a person pressed. */
-export function generateLookPreview(genesisId: string): void {
-  send({ kind: "generate-look-preview", genesisId, requestId: ulid() });
+export function generateLookPreview(genesisId: string, models?: ModelChoices): void {
+  send({ kind: "generate-look-preview", genesisId, requestId: ulid(), ...(models !== undefined ? { models } : {}) });
 }
 
 /** What key art would carry and drop — asked when the dialog opens (SPEC-010 R-15). */
@@ -2314,6 +3355,31 @@ export function cancelVendorSignIn(): void {
   send({ kind: "cancel-vendor-sign-in" });
 }
 
+// ---- The Arke account (design turn 151) ------------------------------------
+
+/** A browser handoff, like vendor sign-in: nothing here waits on the browser or sees a password. */
+export function signInAccount(): void {
+  send({ kind: "account-sign-in" });
+}
+
+export function createAccount(): void {
+  send({ kind: "account-create" });
+}
+
+/** Takes back a handoff still waiting on the browser, or clears the refusal a rejected one left. */
+export function cancelAccountSignIn(): void {
+  send({ kind: "account-cancel-sign-in" });
+}
+
+export function signOutAccount(): void {
+  send({ kind: "account-sign-out" });
+}
+
+/** The doors that leave the app: the account's own pages, in the system browser. */
+export function openAccountPage(page: AccountPage): void {
+  send({ kind: "account-open", page });
+}
+
 export function removeVendorConnection(vendor: string, credential: string): void {
   send({ kind: "remove-vendor-connection", vendor, credential });
 }
@@ -2323,7 +3389,7 @@ export function setAgentConfig(agent: string, patch: { model?: string | null; br
   send({ kind: "set-agent-config", agent, ...patch });
 }
 
-/** Ask the harness what it can run. Nothing happens if it is not up — the list stays empty. */
+/** Refresh the running harness's catalog; discovery progress and failures arrive in app state. */
 export function listHarnessModels(): void {
   send({ kind: "list-harness-models" });
 }
@@ -2347,10 +3413,21 @@ export function setProductionModel(
   send({ kind: "set-production-model", worldId, productionId, capability, modelId });
 }
 
+/**
+ * Which model this world's own work reaches for, per capability (design turn 153). `null` clears
+ * it, which is how the world goes back to following Settings.
+ */
+export function setWorldModel(worldId: string, capability: Capability, modelId: string | null): void {
+  send({ kind: "set-world-model", worldId, capability, modelId });
+}
+
 /** Offer a model, or stop offering it. Never edits routing — a stranded default is shown instead. */
 /** Let the Studio read a page online when a conversation asks it to, or stop it. */
 export function setResearchWeb(enabled: boolean): void {
   send({ kind: "set-research-web", enabled });
+}
+export function adapterCommand(command: import("@arke-studio/contracts").AdapterAction): void {
+  send({ kind: "adapter-command", command });
 }
 
 export function setModelEnabled(modelId: string, enabled: boolean): void {
@@ -2386,6 +3463,14 @@ export function chooseClaudeExecutable(): void {
 /** Forget the chosen path and go back to whatever PATH offers. */
 export function clearClaudeExecutable(): void {
   send({ kind: "clear-claude-executable" });
+}
+
+export function chooseCodexExecutable(): void {
+  send({ kind: "choose-codex-executable" });
+}
+
+export function clearCodexExecutable(): void {
+  send({ kind: "clear-codex-executable" });
 }
 
 export function chooseVoxaExecutable(): void {
@@ -2473,6 +3558,16 @@ export function testLocalVoice(): string {
 
 export function setBackgroundNotifications(preference: ClientState["app"]["backgroundNotifications"]): void {
   send({ kind: "set-background-notifications", preference });
+}
+
+/** The Inbox was looked at: the coordinator stamps the instant the bell's dot measures against (SPEC-014 R-25). */
+export function markInboxSeen(): void {
+  send({ kind: "mark-inbox-seen" });
+}
+
+/** What's new was read up to this bundled release (SPEC-014 R-25). */
+export function markWhatsNewSeen(version: string): void {
+  send({ kind: "mark-whats-new-seen", version });
 }
 
 // ---- SPEC-009: the job queue -----------------------------------------------
@@ -2784,12 +3879,28 @@ export function requestCataloguePreview(voice: ReadingVoice): string {
 export function stopCataloguePreview(requestId: string): void {
   send({ kind: "stop-catalogue-voice-preview", requestId });
 }
+export function designVoice(worldId: string, draft: import("@arke-studio/contracts").VoiceDesignDraft, confirmedEstimateMicroUsd: number): string {
+  const requestId = queueRequest("design-voice");
+  send({ kind: "design-voice", requestId, worldId, draft, confirmedEstimateMicroUsd });
+  return requestId;
+}
+export function saveVoiceDesign(worldId: string, source: { jobId: string } | { remoteId: string }): string {
+  const requestId = ulid();
+  send({ kind: "save-designed-voice", requestId, worldId, ...source });
+  return requestId;
+}
+export function hearDesignedVoice(worldId: string, model: string, voiceId: string, text: string, confirmedSpeechMicroUsd: number): string {
+  const requestId = queueRequest("hear-designed-voice");
+  send({ kind: "hear-designed-voice", requestId, worldId, model, voiceId, text, confirmedSpeechMicroUsd });
+  return requestId;
+}
 
 /**
  * Speak a shot's line (SPEC-011 R-14). No voice argument: it is the speaker's own, read from
  * their sheet at dispatch, so a retake keeps it by construction.
  */
 export function requestVoiceLine(input: {
+  confirmedSpeechMicroUsd?: number;
   worldId: string;
   productionId: string;
   shotId: string;
@@ -2800,6 +3911,7 @@ export function requestVoiceLine(input: {
   const requestId = queueRequest("voice-line");
   send({
     kind: "voice-line",
+    ...(input.confirmedSpeechMicroUsd !== undefined ? { confirmedSpeechMicroUsd: input.confirmedSpeechMicroUsd } : {}),
     requestId,
     worldId: input.worldId,
     productionId: input.productionId,
@@ -2828,8 +3940,10 @@ export function requestVoicePreview(
   voiceUploadConfirmedFor?: string,
 ): string {
   const requestId = queueRequest("voice-preview");
+  const quoteToken = current.voiceCandidates[sheetId]?.previewQuoteByVoice?.[voiceTargetKey({ provider, model, voiceId })];
   send({
     kind: "voice-preview",
+    ...(quoteToken !== undefined ? { quoteToken } : {}),
     worldId,
     sheetId,
     provider,
@@ -2938,6 +4052,7 @@ export function readProsePage(
   sources: readonly ProseReadSource[],
   requestId = queueRequest("read-prose-page"),
   confirmationToken?: string,
+  voiceUploadConfirmedFor?: string,
 ): string {
   send({
     kind: "read-prose-page",
@@ -2945,6 +4060,7 @@ export function readProsePage(
     sources: [...sources],
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
   });
   return requestId;
 }
@@ -2973,15 +4089,15 @@ export interface StagedClip {
 export function stageVoiceClip(
   worldId: string,
   recording?: { audioBase64: string; contentType: string },
-): string {
+): string | null {
   const requestId = `clip-${crypto.randomUUID()}`;
-  send({
+  const sent = send({
     kind: "stage-voice-clip",
     worldId,
     requestId,
     source: recording ? { from: "recorded", ...recording } : { from: "chosen" },
   });
-  return requestId;
+  return sent ? requestId : null;
 }
 
 /** Cancelling the dialog: the temp file should not outlive the screen that made it. */
@@ -2999,6 +4115,8 @@ export function cloneVoice(input: {
   clipId: string;
   name: string;
   description: string;
+  /** The recording's language (ISO 639-1); the coordinator takes English when it is not said. */
+  language?: string;
   sheetId?: string;
 }): void {
   send({
@@ -3008,8 +4126,18 @@ export function cloneVoice(input: {
     name: input.name,
     description: input.description,
     consent: true,
+    ...(input.language !== undefined ? { language: input.language } : {}),
     ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
   });
+}
+
+/**
+ * Delete a cloned voice (SPEC-046 R-15): the clip, the entry, and every vendor copy after. The
+ * answer comes back on `voice.deleted` under this id; null when the studio is disconnected.
+ */
+export function deleteVoice(worldId: string, voiceId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "delete-voice", requestId, worldId, voiceId }) ? requestId : null;
 }
 
 export function useVoiceClips(): Record<string, StagedClip> {
@@ -3302,13 +4430,18 @@ export function restoreChapter(worldId: string, productionId: string, chapterFil
   send({ kind: "restore-chapter", worldId, productionId, chapterFile, version });
 }
 
-export function draftChapter(
+/** The plan on the chapter (turn 127): saved in place, no proposal, no version cut. `null` clears. */
+export function setChapterRetired(worldId: string, productionId: string, chapterFile: string, retired: boolean) {
+  send({ kind: retired ? "retire-chapter" : "restore-chapter-retired", worldId, productionId, chapterFile });
+}
+
+export function editChapterPlan(
   worldId: string,
   productionId: string,
   chapterFile: string,
-  instruction: string,
+  changes: Extract<ClientMessage, { kind: "edit-chapter-plan" }>["changes"],
 ): void {
-  send({ kind: "draft-chapter", worldId, productionId, chapterFile, instruction });
+  send({ kind: "edit-chapter-plan", worldId, productionId, chapterFile, changes });
 }
 
 export function reorderChapters(worldId: string, productionId: string, orderedFiles: string[]): void {
@@ -3338,12 +4471,11 @@ export function dispatchScenePlanned(
   policy: "review-gated" | "pre-authorized",
   resolution?: string,
   tier?: SizeTier,
-  audioReferencesDisabled?: boolean,
-  performanceAudio?: PerformanceAudioRequest[],
-  masterAudio?: MasterAudioRequest[],
-  acknowledgedRecommendationIds?: string[],
 ): string {
   const requestId = ulid();
+  // The scene page chooses nothing per dispatch (SPEC-044 R-26, R-29, R-34): the coordinator
+  // resolves the scene's cast when it plans, and dialogue guidance is not drawn, so no
+  // recommendation can have been acknowledged.
   send({
     kind: "dispatch-scene-planned",
     requestId,
@@ -3353,12 +4485,9 @@ export function dispatchScenePlanned(
     mode,
     modelId,
     policy,
-    ...(performanceAudio?.length ? { performanceAudio } : {}),
-    ...(masterAudio?.length ? { masterAudio } : {}),
-    ...(acknowledgedRecommendationIds?.length ? { acknowledgedRecommendationIds } : {}),
+    acknowledgedRecommendationIds: [],
     ...(resolution !== undefined ? { resolution } : {}),
     ...(tier !== undefined ? { tier } : {}),
-    ...(audioReferencesDisabled !== undefined ? { audioReferencesDisabled } : {}),
   });
   return requestId;
 }
@@ -3388,9 +4517,29 @@ export function listPlans(worldId: string, productionId: string): void {
   send({ kind: "list-plans", worldId, productionId });
 }
 
+/** What the scene's lines can play (SPEC-044 R-33); the answer is a rehearsal result under this id. */
+export function planTableRead(worldId: string, productionId: string, sceneId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "plan-table-read", requestId, worldId, productionId, sceneId }) ? requestId : null;
+}
+
+/** Prepare the lines that have no read, at the cost the plan quoted (R-33); answered as the plan is. */
+export function prepareTableRead(worldId: string, productionId: string, sceneId: string, confirmationToken: string, confirmedMicroUsd: number): string | null {
+  const requestId = ulid();
+  return send({ kind: "prepare-table-read", requestId, worldId, productionId, sceneId, confirmationToken, confirmedMicroUsd }) ? requestId : null;
+}
+
 /** Save the routing record (epic 401): the strict parse server-side is the no-state gate. */
 export function saveRouting(worldId: string, productionId: string, routing: unknown): void {
   send({ kind: "save-routing", worldId, productionId, routing });
+}
+
+/**
+ * One edit to the routing, as a closed command (design turn 157): applied to the file on disk,
+ * so two quick edits from the branch map both land rather than the second overwriting the first.
+ */
+export function sendRoutingCommand(worldId: string, productionId: string, command: RoutingCommand): void {
+  send({ kind: "routing-command", worldId, productionId, command });
 }
 
 /** One preview traversal, appended durably (epic 401, brief §4). */
@@ -3492,11 +4641,12 @@ export async function stagePlayblast(
   target: Extract<AttachTarget, { kind: "stage-playblast" | "conversation-action-stage-playblast-complete" }>,
   jobId: string,
   openingFrame: Uint8Array,
+  referenceFrames: Array<import("@arke-studio/contracts").StageReferenceFrame & { bytes: Uint8Array }>,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const host = bridge;
   if (!host?.finishStageExport) return { ok: false, reason: "deterministic playblast export needs the desktop app" };
   try {
-    return await host.finishStageExport(target, jobId, openingFrame);
+    return await host.finishStageExport(target, jobId, openingFrame, referenceFrames);
   } catch {
     await cancelStageExport(jobId).catch(() => {});
     return { ok: false, reason: "the Stage export could not be handed to the app" };
@@ -3601,82 +4751,48 @@ export function moveTimelineHistory(
   send({ kind: "timeline-history", worldId, productionId, action, baseRevision });
 }
 
-/** File new artifacts into the world: the host picks, the renderer never sees the bytes (82a). */
-export function uploadArtifacts(worldId: string): void {
-  send({ kind: "upload-artifacts", worldId, requestId: queueRequest("upload-artifacts") });
+/**
+ * File new artifacts: the host picks, the renderer never sees the bytes (82a).
+ *
+ * The world's shelf unless `production` names one. A production's own artifacts page is the only
+ * surface that scopes what it takes (SPEC-020 R-13, design 134); everywhere else the omission is
+ * the world saying so.
+ */
+export function uploadArtifacts(
+  worldId: string,
+  files?: readonly File[],
+  production?: string,
+): { requestId: string | null; reason?: string } {
+  return importEditorMedia(worldId, undefined, files, production);
+}
+
+export function restoreArtifact(worldId: string, artifactId: string): void {
+  send({ kind: "restore-artifact", worldId, artifactId });
+}
+
+export function retireArtifact(worldId: string, artifactId: string): void {
+  send({ kind: "retire-artifact", worldId, artifactId });
 }
 
 export function importEditorMedia(
-  worldId: string, editor: NonNullable<Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"]>,
-  files?: readonly File[],
+  worldId: string, editor: Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"],
+  files?: readonly File[], production?: string,
 ): { requestId: string | null; reason?: string } {
+  if (isRemoteSession()) return { requestId: null, reason: "Import media on the desktop app." };
   if (files && !bridge?.importDroppedMedia) return { requestId: null, reason: "File drops are available in the desktop app. Use Import media instead." };
   if (files && files.length > 16) return { requestId: null, reason: "Import up to 16 files at a time." };
   const requestId = queueRequest("upload-artifacts");
+  // Omitted rather than sent as undefined: the frame is `.strict()`, and the picker and the drop
+  // have to carry the same scope or one entrance on a page would file somewhere the other did not.
+  const scope = production !== undefined ? { production } : {};
   const submitted = files
-    ? bridge!.importDroppedMedia!({ worldId, requestId, editor }, files).submitted
-    : send({ kind: "upload-artifacts", worldId, requestId, editor });
+    ? bridge!.importDroppedMedia!({ worldId, requestId, editor, ...scope }, files).submitted
+    : send({ kind: "upload-artifacts", worldId, requestId, editor, ...scope });
   if (!submitted) {
     pendingQueueRequests.delete(requestId);
     return { requestId: null, reason: "The files could not be imported. Check the connection and use Import media." };
   }
   return { requestId };
-}
-
-/**
- * Overlays (82a): the one stored position on the cut. Placing, moving and removing are one act —
- * where a thing sits — and none of them touch the artifact, which is only ever cited.
- */
-export function placeOverlay(
-  worldId: string,
-  productionId: string,
-  artifactId: string,
-  startSec: number,
-  endSec: number,
-  lane?: number,
-): void {
-  send({
-    kind: "place-overlay",
-    worldId,
-    productionId,
-    artifactId,
-    startSec,
-    endSec,
-    ...(lane !== undefined ? { lane } : {}),
-  });
-}
-
-export function moveOverlay(
-  worldId: string,
-  productionId: string,
-  overlayId: string,
-  startSec: number,
-  endSec: number,
-  lane?: number,
-): void {
-  send({
-    kind: "move-overlay",
-    worldId,
-    productionId,
-    overlayId,
-    startSec,
-    endSec,
-    ...(lane !== undefined ? { lane } : {}),
-  });
-}
-
-/** Two clips over one file: the picture stays put and stops sounding, the sound drops a lane. */
-export function splitOverlayAudio(worldId: string, productionId: string, overlayId: string): void {
-  send({ kind: "split-overlay-audio", worldId, productionId, overlayId });
-}
-
-/** The inverse, so a split is not a one-way door: the picture sounds again and the twin goes. */
-export function rejoinOverlayAudio(worldId: string, productionId: string, overlayId: string): void {
-  send({ kind: "rejoin-overlay-audio", worldId, productionId, overlayId });
-}
-
-export function removeOverlay(worldId: string, productionId: string, overlayId: string): void {
-  send({ kind: "remove-overlay", worldId, productionId, overlayId });
 }
 
 /** A rejection requires the cited sheet and field (R-10). */
@@ -3697,14 +4813,10 @@ export function rejectTake(
   });
 }
 
-export function saveAudioTracks(worldId: string, productionId: string, cut: unknown): void {
-  send({ kind: "save-audio-tracks", worldId, productionId, cut });
-}
-
 export function exportCut(
   worldId: string,
   productionId: string,
-  preset: "review-cut" | "master" | "social-excerpt",
+  preset: import("@arke-studio/contracts").ExportPreset,
   timelineRevision: number | null,
   episodeId?: string,
   subtitles?: { trackId: `tr_${string}`; mode: "none" | "burn-in" | "sidecar" | "burn-in+sidecar"; sidecar?: "srt" | "vtt" },
@@ -3751,6 +4863,8 @@ export function exportWorld(worldId: string): void {
 }
 
 export interface ExportState {
+  /** The world the export belongs to (codex on PR 924): a production slug recurs across worlds. */
+  worldId?: string;
   productionId: string;
   /** Set when the export is one episode's deliverable (issue 396). */
   episodeId?: string;
@@ -3781,8 +4895,358 @@ export function fileArtifactMsg(
   send({ kind: "file-artifact", worldId, sourcePath, ...opts });
 }
 
-export function importFolder(worldId: string, sourcePath: string): void {
-  send({ kind: "import-folder", worldId, sourcePath });
+/** Derive continuity for one chapter (turn 129): a press, never a save. */
+export function deriveContinuity(worldId: string, productionId: string, chapterFile: string): void {
+  send({ kind: "derive-continuity", worldId, productionId, chapterFile });
+}
+
+export function stopContinuity(worldId: string, productionId: string, chapterFile: string): void {
+  send({ kind: "stop-continuity", worldId, productionId, chapterFile });
+}
+
+/** How each chapter's derivation is going, keyed by `worldId/productionId/chapterId` — the panel reads this. */
+export function useDeriving(): StoreState["deriving"] {
+  return useStore().deriving;
+}
+
+/** Cast a chapter's lines (turn 130): a press, never a save. */
+export function castVoices(worldId: string, productionId: string, chapterFile: string): boolean {
+  return send({ kind: "cast-voices", worldId, productionId, chapterFile });
+}
+
+/** A correction to the cast (design turn 155, SPEC-012 R-62): the span given a speaker, narration, or cleared. */
+export function setVoicePin(
+  worldId: string,
+  productionId: string,
+  chapterFile: string,
+  pin: { paragraph: number; occurrence: number; quote: string } & ({ speaker: string; sheet?: string } | { narration: true } | { clear: true }),
+): boolean {
+  return send({ kind: "set-voice-pin", worldId, productionId, chapterFile, ...pin });
+}
+
+export function stopVoices(worldId: string, productionId: string, chapterFile: string): void {
+  send({ kind: "stop-voices", worldId, productionId, chapterFile });
+}
+
+// ---- turn 146: the audiobook ------------------------------------------------
+
+/** Read a chapter into kept takes (SPEC-047 R-16); the token answers a price the run asked. */
+export function readAudiobookChapter(
+  worldId: string,
+  productionId: string,
+  chapterFile: string,
+  options: { confirmationToken?: string; voiceUploadConfirmedFor?: string } = {},
+): boolean {
+  return send({
+    kind: "read-audiobook-chapter",
+    worldId,
+    productionId,
+    chapterFile,
+    ...(options.confirmationToken !== undefined ? { confirmationToken: options.confirmationToken } : {}),
+    ...(options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
+  });
+}
+
+export function stopAudiobook(worldId: string, productionId: string, chapterFile: string): void {
+  send({ kind: "stop-audiobook", worldId, productionId, chapterFile });
+}
+
+/** The book's reading (SPEC-047 R-11): every block the narrator's, or each line its speaker's. */
+export function setAudiobookReading(worldId: string, productionId: string, reading: "narrator" | "performed" | "cast"): boolean {
+  return send({ kind: "set-audiobook-reading", worldId, productionId, reading });
+}
+
+/** How the narrator plays a character under `performed` (SPEC-047 R-44); null takes the note away. */
+export function setAudiobookNote(worldId: string, productionId: string, speaker: string, note: string | null): boolean {
+  return send({ kind: "set-audiobook-note", worldId, productionId, speaker, note });
+}
+
+/** The book's own narrator, or null for the app's (R-46). */
+export function setAudiobookNarrator(worldId: string, productionId: string, voice: AudiobookReader | null): boolean {
+  return send({ kind: "set-audiobook-narrator", worldId, productionId, voice });
+}
+
+/** What a narrator switch would do, before it is made (R-46); answered under the returned id. */
+export function quoteAudiobookNarrator(worldId: string, productionId: string, voice: AudiobookReader | null): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "quote-audiobook-narrator", worldId, productionId, requestId, voice })) return null;
+  emitChange({ ...current, narratorQuotes: { ...current.narratorQuotes, [requestId]: { state: "working" } } });
+  return requestId;
+}
+
+/** A block heard as it would be read, in the narrator's voice or the one given (R-45, R-46). */
+export function hearAudiobookLine(worldId: string, productionId: string, chapterFile: string, block: string, voice?: AudiobookReader, quoteToken?: string): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "hear-audiobook-line", worldId, productionId, requestId, chapterFile, block, ...(voice !== undefined ? { voice } : {}), ...(quoteToken !== undefined ? { quoteToken } : {}) })) return null;
+  emitChange({ ...current, heardLines: { ...current.heardLines, [requestId]: { state: "working" } } });
+  return requestId;
+}
+
+export function useNarratorQuotes(): StoreState["narratorQuotes"] {
+  return useStore().narratorQuotes;
+}
+
+export function useHeardLines(): StoreState["heardLines"] {
+  return useStore().heardLines;
+}
+
+/** A speaker recorded by a person, or given back to their voice (SPEC-047 R-37): `narrator`, a sheet id, or a name. */
+export function setAudiobookRecorded(worldId: string, productionId: string, speaker: string, recorded: boolean): boolean {
+  return send({ kind: "set-audiobook-recorded", worldId, productionId, speaker, recorded });
+}
+
+/**
+ * A price declined, or an upload consent declined: the run is over on the coordinator's side
+ * either way — it returned without a finished event when it asked — so only this window's word
+ * goes, and a finished run is never cleared (codex on PR 1180).
+ */
+export function dismissAudiobookRun(worldId: string, productionId: string, chapterId: string): void {
+  const key = `${worldId}/${productionId}/${chapterId}`;
+  const held = current.audiobook[key];
+  if (held === undefined || (held.state !== "priced" && held.state !== "reading")) return;
+  const { [key]: _dropped, ...rest } = current.audiobook;
+  emitChange({ ...current, audiobook: rest });
+}
+
+/** How each chapter's audiobook run is going, keyed by `worldId/productionId/chapterId`. */
+export function useAudiobookRuns(): StoreState["audiobook"] {
+  return useStore().audiobook;
+}
+
+/** Read a chapter into kept takes, these blocks alone (SPEC-047 R-30): the panel's `Make again`. */
+export function readAudiobookBlocks(
+  worldId: string,
+  productionId: string,
+  chapterFile: string,
+  blocks: readonly string[],
+  options: { confirmationToken?: string; voiceUploadConfirmedFor?: string } = {},
+): boolean {
+  return send({
+    kind: "read-audiobook-chapter",
+    worldId,
+    productionId,
+    chapterFile,
+    blocks: [...blocks],
+    ...(options.confirmationToken !== undefined ? { confirmationToken: options.confirmationToken } : {}),
+    ...(options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
+  });
+}
+
+/** A recording chosen for a block (turn 155c, SPEC-047 R-35): the host's picker opens, and the checks come back under the returned id. */
+export function stageAudiobookTake(worldId: string, productionId: string, chapterFile: string, block: string): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "stage-audiobook-take", worldId, productionId, chapterFile, block, requestId })) return null;
+  emitChange({ ...current, stagedTakes: { ...current.stagedTakes, [requestId]: { worldId, productionId, block, state: "choosing" } } });
+  return requestId;
+}
+
+/** Keep the staged recording as the block's take, under the rights given (R-36). */
+export function keepAudiobookTake(worldId: string, requestId: string, basis: "self" | "authorized" | "licensed", performer?: string): boolean {
+  const held = current.stagedTakes[requestId];
+  if (held === undefined) return false;
+  const trimmed = performer?.trim();
+  if (!send({ kind: "keep-audiobook-take", worldId, requestId, basis, ...(trimmed ? { performer: trimmed } : {}) })) return false;
+  const { refused: _refused, ...rest } = held;
+  emitChange({ ...current, stagedTakes: { ...current.stagedTakes, [requestId]: { ...rest, state: "keeping" } } });
+  return true;
+}
+
+/** A recorded speaker's script as a PDF under exports/ (SPEC-047 R-39); answered under the returned id. */
+export function exportAudiobookScript(worldId: string, productionId: string, speaker: string, label: string, scope: "awaiting" | "all"): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "export-audiobook-script", worldId, productionId, speaker, label, scope, requestId })) return null;
+  emitChange({ ...current, speakerLines: { ...current.speakerLines, [requestId]: { kind: "script", state: "working" } } });
+  return requestId;
+}
+
+/** The files a performer sent back, chosen together on this machine and matched by the id in each name (R-39). */
+export function stageAudiobookLines(worldId: string, productionId: string, speaker: string): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "stage-audiobook-lines", worldId, productionId, speaker, requestId })) return null;
+  emitChange({ ...current, speakerLines: { ...current.speakerLines, [requestId]: { kind: "files", state: "working" } } });
+  return requestId;
+}
+
+/** Keep the ticked files as takes, under the rights given once (R-36, R-39). */
+export function keepAudiobookLines(worldId: string, requestId: string, basis: "self" | "authorized" | "licensed", files: readonly string[], performer?: string): boolean {
+  const held = current.speakerLines[requestId];
+  if (held === undefined) return false;
+  const trimmed = performer?.trim();
+  if (!send({ kind: "keep-audiobook-lines", worldId, requestId, basis, files: [...files], ...(trimmed ? { performer: trimmed } : {}) })) return false;
+  emitChange({ ...current, speakerLines: { ...current.speakerLines, [requestId]: { ...held, state: "keeping" } } });
+  return true;
+}
+
+/** Let the matched files go: their staged copies are deleted, nothing was written. */
+export function discardAudiobookLines(worldId: string, requestId: string): void {
+  const { [requestId]: _gone, ...rest } = current.speakerLines;
+  emitChange({ ...current, speakerLines: rest });
+  send({ kind: "discard-audiobook-lines", worldId, requestId });
+}
+
+export function useSpeakerLines(): StoreState["speakerLines"] {
+  return useStore().speakerLines;
+}
+
+/** Let the staged recording go: its copies are deleted on the machine that made them. */
+export function discardAudiobookTake(worldId: string, requestId: string): void {
+  const { [requestId]: _gone, ...rest } = current.stagedTakes;
+  emitChange({ ...current, stagedTakes: rest });
+  send({ kind: "discard-audiobook-take", worldId, requestId });
+}
+
+export function useStagedTakes(): StoreState["stagedTakes"] {
+  return useStore().stagedTakes;
+}
+
+/** One block's direction, set or cleared (SPEC-047 R-6): the coordinator answers with the record, or why not. */
+export function setAudiobookBlock(worldId: string, productionId: string, chapterFile: string, block: string, direction: import("@arke-studio/contracts").AudiobookDirectionInput | null): boolean {
+  return send({ kind: "set-audiobook-block", worldId, productionId, chapterFile, block, direction });
+}
+
+/** `Direct this chapter` (SPEC-047 R-10): the model asked for a direction per block; the card comes back as a run's result. */
+export function directChapter(worldId: string, productionId: string, chapterFile: string): boolean {
+  return send({ kind: "direct-chapter", worldId, productionId, chapterFile });
+}
+
+/** The card accepted whole: the coordinator checks every direction once more and writes the record. */
+export function acceptDirection(worldId: string, productionId: string, chapterId: string, chapterFile: string): boolean {
+  const key = `${worldId}/${productionId}/${chapterId}`;
+  const card = current.direction[key];
+  if (card === undefined || card.state !== "directed" || card.proposed === undefined || card.hash === undefined) return false;
+  const requestId = ulid();
+  const sent = send({ kind: "accept-direction", worldId, productionId, chapterFile, requestId, hash: card.hash, directions: card.proposed });
+  if (sent) emitChange({ ...current, direction: { ...current.direction, [key]: { ...card, state: "accepting", requestId } } });
+  return sent;
+}
+
+/**
+ * The card discarded, or an ended derivation put away: nothing was written, and the coordinator
+ * is told to stop holding a proposal for a window that reconnects. `chapterFile` names the
+ * chapter to the coordinator as every audiobook frame does.
+ */
+export function dismissDirection(worldId: string, productionId: string, chapterId: string, chapterFile: string): void {
+  const key = `${worldId}/${productionId}/${chapterId}`;
+  const held = current.direction[key];
+  if (held === undefined || held.state === "directing") return;
+  if (held.state === "directed") send({ kind: "discard-direction", worldId, productionId, chapterFile });
+  const { [key]: _dropped, ...rest } = current.direction;
+  emitChange({ ...current, direction: rest });
+}
+
+export function useDirectionRuns(): StoreState["direction"] {
+  return useStore().direction;
+}
+
+export function useAudiobookRecords(): StoreState["audiobookRecords"] {
+  return useStore().audiobookRecords;
+}
+
+// ---- turn 146: the door ----------------------------------------------------
+
+/**
+ * The latest ask of each door, by world and production: the shell and the door ask by turns
+ * and every ask prepares the whole book, so a slower older answer would otherwise put older
+ * counts, voices and a price over newer ones (codex on PR 1187). Only the latest ask's answer
+ * is kept.
+ */
+const doorRequests = new Map<string, string>();
+
+/** Ask the door (SPEC-047 R-29): every chapter's state, who reads, the price; answered as `audiobook.door`. */
+export function openAudiobook(worldId: string, productionId: string): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "open-audiobook", worldId, productionId, requestId })) return null;
+  doorRequests.set(`${worldId}/${productionId}`, requestId);
+  return requestId;
+}
+
+/** Read the book (SPEC-047 R-16, R-17): every chapter with prose, priced once; the token answers the price. */
+export function readAudiobookBook(worldId: string, productionId: string, options: { confirmationToken?: string; voiceUploadConfirmedFor?: string } = {}): boolean {
+  return send({
+    kind: "read-audiobook-book",
+    worldId,
+    productionId,
+    ...(options.confirmationToken !== undefined ? { confirmationToken: options.confirmationToken } : {}),
+    ...(options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
+  });
+}
+
+export function stopAudiobookBook(worldId: string, productionId: string): void {
+  send({ kind: "stop-audiobook-book", worldId, productionId });
+}
+
+/** A price declined, a consent declined, or an ended run put away: this window's word only. */
+export function dismissAudiobookBook(productionId: string): void {
+  const held = current.audiobookBook[productionId];
+  if (held === undefined) return;
+  const { [productionId]: _dropped, ...rest } = current.audiobookBook;
+  emitChange({ ...current, audiobookBook: rest });
+}
+
+export function dismissAudiobookNote(productionId: string): void {
+  if (current.audiobookNotes[productionId] === undefined) return;
+  const { [productionId]: _dropped, ...rest } = current.audiobookNotes;
+  emitChange({ ...current, audiobookNotes: rest });
+}
+
+export function useAudiobookDoors(): StoreState["audiobookDoor"] {
+  return useStore().audiobookDoor;
+}
+
+export function useAudiobookBooks(): StoreState["audiobookBook"] {
+  return useStore().audiobookBook;
+}
+
+export function useAudiobookNotes(): StoreState["audiobookNotes"] {
+  return useStore().audiobookNotes;
+}
+
+// ---- turn 131: a manuscript out and in ------------------------------------
+
+export function exportManuscript(worldId: string, productionId: string, format: "docx" | "epub", language?: string): boolean {
+  return send({ kind: "export-manuscript", worldId, productionId, format, ...(language !== undefined && format === "epub" ? { language } : {}) });
+}
+
+export function openExportsFolder(worldId: string): void {
+  send({ kind: "open-exports-folder", worldId });
+}
+
+/** Ask the host for a `.docx` and read it; the answer arrives by this request id, and nothing is written until the import press. */
+export function pickManuscript(worldId: string, productionId: string): string {
+  const requestId = ulid();
+  const sent = send({ kind: "pick-manuscript", worldId, productionId, requestId });
+  emitChange({ ...current, manuscripts: { ...current.manuscripts, [requestId]: sent ? { state: "reading" } : {
+    state: "refused", reason: isRemoteSession() ? "Choose a manuscript on your PC." : "Studio is not connected. Try again after it reconnects.",
+  } } });
+  return requestId;
+}
+
+export function importManuscript(worldId: string, productionId: string, requestId: string): void {
+  const held = current.manuscripts[requestId];
+  if (held !== undefined) emitChange({ ...current, manuscripts: { ...current.manuscripts, [requestId]: { ...held, state: "importing" } } });
+  send({ kind: "import-manuscript", worldId, productionId, requestId });
+}
+
+/** The same file again at the level the person chose; the rows are read again, nothing is written. */
+export function rereadManuscript(worldId: string, productionId: string, requestId: string, headingLevel: "title" | "subtitle" | "heading1" | "heading2" | "document"): void {
+  const held = current.manuscripts[requestId];
+  if (held !== undefined) emitChange({ ...current, manuscripts: { ...current.manuscripts, [requestId]: { ...held, state: "reading" } } });
+  send({ kind: "reread-manuscript", worldId, productionId, requestId, headingLevel });
+}
+
+export function cancelManuscript(worldId: string, requestId: string): void {
+  const { [requestId]: _dropped, ...rest } = current.manuscripts;
+  emitChange({ ...current, manuscripts: rest });
+  send({ kind: "cancel-manuscript", worldId, requestId });
+}
+
+export function useManuscripts(): StoreState["manuscripts"] {
+  return useStore().manuscripts;
+}
+
+/** How each chapter's casting is going, keyed by `worldId/productionId/chapterId` — the Voices panel reads this. */
+export function useCasting(): StoreState["casting"] {
+  return useStore().casting;
 }
 
 export function extractArtifact(worldId: string, artifactId: string): void {
@@ -3823,26 +5287,32 @@ export function useArtifactNotices(): Array<{
   outcome: string;
   reason: string;
   sizeBytes: number | null;
+  production?: string | null;
 }> {
   return useStore().artifactNotices;
 }
 
 // ---- SPEC-016: first run, updates, diagnostics -----------------------------
 
-export function checkUpdates(): void {
-  send({ kind: "check-updates" });
+export function checkUpdates(): boolean {
+  return send({ kind: "check-updates" });
 }
 
-export function downloadUpdate(): void {
-  send({ kind: "download-update" });
+/**
+ * The update commands say whether they left: `send` drops a frame while the connection is not
+ * open, and the launch announcement (design turn 152) must not close on a press that went
+ * nowhere — the version would be marked announced and the download never asked for.
+ */
+export function downloadUpdate(): boolean {
+  return send({ kind: "download-update" });
 }
 
-export function installUpdateAndRestart(): void {
-  send({ kind: "install-update-and-restart" });
+export function installUpdateAndRestart(): boolean {
+  return send({ kind: "install-update-and-restart" });
 }
 
-export function installUpdateOnClose(): void {
-  send({ kind: "install-update-on-close" });
+export function installUpdateOnClose(): boolean {
+  return send({ kind: "install-update-on-close" });
 }
 
 export function acknowledgeUpdate(): void {
@@ -3919,6 +5389,7 @@ export function useVoiceRuntimeTest(): StoreState["voiceRuntimeTest"] {
 }
 
 const getSnapshot = (): StoreState => current;
+setMediaStateSource(() => current.state);
 const subscribe = (l: () => void): (() => void) => {
   listeners.add(l);
   return () => listeners.delete(l);
@@ -3959,6 +5430,19 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     setupStatus: null,
     diagnostics: null,
     reading: {},
+  deriving: {},
+    casting: {},
+    audiobook: {},
+    direction: {},
+    audiobookRecords: {},
+    stagedTakes: {},
+    speakerLines: {},
+  narratorQuotes: {},
+  heardLines: {},
+    audiobookDoor: {},
+    audiobookBook: {},
+    audiobookNotes: {},
+  manuscripts: {},
     archiveNote: null,
     permissions: {},
     askResults: {},
@@ -3995,6 +5479,10 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     frameRunQuotes: {},
     frameRunStartResults: {},
     frameRunRequestEpoch: 0,
+    rejoins: 0,
+    // A line just sent stays held across a test's state changes, as it does across snapshots;
+    // `__clearWorldChatHoldsForTest` starts a test without one.
+    worldChatHolds: current.worldChatHolds,
     ...extra,
   });
 }
@@ -4041,8 +5529,8 @@ export function createWorldChat(
   title: string,
   requestId: string,
   entryContext?: WorldChatContext,
-): void {
-  send({ kind: "world-chat-create", worldId, title, requestId, ...(entryContext ? { entryContext } : {}) });
+): boolean {
+  return send({ kind: "world-chat-create", worldId, title, requestId, ...(entryContext ? { entryContext } : {}) });
 }
 
 /** Say something in a conversation, and take a turn. */
@@ -4053,17 +5541,53 @@ export function sendWorldChat(
   attachmentIds: string[] = [],
   subject?: WorldChatSubject,
   modelId?: string,
-): void {
-  send({
+  /** A line that asks for a reply and nothing else (turn 128): no action the turn returns is staged. */
+  replyOnly = false,
+  /**
+   * A line sent again after its answer was lost goes under its first request (PR 1232): the
+   * coordinator takes one line per request, so the retry cannot buy a second turn.
+   */
+  requestId: string = crypto.randomUUID(),
+): string | null {
+  const sent = send({
     kind: "world-chat-send",
     worldId,
-    requestId: crypto.randomUUID(),
+    requestId,
     conversationId,
     text,
     attachmentIds,
     ...(modelId !== undefined ? { modelId } : {}),
     ...(subject !== undefined ? { subject } : {}),
+    ...(replyOnly ? { replyOnly: true } : {}),
   });
+  if (!sent) return null;
+  // Held only while there is a thread on screen to watch move; with none there is nothing to wait on.
+  const workspace = current.state?.worldChat;
+  if (workspace?.conversationId === conversationId) {
+    emitChange({
+      ...current,
+      worldChatHolds: {
+        ...current.worldChatHolds,
+        [conversationId]: { requestId, worldId, seq: workspace.seq, rejoins: current.rejoins },
+      },
+    });
+  }
+  return requestId;
+}
+
+/** Asks where a sent line stands, after a rejoin that may have lost its answer (PR 1232). */
+export function askWorldChatSendStatus(worldId: string, conversationId: string, requestId: string): boolean {
+  return send({ kind: "world-chat-send-status", worldId, requestId, conversationId: conversationId as never });
+}
+
+/** Test hook: no line held from an earlier test. */
+export function __clearWorldChatHoldsForTest(): void {
+  current = { ...current, worldChatHolds: {} };
+}
+
+/** The line just sent into a conversation that the screen has not seen become a turn, if any. */
+export function worldChatHold(conversationId: string | null | undefined): WorldChatHold | null {
+  return conversationId ? current.worldChatHolds[conversationId] ?? null : null;
 }
 
 /** Decide exactly the card and conversation revision currently on screen. */
@@ -4493,16 +6017,16 @@ export function sendBenchUploadReferences(
   worldId: string,
   sessionId: string,
   lane?: "reference" | "keyframe",
-): string {
+): string | null {
   const requestId = ulid();
-  send({
+  const sent = send({
     kind: "bench-upload-references",
     worldId,
     sessionId,
     requestId,
     ...(lane !== undefined ? { lane } : {}),
   } as ClientMessage);
-  return requestId;
+  return sent ? requestId : null;
 }
 
 /** Returns the requestId so the screen can correlate the queue.enqueue-result. */
@@ -4511,10 +6035,12 @@ export function sendBenchDispatch(
   sessionId: string,
   composer: Extract<ClientMessage, { kind: "bench-dispatch" }>["composer"],
   voiceUploadConfirmedFor?: string,
+  confirmedSpeechMicroUsd?: number,
 ): string {
   const requestId = queueRequest("bench-dispatch");
   send({
     kind: "bench-dispatch",
+    ...(confirmedSpeechMicroUsd !== undefined ? { confirmedSpeechMicroUsd } : {}),
     worldId,
     sessionId,
     requestId,
@@ -4570,15 +6096,15 @@ export function sendStageArtifactReference(worldId: string, key: string, artifac
 }
 
 /** Returns the requestId the artifact.filed-batch answer will carry. */
-export function sendAttachFilesCorrelated(worldId: string, links?: string[]): string {
+export function sendAttachFilesCorrelated(worldId: string, links?: string[]): string | null {
   const requestId = ulid();
-  send({
+  const sent = send({
     kind: "attach-files-correlated",
     worldId,
     requestId,
     ...(links !== undefined ? { links } : {}),
   } as ClientMessage);
-  return requestId;
+  return sent ? requestId : null;
 }
 
 // ---- props (design turn 105; issues 535, 537) --------------------------------------------
@@ -4616,7 +6142,14 @@ export function updateComfyUiRuntime(): void {
   send({ kind: "comfyui-update-runtime" });
 }
 
-export function convertPerformance(input: Omit<Extract<ClientMessage, { kind: "convert-performance" }>, "kind" | "requestId">): string | null {
-  const requestId = queueRequest("convert-performance");
-  return send({ kind: "convert-performance", requestId, ...input }) ? requestId : null;
+/** Generate a line (SPEC-044 R-14): a queue request, so the enqueue result reaches the sheet that asked. */
+export function generatePerformance(input: Omit<Extract<ClientMessage, { kind: "generate-performance" }>, "kind" | "requestId">): string | null {
+  const requestId = queueRequest("generate-performance");
+  return send({ kind: "generate-performance", requestId, ...input }) ? requestId : null;
+}
+
+const remoteRefusalListeners = new Set<(refusal: RemoteCommandRefusal) => void>();
+export function subscribeRemoteRefusals(listener: (refusal: RemoteCommandRefusal) => void): () => void {
+  remoteRefusalListeners.add(listener);
+  return () => remoteRefusalListeners.delete(listener);
 }

@@ -17,11 +17,12 @@ export interface ChangeLine {
 }
 
 /** Read every complete line; a truncated tail is silently discarded (R-22). */
-export async function readChanges(path: string): Promise<ChangeLine[]> {
+export async function readChanges(path: string, signal?: AbortSignal): Promise<ChangeLine[]> {
   let raw: string;
   try {
-    raw = await readFile(toExtendedLength(path), "utf8");
+    raw = await readFile(toExtendedLength(path), { encoding: "utf8", signal });
   } catch {
+    signal?.throwIfAborted();
     return [];
   }
   const out: ChangeLine[] = [];

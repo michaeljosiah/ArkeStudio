@@ -6,6 +6,7 @@ import {
   buildExportPlan,
   buildFfmpegArgs,
   deriveCut,
+  REVIEW_NOTE_MAX,
   type ExportPlan,
   type Job,
   type ProductionBundle,
@@ -70,6 +71,19 @@ async function landPass(dir: string): Promise<string> {
 }
 
 describe("pass segmentation (R-3..R-5, D2..D4, §3.2)", () => {
+  it("bounds new rejection writes while preserving and reading older long notes", async () => {
+    const { dir, store } = await open();
+    const path = join(dir, "productions/saltlight/reviews.jsonl");
+    const older = { ts: CLOCK(), takeId: "tk_01J8F3K2QW9VZX4N7M0RTYB6HC", decision: "reject", by: "user", citation: { sheet: "maren-kest", field: "appearance", note: "a".repeat(REVIEW_NOTE_MAX + 1) } };
+    const raw = JSON.stringify(older) + "\n";
+    await store.ownedWrite(() => writeFile(path, raw));
+    const production = store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
+    assert.equal(production.reviews.find(row => row.takeId === older.takeId)?.citation?.note, older.citation.note);
+    await assert.rejects(rejectTake(store, production, { takeId: older.takeId, by: "user", citation: older.citation }));
+    assert.equal(await readFile(path, "utf8"), raw, "an oversized new entry changes no journal bytes");
+    await rejectTake(store, production, { takeId: older.takeId, by: "user", citation: { ...older.citation, note: "b".repeat(REVIEW_NOTE_MAX) } });
+    assert.ok((await readFile(path, "utf8")).startsWith(raw), "the older entry is never truncated or rewritten");
+  });
   it("one media file, three range takes, boundaries from the plan, allocated costs sum exactly", async () => {
     const { dir, store } = await open();
     const landed = await landPass(dir);

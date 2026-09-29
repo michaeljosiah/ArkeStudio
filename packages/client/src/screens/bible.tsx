@@ -1,14 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
-import { bibleSize, DEFAULT_NARRATOR, formatMicroUsd, splitBible, supportsVoiceUse } from "@arke-studio/contracts";
+import { bibleSize, DEFAULT_NARRATOR, splitBible, supportsVoiceUse } from "@arke-studio/contracts";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
-import { Button, Callout, cx } from "../components/ui.js";
+import { Button, Callout, IconButton } from "../components/ui.js";
+import { HeldBar } from "../components/held-bar.js";
+import { PageSheet } from "../components/page-sheet.js";
+import { useMediaQuery } from "../lib/media-query.js";
+import { Speaker } from "../components/icons.js";
+import { Loading } from "../components/loading.js";
 import { readBibleSection, restoreBible, saveBible, useStore, useVoiceAudio, useVoiceParts } from "../lib/store.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import { mediaUrl } from "../lib/media.js";
 import { clearQueue, enqueueClip, playClip } from "../lib/audio.js";
 import { ClipPlayButton } from "../components/player.js";
+import { ReadAloudConfirmation } from "../components/read-aloud-confirmation.js";
 
 /**
  * The world Bible (master §4.5) — one page, one document, no approval step.
@@ -40,6 +46,11 @@ export function BibleScreen() {
   const world = useOpenWorldGuard(worldId);
   const { state } = useStore();
   const bible = world?.bible;
+  // 48px gutters + 28px gap + 240px rail + a 480px document (turn 163).
+  const compact = useMediaQuery("(max-width: 843px)");
+  const [contentsOpen, setContentsOpen] = useState(false);
+  const editorHost = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (!compact) setContentsOpen(false); }, [compact]);
 
   const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -141,6 +152,13 @@ export function BibleScreen() {
   const voiceAudio = useVoiceAudio();
   const [read, setRead] = useState<{ requestId: string; heading: string } | null>(null);
   const readResult = read ? voiceAudio[read.requestId] : undefined;
+  /*
+   * The quote whose Confirm has been pressed (issue 1211, as the sheet does it): the newest
+   * event for a request stays `confirmation-required` until the first piece lands, so without
+   * this the dialog would come back after its own Confirm — and a second press on a charged
+   * read is a second charge. A revised quote is a new key, and asks again.
+   */
+  const [submittedRead, setSubmittedRead] = useState<string | null>(null);
   const narrator = state?.app.narrator ?? null;
   const narratorLabel = narrator && !supportsVoiceUse(narrator, "narration")
     ? DEFAULT_NARRATOR.label
@@ -151,9 +169,14 @@ export function BibleScreen() {
    * A long section arrives in pieces, because local synthesis runs at about the speed of speech
    * and holding the first word until the last one exists is a ten-minute silence. Each piece is
    * queued as it appears and the first starts immediately; the player walks the rest. A short
-   * section still arrives whole and takes the single-clip path, unchanged.
+   * section still arrives whole and takes the single-clip path, unchanged. Cloud pieces (issue
+   * 1208) land in whatever order the reader finishes them, so the effect follows how many exist
+   * rather than how far the array reaches: a later piece landing first fills the array to its
+   * final length, and the earlier one filling the gap behind it would otherwise change nothing
+   * the effect watches (codex on PR 1210).
    */
   const parts = useVoiceParts()[read?.requestId ?? ""] ?? [];
+  const landed = parts.filter((file) => file !== undefined).length;
   const queued = useRef(0);
   useEffect(() => {
     if (!read || !world) return;
@@ -169,7 +192,7 @@ export function BibleScreen() {
       });
       queued.current = i + 1;
     }
-  }, [read?.requestId, read?.heading, parts.length, world?.meta.slug, narratorLabel]);
+  }, [read?.requestId, read?.heading, landed, world?.meta.slug, narratorLabel]);
 
   useEffect(() => {
     if (parts.length > 0) return; // a streamed read is already sounding
@@ -189,24 +212,149 @@ export function BibleScreen() {
 
   if (!state || !world) return null;
 
+  const jumpToSection = (index: number) => {
+    setContentsOpen(false);
+    // The modal returns focus first; then the document owns the requested destination.
+    requestAnimationFrame(() => {
+      const host = editorHost.current;
+      const heading = host?.querySelectorAll<HTMLElement>(".fy-rme__doc h2")[index];
+      if (heading) {
+        host?.querySelector<HTMLElement>(".fy-rme__doc")?.focus({ preventScroll: true });
+        const range = document.createRange();
+        range.selectNodeContents(heading);
+        range.collapse(true);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        heading.scrollIntoView({ block: "start" });
+      } else {
+        const source = host?.querySelector<HTMLTextAreaElement>("textarea");
+        const matches = [...text.matchAll(/^## .+$/gm)];
+        const offset = matches[index]?.index ?? 0;
+        if (source) {
+          source.focus();
+          source.setSelectionRange(offset, offset);
+          source.scrollTop = text.slice(0, offset).split("\n").length * parseFloat(getComputedStyle(source).lineHeight);
+          source.scrollIntoView({ block: "start" });
+        }
+      }
+    });
+  };
+  const contents = (
+    <div className="fy-biblegrid__side">
+      <section className="fy-bible__panel">
+        <h2 className="fy-bible__paneltitle">{compact ? "Contents" : "In here"}</h2>
+        {outline.sections.length === 0 ? (
+          <p className="fy-bible__empty">
+            Headings you write with <code>## </code> show up here.
+          </p>
+        ) : (
+          <ol className="fy-bible__toc">
+            {outline.sections.map((section, index) => {
+              const mine = read?.heading === section.heading ? readResult : undefined;
+              const quote = `${read?.requestId}:${mine?.confirmationToken ?? ""}`;
+              // Busy from the press until something lands: nothing yet, or a price answered
+              // and not yet made good.
+              const preparing = read?.heading === section.heading && (!mine || (mine.status === "confirmation-required" && submittedRead === quote));
+              return (
+                <li key={index}>
+                  <span className="fy-bible__tocrow">
+                    <button type="button" className="fy-bible__tocname" onClick={() => jumpToSection(index)}>{section.heading}</button>
+                    {mine?.status === "ready" && mine.file && world ? (
+                      <ClipPlayButton
+                        clip={{
+                          id: mine.requestId,
+                          url: mediaUrl(world.meta.slug, mine.file),
+                          title: section.heading,
+                          sub: `read aloud · ${narratorLabel}`,
+                        }}
+                      />
+                    ) : (
+                      /* One per heading, six times down the page (issue 1010, U1). The
+                         speaker is the word; only the wait still needs one, because a
+                         glyph cannot say it is busy. */
+                      <IconButton
+                        label={preparing ? `Preparing ${section.heading}` : `Read ${section.heading} aloud`}
+                        disabled={section.body.trim() === "" || preparing}
+                        onClick={() => {
+                          if (!worldId) return;
+                          queued.current = 0;
+                          clearQueue();
+                          setRead({ requestId: readBibleSection(worldId, section.heading), heading: section.heading });
+                        }}
+                      >
+                        {preparing ? <Loading inline size={13} /> : <Speaker />}
+                      </IconButton>
+                    )}
+                  </span>
+                  {/* The one confirmation every read shares (issue 1211): the reader the
+                      quote names, the price, the pieces — this column had the third copy
+                      of a sentence that named ElevenLabs whatever read. */}
+                  {mine?.status === "confirmation-required" && quote !== submittedRead && (
+                    <ReadAloudConfirmation
+                      inline={compact}
+                      title={section.heading}
+                      result={mine}
+                      onCancel={() => setRead(null)}
+                      onConfirm={(token) => {
+                        if (!worldId || !read) return;
+                        setSubmittedRead(quote);
+                        readBibleSection(worldId, section.heading, read.requestId, token);
+                      }}
+                    />
+                  )}
+                  {mine?.status === "failed" && (
+                    <span className="fy-bible__tocnote">{mine.error ?? "Read aloud failed."}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </section>
+
+      <section className="fy-bible__panel">
+        <h2 className="fy-bible__paneltitle">Earlier versions</h2>
+        {history.length === 0 ? (
+          <p className="fy-bible__empty">Nothing here yet.</p>
+        ) : (
+          <>
+            <ul className="fy-bible__versions">
+              {history.map((version) => (
+                <li key={version}>
+                  <span className="fy-mono">v{version}</span>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      if (worldId) restoreBible(worldId, version);
+                    }}
+                  >
+                    Restore
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </section>
+
+    </div>
+  );
   return (
     <div data-screen="bible">
-      <div className="fy-hero">
-        <div className="fy-hero__eyebrow">
-          {world.meta.name} · {bible?.present ? `v${bible.version}` : "not started"} ·{" "}
-          {size.words.toLocaleString()} word{size.words === 1 ? "" : "s"}
+      <div className="fy-hero fy-document-head">
+        <div className="fy-document-head__text">
+          <div className="fy-hero__eyebrow">
+            {world.meta.name} · {bible?.present ? `v${bible.version}` : "not started"} ·{" "}
+            {size.words.toLocaleString()} word{size.words === 1 ? "" : "s"}
+          </div>
+          <h1 className="fy-hero__title fy-document-title">Bible</h1>
         </div>
-        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
-          Bible
-        </h1>
-        <div className="fy-mono" style={{ marginTop: 8 }}>
-          your thinking about this world, in your words · the Studio reads all of it, every turn ·
-          it may guide creative generation, but it is never canon or evidence
-        </div>
+        {compact && <Button className="fy-bible-contents" onClick={() => setContentsOpen(true)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" /></svg>Contents</Button>}
       </div>
 
       <div className="fy-biblegrid">
-        <div className="fy-biblegrid__main">
+        <div className="fy-biblegrid__main" ref={editorHost}>
           {richMode ? (
             <RichMarkdownEditor
               // Remounting on the world is what re-reads the document from the store; without it a
@@ -227,22 +375,26 @@ export function BibleScreen() {
               aria-label="The world bible"
             />
           )}
-          <div className="fy-bible__foot">
-            <span className="fy-mono">
-              {saving ? "Saving…" : bible?.present ? `Saved · v${bible.version}` : "Not saved yet"}
-            </span>
-            <span className="fy-mono">
-              {size.words.toLocaleString()} words · ~{size.approxTokens.toLocaleString()} tokens a
-              turn
-            </span>
-            {richRefusal ? (
+          <HeldBar className="fy-bible__foot" query="(max-width: 843px)">
+            <div className="fy-bible__meter">
+              <span className="fy-mono">
+                {saving ? "Saving…" : bible?.present ? `Saved · v${bible.version}` : "Not saved yet"}
+              </span>
+              <span className="fy-mono">
+                {size.words.toLocaleString()} words · ~{size.approxTokens.toLocaleString()} tokens a
+                turn
+              </span>
+            </div>
+            {compact ? <details className="fy-bar-menu"><summary aria-label="Bible options">⋯</summary><div>
+              {richRefusal ? <span>{richRefusal.message}</span> : <Button variant="ghost" onClick={() => setPreferSource((source) => !source)}>{preferSource ? "Rich text" : "Markdown source"}</Button>}
+            </div></details> : richRefusal ? (
               <span className="fy-mono">{richRefusal.message}</span>
             ) : (
               <Button variant="ghost" onClick={() => setPreferSource((source) => !source)}>
                 {preferSource ? "Rich text" : "Markdown source"}
               </Button>
             )}
-          </div>
+          </HeldBar>
           {size.characters > NOTABLE_CHARACTERS && (
             <Callout tone="warning" title="This is a long bible now">
               All of it goes to the Studio on every turn — nothing is cut — so it costs about{" "}
@@ -253,109 +405,10 @@ export function BibleScreen() {
           )}
         </div>
 
-        <aside className="fy-biblegrid__side">
-          <section className="fy-bible__panel">
-            <h2 className="fy-bible__paneltitle">In here</h2>
-            {outline.sections.length === 0 ? (
-              <p className="fy-bible__empty">
-                Headings you write with <code>## </code> show up here, and the Studio can edit them
-                one at a time rather than rewriting everything.
-              </p>
-            ) : (
-              <ol className="fy-bible__toc">
-                {outline.sections.map((section) => {
-                  const mine = read?.heading === section.heading ? readResult : undefined;
-                  return (
-                    <li key={section.heading}>
-                      <span className="fy-bible__tocrow">
-                        <span className="fy-bible__tocname">{section.heading}</span>
-                        {mine?.status === "ready" && mine.file && world ? (
-                          <ClipPlayButton
-                            clip={{
-                              id: mine.requestId,
-                              url: mediaUrl(world.meta.slug, mine.file),
-                              title: section.heading,
-                              sub: `read aloud · ${narratorLabel}`,
-                            }}
-                          />
-                        ) : (
-                          <Button
-                            aria-label={`Read ${section.heading} aloud`}
-                            disabled={section.body.trim() === "" || (read?.heading === section.heading && !mine)}
-                            onClick={() => {
-                              if (!worldId) return;
-                              queued.current = 0;
-                              clearQueue();
-                              setRead({ requestId: readBibleSection(worldId, section.heading), heading: section.heading });
-                            }}
-                          >
-                            {read?.heading === section.heading && !mine ? "Preparing…" : "Listen"}
-                          </Button>
-                        )}
-                      </span>
-                      {mine?.status === "confirmation-required" && (
-                        <span className="fy-bible__tocnote">
-                          This section goes to ElevenLabs and is kept in Activity.
-                          <Button
-                            onClick={() => {
-                              if (worldId && read && mine.confirmationToken)
-                                readBibleSection(worldId, section.heading, read.requestId, mine.confirmationToken);
-                            }}
-                          >
-                            Confirm {mine.characterCount} characters · {formatMicroUsd(mine.estimatedMicroUsd)}
-                          </Button>
-                        </span>
-                      )}
-                      {mine?.status === "failed" && (
-                        <span className="fy-bible__tocnote">{mine.error ?? "Read aloud failed."}</span>
-                      )}
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
-          </section>
-
-          <section className="fy-bible__panel">
-            <h2 className="fy-bible__paneltitle">Earlier versions</h2>
-            {history.length === 0 ? (
-              <p className="fy-bible__empty">
-                Every save keeps the one before it. Nothing here yet — this is still v
-                {bible?.version ?? 1}.
-              </p>
-            ) : (
-              <>
-                <p className="fy-bible__empty">
-                  Restoring brings a version back as a new one. Nothing in between is lost.
-                </p>
-                <ul className="fy-bible__versions">
-                  {history.map((version) => (
-                    <li key={version}>
-                      <span className="fy-mono">v{version}</span>
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          if (worldId) restoreBible(worldId, version);
-                        }}
-                      >
-                        Restore
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </section>
-
-          <section className={cx("fy-bible__panel", "fy-bible__panel--quiet")}>
-            <h2 className="fy-bible__paneltitle">Bible or Canon?</h2>
-            <p className="fy-bible__empty">
-              If changing it should ripple into productions and regenerate references, it is Canon.
-              If it is how you think about the place, it belongs here. The Studio reads both, and
-              says so when they disagree.
-            </p>
-          </section>
-        </aside>
+        {!compact && contents}
+        <PageSheet open={compact && contentsOpen} title="In this bible" onClose={() => setContentsOpen(false)} footer={<span>Tap a heading to jump to it</span>}>
+          {contents}
+        </PageSheet>
       </div>
     </div>
   );

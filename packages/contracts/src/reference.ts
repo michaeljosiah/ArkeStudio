@@ -111,7 +111,8 @@ export const CharacterLookSchema = z
   .object({
     id: z.string().min(1),
     file: z.string().min(1),
-    kind: z.enum(["costume", "pose-expression", "condition-age"]),
+    // "view" is a place's look — a plate chosen for a scene rides the way a costume does (SPEC-044 §2.1).
+    kind: z.enum(["costume", "pose-expression", "condition-age", "view"]),
     prompt: z.string().min(1),
     sourceJobId: JobIdSchema.optional(),
     sourceTakeId: TakeIdSchema.optional(),

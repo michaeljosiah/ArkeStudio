@@ -22,6 +22,7 @@ import {
 import { assessV2Permission, buildSessionConfigV2 } from "./config.js";
 import { PreparedSessionPolicies, type SessionPermissionPolicy } from "../permission-policy.js";
 import { parseSse } from "../sse.js";
+import { modelEnabled, modelMetadata, type WireModel } from "../model-metadata.js";
 import { OpenCodeV2Http, sameDirectory, wireDirectory } from "./http.js";
 import { OpenCodeError } from "../http.js";
 import { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2State } from "./normalize.js";
@@ -77,6 +78,13 @@ const STREAM_SILENCE_MS = 45_000;
  * fetch on the path — so readiness patience belongs to the first probe, not to every world.
  */
 const WARMUP_MS = 30_000;
+
+/** `provider/model` as v2's session model reference. Null when no provider is named: the server decides. */
+export function wireModelRef(reference: string): { providerID: string; id: string } | null {
+  const slash = reference.indexOf("/");
+  if (slash <= 0 || slash === reference.length - 1) return null;
+  return { providerID: reference.slice(0, slash), id: reference.slice(slash + 1) };
+}
 
 /** v2 rejects client message ids outside the msg_ namespace, and ids are globally durable. */
 let wireIdCounter = 0;
@@ -171,8 +179,17 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   // ---- the model window (§8.5) ---------------------------------------------
 
   private lastKnownWindow: number | null = null;
+  /** Every catalogue row's window by `provider/id`, so a pinned session can be budgeted from its own model. */
+  private readonly modelWindows = new Map<string, number>();
+  /**
+   * The pinned model's window per session, taken at creation from the catalogue as it stood
+   * then. Null is a pinned model whose window the catalogue did not state: the caller's floor
+   * is the right budget for it, and the default model's window is the wrong one twice over.
+   */
+  private readonly sessionWindows = new Map<string, number | null>();
 
-  knownInputTokenLimit(): number | null {
+  knownInputTokenLimit(sessionId?: string): number | null {
+    if (sessionId !== undefined && this.sessionWindows.has(sessionId)) return this.sessionWindows.get(sessionId)!;
     return this.lastKnownWindow;
   }
 
@@ -214,19 +231,30 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   }
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
+    const model = wireModelRef(this.preparedPolicies.model(input.agent, input.preparationId) ?? "");
     const permissionPolicy = this.preparedPolicies.take(input.agent, input.preparationId);
     if (input.preparationId !== undefined && permissionPolicy === null) {
       throw new Error("session preparation is missing or was already consumed");
     }
     const location = input.cwd;
+    // The model is session state, pinned at creation (issue 1247). Measured against the pinned
+    // build: an agent's `model` in opencode.json shows on GET /api/agent and is never consulted
+    // for a turn — the runner reads only the session's own model, and a session without one
+    // answers with the server default. So every choice Studio wrote into the config was being
+    // read back as the default model, a cloud one, whatever the person had picked. Split at
+    // the first slash, because a model id may carry its own (`openrouter/vendor/model`).
     const session = await this.http.reqData<{ id?: string; location?: { directory?: string } }>(
       "POST",
       "/api/session",
-      location ? { location: { directory: wireDirectory(location) } } : {},
+      {
+        ...(location ? { location: { directory: wireDirectory(location) } } : {}),
+        ...(model !== null ? { model } : {}),
+      },
       { signal: input.signal },
     );
     const sessionId = session?.id ?? "";
     if (!sessionId) throw new Error("OpenCode v2 did not return a session id");
+    if (model !== null) this.sessionWindows.set(sessionId, this.modelWindows.get(`${model.providerID}/${model.id}`) ?? null);
     // The envelope assertion in reqData covers scoped GETs; session create echoes the location
     // inside data, so assert here too — a session in the wrong directory writes the wrong world.
     if (location && session?.location?.directory !== undefined && !sameDirectory(session.location.directory, location)) {
@@ -238,7 +266,15 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     // backing carried (the `build` fallback that silently ate turns). 204 on success;
     // confirmation arrives as session.agent.selected on the stream.
     if (input.agent) {
-      await this.http.req("POST", `/api/session/${sessionId}/agent`, { agent: input.agent }, { signal: input.signal });
+      try {
+        await this.http.req("POST", `/api/session/${sessionId}/agent`, { agent: input.agent }, { signal: input.signal });
+      } catch (error) {
+        // The session exists on the server and nobody upstream has its id: a stop between the
+        // two requests would otherwise leave one behind per stop. Retired best-effort, bounded,
+        // and off the caller's signal, which has already fired.
+        await this.http.req<void>("DELETE", `/api/session/${sessionId}`, undefined, { signal: AbortSignal.timeout(5_000) }).catch(() => {});
+        throw error;
+      }
     }
     this.sessions.set(sessionId, {
       purpose: input.purpose,
@@ -467,32 +503,32 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
    * empty list with a healthy server is a readiness reason, not an error.
    */
   async listModels(): Promise<ModelInfo[]> {
-    const rows = await this.http.reqData<
-      Array<{
-        id?: string;
-        providerID?: string;
-        name?: string;
-        disabled?: boolean;
-        limit?: { context?: number; input?: number };
-      }>
-    >("GET", "/api/model");
+    const rows = await this.http.reqData<WireModel[]>("GET", "/api/model", undefined, {
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!Array.isArray(rows)) throw new Error("OpenCode returned an invalid model catalog");
     let defaultKey: string | null = null;
     try {
-      const def = await this.http.reqData<{ id?: string; providerID?: string }>("GET", "/api/model/default");
+      const def = await this.http.reqData<{ id?: string; providerID?: string }>("GET", "/api/model/default", undefined, {
+        signal: AbortSignal.timeout(15_000),
+      });
       if (def?.id && def.providerID) defaultKey = `${def.providerID}/${def.id}`;
     } catch {
       /* a server with no resolvable default still has a catalog */
     }
     const out: ModelInfo[] = [];
-    for (const row of rows ?? []) {
-      if (!row.id || row.disabled === true) continue;
-      const key = `${row.providerID ?? "unknown"}/${row.id}`;
-      const window = row.limit?.input ?? row.limit?.context ?? null;
-      if (key === defaultKey && window !== null) this.lastKnownWindow = window;
+    this.lastKnownWindow = null;
+    this.modelWindows.clear();
+    for (const row of rows) {
+      if (!row.id || !row.providerID || !modelEnabled(row)) continue;
+      const key = `${row.providerID}/${row.id}`;
+      const metadata = modelMetadata(row);
+      if (metadata.inputTokenLimit !== undefined) this.modelWindows.set(key, metadata.inputTokenLimit);
+      if (key === defaultKey) this.lastKnownWindow = metadata.inputTokenLimit ?? null;
       out.push({
         id: row.id,
-        provider: row.providerID ?? "unknown",
-        ...(row.name ? { displayName: row.name } : {}),
+        provider: row.providerID,
+        ...metadata,
         ...(key === defaultKey ? { isDefault: true } : {}),
       });
     }
@@ -713,6 +749,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    this.sessionWindows.clear();
     this.pumpAbort.abort();
     for (const sub of this.subscribers) {
       sub.wake?.();

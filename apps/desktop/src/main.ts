@@ -1,28 +1,35 @@
 import { pathToFileURL } from "node:url";
+import { DesktopRemoteAccess } from "./remote-access.js";
 import { createPerformanceSpool } from "./performance-spool.js";
 import { microphoneAllowed } from "./microphone-permission.js";
-import { audioMediaOptions } from "./media-tools.js";
+import { audioMediaOptions, createMediaProcessRunner } from "./media-tools.js";
+import { PublicationHost } from "./publication-host.js";
+import { publicationMedia } from "./publication-media.js";
 import { authenticatedMediaHeaders, desktopTransportOrigins } from "./transport-auth.js";
 import { execFile } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { createComfyUiFetch } from "./comfyui-transport.js";
 import { ComfyUiDigestCache } from "./comfyui-digest-cache.js";
+import { cudaFreeMemoryArgs, detectQwenCudaDevice, qwenEngineProfile } from "./comfyui-profiles.js";
 import { CloudProviderTransport } from "./provider-transport.js";
 import { appendFileSync, existsSync } from "node:fs";
 import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { freemem } from "node:os";
-import { join, resolve } from "node:path";
-import { describeClaudeAvailability } from "@arke-studio/adapter-claude";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, nativeTheme, Notification, safeStorage, shell } from "electron";
+import { dirname, join, resolve } from "node:path";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, safeStorage, shell, Tray } from "electron";
 import electronUpdater from "electron-updater";
 import {
   assembleHarness,
+  describeClaudeAvailability,
+  describeCodexAvailability,
   ChildLedger,
   ChildSupervisor,
-  ComfyUiEngineService,
+  ProfiledComfyUiEngineService,
   Coordinator,
+  createStudioHost,
+  type StudioServer,
   AppSettingsFile,
   defaultAppRoot,
   FsWorldProvider,
@@ -43,6 +50,7 @@ import {
   COMFYUI_RECIPES,
   comfyUiRecipeIdentity,
   createProviderClients,
+  cloudVoiceSources,
   discoverHiggsfield,
   lazyHiggsfieldRunner,
   recipeNodeClasses,
@@ -52,7 +60,10 @@ import {
   higgsfieldWorkspaces,
   probeRuntime,
   SHIPPED_MANIFEST,
-  type VoiceCatalogueClient,
+  BREEZE_MODEL,
+  FISH_MODEL,
+  VOXTRAL_MODEL,
+  type VoiceSlotClient,
 } from "@arke-studio/providers";
 import {
   KOKORO_PRESETS,
@@ -63,7 +74,7 @@ import {
   type SidecarHealth,
 } from "@arke-studio/voice";
 import { BackgroundNotificationController } from "./background-notifications.js";
-import { launchDesktop, StartupController, type StartupState } from "./startup.js";
+import { drainDesktop, isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "./startup.js";
 import { boundaryFrameOptions, takePosterOptions, takeQcOptions } from "./take-qc.js";
 import { createExportFfmpegRunner } from "./export-ffmpeg.js";
 import { saveMediaHandler } from "./save-media.js";
@@ -79,9 +90,11 @@ import {
 } from "./voxa-runtime.js";
 import {
   agentForPurpose,
+  effectiveHarnessEngine,
   comfyUiWeightsComponentId,
   ROSTER,
   skillFor,
+  type ProviderId,
   type ThemePreference,
   type VoiceRuntimeFailure,
   type VoiceRuntimeStatus,
@@ -185,6 +198,9 @@ function fetchedHiggsfieldPath(appRoot: string): string | null {
 }
 
 let coordinator: Coordinator | null = null;
+let studioServer: StudioServer | null = null;
+let remoteAccess: DesktopRemoteAccess | null = null;
+let remoteTray: Tray | null = null;
 let window: BrowserWindow | null = null;
 let shuttingDown = false;
 let allowQuit = false;
@@ -198,27 +214,32 @@ let resolvedTheme: ResolvedTheme = "light";
 let rendererThemeReady = false;
 let windowReady = false;
 let windowShowFallback: ReturnType<typeof setTimeout> | null = null;
+let backgroundLogin = false;
+let windowPresentation: StartupWindowPresentation | null = null;
 let startupController: StartupController | null = null;
 let startupProvider: FsWorldProvider | null = null;
 let providerTransport: CloudProviderTransport | null = null;
 let startupState: StartupState = { status: "initializing" };
 let transportSession: { port: number; token: string } | null = null;
 let stageExporter: StageExporter | null = null;
+let publicationHost: PublicationHost | null = null;
 let performanceSpool: ReturnType<typeof createPerformanceSpool>;
 
 async function closeProviderTransport(): Promise<void> {
   const transport = providerTransport;
-  providerTransport = null;
   await transport?.close();
+  providerTransport = null;
 }
 
 function showWindowWhenThemed(): void {
   if (!windowReady || !rendererThemeReady || !window || window.isDestroyed()) return;
   if (windowShowFallback) clearTimeout(windowShowFallback);
   windowShowFallback = null;
-  traceDesktop("window.shown", { reason: "themed" });
-  window.show();
+  traceDesktop(backgroundLogin ? "window.ready-in-background" : "window.shown", { reason: "themed" });
+  windowPresentation?.present();
 }
+
+function revealWindow(): void { backgroundLogin = false; windowPresentation?.reveal(); }
 
 /*
  * The launch screen is always the dark plate, whatever the appearance preference — so the
@@ -272,7 +293,7 @@ const backgroundNotifications = new BackgroundNotificationController({
           isMinimized: () => window?.isMinimized() ?? false,
           isVisible: () => window?.isVisible() ?? false,
           restore: () => window?.restore(),
-          show: () => window?.show(),
+          show: () => revealWindow(),
           focus: () => window?.focus(),
           activateActivity: activateActivity,
         }
@@ -305,9 +326,43 @@ function publishStartup(state: StartupState): void {
         : {},
   );
   if (window && !window.isDestroyed()) window.webContents.send("arke:startup-state", startupPayload(state));
+  if (state.status === "failed") revealWindow();
 }
 
 function registerHostIpc(): void {
+  ipcMain.handle("arke:remote-access", async (event, input: unknown) => {
+    if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || shuttingDown || !remoteAccess) {
+      throw new Error("Remote access settings are available only in the ready desktop app.");
+    }
+    const result = await remoteAccess.command(input);
+    updateRemoteTray();
+    return result;
+  });
+  const media = () => {
+    const ffmpeg = ffmpegPath(); const ffprobe = ffprobeResolution().path;
+    if (!ffprobe) throw new Error("ffprobe is unavailable.");
+    return publicationMedia(createMediaProcessRunner({ ffmpeg: ffmpeg ?? "", ffprobe }));
+  };
+  publicationHost = new PublicationHost({
+    root: join(appRoot, "publications"), origins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL),
+    providers: () => ({ starting: startupProvider, live: coordinator?.worldProvider ?? null }),
+    compiler: signal => media().compiler(signal), probe: (path, type, signal) => media().playback(path, type, signal),
+    pick: async kind => {
+      if (!window || shuttingDown) return null;
+      const result = await dialog.showOpenDialog(window, { title: kind === "output" ? "Publish to folder" : "Open publication",
+        properties: kind === "zip" ? ["openFile"] : ["openDirectory", "createDirectory"],
+        ...(kind === "zip" ? { filters: [{ name: "Publication ZIP", extensions: ["zip"] }] } : {}) });
+      return result.canceled ? null : result.filePaths[0] ?? null;
+    },
+    reveal: path => shell.showItemInFolder(path),
+  });
+  for (const method of ["open", "close", "list", "start", "retry", "cancel", "reveal"] as const) {
+    ipcMain.handle(`arke:publication-${method}`, async (event, input: unknown) => {
+      if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || shuttingDown) return { ok: false, reason: "Publication action unavailable." };
+      try { return await publicationHost![method](input as never); }
+      catch { throw new Error("Publication action failed."); }
+    });
+  }
   performanceSpool = createPerformanceSpool(appRoot);
   ipcMain.handle("arke:performance-stage", async (event, input: unknown) => {
     if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) return { ok: false, reason: "Only the main studio can stage a recording." };
@@ -426,6 +481,11 @@ function registerHostIpc(): void {
       applyHostTheme(preference);
     }
   });
+  ipcMain.on("arke:get-theme", (event) => {
+    event.returnValue = window && event.sender === window.webContents
+      ? { preference: themePreference, resolved: resolvedTheme }
+      : null;
+  });
   ipcMain.on("arke:chrome-over-plate", (event, over: unknown) => {
     if (!window || event.sender !== window.webContents) return;
     chromeOverPlate = over === true;
@@ -438,7 +498,7 @@ function registerHostIpc(): void {
     showWindowWhenThemed();
   });
   ipcMain.on("arke:retry-startup", (event) => {
-    if (!window || event.sender !== window.webContents) return;
+    if (!window || event.sender !== window.webContents || shuttingDown) return;
     void startupController?.run();
   });
   ipcMain.on("arke:open-data-folder", (event) => {
@@ -452,10 +512,17 @@ function registerHostIpc(): void {
 }
 
 async function createWindow(): Promise<void> {
+  applyHostTheme(themePreference, false);
   const palette = themePalette(resolvedTheme);
   window = new BrowserWindow({
-    width: 1440,
-    height: 900,
+    /*
+     * Measured off a running window rather than picked: 1200 × 790 is the size the app is
+     * actually worked at. Unlike the 1440 × 900 it replaces, it also fits inside the work area
+     * of a 1920 × 1080 laptop at 125 % scaling, about 1536 × 816, so the window opens at its own
+     * default there instead of at whatever the screen cut it down to.
+     */
+    width: 1200,
+    height: 790,
     minWidth: 1024,
     minHeight: 640,
     icon: appIcon,
@@ -478,10 +545,11 @@ async function createWindow(): Promise<void> {
       plugins: true,
       additionalArguments: [
         `--arke-app-version=${__APP_VERSION__}`,
-        `--arke-theme-preference=${themePreference}`,
-        `--arke-resolved-theme=${resolvedTheme}`,
       ],
     },
+  });
+  windowPresentation = new StartupWindowPresentation(backgroundLogin, () => {
+    if (window && !window.isDestroyed()) window.show();
   });
   const rendererUrl = process.env.ARKE_DEV_SERVER_URL ?? pathToFileURL(clientIndex).href;
   window.webContents.session.setPermissionCheckHandler((contents, permission, _origin, details) => microphoneAllowed({
@@ -494,19 +562,21 @@ async function createWindow(): Promise<void> {
   })));
   window.webContents.session.webRequest.onBeforeSendHeaders(
     { urls: ["<all_urls>"] },
-    (details, callback) => callback({ requestHeaders: authenticatedMediaHeaders(details, transportSession, window?.webContents.id) }),
+    (details, callback) => callback({ requestHeaders: authenticatedMediaHeaders({ ...details,
+      requestHeaders: authenticatedMediaHeaders(details, transportSession, window?.webContents.id),
+    }, publicationHost?.session ?? null, window?.webContents.id) }),
   );
   traceDesktop("window.created", { themePreference, resolvedTheme });
   windowShowFallback = setTimeout(() => {
     if (!window || window.isDestroyed()) return;
-    traceDesktop("window.shown", {
+    traceDesktop(backgroundLogin ? "window.ready-in-background" : "window.shown", {
       reason: "readiness-timeout",
       windowReady,
       rendererThemeReady,
       loading: window.webContents.isLoading(),
       visible: window.isVisible(),
     });
-    window.show();
+    windowPresentation?.present();
   }, 5_000);
   window.once("ready-to-show", () => {
     windowReady = true;
@@ -525,6 +595,7 @@ async function createWindow(): Promise<void> {
       activityActivationReady = false;
       rendererThemeReady = false;
       void stageExporter?.cancelAll();
+      void publicationHost?.resetPlayback().catch(() => traceDesktop("publication.playback-cleanup-failed"));
       if (window?.isVisible()) window.hide();
     }
   });
@@ -539,9 +610,13 @@ async function createWindow(): Promise<void> {
   window.webContents.on("render-process-gone", (_event, details) => {
     activityActivationReady = false;
     void stageExporter?.cancelAll();
+    void publicationHost?.resetPlayback().catch(() => traceDesktop("publication.playback-cleanup-failed"));
     traceDesktop("window.render-process-gone", { reason: details.reason, exitCode: details.exitCode });
   });
   window.on("close", (event) => {
+    if (!allowQuit && !shuttingDown && remoteAccess?.status().running && !updateController?.shouldKeepWindowVisible()) {
+      event.preventDefault(); window?.hide(); return;
+    }
     if (allowQuit || !updateController?.shouldKeepWindowVisible()) return;
     event.preventDefault();
     if (!updateController.isInstallOnCloseArmed() || closeForUpdate) return;
@@ -552,6 +627,7 @@ async function createWindow(): Promise<void> {
   });
   window.on("closed", () => {
     void stageExporter?.cancelAll();
+    void publicationHost?.resetPlayback().catch(() => traceDesktop("publication.playback-cleanup-failed"));
     if (windowShowFallback) clearTimeout(windowShowFallback);
     windowShowFallback = null;
     window = null;
@@ -564,7 +640,7 @@ async function createWindow(): Promise<void> {
   const devServer = process.env.ARKE_DEV_SERVER_URL;
   if (devServer) await window.loadURL(devServer);
   else await window.loadFile(clientIndex);
-  if (!window.isVisible()) await new Promise<void>((resolve) => window?.once("show", resolve));
+  await windowPresentation.ready;
 }
 
 async function initialize(): Promise<{ port: number }> {
@@ -595,10 +671,11 @@ async function initialize(): Promise<{ port: number }> {
    */
   const hostSettings = new AppSettingsFile(join(appRoot, "settings.json"));
   const storedHarness = (await hostSettings.load().catch(() => null))?.harness ?? null;
-  const chosenHarness = storedHarness?.engine ?? "opencode";
+  const chosenHarness = effectiveHarnessEngine(storedHarness?.engine ?? "opencode", process.env["ARKE_HARNESS"]);
 
   const wiring = await assembleHarness({
     appRoot,
+    engine: chosenHarness,
     deps: { ledger: childLedger },
     preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
     v1: {
@@ -614,7 +691,7 @@ async function initialize(): Promise<{ port: number }> {
     claude: {
       // Settings is the way in. ARKE_HARNESS stays as a developer override so a branch can be
       // tried without writing to somebody's real settings file, and it wins where both are set.
-      enabled: process.env["ARKE_HARNESS"] === "claude" || chosenHarness === "claude",
+      enabled: chosenHarness === "claude",
       // The chosen path is used at launch too, or Settings verifies one binary and the
       // lane runs another — the confinement probe would then have proved nothing.
       ...(process.env["ARKE_CLAUDE_CMD"]
@@ -622,6 +699,11 @@ async function initialize(): Promise<{ port: number }> {
         : storedHarness?.claudePath
           ? { configuredPath: storedHarness.claudePath }
           : {}),
+    },
+    codex: {
+      enabled: chosenHarness === "codex",
+      ...(process.env["ARKE_CODEX_CMD"] ?? storedHarness?.codexPath
+        ? { configuredPath: process.env["ARKE_CODEX_CMD"] ?? storedHarness!.codexPath! } : {}),
     },
     onTrace: harnessTrace(appRoot),
   });
@@ -679,11 +761,12 @@ async function initialize(): Promise<{ port: number }> {
    * One implementation, two readers: readiness asks it so a busy machine says so before Generate
    * is pressed, and the dispatch path asks it again after telling the engine to unload.
    */
-  const freeVramMb = (): Promise<number | null> =>
+  const qwenCudaDevice = await detectQwenCudaDevice();
+  const freeVramMb = (model?: string): Promise<number | null> =>
     new Promise((resolve) => {
       execFile(
         "nvidia-smi",
-        ["--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+        cudaFreeMemoryArgs(model === "comfyui-qwen21-image" && comfyUiEngine.engineStatus().source !== "user-url" ? qwenCudaDevice : null),
         { timeout: 5_000, windowsHide: true },
         (err, stdout) => {
           if (err) return resolve(null);
@@ -713,7 +796,8 @@ async function initialize(): Promise<{ port: number }> {
   const comfyUiFetch = createComfyUiFetch((url, init) => fetch(url, init));
   const comfyUiDigests = new ComfyUiDigestCache(appRoot);
 
-  const comfyUiEngine = new ComfyUiEngineService({
+  const qwenProfile = qwenEngineProfile(app.isPackaged ? join(process.resourcesPath, "comfyui-nodes") : join(repoRoot, "vendor", "comfyui"), qwenCudaDevice);
+  const comfyUiEngine = new ProfiledComfyUiEngineService({
     freeVramMb,
     freeMemMb,
     appRoot,
@@ -725,6 +809,7 @@ async function initialize(): Promise<{ port: number }> {
       minEngineVersion: recipe.engine.minVersion,
       exercisedThroughVersion: recipe.engine.exercisedThroughVersion,
       minVramMb: recipe.hardware.minVramMb,
+      ...(recipe.hardware.accelerator ? { accelerator: recipe.hardware.accelerator } : {}),
       minFreeVramMb: recipe.hardware.minFreeVramMb,
       ...(recipe.hardware.minMemMb !== undefined ? { minMemMb: recipe.hardware.minMemMb } : {}),
       ...(recipe.hardware.minFreeMemMb !== undefined ? { minFreeMemMb: recipe.hardware.minFreeMemMb } : {}),
@@ -764,7 +849,7 @@ async function initialize(): Promise<{ port: number }> {
     },
     registerSupervisorExitBackstop: (supervisor) => registerExitBackstop(supervisor),
     createProcessEpoch: () => randomUUID(),
-  });
+  }, qwenProfile.model, qwenProfile.launch);
   // Per-recipe weight entries for setup (SPEC-021 §2.4): derived from the provider layer's
   // recipe facts so the digests live in exactly one place, landing in the engine's own models
   // folder through the coordinator's external-dir resolver.
@@ -794,8 +879,14 @@ async function initialize(): Promise<{ port: number }> {
     voxaTranscribe: (input, options) => voxaClient.transcribe(input.audio, input.contentType, options),
     comfyui: {
       fetch: comfyUiFetch,
-      baseUrl: () => comfyUiEngine.baseUrl(),
+      baseUrl: (model) => comfyUiEngine.baseUrl(model),
+      allBaseUrls: () => comfyUiEngine.baseUrls(),
+      isEndpointGone: url => comfyUiEngine.isManagedEndpointGone(url),
       preflight: (recipeId) => comfyUiEngine.preflight(recipeId),
+      adapterGuard: async (recipeId, selections) => {
+        if (!coordinator) throw new Error("The adapter library is not ready.");
+        await coordinator.guardAdapters(recipeId, selections);
+      },
       locality: () => comfyUiEngine.engineStatus().locality,
       // The engine says what it is doing only on its socket (SPEC-021 D16). Node's own
       // WebSocket, adapted to the two handlers the client needs — nothing here should hold a
@@ -937,7 +1028,7 @@ async function initialize(): Promise<{ port: number }> {
     { ledger: childLedger },
   );
   voxaSupervisorRef = voxaSupervisor;
-  registerExitBackstop(opencodeSupervisor, voxaSupervisor);
+  registerExitBackstop(...(opencodeSupervisor ? [opencodeSupervisor] : []), voxaSupervisor);
   const voxaSidecar = {
     /*
      * The catalogue asks this before offering a voice (2026-08-24), so it has to be here and not
@@ -950,8 +1041,11 @@ async function initialize(): Promise<{ port: number }> {
     health: () =>
       voxaSelection.command === null || !voxaRequestsEnabled ? Promise.resolve(null) : voxaClient.health(),
     listVoices: () => voxaClient.listVoices(),
-    synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }) =>
-      voxaClient.synthesize(input),
+    // The caller's signal travels with the request (codex on PR 1183): a stopped audiobook run
+    // or a cancelled performance ends the Voxa request, and the client's own waiter, rather
+    // than leaving the engine to finish a paragraph nobody is waiting for.
+    synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }) =>
+      voxaClient.synthesize(input, options ?? {}),
     transcribe: (audio: Uint8Array, contentType: string) => voxaClient.transcribe(audio, contentType),
   };
 
@@ -1104,7 +1198,7 @@ async function initialize(): Promise<{ port: number }> {
   });
 
   const transportToken = randomBytes(32).toString("hex");
-  coordinator = new Coordinator({
+  const studioHost = createStudioHost({
     transportAuth: { token: transportToken, allowedOrigins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL) },
     provider,
     adapter,
@@ -1120,9 +1214,14 @@ async function initialize(): Promise<{ port: number }> {
     sampleWorldPath: app.isPackaged ? join(process.resourcesPath, "sample-world") : null,
     authoring: { agentForPurpose, roster: ROSTER, skillFor },
     ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
+    harnessLaunchEngine: chosenHarness,
+    ...(wiring.unavailableReason ? { harnessUnavailableReason: wiring.unavailableReason } : {}),
+    ...(process.env["ARKE_HARNESS"] === chosenHarness ? { harnessEngineOverride: chosenHarness } : {}),
     // Stored LLM keys reach the harness as spawn environment (SPEC-005 D5) — under v2's
     // redirected profile this is the only credential path there is (issue 327 §2).
     relaunchHarness: wiring.relaunchHarness,
+    // The local models the bundled harness cannot see on its own (issue 1247).
+    ...(wiring.publishLocalModels ? { publishLocalHarnessModels: wiring.publishLocalModels } : {}),
     cipher,
     secretRegistry: providerSecrets,
     providerCalls,
@@ -1164,7 +1263,20 @@ async function initialize(): Promise<{ port: number }> {
       return result.canceled ? null : (result.filePaths[0] ?? null);
     },
     // Only the harnesses that can be absent — OpenCode is in the installer beside this process.
-    detectHarnesses: async (configuredPath) => [
+    chooseCodexExecutable: async () => {
+      const parent = window;
+      if (!parent) return null;
+      const result = await dialog.showOpenDialog(parent, {
+        title: process.platform === "win32" ? "Choose the Codex executable (.exe)" : "Choose the Codex executable",
+        buttonLabel: "Use this Codex",
+        properties: ["openFile"],
+        filters: process.platform === "win32"
+          ? [{ name: "Codex executable", extensions: ["exe"] }]
+          : [{ name: "All files", extensions: ["*"] }],
+      });
+      return result.canceled ? null : (result.filePaths[0] ?? null);
+    },
+    detectHarnesses: async (configuredPath, codexPath) => [
       await describeClaudeAvailability(
         // The user's choice first; the developer override still wins where it is set.
         process.env["ARKE_CLAUDE_CMD"]
@@ -1172,6 +1284,10 @@ async function initialize(): Promise<{ port: number }> {
           : configuredPath
             ? { configuredPath }
             : {},
+      ),
+      await describeCodexAvailability(
+        process.env["ARKE_CODEX_CMD"] ?? codexPath
+          ? { configuredPath: process.env["ARKE_CODEX_CMD"] ?? codexPath! } : {},
       ),
     ],
     dispatchClients: providerClients,
@@ -1253,6 +1369,30 @@ async function initialize(): Promise<{ port: number }> {
       ...nodeSetupDeps(),
       externallyPresent: async (entryId) =>
         entryId === "comfyui-runtime" ? comfyUiEngine.externallySelected() : false,
+    },
+    // Breeze and Fish keep a cloned voice on the account — a slot, a model; the library asks for
+    // it here (SPEC-046 R-13). A reader whose client carries no slot calls keeps none.
+    hostedVoiceSlots: {
+      save: (provider, key, input, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.saveVoice === undefined) return Promise.reject(new Error(`${provider} keeps no voice slots`));
+        return client.saveVoice(key, input, signal);
+      },
+      remove: (provider, key, voiceId, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.deleteVoice === undefined) return Promise.resolve();
+        return client.deleteVoice(key, voiceId, signal);
+      },
+      find: (provider, key, name, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.findVoice === undefined) return Promise.resolve(null);
+        return client.findVoice(key, name, signal);
+      },
+      has: (provider, key, voiceId, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.hasVoice === undefined) return Promise.resolve(false);
+        return client.hasVoice(key, voiceId, signal);
+      },
     },
     comfyui: {
       service: comfyUiEngine,
@@ -1343,11 +1483,12 @@ async function initialize(): Promise<{ port: number }> {
         voxaClient.dispose();
       },
       localPresets: localCandidates(KOKORO_PRESETS),
-      cloudSources: [
-        {
-          provider: "elevenlabs",
-          list: (key: string) => (providerClients.elevenlabs as VoiceCatalogueClient).listVoicesCatalog(key),
-        },
+      cloudSources: cloudVoiceSources(providerClients),
+      // And the library's own voices read through them (R-10), when keyed.
+      hostedReaders: [
+        { provider: "mistral", model: VOXTRAL_MODEL },
+        { provider: "breezeblue", model: BREEZE_MODEL },
+        { provider: "fishaudio", model: FISH_MODEL },
       ],
     },
     observeEvent: (event) => {
@@ -1355,15 +1496,26 @@ async function initialize(): Promise<{ port: number }> {
       if (event.type === "appearance.changed") applyHostTheme(event.preference);
     },
   });
+  coordinator = studioHost.coordinator;
+  studioServer = studioHost.server;
   startupProvider = null;
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,
   // and the affected features carry a stated reason (R-6).
-  coordinator.superviseAs("harness", opencodeSupervisor);
+  if (opencodeSupervisor) coordinator.superviseAs("harness", opencodeSupervisor);
   coordinator.superviseAs("voice", voxaSupervisor);
 
-  const { port } = await coordinator.start(0);
+  const { port } = await studioServer.start(0);
   transportSession = { port, token: transportToken };
+  remoteAccess = new DesktopRemoteAccess({ root: appRoot, clientDirectory: dirname(clientIndex), session: transportSession,
+    writeClipboard: text => clipboard.writeText(text),
+    startupSupported: app.isPackaged && (process.platform === "win32" || process.platform === "darwin"),
+    setStartOnLogin: enabled => app.setLoginItemSettings({ openAtLogin: enabled,
+      ...(process.platform === "win32" ? { args: ["--remote-background"] } : {}) }),
+  });
+  await remoteAccess.initialize();
+  updateRemoteTray();
+  if (backgroundLogin && !remoteAccess.status().running) revealWindow();
   void updateController.initialize();
   backgroundNotifications.arm(coordinator.getState());
   applyHostTheme(coordinator.getState().app.appearance.theme, false);
@@ -1381,54 +1533,75 @@ async function shutdownConfirmed(): Promise<void> {
   if (shuttingDown) throw new Error("shutdown is already in progress");
   shuttingDown = true;
   backgroundNotifications.stop();
-  const stop = (async () => {
-    try {
-      await (coordinator?.stop() ?? startupProvider?.close() ?? Promise.resolve());
-    } finally {
-      await closeProviderTransport();
-    }
-  })();
-  let timer: ReturnType<typeof setTimeout> | null = null;
   try {
-    await Promise.race([
-      stop,
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error("local shutdown did not finish safely")), 15_000);
-      }),
-    ]);
+    await drainDesktop(async () => { await remoteAccess?.stop(); }, async () => {
+      try {
+        await publicationHost?.stop();
+        await (studioServer?.stop() ?? startupProvider?.close() ?? Promise.resolve());
+      } finally {
+        await closeProviderTransport();
+      }
+    });
   } finally {
-    if (timer) clearTimeout(timer);
     shuttingDown = false;
   }
+}
+
+function updateRemoteTray(): void {
+  if (!remoteAccess?.status().enabled) { remoteTray?.destroy(); remoteTray = null; return; }
+  if (!remoteTray) {
+    remoteTray = new Tray(appIcon);
+    remoteTray.setToolTip("Arke Studio — remote access");
+    remoteTray.on("double-click", () => { revealWindow(); window?.focus(); });
+  }
+  remoteTray.setContextMenu(Menu.buildFromTemplate([
+    { label: "Open Arke Studio", click: () => { revealWindow(); window?.focus(); } },
+    { label: remoteAccess.status().running ? "Remote access is running" : "Remote access needs attention", enabled: false },
+    { label: "Quit Arke Studio", click: () => app.quit() },
+  ]));
 }
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
+  app.on("activate", () => {
+    if (!window || window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    revealWindow();
+    window.focus();
+  });
   app.on("second-instance", () => {
     if (window) {
       if (window.isMinimized()) window.restore();
+      revealWindow();
       window.focus();
     }
   });
 
   app.whenReady().then(async () => {
+    backgroundLogin = isBackgroundLogin(process.platform, process.argv,
+      process.platform === "darwin" ? app.getLoginItemSettings() : undefined);
     if (process.platform === "win32") app.setAppUserModelId("studio.arke.app");
     registerHostIpc();
     startupController = new StartupController({
       initialize,
       cleanup: async () => {
-        const started = coordinator;
+        await remoteAccess?.stop();
+        remoteAccess = null;
+        updateRemoteTray();
+        const started = studioServer;
         const provider = startupProvider;
-        coordinator = null;
-        startupProvider = null;
         try {
           if (started) await started.stop();
           else await provider?.close();
         } finally {
           await closeProviderTransport();
         }
+        coordinator = null;
+        studioServer = null;
+        startupProvider = null;
+        transportSession = null;
       },
       publish: publishStartup,
       report: (error) => {

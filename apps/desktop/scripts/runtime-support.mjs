@@ -105,9 +105,8 @@ export function assertNoticeMatchesLicence(licenceText, noticeText, label) {
 /*
  * Windows keeps a directory locked for a moment after something inside it has been run, and a
  * rename of it fails with EPERM -- a code that names nothing about the real reason. This bit a
- * real prepare run: prepare-opencode2 executes the staged opencode2.exe for its --version probe
- * seconds before the swap moves that directory, and the same rename succeeded by hand a minute
- * later. Antivirus reading a 100MB binary produces it too.
+ * real prepare run: a version probe ran in the stage just before the swap. The probe now runs
+ * before copying into the stage, but antivirus reading a 100MB binary can still lock it.
  *
  * Retried rather than reported, because a prepare that dies on a lock which clears by itself is
  * exactly the intermittent packaging failure this change exists to remove. EXDEV is deliberately
@@ -115,16 +114,30 @@ export function assertNoticeMatchesLicence(licenceText, noticeText, label) {
  */
 const TRANSIENT_LOCK_CODES = new Set(["EPERM", "EBUSY", "EACCES", "ENOTEMPTY"]);
 
-function renameWithRetry(from, to) {
-  for (let attempt = 0; ; attempt += 1) {
+export function renameWithRetry(from, to, {
+  rename = renameSync,
+  now = () => performance.now(),
+  wait = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms),
+} = {}) {
+  const started = now();
+  let delay = 250;
+  for (let attempt = 1; ; attempt += 1) {
     try {
-      renameSync(from, to);
+      rename(from, to);
       return;
     } catch (error) {
-      if (attempt >= 20 || !TRANSIENT_LOCK_CODES.has(error.code)) throw error;
+      if (!TRANSIENT_LOCK_CODES.has(error.code)) throw error;
+      const elapsed = now() - started;
+      if (elapsed >= 30_000) {
+        // Preserve the filesystem code for fallback/rollback callers while making the
+        // exhausted budget visible in the release log.
+        error.message += ` (runtime rename failed on attempt ${attempt} after ${Math.round(elapsed)} ms: ${from} -> ${to})`;
+        throw error;
+      }
       // Sync, because everything around it is: the scripts stage in order and have nothing to
       // get on with while they wait.
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+      wait(Math.min(delay, 30_000 - elapsed));
+      delay = Math.min(delay * 2, 2_000);
     }
   }
 }

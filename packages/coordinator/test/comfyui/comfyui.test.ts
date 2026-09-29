@@ -15,6 +15,7 @@ import {
   type EngineServiceDeps,
 } from "../../src/comfyui/engine.js";
 import { readCustomNodeRef } from "../../src/comfyui/node-ref.js";
+import { ProfiledComfyUiEngineService } from "../../src/comfyui/profiled-engine.js";
 import { sanitizeComfyUiMedia } from "../../src/comfyui/sanitize.js";
 import { verifyArtifact } from "../../src/queue/verify.js";
 import { JobQueue, type EnqueueInput } from "../../src/queue/dispatcher.js";
@@ -443,6 +444,115 @@ function fakeWorld(): FakeEngineWorld {
 
 const NO_SETTINGS: ComfyUiSettings = { enginePath: null, engineUrl: null, modelsDir: null };
 const PROBES: RuntimeProbes = { vramMb: 10240, memMb: 32000, diskFreeMb: 100000 };
+
+it("download completion starts an isolated recipe worker with bundled code, without restarting the default engine", async () => {
+  const world = fakeWorld();
+  world.files.add("C:/app/comfyui-runtime/ComfyUI/main.py");
+  world.files.add("C:/app/comfyui-runtime/python_embeded/python.exe");
+  const nodeHash = "d".repeat(64);
+  const qwen = { ...FACTS[0]!, id: "qwen", customNodes: [{ id: "RuntimeGuard", pinnedRef: nodeHash }] };
+  const deps = engineDeps(world, "C:/app", [...FACTS, qwen]);
+  const writes = new Map<string, string>();
+  deps.writeTextFile = async (path, text) => { writes.set(path, text); };
+  const stopped: string[] = [];
+  const children: ChildSupervisor[] = [];
+  const livePids = new Set<number>();
+  deps.processExists = pid => livePids.has(pid);
+  let port = 51998;
+  const makeSupervisor = deps.createSupervisor;
+  deps.createSupervisor = spec => {
+    const child = makeSupervisor(spec);
+    children.push(child);
+    Object.assign(child, { port: ++port, stop: async () => { stopped.push(spec.id); } });
+    Object.assign(child, { pid: port });
+    livePids.add(port);
+    world.urls.set(`http://127.0.0.1:${port}`, { version: "0.37.0" });
+    return child;
+  };
+  const service = new ProfiledComfyUiEngineService(deps, "qwen", {
+    id: "comfyui-qwen", args: ["--disable-dynamic-vram", "--reserve-vram", "4.5"],
+    customNodesDir: "C:/bundle/nodes", nodeRefs: { RuntimeGuard: nodeHash },
+  });
+  try {
+    await service.applySettings(NO_SETTINGS);
+    assert.equal(world.spawned.length, 1, "an uninstalled recipe does not launch a worker");
+    assert.equal(await Promise.race([
+      service.waitUntilReady(1_000),
+      new Promise(resolve => setTimeout(() => resolve("delayed"), 50)),
+    ]), true, "an uninstalled recipe does not delay recovery of the primary engine");
+    const primary = service.engineIdentity();
+    const file = "C:/app/comfyui-runtime/ComfyUI/models/checkpoints/sd_xl_base_1.0.safetensors";
+    world.files.add(file);
+    world.hashes.set(file, "a".repeat(64));
+    world.files.add("C:/bundle/nodes/RuntimeGuard");
+    world.hashes.set("C:/bundle/nodes/RuntimeGuard/__init__.py", nodeHash);
+    await service.reverify(["qwen"]);
+    assert.equal(world.spawned.length, 2);
+    assert.deepEqual(service.engineIdentity(), primary);
+    assert.notEqual(service.engineIdentity("qwen")!.instanceId, primary!.instanceId);
+    assert.notEqual(service.baseUrl("qwen"), service.baseUrl());
+    assert.equal(world.spawned[0]!.args!.includes("--disable-dynamic-vram"), false);
+    assert.ok(world.spawned[1]!.args!.includes("--disable-dynamic-vram"));
+    assert.ok([...writes.values()].some(text => text.includes('custom_nodes: "C:/bundle/nodes"')));
+    assert.equal((await service.status(PROBES)).recipes.find(recipe => recipe.recipeId === "qwen")!.state, "ready");
+    world.hashes.set("C:/bundle/nodes/RuntimeGuard/__init__.py", "e".repeat(64));
+    assert.equal((await service.preflight("qwen")).ok, false, "bundled code is verified by bytes");
+    await service.reverify(["qwen"]);
+    assert.equal(world.spawned.length, 2, "reverification does not kill an active worker");
+    Object.assign(children[1]!, { status: "starting" });
+    assert.equal(await Promise.race([
+      service.waitUntilReady(1_000),
+      new Promise(resolve => setTimeout(() => resolve("delayed"), 50)),
+    ]), true, "the ready primary does not wait for an importing sibling");
+    Object.assign(children[1]!, { status: "healthy" });
+    Object.assign(children[0]!, { status: "failed" });
+    const primaryUrl = `http://127.0.0.1:${children[0]!.port}`;
+    assert.equal(service.isManagedEndpointGone(primaryUrl), false, "unhealthy is not proof of exit");
+    livePids.delete(children[0]!.pid!);
+    assert.equal(service.isManagedEndpointGone(primaryUrl), true);
+    assert.equal(service.baseUrl(), null);
+    assert.ok(service.baseUrl("qwen"));
+    assert.equal(await service.waitUntilReady(50), true, "a healthy isolated worker releases startup recovery");
+  } finally {
+    await service.dispose();
+  }
+  assert.deepEqual(stopped.sort(), ["comfyui", "comfyui-qwen"]);
+});
+
+it("an external Qwen guard is checked by bytes even when its old marker remains", async () => {
+  const world = fakeWorld();
+  world.urls.set("http://127.0.0.1:8188", { version: "0.37.0" });
+  const pin = "d".repeat(64);
+  const recipe = { ...FACTS[0]!, customNodes: [{ id: "ArkeQwen21Runtime", pinnedRef: pin }] };
+  const service = new ComfyUiEngineService(engineDeps(world, "C:/app", [recipe]));
+  const file = "C:/external/models/checkpoints/sd_xl_base_1.0.safetensors";
+  world.files.add(file);
+  world.hashes.set(file, "a".repeat(64));
+  const nodeDir = "C:/external/custom_nodes/ArkeQwen21Runtime";
+  world.files.add(nodeDir);
+  world.nodeRefs.set(nodeDir, pin);
+  world.hashes.set(`${nodeDir}/__init__.py`, pin);
+  try {
+    await service.applySettings({ ...NO_SETTINGS, engineUrl: "http://127.0.0.1:8188", modelsDir: "C:/external/models" });
+    assert.equal((await service.preflight(recipe.id)).ok, true);
+    world.hashes.set(`${nodeDir}/__init__.py`, "e".repeat(64));
+    assert.equal((await service.preflight(recipe.id)).ok, false);
+  } finally { await service.dispose(); }
+});
+
+it("an external URL is never replaced with a locally spawned profile", async () => {
+  const world = fakeWorld();
+  world.urls.set("http://127.0.0.1:8188", { version: "0.37.0" });
+  const service = new ProfiledComfyUiEngineService(engineDeps(world, "C:/app"), FACTS[0]!.id, {
+    id: "profile", args: ["--reserve-vram", "4.5"], customNodesDir: "C:/bundle/nodes", nodeRefs: {},
+  });
+  try {
+    await service.applySettings({ ...NO_SETTINGS, engineUrl: "http://127.0.0.1:8188" });
+    assert.equal(service.baseUrl(FACTS[0]!.id), "http://127.0.0.1:8188");
+    assert.deepEqual(service.engineIdentity(FACTS[0]!.id), service.engineIdentity());
+    assert.equal(world.spawned.length, 0);
+  } finally { await service.dispose(); }
+});
 
 describe("the engine service resolves, probes, and never spawns a URL (§2.2, D13)", () => {
   it("absent when nothing is configured and nothing is found, with detection offers when they exist", async () => {
@@ -1369,6 +1479,26 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
     assert.equal((await streaming(4100)).startsWith("ready|"), true);
   });
 
+  it("mapped CUDA weights cannot borrow another accelerator's VRAM", async () => {
+    const world = fakeWorld();
+    world.urls.set("http://127.0.0.1:8188", {});
+    world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
+    world.hashes.set("C:/models/checkpoints/sd_xl_base_1.0.safetensors", "a".repeat(64));
+    const service = new ComfyUiEngineService({ ...engineDeps(world, "C:/app"),
+      recipes: [{ ...FACTS[0]!, accelerator: "cuda", minVramMb: 10240 }] });
+    try {
+      await service.applySettings({ ...NO_SETTINGS, engineUrl: "http://127.0.0.1:8188", modelsDir: "C:/models" });
+      const mixed: RuntimeProbes = { ...PROBES, vramMb: 24576, accelerators: ["cuda", "rocm"],
+        vramMbByAccelerator: { cuda: 8192, rocm: 24576 } };
+      const small = (await service.status(mixed)).recipes[0]!;
+      assert.equal(small.state, "disabled");
+      assert.match(small.reason!, /8 GB/);
+      assert.equal((await service.status({ ...mixed, vramMbByAccelerator: { cuda: 16384, rocm: 24576 } })).recipes[0]!.state, "ready");
+      assert.equal((await service.status({ ...mixed, accelerators: ["rocm"] })).recipes[0]!.state, "disabled");
+      assert.equal((await service.status({ ...mixed, vramMbByAccelerator: undefined })).recipes[0]!.state, "unknown");
+    } finally { await service.dispose(); }
+  });
+
   it("a declared memory floor is a readiness rung, because mapped weights never meet the setup gate", async () => {
     // The manifest gate only steers setup: weights already sitting in a mapped models folder
     // reach dispatch admission through this walk alone, and the H3 workload that measured 32 GB
@@ -1520,6 +1650,7 @@ function queueWith(
       | { ok: false; reason: string };
     providerConcurrency?: Readonly<Record<string, number>>;
     awaitRecoveryReady?: (provider: string) => Promise<boolean>;
+    runtimeReady?: (job: Job) => boolean;
   } = {},
 ): { queue: JobQueue; events: DomainEvent[]; ledger: LedgerEntry[] } {
   const events: DomainEvent[] = [];
@@ -2119,6 +2250,37 @@ describe("retiring an engine mid-flight (§2.11)", () => {
     // Terminal local work still records its zero.
     assert.equal(ledger.find((e) => e.jobId === theirs.id)!.actualSource, "local-zero");
     queue.dispose();
+  });
+
+  it("a restarting profile stays queued while a healthy sibling runs, then resumes on readiness", async () => {
+    const dir = await tempDir("arke-profile-recovery-");
+    const provider = new FakeProvider();
+    provider.pollState = "running";
+    let ready = true;
+    const { queue } = queueWith({ comfyui: provider }, join(dir, "jobs.jsonl"), dir, {
+      providerConcurrency: { comfyui: 1 },
+      runtimeReady: job => job.model !== "restarting" || ready,
+    });
+    try {
+      await queue.start();
+      const job = await queue.enqueue({ ...localInput(), model: "restarting",
+        engine: { source: "managed", instanceId: "profile", processEpoch: "old" } });
+      await until(() => queue.listJobs().find(item => item.id === job.id)?.status === "running", "first profile running");
+      ready = false;
+      await queue.failJobsForRetiredEngine("comfyui", () => false, "restarted",
+        () => ({ source: "managed", instanceId: "profile", processEpoch: "new" }));
+      assert.equal(queue.listJobs().find(item => item.id === job.id)?.status, "queued");
+      assert.equal(provider.submitCount, 1, "the replacement is not contacted before readiness");
+      const sibling = await queue.enqueue({ ...localInput(), model: "healthy" });
+      await until(() => queue.listJobs().find(item => item.id === sibling.id)?.status === "running", "healthy sibling running");
+      assert.equal(provider.submitCount, 2);
+      assert.equal(queue.listJobs().find(item => item.id === job.id)?.status, "queued");
+      await queue.cancel(sibling.id);
+      ready = true;
+      queue.releaseRecovery("comfyui");
+      await until(() => provider.submitCount === 3, "recovered profile dispatch");
+      assert.notEqual(queue.listJobs().find(item => item.id === job.id)?.status, "failed");
+    } finally { queue.dispose(); }
   });
 
   for (const sample of [

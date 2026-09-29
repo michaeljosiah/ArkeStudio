@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
+import { followLink } from "../lib/activity-panel.js";
 import {
   CONTROL_REGISTRY,
   consequencesOf,
@@ -96,7 +97,8 @@ function Remedy({ finding, snapshot }: { finding: Finding; snapshot: Diagnostics
   return (
     <>
       <span className="fy-diag__place">{control.place}</span>
-      <button type="button" className="fy-diag__go" onClick={() => navigate(to)}>
+      {/* A remedy that lives in Activity opens the panel over Settings rather than leaving it. */}
+      <button type="button" className="fy-diag__go" onClick={() => followLink(navigate, to)}>
         {control.label}
       </button>
     </>
@@ -117,7 +119,7 @@ function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: Di
       </div>
       <div className="fy-set__why">
         <span className={cx("fy-set__dot", dotClass(finding.severity))} style={{ width: 5, height: 5 }} />
-        <span>{finding.cause.statement}</span>
+        <span className="fy-diag__cause">{finding.cause.statement}</span>
         {finding.note !== undefined && <span className="fy-diag__meta"> · {finding.note}</span>}
         {finding.cause.redacted === true && <span className="fy-diag__chip">redacted</span>}
       </div>

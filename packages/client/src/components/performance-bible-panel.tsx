@@ -3,7 +3,7 @@ import { foldPerformanceBible, recommendPerformanceBible, DELIVERIES, ulid, type
 import { send, subscribeRehearsalResults } from "../lib/store.js";
 import { playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
-import { Button } from "./ui.js";
+import { Button, Checkbox, Select } from "./ui.js";
 export function PerformanceBiblePanel({ world, sheet }: { world: WorldBundle; sheet: Sheet }) {
   const bible = world.performanceBibles?.find(b => b.sheetId === sheet.id);
   let slots: ReturnType<typeof foldPerformanceBible> = [];
@@ -43,14 +43,14 @@ export function PerformanceBiblePanel({ world, sheet }: { world: WorldBundle; sh
     <fieldset disabled={busy || Boolean(bible?.problem)}><legend>Designate an accepted performance</legend>
       <label>Slot ID <input value={slotId} onChange={e => setSlotId(e.target.value)} placeholder="warm-reassurance" /></label>{" "}
       <label>Label <input value={label} maxLength={80} onChange={e => setLabel(e.target.value)} /></label>{" "}
-      <label>Delivery <select value={delivery} onChange={e => setDelivery(e.target.value as typeof delivery)}>{DELIVERIES.map(d => <option key={d}>{d}</option>)}</select></label>{" "}
-      <label>Reference role <select value={role} onChange={e => setRole(e.target.value as typeof role)}><option value="cadence">Cadence</option><option value="identity">Identity</option><option value="both">Both</option></select></label>
-      <label>Accepted source <select value={sourceId} onChange={e => { setSourceId(e.target.value); setSingle(false); setNoMusic(false); setWarningsAccepted(false); }}><option value="">Choose a performance…</option>{sources.map(s => <option key={s.performance.id} value={s.performance.id}>{s.production.meta.id} · {s.performance.kind} · {s.performance.id}</option>)}</select></label>
+      <label>Delivery <Select label="Delivery" value={delivery} onChange={e => setDelivery(e.target.value as typeof delivery)}>{DELIVERIES.map(d => <option key={d}>{d}</option>)}</Select></label>{" "}
+      <label>Reference role <Select label="Reference role" value={role} onChange={e => setRole(e.target.value as typeof role)}><option value="cadence">Cadence</option><option value="identity">Identity</option><option value="both">Both</option></Select></label>
+      <label>Accepted source <Select label="Accepted source" value={sourceId} onChange={e => { setSourceId(e.target.value); setSingle(false); setNoMusic(false); setWarningsAccepted(false); }}><option value="">Choose a performance…</option>{sources.map(s => <option key={s.performance.id} value={s.performance.id}>{s.production.meta.id} · {s.performance.kind} · {s.performance.id}</option>)}</Select></label>
       {source?.performance.kind === "scratch" && role !== "cadence" && <p>A scratch recording can demonstrate cadence only.</p>}
-      <label><input type="checkbox" checked={single} onChange={e => setSingle(e.target.checked)} /> One speaker</label>{" "}
-      <label><input type="checkbox" checked={noMusic} onChange={e => setNoMusic(e.target.checked)} /> No music</label>
-      {warnings.length > 0 && <label><input type="checkbox" checked={warningsAccepted} onChange={e => setWarningsAccepted(e.target.checked)} /> I reviewed QC warnings: {warnings.join(", ")}</label>}
-      <label>Authorization for cloud reference reuse <select value={basis} onChange={e => setBasis(e.target.value as typeof basis)}><option value="">Choose authorization…</option><option value="self">I performed and authorize this use</option><option value="authorized">The performer authorized reference reuse</option><option value="licensed">My license permits reference reuse</option></select></label>
+      <Checkbox label="One speaker" checked={single} onChange={e => setSingle(e.target.checked)} />{" "}
+      <Checkbox label="No music" checked={noMusic} onChange={e => setNoMusic(e.target.checked)} />
+      {warnings.length > 0 && <Checkbox label={`I reviewed QC warnings: ${warnings.join(", ")}`} checked={warningsAccepted} onChange={e => setWarningsAccepted(e.target.checked)} />}
+      <label>Authorization for cloud reference reuse <Select label="Authorization for cloud reference reuse" value={basis} onChange={e => setBasis(e.target.value as typeof basis)}><option value="">Choose authorization…</option><option value="self">I performed and authorize this use</option><option value="authorized">The performer authorized reference reuse</option><option value="licensed">My license permits reference reuse</option></Select></label>
       <Button disabled={!source || !label.trim() || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slotId) || !basis || !single || !noMusic || (warnings.length > 0 && !warningsAccepted) || (source.performance.kind === "scratch" && role !== "cadence")} onClick={() => {
         if (!source?.review || !basis) return; pending.current = ulid(); setBusy(true);
         if (!send({ kind: "designate-performance-bible", requestId: pending.current, worldId: world.meta.worldId, sheetId: sheet.id, slotId, label: label.trim(), delivery, role,

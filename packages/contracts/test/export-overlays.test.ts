@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  MEDIA_CANVAS_MIN_SEC,
+  MEDIA_CANVAS_HEADROOM_SEC,
   buildExportPlan,
   buildFfmpegArgs,
   exportOverlays,
   isMediaOnly,
-  mediaCanvasSec,
   placedExtentSec,
-  placedFilmSec,
 } from "../src/cut.js";
 import type { CutOverlay, DerivedCut } from "../src/cut.js";
 
@@ -217,34 +215,13 @@ describe("a production with no story", () => {
     assert.equal(placedExtentSec([]), 0, "nothing placed is not a film of some default length");
   });
 
-  it("hands every surface that states a length the same one, resolved (508)", () => {
-    // The rail, the switcher, the Cut header and the Exports button all read this. It resolves
-    // against the world's artifacts rather than counting lane records, so a document stretched
-    // past the picture cannot claim a runtime the encode will not produce.
-    const placed = [
-      overlay("ar_01J8G0000000000000000000A2", 0, 4),
-      overlay("ar_01J8G0000000000000000000A3", 2, 6),
-      overlay("ar_01J8G0000000000000000000A4", 0, 60),
-    ];
-    assert.equal(placedFilmSec(placed, artifacts), 6, "the sound outlasting the picture is the film's end");
-    assert.equal(placedFilmSec([overlay("ar_01J8G0000000000000000000A4", 0, 60)], artifacts), 0, "a lane holding only a document is not a film");
-    assert.equal(placedFilmSec([], artifacts), 0);
-  });
-
-  it("draws a canvas longer than the film, so there is somewhere to drop the next clip", () => {
-    // The empty state has to be droppable or it is a dead end: every gesture on the Cut refuses
-    // at zero, so a canvas measured only by its contents could never accept the first clip.
-    assert.equal(mediaCanvasSec([]), MEDIA_CANVAS_MIN_SEC);
-    assert.ok(mediaCanvasSec([{ endSec: 300 }]) > 300, "and it grows past the last clip, never stops at it");
-  });
-
   it("exports the placed work over bare ground, at the work's length and not the canvas's", () => {
     const plan = buildExportPlan(empty, "review-cut", [{ path: "artifacts/a.mp4", startSec: 0, endSec: 4, still: false }], [
       { path: "artifacts/b.wav", startSec: 2, endSec: 6, gainDb: 0 },
     ]);
     assert.deepEqual(plan.items, [{ type: "black", durationSec: 6 }], "one bed, as long as the furthest thing placed");
     assert.equal(plan.totalSec, 6);
-    assert.ok(plan.totalSec < mediaCanvasSec([{ endSec: 6 }]), "the empty canvas past the work is not part of the film");
+    assert.ok(plan.totalSec < 6 + MEDIA_CANVAS_HEADROOM_SEC, "the empty canvas past the work is not part of the film");
   });
 
   it("writes nothing on that ground, because there is no missing work to name", () => {

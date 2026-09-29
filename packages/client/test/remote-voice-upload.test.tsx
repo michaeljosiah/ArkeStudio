@@ -50,6 +50,50 @@ describe("remote cloned voice renderer confirmation", () => {
     assert.doesNotMatch(markup, /confirmationToken|opaque-engine-instance/);
   });
 
+  it("names a hosted reader as the destination and says what it does with the clip, in its terms (SPEC-046 R-17)", () => {
+    const notice = "The recording is sent with each read and not kept by Arke on the service.";
+    const markup = renderToString(
+      <RemoteVoiceUploadConfirmation
+        destinationLabel="Mistral"
+        destinationNotice={notice}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    assert.match(markup, /Mistral/);
+    assert.match(markup, /data-testid="remote-voice-upload-notice"/);
+    assert.ok(markup.includes(notice));
+    // An engine destination has no vendor terms to show, and shows none.
+    const engine = renderToString(
+      <RemoteVoiceUploadConfirmation destinationLabel="voice-box.example:8188" onCancel={() => {}} onConfirm={() => {}} />,
+    );
+    assert.doesNotMatch(engine, /remote-voice-upload-notice/);
+  });
+
+  it("carries the vendor's notice through the event the store hands the screens", () => {
+    __setStateForTest(FIXTURE_STATE);
+    const messages: ClientMessage[] = [];
+    __setBridgeForTest(bridge(messages));
+    const requestId = requestVoicePreview(WORLD, SHEET, "mistral", "voxtral-mini-tts", "harbour");
+    const seen: Array<Extract<DomainEvent, { type: "voice.upload-confirmation-required" }>> = [];
+    const unsubscribe = subscribeVoiceUploadConfirmations((event) => {
+      seen.push(event);
+    });
+    __applyEventForTest({
+      at: "2026-09-13T12:00:00.000Z",
+      type: "voice.upload-confirmation-required",
+      requestId,
+      worldId: WORLD,
+      command: "voice-preview",
+      destinationLabel: "Mistral",
+      confirmationToken: "vendor:mistral",
+      destinationNotice: "The recording is sent with each read.",
+    });
+    unsubscribe();
+    assert.equal(seen[0]?.destinationNotice, "The recording is sent with each read.");
+    assert.equal(seen[0]?.confirmationToken, "vendor:mistral");
+  });
+
   it("surfaces a correlated confirmation-required event to the renderer", () => {
     __setStateForTest(FIXTURE_STATE);
     const messages: ClientMessage[] = [];

@@ -76,6 +76,17 @@ it("reviewed assignment survives reopen, leaves source and TTS intact, and clear
   await fal.submit("mock", { ...fastJob, capability: "video", audioReferences: await readCharacterAudioInputs(store, fastJob),
     imageReferences: [{ name: "character.png", contentType: "image/png", data: new Uint8Array([1]) }] });
   assert.ok(sent!.url.endsWith("bytedance/seedance-2.0/fast/reference-to-video"));
+  const motionPlan = planCharacterAudio({ scene, shots: [shot], sheets: bundle.sheets, kits: bundle.referenceKits, model, imageCount: 0, videoCount: 1 });
+  assert.deepEqual(motionPlan.problems, []);
+  const motionJob = { ...job, params: { ...job.params, references: [], videoReferences: ["motion.mp4"], audioReferences: motionPlan } };
+  const motionAudio = await readCharacterAudioInputs(store, motionJob);
+  await fal.submit("mock", { ...motionJob, capability: "video", audioReferences: motionAudio,
+    videoReferences: [{ contentType: "video/mp4", data: Uint8Array.from([1]), durationSec: 4 }] });
+  assert.equal((sent!.body.video_urls as string[]).length, 1);
+  assert.equal((sent!.body.audio_urls as string[]).length, 1);
+  await assert.rejects(readCharacterAudioInputs(store, { ...motionJob, params: { ...motionJob.params,
+    references: Array(9).fill("image.png"), videoReferences: Array(3).fill("motion.mp4"),
+  } }), /shared input budget/);
   const tooManyImages = Array.from({ length: 10 }, () => "references/maren-kest/head-front.png");
   assert.match(planCharacterAudio({ scene, shots: [shot], sheets: bundle.sheets, kits: bundle.referenceKits,
     model, imageCount: 10 }).problems.join(" "), /budget/);

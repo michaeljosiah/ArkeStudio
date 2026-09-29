@@ -5,7 +5,7 @@ import {
   confinementFor,
   permits,
   ROSTER,
-  skillForAgent,
+  sessionSkillForAgent,
   ToolIntent,
   type AgentConfinement,
   type SessionConfigInput,
@@ -96,7 +96,7 @@ export function buildSessionConfig(input: SessionConfigInput): Record<string, un
     // The skill comes from the shipped registry, never from the Settings override: a brief
     // replaces what the agent is for, and craft guidance the output quality depends on is not
     // something to lose by editing an unrelated field (R-14, D12).
-    const skill = skillForAgent(member.name, input.skillFamily, input.skillModelId);
+    const skill = sessionSkillForAgent(member.name, input);
     agent[member.name] = {
       description: member.description,
       prompt: agentPromptFor({

@@ -427,12 +427,14 @@ drag, not a proposition.</div>
       </section>
 
       <section id="engines">
-        <div class="eyebrow">Two engines</div>
-        <h2>Two different assistants behind one door</h2>
+        <div class="eyebrow">Four engines</div>
+        <h2>Different assistants behind one door</h2>
         <p>
-          Arke ships with an assistant built in, and can also drive Claude Code if you already
-          have it installed and signed in. You never talk to either: you ask Arke for a draft, and
-          one of them does the drafting.
+          Arke ships with an assistant built in, has a second of its own for writing entirely on
+          this computer, and can also drive Claude Code or Codex if you already have one installed
+          and signed in. You never talk to any of them: you ask Arke for a draft, and whichever is
+          chosen in Settings does the drafting. The table compares the two that differ most; the
+          other two are described below it.
         </p>
         <div class="scroller">
           <table>
@@ -502,6 +504,27 @@ drag, not a proposition.</div>
           around thirty capabilities and gained five between two runs of one experiment, so
           anything unrecognised is refused outright rather than parked on a prompt nobody is there
           to see. The plumbing is on <a href="the-program.html">the program</a>.
+        </p>
+        <h4>Codex</h4>
+        <p>
+          Like Claude Code, Codex is yours: Arke finds the copy you installed and uses the account
+          you signed it into. Unlike Claude Code, it is given none of its own tools. Arke hands it
+          a short list of its own — read, list, search, write, edit — and does every one of them
+          itself, inside the working folder, so the fence is not something Codex is asked to honour.
+        </p>
+        <h4>Local</h4>
+        <p>
+          Local is Arke's own assistant for writing with a model on this computer, through Ollama.
+          There is nothing to install beyond the model, nothing to sign in to, and nothing leaves
+          the machine. Like Codex, it only ever has Arke's own tools, and Arke carries each of them
+          out; unlike every other engine, there is no separate program at all — Arke talks to the
+          model directly, which is what lets it keep the model's memory of the conversation warm
+          between turns instead of rebuilding it every time.
+        </p>
+        <p>
+          It is offered only when Ollama is running and has a model that can hold a long
+          conversation — one that states a context of 256,000 tokens or more and can use tools.
+          Settings says which of those is missing when it is not.
         </p>
       </section>
 
@@ -683,7 +706,7 @@ frame, and a burned-in caption cannot be removed from the footage afterwards.</d
         described here and the disagreement is named on the page. Related:
         <a href="the-accept-gate.html">the accept gate</a> for what happens to a proposal,
         <a href="the-world.html">the world</a> for what the assistant is searching, and
-        <a href="the-program.html">the program</a> for how the two engines are actually driven.
+        <a href="the-program.html">the program</a> for how the engines are actually driven.
       </div>
     </div>
   </body>

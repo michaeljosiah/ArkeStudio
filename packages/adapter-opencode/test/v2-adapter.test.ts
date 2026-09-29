@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { HarnessEvent } from "@arke-studio/contracts";
 import { OpenCodeV2Adapter } from "../src/v2/opencode-v2-adapter.js";
 import { createNormalizeV2State, normalizeOpenCodeV2 } from "../src/v2/normalize.js";
-import { buildSessionConfigV2 } from "../src/v2/config.js";
+import { buildProfileConfigV2, buildSessionConfigV2 } from "../src/v2/config.js";
 import { credentialEnvPatch } from "../src/config.js";
 import { sameDirectory } from "../src/v2/http.js";
 import { meetsV2Gate, discoverOpenCode2, discoverPreferredHarness } from "../src/discovery.js";
@@ -199,6 +199,26 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
     }
   });
 
+  it("retires a session whose agent pin was stopped, rather than leaving it on the server (issue 1247)", async () => {
+    const adapter = makeAdapter();
+    try {
+      await adapter.init();
+      stub.holdAgentPin = true;
+      const stop = new AbortController();
+      const creation = adapter.createSession({ purpose: "authoring", cwd: "C:\\worlds\\proposal-9", agent: "scene-writer", signal: stop.signal });
+      await until(() => stub.lastRequest(/\/agent$/) !== undefined, "the pin to reach the server");
+      const created = stub.lastRequest(/^\/api\/session$/);
+      stop.abort(new Error("stopped"));
+      await assert.rejects(creation);
+      await until(() => stub.requests.some((r) => r.method === "DELETE" && /^\/api\/session\/ses_stub_\d+$/.test(r.path)), "the created session to be retired");
+      const retired = stub.requests.findLast((r) => r.method === "DELETE" && r.path.startsWith("/api/session/"));
+      assert.ok(created && retired, "both the creation and its retirement were seen");
+    } finally {
+      stub.holdAgentPin = false;
+      await adapter.dispose();
+    }
+  });
+
   it("creates the session in its location and pins the agent as session state", async () => {
     const adapter = makeAdapter();
     try {
@@ -211,6 +231,58 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
       assert.deepEqual(pin?.body, { agent: "scene-writer" });
       assert.equal(pin?.authorized, true);
     } finally {
+      await adapter.dispose();
+    }
+  });
+
+  it("pins the prepared model as session state, dispatch choice over agent default (issue 1247)", async () => {
+    const adapter = makeAdapter();
+    try {
+      await adapter.init();
+      // Measured against the pinned build: the agent's `model` in opencode.json is shown on
+      // GET /api/agent and never consulted for a turn. Only the session's own model runs.
+      adapter.prepareSession({ preparationId: "prep_agent_model", agents: { "scene-writer": { model: "ollama/gemma4:12b" } } });
+      await adapter.createSession({ purpose: "authoring", cwd: "C:\\worlds\\proposal-3", agent: "scene-writer", preparationId: "prep_agent_model" });
+      assert.deepEqual(stub.lastRequest(/^\/api\/session$/)?.body, {
+        location: { directory: "C:/worlds/proposal-3" },
+        model: { providerID: "ollama", id: "gemma4:12b" },
+      });
+      adapter.prepareSession({ preparationId: "prep_dispatch", model: "openrouter/vendor/model-x", agents: { "scene-writer": { model: "ollama/gemma4:12b" } } });
+      await adapter.createSession({ purpose: "authoring", agent: "scene-writer", preparationId: "prep_dispatch" });
+      // The id keeps its own slashes; only the first one names the provider.
+      assert.deepEqual(stub.lastRequest(/^\/api\/session$/)?.body, { model: { providerID: "openrouter", id: "vendor/model-x" } });
+      adapter.prepareSession({ preparationId: "prep_none" });
+      await adapter.createSession({ purpose: "authoring", agent: "scene-writer", preparationId: "prep_none" });
+      assert.deepEqual(stub.lastRequest(/^\/api\/session$/)?.body, {}, "no choice pins nothing; the server's default stands");
+    } finally {
+      await adapter.dispose();
+    }
+  });
+
+  it("budgets a pinned session from its own model's window, not the default's (issue 1247)", async () => {
+    const adapter = makeAdapter();
+    try {
+      await adapter.init();
+      stub.models = [
+        { id: "gpt-5.4-mini", providerID: "openai", limit: { context: 400_000, input: 272_000 } },
+        { id: "gemma4:12b", providerID: "ollama", limit: { context: 131_072 } },
+        { id: "mystery:7b", providerID: "ollama" },
+      ];
+      stub.defaultModel = { id: "gpt-5.4-mini", providerID: "openai" };
+      await adapter.listModels();
+      adapter.prepareSession({ preparationId: "prep_window", model: "ollama/gemma4:12b" });
+      const pinned = await adapter.createSession({ purpose: "authoring", agent: "scene-writer", preparationId: "prep_window" });
+      adapter.prepareSession({ preparationId: "prep_unpinned" });
+      const unpinned = await adapter.createSession({ purpose: "authoring", agent: "scene-writer", preparationId: "prep_unpinned" });
+      adapter.prepareSession({ preparationId: "prep_unknown", model: "ollama/mystery:7b" });
+      const unknown = await adapter.createSession({ purpose: "authoring", agent: "scene-writer", preparationId: "prep_unknown" });
+      assert.equal(adapter.knownInputTokenLimit(pinned.sessionId), 131_072);
+      assert.equal(adapter.knownInputTokenLimit(unpinned.sessionId), 272_000, "an unpinned session answers with the default model");
+      assert.equal(adapter.knownInputTokenLimit(unknown.sessionId), null, "a pinned model with no stated window takes the floor, never the default's window");
+      assert.equal(adapter.knownInputTokenLimit(), 272_000);
+    } finally {
+      stub.models = [];
+      stub.defaultModel = null;
       await adapter.dispose();
     }
   });
@@ -450,15 +522,33 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
     try {
       await adapter.init();
       stub.models = [
-        { id: "gpt-5.4-mini", providerID: "openai", name: "GPT-5.4 mini", limit: { context: 400_000, input: 272_000 } },
+        { id: "gpt-5.4-mini", providerID: "openai", name: "GPT-5.4 mini", limit: { context: 400_000, input: 272_000 }, capabilities: { input: ["text", "image"] } },
         { id: "old-model", providerID: "openai", limit: { context: 8_000 } },
+        { id: "sparse-text", providerID: "openai", capabilities: { input: { text: true } } },
+        { id: "sparse-image", providerID: "openai", capabilities: { input: { image: true } } },
+        { id: "sparse-false", providerID: "openai", capabilities: { input: { text: false } } },
+        { id: "no-tools", providerID: "ollama", capabilities: { tools: false, input: ["text"] } },
+        { id: "disabled", providerID: "openai", disabled: true },
+        { id: "unavailable", providerID: "openai", enabled: false },
+        { id: "deprecated", providerID: "openai", status: "deprecated" },
       ];
       stub.defaultModel = { id: "gpt-5.4-mini", providerID: "openai" };
       const models = await adapter.listModels();
-      assert.equal(models.length, 2);
+      assert.equal(models.length, 6);
       const def = models.find((m) => m.isDefault);
       assert.equal(def?.id, "gpt-5.4-mini");
+      assert.deepEqual(def?.inputModalities, ["text", "image"]);
+      assert.deepEqual(models.find(model => model.id === "sparse-text")?.inputModalities, ["text"]);
+      assert.deepEqual(models.find(model => model.id === "sparse-image")?.inputModalities, ["image"]);
+      assert.deepEqual(models.find(model => model.id === "sparse-false")?.inputModalities, []);
+      assert.equal(models.find(model => model.id === "no-tools")?.tools, false, "a stated tool capability travels with the row");
+      assert.equal(def?.tools, undefined, "unstated stays unknown");
+      assert.equal(def?.inputTokenLimit, 272_000);
       assert.equal(adapter.knownInputTokenLimit(), 272_000, "input beats context when the provider states both");
+      stub.models = [];
+      stub.defaultModel = null;
+      assert.deepEqual(await adapter.listModels(), []);
+      assert.equal(adapter.knownInputTokenLimit(), null, "a removed credential must not retain an obsolete model window");
     } finally {
       await adapter.dispose();
     }
@@ -518,6 +608,35 @@ describe("v2 session config (issue 327 §7)", () => {
       ANTHROPIC_API_KEY: undefined,
       OPENAI_API_KEY: undefined,
     });
+  });
+
+  it("lists the local models in v2's provider grammar, by name, and drops the block when there are none (issue 1247)", () => {
+    const config = buildProfileConfigV2([
+      { id: "gemma4:12b", contextLength: 131072, tools: true, vision: false },
+      { id: "qwen3-vl:8b", tools: true, vision: true },
+    ]);
+    // Measured against 0.0.0-next-17444: `providers` + `package` + `settings.baseURL` produce
+    // rows; the v1 spelling (`provider`, `npm`, `options`) parses and produces nothing.
+    assert.equal(config["provider"], undefined);
+    const providers = config["providers"] as Record<string, Record<string, unknown>>;
+    assert.equal(providers["ollama"]!["package"], "aisdk:@ai-sdk/openai-compatible");
+    assert.deepEqual(providers["ollama"]!["settings"], { baseURL: "http://127.0.0.1:11434/v1", apiKey: "ollama" });
+    assert.deepEqual(providers["ollama"]!["models"], {
+      "gemma4:12b": {
+        name: "gemma4:12b",
+        capabilities: { tools: true, input: ["text"], output: ["text"] },
+        limit: { context: 131072 },
+        cost: { input: 0, output: 0 },
+      },
+      "qwen3-vl:8b": {
+        name: "qwen3-vl:8b",
+        capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
+        cost: { input: 0, output: 0 },
+      },
+    });
+    // The server keeps no provider without models and never asks Ollama itself, so an empty
+    // list must take the whole block away rather than leave a provider that lists nothing.
+    assert.deepEqual(buildProfileConfigV2([]), { $schema: "https://opencode.ai/config.json" });
   });
 
   it("speaks the v2 grammar: agents plural, system not prompt, default_agent set", () => {

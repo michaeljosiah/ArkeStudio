@@ -2,6 +2,8 @@ import { promptHash } from "@arke-studio/contracts";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { captureProviderClient } from "../src/capture.js";
+import { GoogleClient } from "../src/clients/google.js";
+import { createProviderClients } from "../src/registry.js";
 import { ProviderTransportError } from "../src/transport.js";
 import type {
   CommandRunner,
@@ -9,6 +11,7 @@ import type {
   ProviderClient,
   ProviderTransport,
   ProviderTransportScope,
+  VoiceDesignClient,
 } from "../src/types.js";
 
 function fetchFailed(code: string): TypeError {
@@ -42,6 +45,55 @@ function recorder() {
   };
   return { capture, started, responded, finished, failed, drain: () => Promise.allSettled(tracked) };
 }
+
+it("redacts Gemini keys and nested audio bytes while preserving reported usage", async () => {
+  const log = recorder();
+  const encoded = Buffer.alloc(96, 42).toString("base64");
+  const google = captureProviderClient("google", fetch => new GoogleClient(fetch), async () => Response.json({
+    id: "interaction-1", model: "gemini-3.8-flash-tts", status: "completed", usage: { total_input_tokens: 7, total_output_tokens: 10 },
+    steps: [{ type: "model_output", content: [{ type: "audio", mime_type: "audio/wav", data: encoded }] }],
+  }), log.capture);
+  await google.submit("never-log-this-key", { model: "gemini-3.8-flash-tts", capability: "voice-tts", params: { voiceId: "Kore", text: "Hello" } });
+  await log.drain();
+  const saved = JSON.stringify({ started: log.started, finished: log.finished });
+  assert.equal(saved.includes("never-log-this-key"), false);
+  assert.equal(saved.includes(encoded), false);
+  assert.ok(saved.includes('"total_output_tokens":10'));
+  assert.ok(saved.includes('"sizeBytes":96'));
+});
+
+it("carries designed voice methods through captured host assembly and redacts samples and stateless secrets", async () => {
+  const log = recorder();
+  const scopes: ProviderTransportScope[] = [];
+  const encoded = Buffer.alloc(96, 42).toString("base64");
+  const metadata = { id: "voice_abc", type: "prompted", model: "gemini-3.8-flash-tts", display_name: "Astronomer",
+    prompted: { input: "A warm British voice." }, language_code: "en-GB", expire_time: "2027-09-28T00:00:00Z" };
+  const clients = createProviderClients({
+    fetch: async () => { assert.fail("the auxiliary methods must use the host transport"); },
+    capture: log.capture,
+    transport: { async run(scope, operation) { scopes.push(scope); return operation(async () => {
+      // The host transport is the fetch owner even for the auxiliary voice methods.
+      return scope.operation === "list-designed-voices" ? Response.json({ voices: [metadata] }) : Response.json({ ...metadata,
+        key: "voicekey_never_keep_this", message: "unexpected voicekey_never_keep_that.opaque/+/=tail", sample_audio: { mime_type: "audio/wav", data: encoded },
+        usage: { total_input_tokens: 20, total_output_tokens: 100 } });
+    }); } },
+  });
+  const google = clients.google as VoiceDesignClient;
+  const result = await google.createDesignedVoice("never-log-this-key", { model: metadata.model, name: metadata.display_name,
+    description: metadata.prompted.input, language: metadata.language_code });
+  assert.equal(result.remoteId, metadata.id);
+  await google.getDesignedVoice("never-log-this-key", metadata.id);
+  assert.equal((await google.listDesignedVoices("never-log-this-key")).voices.length, 1);
+  await log.drain();
+  const operations = ["design-voice", "get-designed-voice", "list-designed-voices"];
+  assert.deepEqual(log.started.map(row => row.operation), operations);
+  assert.deepEqual(scopes.map(row => row.operation), operations);
+  assert.equal(scopes[0]?.model, metadata.model);
+  const saved = JSON.stringify({ started: log.started, finished: log.finished });
+  for (const secret of ["never-log-this-key", "voicekey_never_keep_this", "voicekey_never_keep_that", "opaque/+/=tail", encoded]) assert.equal(saved.includes(secret), false);
+  assert.ok(saved.includes('"total_output_tokens":100'));
+  assert.ok(saved.includes('"sizeBytes":96'));
+});
 
 function client(fetchImpl: typeof fetch): ProviderClient {
   return {

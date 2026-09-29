@@ -14,11 +14,20 @@ let returnTo: string | null = null;
 
 export function rememberSettingsReturn(path: string): void {
   // Settings is never somewhere to return to — a second press would loop on itself.
-  if (path.startsWith("/settings")) return;
+  if (isSettingsPath(path)) return;
   returnTo = path;
 }
 
-/** The route to leave to, or the world picker where nothing was remembered — a deep link, a fresh launch. */
+/** Whether an address is inside Settings — the sheet's routes, which render over the screen tree. */
+export function isSettingsPath(path: string): boolean {
+  return path === "/settings" || path.startsWith("/settings/");
+}
+
+/**
+ * The route to leave to, or the world picker where nothing was remembered — a deep link, a fresh
+ * launch. Since design turn 150 it is also what renders *behind* the sheet while Settings is up,
+ * so leaving is a change of address and not a change of screen.
+ */
 export function settingsReturnPath(): string {
   return returnTo ?? "/worlds";
 }

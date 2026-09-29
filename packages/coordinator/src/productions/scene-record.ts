@@ -1,3 +1,4 @@
+import { orderedShots, VISUAL_NOVEL_KIND } from "@arke-studio/contracts";
 import {
   isGraphScene,
   linearizeSceneFlow,
@@ -42,6 +43,13 @@ export const STAGE_BLOCKING_SCHEMA_VERSION = 6;
 export const STAGE_PERFORMANCE_SCHEMA_VERSION = 7;
 export const STAGE_EASING_SCHEMA_VERSION = 8;
 export const STAGE_RIG_SCHEMA_VERSION = 9;
+/**
+ * A visual novel (turn 174). Its beat on a shot — how it moves on, whether it keeps the picture
+ * before — is a strict field a build without it would drop the scene over; and the kind itself
+ * changes how the production plays and exports, which an older build would read as plain video
+ * and let be cut as clips (codex round 16). Either one landing fences the world.
+ */
+export const VISUAL_NOVEL_SCHEMA_VERSION = 41;
 
 /**
  * A write refused because the graph it would land is not one path (R-59, R-61).
@@ -335,4 +343,59 @@ export function carriesStageRig(raw: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Do these production.json bytes make the production a visual novel (turn 174)? */
+export function carriesVisualNovel(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return typeof value === "object" && value !== null && (value as Record<string, unknown>)["kind"] === VISUAL_NOVEL_KIND;
+  } catch {
+    return false;
+  }
+}
+
+/** Do these scene bytes carry a visual novel's beat on any shot (turn 174)? */
+export function carriesBeat(raw: string): boolean {
+  try { return orderedShots(parseSceneRecord(raw)).some(shot => shot.beat !== undefined); }
+  catch { return false; }
+}
+
+/** The expanded playblast pin is strict; older readers must refuse instead of dropping the scene. */
+export function carriesStageReferenceFrames(raw: string): boolean {
+  try { return orderedShots(parseSceneRecord(raw)).some(shot => shot.staging?.playblast?.referenceFrames !== undefined); }
+  catch { return false; }
+}
+
+/** Gait and optional object speed limits are strict authored fields (issue 1044). */
+export function carriesStageSpeed(raw: string): boolean {
+  try { return orderedShots(parseSceneRecord(raw)).some(shot => shot.staging?.performances?.some(track => track.keys.some(key => key.gait !== undefined)) || shot.staging?.objectMotions?.some(track => track.maxSpeed !== undefined)); }
+  catch { return false; }
+}
+
+/** Performance ease and holds change interpolation only when authored (issue 1046). */
+export function carriesStagePerformanceEase(raw: string): boolean {
+  try { return orderedShots(parseSceneRecord(raw)).some(shot => shot.staging?.performances?.some(track => track.keys.some(key => key.easeIn !== undefined || key.easeOut !== undefined || key.hold !== undefined))); }
+  catch { return false; }
+}
+
+/** Expanded Stage geometry, shot-local performance and camera lens/roll need schema 10. */
+export function carriesStageConstruction(raw: string): boolean {
+  try {
+    const scene = parseSceneRecord(raw);
+    const blocks = [scene.blocking, ...orderedShots(scene).map(shot => shot.staging)];
+    return blocks.some(block => block && (
+      block.cast?.some(f => f.parent !== undefined || f.y !== undefined || f.height !== undefined || f.facing !== undefined) ||
+      block.sets?.some(s => s.vertices !== undefined || s.triangles !== undefined || s.shape !== undefined || s.rotation !== undefined || s.y !== undefined || s.group !== undefined || s.solid !== undefined)
+    )) || orderedShots(scene).some(shot => shot.staging && (
+      shot.staging.objectMotions !== undefined || shot.staging.performances !== undefined || shot.staging.authorship !== undefined || shot.staging.playblast?.sourceFingerprint !== undefined ||
+      shot.staging.keys.some(k => k.anchorSpace !== undefined || k.roll !== undefined || k.focalMm !== undefined)
+    ));
+  } catch { return false; }
+}
+
+/** Evaluator-versioned playblast pins must not make a scene disappear in older readers (#1128). */
+export function carriesStageEvaluatorVersion(raw: string): boolean {
+  try { return orderedShots(parseSceneRecord(raw)).some(shot => shot.staging?.playblast?.evaluatorVersion !== undefined); }
+  catch { return false; }
 }

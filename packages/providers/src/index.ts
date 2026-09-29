@@ -4,6 +4,10 @@
  * declarations) lives in @arke-studio/contracts so the renderer shares it.
  */
 export { AnthropicClient } from "./clients/anthropic.js";
+export { GoogleClient, GEMINI_TTS_MODELS, GEMINI_PRESETS } from "./clients/google.js";
+export { GEMINI_VOICE_DESIGN_AVAILABILITY } from "./clients/google-voices.js";
+export { geminiSpeechModel } from "./gemini-tts-models.js";
+export { cloudVoiceSources } from "./voice-catalogues.js";
 export {
   ComfyUiClient,
   COMFYUI_VERSION_FLOOR,
@@ -36,15 +40,21 @@ export {
   type RecipeParamValues,
 } from "./comfyui/recipes.js";
 export { redactComfyUiBody } from "./comfyui/redact.js";
+export { BreezeBlueClient, BREEZE_MODEL } from "./clients/breezeblue.js";
+export { FishAudioClient, FISH_MODEL, FISH_PROVIDER_MODEL } from "./clients/fishaudio.js";
 export { ElevenLabsClient } from "./clients/elevenlabs.js";
 export { FalClient } from "./clients/fal.js";
 export { HiggsfieldClient } from "./clients/higgsfield.js";
 export { KokoroClient, type KokoroSynthesize, type SidecarBaseUrl } from "./clients/kokoro.js";
+export { MistralClient, VOXTRAL_MODEL, VOXTRAL_PRESETS } from "./clients/mistral.js";
 export { OllamaClient } from "./clients/ollama.js";
 export { OpenAiClient } from "./clients/openai.js";
 export { WhisperCppClient, type WhisperTranscribe } from "./clients/whispercpp.js";
 export { jsonRequest, tryProbe } from "./clients/http.js";
 export { requireModel, SHIPPED_MANIFEST } from "./manifest-data.js";
+export { HEARMEMAN_ADAPTERS } from "./comfyui/hearmeman.generated.js";
+export { H3_ADAPTER_BUNDLES } from "./comfyui/adapter-bundles.js";
+export { recipeWithAdapters } from "./comfyui/adapters.js";
 export { createProviderClients, PROVIDER_DECLARATIONS, type ProviderClientDeps } from "./registry.js";
 export {
   discoverHiggsfield,
@@ -84,6 +94,11 @@ export {
   type ProviderTransport,
   type ProviderTransportScope,
   type VoiceCatalogueClient,
+  type VoiceDesignClient,
+  type VoiceDesignInput,
+  type VoiceDesignResult,
+  type DesignedVoice,
+  type VoiceSlotClient,
   type SubmitRequest,
   type SubmitResult,
 } from "./types.js";

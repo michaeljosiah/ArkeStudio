@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { PROVIDERS, type ClientState, type ManifestModel } from "@arke-studio/contracts";
+import { OPENCODE_AVAILABILITY, PROVIDERS, type ClientState, type ManifestModel } from "@arke-studio/contracts";
+import { parseHTML } from "linkedom";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { CAPABILITY_ROWS } from "../src/screens/settings-parts.js";
@@ -115,20 +113,20 @@ function localVideoReady(
 }
 
 describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => {
+  it("opens Harness on the engine in use and honors an explicit selection (#1004)", () => {
+    const state = stateWith({ harness: {
+      engine: "claude", claudePath: null, codexPath: null, launchOverride: null,
+      harnesses: [OPENCODE_AVAILABILITY, { ...OPENCODE_AVAILABILITY, id: "claude", label: "Claude Code", bundled: false }],
+    } });
+    const selected = (path: string) => parseHTML(render(path, state)).document.querySelector('[role="tab"][aria-selected="true"]')?.textContent;
+    assert.match(selected("/settings/harness")!, /Claude Code/);
+    assert.match(selected("/settings/harness?harness=opencode")!, /OpenCode/);
+  });
   it("mounts under its own name", () => {
     const app = render("/settings/general");
     assert.match(app, /data-screen="settings-general"/);
     assert.match(plain(app), /General/);
     assert.doesNotMatch(plain(app), /Who does what|Cloud AI/);
-  });
-
-  it("sends each old address where its content went, rather than to a hole", async () => {
-    // Asserted on the routes rather than on a render: `<Navigate>` needs a second pass and
-    // `renderToString` makes one. `agents` named the per-agent overrides, and those are on
-    // Harness now — sending it to Cloud AI would land it on the screen defined by not having them.
-    const app = await readFile(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "App.tsx"), "utf8");
-    assert.match(app, /path="who-does-what" element=\{<Navigate to="\/settings\/general" replace \/>\}/);
-    assert.match(app, /path="agents" element=\{<Navigate to="\/settings\/harness" replace \/>\}/);
   });
 
   it("lists a local model beside a cloud one, which R-61 forbade", () => {
@@ -154,13 +152,38 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
   });
 
   it("says where a default actually runs, from the resolved engine (R-16a)", () => {
-    const here = plain(render("/settings/general", localVideoReady({ video: LOCAL_VIDEO.id })));
-    assert.match(here, /ComfyUI · this machine/);
+    // The provider is the control's first word and the state beside it says the rest (design
+    // turn 149): `ComfyUI · Draft video` in the select, `this machine` in the state cell, and
+    // never the provider twice.
+    const here = render("/settings/general", localVideoReady({ video: LOCAL_VIDEO.id }));
+    assert.match(here.replace(/<!-- -->/g, ""), /<option value="comfyui-draft-video" selected="">ComfyUI · Draft video</);
+    assert.match(here, /class="fy-fact__state">this machine</);
     // `PROVIDERS.comfyui.local` is `true` either way, so a clause reading the provider flag would
     // tell someone their video drafts here while it renders on a box down the hall.
-    const elsewhere = plain(render("/settings/general", localVideoReady({ video: LOCAL_VIDEO.id }, "remote")));
-    assert.match(elsewhere, /ComfyUI · another machine/);
-    assert.doesNotMatch(elsewhere, /ComfyUI · this machine/);
+    const elsewhere = render("/settings/general", localVideoReady({ video: LOCAL_VIDEO.id }, "remote"));
+    assert.match(elsewhere, /class="fy-fact__state">another machine</);
+    assert.doesNotMatch(elsewhere, /class="fy-fact__state">this machine</);
+  });
+
+  it("draws every row in Providers' grammar, with no caption under a control (turn 149)", () => {
+    const html = render("/settings/general", localVideoReady({ video: LOCAL_VIDEO.id }));
+    const { document } = parseHTML(html);
+    const screen = document.querySelector('[data-screen="settings-general"]')!;
+    // The page title, then rows: a label, its value, its state. No eyebrow says DEFAULTS.
+    assert.equal(screen.querySelector("h1")?.textContent, "General");
+    assert.doesNotMatch(html, /fy-set__eyebrow|NARRATOR|DEFAULTS/);
+    const rows = [...screen.querySelectorAll(".fy-fact")];
+    assert.deepEqual(
+      rows.map((row) => row.querySelector(".fy-fact__what")?.textContent),
+      ["Images", "Video", "Text-to-Speech", "Music", "Language", "Narrator"],
+    );
+    // The select carries the source's mark in front of the value, and the state follows it in
+    // the same cell rather than under it.
+    const video = rows[1]!;
+    assert.ok(video.querySelector(".ui-select--marked .fy-mark"), "the default's mark");
+    assert.equal(video.querySelector(".fy-fact__is > .ui-select + .fy-fact__state")?.textContent, "this machine");
+    // The capability copy — refs, frames, seconds — is the tile's on AI models, not this row's.
+    assert.doesNotMatch(html, /refs ×|frames ·/);
   });
 
   it("draws no Language picker, only the route to the harness that writes (R-17)", () => {
@@ -213,7 +236,9 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
         }),
       ),
     );
-    assert.match(text, new RegExp(`${PROVIDERS[CLOUD_VIDEO.provider].displayName} · connected`));
+    // The provider is the control's first word; the connection state is the cell beside it.
+    assert.match(text, new RegExp(`${PROVIDERS[CLOUD_VIDEO.provider].displayName} · ${CLOUD_VIDEO.displayName}`));
+    assert.match(text, /connected/);
     // The remedy is Providers, and it is reached from the rail rather than from a button at the
     // foot: SPEC-034 R-4 removes that button because there is no longer anywhere else to route
     // to, and frame 112d draws none.
@@ -225,6 +250,30 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
     assert.doesNotMatch(plain(render("/settings/general")), /which model runs each writing agent/);
     assert.match(plain(render("/settings/harness")), /which model runs each writing agent/);
   });
+
+  it("does not mark an untested default green, and retains the warning for a refused default (#991)", () => {
+    const state = stateWith({
+      routing: { defaults: { video: CLOUD_VIDEO.id }, faults: [] },
+      providers: [{ id: CLOUD_VIDEO.provider, configured: true, validation: "untested", probes: [], fault: null }],
+    });
+    const untested = render("/settings/general", state);
+    assert.match(untested, /class="fy-fact__state">not tested</);
+    assert.doesNotMatch(untested, /fy-set__dot--ok|fy-set__dot--warn/);
+    // Refused: the warning colour and its dot, in the state cell, and no callout above the list
+    // saying the same thing (turn 149) — one fault, one place.
+    state.app.providers[0]!.configured = false;
+    const refused = render("/settings/general", state);
+    assert.match(refused, /fy-fact__state--warn"><span class="fy-set__dot fy-set__dot--warn"[^>]*><\/span>no key</);
+    assert.doesNotMatch(refused, /has nowhere to go|fy-callout/);
+  });
+
+  it("states a default whose model left the manifest on its own row (SPEC-008 §2.7)", () => {
+    const html = render(
+      "/settings/general",
+      stateWith({ routing: { defaults: { video: "gone-2.0" }, faults: [{ capability: "video", modelId: "gone-2.0", reason: "gone" }] } }),
+    );
+    // The control shows what is stored rather than the first option it happens to hold.
+    assert.match(html, /<option value="gone-2.0" selected="">gone-2.0</);
+    assert.match(html, /fy-fact__state--warn"><span class="fy-set__dot fy-set__dot--warn"[^>]*><\/span>not in the manifest</);
+  });
 });
-
-

@@ -1,7 +1,8 @@
 /** Browser-only development has no isolated preload. The local terminal supplies a fragment
  * capability; remove it from browser history and remember it only for this tab and endpoint. */
+import { isRemoteSession } from "./remote-session.js";
 export function devSession(): { port: number; token: string } | null {
-  if (typeof window === "undefined" || window.arke) return null;
+  if (typeof window === "undefined" || window.arke || isRemoteSession()) return null;
   const endpoint = (import.meta.env?.VITE_ARKE_WS as string | undefined) ?? "ws://127.0.0.1:8791";
   const key = "arke-dev-session:" + endpoint;
   try {

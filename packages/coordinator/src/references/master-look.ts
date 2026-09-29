@@ -1,5 +1,21 @@
 import type { ManifestModel, ResolvedArtDirection, SizeTier, WorldMeta } from "@arke-studio/contracts";
-import { estimateMicroUsd, imageConstraintSuffix, imageOutputFor } from "@arke-studio/contracts";
+import { ArtDirectionRecordSchema, estimateMicroUsd, imageConstraintSuffix, imageOutputFor } from "@arke-studio/contracts";
+import { isDeepStrictEqual } from "node:util";
+
+/** Founding may complete v1 with its already approved preview, without changing the look. */
+export function completesFoundingLook(before: string, after: string): boolean {
+  try {
+    const previous = JSON.parse(before);
+    const next = JSON.parse(after);
+    if (!ArtDirectionRecordSchema.safeParse(previous).success || !ArtDirectionRecordSchema.safeParse(next).success) return false;
+    const { masterLook, ...rest } = next;
+    return previous.version === 1 && previous.masterLook === undefined &&
+      typeof masterLook === "string" && /^art-direction\/look-v1\.[a-z0-9]+$/.test(masterLook) &&
+      isDeepStrictEqual(previous, rest);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The world look as a picture, from the world look as words.
@@ -93,6 +109,7 @@ export function masterLookRequest(
     prompt?: string | undefined;
     /** World-relative images to send along, already filtered to what this model can take. */
     references?: readonly string[] | undefined;
+    referenceRoles?: Array<{ file: string; role: string }>;
     /** The chosen size, or absent for the provider's default. */
     tier?: SizeTier | undefined;
     /** The chosen shape. One the model does not offer is dropped, not sent. */
@@ -128,7 +145,7 @@ export function masterLookRequest(
       // Recorded as riding the world look at the version that asked for it, like any other
       // generation — this one happens to be a picture *of* that version.
       artDirection: { version: direction.version, source: "world", transport: "text" },
-      ...(references.length > 0 ? { references: [...references] } : {}),
+      ...(references.length > 0 ? { references: [...references], referenceRoles: options.referenceRoles ?? references.map((file) => ({ file, role: "style" })) } : {}),
     },
     estimatedMicroUsd: estimateMicroUsd(model, {
       images: 1,

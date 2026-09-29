@@ -263,6 +263,8 @@ describe("FsWorldProvider (R-1, T-14)", () => {
     await mkdir(join(root, ".genesis", "gn-first"), { recursive: true });
     await writeFile(join(root, ".genesis", "gn-first", "notes.md"), "# nope");
     assert.equal(await provider.serveGenesisMedia("gn-first", "notes.md"), null);
+    assert.equal(await provider.serveGenesisMedia("gen-nonexistent", "previews/look-preview.png"), null);
+    assert.ok(!(await provider.listGenesisIds()).includes("gen-nonexistent"));
     await provider.close();
   });
 

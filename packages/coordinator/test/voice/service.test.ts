@@ -10,7 +10,10 @@ import {
   authoritativeBibleSpeech,
   authoritativeProseSpeech,
   authoritativeSheetSpeech,
+  cachedVoiceAudioLooksRight,
+  concatMp3,
   concatWav,
+  joinSpeech,
   normalizeSpeechText,
   previewCacheFile,
   speechCacheFile,
@@ -23,6 +26,38 @@ import { makeTempWorld } from "../world/helpers.js";
 import { FakeProvider } from "../queue/fake-provider.js";
 import { AppSettingsFile } from "../../src/app-settings.js";
 import { verifyArtifact } from "../../src/queue/verify.js";
+import { cloudVoiceSources, createProviderClients, SHIPPED_MANIFEST } from "@arke-studio/providers";
+
+it("Google catalogue activation uses only the current configured key and never synthesizes", async () => {
+  let key: string | null = null;
+  let enabled = true;
+  const requestedKeys: string[] = [];
+  const clients = createProviderClients({ fetch: async (_url, init) => {
+    assert.equal(init?.method ?? "GET", "GET");
+    const active = new Headers(init?.headers).get("x-goog-api-key")!;
+    requestedKeys.push(active);
+    if (active === "revoked") return new Response("Forbidden", { status: 403 });
+    return Response.json({ models: [{ name: `models/${active === "flash-project" ? "gemini-3.8-flash-tts" : "gemini-3.8-flash-lite-tts"}` }] });
+  } });
+  const service = new VoiceService({ sidecar: null, localPresets: [], cloudSources: cloudVoiceSources(clients),
+    modelEnabled: () => enabled, getKey: async provider => provider === "google" ? key : null, emit: () => {} });
+  assert.deepEqual(await service.catalogue(), []);
+  assert.deepEqual(requestedKeys, []);
+  key = "flash-project";
+  const flash = await service.catalogue();
+  assert.equal(flash.length, 30);
+  assert.ok(flash.every(v => v.model === "gemini-3.8-flash-tts"));
+  enabled = false;
+  assert.deepEqual(await service.catalogue(), []);
+  enabled = true;
+  key = "lite-project";
+  assert.ok((await service.catalogue()).every(v => v.model === "gemini-3.8-flash-lite-tts"));
+  key = "revoked";
+  assert.deepEqual(await service.catalogue(), []);
+  key = null;
+  assert.deepEqual(await service.catalogue(), []);
+  assert.deepEqual(requestedKeys, ["flash-project", "flash-project", "lite-project", "revoked"]);
+});
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
 
@@ -354,6 +389,79 @@ describe("joining the pieces back into one clip", () => {
   it("refuses audio that is not a wav at all", () => {
     assert.throws(() => concatWav([new Uint8Array([1, 2, 3]), wav([1])]), /invalid audio/);
   });
+
+  /**
+   * MP3 frames simply follow one another, but each vendor response opens with its own ID3v2 tag,
+   * and a tag mid-stream is not a frame a decoder can play through (SPEC-047 R-5). The tag's
+   * size is four seven-bit bytes, which is the one thing worth getting wrong here.
+   */
+  it("drops a later piece's ID3v2 tag and keeps the first one's, by the tag's own size", () => {
+    // 0x01 0x05 as seven-bit bytes is 128 + 5 = 133 bytes of tag body.
+    const tag = () => Buffer.from([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0x01, 0x05, ...Array.from({ length: 133 }, () => 0xaa)]);
+    const first = Buffer.concat([tag(), Buffer.from([0xff, 0xfb, 1, 1])]);
+    const second = Buffer.concat([tag(), Buffer.from([0xff, 0xfb, 2, 2])]);
+    const joined = Buffer.from(concatMp3([new Uint8Array(first), new Uint8Array(second)]));
+    assert.equal(joined.length, first.length + 4, "the second tag is gone, its frame kept");
+    assert.deepEqual([...joined.subarray(joined.length - 4)], [0xff, 0xfb, 2, 2]);
+    assert.deepEqual([...joined.subarray(0, 3)], [0x49, 0x44, 0x33], "the first tag opens the file");
+  });
+
+  it("drops a v2.4 tag's footer with the tag, by the footer flag (codex on PR 1210)", () => {
+    // Flags 0x10: a footer follows the body — ten more bytes the size does not count.
+    const tag = (flags: number) => Buffer.from([0x49, 0x44, 0x33, 4, 0, flags, 0, 0, 0, 0x02, 0xaa, 0xaa, ...(flags & 0x10 ? [0x33, 0x44, 0x49, 4, 0, flags, 0, 0, 0, 0x02] : [])]);
+    const frame = Buffer.from([0xff, 0xfb, 9, 9]);
+    const withFooter = Buffer.from(concatMp3([new Uint8Array(frame), new Uint8Array(Buffer.concat([tag(0x10), frame]))]));
+    assert.deepEqual([...withFooter], [...frame, ...frame], "nothing of the tag, footer included, sits between the frames");
+    const without = Buffer.from(concatMp3([new Uint8Array(frame), new Uint8Array(Buffer.concat([tag(0), frame]))]));
+    assert.deepEqual([...without], [...frame, ...frame]);
+  });
+
+  /**
+   * A reader's mp3 opens with a Xing/Info frame describing that piece alone; joined raw, the
+   * first piece's byte total would name the whole file's length, which the verifier reads as a
+   * truncation — and the cache would never hit (codex on PR 1210). Every part's declaration
+   * frame goes, and the joined stream is one the verifier accepts.
+   */
+  it("drops every part's Xing/Info frame, keeps the first tag, and joins to a stream the verifier accepts", () => {
+    // MPEG-1 Layer III, 128 kb/s, 44.1 kHz, stereo: a 417-byte frame.
+    const frame = (fill: number) => Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x00]), Buffer.alloc(413, fill)]);
+    const info = (frames: number, bytes: number) => {
+      const out = frame(0);
+      out.write("Info", 36, "ascii");
+      out.writeUInt32BE(3, 40);
+      out.writeUInt32BE(frames, 44);
+      out.writeUInt32BE(bytes, 48);
+      return out;
+    };
+    const tag = Buffer.from([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 0x02, 0xaa, 0xaa]);
+    const first = Buffer.concat([tag, info(3, 417 * 3), frame(1), frame(2)]);
+    const second = Buffer.concat([tag, info(2, 417 * 2), frame(3)]);
+    assert.match(verifyArtifact({ name: "raw.mp3", contentType: "audio/mpeg", data: new Uint8Array(Buffer.concat([first, second.subarray(tag.length)])) }) ?? "", /Info/, "joined raw, the first declaration lies about the length");
+    const joined = Buffer.from(concatMp3([new Uint8Array(first), new Uint8Array(second)]));
+    assert.equal(joined.length, tag.length + 417 * 3, "the tag, then three audio frames and nothing else");
+    assert.deepEqual([joined[tag.length + 4], joined[tag.length + 417 + 4], joined[tag.length + 417 * 2 + 4]], [1, 2, 3], "in order");
+    assert.equal(verifyArtifact({ name: "joined.mp3", contentType: "audio/mpeg", data: new Uint8Array(joined) }), null);
+    assert.ok(cachedVoiceAudioLooksRight(new Uint8Array(joined), "mp3"), "a hit next time");
+  });
+
+  it("drops an ID3v1 trailer from every part but the last, where the verifier allows the one there is (codex on PR 1210)", () => {
+    const frame = (fill: number) => Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x00]), Buffer.alloc(413, fill)]);
+    const trailer = Buffer.concat([Buffer.from("TAG", "ascii"), Buffer.alloc(125, 0)]);
+    const first = Buffer.concat([frame(1), trailer]);
+    const second = Buffer.concat([frame(2), trailer]);
+    assert.match(verifyArtifact({ name: "raw.mp3", contentType: "audio/mpeg", data: new Uint8Array(Buffer.concat([first, second])) }) ?? "", /invalid data/, "joined raw, the first trailer is bytes between frames");
+    const joined = Buffer.from(concatMp3([new Uint8Array(first), new Uint8Array(second)]));
+    assert.equal(joined.length, 417 * 2 + 128, "two frames and the one trailer at the end");
+    assert.equal(joined.toString("ascii", 417 * 2, 417 * 2 + 3), "TAG");
+    assert.equal(verifyArtifact({ name: "joined.mp3", contentType: "audio/mpeg", data: new Uint8Array(joined) }), null);
+  });
+
+  it("joins by the format the reader returned, and has no join for flac", () => {
+    assert.deepEqual(joinSpeech([wav([1]), wav([2])], "wav"), concatWav([wav([1]), wav([2])]));
+    const frame = new Uint8Array([0xff, 0xfb, 1, 1]);
+    assert.deepEqual(joinSpeech([frame, frame], "mp3"), concatMp3([frame, frame]));
+    assert.throws(() => joinSpeech([frame, frame], "flac"), /flac parts cannot be joined/);
+  });
 });
 
 describe("the catalogue does not offer a voice the engine cannot speak", () => {
@@ -409,6 +517,59 @@ describe("the catalogue does not offer a voice the engine cannot speak", () => {
     assert.ok(clone);
     assert.equal(clone.local, false);
     assert.equal(clone.unavailableReason, "the cloned voice recipe is hard-disabled");
+  });
+});
+
+describe("a hosted reader offers the library's voices as its own candidates (SPEC-046 R-10)", () => {
+  const harbour = { id: "harbour", name: "Harbour", clip: "voices/harbour.wav", attributes: ["low"] } as never;
+  const service = (keyed: string[]) =>
+    new VoiceService({
+      sidecar: null,
+      localPresets: [],
+      cloudSources: [],
+      hostedReaders: [{ provider: "mistral", model: "voxtral-mini-tts" }, { provider: "breezeblue", model: "breeze-tts-2" }],
+      getKey: async (provider) => (keyed.includes(provider) ? "key" : null),
+      emit: () => {},
+      clock: CLOCK,
+    });
+
+  it("one voice, three readers: the recipe's candidate and one per keyed vendor, all naming the same voice", async () => {
+    const voices = await service(["mistral", "breezeblue"]).catalogue([harbour]);
+    assert.deepEqual(
+      voices.map((v) => [v.provider, v.model, v.voiceId, v.readsClone, v.local]),
+      [
+        ["comfyui", "comfyui-cloned-voice", "harbour", "harbour", true],
+        ["mistral", "voxtral-mini-tts", "harbour", "harbour", false],
+        ["breezeblue", "breeze-tts-2", "harbour", "harbour", false],
+      ],
+    );
+  });
+
+  it("an unkeyed reader offers nothing, like an unkeyed cloud catalogue", async () => {
+    const voices = await service(["mistral"]).catalogue([harbour]);
+    assert.deepEqual(voices.map((v) => v.provider), ["comfyui", "mistral"]);
+    assert.deepEqual((await service([]).catalogue([harbour])).map((v) => v.provider), ["comfyui"]);
+  });
+
+  it("a keyed reader whose key the vendor rejected still lists its voice, marked with the reason (codex on PR 1153)", async () => {
+    // A rejected key is stored and reported invalid; the candidate stays visible so an existing
+    // assignment does, and carries the probe's reason so nothing is queued to fail at dispatch.
+    const marked = new VoiceService({
+      sidecar: null,
+      localPresets: [],
+      cloudSources: [],
+      hostedReaders: [{ provider: "mistral", model: "voxtral-mini-tts" }, { provider: "breezeblue", model: "breeze-tts-2" }],
+      readerAvailability: (provider) => (provider === "mistral" ? { unavailableReason: "Mistral rejected this key" } : {}),
+      getKey: async () => "key",
+      emit: () => {},
+      clock: CLOCK,
+    });
+    const voices = await marked.catalogue([harbour]);
+    assert.deepEqual(voices.map((v) => [v.provider, v.unavailableReason]), [
+      ["comfyui", undefined],
+      ["mistral", "Mistral rejected this key"],
+      ["breezeblue", undefined],
+    ]);
   });
 });
 
@@ -480,6 +641,29 @@ describe("candidates and the stated preview cost (R-7, R-10)", () => {
     const length = event.previewLine.text.length;
     assert.equal(event.previewMicroUsdByVoice[JSON.stringify(["elevenlabs", expensive.id, "same"])], length * 500);
     assert.equal(event.previewMicroUsdByVoice[JSON.stringify(["elevenlabs", ELEVEN_MODEL.id, "same"])], length * 300);
+  });
+
+  it("binds token preview consent to the displayed line, voice and dated rate", async () => {
+    let at = "2026-12-31T23:59:59.000Z";
+    const model: ManifestModel = { ...ELEVEN_MODEL, pricing: { kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
+      speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25, rates: [
+        { version: "intro", effectiveFrom: "2026-09-01T00:00:00.000Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 },
+        { version: "standard", effectiveFrom: "2027-01-01T00:00:00.000Z", microUsdPerMillionInput: 1000000, microUsdPerMillionOutput: 18000000 },
+      ] } } };
+    const events: DomainEvent[] = [];
+    const service = new VoiceService({ sidecar: null, localPresets: [], clock: () => at, getKey: async () => "key", emit: event => events.push(event),
+      cloudSources: [{ provider: model.provider, list: async () => [{ provider: model.provider, model: model.id, voiceId: "same", label: "Same", attributes: [], local: false, canClone: false }] }] });
+    await service.candidates("01J8F3K2QW9VZX4N7M0RTYB6HC", { productions: [] } as unknown as WorldBundle, SHEET, { manifestVersion: 1, generated: "2026-09-27", models: [model] });
+    const event = events.find(e => e.type === "voice.candidates");
+    assert.ok(event?.type === "voice.candidates");
+    const quoteToken = Object.values(event.previewQuoteByVoice!)[0]!;
+    const request = { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", sheet: SHEET, provider: model.provider, voiceId: "same", model, line: event.previewLine, quoteToken };
+    assert.equal(service.queuedPreviewRequest(request).input.estimatedMicroUsd, Object.values(event.previewMicroUsdByVoice)[0]);
+    assert.throws(() => service.queuedPreviewRequest({ ...request, quoteToken: undefined }), /price changed/);
+    assert.throws(() => service.queuedPreviewRequest({ ...request, voiceId: "another" }), /price changed/);
+    assert.throws(() => service.queuedPreviewRequest({ ...request, line: { ...request.line, text: "Different words" } }), /price changed/);
+    at = "2027-01-01T00:00:00.000Z";
+    assert.throws(() => service.queuedPreviewRequest(request), /price changed/);
   });
 
   it("an unkeyed cloud source contributes nothing; the catalogue stays uniform", async () => {
@@ -702,6 +886,7 @@ describe("authoritative prose speech (issue 857)", () => {
         meta: { id: "season-one", title: "Season One" },
         story: { version: 7, logline: "A diver hears her drowned sister sing.", spine: "" },
         season: { version: 2, question: "Who is singing?" },
+        episodes: [{ id: "ep_watch", version: 4, title: "Her mother’s hour", promise: { opens: "  The answering bell.  " } }],
         treatment: "Long-form prose about the season.",
         scenes: [
           {
@@ -715,6 +900,12 @@ describe("authoritative prose speech (issue 857)", () => {
       },
     ],
   } as unknown as WorldBundle;
+
+  it("reads an episode promise from its current saved version and refuses missing episodes", () => {
+    assert.deepEqual(authoritativeProseSpeech(BUNDLE,{of:"episode",productionId:"season-one",episodeId:"ep_watch",field:"opens"}),{text:"The answering bell.",heading:"opens",version:4,subjectId:"season-one/ep_watch/opens"});
+    assert.throws(()=>authoritativeProseSpeech(BUNDLE,{of:"episode",productionId:"season-one",episodeId:"ep_missing",field:"opens"}),/no longer/);
+    assert.throws(()=>authoritativeProseSpeech(BUNDLE,{of:"episode",productionId:"season-one",episodeId:"ep_watch",field:"closes"}),/nothing|no text|empty|not written/i);
+  });
 
   it("reads each kind of record off the bundle, normalized", () => {
     assert.deepEqual(authoritativeProseSpeech(BUNDLE, { of: "canon", canonId: "CANON-004" }), {
@@ -947,6 +1138,7 @@ describe("cloned voices join the catalogue", () => {
       attributes: ["low", "dry", "unhurried", "coastal"],
       consent: true,
       created: "2026-08-18T10:00:00.000Z",
+      language: "en",
     },
   ];
 
@@ -1033,4 +1225,42 @@ describe("a cloned voice previews like any other queued voice", () => {
     });
     assert.equal(input.voiceReference, undefined, "an id names a catalogue voice; a clip would be noise");
   });
+});
+
+
+it("requires the displayed speech ceiling for a line and rejects it after a rate increase", () => {
+  const model: ManifestModel = { ...ELEVEN_MODEL, pricing: { kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
+    speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25, rates: [
+      { version: "intro", effectiveFrom: "2026-09-01T00:00:00.000Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 },
+      { version: "standard", effectiveFrom: "2027-01-01T00:00:00.000Z", microUsdPerMillionInput: 1000000, microUsdPerMillionOutput: 18000000 },
+    ] } } };
+  const input = { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", productionId: "book", shotId: "sh_01", sheet: SHEET,
+    text: "Hello", model, deliveryParams: null, deliveryNotice: null, at: "2026-12-31T23:59:59.000Z" };
+  assert.throws(() => voiceLineRequest(input), /price needs confirmation/);
+  assert.throws(() => voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151551 }), /price needs confirmation/);
+  assert.equal(voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151552 }).estimatedMicroUsd, 151552);
+  assert.throws(() => voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151552, at: "2027-01-01T00:00:00.000Z" }), /price needs confirmation/);
+});
+
+it("refuses oversized Gemini shot lines including separate delivery bytes before making a queue input", () => {
+  for (const model of SHIPPED_MANIFEST.models.filter(m => m.provider === "google" && m.capability === "voice-tts")) {
+    const sheet = { ...SHEET, voice: { ...SHEET.voice!, provider: "google", model: model.id, voiceId: "Charon" } };
+    const input = { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", productionId: "book", shotId: "sh_01", sheet, model,
+      delivery: "warm" as const, deliveryParams: {}, deliveryNotice: null, confirmedSpeechMicroUsd: 1000000, at: "2026-09-27T12:00:00.000Z" };
+    assert.throws(() => voiceLineRequest({ ...input, text: "字".repeat(2400) }), /request limit/);
+    const allowance = model.limits.maxSpeechUtf8Bytes! - Buffer.byteLength(model.cadence!.deliveryMappings.warm!.instruction!);
+    assert.equal(voiceLineRequest({ ...input, text: "a".repeat(allowance) }).params.text, "a".repeat(allowance));
+    assert.throws(() => voiceLineRequest({ ...input, text: "a".repeat(allowance + 1) }), /request limit/);
+  }
+});
+
+it("refuses oversized normalized Gemini character previews before quoting or constructing queue inputs", () => {
+  const service = new VoiceService({ sidecar: null, localPresets: [], cloudSources: [], getKey: async () => null, emit: () => {}, clock: () => "2026-09-27T12:00:00.000Z" });
+  for (const model of SHIPPED_MANIFEST.models.filter(m => m.provider === "google" && m.capability === "voice-tts")) {
+    const request = { worldId: "world", sheet: SHEET, provider: "google", voiceId: "Charon", model,
+      line: { text: "字".repeat(2400), source: "own-line" as const } };
+    assert.throws(() => service.queuedPreviewRequest(request), /preview line exceeds/);
+    assert.throws(() => service.queuedPreviewRequest({ ...request, line: { ...request.line, text: "a".repeat(7001) } }), /preview line exceeds/);
+    assert.throws(() => service.queuedPreviewRequest({ ...request, line: { ...request.line, text: "a".repeat(7000) } }), /price changed/, "a fitting line reaches the consent check");
+  }
 });

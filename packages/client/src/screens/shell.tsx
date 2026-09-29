@@ -1,34 +1,52 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
-import { Badge, Button, Callout, Input, Textarea, cx } from "../components/ui.js";
+import { Navigate, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
+import { remoteStudio } from "./launch.js";
+import { Button, Callout, IconButton, Input, Select, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
-import { SetupTransferControl } from "../components/setup-transfer-control.js";
-import { EmptyState } from "../components/layout.js";
-import { JobRow } from "../domain/domain.js";
-import { Archive, ChevronDown, ChevronRight, Plus, Sparkle } from "../components/icons.js";
+import { PageSheet } from "../components/page-sheet.js";
+import { OnYourPC } from "../components/on-your-pc.js";
+import { DeviceNotifications } from "../components/device-notifications.js";
+import { isRemoteSession } from "../lib/remote-session.js";
+import { Bell, Key, Sliders, Wifi, Cpu, Palette, Info, Shield, User } from "../components/icons.js";
+import { EditorDialog } from "../components/editor-dialog.js";
+import { settingsReturnPath } from "../lib/settings-return.js";
+import { renderInlineMarkdown } from "../components/inline-markdown.js";
+import { GenesisContentCards } from "../components/genesis-review.js";
+import { GenesisImageCards } from "../components/genesis-images.js";
+import { GenesisVoiceCards } from "../components/genesis-voices.js";
+import { GenesisReadinessCard, FoundingProgressCard } from "../components/genesis-readiness.js";
+import { ApprovedGenesisContent } from "../components/genesis-review.js";
+import { reviewGenesisReadiness, leaveGenesisFinding } from "../lib/store.js";
+import { reviewGenesisVoices, generateGenesisVoice, decideGenesisVoice } from "../lib/store.js";
+import { GenesisImportCards } from "../components/genesis-imports.js";
+import { reviewGenesisImports, resolveGenesisImport } from "../lib/store.js";
+import { Archive, Book, ChartLine, ChevronDown, ChevronRight, More, Pencil, Plus, RotateCcw, Sparkle, X } from "../components/icons.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { AgentsPanel } from "./agents.js";
 import {
+  ActionButton,
   CAPABILITY_LABEL,
   CAPABILITY_ROWS,
+  HalfHeading,
+  ProviderMark,
   RuntimeHead,
   RuntimeSection,
   TONE_CLASS,
 } from "./settings-parts.js";
+import { FactRow } from "./settings-providers.js";
 // Providers absorbed both surfaces (SPEC-034 R-5), so its pane draws their parts: the engine
 // details unabridged, and one engine's models grouped by the provider that owns them.
 import { eligibilityInputs, strandReason } from "../components/dispatch-bar.js";
+import { ModelsCard, WORLD_MODEL_CAPABILITIES, modelFacts, withModelChoice } from "../components/models-card.js";
 import { AppChrome } from "../components/chrome.js";
-import type { StartupState } from "../arke-bridge.js";
 import { Working } from "../components/working.js";
 import { Portrait } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
 import { Loading } from "../components/loading.js";
-import { shortDateTime } from "../lib/format.js";
-import { setThemePreference, useResolvedTheme, useThemePreference, type ThemePreference } from "../lib/theme.js";
+import { relativeDate, shortDateTime } from "../lib/format.js";
+import { setThemePreference, useThemePreference, type ThemePreference } from "../lib/theme.js";
 import { genesisMediaUrl } from "../lib/media.js";
 import {
-  cancelExport as cancelExportMsg,
-  cancelJob,
   checkUpdates,
   attachHostFiles,
   attachHostText,
@@ -36,30 +54,34 @@ import {
   beginFoundingBuild,
   generateLookPreview,
   planFoundingBuild,
-  runBuildItem,
   useBuildPlans,
   setResearchWeb,
   createSheetFromSentence,
   createWorld,
-  deleteJob,
   genesisAttachFiles,
   genesisChat,
+  listGenesisDrafts,
+  loadGenesisDraft,
+  reviewGenesisDraft,
+  decideGenesisDraft,
+  reviewGenesisImages,
+  generateGenesisImage,
+  decideGenesisImage,
+  cancelJob,
+  proposeGenesisWorld,
   genesisDiscard,
   hostCanAttach,
   chooseClaudeExecutable,
   clearClaudeExecutable,
+  chooseCodexExecutable,
+  clearCodexExecutable,
   detectHarnesses,
   downloadUpdate,
   installUpdateAndRestart,
   installUpdateOnClose,
   generateDiagnostics,
-  listProviderCalls,
   openDataFolder,
   openThread,
-  openWorld,
-  resolveHeldJob,
-  retryJobFinalization,
-  resumeQueue,
   refreshVendorAuth,
   beginVendorSignIn,
   submitVendorSignInCode,
@@ -70,56 +92,40 @@ import {
   setBackgroundNotifications,
   setRoutingDefault,
   setHarnessEngine,
-  setSpendThreshold,
   installSampleWorld,
   useSampleWorld,
   useArchiveNote,
   useDiagnosticsBundle,
-  useProviderCalls,
   useEnvCheck,
-  useExports as useExportsState,
   useGenesis,
-  useSetup,
-  useReconcileReport,
   useStore,
   useUpdateStatus,
-  useVoiceSidecar as useVoiceSidecarState,
   setNarrator,
   type ReadingVoice,
 } from "../lib/store.js";
 import { ArtStyleGrid, ArtStyleWords } from "../components/art-style-picker.js";
 import { seedFrom } from "../lib/art-styles.js";
 import {
-  computeNeedsYou,
-  computeRunning,
   formatMicroUsd,
-  jobActions,
-  jobOrigin,
-  modelCapabilityCopy,
   PROVIDERS as PROVIDER_TABLE,
-  spendSummary,
+  readerName,
+  readerPriceLabel,
   type Capability,
   type ComponentHealth,
   type HarnessAvailability,
   type HarnessEngine,
   OPENCODE_AVAILABILITY,
-  type LedgerEntry,
-  type ManifestModel,
-  type ProviderId,
-  type ProviderCallRecord,
+  type ModelChoices,
   type VendorAuthMethod,
   type VendorIntegration,
   type VendorSignIn,
   DEFAULT_NARRATOR,
   blueprintCoverage,
-  buildWorkingLine,
   estimateImageMicroUsd,
   legacyVoiceModel,
   modelForCapability,
   supportsVoiceUse,
   ulid,
-  ENGINE_LABEL,
-  engineOfProvider,
   modelEligible,
 } from "@arke-studio/contracts";
 
@@ -133,256 +139,42 @@ export function ShellChrome() {
   );
 }
 
-// ---- Launch ----------------------------------------------------------------
+// ---- Connection ------------------------------------------------------------
 
 /**
- * What setup actually does, in the order it happens. A step is "settled" once its outcome is
- * known — and "not configured" is a settled outcome, not a failure: the app is usable in every
- * one of them (R-6). Progress counts settled steps, so the bar never stalls on an absent
- * optional runtime.
+ * An expired browser capability, said once for every screen past the launch surface. The
+ * surface itself says it on its local way instead (design turn 158).
  */
-function setupSteps(
-  connection: string,
-  state: ReturnType<typeof useStore>["state"],
-  envChecked: boolean,
-): Array<{ label: string; state: string; settled: boolean }> {
-  const outcome = (health: ComponentHealth | undefined): { state: string; settled: boolean } => {
-    if (!health || health.status === "starting") return { state: "starting…", settled: false };
-    if (health.status === "healthy") return { state: "ready", settled: true };
-    return { state: health.reason ?? health.status, settled: true };
-  };
-  return [
-    {
-      label: "Studio core",
-      ...(connection === "open" && state !== null
-        ? { state: "ready", settled: true }
-        : { state: connection === "closed" ? "retrying…" : "starting…", settled: false }),
-    },
-    {
-      label: "Your data folder",
-      ...(envChecked ? { state: "checked", settled: true } : { state: "checking…", settled: false }),
-    },
-    { label: "Authoring (OpenCode)", ...outcome(state?.app.health.harness) },
-    { label: "Local voice (Voxa)", ...outcome(state?.app.health.voice) },
-  ];
-}
-
-function mb(bytes: number): string {
-  const m = bytes / (1024 * 1024);
-  return m >= 1024 ? `${(m / 1024).toFixed(1)} GB` : `${Math.round(m)} MB`;
+export function SessionRefusal() {
+  const { connection } = useStore();
+  const { pathname } = useLocation();
+  // The launch surface says it on its own local way (design turn 158), where it belongs.
+  if (connection !== "auth-refused" || pathname === "/" || pathname === "/starting") return null;
+  // Reached from another device, the developer's instruction is not something a phone can do.
+  if (remoteStudio() !== null) return <div role="alert" className="fy-session-refusal">
+    <Callout tone="warning" title="This link has expired">Open a new one from Arke Studio on your computer.</Callout>
+  </div>;
+  return <div role="alert" className="fy-session-refusal">
+    <Callout tone="warning" title="Session link is out of date">Restart the frontend and open the new Arke session link from its terminal. If it still fails, check that the server allows this browser address.</Callout>
+  </div>;
 }
 
 /**
- * The setup reel. Kept in public/ rather than imported, so it stays a plain file the bundler
- * copies as-is — and so the route tests, which render every screen through node's loader, do
- * not have to know how to load an mp4. Relative, because the packaged app opens over file://.
- */
-const SETUP_REEL = "./setup-reel.mp4";
-
-/** Has this machine asked for less movement? Server-rendered tests have no matchMedia. */
-function stillPreferred(): boolean {
-  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-}
-
-/**
- * The one line shown wherever a screen is waiting on a coordinator that is not there.
- *
- * Three screens had reason to say it — the setup reel, the same reel with nothing to download,
- * and the settings pane, whose rows draw `—` from an absent snapshot exactly as they draw `—`
- * from an unconfigured provider (issue 599). Three copies of one sentence drift; one does not.
- * The remedy stays in it because the case that produces this is nearly always a dev browser
- * session, and it self-qualifies for the case that is not.
+ * The one line shown wherever a Settings pane is waiting on a coordinator that is not there:
+ * its rows draw `—` from an absent snapshot exactly as they draw `—` from an unconfigured
+ * provider (issue 599). The launch surface says the same thing on its local way.
  */
 function WaitingForCoordinator() {
+  const { connection } = useStore();
+  if (typeof window !== "undefined" && window.arke) {
+    return <Callout tone="warning" title="Starting Arke Studio…">Connecting to your workspace. The app keeps retrying on its own.</Callout>;
+  }
+  if (connection === "auth-refused") return null;
   return (
     <Callout tone="warning" title="Waiting for the coordinator">
-      The app keeps retrying on its own. If this is a dev browser session, start it with
-      `npm run dev:coordinator`.
+      The app keeps retrying on its own. Check that your Studio server is running.
     </Callout>
   );
-}
-
-export function StartupScreen() {
-  const { connection, state } = useStore();
-  const navigate = useNavigate();
-  const env = useEnvCheck();
-  const setup = useSetup();
-  const downloading = setup?.running === true;
-  const paused = setup?.components.some((component) => component.state === "paused") === true;
-  const [startup, setStartup] = useState<StartupState | null>(() =>
-    typeof window === "undefined" ? null : window.arke?.startupState?.() ?? null,
-  );
-  useEffect(() => window.arke?.onStartupState?.(setStartup), []);
-
-  // Setup never walks off on its own — the user continues when they're ready (no worlds →
-  // first run; otherwise the picker, R-8).
-  const ready = connection === "open" && state !== null;
-  // Nothing left to fetch and somewhere to go: the only state where this screen is finished
-  // rather than working.
-  const settled = ready && !downloading && !paused;
-  const steps = setupSteps(connection, state, env !== null);
-  const components = setup?.components ?? [];
-
-  // One bar over the whole job. A check counts 1 once settled; a component counts its own
-  // fraction of bytes — and counts as done when it is skipped, blocked or failed, because
-  // those are settled outcomes too and the bar must not stall on something never coming.
-  const parts = steps.length + components.length;
-  const doneParts =
-    steps.filter((s) => s.settled).length +
-    components.reduce(
-      (sum, c) =>
-        sum +
-        (c.state === "downloading" || c.state === "paused" || c.state === "installing"
-          ? c.bytesTotal > 0
-            ? Math.min(1, c.bytesDone / c.bytesTotal)
-            : 0
-          : c.state === "queued"
-            ? 0
-            : 1),
-      0,
-    );
-  const percent = parts === 0 ? 0 : Math.round((doneParts / parts) * 100);
-
-  // What is happening right now, in the product's words — one line, never a list.
-  const active =
-    components.find((c) => c.state === "downloading" || c.state === "installing") ??
-    components.find((c) => c.state === "paused");
-  const outstanding = steps.find((s) => !s.settled);
-  const activity = active
-    ? `${active.state === "installing" ? "installing" : active.state === "paused" ? "paused" : "downloading"} ${active.displayName.toLowerCase()}`
-    : outstanding
-      ? `checking ${outstanding.label.toLowerCase()}`
-      : "everything ready";
-
-  // Bytes and time remaining, only while there is something to measure.
-  const totalBytes = components.reduce((sum, c) => sum + c.bytesTotal, 0);
-  const doneBytes = components.reduce((sum, c) => sum + (c.state === "queued" ? 0 : c.state === "downloading" || c.state === "paused" || c.state === "installing" ? c.bytesDone : c.bytesTotal), 0);
-  const speed = active?.bytesPerSecond ?? null;
-  const remaining = speed !== null && speed > 0 ? Math.round((totalBytes - doneBytes) / speed) : null;
-
-  // Setup happens once. Every launch after it detects the runtimes already on this machine,
-  // fetches nothing, and waits only for the coordinator to open — a few seconds with no
-  // progress worth reporting. A bar creeping under "Setting up your studio" is then a lie
-  // about what is happening and about how often it happens, so that panel is kept for the
-  // launch that is actually doing the work: something queued, downloading or installing.
-  const fetching = components.some(
-    (c) => c.state === "queued" || c.state === "downloading" || c.state === "paused" || c.state === "installing",
-  );
-  const setupRun = downloading || fetching;
-
-  // The snapshot's version once there is a snapshot; the host's before that, so the one line
-  // this screen keeps is not an empty "v" for the length of the wait.
-  const version =
-    state?.app.version ?? (typeof window === "undefined" ? null : window.arke?.appVersion ?? null);
-  const enter = () => {
-    if (!settled || !state) return;
-    // A run cut off by closing the app returns to the building screen, continuing (SPEC-031
-    // R-33) — before the library, because the author left mid-build and is coming back to it.
-    const midBuild = state.app.builds.find((build) => build.status === "running");
-    if (midBuild) {
-      navigate(`/building/${midBuild.worldId}`, { replace: true });
-      return;
-    }
-    navigate(state.worlds.length === 0 ? "/first-run" : "/worlds", { replace: true });
-  };
-
-  return (
-    <div className="fy-app" data-screen="startup">
-      {/* The one screen without the two controls: there is no world open to act on yet, and
-          nothing has happened here that a control could take you back to. */}
-      <AppChrome controls={false} divided={false} />
-      <div className="fy-startup">
-        <div className="fy-startup__reel">
-          {/* The reel plays while the runtimes come down — the wait is the only time this
-              screen is ever seen. Muted and silent by design; a setup screen does not get to
-              make noise. Someone who has asked for less motion gets the still first frame. */}
-          <video
-            className="fy-startup__video"
-            src={SETUP_REEL}
-            autoPlay={!stillPreferred()}
-            loop
-            muted
-            playsInline
-            preload="auto"
-          />
-        </div>
-        <div className="fy-startup__panel">
-          {startup?.status === "failed" ? (
-            <Callout tone="danger" title="The studio could not start">
-              <div>{startup.detail}</div>
-              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <Button variant="primary" onClick={() => window.arke?.retryStartup?.()}>Retry</Button>
-                <Button variant="secondary" onClick={() => window.arke?.openDataFolder?.()}>Open data folder</Button>
-                <Button variant="ghost" onClick={() => window.arke?.quit?.()}>Quit</Button>
-              </div>
-            </Callout>
-          ) : setupRun && !settled ? (
-            <>
-          <div className="fy-startup__row">
-            <span className="fy-startup__title">Setting up your studio.</span>
-          </div>
-          <div className="fy-startup__row" style={{ marginTop: 10 }}>
-            <span className="fy-mono">{activity}</span>
-            <span style={{ flex: 1 }} />
-            {speed !== null && speed > 0 && <span className="fy-mono">{mb(speed)}/s</span>}
-            {active !== undefined && <SetupTransferControl component={active} />}
-          </div>
-          <div className="fy-setupbar">
-            <div className="fy-setupbar__fill" style={{ width: `${percent}%` }} />
-          </div>
-          <div className="fy-startup__row" style={{ marginTop: 8 }}>
-            <span className="fy-mono">{totalBytes > 0 ? `${mb(doneBytes)} of ${mb(totalBytes)}` : ""}</span>
-            <span style={{ flex: 1 }} />
-            <span className="fy-mono">{remaining !== null ? aboutLeft(remaining) : ""}</span>
-          </div>
-          {connection === "closed" && startup?.status !== "initializing" && <WaitingForCoordinator />}
-          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14, justifyContent: "center" }}>
-            <span style={{ font: "400 11.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
-              One-time setup. After this, Arke runs on your machine. Your worlds never leave it.
-            </span>
-            <Button
-              variant="primary"
-              disabled={!ready}
-              title={ready ? undefined : "Waiting for the studio to finish setting up"}
-              onClick={() => navigate(state!.worlds.length === 0 ? "/first-run" : "/worlds", { replace: true })}
-            >
-              {ready ? "Continue in the background →" : "Setting up…"}
-            </Button>
-          </div>
-            </>
-          ) : (
-            /*
-              Nothing to fetch: one control and a version number, and the same control the whole
-              way through. The title, the step line, the bar and the byte counts all answered
-              "what is it doing" — on a launch that only waits for the coordinator, the honest
-              answer is "opening", which a button that says so already gives.
-            */
-            <>
-              {connection === "closed" && startup?.status !== "initializing" && <WaitingForCoordinator />}
-              <div className="fy-startup__done">
-                <Button
-                  variant="primary"
-                  disabled={!settled}
-                  title={settled ? undefined : "Waiting for the studio to open"}
-                  onClick={enter}
-                >
-                  {settled ? "Continue" : "Loading…"}
-                </Button>
-                <span className="fy-startup__version">{version === null ? "" : `v${version}`}</span>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** "about 3 min left" — rounded, because a precise wrong number is worse than a vague right one. */
-function aboutLeft(seconds: number): string {
-  if (seconds < 45) return "under a minute left";
-  const mins = Math.round(seconds / 60);
-  return mins <= 1 ? "about a minute left" : `about ${mins} min left`;
 }
 
 // ---- First run -------------------------------------------------------------
@@ -394,20 +186,18 @@ export function FirstRunScreen() {
   return (
     <div className="fy-app" data-screen="first-run">
       <AppChrome divided={false} />
-      <div className="fy-content">
-        <div className="fy-hero" style={{ paddingTop: 40 }}>
+      {/* Below 1100 the page centres when it fits (design turn 159), so the classes carry the
+          sizes the three widths need rather than inline values none of them can reach. */}
+      <div className="fy-content fy-firstrun">
+        <div className="fy-hero fy-firstrun__hero">
           <div className="fy-hero__eyebrow">Welcome</div>
-          <h1 className="fy-hero__title" style={{ fontSize: 56 }}>
+          <h1 className="fy-hero__title fy-firstrun__title">
             Every world starts as a name.
           </h1>
-          <p className="fy-hero__lede" style={{ maxWidth: 460 }}>
-            Give yours one. Characters, canon and productions grow from there, and stay consistent
-            because they share it. Nothing here requires an account, a key, a download or a network
-            to start.
-          </p>
+          <p className="fy-hero__lede fy-firstrun__lede">Give yours one.</p>
         </div>
         {env && (!env.pathBudgetOk || !env.nativeIndexOk) && (
-          <div style={{ maxWidth: 560, margin: "18px auto 0", display: "grid", gap: 10 }}>
+          <div className="fy-firstrun__warnings">
             {!env.pathBudgetOk && (
               <Callout tone="warning" title="Your data folder sits too deep">
                 {env.pathBudgetDetail}
@@ -420,17 +210,15 @@ export function FirstRunScreen() {
             )}
           </div>
         )}
-        <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", gap: 40, paddingTop: 46 }}>
-          <div className="fy-firstrun__flank" style={{ transform: "rotate(-4deg)" }} />
+        <div className="fy-firstrun__doors">
+          <div className="fy-firstrun__flank fy-firstrun__flank--left" />
           <div className="fy-fan__drift">
             <div className="fy-createcard" onClick={() => navigate("/worlds/new")}>
               <div className="fy-createcard__ring">
                 <Plus size={22} />
               </div>
               <div className="fy-createcard__title">Your first world</div>
-              <div className="fy-createcard__sub">
-                A name and a sentence are enough. We'll hold everything it becomes.
-              </div>
+
               <div style={{ marginTop: 4 }}>
                 <Button variant="primary">Create a world</Button>
               </div>
@@ -469,23 +257,19 @@ export function FirstRunScreen() {
               </div>
             </div>
           ) : (
-            <div className="fy-firstrun__flank" style={{ transform: "rotate(4deg)" }} />
+            <div className="fy-firstrun__flank fy-firstrun__flank--right" />
           )}
         </div>
-        <div style={{ textAlign: "center", paddingTop: 30 }}>
-          <span style={{ font: "400 13px var(--font-sans)", color: "var(--muted-foreground)" }}>
-            Already have a canon in documents?{" "}
-          </span>
+        <div className="fy-firstrun__docs">
+          <span>Already have a canon in documents? </span>
           <span
-            style={{ font: "500 13px var(--font-sans)", textDecoration: "underline", textUnderlineOffset: 3, cursor: "pointer" }}
-            title="Create the world first; then Artifacts → Import folder files everything and offers to lift facts — gated, grounded, optional."
+            className="fy-firstrun__docslink"
+            title="Create the world first; then use Artifacts → Add files to file documents and lift facts."
             onClick={() => navigate("/worlds/new")}
           >
-            Import a folder
+            Add documents
           </span>
-          <span style={{ font: "400 13px var(--font-sans)", color: "var(--muted-foreground)" }}>
-            . It files into artifacts, ready to link.
-          </span>
+          <span className="fy-firstrun__docstail">. It files into artifacts, ready to link.</span>
         </div>
       </div>
     </div>
@@ -499,18 +283,41 @@ export function WorldPickerScreen() {
   const { state } = useStore();
   const navigate = useNavigate();
   const worlds = state?.worlds ?? [];
+  /*
+   * The ages on the cards are computed at render, and this screen can sit open for hours with
+   * nothing else to re-render it — so a card that said `now` when it was drawn went on saying
+   * `now`, and `59m ago` never became `1h ago` (codex, 2026-09-09). A minute is the coarsest
+   * tick that keeps every step of `relativeDate` honest; the timer is cleared with the screen.
+   */
+  const [, setMinute] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setMinute((n) => n + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const [confirming, setConfirming] = useState<string | null>(null);
   const archiveNote = useArchiveNote();
   const sample = useSampleWorld();
   const hour = new Date().getHours();
   const greeting = hour < 5 ? "Working late" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  // A count, and nothing else (turn 137).
   const lede =
     worlds.length === 0
-      ? "Nothing here yet — a first world is a folder and a sentence."
+      ? "Nothing here yet."
       : worlds.length === 1
-        ? "One world, breathing, or start another."
-        : `${["", "", "Two", "Three", "Four", "Five"][worlds.length] ?? worlds.length} worlds, all of them breathing, or start another.`;
+        ? "One world."
+        : `${["", "", "Two", "Three", "Four", "Five"][worlds.length] ?? worlds.length} worlds.`;
   const ROT = [-2.5, 1.8, -1.2, 2.4, -2];
+  // On a phone the last world opened leads, wide, and the grid holds the rest (design turn 159).
+  // Both are rendered at every width and the stylesheet chooses, so the first paint is already
+  // right and a window crossing 600 needs no render.
+  const featured = worlds.reduce<(typeof worlds)[number] | undefined>(
+    (best, w) => (best === undefined || Date.parse(w.updated) > Date.parse(best.updated) ? w : best),
+    undefined,
+  );
+  // The confirm is the one place the width decides what renders: a phone asks in a sheet from the
+  // bottom, where a thumb is, rather than inside a card half a thumb wide.
+  const phone = useMediaQuery("(max-width: 599px)");
+  const confirmingWorld = worlds.find((w) => w.worldId === confirming);
   return (
     <div className="fy-app" data-screen="world-picker">
       {/* No back and no context: this is the top, and the wordmark already says where you are. */}
@@ -521,9 +328,15 @@ export function WorldPickerScreen() {
           <h1 className="fy-hero__title fy-hero__title--home" style={{ textAlign: "left" }}>
             Pick up where you left off.
           </h1>
-          <p className="fy-hero__lede" style={{ margin: "10px 0 0", maxWidth: 540 }}>
-            {lede}
-          </p>
+          <div className="fy-home-count">
+            <p className="fy-hero__lede" style={{ margin: "10px 0 0", maxWidth: 540 }}>
+              {lede}
+            </p>
+            <Button variant="ghost" className="fy-home-pub" onClick={() => navigate("/publications")}>
+              <Book size={18} />
+              Open publication
+            </Button>
+          </div>
           {archiveNote && (
             <div className="fy-set__why" style={{ marginTop: 10 }}>
               <span className={cx("fy-set__dot", archiveNote.refused ? "fy-set__dot--warn" : "fy-set__dot--ok")} />
@@ -531,50 +344,70 @@ export function WorldPickerScreen() {
             </div>
           )}
         </div>
-        {worlds.length === 0 ? (
-          <div style={{ padding: "54px 88px" }}>
-            <EmptyState
-              title="No worlds yet"
-              hint={
-                sample?.available === true
-                  ? "Create one, install ours to pull apart, or drop an existing world folder into your ArkeStudio directory."
-                  : "Create one, or drop an existing world folder into your ArkeStudio directory."
-              }
-              action={
-                <span style={{ display: "inline-flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-                  <Button onClick={() => navigate("/first-run")}>Start</Button>
-                  {sample?.available === true && (
-                    <Button
-                      variant="ghost"
-                      disabled={sample.installing}
-                      onClick={() => installSampleWorld()}
-                    >
-                      {sample.installing ? "Installing…" : "Install the sample world"}
-                    </Button>
-                  )}
-                </span>
-              }
-            />
+        {featured && (
+          <div className="fy-home-feature">
+            <div className="fy-home-label">Last opened</div>
+            <div
+              className="fy-homefeature"
+              role="button"
+              tabIndex={0}
+              onClick={() => navigate(`/w/${featured.worldId}`)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") navigate(`/w/${featured.worldId}`);
+              }}
+            >
+              <div className="fy-homefeature__art">
+                {featured.keyArt ? <Portrait worldSlug={featured.slug} path={featured.keyArt} label={featured.name} radius={0} /> :
+                  <div className="fy-worldcard__empty">No key art yet.</div>}
+                {/* The featured world leaves the grid on a phone, so it carries its own ⋯. */}
+                <button
+                  type="button"
+                  className="fy-worldcard__archive"
+                  aria-label={`Archive ${featured.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirming(featured.worldId);
+                  }}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <span className="fy-worldcard__glyph fy-worldcard__glyph--hover"><Archive size={13} /></span>
+                  <span className="fy-worldcard__glyph fy-worldcard__glyph--touch"><More size={16} /></span>
+                </button>
+              </div>
+              <div className="fy-homefeature__body">
+                <div className="fy-homefeature__name">{featured.name}</div>
+                <div className="fy-homefeature__logline">{featured.logline ?? ""}</div>
+                <WorldMeta world={featured} />
+              </div>
+            </div>
+            <div className="fy-home-label">All worlds</div>
           </div>
-        ) : (
-          <div className="fy-home-cards">
+        )}
+        <div className="fy-home-cards">
+          <button type="button" className="fy-worldcard fy-newworldcard" onClick={() => navigate("/worlds/new")}>
+            <span className="fy-worldcard__frame fy-worldcard__empty" aria-hidden="true"><Plus size={28} /></span>
+            <span className="fy-worldcard__name">Create a world</span>
+          </button>
             {worlds.map((w, i) => (
               <div
                 key={w.worldId}
-                className="fy-fan__drift"
+                className={cx("fy-fan__drift fy-home-drift", w.worldId === featured?.worldId && "fy-home-drift--featured")}
                 style={{ animationDuration: `${7 + (i % 3) * 0.7}s`, animationDelay: `${i * 0.6}s` }}
               >
                 <div
                   className="fy-worldcard"
-                  style={{ transform: `rotate(${ROT[i % ROT.length]}deg)` }}
+                  // The lean is a variable rather than a transform, so a phone can stand the card
+                  // up straight and a touch can leave it where it is (design turn 159).
+                  style={{ "--lean": `${ROT[i % ROT.length]}deg` } as React.CSSProperties}
                   onClick={() => navigate(`/w/${w.worldId}`)}
                 >
                   <div className="fy-worldcard__frame">
-                    <Portrait worldSlug={w.slug} path={w.keyArt ?? ""} label={`${w.name}: key art`} radius={10} />
+                    {w.keyArt ? <Portrait worldSlug={w.slug} path={w.keyArt} label={w.name} radius={10} /> :
+                      <div className="fy-worldcard__empty">No key art yet.</div>}
                   </div>
                   {/* Archiving is two clicks and no dialog: the second click is the consent,
                       and the words say what actually happens to the folder. */}
-                  {confirming === w.worldId ? (
+                  {confirming === w.worldId && !phone ? (
                     <div className="fy-worldcard__confirm" onClick={(e) => e.stopPropagation()}>
                       <span>Move {w.name} to the archive folder? Nothing is deleted.</span>
                       <span className="fy-worldcard__confirmacts">
@@ -604,45 +437,100 @@ export function WorldPickerScreen() {
                         setConfirming(w.worldId);
                       }}
                     >
-                      <Archive size={13} />
+                      {/* Without hover there is nothing to reveal it, so it shows as ⋯ (design turn 159). */}
+                      <span className="fy-worldcard__glyph fy-worldcard__glyph--hover"><Archive size={13} /></span>
+                      <span className="fy-worldcard__glyph fy-worldcard__glyph--touch"><More size={16} /></span>
                     </button>
                   )}
                   <div className="fy-worldcard__name">{w.name}</div>
                   {/* Always rendered: a world with no logline yet keeps the two-line box empty
                       rather than making its card shorter than the ones beside it. */}
                   <div className="fy-worldcard__logline">{w.logline ?? ""}</div>
-                  <div className="fy-worldcard__meta">
-                    <span
-                      className={cx("fy-dot", (w.attention?.unreviewedTakes ?? 0) > 0 ? "fy-dot--warn" : "fy-dot--ok")}
-                    />
-                    <span className="fy-worldcard__counts">
-                      {w.counts.characters} character{w.counts.characters === 1 ? "" : "s"} · {w.counts.productions}{" "}
-                      production{w.counts.productions === 1 ? "" : "s"}
-                    </span>
-                    <span className="mono">{shortDateTime(w.updated)}</span>
-                  </div>
+                  <WorldMeta world={w} />
                 </div>
               </div>
             ))}
-            {/* The card is the target, not the control — the same shape the first-run cards
-                already use. It was a <button> holding another one, which is invalid HTML: the
-                inner control is unreachable in the accessibility tree, and React refuses to
-                hydrate it. The whole card still takes a click; what a keyboard and a screen
-                reader land on is the one thing here that names what it does. */}
-            <div className="fy-newworldcard" onClick={() => navigate("/worlds/new")}>
-              <span className="fy-newprodcard__ring" style={{ width: 46, height: 46 }}>
-                <Plus size={20} />
-              </span>
-              <span style={{ font: "600 17px var(--font-sans)" }}>New world</span>
-              <span style={{ font: "400 13px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center", maxWidth: 190 }}>
-                Name it. We'll hold the rest.
-              </span>
-              <span style={{ marginTop: 6 }}>
-                <Button>Create a world</Button>
-              </span>
-            </div>
+        </div>
+        {worlds.length === 0 && sample?.available === true && (
+          <div className="fy-home-sample">
+            <Button variant="ghost" disabled={sample.installing} onClick={() => installSampleWorld()}>
+              {sample.installing ? "Installing…" : "Install the sample world"}
+            </Button>
           </div>
         )}
+      </div>
+      {phone && confirmingWorld && (
+        <ArchiveSheet
+          world={confirmingWorld}
+          onArchive={() => {
+            archiveWorld(confirmingWorld.worldId);
+            setConfirming(null);
+          }}
+          onKeep={() => setConfirming(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+type WorldCardSummary = NonNullable<ReturnType<typeof useStore>["state"]>["worlds"][number];
+
+/** The card's last band: the attention dot, the counts, and an age. */
+function WorldMeta({ world: w }: { world: WorldCardSummary }) {
+  return (
+    <div className="fy-worldcard__meta">
+      <span
+        className={cx("fy-dot", (w.attention?.unreviewedTakes ?? 0) > 0 ? "fy-dot--warn" : "fy-dot--ok")}
+      />
+      <span className="fy-worldcard__counts">
+        {/* A phone's half-width card keeps productions and the age; the characters go first. */}
+        <span className="fy-worldcard__chars">
+          {w.counts.characters} character{w.counts.characters === 1 ? "" : "s"} ·{" "}
+        </span>
+        {w.counts.productions} production{w.counts.productions === 1 ? "" : "s"}
+      </span>
+      {/* An age, as 1a draws it — `4d ago`, not `Sep 7, 02:22`. The long form
+          took the room the counts beside it needed (issue 1007). */}
+      <span className="mono" title={shortDateTime(w.updated)}>{relativeDate(w.updated)}</span>
+    </div>
+  );
+}
+
+/**
+ * Archiving on a phone (design turn 159b): the same two presses as the card's own confirm, asked
+ * in a sheet from the bottom. The scrim and Escape are Keep, since keeping is the safe answer.
+ */
+function ArchiveSheet({ world, onArchive, onKeep }: { world: WorldCardSummary; onArchive: () => void; onKeep: () => void }) {
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") onKeep(); };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [onKeep]);
+  return (
+    <div className="fy-archivesheet__scrim" onClick={onKeep}>
+      <div
+        className="fy-archivesheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="fy-archivesheet-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <span className="fy-archivesheet__grab" aria-hidden />
+        <div className="fy-archivesheet__who">
+          {world.keyArt && (
+            <span className="fy-archivesheet__art">
+              <Portrait worldSlug={world.slug} path={world.keyArt} label={world.name} radius={8} />
+            </span>
+          )}
+          <div>
+            <h2 id="fy-archivesheet-title">Archive {world.name}?</h2>
+            <p>Moves its folder to the archive. Nothing is deleted.</p>
+          </div>
+        </div>
+        <div className="fy-archivesheet__acts">
+          <Button variant="primary" size="lg" onClick={onArchive}>Archive</Button>
+          <Button size="lg" onClick={onKeep}>Keep</Button>
+        </div>
       </div>
     </div>
   );
@@ -665,118 +553,119 @@ function parseSeed(raw: string): { name: string; sentence: string } | null {
  * The review before the press (SPEC-031 R-12): what will be created counted by kind, how
  * many generations that is, spend as one figure — and every precondition that failed,
  * stated on the way in rather than discovered at item nine of fifteen (R-11).
+ *
+ * A card in the founding conversation, not a route of its own (issue 920). The decision was
+ * reached in the thread; a second screen for it was a second stop for a yes already given,
+ * and the one spend in the whole flow that left the chat every other decision is made in.
+ * The press is still one aggregate authorization (R-13) — the same yes, asked where the
+ * author is.
  */
-function BuildReviewStep({
+function BuildCard({
   plan: entry,
+  startedAt,
   pressed,
-  onBack,
+  settling,
+  onDismiss,
   onBuild,
 }: {
   plan: { requestId: string; plan: import("@arke-studio/contracts").BuildReview | null; reason?: string } | undefined;
+  startedAt: string | null;
   pressed: boolean;
-  onBack: () => void;
+  /** A turn is in flight: the blueprint under the card is moving, so the press waits. */
+  settling: boolean;
+  onDismiss: () => void;
   onBuild: () => void;
 }) {
-  if (!entry) return <Loading label="sizing the build" />;
-  if (entry.plan === null) {
-    return (
-      <>
-        <div className="fy-eyebrow-sm">NEW WORLD · THE BUILD</div>
-        <Callout tone="danger">{entry.reason ?? "the build could not be sized"}</Callout>
-        <div className="fy-artstep__foot">
-          <Button variant="ghost" onClick={onBack}>
-            Back
-          </Button>
-        </div>
-      </>
-    );
-  }
-  const plan = entry.plan;
-  const counts: Array<[number, string]> = [
-    [plan.counts.characters, plan.counts.characters === 1 ? "character" : "characters"],
-    [plan.counts.locations, plan.counts.locations === 1 ? "place" : "places"],
-    [plan.counts.factions, plan.counts.factions === 1 ? "faction" : "factions"],
-    [plan.counts.threads, plan.counts.threads === 1 ? "open thread" : "open threads"],
-  ];
+  const plan = entry?.plan ?? null;
+  const counts: Array<[number, string]> = plan
+    ? [
+        [plan.counts.characters, plan.counts.characters === 1 ? "character" : "characters"],
+        [plan.counts.locations, plan.counts.locations === 1 ? "place" : "places"],
+        [plan.counts.factions, plan.counts.factions === 1 ? "faction" : "factions"],
+        [plan.counts.canon, plan.counts.canon === 1 ? "canon entry" : "canon entries"],
+        [plan.counts.props, plan.counts.props === 1 ? "prop" : "props"],
+        [plan.counts.threads, plan.counts.threads === 1 ? "open thread" : "open threads"],
+      ]
+    : [];
+  const estimate = plan === null ? null : `${formatMicroUsd(plan.estimateMicroUsd)} generation budget`;
   return (
-    <>
-      <div className="fy-eyebrow-sm">NEW WORLD · THE BUILD</div>
-      <h1 className="fy-artstep__h1">One press makes {plan.worldName}.</h1>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {counts
-          .filter(([count]) => count > 0)
-          .map(([count, label]) => (
-            <div
-              key={label}
-              style={{ flex: 1, minWidth: 120, border: "1px solid var(--border)", borderRadius: 11, padding: "13px 15px" }}
-            >
-              <div style={{ font: "650 20px var(--font-sans)" }}>{count}</div>
-              <div className="fy-mono" style={{ fontSize: 10, marginTop: 3 }}>
-                {label.toUpperCase()}
-              </div>
-            </div>
-          ))}
-      </div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          border: "1px solid var(--border)",
-          borderRadius: 11,
-          padding: "13px 15px",
-        }}
-      >
+    <article
+      className="fy-actioncard"
+      data-status={entry !== undefined && plan === null ? "failed" : pressed ? "running" : "pending"}
+      aria-label={plan ? `Build ${plan.worldName}` : "The founding build"}
+    >
+      <div className="fy-actioncard__head">
         <div>
-          <div style={{ font: "650 21px var(--font-sans)" }}>
-            {plan.generations === 0 ? "$0.00" : `~${formatMicroUsd(plan.estimateMicroUsd)}`}
-          </div>
-          <div className="fy-mono" style={{ fontSize: 10, marginTop: 3 }}>
+          <div className="fy-actioncard__reason">new world · the build</div>
+          <h3>{plan ? `One press makes ${plan.worldName}.` : "The founding build"}</h3>
+        </div>
+        {estimate !== null && <span className="fy-actioncard__status">{estimate}</span>}
+      </div>
+      {entry === undefined ? (
+        <Working label="Sizing the build" startedAt={startedAt} />
+      ) : plan === null ? (
+        <p className="fy-actioncard__notice">{entry.reason ?? "the build could not be sized"}</p>
+      ) : (
+        <>
+          {plan.approvedContent && <ApprovedGenesisContent blueprint={plan.approvedContent} />}
+          {plan.approvedContent?.selectedImages?.map(selection => <details key={selection.target}>
+            <summary>Reuse {selection.candidate.label} for {selection.target}</summary>
+            <img className="fy-actioncard__media" src={genesisMediaUrl(plan.genesisId, selection.candidate.file)} alt={selection.candidate.label} />
+          </details>)}
+          {plan.approvedContent?.selectedVoices?.map(selection => <p key={selection.plan.intent.target}>
+            Assign {selection.plan.voice.label} ({selection.plan.voice.provider}) to {selection.plan.title}; no new audition.
+          </p>)}
+          {plan.work && <details><summary>Work and reused selections</summary>{plan.work.map(item => <p key={item.key}>
+            {item.name} · {item.kind.replaceAll("-", " ")} · {item.authorized ? formatMicroUsd(item.estimatedMicroUsd) : "not authorized"}
+          </p>)}</details>}
+          <p className="fy-actioncard__consequence">
+            {counts
+              .filter(([count]) => count > 0)
+              .map(([count, label]) => `${count} ${label}`)
+              .join(" · ")}
+          </p>
+          <div className="fy-mono" style={{ fontSize: 10 }}>
             {plan.generations} GENERATION{plan.generations === 1 ? "" : "S"}
-            {plan.imageModel ? ` · ${plan.imageModel.toUpperCase()}` : ""} · THE CAP
+            {plan.imageModel ? ` · ${plan.imageModel.toUpperCase()}` : ""}
           </div>
-        </div>
-        <span style={{ flex: 1 }} />
-        <span style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", maxWidth: 260, textAlign: "right" }}>
-          Everything lands settled. Nothing waits for a decision.
-        </span>
-      </div>
-      {plan.notes.length > 0 && (
-        <div
-          style={{
-            borderLeft: "2px solid var(--border)",
-            padding: "9px 13px",
-            font: "400 11.5px/1.6 var(--font-sans)",
-            color: "var(--muted-foreground)",
-          }}
-        >
+          <p className="fy-actioncard__notice">Work that would exceed this estimate is skipped.</p>
           {plan.notes.map((note, index) => (
-            <div key={index}>{note}</div>
+            <p key={index} className="fy-actioncard__notice">
+              {note}
+            </p>
           ))}
-        </div>
+        </>
       )}
-      <div className="fy-artstep__foot">
-        <Button variant="ghost" onClick={onBack} disabled={pressed}>
-          Back
-        </Button>
-        <span style={{ flex: 1 }} />
-        <span className="fy-artstep__note">yes once · nothing asks again</span>
-        <Button variant="primary" disabled={pressed} onClick={onBuild}>
-          {pressed
-            ? "Building…"
-            : plan.generations === 0
-              ? `Build ${plan.worldName}`
-              : `Build ${plan.worldName} · ~${formatMicroUsd(plan.estimateMicroUsd)}`}
+      <div className="fy-actioncard__actions">
+        {plan !== null && (
+          <Button variant="primary" disabled={pressed || settling} onClick={onBuild}>
+            {pressed
+              ? "Building…"
+              : plan.generations === 0
+                ? `Build ${plan.worldName}`
+                : `Build ${plan.worldName} · ~${formatMicroUsd(plan.estimateMicroUsd)}`}
+          </Button>
+        )}
+        <Button variant="ghost" disabled={pressed} onClick={onDismiss}>
+          Not yet
         </Button>
       </div>
-    </>
+    </article>
   );
 }
 
 /** World genesis (prototype 12a): the whole window is the surface — form beside the world-so-far rail. */
 export function NewWorldScreen() {
+  const [params] = useSearchParams();
+  const freshId = useRef(`gen-${ulid().toLowerCase()}`);
+  const draftId = params.get("draft") ?? freshId.current;
+  return <NewWorldDraft key={draftId} draftId={draftId} />;
+}
+
+function NewWorldDraft({ draftId }: { draftId: string }) {
   const { state, connection } = useStore();
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
   const [name, setName] = useState("");
   const [logline, setLogline] = useState("");
   const [tone, setTone] = useState("");
@@ -788,14 +677,17 @@ export function NewWorldScreen() {
   // thing before the world exists, because it is the one answer that applies to every image the
   // world will ever make, and asking it while the logline is still being written would be asking
   // about a world nobody has described yet.
-  const [step, setStep] = useState<"draft" | "look" | "words" | "review">("draft");
+  const [step, setStep] = useState<"draft" | "look" | "words">("draft");
   const [presetId, setPresetId] = useState<string | null>(null);
   const [look, setLook] = useState("");
-  // The founding build (SPEC-031): a conversation that settled a name goes through the
-  // review and one press; a bare form still creates and seeds the old way.
+  // The founding build (SPEC-031): a conversation that settled a name is sized into a card in
+  // the thread and founded in one press there; a bare form still creates and seeds the old way.
   const [lookForBuild, setLookForBuild] = useState("");
   const [buildPressed, setBuildPressed] = useState(false);
+  const [generateImages, setGenerateImages] = useState(true);
   const [planRequestId, setPlanRequestId] = useState<string | null>(null);
+  const [planStartedAt, setPlanStartedAt] = useState<string | null>(null);
+  const buildCardRef = useRef<HTMLDivElement>(null);
   const [buildRequestId, setBuildRequestId] = useState<string | null>(null);
   const buildRequestRef = useRef<string | null>(null);
   // Where the words came from: the conversation's own proposal, or a preset seed. The look
@@ -804,22 +696,49 @@ export function NewWorldScreen() {
   const [lookSource, setLookSource] = useState<"conversation" | "preset" | null>(null);
   const conversationLookRef = useRef<string | null>(null);
   const seededRef = useRef(false);
+  // The world's own models, chosen on the card before the world exists (design turn 153). Held
+  // here and sent with every frame that spends or founds — the preview, the review, the press —
+  // so the price reviewed is the model the build runs on. Absent entries follow Settings.
+  const [models, setModels] = useState<ModelChoices | undefined>(undefined);
   const [genMode, setGenMode] = useState<"form" | "chat">("form");
   const modeTouchedRef = useRef(false);
-  const genesisIdRef = useRef(`gen-${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`);
+  const genesisIdRef = useRef(draftId);
   const genesisId = genesisIdRef.current;
   const [message, setMessage] = useState("");
   const harnessReady = state?.app.health.harness.status === "healthy";
-  const g = useGenesis()[genesisId];
+  const drafts = useGenesis();
+  const g = drafts[genesisId];
+  useEffect(() => { if (g?.status === "failed") setSubmittedName(null); }, [g?.status]);
+  useEffect(() => {
+    if (!g?.founding) return;
+    setModels(g.frozenModels);
+    setGenerateImages(g.frozenGenerateImages ?? true);
+    setLook(g.blueprint?.look ?? "");
+    setLookForBuild(g.blueprint?.look ?? "");
+    setGenMode("chat");
+  }, [g?.founding, g?.frozenModels, g?.frozenGenerateImages, g?.blueprint?.look]);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  useEffect(() => {
+    if (connection !== "open") return;
+    listGenesisDrafts();
+    if (params.has("draft")) loadGenesisDraft(genesisId);
+  }, [connection, genesisId]);
+  const canViewChat = harnessReady || Boolean(g?.blueprint || g?.turns.length);
   const turns = g?.turns ?? [];
   const chatRunning = g?.status === "running";
   const blueprint = g?.blueprint ?? null;
+  useEffect(() => {
+    if (g && connection === "open" && !chatRunning && !g.worldId && !g.founding) reviewGenesisImports(genesisId);
+  }, [connection, chatRunning, blueprint, g?.attachments, genesisId]);
+  useEffect(() => {
+    if (connection === "open" && blueprint && !chatRunning && !g?.worldId && !g?.founding) reviewGenesisDraft(genesisId);
+  }, [connection, blueprint, chatRunning, g?.worldId, g?.founding, genesisId]);
 
   // With a healthy harness, talking is the front door (prototype 12a) — unless the author
   // already picked the form themselves.
   useEffect(() => {
-    if (harnessReady && !modeTouchedRef.current) setGenMode("chat");
-  }, [harnessReady]);
+    if (canViewChat && !modeTouchedRef.current) setGenMode("chat");
+  }, [canViewChat]);
 
   const charSeed = parseSeed(firstCharacter);
   const locSeed = parseSeed(firstLocation);
@@ -835,8 +754,13 @@ export function NewWorldScreen() {
   const draftCharacters = (blueprint?.characters ?? []).filter((c) => c.name !== charSeed?.name);
   const draftLocations = (blueprint?.locations ?? []).filter((l) => l.name !== locSeed?.name);
   const railCharacters = [
-    ...(charSeed ? [{ ...charSeed, brief: false }] : []),
-    ...draftCharacters.map((c) => ({ name: c.name, sentence: oneLine(c), brief: hasBrief(c) })),
+    ...(charSeed ? [{ ...charSeed, brief: false, neverDepicted: false }] : []),
+    ...draftCharacters.map((c) => ({
+      name: c.name,
+      sentence: oneLine(c),
+      brief: hasBrief(c),
+      neverDepicted: c.neverDepicted === true,
+    })),
   ];
   const railLocations = [
     ...(locSeed ? [{ ...locSeed, brief: false }] : []),
@@ -870,13 +794,14 @@ export function NewWorldScreen() {
   const previewEstimate = (() => {
     const manifest = state?.app.manifest;
     if (!manifest) return null;
-    const routed = modelForCapability(manifest, state?.app.routing.defaults, "image");
+    const routed = modelForCapability(manifest, { ...state?.app.routing.defaults, ...models }, "image");
     if (!routed || state?.app.models.disabled.includes(routed.id)) return null;
     return estimateImageMicroUsd(routed, { landscape: true });
   })();
   const sendGenesis = () => {
-    if (!harnessReady || chatRunning || message.trim().length === 0) return;
+    if (!harnessReady || chatRunning || myBuild?.status === "running" || g?.worldId || message.trim().length === 0) return;
     genesisChat(genesisId, message.trim());
+    if (!params.has("draft")) setParams({ draft: genesisId }, { replace: true });
     setMessage("");
   };
 
@@ -901,16 +826,22 @@ export function NewWorldScreen() {
       for (const t of (blueprint?.threads ?? []).slice(0, 4)) {
         openThread(worldId, t.length > 80 ? `${t.slice(0, 77)}…` : t, t, []);
       }
-      genesisDiscard(genesisId);
+      if (!turns.length) genesisDiscard(genesisId);
     }
-    navigate(`/w/${worldId}`, { replace: true });
+    if (!turns.length) navigate(`/w/${worldId}`, { replace: true });
   }, [submittedName, state?.world, navigate, railCharacters, railLocations, railFactions, blueprint, genesisId]);
 
   // The build begins server-side from one frame (SPEC-031 R-17); the screen's whole job is
   // to follow it to the building screen the moment the coordinator names the world.
   useEffect(() => {
-    if (buildPressed && myBuild) navigate(`/building/${myBuild.worldId}`, { replace: true });
-  }, [buildPressed, myBuild, navigate]);
+    const worldId = myBuild?.worldId ?? g?.worldId;
+    if (worldId && g?.formHandoff === "completed" && !turns.length) {
+      navigate(`/w/${worldId}`, { replace: true });
+    } else if (worldId && g?.conversationId && (myBuild?.status === "completed" || myBuild?.status === "stopped" || g?.formHandoff === "completed")) {
+      navigate(`/w/${worldId}/chat/${g.conversationId}`, { replace: true });
+    }
+    if (buildPressed && myBuild) setStep("draft");
+  }, [buildPressed, myBuild, g?.worldId, g?.conversationId, g?.formHandoff, turns.length, navigate]);
   // A begin the coordinator refused answers with a reasoned plan; the press un-arms so the
   // refusal can be read and the author can go back — never a button stuck on "Building…".
   useEffect(() => {
@@ -920,31 +851,83 @@ export function NewWorldScreen() {
     }
   }, [buildPressed, buildResponse]);
 
-  // A preview can settle while the review is open, and it is the review's own answer that
-  // changes: an unsettled preview carries if it lands before the press (SPEC-031 R-54). The
-  // plan is asked again so the screen never states a loss the build is about to contradict.
-  const previewStatusAtPlan = useRef<string | null>(null);
+  // The card is open once a plan has been asked for. It sits in the thread, so the
+  // conversation goes on under it.
+  const buildCardOpen = planRequestId !== null;
+  const sizingBuild = buildCardOpen && visibleBuildPlan === undefined;
   useEffect(() => {
-    if (step !== "review" || buildPressed) return;
-    const status = previewJob?.status ?? null;
-    if (previewStatusAtPlan.current === status) return;
-    previewStatusAtPlan.current = status;
+    if (buildCardOpen) buildCardRef.current?.scrollIntoView({ block: "start" });
+  }, [buildCardOpen, planRequestId, visibleBuildPlan]);
+  // A plan is a picture of one blueprint and one preview state, and the card must never state
+  // a count or a loss the build is about to contradict: an unsettled preview carries if it
+  // lands before the press (SPEC-031 R-54), and a blueprint that moved under the card is
+  // exactly what the coordinator would refuse the press for. Either change asks the plan
+  // again. A look the conversation proposed follows the conversation; words the author edited
+  // or chose from a preset stay theirs.
+  // What the build's image route resolves from, as one comparable string: the card's choice or
+  // the Settings default it follows, whether that model is switched off, and its provider's key.
+  // Any of them can change behind an open card — the gear goes to Settings and back — and the
+  // review must be asked again, or it shows one model and price while the press spends on another.
+  const imageRoute = (() => {
+    // Resolved the way the build resolves it: the card's choice, else what Settings routes —
+    // which, with no saved default, is the manifest's first image model, not nothing.
+    const manifest = state?.app.manifest;
+    const id = models?.image ?? (manifest ? modelForCapability(manifest, state?.app.routing.defaults, "image")?.id : undefined);
+    const model = id === undefined ? undefined : manifest?.models.find((m) => m.id === id);
+    const provider = model === undefined ? undefined : state?.app.providers.find((p) => p.id === model.provider);
+    return [
+      id ?? "",
+      model === undefined ? "missing" : "listed",
+      id !== undefined && state?.app.models.disabled.includes(id) ? "off" : "on",
+      provider?.configured === true ? "keyed" : "unkeyed",
+      provider?.validation ?? "",
+    ].join("|");
+  })();
+  const imageJobs = (state?.app.jobs ?? []).filter(job => job.worldId === genesisId && job.target.kind === "genesis-image");
+  const imageJobsKey = imageJobs.map(job => `${job.id}:${job.status}`).join("|");
+  const voiceJobs = (state?.app.jobs ?? []).filter(job => job.worldId === genesisId && job.params["purpose"] === "genesis-voice");
+  const voiceJobsKey = voiceJobs.map(job => `${job.id}:${job.status}`).join("|");
+  useEffect(() => {
+    if (connection === "open" && blueprint && !chatRunning && !g?.worldId) reviewGenesisVoices(genesisId);
+  }, [connection, blueprint, chatRunning, g?.worldId, genesisId, voiceJobsKey]);
+  useEffect(() => {
+    if (connection === "open" && blueprint && !chatRunning && !g?.worldId) reviewGenesisImages(genesisId, models);
+  }, [connection, blueprint, chatRunning, g?.worldId, g?.attachments, genesisId, models, imageJobsKey, imageRoute]);
+  const plannedAgainst = useRef<{ blueprint: typeof blueprint; review: (typeof drafts)[string]["review"]; images: (typeof drafts)[string]["images"]; voices: (typeof drafts)[string]["voices"]; preview: string | null; route: string } | null>(null);
+  useEffect(() => {
+    if (!buildCardOpen || buildPressed) return;
+    const preview = previewJob?.status ?? null;
+    const last = plannedAgainst.current;
+    if (last !== null && last.blueprint === blueprint && last.review === g?.review && last.images === g?.images && last.voices === g?.voices && last.preview === preview && last.route === imageRoute) return;
+    let lookText = lookForBuild;
+    if (lookSource === "conversation" && look.trim() === conversationLookRef.current) {
+      lookText = blueprint?.look?.trim() ?? "";
+      conversationLookRef.current = lookText;
+      setLook(lookText);
+      setLookForBuild(lookText);
+    }
+    plannedAgainst.current = { blueprint, review: g?.review, images: g?.images, voices: g?.voices, preview, route: imageRoute };
     const requestId = ulid();
     setPlanRequestId(requestId);
-    planFoundingBuild(genesisId, requestId, lookForBuild);
-  }, [step, buildPressed, previewJob?.status, lookForBuild, genesisId]);
+    setPlanStartedAt(new Date().toISOString());
+    // A refusal answered the blueprint that moved; the fresh plan is the review it asked for.
+    setBuildRequestId(null);
+    planFoundingBuild(genesisId, requestId, lookText, models, generateImages);
+  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, g?.review, g?.images, g?.voices, lookForBuild, look, lookSource, genesisId, models, imageRoute, generateImages]);
 
-  const enterReview = (lookText: string) => {
+  const openBuildCard = (lookText: string) => {
     setLookForBuild(lookText);
     setBuildRequestId(null);
-    previewStatusAtPlan.current = previewJob?.status ?? null;
+    plannedAgainst.current = { blueprint, review: g?.review, images: g?.images, voices: g?.voices, preview: previewJob?.status ?? null, route: imageRoute };
     const requestId = ulid();
     setPlanRequestId(requestId);
-    planFoundingBuild(genesisId, requestId, lookText);
-    setStep("review");
+    setPlanStartedAt(new Date().toISOString());
+    planFoundingBuild(genesisId, requestId, lookText, models, generateImages);
+    setStep("draft");
   };
 
-  const returnToDraft = () => {
+  // Back from the look steps, or the card set aside: the conversation is untouched either way.
+  const leaveBuild = () => {
     if (buildPressed) return;
     // A proposal copied verbatim is conversation state, not an override. Let the next turn's
     // proposal replace it; words the author edited or chose from a preset remain their choice.
@@ -953,16 +936,30 @@ export function NewWorldScreen() {
       setLookSource(null);
       conversationLookRef.current = null;
     }
+    plannedAgainst.current = null;
     setPlanRequestId(null);
     setBuildRequestId(null);
     setStep("draft");
   };
 
-  const canCreate = connection === "open" && shownName.length > 0 && submittedName === null;
+  const canCreate = connection === "open" && shownName.length > 0 && submittedName === null && !chatRunning;
   const entries =
     1 + railCharacters.length + railLocations.length + railFactions.length + (blueprint?.threads.length ?? 0);
 
   const begin = (artDirection?: string) => {
+    if (turns.length || buildMode) {
+      proposeGenesisWorld(genesisId, {
+        name: shownName, ...(shownLogline ? { logline: shownLogline } : {}),
+        ...(shownTone ? { tone: shownTone } : {}), ...(shownGenre ? { genre: shownGenre } : {}),
+        ...(artDirection?.trim() ? { look: artDirection.trim() } : {}),
+        characters: charSeed ? [{ name: charSeed.name, line: charSeed.sentence }] : [],
+        locations: locSeed ? [{ name: locSeed.name, line: locSeed.sentence }] : [],
+        threads: blueprint?.threads ?? [],
+      });
+      setGenMode("chat");
+      setStep("draft");
+      return;
+    }
     setSubmittedName(shownName);
     createWorld({
       name: shownName,
@@ -978,6 +975,7 @@ export function NewWorldScreen() {
       // something is attached: the sandbox is the source of truth for what is waiting, and the
       // screen's idea of it can lag an event behind.
       genesisId,
+      ...(models !== undefined ? { models } : {}),
     });
   };
 
@@ -987,8 +985,7 @@ export function NewWorldScreen() {
         <AppChrome
           back={{
             label: genMode === "chat" ? "Back to chat" : "Back to form",
-            onClick: returnToDraft,
-            disabled: buildPressed,
+            onClick: leaveBuild,
           }}
           context={{ label: "new world · art direction" }}
         />
@@ -1004,19 +1001,10 @@ export function NewWorldScreen() {
                     <i />
                   </div>
                   <h1 className="fy-artstep__h1">How should {shownName || "this world"} look?</h1>
-                  <p className="fy-artstep__lede">
-                    Pick a starting look. Every image this world makes — characters, locations,
-                    shots — follows it until you change it. Nothing here is permanent: you can edit
-                    the words on the next screen, or set a different look any time from Art
-                    direction.
-                  </p>
+                  <p className="fy-artstep__lede">Pick a starting look.</p>
                 </div>
                 <div className="fy-artstep__aside">
-                  <div className="fy-artstep__asidehead">SAME HARBOUR, NINE TREATMENTS</div>
-                  <div className="fy-artstep__asidenote">
-                    Each preview is one scene rendered each way, so you compare the treatment and
-                    not the subject.
-                  </div>
+                  <div className="fy-artstep__asidehead">SAME FORMS, NINE TREATMENTS</div>
                 </div>
               </div>
               <ArtStyleGrid
@@ -1038,23 +1026,11 @@ export function NewWorldScreen() {
                 <span style={{ flex: 1 }} />
                 {/* Skippable, but not hidden: a world with no look is a real state, and it is
                     better said out loud than arrived at by closing a screen. */}
-                <Button variant="ghost" disabled={!canCreate} onClick={() => (buildMode ? enterReview("") : begin())}>
+                <Button variant="ghost" disabled={!canCreate} onClick={() => (buildMode && genMode !== "form" ? openBuildCard("") : begin())}>
                   Decide later
                 </Button>
               </div>
             </>
-          ) : step === "review" ? (
-            <BuildReviewStep
-              plan={visibleBuildPlan}
-              pressed={buildPressed}
-              onBack={() => setStep(lookForBuild === "" ? "look" : "words")}
-              onBuild={() => {
-                if (buildRequestRef.current === null) buildRequestRef.current = ulid();
-                setBuildRequestId(buildRequestRef.current);
-                setBuildPressed(true);
-                beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild);
-              }}
-            />
           ) : (
             <>
               <div className="fy-artstep__steps">
@@ -1089,13 +1065,10 @@ export function NewWorldScreen() {
                   Back
                 </Button>
                 <span style={{ flex: 1 }} />
-                <span className="fy-artstep__note">
-                  recorded as world look v1 · changing it later goes through the accept gate
-                </span>
                 <Button
                   variant="primary"
                   disabled={!canCreate || look.trim().length === 0}
-                  onClick={() => (buildMode ? enterReview(look.trim()) : begin(look))}
+                  onClick={() => (buildMode && genMode !== "form" ? openBuildCard(look.trim()) : begin(look))}
                 >
                   {submittedName ? "Creating…" : "Looks right"}
                 </Button>
@@ -1123,9 +1096,9 @@ export function NewWorldScreen() {
               <button
                 type="button"
                 className={cx("fy-seg__item", genMode === "chat" && "fy-seg__item--active")}
-                disabled={!harnessReady}
-                style={harnessReady ? undefined : { cursor: "not-allowed", opacity: 0.55 }}
-                title={harnessReady ? undefined : "Chat needs OpenCode running — the form drafts the same world"}
+                disabled={!canViewChat}
+                style={canViewChat ? undefined : { cursor: "not-allowed", opacity: 0.55 }}
+                title={canViewChat ? undefined : "Chat needs OpenCode running — the form drafts the same world"}
                 onClick={() => {
                   modeTouchedRef.current = true;
                   setGenMode("chat");
@@ -1146,20 +1119,148 @@ export function NewWorldScreen() {
             </span>
           </div>
           <div className="fy-gate__body" style={{ gap: 14 }}>
+            {Object.entries(drafts).some(([, draft]) => (draft.turns.length || draft.blueprint?.name || draft.attachments.length) && !draft.worldId) && (
+              <label>
+                Continue a draft
+                <select aria-label="Continue a draft" value={genesisId} disabled={chatRunning || myBuild?.status === "running"}
+                  onChange={event => setParams({ draft: event.target.value })}>
+                  <option value={genesisId}>{blueprint?.name ?? "This conversation"}</option>
+                  {Object.entries(drafts).filter(([id, draft]) => id !== genesisId && (draft.turns.length || draft.blueprint?.name || draft.attachments.length) && !draft.worldId)
+                    .map(([id, draft]) => <option key={id} value={id}>{draft.blueprint?.name ?? draft.turns[0]?.text.slice(0, 80) ?? "Untitled world"}</option>)}
+                </select>
+              </label>
+            )}
+            {(turns.length > 0 || blueprint?.name || handed.length > 0) && !g?.worldId && !g?.founding && !myBuild && (
+              <Button variant="ghost" disabled={chatRunning} onClick={() => {
+                if (!confirmDiscard) { setConfirmDiscard(true); return; }
+                genesisDiscard(genesisId);
+                setParams({ draft: `gen-${ulid().toLowerCase()}` });
+              }}>{confirmDiscard ? "Discard this conversation and its uploads" : "Discard draft"}</Button>
+            )}
+            {myBuild && <FoundingProgressCard build={myBuild} />}
             {genMode === "chat" ? (
               <>
-                {turns.length === 0 && (
-                  <div className="fy-bubble--gate">
-                    Say what the world is — a place, a wrongness, a person standing in it. The studio shapes it with
-                    you and keeps "the world so far" on the right, all proposed, nothing locked.
-                    <div className="fy-bubble__note">everything is drafted from this thread · the world is the record, the chat is scaffolding</div>
-                  </div>
-                )}
+                {/* 12a opens with Arke already talking. It opened here with sixty-six words of
+                    instructions instead — what the screen is, where the draft goes, what is
+                    locked — which is the dv-rule read out loud (design turn 69, issue 1008). */}
+                {turns.length === 0 && <div className="fy-bubble--gate">What is this world?</div>}
                 {turns.map((turn, i) => (
                   <div key={i} className={turn.role === "user" ? "fy-bubble--user" : "fy-bubble--gate"} style={{ whiteSpace: "pre-wrap" }}>
-                    {turn.text}
+                    {/* The author's words are shown exactly as typed; only Arke writes markdown (issue 911). */}
+                    {turn.role === "user" ? turn.text : renderInlineMarkdown(turn.text)}
                   </div>
                 ))}
+                {g?.importError && <Callout title="Import review needs attention">{g.importError}</Callout>}
+                {g?.imports && <GenesisImportCards imports={g.imports} blueprint={blueprint} busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.worldId || !!g.founding}
+                  onResolve={resolution => resolveGenesisImport(genesisId, resolution)}
+                  onRefresh={() => reviewGenesisImports(genesisId)}
+                  onExtract={name => setMessage(`Please extract reviewable worldbuilding proposals from attachments/${name}. Cite exact source quotes; keep interpretations and suggested relationships separate from the evidence.`)} />}
+                {g?.review && <GenesisContentCards review={g.review} busy={!!g.decisionPending || !!g.readinessPending || !!g.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.worldId || myBuild?.status === "running"}
+                  onDecide={(cards, decision) => decideGenesisDraft(genesisId, cards.map(card => ({ key: card.key, digest: card.digest })), decision)}
+                  onRevise={title => setMessage(`Please revise ${title}: `)} />}
+                {!g?.worldId && <GenesisReadinessCard review={g?.readiness} busy={!!g?.decisionPending || !!g?.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.readinessPending}
+                  onRefresh={() => reviewGenesisReadiness(genesisId)} onFix={setMessage}
+                  onLeave={(id, digest) => leaveGenesisFinding(genesisId, id, digest)} />}
+                {g?.voices && <GenesisVoiceCards genesisId={genesisId} voices={g.voices} jobs={voiceJobs} busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.founding || !!g.worldId}
+                  onGenerate={(intentId, digest) => generateGenesisVoice(genesisId, intentId, digest)}
+                  onDecide={(target, decision, candidate) => decideGenesisVoice(genesisId, target, decision, candidate)}
+                  onRevise={setMessage} onRefresh={() => reviewGenesisVoices(genesisId)} onCancel={cancelJob} />}
+                {g?.imageError && <Callout title="Image request needs attention">{g.imageError}</Callout>}
+                {g?.images && blueprint && <GenesisImageCards genesisId={genesisId} blueprint={blueprint} images={g.images} jobs={imageJobs}
+                  busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.founding || myBuild?.status === "running" || !!g.worldId}
+                  onGenerate={(intentId, digest) => generateGenesisImage(genesisId, intentId, digest, models)}
+                  onDecide={(target, decision, candidate) => decideGenesisImage(genesisId, target, decision, candidate)}
+                  onCancel={cancelJob} onRevise={setMessage} />}
+                {/* The look, previewable while the conversation is still a conversation (SPEC-031
+                    §1.10): the agent proposed the words; the press and the spend are the author's.
+                    Asked in the thread, not in the rail beside it — spend is decided where every
+                    other decision here is (issue 920). Build mode only: the legacy create path
+                    sweeps the sandbox without a carry, and the card must not promise one. */}
+                {buildMode && blueprint?.look !== undefined && (
+                  <article
+                    className="fy-actioncard"
+                    data-status={previewFile !== undefined && !previewStale ? "completed" : "pending"}
+                    aria-label="The look"
+                  >
+                    <div className="fy-actioncard__head">
+                      <div>
+                        <div className="fy-actioncard__reason">proposed in conversation</div>
+                        <h3>The look</h3>
+                      </div>
+                    </div>
+                    <p className="fy-actioncard__consequence">{blueprint.look}</p>
+                    {previewFile !== undefined && (
+                      <>
+                        <img
+                          className="fy-actioncard__media"
+                          src={genesisMediaUrl(genesisId, previewFile)}
+                          alt="The look, previewed"
+                        />
+                        {previewStale && (
+                          <div className="fy-mono" style={{ fontSize: 9.5 }}>the look changed since this was made</div>
+                        )}
+                      </>
+                    )}
+                    {previewRunning && <Loading inline label="making the look" />}
+                    {(previewJob?.status === "failed" ||
+                      previewJob?.status === "cancelled" ||
+                      previewJob?.status === "needs-reconciliation") && (
+                      <div className="fy-mono" style={{ fontSize: 9.5 }}>
+                        {previewJob.status === "cancelled"
+                          ? "the preview was cancelled"
+                          : previewJob.status === "needs-reconciliation"
+                            ? "the preview is held in Activity"
+                            : `the preview failed${previewJob.error ? ` — ${previewJob.error}` : ""}`}
+                      </div>
+                    )}
+                    {!previewRunning &&
+                      (previewJob === null || previewJob.status === "failed" || previewJob.status === "cancelled" || previewStale) && (
+                        <>
+                          {/* The build never makes a master look (SPEC-031 R-18): the world gets
+                              this preview or none. Said beside the control that answers it, not
+                              left for an empty plate on Art direction months later (issue 521). */}
+                          <div className="fy-mono" style={{ fontSize: 9.5 }}>
+                            without one, this world has no master look
+                          </div>
+                          <div className="fy-actioncard__actions" style={{ alignItems: "center" }}>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={previewEstimate === null || !!g?.founding || buildPressed}
+                              onClick={() => generateLookPreview(genesisId, models)}
+                            >
+                              See the look{previewEstimate !== null ? ` · ~${formatMicroUsd(previewEstimate)}` : ""}
+                            </Button>
+                            {previewEstimate === null && (
+                              <span className="fy-mono" style={{ fontSize: 9.5 }}>
+                                needs an image provider
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      )}
+                  </article>
+                )}
+                {buildMode && buildCardOpen && (
+                  <div ref={buildCardRef}>
+                    <label><input type="checkbox" checked={generateImages} disabled={buildPressed || g?.founding}
+                      onChange={event => { setGenerateImages(event.target.checked); plannedAgainst.current = null; }} /> Generate remaining images</label>
+                    <BuildCard
+                      plan={visibleBuildPlan}
+                      startedAt={planStartedAt}
+                      pressed={buildPressed}
+                      settling={chatRunning || !!g?.decisionPending || !!g?.readinessPending || !!g?.reviewPending || plannedAgainst.current?.review !== g?.review || plannedAgainst.current?.images !== g?.images || plannedAgainst.current?.voices !== g?.voices}
+                      onDismiss={leaveBuild}
+                      onBuild={() => {
+                        if (g?.decisionPending || g?.readinessPending || g?.reviewPending || plannedAgainst.current?.review !== g?.review || plannedAgainst.current?.images !== g?.images || plannedAgainst.current?.voices !== g?.voices || !visibleBuildPlan?.plan) return;
+                        if (buildRequestRef.current === null) buildRequestRef.current = ulid();
+                        setBuildRequestId(buildRequestRef.current);
+                        setBuildPressed(true);
+                        beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild, models, visibleBuildPlan?.plan?.approvalDigest, generateImages);
+                      }}
+                    />
+                  </div>
+                )}
                 {/* The turn in flight, verb by verb — the same working surface world chat has.
                     A silent stretch while the model reads and writes is indistinguishable from
                     a hang, and this is the first conversation anyone has with the studio. */}
@@ -1172,8 +1273,8 @@ export function NewWorldScreen() {
                     onSubmit={sendGenesis}
                     placeholder="Keep going, or ask it to surprise you…"
                     agentLabel="world author"
-                    busy={chatRunning}
-                    busyLabel="shaping the draft…"
+                    busy={chatRunning || buildPressed || !!g?.founding || myBuild?.status === "running" || sizingBuild}
+                    busyLabel={buildPressed ? "founding the world…" : sizingBuild ? "sizing the build…" : "shaping the draft…"}
                     onAttach={() => genesisAttachFiles(genesisId)}
                     onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
                     {...(hostCanAttach()
@@ -1321,12 +1422,18 @@ export function NewWorldScreen() {
             </div>
           )}
           <div className="fy-draftcard" style={{ padding: "10px 10px 16px" }}>
+            {/*
+              Semantic tokens only (issue 911). Painted from the neutral ramp this was the
+              brightest thing on the world door in dark mode — .dark leaves --neutral-* alone,
+              so a ramp surface stays white on a near-black page. Same dashed-and-unfilled
+              language as the pending frames, which paint from the same two tokens.
+            */}
             <div
               style={{
                 height: 118,
                 borderRadius: 8,
-                border: "1.5px dashed var(--neutral-300)",
-                background: "var(--neutral-50)",
+                border: "1.5px dashed var(--border)",
+                background: "var(--muted)",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
@@ -1334,19 +1441,13 @@ export function NewWorldScreen() {
                 gap: 7,
               }}
             >
-              <span style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)" }}>No world image yet</span>
               {/*
-                There was a button here for months that could never be pressed: an image job
-                needs a world folder to land in, and on this screen there is no world yet. A
-                control that can never be enabled is a trap — it reads as broken, and it caught
-                the same person twice. The sentence says where the thing actually happens.
+                A label and nothing else. There was a button here for months that could never be
+                pressed — an image job needs a world folder to land in, and on this screen there
+                is no world yet — and then a sentence in its place saying where key art actually
+                comes from, which is the same explanation with the control removed (issue 1008).
               */}
-              <span
-                className="fy-mono"
-                style={{ fontSize: 9, textAlign: "center", maxWidth: 190, lineHeight: 1.5 }}
-              >
-                key art is made from the logline in the world's hub, once you begin
-              </span>
+              <span style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)" }}>No world image yet</span>
             </div>
             <div style={{ padding: "12px 8px 0" }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 9 }}>
@@ -1358,7 +1459,7 @@ export function NewWorldScreen() {
                 </span>
               </div>
               <div style={{ font: "400 12.5px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}>
-                {shownLogline || (genMode === "chat" ? "The logline lands here as you talk." : "The logline lands here as you write it.")}
+                {shownLogline}
               </div>
               {(shownTone || shownGenre) && (
                 <div style={{ display: "flex", gap: 7, marginTop: 10, flexWrap: "wrap" }}>
@@ -1382,7 +1483,12 @@ export function NewWorldScreen() {
                   <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8 }}>
                     <span className="fy-dot fy-dot--sketch" style={{ width: 5, height: 5 }} />
                     <span className="fy-mono" style={{ fontSize: 9.5 }}>
-                      {c.brief ? "sketch · brief kept" : "sketch · no face yet"}
+                      {/*
+                       * "no face yet" promises a face, which is the opposite of the rule for a
+                       * character the author has ruled out (issue 945). The build card names the
+                       * same rule as "never depicted"; the two surfaces say it the same way.
+                       */}
+                      {c.neverDepicted ? "sketch · never depicted" : c.brief ? "sketch · brief kept" : "sketch · no face yet"}
                     </span>
                   </div>
                 </div>
@@ -1411,7 +1517,6 @@ export function NewWorldScreen() {
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span className="fy-dot fy-dot--warn" style={{ width: 6, height: 6 }} />
                 <span style={{ font: "600 12.5px var(--font-sans)" }}>Open threads</span>
-                <span className="fy-mono">pull one to keep going</span>
               </div>
               <div style={{ font: "400 12px/1.7 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 7 }}>
                 {blueprint!.threads.slice(0, 4).map((t, i) => (
@@ -1420,74 +1525,22 @@ export function NewWorldScreen() {
               </div>
             </div>
           )}
-          {/* The look, previewable while the conversation is still a conversation (SPEC-031
-              §1.10): the agent proposed the words; the press and the spend are the author's.
-              Build mode only — the legacy create path sweeps the sandbox without a carry,
-              and the card must not promise one. */}
-          {buildMode && blueprint?.look !== undefined && (
-            <div className="fy-draftcard" style={{ padding: "12px 14px" }}>
-              <div className="fy-mono" style={{ fontSize: 10 }}>
-                THE LOOK
-              </div>
-              <div style={{ font: "400 11.5px/1.5 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}>
-                {blueprint.look}
-              </div>
-              {previewFile !== undefined && (
-                <>
-                  <img
-                    src={genesisMediaUrl(genesisId, previewFile)}
-                    alt="The look, previewed"
-                    style={{ width: "100%", borderRadius: 8, marginTop: 9, display: "block" }}
-                  />
-                  <div className="fy-mono" style={{ fontSize: 9.5, marginTop: 6 }}>
-                    {previewStale
-                      ? "the look changed since this was made · it will not carry"
-                      : "carries in as the master look at Begin"}
-                  </div>
-                </>
-              )}
-              {previewRunning && <Loading inline label="making the look" />}
-              {(previewJob?.status === "failed" ||
-                previewJob?.status === "cancelled" ||
-                previewJob?.status === "needs-reconciliation") && (
-                <div className="fy-mono" style={{ fontSize: 9.5, marginTop: 6 }}>
-                  {previewJob.status === "cancelled"
-                    ? "the preview was cancelled"
-                    : previewJob.status === "needs-reconciliation"
-                      ? "the preview is held in Activity"
-                      : `the preview failed${previewJob.error ? ` — ${previewJob.error}` : ""}`}
-                </div>
-              )}
-              {!previewRunning && (previewJob === null || previewJob.status === "failed" || previewJob.status === "cancelled" || previewStale) && (
-                <div style={{ marginTop: 9 }}>
-                  {/* The build never makes a master look (SPEC-031 R-18): the world gets this
-                      preview or none. Said beside the control that answers it, not left for an
-                      empty plate on Art direction months later (issue 521). */}
-                  <div className="fy-mono" style={{ fontSize: 9.5, marginBottom: 7 }}>
-                    without one, this world has no master look
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={previewEstimate === null}
-                    onClick={() => generateLookPreview(genesisId)}
-                  >
-                    See the look{previewEstimate !== null ? ` · ~${formatMicroUsd(previewEstimate)}` : ""}
-                  </Button>
-                  {previewEstimate === null && (
-                    <span className="fy-mono" style={{ fontSize: 9.5, marginLeft: 8 }}>
-                      needs an image provider
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
           <div style={{ flex: 1, minHeight: 16 }} />
+          {/* The models this world will make with, chosen where the world is begun (design turn
+              153) — last in the world so far, above the press that spends on them. Locked once
+              the build is pressed: the run froze its route. */}
+          <ModelsCard
+            state={state}
+            capabilities={WORLD_MODEL_CAPABILITIES}
+            choices={models}
+            scopeWord="this world"
+            disabled={buildPressed || submittedName !== null || !!g?.founding}
+            onChange={(capability, modelId) => setModels((current) => withModelChoice(current, capability, modelId))}
+          />
           <div style={{ display: "grid", gap: 8 }}>
             <Button
               variant="primary"
-              disabled={!canCreate}
+              disabled={!canCreate || buildCardOpen}
               onClick={() => {
                 const proposed = blueprint?.look?.trim();
                 const approvedLook = look.trim() || proposed;
@@ -1500,7 +1553,7 @@ export function NewWorldScreen() {
                     conversationLookRef.current = approvedLook;
                     setPresetId(null);
                   }
-                  if (buildMode) enterReview(approvedLook);
+                  if (buildMode && genMode !== "form") openBuildCard(approvedLook);
                   else begin(approvedLook);
                 } else {
                   setStep("look");
@@ -1515,10 +1568,6 @@ export function NewWorldScreen() {
                 Begin seeds the first 4 of each · the rest are let go
               </div>
             )}
-            <div style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center" }}>
-              One more question — how it should look — then the hub. Everything arrives as sketches:
-              lock what holds, discard what doesn't.
-            </div>
           </div>
         </div>
       </div>
@@ -1528,61 +1577,87 @@ export function NewWorldScreen() {
 
 // ---- Settings --------------------------------------------------------------
 
+const SETTINGS_SECTIONS = [
+  ["providers", "Providers", Key], ["models", "AI models", Sparkle], ["adapters", "Content & safety", Shield],
+  ["general", "General", Sliders], ["remote-access", "Remote access", Wifi], ["harness", "Harness", Cpu],
+  ["appearance", "Appearance", Palette], ["notifications", "Notifications", Bell], ["sign-in", "Sign-in", User],
+  ["sample-world", "Sample world", Book], ["diagnostics", "Diagnostics", ChartLine], ["about", "About", Info],
+] as const;
+export function SettingsIndex() {
+  return useMediaQuery("(max-width: 599px)") ? null : <Navigate to="providers" replace />;
+}
 export function SettingsLayout() {
   const { connection, state } = useStore();
-  return (
-    <div className="fy-app" data-screen="settings">
-      {/* A page, not a panel (SPEC-042 R-5). It was 90% of the window over a blurred scrim, with a
-          close of its own that went to /worlds from wherever it was opened. At that size the
-          modal framing bought nothing but a narrower pane, and the one thing a modal promises —
-          to put you back where you were — it never did. The chrome's gear is the way out now,
-          and it goes back to where it was pressed (R-6). */}
-      <AppChrome current="settings" divided />
-      <div className="fy-content fy-content--fixed">
-        <div className="fy-settings">
-          <nav className="fy-settings__rail" aria-label="Settings">
-            <div className="fy-settings__title">Settings</div>
-            {(
-              [
-                ["providers", "Providers"],
-                ["models", "AI models"],
-                ["general", "General"],
-                ["harness", "Harness"],
-                ["appearance", "Appearance"],
-                ["notifications", "Notifications"],
-                ["sign-in", "Sign-in"],
-                ["sample-world", "Sample world"],
-                ["diagnostics", "Diagnostics"],
-                ["about", "About"],
-              ] as const
-            ).map(([slug, label]) => (
-              <NavLink
-                key={slug}
-                to={`/settings/${slug}`}
-                className={({ isActive }) => cx("fy-settings__tab", isActive && "fy-settings__tab--active")}
-              >
-                {label}
-              </NavLink>
-            ))}
-            <div style={{ flex: 1 }} />
-            <div className="fy-settings__version">v{state?.app.version ?? "0.1.0"}</div>
-          </nav>
-          <div className="fy-settings__pane">
-            {/* Most panes in here draw from the coordinator's snapshot, and with no snapshot they
-                draw the same thing they draw when a provider has nothing to offer: `—` in the
-                capability rows, `not measured` in the machine header. A dev coordinator that died
-                at import produces exactly that screen, which reads as a data bug in whatever you
-                last changed (issue 599). */}
-            {connection === "closed" && (
-              <div className="fy-settings__waiting">
-                <WaitingForCoordinator />
-              </div>
-            )}
-            <Outlet />
-          </div>
-        </div>
-      </div>
+  const navigate = useNavigate();
+  // Leaving is one act whichever way the sheet closes — Escape, the scrim, the X — and it goes
+  // to the route the gear remembered (SPEC-042 R-6), which is the screen already showing behind
+  // the sheet: a change of address, not of screen.
+  const leave = () => navigate(settingsReturnPath());
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const { pathname, search } = useLocation();
+  const slug = pathname.split("/")[2];
+  const section = SETTINGS_SECTIONS.find(([id]) => id === slug);
+  const providerDetail = slug === "providers" && ["provider", "component"].some(key => new URLSearchParams(search).has(key));
+  const theme = useThemePreference();
+  const summary = (id: string): string => {
+    if (id === "providers") return `${state?.app.providers.filter(p => p.configured).length ?? 0} connected`;
+    if (id === "models") return "images, video, voice, music";
+    if (id === "adapters") return state?.app.adapters?.adultContent.enabled ? "enabled" : "standard";
+    if (id === "general") return "defaults for new work";
+    if (id === "remote-access") return isRemoteSession() ? "this device is paired" : "pairing and devices";
+    if (id === "harness") return state?.app.health.harness.status === "healthy" ? "running" : "unavailable";
+    if (id === "appearance") return theme;
+    if (id === "notifications") return isRemoteSession() ? "on this device" : "background notifications";
+    if (id === "sign-in") return isRemoteSession() ? "on your PC" : "vendor connections";
+    if (id === "about") return `v${state?.app.version ?? "—"}`;
+    return id === "diagnostics" ? "studio health" : "a world to explore";
+  };
+  if (phone) return <PageSheet open onClose={leave} title={section?.[1] ?? (slug === "downloads" ? "Downloads" : "Settings")} className="fy-settings-phone"
+    resetKey={pathname + search}
+    footer={<span>{slug === "general" ? "new work only" : slug === "remote-access" && isRemoteSession() ? "connected through your PC" : `Arke Studio ${state?.app.version ?? "—"}${isRemoteSession() ? " · remote" : ""}`}</span>}
+    {...(slug ? { onBack: () => navigate(providerDetail || slug === "downloads" ? "/settings/providers" : "/settings") } : {})}>
+    <div className="fy-settings-phone__content" data-screen="settings">
+      {slug ? <Outlet /> : <nav className="fy-settings-sections" aria-label="Settings sections">{SETTINGS_SECTIONS.map(([id, label, Glyph]) =>
+        <NavLink key={id} to={`/settings/${id}`}><Glyph size={20} /><span><strong>{label}</strong><small>{summary(id)}</small></span><ChevronRight size={18} /></NavLink>)}</nav>}
     </div>
+  </PageSheet>;
+  return (
+    /* A sheet, not a page (design turn 150; SPEC-042 R-5 amended). The page of turn 124 answered
+       a panel whose close went to /worlds from wherever it was opened; R-6 fixed that by
+       remembering the route, and with the remembered route rendering behind the sheet the modal
+       keeps the one promise it makes. The editor's sheet (SPEC-039 R-5) at 95% of the window,
+       with no head of its own — the rail says what it is — and the X as its one added control. */
+    <EditorDialog open onClose={leave} width="95vw" height="95dvh" labelledBy="fy-settings-title" panelClassName="fy-settings__sheet">
+      <div className="fy-settings" data-screen="settings">
+        <nav className="fy-settings__rail" aria-label="Settings panes">
+          <div className="fy-settings__title" id="fy-settings-title">Settings</div>
+          {SETTINGS_SECTIONS.map(([slug, label, Glyph]) => (
+            <NavLink key={slug} to={`/settings/${slug}`} className={({ isActive }) => cx("fy-settings__tab", isActive && "fy-settings__tab--active")}>
+              {compact && <Glyph size={16} />}{label}
+            </NavLink>
+          ))}
+          <div style={{ flex: 1 }} />
+          <div className="fy-settings__version">v{state?.app.version ?? (typeof window === "undefined" ? undefined : window.arke?.appVersion) ?? "—"}</div>
+        </nav>
+        <div className="fy-settings__pane">
+          {/* Most panes in here draw from the coordinator's snapshot, and with no snapshot they
+              draw the same thing they draw when a provider has nothing to offer: `—` in the
+              capability rows, `not measured` in the machine header. A dev coordinator that died
+              at import produces exactly that screen, which reads as a data bug in whatever you
+              last changed (issue 599). */}
+          {(connection === "closed" || connection === "auth-refused") && (
+            <div className="fy-settings__waiting">
+              <WaitingForCoordinator />
+            </div>
+          )}
+          <Outlet />
+        </div>
+        <IconButton label="Close" className="fy-settings__close" onClick={leave}>
+          <X size={13} />
+        </IconButton>
+      </div>
+    </EditorDialog>
   );
 }
 
@@ -1618,6 +1693,9 @@ export function SettingsSignInScreen() {
     const overrideProvider = agent.model?.split("/")[0];
     if (overrideProvider) authoringProviders.add(overrideProvider);
   }
+  if (isRemoteSession()) return <div data-screen="settings-signin" className="fy-set"><h1 className="fy-pane__name">Sign-in</h1>
+    {(auth?.vendors ?? []).map(v => <FactRow key={v.id} what={v.name}>{v.connections.some(c => c.kind === "stored") ? "connected" : "not connected"}</FactRow>)}
+    <OnYourPC>keys and sign-ins</OnYourPC></div>;
   if (!auth || !auth.available) {
     return (
       <div data-screen="settings-signin" className="fy-set">
@@ -1820,10 +1898,9 @@ function VendorSignInRow({
           <div className="fy-set__field">
             {visibleFields(openMethod).map((field) =>
               field.options !== null ? (
-                <select
+                <Select
                   key={field.key}
-                  className="fy-set__select"
-                  aria-label={field.title}
+                  label={field.title}
                   value={answers[field.key] ?? ""}
                   onChange={(e) => setAnswers({ ...answers, [field.key]: e.target.value })}
                 >
@@ -1833,7 +1910,7 @@ function VendorSignInRow({
                       {option.label}
                     </option>
                   ))}
-                </select>
+                </Select>
               ) : (
                 <Input
                   key={field.key}
@@ -1874,6 +1951,7 @@ function VendorSignInRow({
 export function SettingsNotificationsScreen() {
   const { state } = useStore();
   const preference = state?.app.backgroundNotifications ?? "issues-only";
+  if (isRemoteSession()) return <div data-screen="settings-notifications" className="fy-set"><DeviceNotifications /></div>;
   return (
     <div data-screen="settings-notifications" className="fy-set">
       <div className="fy-set__eyebrow">BACKGROUND NOTIFICATIONS</div>
@@ -1882,9 +1960,9 @@ export function SettingsNotificationsScreen() {
           <div className="fy-set__title">When Arke Studio is in the background</div>
           <div className="fy-set__caps">Windows notifications open Activity when clicked</div>
         </div>
-        <select
-          className="fy-set__select"
-          aria-label="Background notifications"
+        {/* The house control, not the platform's (issue 1010, U2). */}
+        <Select
+          label="Background notifications"
           value={preference}
           onChange={(event) =>
             setBackgroundNotifications(event.target.value as typeof preference)
@@ -1893,116 +1971,44 @@ export function SettingsNotificationsScreen() {
           <option value="background-results-and-issues">Results and issues</option>
           <option value="issues-only">Issues only</option>
           <option value="off">Off</option>
-        </select>
-      </div>
-      <div className="fy-set__note">
-        issues include failed or uncertain generations, result preparation, and paused providers ·
-        result notifications contain no world or character names
+        </Select>
       </div>
     </div>
   );
 }
 
-const APPEARANCE_OPTIONS: Array<{ preference: ThemePreference; title: string; detail: string }> = [
-  { preference: "system", title: "System", detail: "Follow Windows appearance" },
-  { preference: "light", title: "Light", detail: "Always use the light theme" },
-  { preference: "dark", title: "Dark", detail: "Always use the dark theme" },
+const APPEARANCE_OPTIONS: Array<{ preference: ThemePreference; title: string }> = [
+  { preference: "dark", title: "Dark" },
+  { preference: "light", title: "Light" },
+  { preference: "system", title: "System" },
 ];
 
 export function SettingsAppearanceScreen() {
-  const { state } = useStore();
   const preference = useThemePreference();
-  const resolved = useResolvedTheme();
-  const stored = state?.app.narrator ?? null;
-  const narrator = stored && supportsVoiceUse(stored, "narration") ? stored : null;
-  const worldIdForVoices = state?.world?.meta.worldId;
-  const [narratorOpen, setNarratorOpen] = useState(false);
   return (
     <div data-screen="settings-appearance" className="fy-set fy-set--appearance">
-      <div className="fy-set__eyebrow">THEME</div>
-      <fieldset className="fy-theme-options">
-        <legend className="fy-sr-only">Theme</legend>
-        {APPEARANCE_OPTIONS.map((option) => (
-          <label key={option.preference} className="fy-theme-option">
-            <span className="fy-theme-option__copy">
-              <span className="fy-set__title">{option.title}</span>
-              <span className="fy-set__caps">{option.detail}</span>
-            </span>
-            <input
-              type="radio"
-              name="appearance-theme"
-              value={option.preference}
-              checked={preference === option.preference}
-              onChange={() => setThemePreference(option.preference)}
-            />
-          </label>
-        ))}
-      </fieldset>
-      <div className="fy-set__note">currently using {resolved}</div>
-      {/*
-       * The narrator arrived here from the Voice group inside Local runtime, and it is the one
-       * thing on that group that was never about a runtime. It is a voice the app speaks in, and
-       * it may be a cloud one — so Local AI is forbidden it (R-2) and Engines is wrong in kind,
-       * because an engine is not a provider (R-72). What is left is how the app presents itself.
-       */}
-      {/* Who reads the app's prose aloud. A third role: a character's voice lives on their sheet,
-          a reading voice belongs to one bench take, and this one narrates. It stays on the shipped
-          local voice unless somebody chooses otherwise, because "read aloud" is a passive press and
-          no other preference here spends money on one. */}
-      <div className="fy-rt__keyline">
-        <div className="fy-rt__eyebrow">NARRATOR</div>
-        <div className="fy-set__field">
-          <span className="fy-rt__path" data-testid="narrator-name">
-            {narrator === null ? DEFAULT_NARRATOR.label : `${narrator.label ?? narrator.voiceId} · ${narrator.provider}`}
-            {" · "}
-            {narrator === null || narrator.provider === "kokoro"
-              ? "reads on this machine · free"
-              : "reads in the cloud · billed per character"}
-          </span>
-          <button type="button" className="fy-set__link" onClick={() => setNarratorOpen(true)}>
-            Choose voice
-          </button>
-          {narrator !== null && (
-            <button type="button" className="fy-set__link" data-testid="narrator-reset" onClick={() => setNarrator(null)}>
-              Use the local voice
-            </button>
-          )}
+      <div className="fy-set__eyebrow">APPEARANCE</div>
+      <div className="fy-appearance__theme">
+        <div className="fy-appearance__copy">
+          <h2 className="fy-appearance__title">Theme</h2>
+
         </div>
-      </div>
-      <VoicePickerDialog
-        open={narratorOpen}
-        use="narration"
-        {...(worldIdForVoices !== undefined ? { worldId: worldIdForVoices } : {})}
-        chosenId={narrator?.voiceId ?? DEFAULT_NARRATOR.voiceId}
-        chosenProvider={narrator?.provider ?? DEFAULT_NARRATOR.provider}
-        chosenModel={
-          narrator?.model ??
-          (narrator ? legacyVoiceModel(narrator.provider, narrator.voiceId) ?? undefined : DEFAULT_NARRATOR.model)
-        }
-        onClose={() => setNarratorOpen(false)}
-        onPick={(voice: ReadingVoice) => {
-          setNarratorOpen(false);
-          setNarrator({ provider: voice.provider, model: voice.model, voiceId: voice.voiceId, label: voice.label });
-        }}
-      />
-      {/*
-       * The two themes, side by side. Fixed swatches rather than a live preview of the current
-       * one: the point is to show what the choice above would look like, and a card that followed
-       * the active theme would only ever show you what you can already see.
-       */}
-      <div className="fy-themeswatches" aria-hidden="true">
-        {(["light", "dark"] as const).map((theme) => (
-          <div key={theme} className={`fy-themeswatch fy-themeswatch--${theme}`}>
-            <div className="fy-themeswatch__frame">
-              <span className="fy-themeswatch__block" />
-              <span className="fy-themeswatch__lines">
-                <i />
-                <i />
-              </span>
-            </div>
-            <div className="fy-themeswatch__caption">{theme.toUpperCase()}</div>
-          </div>
-        ))}
+        <fieldset className="fy-theme-options">
+          <legend className="fy-sr-only">Theme</legend>
+          {APPEARANCE_OPTIONS.map((option) => (
+            <label key={option.preference} className="fy-theme-option">
+              <input
+                className="fy-sr-only"
+                type="radio"
+                name="appearance-theme"
+                value={option.preference}
+                checked={preference === option.preference}
+                onChange={() => setThemePreference(option.preference)}
+              />
+              <span>{option.title}</span>
+            </label>
+          ))}
+        </fieldset>
       </div>
     </div>
   );
@@ -2020,29 +2026,53 @@ export function SettingsAppearanceScreen() {
  * independently, so this is the courtesy and not the guarantee.
  */
 export function SettingsHarnessScreen() {
-  const { state } = useStore();
+  const { state, connection } = useStore();
   const [searchParams, setSearchParams] = useSearchParams();
   const harness = state?.app.harness ?? null;
   const researchOn = state?.app.research.web === true;
+  const hasSnapshot = state !== null;
 
   useEffect(() => {
-    // Detection costs a subprocess, so it happens when the screen is opened rather than at boot.
-    if (!harness) detectHarnesses();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // A file page can mount before the transport opens. Its first discovery request would be
+    // dropped, so wait for the snapshot and ask again when an unfinished connection recovers.
+    if (connection === "open" && hasSnapshot && harness === null) detectHarnesses();
+  }, [connection, hasSnapshot, harness]);
 
   const harnesses = harness?.harnesses ?? [OPENCODE_AVAILABILITY];
   const engine = harness?.engine ?? "opencode";
+  const generation = state?.app.harnessInfo?.generation;
+  const runningEngine = generation === "claude" || generation === "codex" || generation === "arke"
+    ? generation
+    : generation === "v1" || generation === "v2" ? "opencode" : harness?.launchEngine ?? null;
+  const harnessHealth = state?.app.health.harness;
+  const activeStatus = harnessHealth?.status === "healthy" ? "running now"
+    : harnessHealth?.status === "starting" ? "starting" : "unavailable";
   const asked = searchParams.get("harness");
-  const current = harnesses.some((h) => h.id === asked) ? asked! : harnesses[0]!.id;
+  const current = harnesses.some((h) => h.id === asked) ? asked! : (harnesses.find((h) => h.id === engine) ?? harnesses[0]!).id;
   const chosen = harnesses.find((h) => h.id === current) ?? harnesses[0]!;
 
   const [agentsOpen, setAgentsOpen] = useState(false);
+  const requestedAgent = searchParams.get("agent");
+  const focusAgent = state?.app.agents.some(agent => agent.name === requestedAgent) ? requestedAgent! : undefined;
+  useEffect(() => {
+    if (focusAgent !== undefined) setAgentsOpen(true);
+  }, [focusAgent]);
+  if (isRemoteSession()) return <div data-screen="settings-harness" className="fy-set"><h1 className="fy-pane__name">Harness</h1>
+    <FactRow what="Engine">{harnesses.find(h => h.id === runningEngine)?.label ?? "—"} · {activeStatus}</FactRow>
+    <OnYourPC>harness and executables</OnYourPC>
+    <div className="fy-set__row"><span className="fy-set__name--wide">Search online</span><button type="button" role="switch" aria-label="Search online" aria-checked={researchOn} className={cx("fy-prov__switch", researchOn && "is-on")} onClick={() => setResearchWeb(!researchOn)}><span /></button></div>
+    <AgentsPanel {...(focusAgent ? { focusAgent } : {})} />
+  </div>;
+  if (!hasSnapshot) return (
+    <div data-screen="settings-harness" className="fy-set fy-set--runtime">
+      {(connection !== "closed" && connection !== "auth-refused") && <WaitingForCoordinator />}
+    </div>
+  );
   return (
     <div data-screen="settings-harness" className="fy-set fy-set--runtime">
       <div className="fy-rt">
         <div className="fy-rt__rail" role="tablist" aria-label="Harnesses">
-          {harnesses.map((h) => (
+          {harness !== null && harnesses.map((h) => (
             <button
               type="button"
               key={h.id}
@@ -2051,17 +2081,37 @@ export function SettingsHarnessScreen() {
               className={cx("fy-rt__railitem", h.id === current && "is-current")}
               onClick={() => setSearchParams({ harness: h.id }, { replace: true })}
             >
-              <span className={cx("fy-set__dot", TONE_CLASS[h.id === engine ? "ok" : h.installed ? "idle" : "warn"])} />
+              <span className={cx("fy-set__dot", TONE_CLASS[h.id === runningEngine && activeStatus === "running now" ? "ok" : h.installed ? "idle" : "warn"])} />
               <span>{h.label}</span>
               <span style={{ flex: 1 }} />
               <span className="fy-rt__count">
-                {h.id === engine ? "in use" : h.installed ? "available" : "not here"}
+                {h.id === runningEngine ? activeStatus : h.blocked ? (h.bundled ? "unavailable" : h.version !== null || h.source !== null ? "needs attention" : "not here") : h.id === engine ? "next restart" : h.installed ? "available" : "not here"}
               </span>
             </button>
           ))}
         </div>
         <div className="fy-rt__pane">
-          <HarnessPane harness={chosen} engine={engine} detected={harness !== null} claudePath={harness?.claudePath ?? null} />
+          {harness === null && (
+            <div className="fy-set__note" role="status">
+              {connection === "open" && hasSnapshot ? "Detecting available harnesses…" : "Connecting to detect available harnesses…"}
+              <Button disabled={connection !== "open"} onClick={() => detectHarnesses()}>Check again</Button>
+            </div>
+          )}
+          {harness !== null && <HarnessPane
+            harness={chosen}
+            engine={engine}
+            runningEngine={runningEngine}
+            health={harnessHealth}
+            detected={harness !== null}
+            canDetect={connection === "open" && hasSnapshot}
+            executablePath={chosen.id === "codex" ? harness?.codexPath ?? null : harness?.claudePath ?? null}
+          />}
+          {harness?.launchOverride && (
+            <div className="fy-set__note" role="status">
+              ARKE_HARNESS selects {harnesses.find(h => h.id === harness.launchOverride)?.label ?? harness.launchOverride} at launch.
+              {" "}Clear the override to use the saved engine.
+            </div>
+          )}
           {/*
             The one thing the Studio does that leaves this machine, so it lives with the other
             question about what the agent may do rather than behind a provider key. Off until
@@ -2084,7 +2134,9 @@ export function SettingsHarnessScreen() {
             </button>
             <div>
               <strong>Search online</strong>
-              <p>{researchOn ? "Searches, reads, and cites pages." : "Stays offline."}</p>
+              {/* The setting is global, but Local has no web tools yet, so it never searches. */}
+              <p>{runningEngine === "arke" ? researchOn ? "On, but Local stays offline." : "Stays offline."
+                : researchOn ? "Searches, reads, and cites pages." : "Stays offline."}</p>
             </div>
           </div>
           {/*
@@ -2113,7 +2165,7 @@ export function SettingsHarnessScreen() {
             {agentsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             Advanced · which model runs each writing agent
           </button>
-          {agentsOpen && <AgentsPanel />}
+          {agentsOpen && <AgentsPanel focusAgent={focusAgent} />}
         </div>
       </div>
     </div>
@@ -2123,37 +2175,45 @@ export function SettingsHarnessScreen() {
 function HarnessPane({
   harness,
   engine,
+  runningEngine,
+  health,
   detected,
-  claudePath,
+  canDetect,
+  executablePath,
 }: {
   harness: HarnessAvailability;
   engine: HarnessEngine;
+  runningEngine: HarnessEngine | null;
+  health?: ComponentHealth;
   detected: boolean;
-  claudePath: string | null;
+  canDetect: boolean;
+  executablePath: string | null;
 }) {
-  const inUse = harness.id === engine;
+  const selected = harness.id === engine;
+  const active = harness.id === runningEngine;
+  const running = active && health?.status === "healthy";
+  const chooseExecutable = harness.id === "codex" ? chooseCodexExecutable : chooseClaudeExecutable;
+  const clearExecutable = harness.id === "codex" ? clearCodexExecutable : clearClaudeExecutable;
   return (
     <>
       <RuntimeHead
         title={harness.label}
         caps={harness.bundled ? "BUNDLED" : "YOUR INSTALLATION"}
-        tone={inUse ? "ok" : harness.installed ? "idle" : "warn"}
-        state={inUse ? "in use" : harness.installed ? "available" : "not here"}
+        tone={active && !running && health?.status !== "starting" ? "warn" : running ? "ok" : harness.installed ? "idle" : "warn"}
+        state={active ? running ? "running now" : health?.status === "starting" ? "starting" : "unavailable" : harness.blocked ? (harness.bundled ? "unavailable" : harness.version !== null || harness.source !== null ? "needs attention" : "not here") : selected ? "next restart" : harness.installed ? "available" : "not here"}
       />
       <RuntimeSection label="ON THIS MACHINE" />
       <div className="fy-set__row">
         <div className="fy-set__name fy-set__name--wide">
-          <div className="fy-set__title">{harness.bundled ? "Ships with Arke Studio" : "Found on this machine"}</div>
+          <div className="fy-set__title">{harness.bundled ? "Ships with Arke Studio" : harness.installed || harness.version !== null || harness.source !== null ? "Found on this machine" : "Not found on this machine"}</div>
           <div className="fy-set__caps">
             {/* The refusal, in the words the coordinator sent — not a re-derived summary. */}
             {harness.blocked ?? (harness.version ? `version ${harness.version}` : "installed")}
           </div>
         </div>
-        {!harness.bundled && (
-          <Button variant="ghost" onClick={() => detectHarnesses()}>
-            Check again
-          </Button>
-        )}
+        <Button variant="ghost" disabled={!canDetect} onClick={() => detectHarnesses()}>
+          Check again
+        </Button>
       </div>
       {!harness.bundled && (
         <>
@@ -2161,22 +2221,22 @@ function HarnessPane({
           <div className="fy-set__row">
             <div className="fy-set__name fy-set__name--wide">
               <div className="fy-set__title">
-                {claudePath ?? (harness.source === "path" ? "Found on the system path" : "No file chosen")}
+                {executablePath ?? (harness.source === "path" ? "Found on the system path" : "No file chosen")}
               </div>
               <div className="fy-set__caps">
-                {claudePath
+                {executablePath
                   ? harness.installed
-                    ? "this file is what Arke Studio runs"
+                    ? "used when this harness starts"
                     : "this file did not answer"
                   : "choose a file if Arke Studio cannot find yours"}
               </div>
             </div>
-            {claudePath && (
-              <Button variant="ghost" onClick={() => clearClaudeExecutable()}>
+            {executablePath && (
+              <Button variant="ghost" onClick={() => clearExecutable()}>
                 Clear
               </Button>
             )}
-            <Button variant="secondary" onClick={() => chooseClaudeExecutable()}>
+            <Button variant="secondary" onClick={() => chooseExecutable()}>
               Choose…
             </Button>
           </div>
@@ -2185,21 +2245,25 @@ function HarnessPane({
       <RuntimeSection label="USE FOR AUTHORING" />
       <div className="fy-set__row">
         <div className="fy-set__name fy-set__name--wide">
-          <div className="fy-set__title">{inUse ? "Runs the authoring work" : "Not in use"}</div>
+          <div className="fy-set__title">
+            {active && !running ? health?.status === "starting" ? "Starting harness" : "Harness unavailable" : selected ? active ? "Runs the authoring work" : "Selected for the next restart" : running ? "Running until restart" : harness.installed ? "Available for authoring" : "Not available for authoring"}
+          </div>
           <div className="fy-set__caps">
-            {inUse
-              ? "takes effect on the next restart"
+            {active && !running
+              ? health?.reason ?? (health?.status === "starting" ? "starting the harness" : "the harness is unavailable")
+              : selected
+              ? running ? "new sessions use this harness" : "restart Arke Studio to switch"
               : harness.installed
                 ? "switching takes effect on the next restart"
-                : "unavailable until it is installed"}
+                : harness.bundled ? "unavailable for now" : "unavailable until it is installed"}
           </div>
         </div>
         <Button
-          variant={inUse ? "secondary" : "primary"}
-          disabled={inUse || !harness.installed || !detected}
+          variant={selected ? "secondary" : "primary"}
+          disabled={selected || !harness.installed || !detected}
           onClick={() => setHarnessEngine(harness.id)}
         >
-          {inUse ? "In use" : "Use this"}
+          {selected ? "Selected" : "Use this"}
         </Button>
       </div>
     </>
@@ -2218,9 +2282,10 @@ const ROUTED_CAPABILITIES: readonly Capability[] = CAPABILITY_ROWS.flatMap((row)
 );
 
 /**
- * Settings · General (SPEC-034 R-14). Which model runs each capability by default.
+ * Settings · General (SPEC-034 R-14, design turn 149). Which model runs each capability by
+ * default, and who reads the app's prose aloud.
  *
- * It was Cloud AI, and before that *Who does what*. What changes with the rename is the thing the
+ * It was Cloud AI, and before that *Who does what*. What changed with the rename is the thing the
  * rename was blocked on: **a default may name a local model** (R-15). SPEC-033 R-61 filtered them
  * out because the screen it replaced let one be chosen with nothing to run it — `llm →
  * gemma4-12b` put all writing on this machine — but the defect was never *a local model
@@ -2231,62 +2296,58 @@ const ROUTED_CAPABILITIES: readonly Capability[] = CAPABILITY_ROWS.flatMap((row)
  * **A default is not a routing switch** (R-16). Where a piece of work runs stays a production's
  * decision at dispatch (SPEC-033 R-74), and that decision outranks the default it started from.
  *
+ * **One row grammar, borrowed whole from Providers** (turn 149): a label, its value, its state at
+ * the row's gap, and on the narrator's row alone a button at the end. Turn 124 put the state
+ * *under* a select stretched to the column, which is the caption turn 137 forbade everywhere
+ * else, and the page had grown three row shapes under one eyebrow. The state now sits beside a
+ * 300px control, says three words at most, and never repeats the provider — that is the first
+ * word in the control. A default that cannot run is stated on its row, in the warning colour,
+ * and nowhere else: the callout that said the same fault above the list is gone.
+ *
  * Providers keeps its job unchanged. This screen **references** a provider and never configures
- * one: the remedy for an unconnected provider is a route to Providers, never a key field here.
+ * one: the remedy for a missing credential is on AI models' supplier heading (SPEC-042 R-4), and
+ * the rail is the route — nothing on a row navigates.
  */
 export function SettingsGeneralScreen() {
+  const phone = useMediaQuery("(max-width: 599px)");
   const { state } = useStore();
+  const stored = state?.app.narrator ?? null;
+  const narrator = stored && supportsVoiceUse(stored, "narration") ? stored : null;
+  const worldIdForVoices = state?.world?.meta.worldId;
+  const [narratorOpen, setNarratorOpen] = useState(false);
   const navigate = useNavigate();
   const manifest = state?.app.manifest ?? null;
   const routing = state?.app.routing ?? { defaults: {}, faults: [] };
   const drift = state?.app.drift ?? [];
-  const statuses = state?.app.providers ?? [];
   const eligibility = eligibilityInputs(state);
-  /** Stored, tested, or neither — the three things Providers actually knows (SPEC-028 R-33). */
-  const providerState = (id: ProviderId): string => {
-    const status = statuses.find((p) => p.id === id);
-    if (status?.configured !== true) return "not connected";
-    if (status.validation === "valid") return "connected";
-    if (status.validation === "invalid") return "key rejected";
-    // `testing` is its own state and reads as one: a key mid-validation is not the same thing as
-    // one nobody has tried, and the four words are the four the provider table actually has.
-    return status.validation === "testing" ? "testing" : "untested";
-  };
-  /**
-   * Where a model actually runs (R-16a), from the resolved engine rather than the provider flag.
-   * `PROVIDERS.comfyui.local` is `true` for every recipe, so reading the flag would tell someone
-   * their video drafts here while it renders on a box down the hall.
-   */
-  /**
-   * What to call the thing a default comes from, which is not the same word on both halves.
-   *
-   * A keyed service is its own source and names itself. A local model's is the **engine**, which
-   * is what frame 112d draws and what Providers' rail is keyed on: `Voxa · this machine` rather
-   * than `Kokoro · this machine`, because the reader who wants to act on it goes to Voxa's pane.
-   */
-  const sourceOf = (model: ManifestModel): string => {
-    const engine = engineOfProvider(model.provider);
-    return engine === undefined ? PROVIDER_TABLE[model.provider].displayName : ENGINE_LABEL[engine];
-  };
+  // The state cell's words, shared with the Models card so the two never disagree (turn 153).
+  const { strandState, sourceOf, runsOn } = modelFacts(state);
+  const warn = (words: string) => (
+    <span className="fy-fact__state fy-fact__state--warn">
+      <span className="fy-set__dot fy-set__dot--warn" aria-hidden="true" />
+      {words}
+    </span>
+  );
 
-  const runsOn = (model: ManifestModel): string => {
-    if (!PROVIDER_TABLE[model.provider].local) return providerState(model.provider);
-    const gated = (state?.app.runtime?.models ?? []).find((m) => m.modelId === model.id);
-    const locality =
-      gated?.locality ??
-      (model.provider === "comfyui" ? (state?.app.comfyui?.engine.locality ?? "local") : "local");
-    return locality === "remote" ? "another machine" : "this machine";
-  };
+  // Who reads the app's prose aloud. A third role: a character's voice lives on their sheet, a
+  // reading voice belongs to one bench take, and this one narrates. It stays on the shipped local
+  // voice unless somebody chooses otherwise, because "read aloud" is a passive press and no other
+  // preference here spends money on one. The row says the reader and its price the way the Voice
+  // page's rows do (SPEC-046 R-30) — `Kokoro · free`, `Voxtral · $0.016 per 1k` — and nothing
+  // more: the price is the whole warning.
+  const reader = narrator === null
+    ? { provider: DEFAULT_NARRATOR.provider as string, model: DEFAULT_NARRATOR.model as string | null }
+    : { provider: narrator.provider, model: narrator.model ?? legacyVoiceModel(narrator.provider, narrator.voiceId) };
+  const readerRow =
+    (manifest?.models ?? []).find((m) => m.provider === reader.provider && m.id === reader.model && m.capability === "voice-tts") ?? null;
+  const readerLocal = (PROVIDER_TABLE as Record<string, { local?: boolean } | undefined>)[reader.provider]?.local === true;
+  const readerChip = [readerName(reader, readerRow), readerPriceLabel(readerRow) ?? (readerLocal ? "free" : null)]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <div data-screen="settings-general" className="fy-set">
-      <div className="fy-set__eyebrow">DEFAULTS</div>
-      {/* A default that cannot run is stated, never repaired (design turn 40d). It gets a callout
-          rather than a footnote because the next dispatch of that capability has nowhere to go. */}
-      {routing.faults.map((f) => (
-        <Callout key={f.capability} tone="warning" title={`${CAPABILITY_LABEL[f.capability]} has nowhere to go.`}>
-          {f.reason}
-        </Callout>
-      ))}
+    <div data-screen="settings-general" className="fy-set fy-set--general">
+      <h1 className="fy-pane__name">General</h1>
       {ROUTED_CAPABILITIES.map((capability) => {
         // Both halves, in one list (R-15). The picker is where R-61's filter used to be, and what
         // stands in its place is eligibility — the same answer the routing write consults, so an
@@ -2296,76 +2357,107 @@ export function SettingsGeneralScreen() {
         const selectedModel = options.find((m) => m.id === selected);
         const usable = (m: (typeof options)[number]) => modelEligible(m, eligibility);
         const stranded = selectedModel !== undefined && !usable(selectedModel);
+        // A stored default whose model left the manifest (SPEC-008 §2.7). Listed under its own id
+        // so the control shows what is stored rather than the first option it happens to hold.
+        const missing = selected !== undefined && selectedModel === undefined;
+        const source = selectedModel === undefined ? undefined : sourceOf(selectedModel);
         return (
-          <div key={capability} className="fy-set__row">
-            <span className="fy-set__routelabel">{CAPABILITY_LABEL[capability]}</span>
-            <select
-              className="fy-set__pill"
-              aria-label={`Model for ${CAPABILITY_LABEL[capability]}`}
+          <FactRow key={capability} what={CAPABILITY_LABEL[capability]}>
+            <Select
+              wrapClassName="fy-default"
+              label={`Model for ${CAPABILITY_LABEL[capability]}`}
               disabled={options.length === 0}
               value={selected ?? ""}
               onChange={(e) => setRoutingDefault(capability, e.target.value)}
+              {...(source === undefined ? {} : { mark: <ProviderMark id={source.id} label={source.label} size="xs" /> })}
             >
-              {options.length === 0 && <option value="">nothing in the manifest for this</option>}
-              {selected === undefined && options.length > 0 && <option value="">no default set</option>}
+              {options.length === 0 && <option value="">No models</option>}
+              {selected === undefined && options.length > 0 && <option value="">Not set</option>}
+              {missing && <option value={selected}>{selected}</option>}
               {[...options]
                 .sort((a, b) => Number(usable(b)) - Number(usable(a)))
                 .map((m) => (
                   <option key={m.id} value={m.id} disabled={!usable(m)}>
-                    {PROVIDER_TABLE[m.provider].displayName} · {m.displayName}
-                    {/* Not on the selected one: the collapsed select is read beside the state
-                        text, which already says why, and twice on one row reads as two problems. */}
+                    {sourceOf(m).label} · {m.displayName}
+                    {/* Not on the selected one: the collapsed control is read beside the state,
+                        which already says why, and twice on one row reads as two problems. */}
                     {usable(m) || m.id === selected ? "" : ` — ${strandReason(state, m)}`}
                   </option>
                 ))}
-            </select>
-            {/* The capability copy is the manifest speaking (R-10): refs, frames, caps. */}
-            {/* A model names its provider and where that provider's work runs — the connection
-                state SPEC-028 R-33 requires for a keyed one, the resolved engine's locality for a
-                local one (R-16a). Displayed rather than re-derived (R-63). */}
-            {selectedModel && !stranded && (
-              <span className="fy-set__state">
-                {sourceOf(selectedModel)} · {runsOn(selectedModel)} ·{" "}
-                {modelCapabilityCopy(selectedModel)}
-              </span>
-            )}
-            {stranded && selectedModel && (
-              <span className="fy-set__state">
-                {sourceOf(selectedModel)} · {strandReason(state, selectedModel)}
-              </span>
-            )}
-            <span className={cx("fy-set__dot", stranded ? "fy-set__dot--warn" : selectedModel && "fy-set__dot--ok")} />
-          </div>
+            </Select>
+            {/* The provider is the control's first word, so the state is what R-16a asks for
+                after it: where the model runs, or what its credential is doing. Displayed rather
+                than re-derived (R-63). */}
+            {selectedModel && !stranded && <span className="fy-fact__state">{runsOn(selectedModel)}</span>}
+            {selectedModel && stranded && warn(strandState(selectedModel))}
+            {missing && warn("not in the manifest")}
+          </FactRow>
         );
       })}
       {/* Its label and the route, with no picker and no sentence (R-17): the absence of a control
           is what says the choice is not made here. */}
-      <div className="fy-set__row">
-        <span className="fy-set__routelabel">{CAPABILITY_LABEL.llm}</span>
-        <button type="button" className="fy-set__link" onClick={() => navigate("/settings/harness")}>
+      {!phone && <FactRow what={CAPABILITY_LABEL.llm}>
+        <button type="button" className="fy-fact__link" onClick={() => navigate("/settings/harness")}>
           on Harness
         </button>
-        <span style={{ flex: 1 }} />
-      </div>
-
+      </FactRow>}
+      <FactRow
+        what="Narrator"
+        does={
+          <>
+            {!phone && <ActionButton icon={<Pencil size={13} />} onClick={() => setNarratorOpen(true)}>
+              Change
+            </ActionButton>}
+            {narrator !== null && (
+              <ActionButton
+                icon={<RotateCcw size={13} />}
+                hint={`${DEFAULT_NARRATOR.label} · Kokoro · free`}
+                testId="narrator-reset"
+                onClick={() => setNarrator(null)}
+              >
+                Reset
+              </ActionButton>
+            )}
+          </>
+        }
+      >
+        {phone ? <button type="button" className="fy-narrator-default" onClick={() => setNarratorOpen(true)}><span>{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)} · {narrator?.provider ?? "Kokoro"}</span><ChevronDown size={14} /></button> : <span data-testid="narrator-name">{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)}</span>}
+        <span className="fy-fact__state">{readerChip}</span>
+      </FactRow>
+      {phone && <FactRow what={CAPABILITY_LABEL.llm}>
+        <button type="button" className="fy-fact__link" onClick={() => navigate("/settings/harness")}>
+          on Harness
+        </button>
+      </FactRow>}
+      <VoicePickerDialog
+        open={narratorOpen}
+        use="narration"
+        {...(worldIdForVoices !== undefined ? { worldId: worldIdForVoices } : {})}
+        chosenId={narrator?.voiceId ?? DEFAULT_NARRATOR.voiceId}
+        chosenProvider={narrator?.provider ?? DEFAULT_NARRATOR.provider}
+        chosenModel={
+          narrator?.model ??
+          (narrator ? legacyVoiceModel(narrator.provider, narrator.voiceId) ?? undefined : DEFAULT_NARRATOR.model)
+        }
+        onClose={() => setNarratorOpen(false)}
+        onPick={(voice: ReadingVoice) => {
+          setNarratorOpen(false);
+          setNarrator({ provider: voice.provider, model: voice.model, voiceId: voice.voiceId, label: voice.label });
+        }}
+      />
       {drift.length > 0 && (
         <>
-          <div className="fy-set__eyebrow">MANIFEST DRIFT</div>
+          <HalfHeading icon={<ChartLine size={14} />} aside={`${drift.length} model${drift.length === 1 ? "" : "s"}`}>
+            Manifest drift
+          </HalfHeading>
           {drift.map((d) => (
-            <div key={d.modelId} className="fy-set__row">
-              <div className="fy-set__name fy-set__name--wide">
-                <div className="fy-set__title">{d.modelId}</div>
-                <div className="fy-set__caps">
-                  {PROVIDER_TABLE[d.provider].displayName} · {d.samples} reported charges
-                </div>
-              </div>
-              <span className="fy-set__state">
-                estimates off by ~{(d.medianDivergencePerMille / 10).toFixed(0)}%
+            <FactRow key={d.modelId} what={d.modelId}>
+              <span>
+                {PROVIDER_TABLE[d.provider].displayName} · {d.samples} reported charges
               </span>
-              <span className="fy-set__dot fy-set__dot--warn" />
-            </div>
+              {warn(`estimates off by ~${(d.medianDivergencePerMille / 10).toFixed(0)}%`)}
+            </FactRow>
           ))}
-          <div className="fy-set__note">the shipped manifest needs an update — estimates keep missing what was billed</div>
         </>
       )}
     </div>
@@ -2398,16 +2490,8 @@ export function SettingsSampleWorldScreen() {
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">Install a copy</div>
           <div className="fy-set__caps">
-            {available
-              ? "a cast with reference kits, canon, a production under way, and a proposal at the gate"
-              : "this build does not carry it"}
+            {available ? "cast · canon · a production · a proposal" : "not in this build"}
           </div>
-          {available && (
-            <div className="fy-set__note">
-              It lands beside your own worlds as an ordinary folder. Change it, break it, archive
-              it — nothing here is read-only, and installing again gives you a fresh copy.
-            </div>
-          )}
         </div>
         {available && (
           <Button variant="primary" disabled={installing} onClick={() => installSampleWorld()}>
@@ -2460,21 +2544,18 @@ export function SettingsAboutScreen() {
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">Updates</div>
           <div className="fy-set__caps">{updateCopy}</div>
-          {(update?.status === "ready" || update?.status === "install-on-close") && (
-            <div className="fy-set__note">Install when I close will not reopen Arke Studio.</div>
-          )}
         </div>
-        {update?.status === "available" && (
+        {update?.status === "available" && (isRemoteSession() ? <OnYourPC>download and install updates</OnYourPC> :
           <Button variant="primary" onClick={() => downloadUpdate()}>
             Download
           </Button>
         )}
-        {update?.status === "ready" && (
+        {update?.status === "ready" && (isRemoteSession() ? <OnYourPC>install and restart</OnYourPC> :
           <>
             <Button variant="primary" onClick={() => installUpdateAndRestart()}>
               Install and restart
             </Button>
-            <button type="button" className="fy-set__link" onClick={() => installUpdateOnClose()}>
+            <button type="button" className="fy-set__link" title="Install on close without reopening Arke Studio" onClick={() => installUpdateOnClose()}>
               Install when I close
             </button>
           </>
@@ -2513,9 +2594,7 @@ export function SettingsAboutScreen() {
             %USERPROFILE%\ArkeStudio · worlds, ledger, credentials — uninstalling deletes none of it
           </div>
         </div>
-        <button type="button" className="fy-set__link" onClick={() => openDataFolder()}>
-          Open folder
-        </button>
+        {isRemoteSession() ? <OnYourPC>your data folder</OnYourPC> : <button type="button" className="fy-set__link" onClick={() => openDataFolder()}>Open folder</button>}
       </div>
 
       <div className="fy-set__row">
@@ -2523,9 +2602,7 @@ export function SettingsAboutScreen() {
           <div className="fy-set__title">Diagnostics</div>
           <div className="fy-set__caps">redacted at the boundary — no world content, no keys, no prompts</div>
         </div>
-        <button type="button" className="fy-set__link" onClick={() => generateDiagnostics()}>
-          Generate
-        </button>
+        {isRemoteSession() ? <OnYourPC>export diagnostics</OnYourPC> : <button type="button" className="fy-set__link" onClick={() => generateDiagnostics()}>Generate</button>}
       </div>
       {diagnostics && (
         <Textarea readOnly value={diagnostics} style={{ minHeight: 160, marginTop: 10, font: "var(--type-mono, monospace)" }} />
@@ -2540,480 +2617,6 @@ export function SettingsAboutScreen() {
         </div>
       )}
       <div className="fy-set__copyright">© 2026 Michael Josiah</div>
-    </div>
-  );
-}
-
-// ---- Activity --------------------------------------------------------------
-
-const TERMINAL_JOB = new Set(["succeeded", "failed", "cancelled"]);
-
-function ProviderCallInspector({ jobId, onClose }: { jobId: string | null; onClose: () => void }) {
-  const calls = useProviderCalls(jobId);
-  useEffect(() => listProviderCalls(jobId), [jobId]);
-  const copy = (call: ProviderCallRecord) => void navigator.clipboard.writeText(JSON.stringify(call, null, 2));
-  return (
-    <section className="fy-provider-calls" aria-label="Provider calls">
-      <div className="fy-provider-calls__head">
-        <div><div className="fy-eyebrow-sm">PROVIDER CALLS</div><div className="fy-mono">{jobId ?? "100 most recent calls"}</div></div>
-        <Button variant="ghost" onClick={onClose}>Close</Button>
-      </div>
-      <Callout tone="warning" title="Sensitive local history">
-        Requests and responses may contain prompts and world content. Credentials and binary media are redacted or summarized.
-      </Callout>
-      {calls === null && <div className="fy-mono">loading call history…</div>}
-      {calls?.length === 0 && <div className="fy-mono">No recorded calls. Calls made before this feature are not recoverable.</div>}
-      {calls?.map((call) => (
-        <details key={call.id} className="fy-provider-call" open={calls.length === 1}>
-          <summary>
-            <span>{call.operation}</span><span className="fy-mono">{call.method} {call.endpoint}</span>
-            <Badge tone={call.status === "succeeded" || call.status === "accepted" ? "success" : call.status === "pending" ? "warning" : "danger"}>
-              {call.status === "pending" ? "outcome unknown" : call.status}
-            </Badge>
-          </summary>
-          <div className="fy-provider-call__meta">{shortDateTime(call.startedAt)} · attempt {call.attempt ?? "—"} · HTTP {call.httpStatus ?? "no response"} · {call.elapsedMs === null ? "still pending" : `${call.elapsedMs} ms`}</div>
-          {call.error && <Callout tone="warning" title={`${call.error.name}${call.error.code ? ` · ${call.error.code}` : ""}`}>{call.error.message}</Callout>}
-          <div className="fy-provider-call__payloads">
-            <div><div className="fy-provider-call__label">REQUEST</div><pre>{JSON.stringify(call.request, null, 2)}</pre></div>
-            <div><div className="fy-provider-call__label">RESPONSE</div><pre>{call.response === null ? "No response was witnessed." : JSON.stringify(call.response, null, 2)}</pre></div>
-          </div>
-          <Button variant="ghost" onClick={() => copy(call)}>Copy sensitive call JSON</Button>
-        </details>
-      ))}
-    </section>
-  );
-}
-
-export function ActivityScreen() {
-  const { state } = useStore();
-  const reconcileReport = useReconcileReport();
-  const sidecar = useVoiceSidecarState();
-  const exportsState = useExportsState();
-  const navigate = useNavigate();
-  const [scope, setScope] = useState<"active" | "all">("active");
-  const [inspectedJobId, setInspectedJobId] = useState<string | null>(null);
-  const [inspectAllCalls, setInspectAllCalls] = useState(false);
-  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
-  const activeWorldId = state?.world?.meta.worldId ?? null;
-  // The alert threshold, set where it is reported (26a). Closed until asked for: the note says
-  // what the alert is, and most visits to this screen are not about changing it.
-  const [editingThreshold, setEditingThreshold] = useState(false);
-  const [threshold, setThreshold] = useState<string | null>(null);
-  const [period, setPeriod] = useState<string | null>(null);
-  const thresholdValue =
-    threshold ?? String((state?.app.spend?.settings.thresholdMicroUsd ?? 0) / 1_000_000);
-  const periodValue = period ?? String(state?.app.spend?.settings.periodDays ?? 7);
-
-  const jobs = [...(state?.app.jobs ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const scoped = <T extends { worldId?: string }>(items: T[]): T[] =>
-    scope === "all" || activeWorldId === null ? items : items.filter((i) => i.worldId === undefined || i.worldId === activeWorldId);
-
-  const running = state ? computeRunning(state, { sidecar, exports: exportsState }) : [];
-  const needsYou = state ? computeNeedsYou(state) : [];
-  // Founding-build items that did not land (SPEC-031 R-48): rows derived from the build
-  // record's own keys, so an item never dispatched — no route, no credential — is as visible
-  // and as runnable as a failed one. Held items are deliberately absent: their queue rows
-  // are already here, and resuming the lane is that row's action (row 32 — no duplicates).
-  const NOT_LANDED = new Set(["failed", "skipped", "unauthorized"]);
-  const builds = scoped([...(state?.app.builds ?? [])]).filter((build) => build.status !== "running");
-  const buildMissing = builds
-    .map((build) => ({ build, missing: build.items.filter((item) => NOT_LANDED.has(item.state)) }))
-    .filter(({ missing }) => missing.length > 0);
-  /** The build item a failed job belongs to, for the retry that lands as the build would (R-49). */
-  const buildItemForJob = (jobId: string) => {
-    for (const build of state?.app.builds ?? []) {
-      const item = build.items.find((candidate) => candidate.jobId === jobId);
-      if (item) return { build, item };
-    }
-    return null;
-  };
-  // Spend obeys the screen's scope like every other collection here (issue 305 §8). Bench jobs
-  // omit productionId but keep worldId, so their ledger entries are world-owned already; what was
-  // missing was reading that. The threshold alert below stays app-wide deliberately — it is one
-  // durable app setting about one app-wide rolling total, not a per-world figure.
-  //
-  // The ledger cannot use `scoped` as it stands, because it is the one collection here whose
-  // scope is not always a world id. A founding look preview is paid for before any world exists,
-  // and while the job is re-associated to the world at Begin, the ledger entry keeps the genesis
-  // it was actually spent under (SPEC-031 R-55) — that is the record of where the money went.
-  // The build holds the join, so read it: dropping those entries would underreport every world
-  // that was founded from a paid preview.
-  // The build is pruned from the snapshot once every item has landed, which is exactly when
-  // the founding went well — so the coordinator also keeps the pair it harvested before pruning
-  // (issue 531). Both are read: the build for a founding in this session, the map after any
-  // restart. Neither ever names another world's genesis as this one's.
-  const genesisForActiveWorld = new Set([
-    ...(state?.app.builds ?? []).filter((b) => b.worldId === activeWorldId).map((b) => b.genesisId),
-    ...Object.entries(state?.app.worldGenesis ?? {})
-      .filter(([worldId]) => worldId === activeWorldId)
-      .map(([, genesisId]) => genesisId),
-  ]);
-  const inScope = (entry: LedgerEntry): boolean =>
-    scope === "all" ||
-    activeWorldId === null ||
-    entry.worldId === activeWorldId ||
-    genesisForActiveWorld.has(entry.worldId);
-  const spend = state
-    ? spendSummary(state.app.ledger.filter(inScope), state.app.spend?.settings.periodDays ?? 7, new Date())
-    : null;
-  const spendStatus = state?.app.spend ?? null;
-  const spendThreshold = spendStatus?.settings.thresholdMicroUsd ?? 0;
-  // The source-quality slot, and a failed read is the loudest source fact there is: the figure
-  // beside it sums only what survived the read, a lower bound wearing the shape of a total.
-  // Keyed on the published list's own read — latched to the seed — where the alert note below
-  // states the fate of the evaluation's own, fresher read. The two can honestly differ.
-  const sourceNote = state?.app.ledgerUnavailable
-    ? "ledger could not be read"
-    : spend?.mixed
-      ? `mixed · ${spend.reportedEntries} measured, ${spend.derivedEntries} derived`
-      : (spend?.derivedEntries ?? 0) > 0
-        ? "derived from the manifest"
-        : "provider-reported";
-  /*
-   * The threshold row. A fired alert outranks everything: `alerted` is only ever computed from
-   * entries that were read, so the crossing is real even when a later read failed, and hiding
-   * it would be the reverse of this screen's fault. Then the un-evaluated case — a status whose
-   * read failed has an un-fired alert, which is not an all-clear (SPEC-008 R-19). A zero
-   * threshold stays `off` throughout: an alert that is off asks nothing of the ledger.
-   */
-  const alertWindow = `Alert at ${formatMicroUsd(spendThreshold)} / ${spend?.periodDays ?? 7}d`;
-  const alertNote = spendStatus?.alerted
-    ? `Over the threshold: ${formatMicroUsd(spendStatus.rollingMicroUsd)} against ${formatMicroUsd(spendThreshold)}. Nothing is blocked.`
-    : spendThreshold === 0
-      ? `${alertWindow} · off`
-      : spendStatus?.ledgerUnavailable
-        ? `${alertWindow} · not evaluated`
-        : alertWindow;
-  const drift = state?.app.drift ?? [];
-  const today = new Date().toISOString().slice(0, 10);
-  const recent = scoped(jobs.filter((j) => TERMINAL_JOB.has(j.status) && j.updatedAt.startsWith(today)));
-  const settled = running.length === 0 && needsYou.length === 0;
-
-  return (
-    <div className="fy-app" data-screen="activity">
-      <AppChrome back={{ label: "Home", to: "/worlds" }} context={{ label: "activity" }} current="activity" />
-      <div className="fy-activity">
-        <div className="fy-activity__main">
-          <div className="fy-h1row">
-            <h1 className="fy-h1">Activity</h1>
-            <span className="fy-h1row__meta">
-              {scoped(running).length} running · {scoped(needsYou).length} need{scoped(needsYou).length === 1 ? "s" : ""} you ·
-              everything Arke is doing, and what it costs
-            </span>
-            <span className="fy-h1row__push" />
-            <span className="fy-seg">
-              <button
-                type="button"
-                className={cx("fy-seg__item", scope === "active" && "fy-seg__item--active")}
-                onClick={() => setScope("active")}
-              >
-                This world
-              </button>
-              <button
-                type="button"
-                className={cx("fy-seg__item", scope === "all" && "fy-seg__item--active")}
-                onClick={() => setScope("all")}
-              >
-                All worlds
-              </button>
-            </span>
-          </div>
-          {reconcileReport && reconcileReport.length > 0 && (
-            <Callout title="What recovery did">
-              {reconcileReport.map((r) => `${r.jobId.slice(0, 8)}… ${r.action}`).join(" · ")}
-            </Callout>
-          )}
-          {settled ? (
-            <div style={{ padding: "40px 0" }}>
-              <EmptyState
-                title="Nothing running, nothing waiting on you"
-                hint="A settled state, not a blank — you can stop."
-              />
-            </div>
-          ) : (
-            <>
-              <div className="fy-eyebrow-sm" style={{ margin: "18px 0 2px" }}>
-                RUNNING
-              </div>
-              {scoped(running).length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>nothing in flight</div>}
-              {scoped(running).map((r) => (
-                <div key={r.ref} className="fy-activityrow">
-                  <span className="fy-dot fy-dot--live" />
-                  <div className="fy-activityrow__main">
-                    <div className="fy-activityrow__title">{r.title}</div>
-                    <div className="fy-activityrow__sub">
-                      {r.kind} · {r.detail}
-                    </div>
-                  </div>
-                  <span className="fy-activityrow__meta">{r.percent !== null ? `${Math.round(r.percent)}%` : "running"}</span>
-                  {r.cancellable && r.kind === "job" && (
-                    <Button variant="ghost" onClick={() => cancelJob(r.ref)}>
-                      Cancel
-                    </Button>
-                  )}
-                  {r.kind === "job" && <Button variant="ghost" onClick={() => setInspectedJobId(r.ref)}>Calls</Button>}
-                  {r.cancellable && r.kind === "export" && activeWorldId && (
-                    <Button variant="ghost" onClick={() => cancelExportMsg(activeWorldId, r.ref)}>
-                      Cancel
-                    </Button>
-                  )}
-                </div>
-              ))}
-              <div className="fy-eyebrow-sm" style={{ margin: "18px 0 2px" }}>
-                NEEDS YOU · {scoped(needsYou).length}
-              </div>
-              {scoped(needsYou).length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>nothing waiting on you</div>}
-              {scoped(needsYou).map((entry, i) => (
-                <div key={`${entry.kind}-${entry.ref ?? entry.worldId ?? i}`} className="fy-activityrow" style={{ alignItems: "flex-start" }}>
-                  <span className="fy-dot fy-dot--warn" style={{ marginTop: 5 }} />
-                  <div className="fy-activityrow__main">
-                    <div className="fy-activityrow__title" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      {entry.title}
-                      <Badge tone={entry.urgency <= 2 ? "warning" : "outline"}>class {entry.urgency}</Badge>
-                      {entry.asOf && <Badge tone="outline">as of {shortDateTime(entry.asOf)} — not current</Badge>}
-                    </div>
-                    <div className="fy-activityrow__sub">{entry.detail}</div>
-                    <div style={{ display: "flex", gap: "var(--space-2)", marginTop: 8, flexWrap: "wrap" }}>
-                      {entry.ref && jobs.some((job) => job.id === entry.ref) && <Button variant="ghost" onClick={() => setInspectedJobId(entry.ref!)}>Provider calls</Button>}
-                      {entry.actions.includes("resolve") && entry.ref && (
-                        <>
-                          <Button onClick={() => resolveHeldJob(entry.ref!, "resubmit")}>Resubmit · may charge again</Button>
-                          <Button variant="ghost" onClick={() => resolveHeldJob(entry.ref!, "discard")}>
-                            Abandon · prior cost unknown
-                          </Button>
-                        </>
-                      )}
-                      {entry.actions.includes("retry-finalization") && entry.ref && (
-                        <Button onClick={() => retryJobFinalization(entry.ref!)}>
-                          Retry finalization · no regeneration or charge
-                        </Button>
-                      )}
-                      {entry.actions.includes("settings") && entry.ref && (
-                        <>
-                          <Button onClick={() => resumeQueue(entry.ref!)}>Resume {entry.ref}</Button>
-                          <Button variant="ghost" onClick={() => navigate("/settings/providers")}>
-                            Settings
-                          </Button>
-                        </>
-                      )}
-                      {entry.actions.includes("reconcile") && entry.worldId && (
-                        <Button onClick={() => navigate(`/w/${entry.worldId}`)}>Open world</Button>
-                      )}
-                      {entry.actions.includes("review") && entry.worldId && (
-                        <Button onClick={() => navigate(entry.reviewPath ?? `/w/${entry.worldId}/productions`)}>Review</Button>
-                      )}
-                      {entry.actions.includes("open-proposal") && entry.worldId && (
-                        <Button onClick={() => navigate(`/w/${entry.worldId}/proposals`)}>Review</Button>
-                      )}
-                      {entry.actions.includes("open-world") && entry.worldId && (
-                        <Button
-                          onClick={() => {
-                            // Opening makes the counts precise (R-7).
-                            openWorld(entry.worldId!);
-                            navigate(`/w/${entry.worldId}`);
-                          }}
-                        >
-                          Open — items become precise
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </>
-          )}
-          {buildMissing.map(({ build, missing }) => (
-            <div key={build.buildId}>
-              <div className="fy-eyebrow-sm" style={{ margin: "18px 0 2px" }}>
-                THE FOUNDING BUILD · {missing.length} NOT LANDED
-              </div>
-              {missing.length > 1 && (
-                <div className="fy-activityrow">
-                  <span className="fy-dot" />
-                  <div className="fy-activityrow__main">
-                    <span>{build.worldName} · everything outstanding</span>
-                  </div>
-                  <Button onClick={() => runBuildItem(build.worldId)}>Run all {missing.length}</Button>
-                </div>
-              )}
-              {missing.map((item) => (
-                <div key={item.key} className="fy-activityrow">
-                  <span className="fy-dot fy-dot--warn" />
-                  <div className="fy-activityrow__main">
-                    <span>{buildWorkingLine(item)}</span>
-                    {item.detail && <span className="fy-mono">{item.detail}</span>}
-                  </div>
-                  {/* Lands exactly as the build would have — settled, anchored, designated (R-49). */}
-                  <Button onClick={() => runBuildItem(build.worldId, item.key)}>Run</Button>
-                </div>
-              ))}
-            </div>
-          ))}
-          <div className="fy-eyebrow-sm" style={{ margin: "18px 0 2px" }}>
-            EARLIER TODAY
-          </div>
-          {recent.length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>nothing finished today · the ledger holds everything</div>}
-          {recent.slice(0, 20).map((job) => (
-            <div key={job.id} className="fy-activityrow" style={{ display: "block" }}>
-              <JobRow job={job} />
-              {/* Where this one is re-run from, which is not one place (issue 226). The row used
-                  to name the production's dispatch dialog under every failure, including the
-                  reference work that belongs to no production and has no such dialog. */}
-              {jobActions(job).includes("retry") &&
-                (() => {
-                  // A founding-build job retries through the build's own landing (SPEC-031
-                  // R-49): the photo becomes the anchor, never a staged proposal.
-                  const owned = buildItemForJob(job.id);
-                  if (owned) {
-                    return (
-                      <>
-                        <span className="scr-field__hint">failed — runs again and lands settled</span>
-                        <Button variant="ghost" onClick={() => runBuildItem(owned.build.worldId, owned.item.key)}>
-                          Run again
-                        </Button>
-                      </>
-                    );
-                  }
-                  const origin = jobOrigin(job);
-                  return origin ? (
-                    <>
-                      <span className="scr-field__hint">failed — run it again from {origin.where}</span>
-                      <Button variant="ghost" onClick={() => navigate(origin.path)}>
-                        {origin.label}
-                      </Button>
-                    </>
-                  ) : (
-                    <span className="scr-field__hint">failed — run it again from wherever you started it</span>
-                  );
-                })()}
-              <Button variant="ghost" onClick={() => setInspectedJobId(job.id)}>Provider calls</Button>
-              {/* Two clicks and no dialog, like archiving a world: the second click is the consent,
-                  and the words say what survives it. Offered only where the state permits it
-                  (R-13) — work still finishing, or a finalization the user can still retry, is
-                  not history yet. */}
-              {jobActions(job).includes("delete") &&
-                (confirmingDelete === job.id ? (
-                  <>
-                    <span className="scr-field__hint">
-                      Remove from this history? The ledger entry and anything it produced stay — spend does not
-                      move.
-                    </span>
-                    <Button
-                      onClick={() => {
-                        deleteJob(job.id);
-                        setConfirmingDelete(null);
-                      }}
-                    >
-                      Delete
-                    </Button>
-                    <Button variant="ghost" onClick={() => setConfirmingDelete(null)}>
-                      Keep
-                    </Button>
-                  </>
-                ) : (
-                  <Button variant="ghost" onClick={() => setConfirmingDelete(job.id)}>
-                    Delete
-                  </Button>
-                ))}
-            </div>
-          ))}
-          {(inspectedJobId || inspectAllCalls) && (
-            <ProviderCallInspector jobId={inspectAllCalls ? null : inspectedJobId} onClose={() => { setInspectedJobId(null); setInspectAllCalls(false); }} />
-          )}
-        </div>
-        <div className="fy-activity__side">
-          <div style={{ font: "600 13px var(--font-sans)" }}>
-            {spend ? `Last ${spend.periodDays} days` : "Spend"}
-          </div>
-          {spend && (
-            <>
-              <div className="fy-spendtotal">
-                {formatMicroUsd(spend.totalMicroUsd)} <span className="fy-mono">{sourceNote}</span>
-              </div>
-              {spend.byProvider
-                .filter((p) => !p.unmetered)
-                .map((p) => (
-                  <div key={p.provider} className="fy-spendbar">
-                    <span className="fy-spendbar__label">{p.provider}</span>
-                    <div className="fy-spendbar__track">
-                      <div
-                        className="fy-spendbar__fill"
-                        style={{
-                          width: `${spend.totalMicroUsd > 0 ? Math.max(Math.round((p.microUsd / spend.totalMicroUsd) * 100), 2) : 0}%`,
-                        }}
-                      />
-                    </div>
-                    <span className="fy-spendbar__value">{formatMicroUsd(p.microUsd)}</span>
-                  </div>
-                ))}
-              {spend.unmeteredRuns > 0 && (
-                <div className="fy-mono" style={{ marginTop: 12 }}>
-                  {spend.unmeteredRuns} unmetered run{spend.unmeteredRuns === 1 ? "" : "s"} — no provider charge
-                </div>
-              )}
-              <div className="fy-notecard" style={{ background: "var(--background)" }}>
-                <span className={`fy-dot fy-dot--${spendStatus?.alerted ? "warn" : "sketch"}`} />
-                {alertNote}
-                {/* Opens the control in place. It used to send you to Settings, which is where the
-                    threshold lived; 26a puts the threshold on this screen, so it is here now. */}
-                <button
-                  type="button"
-                  className="fy-spendalert__toggle"
-                  aria-expanded={editingThreshold}
-                  onClick={() => setEditingThreshold((open) => !open)}
-                >
-                  {editingThreshold ? "Close" : "Set"}
-                </button>
-              </div>
-              {editingThreshold && (
-                <div className="fy-spendalert">
-                  <span className="fy-spendalert__label">alert at $</span>
-                  <Input
-                    aria-label="Alert threshold in dollars"
-                    style={{ maxWidth: 92 }}
-                    value={thresholdValue}
-                    onChange={(e) => setThreshold(e.target.value)}
-                  />
-                  <span className="fy-spendalert__label">over</span>
-                  <Input
-                    aria-label="Alert window in days"
-                    style={{ maxWidth: 62 }}
-                    value={periodValue}
-                    onChange={(e) => setPeriod(e.target.value)}
-                  />
-                  <span className="fy-spendalert__label">days</span>
-                  <Button
-                    onClick={() => {
-                      const usdValue = Number.parseFloat(thresholdValue);
-                      const days = Number.parseInt(periodValue, 10);
-                      if (Number.isFinite(usdValue) && usdValue >= 0 && Number.isFinite(days) && days >= 1) {
-                        setSpendThreshold(Math.round(usdValue * 1_000_000), Math.min(days, 365));
-                        setThreshold(null);
-                        setPeriod(null);
-                        setEditingThreshold(false);
-                      }
-                    }}
-                  >
-                    Save
-                  </Button>
-                </div>
-              )}
-              {drift.map((d) => (
-                <Callout key={d.modelId} tone="warning" title={`${d.modelId} estimates are drifting`}>
-                  ~{(d.medianDivergencePerMille / 10).toFixed(0)}% off across {d.samples} provider-reported charges —
-                  the shipped manifest needs an update.
-                </Callout>
-              ))}
-            </>
-          )}
-          <div className="fy-mono" style={{ marginTop: 12 }}>
-            unmetered runtimes report no provider charge
-          </div>
-          <div style={{ flex: 1 }} />
-          <Button onClick={() => navigate("/settings/providers")}>Providers &amp; keys</Button>
-          <Button variant="ghost" onClick={() => { setInspectedJobId(null); setInspectAllCalls(true); }}>All provider calls</Button>
-        </div>
-      </div>
     </div>
   );
 }

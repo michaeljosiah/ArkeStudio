@@ -37,8 +37,8 @@ export type ComponentKind =
   /** A third-party installer: fetched, then run. */
   | { kind: "installer"; file: DownloadFile; silentArgs: readonly string[] }
   /**
-   * A model pulled by a runtime we do not own, through its own CLI. No catalogue entry ships
-   * one — which model Ollama runs is chosen in Settings · Providers, on the disk it costs.
+   * A model pulled by a runtime we do not own, through its own CLI. Offered entries are
+   * optional — which model Ollama runs is chosen in Settings, on the disk it costs.
    */
   | { kind: "pull"; command: string; args: readonly string[] }
   /**
@@ -114,6 +114,19 @@ export interface CatalogueEntry {
    * someone asks for it. Big models belong here — the disk is the user's to spend.
    */
   optional?: boolean;
+  /** Never replace a file that appeared while a managed optional download was running. */
+  preserveExistingFiles?: boolean;
+  /**
+   * For a model pull: the sampling its publisher tuned it with, sent with every local request.
+   * A Hugging Face pull carries only stop tokens, so it would otherwise run on Ollama's generic
+   * defaults (issue 1289).
+   */
+  sampling?: Readonly<Record<string, number>>;
+  /**
+   * For a model pull: never chosen for an agent nobody chose a model for. Installing a community
+   * uncensored variant is not choosing it for every agent in the studio (issue 1289).
+   */
+  explicitChoiceOnly?: true;
 }
 
 const KOKORO = "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main";
@@ -133,7 +146,7 @@ const GZIP_MAGIC = [0x1f, 0x8b] as const;
 /** 7-Zip's signature — the System32 bsdtar this service already resolves reads the format. */
 const SEVENZ_MAGIC = [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c] as const;
 
-export const COMFYUI_VERSION = "0.33.1";
+export const COMFYUI_VERSION = "0.37.0";
 
 /** Canonical setup identities for the two model directories Voxa reads at launch. */
 export const VOXA_SETUP_COMPONENT_IDS = {
@@ -161,7 +174,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: "ollama-runtime",
     engine: "ollama",
     displayName: "Ollama",
-    purpose: "Runs language models here — choose one in Settings · Providers",
+    purpose: "Runs language models here",
     sizeMb: 750,
     spec: {
       kind: "installer",
@@ -175,7 +188,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: VOXA_SETUP_COMPONENT_IDS.kokoro,
     engine: "voxa",
     displayName: "Kokoro 82M · voice",
-    purpose: "Speaks lines on this machine, in the six preset voices",
+    purpose: "Speaks lines · six preset voices",
     sizeMb: 400,
     provides: ["kokoro-82m"],
     spec: {
@@ -198,7 +211,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: VOXA_SETUP_COMPONENT_IDS.whisper,
     engine: "voxa",
     displayName: "Whisper base.en · dictation",
-    purpose: "Turns your speech into text, without the audio leaving this machine",
+    purpose: "Speech to text · on this machine",
     // The manifest's dictation row keeps `whisper-large-v3` as its id because that string is a
     // persisted routing key, and this is the component that satisfies it.
     provides: ["whisper-large-v3"],
@@ -224,7 +237,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: "higgsfield-cli",
     provider: "higgsfield",
     displayName: "Higgsfield CLI",
-    purpose: "Generates images and video through your Higgsfield account — sign in from Providers",
+    purpose: "Images and video · Higgsfield account",
     sizeMb: 7,
     optional: true,
     spec: {
@@ -258,8 +271,8 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: "comfyui-runtime",
     engine: "comfyui",
     displayName: "ComfyUI",
-    purpose: "Runs image and video recipes — install managed, or explicitly reuse another engine",
-    sizeMb: 2034,
+    purpose: "Runs image and video recipes",
+    sizeMb: 1926,
     // ~6 GB extracted, and the archive is still on disk while it extracts, so the peak is both
     // at once. Almost none of it is ComfyUI: the tree is an embedded Python plus torch and the
     // CUDA libraries, which is the cost §2.1 says every alternative runtime pays too.
@@ -275,9 +288,10 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
       file: {
         url: `https://github.com/Comfy-Org/ComfyUI/releases/download/v${COMFYUI_VERSION}/ComfyUI_windows_portable_nvidia.7z`,
         file: "ComfyUI_windows_portable_nvidia.7z",
-        sizeMb: 2034,
+        sizeMb: 1926,
         magic: SEVENZ_MAGIC,
-        sha256: "4a221588979b96b8244e0e50b2edca03af732acae1deba69d60aa3b4d60b9dba",
+        // Published GitHub release-asset digest, checked 2026-09-22 (1,925,204,508 bytes).
+        sha256: "7805f634fab51f63a238aaf0cfe2a9833bb7c86ddfc8400a60919f44460d7d65",
       },
     },
   },
@@ -287,7 +301,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: "ollama-gemma4-e2b-it-qat",
     engine: "ollama",
     displayName: "Gemma 4 · E2B (quantised)",
-    purpose: "The small Gemma 4 — the one to try first on a modest graphics card",
+    purpose: "The small one",
     sizeMb: 4300,
     optional: true,
     requires: ["ollama-runtime"],
@@ -298,7 +312,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: "ollama-gemma4-12b",
     engine: "ollama",
     displayName: "Gemma 4 · 12B",
-    purpose: "Reads images and holds a 256K context — the one worth having if it fits",
+    purpose: "Reads images · 256K context",
     sizeMb: 7600,
     optional: true,
     requires: ["ollama-runtime"],
@@ -306,10 +320,30 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     spec: { kind: "pull", command: "ollama", args: ["pull", "gemma4:12b"] },
   },
   {
+    id: "ollama-gemma4-12b-balanced",
+    engine: "ollama",
+    displayName: "Gemma 4 · 12B Uncensored Balanced · HauhauCS",
+    purpose: "Text generation · Q4_K_M",
+    // Hugging Face file size checked 2026-09-24; see docs/development/local-language-models.md.
+    sizeMb: 7382,
+    optional: true,
+    requires: ["ollama-runtime"],
+    provides: ["gemma4-12b-balanced"],
+    caveat: "Community Uncensored variant · Requires Ollama 0.34.3 or newer · Installation and inference not verified by Arke · Upstream weights may change",
+    // From the model card, checked 2026-09-25: "part of that" tuning, and not Gemma's stock defaults.
+    sampling: { temperature: 0.6, top_k: 64, top_p: 0.9, min_p: 0.05, repeat_penalty: 1.1 },
+    explicitChoiceOnly: true,
+    spec: {
+      kind: "pull",
+      command: "ollama",
+      args: ["pull", "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M"],
+    },
+  },
+  {
     id: "ollama-gemma4-26b",
     engine: "ollama",
     displayName: "Gemma 4 · 26B",
-    purpose: "The large one, for a machine with the memory to hold it",
+    purpose: "The large one",
     sizeMb: 18000,
     optional: true,
     requires: ["ollama-runtime"],
@@ -317,6 +351,23 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     spec: { kind: "pull", command: "ollama", args: ["pull", "gemma4:26b"] },
   },
 ] as const;
+
+/**
+ * What the catalogue says about a pulled Ollama model, by the name Ollama lists it under. A pull
+ * of `gemma4:12b` is listed as `gemma4:12b`, a Hugging Face pull as its whole reference, and a
+ * name pulled without a tag as `:latest`. A model pulled some other way has no policy.
+ */
+export function localModelPolicy(
+  modelId: string,
+  entries: readonly CatalogueEntry[] = SETUP_CATALOGUE,
+): { displayName: string; sampling?: Readonly<Record<string, number>>; explicitChoiceOnly?: true } | undefined {
+  const id = modelId.replace(/^ollama\//, "").toLowerCase();
+  const tagged = (name: string) => (/:[^/]+$/.test(name) ? name : `${name}:latest`).toLowerCase();
+  const entry = entries.find((candidate) => candidate.spec.kind === "pull" && candidate.spec.args[0] === "pull" &&
+    candidate.spec.args[1] !== undefined && tagged(candidate.spec.args[1]) === tagged(id));
+  if (!entry || (entry.sampling === undefined && entry.explicitChoiceOnly === undefined)) return undefined;
+  return { displayName: entry.displayName, ...(entry.sampling ? { sampling: entry.sampling } : {}), ...(entry.explicitChoiceOnly ? { explicitChoiceOnly: true as const } : {}) };
+}
 
 /** What setup fetches unasked — the optional entries are nobody's cost until they are chosen. */
 export function catalogueTotalMb(entries: readonly CatalogueEntry[] = SETUP_CATALOGUE): number {

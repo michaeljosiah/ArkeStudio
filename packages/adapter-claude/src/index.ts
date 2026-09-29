@@ -24,5 +24,13 @@ export { ClaudeAdapter, type ClaudeAdapterOptions, type RunQuery } from "./claud
 export { createNormalizeState, normalizeClaude, toolSummary, type NormalizeOutcome, type NormalizeState } from "./normalize.js";
 export { decideTool, intentOf, type ToolCall, type ToolDecision } from "./tool-intents.js";
 export { confinePath, isWithin, resolveRoot } from "./path-confinement.js";
-export { sdkQuery } from "./sdk-query.js";
+export { sdkQuery, sdkModels } from "./sdk-query.js";
+export {
+  discoverClaudeModels,
+  normalizeClaudeModels,
+  type ClaudeModel,
+  type ClaudeModelDiscoveryInput,
+  type DiscoverClaudeModels,
+  type OpenModelQuery,
+} from "./model-discovery.js";
 export { credentialSummary } from "./confinement-probe.js";

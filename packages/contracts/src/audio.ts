@@ -222,6 +222,8 @@ export const AudioRightsScopeSchema = z.enum([
   "cloud-voice-conversion",
   "cloud-reference-upload",
   "voice-cloning",
+  /** A person's recording kept as an audiobook take (SPEC-047 R-36): used on this machine, in the book's files. */
+  "recorded-take",
 ]);
 
 export const AudioRightsEventSchema = z.discriminatedUnion("action", [

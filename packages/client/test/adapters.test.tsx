@@ -1,0 +1,120 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { renderToString } from "react-dom/server";
+import { MemoryRouter } from "react-router";
+import { AdapterReleaseSchema, type AdapterBundle, type AdapterLibraryState } from "@arke-studio/contracts";
+import { SettingsAdaptersScreen } from "../src/screens/settings-adapters.js";
+import { AdapterPicker } from "../src/components/adapter-picker.js";
+import { __setStateForTest } from "../src/lib/store.js";
+import { FIXTURE_STATE } from "./fixture-state.js";
+import { adapterPreviewHidden, mediaUrl } from "../src/lib/media.js";
+
+const release = AdapterReleaseSchema.parse({ id: "test-release", adapterId: "test", publisher: "Test", displayName: "Fixture adapter",
+  source: { repository: "test/fixture", revision: "a".repeat(40), file: "fixture.safetensors", bytes: 1000, sha256: "b".repeat(64) },
+  license: { name: "Test", url: "https://example.com/license" }, classification: "adult", baseFamily: "minimax-h3", supersedes: [],
+  assessedAt: "2026-09-24T00:00:00.000Z", compatibility: [{ recipeId: "test-recipe", state: "unverified", reason: "GPU validation pending" }] });
+const library: AdapterLibraryState = { revision: 1, adultContent: { enabled: true, acknowledgedAt: "2026-09-24T00:00:00.000Z", acknowledgementVersion: 1 },
+  scannerAvailable: false, error: null, entries: [{ release, decision: null, removed: false, owned: false, installed: false, reason: "Awaiting compliance assessment." }] };
+function set(adapters: AdapterLibraryState) { __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, adapters } }); }
+
+test("one experimental bundle displays all members and becomes unavailable when any member is blocked", () => {
+  const entries = Array.from({ length: 14 }, (_, i) => {
+    const approved = AdapterReleaseSchema.parse({ ...release, id: `fixture-${i}`, displayName: `Member ${i + 1}`,
+      source: { ...release.source, sha256: i.toString(16).padStart(64, "0") }, compatibility: [{ recipeId: "test-recipe", state: "owner-approved",
+        reason: "Owner accepted", evidence: "Fixture", minStrength: 1, maxStrength: 1,
+        ownerApproval: { approvedAt: "2026-09-25T00:00:00.000Z", generation: "not-run" } }] });
+    return { release: approved, installed: true, owned: false, removed: false, reason: null,
+      decision: { sha256: approved.source.sha256, decision: "allowed" as const, reason: "Fixture", policyRevision: "fixture", assessedAt: "2026-09-24T00:00:00.000Z" } };
+  });
+  const selections = entries.map(({ release: member }) => ({ releaseId: member.id, sha256: member.source.sha256, strength: 1 }));
+  const bundle: AdapterBundle = { id: "fixture-bundle", displayName: "All adapters", recipeId: "test-recipe", status: "experimental", description: "Combination not GPU-tested", selections };
+  const render = (recipeId = "test-recipe") => renderToString(<MemoryRouter><AdapterPicker recipeId={recipeId} selected={selections} onChange={() => {}} /></MemoryRouter>).replaceAll("<!-- -->", "");
+  const available = { ...library, entries, bundles: [bundle] };
+  set(available);
+  assert.match(render(), /<option[^>]*value="bundle:fixture-bundle"[^>]*selected/);
+  assert.doesNotMatch(render(), /<option[^>]*value="bundle:fixture-bundle"[^>]*disabled/);
+  assert.match(render(), /14 adapters · Experimental/);
+  assert.match(render(), /Combination not GPU-tested/);
+  assert.equal((render().match(/<li>/g) ?? []).length, 14);
+  assert.match(render(), /Member 14 · Strength 1/);
+  assert.doesNotMatch(render(), /aria-label="Adapter strength"/);
+  set({ ...available, entries: entries.map((row, i) => i === 13 ? { ...row, decision: null } : row) });
+  assert.match(render(), /<option[^>]*value="bundle:fixture-bundle"[^>]*disabled/);
+  assert.match(render(), /Member 14: Awaiting compliance/);
+  set({ ...available, entries: entries.slice(0, 13) });
+  assert.match(render(), /<option[^>]*value="bundle:fixture-bundle"[^>]*disabled/);
+  assert.match(render("another-model"), /Saved adapter unavailable/);
+  set({ ...available, adultContent: { ...library.adultContent, enabled: false } });
+  assert.doesNotMatch(render(), /Member|All adapters|Experimental/);
+  assert.match(render(), /Clear selection/);
+});
+
+test("turning access off changes a loaded take's media URL without rewriting its record", () => {
+  const state = structuredClone(FIXTURE_STATE);
+  const world = state.world!;
+  const production = world.productions[0]!;
+  const take = production.takes[0]!;
+  take.params.adapters = [{ releaseId: release.id, sha256: release.source.sha256, strength: 0.5 }];
+  state.app.adapters = library;
+  const path = `productions/${production.meta.id}/takes/${take.id}/frame.png`;
+  __setStateForTest(state);
+  assert.notEqual(mediaUrl(world.meta.slug, path), "about:blank");
+  const disabled = { ...state, app: { ...state.app, adapters: { ...library, adultContent: { ...library.adultContent, enabled: false } } } };
+  __setStateForTest(disabled);
+  assert.equal(adapterPreviewHidden(disabled, world.meta.slug, path), true);
+  assert.equal(mediaUrl(world.meta.slug, path), "about:blank");
+  assert.deepEqual(take.params.adapters, [{ releaseId: release.id, sha256: release.source.sha256, strength: 0.5 }]);
+});
+
+test("settings hide the catalogue when off and state pending review when on", () => {
+  set({ ...library, adultContent: { ...library.adultContent, enabled: false } });
+  const off = renderToString(<MemoryRouter><SettingsAdaptersScreen /></MemoryRouter>);
+  assert.doesNotMatch(off, /Fixture adapter/);
+  assert.match(off, /Enable adult content/);
+  set(library);
+  const on = renderToString(<MemoryRouter><SettingsAdaptersScreen /></MemoryRouter>);
+  assert.match(on, /Fixture adapter/);
+  assert.match(on, /GPU validation pending/);
+  assert.match(on, /No compliance agent/);
+});
+
+test("picker never advertises an unverified entry as selectable and retains a removable hidden saved choice", () => {
+  set(library);
+  const picker = renderToString(<MemoryRouter><AdapterPicker recipeId="test-recipe" selected={[]} onChange={() => {}} /></MemoryRouter>);
+  assert.match(picker, /<option[^>]*value="test-release"[^>]*disabled=""/);
+  set({ ...library, adultContent: { ...library.adultContent, enabled: false } });
+  const off = renderToString(<MemoryRouter><AdapterPicker recipeId="test-recipe" selected={[{ releaseId: release.id, sha256: release.source.sha256, strength: 1 }]} onChange={() => {}} /></MemoryRouter>);
+  assert.doesNotMatch(off, /Fixture adapter/);
+  assert.match(off, /Clear selection/);
+});
+
+test("picker follows the selected model and keeps an incompatible saved selection clearable", () => {
+  set(library);
+  const render = (recipeId: string, selected: { releaseId: string; sha256: string; strength: number }[] = []) =>
+    renderToString(<MemoryRouter><AdapterPicker recipeId={recipeId} selected={selected} onChange={() => {}} /></MemoryRouter>);
+  assert.equal(render("another-model"), "");
+  assert.equal(render(""), "");
+  assert.match(render("test-recipe"), /Fixture adapter/);
+  const stale = render("another-model", [{ releaseId: release.id, sha256: release.source.sha256, strength: 1 }]);
+  assert.match(stale, /Saved adapter unavailable/);
+  assert.match(stale, /Choose None to clear it/);
+  assert.doesNotMatch(stale, /Adapter strength/);
+});
+
+test("picker identifies owner approval and its untested status without overriding compliance", () => {
+  const approved = AdapterReleaseSchema.parse({ ...release, compatibility: [{ recipeId: "test-recipe", state: "owner-approved",
+    reason: "Owner approved; generation not run.", evidence: "Owner acceptance record", minStrength: 1, maxStrength: 1,
+    ownerApproval: { approvedAt: "2026-09-25T00:00:00.000Z", generation: "not-run" } }] });
+  const entry = { ...library.entries[0]!, release: approved, installed: true, reason: null,
+    decision: { sha256: approved.source.sha256, decision: "allowed" as const, reason: "Fixture approval", policyRevision: "fixture", assessedAt: "2026-09-24T00:00:00.000Z" } };
+  const selected = [{ releaseId: approved.id, sha256: approved.source.sha256, strength: 1 }];
+  const render = () => renderToString(<MemoryRouter><AdapterPicker recipeId="test-recipe" selected={selected} onChange={() => {}} /></MemoryRouter>);
+  set({ ...library, entries: [entry] });
+  const available = render();
+  assert.match(available.replaceAll("<!-- -->", ""), /Fixture adapter · Owner approved/);
+  assert.match(available, /Owner approved; generation not run/);
+  assert.doesNotMatch(available, /<option[^>]*value="test-release"[^>]*disabled/);
+  set({ ...library, entries: [{ ...entry, decision: null }] });
+  assert.match(render(), /<option[^>]*value="test-release"[^>]*disabled/);
+  assert.match(render(), /Awaiting compliance/);
+});

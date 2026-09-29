@@ -1,5 +1,6 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { once } from "node:events";
+import type { WireModel } from "../../src/model-metadata.js";
 
 /**
  * A scripted OpenCode stand-in serving the probed /api surface: health, doc, session create,
@@ -21,9 +22,10 @@ export class StubOpenCode {
   private sseClients = new Set<ServerResponse>();
   private sessionCounter = 0;
   /** What /config/providers answers with; null makes the endpoint absent (older servers). */
-  configProviders: { providers: Array<{ id: string; models: Record<string, { name?: string }> }>; default?: Record<string, string> } | null = null;
+  configProviders: { providers: Array<{ id: string; models: Record<string, WireModel> }>; default?: Record<string, string> } | null = null;
+  configProvidersStatus = 200;
   /** What /api/model answers with; null makes it absent. */
-  apiModels: Array<{ id: string; providerID: string; name?: string; status?: string }> | null = null;
+  apiModels: WireModel[] | null = null;
   /** Paths advertised at /doc — tests override to simulate under-capable servers. */
   docPaths: string[] = [
     "/api/health",
@@ -102,7 +104,7 @@ export class StubOpenCode {
           return;
         }
         if (url.pathname === "/config/providers" && this.configProviders) {
-          res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(this.configProviders));
+          res.writeHead(this.configProvidersStatus, { "Content-Type": "application/json" }).end(JSON.stringify(this.configProviders));
           return;
         }
         if (url.pathname === "/api/model" && this.apiModels) {

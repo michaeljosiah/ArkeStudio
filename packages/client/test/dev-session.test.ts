@@ -30,3 +30,30 @@ it("browser development authenticates media without breaking retry query paramet
     if (windowBefore) Object.defineProperty(globalThis, "window", windowBefore); else Reflect.deleteProperty(globalThis, "window");
   }
 });
+
+
+it("browser bridge preserves authentication refusal separately from network loss", async () => {
+  const { devBridge } = await import("../src/lib/store.js");
+  const prior = Object.getOwnPropertyDescriptor(globalThis, "WebSocket");
+  class Socket extends EventTarget {
+    static OPEN = 1;
+    static CONNECTING = 0;
+    readyState = 1;
+    static latest: Socket;
+    constructor(_url: string) { super(); Socket.latest = this; }
+  }
+  Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: Socket });
+  try {
+    const statuses: string[] = [];
+    const bridge = devBridge("ws://127.0.0.1:8791");
+    bridge.subscribe(() => {}, status => statuses.push(status));
+    for (const [code, reason, expected] of [[1008, "session authentication required", "auth-refused"],
+      [1006, "", "closed"], [1008, "too many commands before initial state", "closed"]] as const) {
+      bridge.connect();
+      Socket.latest.dispatchEvent(Object.assign(new Event("close"), { code, reason }));
+      assert.equal(statuses.at(-1), expected);
+    }
+  } finally {
+    if (prior) Object.defineProperty(globalThis, "WebSocket", prior); else Reflect.deleteProperty(globalThis, "WebSocket");
+  }
+});

@@ -2,9 +2,11 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { formatSeconds, type ArtifactSidecar } from "@arke-studio/contracts";
 import { Button } from "./ui.js";
-import { Copy, Download, X } from "./icons.js";
+import { ChevronLeft, ChevronRight, ChevronUp, Copy, Download, More, X } from "./icons.js";
+import { PageSheet } from "./page-sheet.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { RichMarkdownEditor } from "./editor/rich-markdown-editor.js";
-import { artifactIsServable, artifactViewer } from "../lib/artifact-view.js";
+import { artifactDisplayName, artifactIsServable, artifactViewer } from "../lib/artifact-view.js";
 import { useArtifactText } from "../lib/artifact-text.js";
 import { downloadMedia, downloadNameFor } from "../lib/download.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
@@ -37,6 +39,9 @@ export function ArtifactViewer({
   worldSlug,
   linkName,
   onClose,
+  onRetire,
+  visibleArtifacts = artifacts,
+  onNavigate,
 }: {
   /** The artifact on screen, or null for closed. */
   artifact: ArtifactSidecar | null;
@@ -44,17 +49,31 @@ export function ArtifactViewer({
   artifacts: readonly ArtifactSidecar[];
   worldSlug: string | undefined;
   /** Names a link the way the cards do — "The Vigil", never "the-vigil". */
-  linkName: (link: string) => string;
+  linkName: (link: string, links?: readonly string[]) => string;
   onClose: () => void;
+  onRetire?: (artifactId: string) => void;
+  /** Navigation stays inside the shelf's current filters and order. */
+  visibleArtifacts?: readonly ArtifactSidecar[];
+  onNavigate?: (artifactId: string) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const focusAfterNavigation = useRef<string | null>(null);
 
   useEffect(() => {
     const node = dialog.current;
     if (!node) return;
     // `showModal` is guarded because the DOM this renders under in tests is not a browser's.
-    if (artifact !== null && !node.open) node.showModal?.();
+    if (artifact !== null) {
+      const opening = !node.open;
+      if (opening) node.showModal?.();
+      if (node.querySelector(".fy-artview__foot")) {
+        const label = focusAfterNavigation.current;
+        const target = label && [...node.querySelectorAll<HTMLButtonElement>("button")].find(button => button.getAttribute("aria-label") === label && !button.disabled);
+        if (opening || label) (target || node.querySelector<HTMLElement>("h2"))?.focus({ preventScroll: true });
+      }
+      focusAfterNavigation.current = null;
+    }
     if (artifact === null && node.open) node.close();
   }, [artifact]);
 
@@ -65,7 +84,7 @@ export function ArtifactViewer({
       aria-labelledby={titleId}
       // Escape arrives here as well as the close button, so the screen's state and the element
       // agree however it was dismissed.
-      onClose={onClose}
+      onClose={(event) => { if (event.target === event.currentTarget) onClose(); }}
       onClick={(event) => {
         // A click that lands on the dialog itself rather than its panel is the backdrop.
         if (event.target === event.currentTarget) dialog.current?.close();
@@ -81,6 +100,12 @@ export function ArtifactViewer({
           worldSlug={worldSlug}
           linkName={linkName}
           titleId={titleId}
+          onRetire={onRetire}
+          visibleArtifacts={visibleArtifacts}
+          onNavigate={onNavigate ? (id) => {
+            focusAfterNavigation.current = document.activeElement?.getAttribute("aria-label") ?? null;
+            onNavigate(id);
+          } : undefined}
           onClose={() => dialog.current?.close()}
         />
       )}
@@ -95,15 +120,30 @@ function ArtifactPanel({
   linkName,
   titleId,
   onClose,
+  onRetire,
+  visibleArtifacts,
+  onNavigate,
 }: {
   artifact: ArtifactSidecar;
   artifacts: readonly ArtifactSidecar[];
   worldSlug: string | undefined;
-  linkName: (link: string) => string;
+  linkName: (link: string, links?: readonly string[]) => string;
   titleId: string;
   onClose: () => void;
+  onRetire?: (artifactId: string) => void;
+  visibleArtifacts: readonly ArtifactSidecar[];
+  onNavigate?: (artifactId: string) => void;
 }) {
-  const name = artifact.file.split("/").pop() ?? artifact.file;
+  const compact = useMediaQuery("(max-width: 859px)");
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
+  useEffect(() => { if (!compact) setDetailsOpen(false); }, [compact]);
+  const touch = useRef<{ x: number; y: number } | null>(null);
+  const index = visibleArtifacts.findIndex(item => item.id === artifact.id);
+  const previous = visibleArtifacts[index - 1];
+  const next = index >= 0 ? visibleArtifacts[index + 1] : undefined;
+  const filename = artifact.file.split("/").pop() ?? artifact.file;
+  const name = artifactDisplayName(artifact, linkName);
   const path = `artifacts/${artifact.file}`;
   const viewer = artifactViewer(artifact);
   /*
@@ -115,23 +155,27 @@ function ArtifactPanel({
   const src = worldSlug ? mediaUrl(worldSlug, path, { attempt: String(attempt) }) : "";
   const retry = () => setAttempt((n) => n + 1);
 
-  const extension = name.includes(".") ? name.split(".").pop() : null;
+  const extension = filename.includes(".") ? filename.split(".").pop() : null;
   const sub = [
     artifact.kind,
     ...(extension !== null && extension !== undefined ? [extension.toLowerCase()] : []),
-    ...(artifact.mediaInfo ? [formatSeconds(artifact.mediaInfo.durationSec)] : []),
+    ...(artifact.mediaInfo ? [formatSeconds(artifact.mediaInfo.durationSec)] : compact && dimensions ? [`${dimensions.width} × ${dimensions.height}`] : []),
   ].join(" · ");
 
   return (
     <div className="fy-artview__panel">
       <div className="fy-artview__head">
         <div className="fy-artview__titles">
-          <h2 id={titleId}>{name}</h2>
+          <h2 id={titleId} title={filename} tabIndex={compact ? -1 : undefined}>{name}</h2>
           <div className="fy-artview__sub">{sub}</div>
         </div>
         {artifactIsServable(artifact) && (
-          <SaveCopy worldSlug={worldSlug} path={path} name={name} />
+          <SaveCopy worldSlug={worldSlug} path={path} name={filename} />
         )}
+        {onRetire && artifact.retiredAt === undefined && (compact ? <details className="fy-artview__menu">
+          <summary aria-label="Artifact options"><More size={20} /></summary>
+          <div><Button variant="ghost" onClick={() => onRetire(artifact.id)}>Remove from shelf</Button></div>
+        </details> : <Button variant="outline" onClick={() => onRetire(artifact.id)}>Remove from shelf</Button>)}
         <button
           type="button"
           className="fy-artview__close"
@@ -142,11 +186,41 @@ function ArtifactPanel({
         </button>
       </div>
       <div className="fy-artview__body">
-        <div className="fy-artview__stage" data-viewer={viewer}>
-          <Stage key={attempt} viewer={viewer} src={src} name={name} path={path} worldSlug={worldSlug} onRetry={retry} />
+        <div className="fy-artview__stage" data-viewer={viewer}
+          onTouchStart={(event) => {
+            touch.current = null;
+            if (!compact || !onNavigate || event.touches.length !== 1 || (event.target as Element).closest("button,a,input,textarea,video,audio")) return;
+            const point = event.touches[0]!;
+            touch.current = { x: point.clientX, y: point.clientY };
+          }}
+          onTouchCancel={() => { touch.current = null; }}
+          onTouchEnd={(event) => {
+            const start = touch.current;
+            touch.current = null;
+            const end = event.changedTouches[0];
+            if (!start || !end) return;
+            const dx = end.clientX - start.x, dy = end.clientY - start.y;
+            if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 2) return;
+            const destination = dx < 0 ? next : previous;
+            if (destination) onNavigate?.(destination.id);
+          }}>
+          <Stage key={attempt} viewer={viewer} src={src} name={name} path={path} worldSlug={worldSlug} onRetry={retry} onDimensions={setDimensions} />
         </div>
-        <ArtifactMeta artifact={artifact} artifacts={artifacts} linkName={linkName} />
+        {!compact && <ArtifactMeta artifact={artifact} artifacts={artifacts} linkName={linkName} />}
       </div>
+      {compact && <>
+        <div className="fy-artview__foot">
+          <button type="button" aria-label="Previous artifact" disabled={!previous || !onNavigate} onClick={() => previous && onNavigate?.(previous.id)}><ChevronLeft size={22} /></button>
+          <span>{index >= 0 ? `${index + 1} of ${visibleArtifacts.length}` : "Outside current filter"}</span>
+          <button type="button" className="fy-artview__details" onClick={() => setDetailsOpen(true)}>Details<ChevronUp size={16} /></button>
+          <span aria-hidden="true" />
+          <button type="button" aria-label="Next artifact" disabled={!next || !onNavigate} onClick={() => next && onNavigate?.(next.id)}><ChevronRight size={22} /></button>
+        </div>
+        <PageSheet className="fy-artview__sheet" open={detailsOpen} title={name} onClose={() => setDetailsOpen(false)} footer={<div className="fy-artview__detailactions">
+          {onRetire && artifact.retiredAt === undefined && <Button variant="outline" onClick={() => onRetire(artifact.id)}>Remove from shelf</Button>}
+          {artifactIsServable(artifact) && <SaveCopy worldSlug={worldSlug} path={path} name={filename} text />}
+        </div>}><ArtifactMeta artifact={artifact} artifacts={artifacts} linkName={linkName} compact /></PageSheet>
+      </>}
     </div>
   );
 }
@@ -159,6 +233,7 @@ function Stage({
   path,
   worldSlug,
   onRetry,
+  onDimensions,
 }: {
   viewer: ReturnType<typeof artifactViewer>;
   src: string;
@@ -166,11 +241,12 @@ function Stage({
   path: string;
   worldSlug: string | undefined;
   onRetry: () => void;
+  onDimensions: (dimensions: { width: number; height: number }) => void;
 }) {
   if (worldSlug === undefined) return <Failed note="No world open" />;
   switch (viewer) {
     case "image":
-      return <ImageStage src={src} name={name} onRetry={onRetry} />;
+      return <ImageStage src={src} name={name} onRetry={onRetry} onDimensions={onDimensions} />;
     case "video":
       return <VideoStage src={src} name={name} onRetry={onRetry} />;
     case "audio":
@@ -215,11 +291,11 @@ function Failed({ note, onRetry }: { note: string; onRetry?: () => void }) {
   );
 }
 
-function ImageStage({ src, name, onRetry }: { src: string; name: string; onRetry: () => void }) {
+function ImageStage({ src, name, onRetry, onDimensions }: { src: string; name: string; onRetry: () => void; onDimensions: (dimensions: { width: number; height: number }) => void }) {
   const [failed, setFailed] = useState(false);
   if (failed) return <Failed note="Could not read this image" onRetry={onRetry} />;
   return (
-    <img className="fy-artview__image" src={src} alt={name} draggable={false} onError={() => setFailed(true)} />
+    <img className="fy-artview__image" src={src} alt={name} draggable={false} onLoad={event => onDimensions({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => setFailed(true)} />
   );
 }
 
@@ -314,7 +390,7 @@ function TextStage({ worldSlug, path, name }: { worldSlug: string; path: string;
 }
 
 /** Save these bytes out of the app, through the same confined identity the stage reads them by. */
-function SaveCopy({ worldSlug, path, name }: { worldSlug: string | undefined; path: string; name: string }) {
+function SaveCopy({ worldSlug, path, name, text = false }: { worldSlug: string | undefined; path: string; name: string; text?: boolean }) {
   const [saving, setSaving] = useState(false);
   const filename = downloadNameFor(path, name);
   const label = `Download ${filename}`;
@@ -322,7 +398,7 @@ function SaveCopy({ worldSlug, path, name }: { worldSlug: string | undefined; pa
   return (
     <button
       type="button"
-      className="fy-artview__save"
+      className={text ? "ui-btn ui-btn--primary" : "fy-artview__save"}
       aria-label={label}
       title={label}
       disabled={!available}
@@ -345,6 +421,7 @@ function SaveCopy({ worldSlug, path, name }: { worldSlug: string | undefined; pa
       }}
     >
       <Download size={13} />
+      {text && "Save"}
     </button>
   );
 }
@@ -360,17 +437,19 @@ function ArtifactMeta({
   artifact,
   artifacts,
   linkName,
+  compact = false,
 }: {
   artifact: ArtifactSidecar;
   artifacts: readonly ArtifactSidecar[];
-  linkName: (link: string) => string;
+  compact?: boolean;
+  linkName: (link: string, links?: readonly string[]) => string;
 }) {
   const replacement = artifacts.find((a) => a.supersedes === artifact.id);
   const generation = artifact.generation;
   return (
     <dl className="fy-artview__meta">
-      <Row label="id">{artifact.id}</Row>
-      <Row label="kind">{artifact.kind}</Row>
+      {!compact && <Row label="id">{artifact.id}</Row>}
+      <Row label="kind">{compact ? [artifact.kind, artifact.file.split(".").pop()].join(" · ") : artifact.kind}</Row>
       <Row label="origin">
         {artifact.origin.by === "system"
           ? generatedOriginLabel(artifact)
@@ -379,21 +458,23 @@ function ArtifactMeta({
             : "filed by hand"}
       </Row>
       <Row label="created">{shortDateTime(artifact.created)}</Row>
-      <Row label="hash">{`${artifact.hash.slice(0, 19)}…`}</Row>
-      <Row label="links">{artifact.links.length > 0 ? artifact.links.map(linkName).join(", ") : "—"}</Row>
+      {!compact && <Row label="hash">{`${artifact.hash.slice(0, 19)}…`}</Row>}
+      <Row label="links">{artifact.links.length > 0 ? artifact.links.map((link) => linkName(link, artifact.links)).join(", ") : "—"}</Row>
       {artifact.production !== undefined && <Row label="production">{artifact.production}</Row>}
       {generation !== undefined && <Row label="model">{`${generation.provider} · ${generation.model}`}</Row>}
       {generation !== undefined && generation.source === "bench" && (
         <Row label="from">{`take ${generation.takeNumber} · ${generation.sessionId}`}</Row>
       )}
       {generation !== undefined && generation.source === "character-reference" && (
-        <Row label="from">{`${generation.workflow} · ${linkName(generation.sheetId)}`}</Row>
+        <Row label="from">{`${generation.workflow} · ${linkName(generation.sheetId, artifact.links)}`}</Row>
       )}
+      {generation?.source === "founding" && <Row label="from">{generation.label} · founding conversation</Row>}
       {artifact.boundaryExtraction !== undefined && (
         <Row label="cut from">{artifact.boundaryExtraction.sourceTakeId}</Row>
       )}
       {artifact.supersedes !== undefined && <Row label="supersedes">{artifact.supersedes}</Row>}
       {replacement !== undefined && <Row label="superseded by">{replacement.file}</Row>}
+      {compact && <Row label="hash">{`${artifact.hash.slice(0, 19)}…`}</Row>}
     </dl>
   );
 }

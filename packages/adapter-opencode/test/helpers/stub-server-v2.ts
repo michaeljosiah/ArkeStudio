@@ -1,5 +1,6 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { once } from "node:events";
+import type { WireModel } from "../../src/model-metadata.js";
 
 /**
  * A scripted OpenCode v2 stand-in serving the measured 0.0.0-next-17444 surface: Basic-auth
@@ -23,6 +24,8 @@ export class StubOpenCodeV2 {
   private server: Server | null = null;
   port = 0;
   readonly requests: CapturedV2Request[] = [];
+  /** Hold the agent pin open, never answering: a stop between the two creation requests (issue 1247). */
+  holdAgentPin = false;
   private sseClients = new Set<ServerResponse>();
   private sessionCounter = 0;
   private turnCounter = 0;
@@ -39,7 +42,7 @@ export class StubOpenCodeV2 {
   private healthAnswered = false;
   /** The location echoed on session create; null echoes the requested one honestly. */
   echoLocation: string | null = null;
-  models: Array<{ id: string; providerID: string; name?: string; limit?: { context?: number; input?: number } }> = [];
+  models: WireModel[] = [];
   defaultModel: { id: string; providerID: string } | null = null;
   /** The integration catalog GET /api/integration serves — raw wire rows, scripted per test. */
   integrations: unknown[] = [];
@@ -124,6 +127,12 @@ export class StubOpenCodeV2 {
 
         let m = /^\/api\/session\/([^/]+)\/agent$/.exec(url.pathname);
         if (m && req.method === "POST") {
+          if (this.holdAgentPin) return;
+          res.writeHead(204).end();
+          return;
+        }
+        m = /^\/api\/session\/([^/]+)$/.exec(url.pathname);
+        if (m && req.method === "DELETE") {
           res.writeHead(204).end();
           return;
         }

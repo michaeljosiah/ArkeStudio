@@ -30,9 +30,11 @@ function provenanceOf(job: Job): Provenance {
   // identity frozen on the job at enqueue — never looked up at arrival, because a job that
   // outlives an app update must land as what it was dispatched as.
   return ProvenanceSchema.parse({
+    ...(job.recipe?.adapters?.length ? { recipe: job.recipe } : {}),
     canonRevision: frozen?.canonRevision ?? 0,
     ...(frozen?.dialogueAssessments ? { dialogueAssessments: frozen.dialogueAssessments } : {}),
     sheets: frozen?.sheets ?? {},
+    ...(frozen?.borrowedImages ? { borrowedImages: frozen.borrowedImages } : {}),
     ...(frozen?.artDirectionVersion !== undefined ? { artDirectionVersion: frozen.artDirectionVersion } : {}),
     ...(frozen?.sceneId !== undefined ? { sceneId: frozen.sceneId } : {}),
     ...(frozen?.sceneVersion !== undefined ? { sceneVersion: frozen.sceneVersion } : {}),

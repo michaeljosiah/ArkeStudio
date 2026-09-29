@@ -5,13 +5,14 @@ import { MemoryRouter } from "react-router";
 import { App } from "../src/App.js";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { MICRODRAMA_DEFAULTS } from "@arke-studio/contracts";
 import {
   DOOR_CHOICES,
-  EPISODE_COUNT_CHOICES,
   EPISODE_LENGTH_CHOICES,
   FRAME_RATE_CHOICES,
+  INTERACTIVE_KIND_CHOICES,
+  KINDS_BY_DOOR,
   KIND_PLATES,
-  MICRODRAMA_DEFAULTS,
   VIDEO_KIND_CHOICES,
   parseEpisodeLength,
 } from "../src/screens/world.js";
@@ -147,6 +148,35 @@ describe("what the door writes (turn 113a)", () => {
   });
 });
 
+describe("CHOOSE asks which interactive (design turn 174)", () => {
+  it("offers an interactive movie and a visual novel, named for what the viewer does", () => {
+    assert.deepEqual(
+      INTERACTIVE_KIND_CHOICES.map((k) => [k.id, k.label]),
+      [
+        ["interactive", "Interactive movie"],
+        ["visual-novel", "Visual novel"],
+      ],
+    );
+    assert.equal(KINDS_BY_DOOR.choose, INTERACTIVE_KIND_CHOICES);
+    // "Illustrated" already names an art direction; a label that says the technique rather than
+    // what the viewer does is what the turn replaced.
+    for (const k of INTERACTIVE_KIND_CHOICES) assert.doesNotMatch(k.label, /Illustrated|Moving pictures/);
+  });
+
+  it("the card's own kind is the row's first answer, so an untouched step writes what it always did", () => {
+    const choose = DOOR_CHOICES.find((d) => d.id === "choose")!;
+    assert.equal("productionKind" in choose && choose.productionKind, INTERACTIVE_KIND_CHOICES[0]!.id);
+  });
+
+  it("both interactive kinds have their plate on disk", () => {
+    const plates = fileURLToPath(new URL("../public/video-kinds/", import.meta.url));
+    for (const kind of INTERACTIVE_KIND_CHOICES) {
+      assert.ok(KIND_PLATES.has(kind.id), `${kind.id} asks for a plate`);
+      assert.ok(existsSync(`${plates}${kind.id}.webp`), `${kind.id}.webp is shipped`);
+    }
+  });
+});
+
 describe("step two offers every kind and every default (design turn 53)", () => {
   it("four kinds are offered, Other among them, in the drawn order", () => {
     assert.deepEqual(
@@ -202,31 +232,8 @@ describe("step two offers every kind and every default (design turn 53)", () => 
   });
 
 
-  /**
-   * A season can be as long as the form actually runs (2026-08-23).
-   *
-   * This offered 5 to 12, which is a short film in slices. Vertical series run 60 to 100, and a
-   * season written to eight has a different spine from one written to eighty — the reveal sits at
-   * four instead of forty. A door that cannot say eighty makes every season it opens the wrong
-   * shape, and the author finds out where changing it is expensive.
-   */
-  it("offers the lengths a vertical series is actually written to", () => {
-    assert.ok(EPISODE_COUNT_CHOICES.includes(80), "eighty is sayable");
-    assert.ok(
-      EPISODE_COUNT_CHOICES.some((n) => n >= 60 && n <= 100),
-      "the platform range is reachable, not just its edges",
-    );
-    assert.ok(EPISODE_COUNT_CHOICES.includes(8), "and a short sample cut to sell the run still is");
-    assert.deepEqual([...EPISODE_COUNT_CHOICES].sort((a, b) => a - b), [...EPISODE_COUNT_CHOICES], "in order");
-  });
-
-  it("starts on a count that is one of the choices", () => {
-    // The default used to be 7, which stopped being in the list. A select whose value is absent
-    // from its options silently shows the first one instead — a door that lies about what it did.
-    assert.ok(
-      EPISODE_COUNT_CHOICES.includes(MICRODRAMA_DEFAULTS.episodeCount),
-      `the default ${MICRODRAMA_DEFAULTS.episodeCount} is selectable`,
-    );
+  it("starts without an episode count", () => {
+    assert.equal("episodeCount" in MICRODRAMA_DEFAULTS, false);
   });
 
   it("episode length is a range a season can be written from", () => {

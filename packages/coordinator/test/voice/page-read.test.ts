@@ -27,7 +27,7 @@ function wav(): Uint8Array {
   return new Uint8Array(out);
 }
 
-async function harness() {
+async function harness(cloudOnly = false) {
   const { root } = await makeTempRoot();
   const provider = new FsWorldProvider(root, { clock: () => CLOCK });
   await provider.loadWorld(WORLD_ID);
@@ -40,7 +40,7 @@ async function harness() {
     appVersion: "test",
     observeEvent: (event) => events.push(event),
     voice: {
-      sidecar: {
+      sidecar: cloudOnly ? null : {
         health: async () => ({ engineStatus: { kokoro: { ready: true } } }),
         listVoices: async () => [{ id: "bm_george", label: "George", attributes: [] }],
         synthesize: async (input: { voiceId: string; text: string }) => {
@@ -66,6 +66,28 @@ function reads(events: DomainEvent[]) {
     { type: "voice.audio" }
   >[];
 }
+
+it("a cloud-only host refuses ordinary prose and sheet reads before local synthesis", async () => {
+  const h = await harness(true);
+  try {
+    const common = { worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB6P1" };
+    const commands: ClientMessage[] = [
+      { ...common, kind: "read-sheet-page", sheetId: "maren-kest", sections: ["Essence"] },
+      { ...common, kind: "read-sheet-section", sheetId: "maren-kest", sectionHeading: "Essence" },
+      { ...common, kind: "read-prose", source: { of: "story", productionId: "saltlight", field: "logline" } },
+      { ...common, kind: "read-prose-page", sources: [{ of: "story", productionId: "saltlight", field: "logline" }] },
+    ];
+    for (const command of commands) {
+      h.events.length = 0;
+      await h.send(command);
+      const result = reads(h.events).at(-1)!;
+      assert.equal(result.status, "failed");
+      assert.match(result.error!, /Choose a configured cloud narrator/);
+      assert.equal(h.events.some(event => event.type === "job.updated"), false);
+    }
+    assert.deepEqual(h.spoken, []);
+  } finally { await h.provider.close(); }
+});
 
 describe("reading a sheet as a page", () => {
   it("reads the blocks the screen declared, in the order it declared them, one part each", async () => {
@@ -124,6 +146,16 @@ describe("reading a sheet as a page", () => {
 });
 
 describe("reading a production overview as a page", () => {
+  it("reads only the act named by a Fold card and refuses a missing act",async()=>{
+    const h=await harness();
+    try {
+      await h.send({kind:"read-prose",worldId:WORLD_ID,requestId:"01J8F3K2QW9VZX4N7M0RTYB6P4",source:{of:"story",productionId:"saltlight",field:"acts",act:0}});
+      assert.ok(h.spoken.length>0);assert.ok(h.spoken.join(" ").startsWith("1."));assert.ok(!h.spoken.join(" ").includes("2."));
+      const before=h.spoken.length;
+      await h.send({kind:"read-prose",worldId:WORLD_ID,requestId:"01J8F3K2QW9VZX4N7M0RTYB6P5",source:{of:"story",productionId:"saltlight",field:"acts",act:999}});
+      assert.equal(h.spoken.length,before);assert.equal(reads(h.events).at(-1)!.status,"failed");
+    }finally{await h.provider.close();}
+  });
   it("reads the cards the screen declared, in that order, and drops one that has no record", async () => {
     const h = await harness();
     try {

@@ -3,6 +3,7 @@ import {
   editorRequestStaleness,
   previewEditorRequest,
   migrateLegacyCut,
+  resolveProductionArtifact,
   seedSpinePictureTimeline,
   seedFirstPictureTimeline,
   sourceLengthFramesFor,
@@ -100,7 +101,9 @@ function requestBase(
   }
   const spine = production.spine;
   if (spine !== null) {
-    const measured = store.getBundle().artifacts.find((artifact) => artifact.id === spine.trackArtifactId)?.mediaInfo?.durationSec ?? null;
+    const master = resolveProductionArtifact(store.getBundle().artifacts, spine.trackArtifactId, production.meta.id);
+    if (!master.ok) throw new EditorRequestRefused(`Master track cites ${master.reason}`);
+    const measured = master.artifact.mediaInfo?.durationSec ?? null;
     if (measured === null) throw new EditorRequestRefused("this production is cut to a song; open it on the timeline before requesting edits");
     return {
       timeline: migrateLegacyCut(seedSpinePictureTimeline(production, spine, measured), production, store.getBundle().artifacts).timeline,

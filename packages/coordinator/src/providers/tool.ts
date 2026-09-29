@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import type { ProviderId, ProviderToolStatus, ProviderWorkspace } from "@arke-studio/contracts";
 import type { AppLog } from "../app-log.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 
 /**
  * Providers whose credential is not ours (issue #137). Higgsfield authenticates through its
@@ -119,7 +120,7 @@ export class ProviderToolService {
         state: "signed-out",
         account: null,
         workspaces: [],
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
       });
     }
     return this.status;
@@ -161,7 +162,7 @@ export class ProviderToolService {
       });
       return this.status;
     } catch (err) {
-      this.set({ state: "signed-out", detail: err instanceof Error ? err.message : String(err) });
+      this.set({ state: "signed-out", detail: describeCoordinatorError(err) });
       return this.status;
     } finally {
       this.running = null;
@@ -188,7 +189,7 @@ export class ProviderToolService {
         workspaceId,
       });
     } catch (err) {
-      failure = err instanceof Error ? err.message : String(err);
+      failure = describeCoordinatorError(err);
     }
     // Re-read either way: the selection may or may not have moved, and only the listing knows
     // which. The reason is re-applied *after*, because a successful probe clears `detail` — so

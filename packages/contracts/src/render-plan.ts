@@ -1,12 +1,15 @@
 import { calculateDialogueTiming, dialogueSlots, dialogueTimingProblems, type DialogueTiming } from "./dialogue-timing.js";
+import { resolveProductionArtifact } from "./artifact-access.js";
 import type { ProductionBundle } from "./client-state.js";
 import {
+  audioSourceOf,
   buildExportPlan,
   deriveCut,
   deriveEpisodeCut,
   episodeExportRefusals,
   exportAudioClips,
   exportOverlays,
+  type CutFile,
   type ExportAudioClip,
   type ExportItem,
   type ExportOverlay,
@@ -60,6 +63,27 @@ export interface RenderAudioItem extends ExportAudioClip {
   clipId?: string;
 }
 
+/** A filed segment's remaining slot is silence, never the next shot in its parent file. */
+function segmentSoundWindow<T extends { startSec: number; endSec: number }>(item: T, sourceInSec: number, sourceOutSec?: number): T[] {
+  const endSec = sourceOutSec === undefined ? item.endSec : Math.min(item.endSec, item.startSec + Math.max(0, sourceOutSec - sourceInSec));
+  return endSec > item.startSec ? [{ ...item, endSec }] : [];
+}
+
+function segmentSound(item: RenderAudioItem, sourceOutSec?: number): RenderAudioItem[] {
+  return segmentSoundWindow(item, item.sourceInSec, sourceOutSec);
+}
+
+function unmeasuredLegacySound(placements: CutFile["overlays"], artifacts: readonly RenderArtifact[], totalSec = Infinity): NonNullable<RenderPlan["unmeasuredAudio"]> {
+  // If omitted audio is all that was placed, there is no render duration to bound it by.
+  // Keep the diagnosis without inventing playable content or an export length.
+  const limit = totalSec > 0 ? totalSec : Infinity;
+  return placements.flatMap(placement => {
+    const artifact = artifacts.find(candidate => candidate.id === placement.artifactId);
+    return placement.startSec < limit && placement.audio !== "mute" && artifact?.kind === "video" && artifact.mediaInfo === undefined
+      ? [{ clipId: placement.id, label: artifact.file, startSec: placement.startSec, endSec: Math.min(placement.endSec, limit) }] : [];
+  });
+}
+
 /** A measured source rounded to the timeline clock can be transcribed without a trim tool. */
 export function playsWholeAudioSource(item: Pick<RenderAudioItem, "sourceInSec" | "startSec" | "endSec">,
   sourceLengthSec: number | null, frameRate: FrameRate): boolean {
@@ -97,6 +121,8 @@ export interface SubtitleChoice {
 }
 
 export interface RenderPlan extends ExportPlan {
+  /** Picture sound omitted because its source has not been measured (#908). */
+  unmeasuredAudio?: Array<{ clipId: string; label: string; startSec: number; endSec: number }>;
   /** The saved timeline revision this plan was frozen from; null for legacy derivation. */
   revision: number | null;
   /** The delivery window on the timeline, in seconds of the production clock. */
@@ -117,11 +143,13 @@ export interface RenderArtifact {
   id: string;
   file: string;
   kind: string;
+  production?: string | null;
   mediaInfo?: { hasAudio: boolean; durationSec?: number };
 }
 
 export interface RenderPlanInput {
   production: ProductionBundle;
+  /** The whole world's catalog; this planner checks ownership before using a referenced file. */
   artifacts: readonly RenderArtifact[];
   timeline: TimelineState | undefined;
   scope: RenderScope;
@@ -240,10 +268,11 @@ function overlaysFromTimeline(
   production: ProductionBundle,
   artifacts: readonly RenderArtifact[],
   frameRate: FrameRate,
-): { ok: true; overlays: ExportOverlay[]; sound: RenderAudioItem[] } | { ok: false; reason: string } {
+): { ok: true; overlays: ExportOverlay[]; sound: RenderAudioItem[]; unmeasuredAudio: NonNullable<RenderPlan["unmeasuredAudio"]> } | { ok: false; reason: string } {
   const base = basePictureTrack(timeline);
   const overlays: ExportOverlay[] = [];
   const sound: RenderAudioItem[] = [];
+  const unmeasuredAudio: NonNullable<RenderPlan["unmeasuredAudio"]> = [];
   const audible = new Set(audibleTracks(timeline).map((track) => track.id));
   const anySolo = timeline.tracks.some((track) => track.solo === true);
   const upper = timeline.tracks
@@ -259,9 +288,12 @@ function overlaysFromTimeline(
         const resolved = resolveTakeMedia(production, takeId);
         if (resolved === null) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
         const sourceInSec = resolved.inSec + (clip.source.offsetSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
+        if (clip.audio !== "mute" && audible.has(track.id) && !anySolo && production.takeMediaInfo[resolved.measuredId] === undefined && production.takes.find(take => take.id === resolved.measuredId)?.kind === "clip") {
+          unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec }, sourceInSec, resolved.outSec));
+        }
         overlays.push({ path: resolved.path, startSec, endSec, still: false, ...(sourceInSec > 0 ? { sourceInSec } : {}) });
         if (clip.audio !== "mute" && production.takeMediaInfo[resolved.measuredId]?.mediaInfo.hasAudio === true && audible.has(track.id) && !anySolo) {
-          sound.push({ path: resolved.path, startSec, endSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec, clipId: clip.id });
+          sound.push(...segmentSound({ path: resolved.path, startSec, endSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec, clipId: clip.id }, resolved.outSec));
         }
         continue;
       }
@@ -269,13 +301,17 @@ function overlaysFromTimeline(
         return { ok: false, reason: `${clip.id} on ${track.name} is a shot; shots live on the base Picture track` };
       }
       const artifactId = clip.source.artifactId;
-      const artifact = artifacts.find((candidate) => candidate.id === artifactId);
-      if (artifact === undefined) return { ok: false, reason: `${clip.id} cites artifact ${artifactId}, which this world does not have` };
+      const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
+      if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
+      const artifact = resolved.artifact;
       const still = STILL_KINDS.has(artifact.kind);
       if (!still && artifact.kind !== "video") {
         return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is ${artifact.kind} and has no picture` };
       }
       const sourceInSec = framesToSeconds(clip.sourceInFrames, frameRate);
+      if (!still && clip.audio !== "mute" && audible.has(track.id) && !anySolo && artifact.mediaInfo === undefined) {
+        unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec });
+      }
       overlays.push({ path: `artifacts/${artifact.file}`, startSec, endSec, still, ...(!still && sourceInSec > 0 ? { sourceInSec } : {}) });
       // A placed video's own sound plays while it is kept and the world knows it has some (R-12).
       if (!still && clip.audio !== "mute" && artifact.mediaInfo?.hasAudio === true && audible.has(track.id) && !anySolo) {
@@ -291,7 +327,7 @@ function overlaysFromTimeline(
       }
     }
   }
-  return { ok: true, overlays, sound };
+  return { ok: true, overlays, sound, unmeasuredAudio };
 }
 
 /** Typed audio tracks become mixed sound (R-12, R-13, R-19); each clip conformed to its window. */
@@ -311,10 +347,12 @@ function audioFromTimeline(
       let path: string;
       let segmentInSec = 0;
       let physicalInSec: number | undefined;
+      let sourceOutSec: number | undefined;
       if (clip.source.kind === "artifact") {
         const artifactId = clip.source.artifactId;
-        const artifact = artifacts.find((candidate) => candidate.id === artifactId);
-        if (artifact === undefined) return { ok: false, reason: `${clip.id} cites artifact ${artifactId}, which this world does not have` };
+        const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
+        if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
+        const artifact = resolved.artifact;
         const carries = artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true);
         if (!carries) return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is not known to carry sound` };
         path = `artifacts/${artifact.file}`;
@@ -326,6 +364,7 @@ function audioFromTimeline(
         if (resolved === null) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
         path = resolved.path;
         segmentInSec = resolved.inSec + (clip.source.offsetSec ?? 0);
+        sourceOutSec = resolved.outSec;
       } else if (clip.source.kind === "performance") {
         const source = clip.source;
         const performance = production.performances.find(p => p.id === source.performanceId);
@@ -344,7 +383,7 @@ function audioFromTimeline(
       } else {
         return { ok: false, reason: `${clip.id} is a shot on ${track.name}; shots are picture` };
       }
-      audio.push({
+      const sound = segmentSound({
         path,
         startSec,
         endSec,
@@ -352,13 +391,48 @@ function audioFromTimeline(
         role: effectiveAudioRole(track, clip),
         sourceInSec: physicalInSec ?? (segmentInSec + framesToSeconds(clip.sourceInFrames, frameRate)),
         clipId: clip.id,
-      });
-      if (effectiveAudioRole(track, clip) === "dialogue") speech.push({ startSec, endSec });
+      }, sourceOutSec);
+      audio.push(...sound);
+      if (effectiveAudioRole(track, clip) === "dialogue") speech.push(...sound.map(item => ({ startSec: item.startSec, endSec: item.endSec })));
     }
   }
   const problems = dialogueTimingProblems(timings,slots,Math.max(0,...slots.map(s=>s.endSec)));
   if (problems.length) return {ok:false,reason:problems.join(" ")};
   return { ok: true, audio, speech: mergeRegions(speech) };
+}
+
+/** Legacy rows have no stable IDs: kind/label and normalized placement survive deletion's index shifts. */
+export function legacyCutArtifactReferences(cut: CutFile): Array<{ key: string; label: string; id: string }> {
+  const references = cut.overlays.map(overlay => ({ key: `overlay:${overlay.id}:${overlay.artifactId}`, label: overlay.id, id: overlay.artifactId }));
+  for (const track of cut.audio) for (const [index, entry] of track.entries.entries()) {
+    const source = audioSourceOf(entry);
+    if (source?.kind === "artifact") references.push({
+      key: `audio:${JSON.stringify({ trackKind: track.kind, trackLabel: track.label, source, shotId: entry.shotId ?? null, offsetSec: entry.offsetSec, timing: entry.timing ?? null })}`,
+      label: `${track.label} entry ${index + 1}`, id: source.artifactId,
+    });
+  }
+  return references;
+}
+
+/** Legacy clocks still need scope checks even where they bypass the saved-timeline planner. */
+export function legacyArtifactScopeRefusal(production: ProductionBundle,
+  artifacts: readonly { id: string; production?: string | null }[], timeline: TimelineState | undefined = production.timeline,
+  scope: RenderScope = { kind: "production" }): string | null {
+  // Legacy episodes include only their scene cut, and the song clock includes only its master
+  // and anchored takes. Neither reads the legacy overlay/audio placements.
+  if (timeline?.status !== "ready" && scope.kind === "episode") return null;
+  if (timeline?.status !== "ready" && production.spine) {
+    const master = resolveProductionArtifact(artifacts, production.spine.trackArtifactId, production.meta.id);
+    // The song clock already has its own missing/unmeasured-master diagnostics.
+    if (!master.ok && master.code === "other-production") return `Master track cites ${master.reason}`;
+    return null;
+  }
+  if (timeline?.status === "ready" && timeline.timeline.migratedCut === true) return null;
+  for (const reference of legacyCutArtifactReferences(production.cut)) {
+    const resolved = resolveProductionArtifact(artifacts, reference.id, production.meta.id);
+    if (!resolved.ok) return `${reference.label} cites ${resolved.reason}`;
+  }
+  return null;
 }
 
 /**
@@ -373,6 +447,8 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   const { production, artifacts, timeline, scope, preset, subtitles: subtitleChoice } = input;
   const frameRate = productionFrameRate(production.meta);
   if (timeline?.status === "invalid") return { ok: false, reason: `timeline is invalid: ${timeline.message}` };
+  const legacyRefusal = scope.kind === "episode" ? null : legacyArtifactScopeRefusal(production, artifacts, timeline, scope);
+  if (legacyRefusal !== null) return { ok: false, reason: legacyRefusal };
   // A music-timed production renders through the spine plan until its timeline is materialised
   // (SPEC-037 R-2); once it is, the song is a Music clip and the picture is the saved order.
   if (production.spine !== null && (timeline === undefined || timeline.status === "absent")) {
@@ -389,9 +465,31 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
        */
       const range = episodeTimelineRange(production, timeline.timeline, scope.episodeId);
       if (!range.ok) return { ok: false, reason: `episode export refused: ${range.reason}` };
-      const whole = buildRenderPlan({ ...input, scope: { kind: "production" } });
+      const startSec = framesToSeconds(range.startFrame, frameRate), endSec = framesToSeconds(range.endFrame, frameRate);
+      const intersects = (clip: TimelineClip) => clip.startFrame < range.endFrame && clip.startFrame + clip.durationFrames > range.startFrame;
+      const audible = new Set(audibleTracks(timeline.timeline).map(track => track.id));
+      const excludedSpeech: SpeechRegion[] = [];
+      // Remove only unavailable artifact references outside delivery. The surrounding timeline
+      // still supplies performance overlap validation and speech look-ahead/release context.
+      const scopedTimeline = { ...timeline.timeline, tracks: timeline.timeline.tracks.map(track => ({ ...track,
+        clips: track.clips.filter(clip => {
+          if (intersects(clip) || clip.source.kind !== "artifact" || resolveProductionArtifact(artifacts, clip.source.artifactId, production.meta.id).ok) return true;
+          // A recorded Voice window controls ducking without reading the excluded file.
+          if (audible.has(track.id) && AUDIO_TRACK_KINDS.has(track.kind) && effectiveAudioRole(track, clip) === "dialogue") {
+            excludedSpeech.push({ startSec: framesToSeconds(clip.startFrame, frameRate), endSec: framesToSeconds(clip.startFrame + clip.durationFrames, frameRate) });
+          }
+          return false;
+        }),
+      })) };
+      const scopedProduction = { ...production, cut: { ...production.cut,
+        overlays: production.cut.overlays.filter(overlay => (overlay.startSec < endSec && overlay.endSec > startSec) || resolveProductionArtifact(artifacts, overlay.artifactId, production.meta.id).ok),
+        // Named legacy audio is migration input; legacy rendering only reads overlay sound.
+        audio: [],
+      } };
+      const whole = buildRenderPlan({ ...input, production: scopedProduction, timeline: { status: "ready", timeline: scopedTimeline }, scope: { kind: "production" } });
       if (!whole.ok) return whole;
-      return { ok: true, plan: windowPlan(whole.plan, framesToSeconds(range.startFrame, frameRate), framesToSeconds(range.endFrame, frameRate), scope) };
+      if (whole.plan.mix.speechFirst) whole.plan.speech = mergeRegions([...whole.plan.speech, ...excludedSpeech]);
+      return { ok: true, plan: windowPlan(whole.plan, startSec, endSec, scope) };
     }
     // The legacy refusals — a spine with no episode authority among them — belong to the legacy
     // cut alone; a saved timeline has its own episode range above (round six).
@@ -406,7 +504,8 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     const overlays = exportOverlays(production.cut.overlays, artifacts);
     const audio = exportAudioClips(production.cut.overlays, artifacts);
     const plan = buildExportPlan(deriveCut(production), preset, overlays, audio, frameRate);
-    return { ok: true, plan: withRender(plan, scope, null, DEFAULT_MIX) };
+    const unmeasuredAudio = unmeasuredLegacySound(production.cut.overlays, artifacts, plan.totalSec);
+    return { ok: true, plan: { ...withRender(plan, scope, null, DEFAULT_MIX), ...(unmeasuredAudio.length ? { unmeasuredAudio } : {}) } };
   }
 
   let cut;
@@ -438,6 +537,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   const items: ExportItem[] = [];
   const stillOverlays: ExportOverlay[] = [];
   const baseSound: RenderAudioItem[] = [];
+  const unmeasuredAudio = [...upper.unmeasuredAudio];
   let cursorSec = 0;
   for (const entry of cut.entries) {
     const startSec = cursorSec;
@@ -451,8 +551,9 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     const clip: TimelineClip | undefined = base?.clips.find((candidate) => candidate.id === entry.clipId);
     if (clip !== undefined && clip.source.kind === "artifact") {
       const artifactId = clip.source.artifactId;
-      const artifact = artifacts.find((candidate) => candidate.id === artifactId);
-      if (artifact === undefined) return { ok: false, reason: `${clip.id} cites artifact ${artifactId}, which this world does not have` };
+      const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
+      if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
+      const artifact = resolved.artifact;
       const inSec = framesToSeconds(clip.sourceInFrames, frameRate);
       if (STILL_KINDS.has(artifact.kind)) {
         items.push({ type: "black", durationSec: entry.durationSec });
@@ -460,6 +561,9 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
         continue;
       }
       if (artifact.kind !== "video") return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is ${artifact.kind} and has no picture` };
+      if (baseAudible && clip.audio !== "mute" && artifact.mediaInfo === undefined) {
+        unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec });
+      }
       items.push({
         type: "clip",
         path: `artifacts/${artifact.file}`,
@@ -488,8 +592,11 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       const segment = take?.segment;
       const pass = take === undefined ? undefined : segment === undefined ? take : production.takes.find((candidate) => candidate.id === segment.passTakeId);
       if (take === undefined || pass?.media === undefined) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
-      const path = `productions/${production.meta.id}/takes/${pass.id}/${pass.media}`;
       const inSec = (segment?.inSec ?? 0) + (clip.source.offsetSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
+      if (baseAudible && clip.audio !== "mute" && pass.kind === "clip" && production.takeMediaInfo[pass.id] === undefined) {
+        unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec }, inSec, segment?.outSec));
+      }
+      const path = `productions/${production.meta.id}/takes/${pass.id}/${pass.media}`;
       items.push({
         type: "clip",
         path,
@@ -499,7 +606,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
         label: entry.label,
       });
       if (baseAudible && clip.audio !== "mute" && production.takeMediaInfo[pass.id]?.mediaInfo.hasAudio === true) {
-        baseSound.push({ path, startSec, endSec: startSec + entry.durationSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec: inSec, clipId: clip.id });
+        baseSound.push(...segmentSound({ path, startSec, endSec: startSec + entry.durationSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec: inSec, clipId: clip.id }, segment?.outSec));
       }
       continue;
     }
@@ -519,8 +626,11 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       const takeId = entry.takeId;
       const accepted = takeId === null ? undefined : production.takes.find((candidate) => candidate.id === takeId);
       const measuredId = accepted?.segment !== undefined ? accepted.segment.passTakeId : takeId;
-      if (clip !== undefined && clip.audio === "keep" && baseAudible && measuredId !== null && production.takeMediaInfo[measuredId]?.mediaInfo.hasAudio === true) {
-        baseSound.push({
+      if (clip !== undefined && clip.audio !== "mute" && baseAudible && measuredId !== null && production.takeMediaInfo[measuredId] === undefined && accepted?.kind === "clip") {
+        unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec }, entry.media.inSec ?? 0, entry.media.outSec));
+      }
+      if (clip !== undefined && clip.audio !== "mute" && baseAudible && measuredId !== null && production.takeMediaInfo[measuredId]?.mediaInfo.hasAudio === true) {
+        baseSound.push(...segmentSound({
           path: entry.media.path,
           startSec,
           endSec: startSec + entry.durationSec,
@@ -528,7 +638,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
           role: "picture",
           sourceInSec: entry.media.inSec ?? 0,
           clipId: clip.id,
-        });
+        }, entry.media.outSec));
       }
       continue;
     }
@@ -545,6 +655,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
    */
   const pictureEnd = Math.max(cut.totalSec, ...overlays.map((overlay) => overlay.endSec), 0);
   const totalSec = pictureEnd > 0 ? pictureEnd : Math.max(...placedSound.map((clip) => clip.endSec), 0);
+  if (record.migratedCut !== true) unmeasuredAudio.push(...unmeasuredLegacySound(production.cut.overlays, artifacts, totalSec));
   const audio = placedSound
     .filter((clip) => clip.startSec < totalSec)
     .map((clip) => (clip.endSec > totalSec ? { ...clip, endSec: totalSec } : clip));
@@ -562,6 +673,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     overlays,
     audio,
     totalSec,
+    ...(unmeasuredAudio.length ? { unmeasuredAudio } : {}),
     revision: record.revision,
     range: { startSec: 0, endSec: totalSec },
     scope,
@@ -642,6 +754,7 @@ export function windowPlan(plan: RenderPlan, startSec: number, endSec: number, s
     items,
     overlays,
     audio,
+    ...(plan.unmeasuredAudio ? { unmeasuredAudio: plan.unmeasuredAudio.flatMap(entry => { const scoped = clipRange(entry); return scoped ? [scoped] : []; }) } : {}),
     speech,
     subtitles,
     ...(burnIn !== undefined ? { burnIn } : {}),

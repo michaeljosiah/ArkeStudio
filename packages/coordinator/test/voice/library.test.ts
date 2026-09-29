@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { ArtifactSidecarSchema } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { WorldStore } from "../../src/world/store.js";
-import { cloneVoice, clipFor, wavSeconds } from "../../src/voice/library.js";
+import { cloneVoice, clipFor, deleteVoice, wavSeconds } from "../../src/voice/library.js";
 import { fileArtifact } from "../../src/artifacts/filing.js";
 import { CrashSignal } from "../../src/world/commit.js";
 import { toExtendedLength } from "../../src/world/paths.js";
@@ -284,6 +284,7 @@ describe("cloning a voice into a world", () => {
         attributes: ["low"],
         consent: true,
         created: CLOCK(),
+        language: "en",
       };
       for (const clip of [
         source,
@@ -473,6 +474,7 @@ describe("cloning a voice into a world", () => {
         attributes: ["low"],
         consent: true,
         created: CLOCK(),
+        language: "en",
       };
       assert.equal(await clipFor(store, voice), null);
     });
@@ -800,5 +802,48 @@ describe("reading a WAV's length", () => {
       ),
       null,
     );
+  });
+});
+
+describe("deleting a cloned voice (SPEC-046 R-15, issue 1162)", () => {
+  it("removes the entry and the clip together, keeps the artifact, leaves a neighbour it cannot parse, and frees the id", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    const source = join(await tempDir("arke-delete-"), "recording.wav");
+    await writeFile(toExtendedLength(source), wav({ byteRate: 20, dataBytes: 64 }));
+    try {
+      // A neighbour this build cannot read, written before the clone the way the preserve test
+      // writes one: the delete patches the entries as read, like every other write here.
+      await mkdir(toExtendedLength(join(dir, "voices")), { recursive: true });
+      await writeFile(toExtendedLength(join(dir, "voices", "voices.json")), JSON.stringify({ voices: [{ nonsense: true }] }), "utf8");
+      const made = await cloneVoice(store, [], { sourcePath: source, name: "Harbour glass", description: "Low and dry.", consent: true, language: "fr" });
+      assert.ok(made.ok);
+      const clip = join(dir, "voices", "harbour-glass.wav");
+      assert.ok(await fileExists(clip));
+
+      const removed = await deleteVoice(store, "harbour-glass");
+      assert.ok(removed.ok);
+      assert.equal(removed.voice.language, "fr", "the entry as it was: the caller removes the vendor copies from it");
+      assert.equal(await fileExists(clip), false, "the clip goes with the entry");
+      const written = JSON.parse(await readFile(toExtendedLength(join(dir, "voices", "voices.json")), "utf8")) as { voices: unknown[] };
+      assert.deepEqual(written.voices, [{ nonsense: true }], "the unreadable neighbour survives, exactly as it was");
+      assert.equal(store.getBundle().clonedVoices.length, 0, "the picker no longer sees it");
+      // Provenance is a record that a recording was filed, which deleting the voice does not unmake.
+      const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === made.voice.artifactId);
+      assert.ok(artifact, "the artifact stays");
+      assert.ok(await fileExists(join(dir, "artifacts", artifact.file)));
+
+      // Gone is gone: a second delete says so rather than removing anything again.
+      const again = await deleteVoice(store, "harbour-glass");
+      assert.ok(!again.ok && /no longer in this world/.test(again.reason));
+      // The id is free again, and the clip lands at the same path — which is why the removal
+      // holds the clone's gate: the two cannot run beside each other.
+      const remade = await cloneVoice(store, [], { sourcePath: source, name: "Harbour glass", description: "Low and dry.", consent: true });
+      assert.ok(remade.ok);
+      assert.equal(remade.voice.id, "harbour-glass");
+      assert.ok(await fileExists(clip));
+    } finally {
+      await store.close();
+    }
   });
 });

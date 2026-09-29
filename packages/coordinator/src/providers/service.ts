@@ -11,7 +11,7 @@ import type { CredentialStore } from "../credentials/store.js";
 /**
  * Provider status orchestration (SPEC-008 R-1..R-4): who is configured, what the last
  * validation found, and mid-session provider faults. Statuses carry no key material — the
- * renderer sees booleans and probe results only (R-6).
+ * renderer sees status, probe results and a digest of the stored encrypted record (R-6).
  */
 
 /** The one slice of a provider client the coordinator needs; SPEC-009 wires the rest. */
@@ -21,6 +21,8 @@ export interface KeyValidator {
 
 export class ProviderService {
   private readonly statuses = new Map<ProviderId, ProviderStatus>();
+  private readonly credentialGenerations = new Map<ProviderId, number>();
+  private readonly validationGenerations = new Map<ProviderId, number>();
 
   constructor(
     private readonly credentials: CredentialStore | null,
@@ -42,6 +44,7 @@ export class ProviderService {
       this.statuses.set(id, {
         id,
         configured: credential === "none" || (credential === "in-app" && configured.has(id)),
+        credentialFingerprint: credential === "in-app" && configured.has(id) ? await this.credentials?.fingerprint(id).catch(() => undefined) : undefined,
         validation: "untested",
         probes: [],
         fault: null,
@@ -61,14 +64,21 @@ export class ProviderService {
       probes: [],
       fault: null,
     };
-    const next = { ...current, ...changes } as ProviderStatus;
+    // A fault cleared takes its kind with it: the kind describes the fault, never the provider.
+    const { faultKind: _kind, ...kept } = current;
+    const next = { ...(changes.fault === null ? kept : current), ...changes } as ProviderStatus;
     this.statuses.set(id, next);
     return next;
   }
 
   /** A credential landed or was cleared; validation resets to untested. */
-  setConfigured(id: ProviderId, configured: boolean): void {
-    this.patch(id, { configured, validation: "untested", probes: [], fault: null });
+  async setConfigured(id: ProviderId, configured: boolean): Promise<void> {
+    const generation = (this.credentialGenerations.get(id) ?? 0) + 1;
+    this.credentialGenerations.set(id, generation);
+    this.patch(id, { configured, credentialFingerprint: undefined, validation: "untested", probes: [], lastValidated: undefined, fault: null });
+    // Optional display metadata cannot delay invalidation or make a durable save look failed.
+    const credentialFingerprint = configured ? await this.credentials?.fingerprint(id).catch(() => undefined) : undefined;
+    if (this.credentialGenerations.get(id) === generation) this.patch(id, { credentialFingerprint });
   }
 
   /**
@@ -76,6 +86,10 @@ export class ProviderService {
    * unlocked; the probes themselves are the real answer either way.
    */
   async validate(id: ProviderId): Promise<ProviderStatus> {
+    const credentialGeneration = this.credentialGenerations.get(id);
+    const validationGeneration = (this.validationGenerations.get(id) ?? 0) + 1;
+    this.validationGenerations.set(id, validationGeneration);
+    const current = () => this.credentialGenerations.get(id) === credentialGeneration && this.validationGenerations.get(id) === validationGeneration;
     const validator = this.validators[id];
     if (!validator) {
       // A local provider whose runtime was never wired has no client to ask, so there is nothing
@@ -94,6 +108,7 @@ export class ProviderService {
     // runtime needs none, and the external tool holds its own.
     const external = PROVIDERS[id].credential === "external";
     const key = PROVIDERS[id].credential === "in-app" ? ((await this.credentials?.get(id)) ?? null) : "";
+    if (!current()) return this.statuses.get(id)!;
     if (key === null) {
       return this.patch(id, {
         validation: "invalid",
@@ -107,10 +122,16 @@ export class ProviderService {
     this.patch(id, { validation: "testing" });
     try {
       const probes = await validator.validateKey(key);
+      if (!current()) return this.statuses.get(id)!;
       const anyAvailable = probes.some((p) => p.available);
+      // A key the vendor accepted is a valid key, whatever the account can pay for (issue 1167):
+      // "invalid" here is what Settings renders as "key rejected" and remedies with a
+      // replacement, which an unfunded account does not need. The capability stays locked —
+      // `deriveCapabilityAvailability` reads the probe — and the probe's reason says why.
+      const authenticated = anyAvailable || probes.some((p) => p.authenticated === true);
       void this.log?.append({ kind: "provider.validated", provider: id, probes });
       return this.patch(id, {
-        validation: anyAvailable ? "valid" : "invalid",
+        validation: authenticated ? "valid" : "invalid",
         probes,
         lastValidated: this.clock(),
         fault: null,
@@ -119,6 +140,7 @@ export class ProviderService {
         ...(external ? { configured: anyAvailable } : {}),
       });
     } catch (err) {
+      if (!current()) return this.statuses.get(id)!;
       const message = err instanceof Error ? err.message : String(err);
       void this.log?.append({ kind: "provider.validation-failed", provider: id, message });
       return this.patch(id, {
@@ -131,7 +153,17 @@ export class ProviderService {
   }
 
   /** A credential failed mid-session — a provider fault naming the provider, never a work failure (R-4). */
-  markFault(id: ProviderId, message: string): ProviderStatus {
+  /**
+   * A fault about the credential in use marks the key invalid; one about the store that could
+   * not save a key, or clear one (issue 1191), leaves the validation as it was — nothing
+   * rejected the key the provider holds, and the new one never left — and says which it is,
+   * so the settings say "not saved" or "not cleared" rather than "rejected". A store fault
+   * changes no credential, so it neither turns a validation's generation (a probe in flight
+   * still lands, and "Test again" is not left testing) nor disables what the held credential
+   * unlocks (codex on PR 1195).
+   */
+  markFault(id: ProviderId, message: string, kind: "credential" | "not-saved" | "not-cleared" = "credential"): ProviderStatus {
+    if (kind === "credential") this.validationGenerations.set(id, (this.validationGenerations.get(id) ?? 0) + 1);
     // The category rides the record (SPEC-032 R-20.9): the fault correlation must not offer a
     // key row for a quota that a replaced key would not refill, and stamping at the producer is
     // what keeps that a fact of the record rather than a re-reading of its sentence.
@@ -141,6 +173,6 @@ export class ProviderService {
       message,
       category: providerFaultCategory(message),
     });
-    return this.patch(id, { fault: message, validation: "invalid" });
+    return kind === "credential" ? this.patch(id, { fault: message, faultKind: "credential", validation: "invalid" }) : this.patch(id, { fault: message, faultKind: kind });
   }
 }

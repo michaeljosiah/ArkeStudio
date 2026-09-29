@@ -1,0 +1,75 @@
+# Stage evaluation (#886)
+
+The deterministic fixture set defines these checks before scoring model-authored drafts. Camera
+positions are in metres and marks in shot-local seconds. General checks: finite transforms,
+ordered tracks, exact shot coverage, head projections inside normalized ±0.98 at quarter-second
+samples (foreground shoulders can crop), no unintended camera/subject intersections, and visible
+script-relevant openings and props. Review intermediate motion, not only the first and last frame.
+
+| Fixture | Measurable expectations | Cinematic review |
+|---|---|---|
+| Walking orbit (#1128) | Nine keys at 0.75s intervals; relative speed jumps below 0.15m/s and angular speed within 20% at interior keys | One flowing orbit around the moving subject, with no waypoint stops |
+| Vertigo (#1048) | Generated dolly increases camera distance and focal length by the same factor over 6s; subject stays the same projected size | Background perspective changes while the subject framing holds |
+| Dialogue two-shot | Both heads remain in frame for 6s; fixed camera; left/right order preserved | Balanced readable faces and eyelines |
+| Over shoulder | Foreground shoulder may crop; listener remains visible throughout 6s | Shoulder establishes relation without hiding listener |
+| Doorway entry | Actor waits to 1s, crosses z=0 at 3s, stops at 5s; 1.4m opening and 2.4m clearance | Actor visibly passes through an opening, not a wall |
+| Seated furniture | Actor stays seated for 6s; face visible above table | Chair/table dimensions and body relationship are plausible |
+| Delayed action | Hold to 1s; cross by 3s; finish turn by 4s; sit at 5s | Distinct beats read without sliding through furniture |
+| Eased action (#1046) | Hold to 1s; curved travel through (0, -0.5) at 3s to (1, 0) at 5s; sit at 6s | Visible wait, gradual starts/stops and smooth travel; legacy delayed-action fixture remains unchanged |
+| Independent motion | Actor crosses x=-2 to +2 in 6s while camera completes an orbit | Camera and actor move independently; tracking keeps subject framed |
+| Valley chase | Driver rides car from z=0 to 50 in 8s; camera settles in car space at 6s; final offset holds within 1e-8m | Valley/road/car silhouettes read, windows are open, final driver view is unobstructed |
+
+Fixtures live in `packages/contracts/test/fixtures/stage-scenes.ts`. Tests use the same evaluator
+as the viewport; they are a tool regression baseline, not evidence that a live model interprets
+every script correctly. The model-loop fixture deliberately changes the first composition after
+reading actual PNG files; it checks transport, preservation and provenance with a fake adapter.
+
+Run the affected tests using the commands in [testing](testing.md). For an actual WebGL/encoder gate:
+
+```powershell
+node apps/desktop/scripts/stage-visual-smoke.mjs
+```
+
+This launches a hidden sandboxed Electron window with a dedicated test bridge, renders all fixture
+inspection frames and MP4s through StageViewport and the real Stage exporter, and prints its
+output directory. It needs installed Electron plus `ffmpeg`/`ffprobe` on PATH; optional
+`ARKE_STAGE_FFMPEG` and `ARKE_STAGE_FFPROBE` name executables. It makes no model/provider calls.
+Each output includes measured encoded metadata, opening/last PNGs, every interior camera-key PNG, a top-down camera-path/cast overview, and frame observations (issue 1043). All filed PNGs use export resolution; the gate compares both opening and last PNGs to their decoded video frames. Expect
+1280×720, 30fps, 180 frames for 6s or 240 for 8s. Compare decoded opening video to opening PNG
+(with lossy-codec tolerance), and inspect camera framing, screen orientation and timed action.
+Outputs are intentionally retained for visual review in the printed temporary directory.
+
+For live AI evaluation, select a capable image-reading model in production/Stage designer settings.
+Use each fixture brief without feeding its coordinates to the model. Compare Build with Arke
+against Quick layout using the measurable constraints above, then review framing, occlusion,
+motion readability and assumptions. Preserve blocking on a second request and ask for camera-only
+corrections. Record the actual model, source versions, outputs and remaining issues. Model fidelity
+is unscored until that run is performed; schema validity and fake-adapter success are insufficient.
+
+The transport regression files an MP4, admits it in Bench, resolves contained bytes and captures
+the real provider client's request. This proves delivery without spending on generation. An
+explicitly authorized paid smoke test can separately evaluate whether generated motion follows
+the accepted reference. Compare the generated take and playable Stage reference in Bench.
+
+World schema 21 fences authored gait and object speed ceilings (#1044); schema 22 fences performance ease and hold (#1046). Legacy performance tracks retain linear travel until a hold or ease control is authored. New action marks use the shared camera/object spline with zero ease by default. Performance holds leave at least 0.1s of travel, scale with shot duration, and are reflected in timeline spans, speed measurements and generation beats.
+
+World schema 20 additionally fences the expanded playblast reference pin, so older readers refuse before scanning its strict scene fields. Opening, last, key and overview artifacts share the pin’s source fingerprint and staleness checks. Bench offers the opening/last pair to end-frame routes and the ordered still strip to image-reference routes, within existing manifest limits.
+
+World schema 11 is the earlier compatibility fence: expanded Stage fields, animation, provenance and encoded video metadata cause
+the normal committer to advance the world minimum reader version. No bulk migration is required;
+legacy boxes/figures/cameras remain readable. Restoring a scene restores its Stage state with the
+existing scene journal; prior playblast artifacts remain history and are revalidated before use.
+
+First-pass framing (#1047) solves distance from the production-aspect Super 35 vertical FOV and subject height (default 1.8m). Frame-height fractions retain the existing size ranges: extreme close-up 0.3, close-up/MCU 0.55, medium 0.9, wide 1.5 and extreme wide 2.5. The same table and rule are supplied to Stage construction. The camera-angle height table is unchanged; 24, 35 and 85mm lenses now show the same subject-plane height for a given size.
+
+Reference matching (#1049) is local editor chrome: Camera view can show a filed image or clip in ghost/corner mode, with opacity and a playhead offset. Clip segments retain their source in/out bounds. Imported plates use the production artifact import path. Look view, construction inspection and playblast capture exclude the plate; the WebGL canvas never contains its pixels.
+
+Preview (#1050) plays fresh filed playblasts on the existing ordered scene clock where no accepted take exists, labelled blockout and using the filed opening frame as poster. It verifies the same source fingerprint as Bench before admission and withdraws clips immediately when their source changes. This adds no separate animatic file or acceptance state.
+
+First-pass edge cases retain clearance of one quarter of subject height plus the Stage camera's 0.1m near plane; very wide lenses may therefore frame more broadly than requested. Aim height scales with the subject while the angle-based camera-height table stays unchanged. If a playblast opening poster is missing or retired, Preview retains the existing authored-frame fallback.
+
+Camera evaluator 2 (#1128) uses continuous time-to-distance interpolation through passing keys. Ease applies at endpoints and holds; position and aim holds remain independent. Roll and lens use monotone interpolation too. Existing camera keys remain readable, but older playblasts become stale. New pins record evaluator version 2 and raise the world's reader boundary to schema 26. Re-export is required before those older references can be admitted again.
+
+`stage-camera-continuity.test.ts` checks orbit velocity, irregular timing, panning through aim keys, exact holds and rest ramps. Whole-path standoff and passing-key motion findings appear in Stage and in construction inspection feedback (#1126). They are advisories; deterministic tests and the local encoder gate do not score a live model's cinematic judgment.
+
+The encoded gate also refreshes a 120-key version of the walking orbit and counts distinct spatial curves. The viewport must reuse them across refresh, path drawing and recording; a pure-evaluator benchmark alone does not catch a caller that copies keys on every sample.

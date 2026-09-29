@@ -5,15 +5,20 @@ import {
   ENGINE_PROVIDERS,
   PROVIDERS as PROVIDER_TABLE,
   comfyUiWeightsRecipeId,
+  credentialFaulted,
   deriveCapabilityAvailability,
+  modelPriceCopy,
   type EngineId,
   type ProviderId,
   type ProviderStatus,
   type ProviderWorkspace,
   type SetupComponent,
 } from "@arke-studio/contracts";
+import { useMediaQuery } from "../lib/media-query.js";
+import { isRemoteSession } from "../lib/remote-session.js";
+import { OnYourPC } from "../components/on-your-pc.js";
 import { cx } from "../components/ui.js";
-import { Check, Cloud, Download, LinkMark, Monitor, Pencil, RefreshCw, Trash, User, X } from "../components/icons.js";
+import { Check, ChevronRight, Cloud, Download, LinkMark, Monitor, Pencil, RefreshCw, Trash, User, X } from "../components/icons.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { shortDateTime } from "../lib/format.js";
 import {
@@ -22,6 +27,7 @@ import {
   refreshProviderTool,
   selectProviderWorkspace,
   setCredential,
+  setModelEnabled,
   setupRetry,
   signInProviderTool,
   useSetup,
@@ -33,10 +39,8 @@ import {
   OllamaDetail,
   OtherComponentsDetail,
   VoxaDetail,
-  comfyUiTone,
   componentsFor,
   componentsTone,
-  processTone,
 } from "./engine-panes.js";
 import { MachineRow, VoiceLines } from "./local-models.js";
 import {
@@ -68,8 +72,12 @@ import {
  * reached, never for where its work runs.
  */
 
-/** The keyed services, in the column's order. Higgsfield's credential is external (issue 137). */
-export const KEYED_PROVIDERS: readonly ProviderId[] = ["fal", "higgsfield", "openai", "anthropic", "elevenlabs"];
+/**
+ * The keyed services, in the column's order. Higgsfield's credential is external (issue 137).
+ * Mistral and BreezeBlue are the hosted readers of the world's cloned voices (SPEC-046 R-29);
+ * neither ships a mark yet, so both sit on the monogram the slot already falls back to (R-4).
+ */
+export const KEYED_PROVIDERS: readonly ProviderId[] = ["fal", "higgsfield", "openai", "anthropic", "google", "elevenlabs", "mistral", "breezeblue", "fishaudio"];
 
 const ENGINES: readonly EngineId[] = ["comfyui", "ollama", "voxa"];
 
@@ -214,6 +222,7 @@ export function ProviderToolLine({ id }: { id: ProviderId }) {
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
+  if (isRemoteSession()) return <><FactRow what="Sign-in">{tool.state === "ready" ? "connected" : "not connected"}</FactRow><OnYourPC>keys and sign-ins</OnYourPC></>;
   return (
     <>
       <FactRow
@@ -302,6 +311,9 @@ export function ProviderKeyLine({ id }: { id: ProviderId }) {
     setReplacing(false);
   };
   const probes = probeWords(status);
+  if (isRemoteSession()) return <><FactRow what="Key">{stored ? "set" : "not set"}</FactRow>
+    <FactRow what="Last checked">{status?.lastValidated ? shortDateTime(status.lastValidated) : "not yet"}</FactRow>
+    <OnYourPC>keys and sign-ins</OnYourPC></>;
   return (
     <>
       {stored && !replacing ? (
@@ -318,9 +330,7 @@ export function ProviderKeyLine({ id }: { id: ProviderId }) {
             </>
           }
         >
-          {/* No last-four: the key never comes back over the bridge, and inventing a tail would
-              be a picture of a secret rather than the secret's state (SPEC-008 R-10). */}
-          <span className="fy-fact__mono">•••••••••••• stored</span>
+          <span className="fy-fact__mono">set</span>
         </FactRow>
       ) : (
         <FactRow
@@ -390,12 +400,32 @@ export function ProviderKeyLine({ id }: { id: ProviderId }) {
   );
 }
 
+/**
+ * The key was accepted and nothing is unlocked (issue 1167): the account is what needs
+ * attention — a balance, a plan — and "key rejected" would send the person to replace a key
+ * that is fine. The probe's own reason is on the pane's "Last tested" line. Shared with the
+ * models page, whose group note said "Not unlocked by this key" of the same key (issue 1191).
+ */
+export function cannotPay(status: ProviderStatus | undefined): boolean {
+  return status?.configured === true && status.validation === "valid" && !status.probes.some((p) => p.available) && status.probes.some((p) => p.authenticated === true);
+}
+
 /** Stored, tested, or neither — in the words the head prints (SPEC-028 R-33). */
 function connectionWords(id: ProviderId, status: ProviderStatus | undefined): { word: string; tone: RuntimeTone } {
   const external = PROVIDER_TABLE[id].credential === "external";
-  const troubled = Boolean(status?.fault) || status?.validation === "invalid";
+  // A key that never reached the provider — the store refused it, nothing rejected it (issue
+  // 1191) — is not a rejected key, and a key the store could not clear is still the one held;
+  // the fault's own words are on the pane.
+  if (status?.faultKind === "not-saved") return { word: "not saved", tone: "warn" };
+  if (status?.faultKind === "not-cleared") return { word: "not cleared", tone: "warn" };
+  const troubled = credentialFaulted(status) || status?.validation === "invalid";
   if (troubled) return { word: external ? "sign-in needed" : "key rejected", tone: "warn" };
-  if (status?.configured === true) return { word: "connected", tone: "ok" };
+  if (status?.configured === true) {
+    if (status.validation === "valid") {
+      return cannotPay(status) ? { word: "can't pay", tone: "warn" } : { word: "connected", tone: "ok" };
+    }
+    return { word: status.validation === "testing" ? "testing" : "untested", tone: "idle" };
+  }
   return { word: external ? "not signed in" : "no key", tone: "idle" };
 }
 
@@ -414,6 +444,7 @@ function ModelsAside({ children }: { children: ReactNode }) {
 
 /** A keyed service: its mark, its credential, and one line about its models (R-18). */
 function ServicePane({ id }: { id: ProviderId }) {
+  const compact = useMediaQuery("(max-width: 1099px)");
   const { state } = useStore();
   const info = PROVIDER_TABLE[id];
   const status = state?.app.providers.find((p) => p.id === id);
@@ -428,6 +459,15 @@ function ServicePane({ id }: { id: ProviderId }) {
   );
   const on = models.filter((m) => unlocked.has(m.capability) && !disabled.has(m.id)).length;
   const words = [...new Set(info.capabilities.map((c) => CAPABILITY_LABEL[c]))].join(", ");
+  if (compact && isRemoteSession()) return <div className="fy-pane fy-provider-detail" data-testid="provider-pane">
+    <div><div className="fy-set__eyebrow">PROVIDER</div><h1 className="fy-pane__name">{info.displayName}</h1></div>
+    <div className="fy-provider-state"><div><strong>{on > 0 ? "On" : "Off"}</strong><small><i className={cx("fy-set__dot", tone === "ok" && "fy-set__dot--ok")} />{word}{status?.lastValidated ? ` · checked ${shortDateTime(status.lastValidated)}` : " · not checked"}</small></div>
+      <button type="button" role="switch" aria-label={`${info.displayName} models`} aria-checked={on > 0} disabled={!models.some(model => unlocked.has(model.capability))} className={cx("fy-prov__switch", on > 0 && "is-on")} onClick={() => { for (const m of models) setModelEnabled(m.id, on === 0); }}><span /></button></div>
+    <OnYourPC>{info.credential === "external" ? "sign-in" : `the key · ${status?.configured ? "set" : "not set"}, never shown here`}</OnYourPC>
+    <div className="fy-provider-models-label">Models · {models.length}</div>
+    <div className="fy-provider-models">{models.map(model => { const enabled = unlocked.has(model.capability) && !disabled.has(model.id); return <div key={model.id} className="fy-provider-model"><div className="fy-provider-model__row"><strong>{model.displayName}</strong><button type="button" role="switch" aria-label={model.displayName} aria-checked={enabled} disabled={!unlocked.has(model.capability)} className={cx("fy-prov__switch", enabled && "is-on")} onClick={() => setModelEnabled(model.id, !enabled)}><span /></button></div><small>{CAPABILITY_LABEL[model.capability]} · {modelPriceCopy(model)}</small></div>; })}</div>
+    <div><ActionButton icon={<RefreshCw size={14} />} disabled={!status?.configured || status.validation === "testing"} onClick={() => validateProvider(id)}>{status?.validation === "testing" ? "Testing…" : "Test connection"}</ActionButton></div>
+  </div>;
   return (
     <div className="fy-pane" data-testid="provider-pane">
       <div className="fy-pane__head">
@@ -440,6 +480,11 @@ function ServicePane({ id }: { id: ProviderId }) {
       <div className="fy-facts">
         {info.credential === "external" ? <ProviderToolLine id={id} /> : <ProviderKeyLine id={id} />}
       </div>
+      {compact && models.length > 0 && <div className="fy-provider-models">{models.map(model => {
+        const enabled = unlocked.has(model.capability) && !disabled.has(model.id);
+        return <div key={model.id} className="fy-provider-model"><div><strong>{model.displayName}</strong><small>{CAPABILITY_LABEL[model.capability]} · {modelPriceCopy(model)}</small></div>
+          <button type="button" role="switch" aria-label={model.displayName} aria-checked={enabled} disabled={!unlocked.has(model.capability)} className={cx("fy-prov__switch", enabled && "is-on")} onClick={() => setModelEnabled(model.id, !enabled)}><span /></button></div>;
+      })}</div>}
       <ModelsAside>
         {models.length === 0
           ? `Nothing in the shipped manifest routes to ${info.displayName} yet.`
@@ -466,6 +511,9 @@ function EnginePane({ engine, supporting }: { engine: EngineId; supporting: read
       : models.filter((m) =>
           (setup?.components ?? []).some((c) => c.provides?.includes(m.id) && (c.state === "ready" || c.state === "present")),
         ).length;
+  if (isRemoteSession()) return <div className="fy-pane" data-testid="provider-pane"><h1 className="fy-pane__name">{ENGINE_LABEL[engine]}</h1>
+    <FactRow what="State">{engine === "comfyui" ? comfyui?.engine.state ?? "not started" : engine === "voxa" ? state?.app.voiceRuntime?.processState ?? "not set up" : state?.app.providers.find(p => p.id === "ollama")?.validation ?? "untested"}</FactRow>
+    <OnYourPC>engine controls and restarts</OnYourPC><ModelsAside>{models.length} models, {ready} ready.</ModelsAside></div>;
   return (
     <div className="fy-pane" data-testid="provider-pane">
       {engine === "comfyui" && <ComfyUiDetail />}
@@ -509,6 +557,8 @@ interface Row {
 }
 
 export function SettingsProvidersScreen() {
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
   const { state } = useStore();
   const setup = useSetup();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -530,22 +580,20 @@ export function SettingsProvidersScreen() {
     const { word, tone } = connectionWords(id, status);
     return { id, label: PROVIDER_TABLE[id].displayName, note: tone === "ok" ? null : word, kind: "service" };
   });
-  const engineTone = (engine: EngineId): RuntimeTone =>
-    engine === "comfyui"
-      ? comfyUiTone(comfyui?.engine ?? null)
-      : engine === "ollama"
-        ? processTone(providerStatus.find((p) => p.id === "ollama")?.validation)
-        : processTone(voiceRuntime?.processState);
-  const engineNote = (engine: EngineId): string | null => {
+  // An engine's row always carries its state (issue 1191): a running engine says so, where a
+  // connected service says nothing beside its name, since the engine is machinery this
+  // machine runs and whether it is up is the fact the column is for.
+  const engineNote = (engine: EngineId): string => {
     // `elsewhere` in place of a state (SPEC-034 R-9): for a machine down the hall, how it is
     // doing here is not a question with an answer.
     if (engine === "comfyui" && comfyui?.engine.locality === "remote") return "elsewhere";
-    if (engineTone(engine) !== "warn") return null;
-    return engine === "comfyui"
-      ? (comfyui?.engine.state ?? "not running")
-      : engine === "ollama"
-        ? "not answering"
-        : (voiceRuntime?.processState ?? "not running");
+    if (engine === "comfyui") return comfyui === null ? "not started" : comfyui.engine.state;
+    if (engine === "ollama") {
+      const validation = providerStatus.find((p) => p.id === "ollama")?.validation;
+      return validation === "valid" ? "answering" : validation === "testing" ? "testing" : validation === undefined || validation === "untested" ? "untested" : "not answering";
+    }
+    const process = voiceRuntime?.processState;
+    return process === "healthy" ? "running" : process === undefined || process === "unconfigured" ? "not set up" : process === "unhealthy" ? "not answering" : process;
   };
   const engines: Row[] = ENGINES.map((engine) => ({
     id: engine,
@@ -589,7 +637,18 @@ export function SettingsProvidersScreen() {
   }
 
   const column = (rowsOf: Row[]) =>
-    rowsOf.map((r) => (
+    rowsOf.map((r) => compact ? (() => {
+      const models = (state?.app.manifest?.models ?? []).filter(m => r.kind === "engine" ? ENGINE_PROVIDERS[r.id as EngineId].includes(m.provider) : m.provider === r.id);
+      const unlocked = models.filter(model => deriveCapabilityAvailability(providerStatus).some(a => a.capability === model.capability && a.via.includes(model.provider)));
+      const usable = unlocked.length > 0;
+      const on = unlocked.some(m => !(state?.app.models.disabled ?? []).includes(m.id));
+      return <div className={cx("fy-provider-row", r.id === current && "is-current")} key={r.id}>
+        <button type="button" className="fy-src" onClick={() => setSearchParams({ provider: r.id }, { replace: true })}>
+          {!phone && <i className={cx("fy-set__dot", r.note === null && "fy-set__dot--ok")} />}<span><strong>{r.label}</strong>{phone && <small><i className={cx("fy-set__dot", r.note === null && "fy-set__dot--ok")} />{r.note ?? "connected"}</small>}</span>{!phone && <ChevronRight size={14} />}
+        </button>
+        {phone && r.kind !== "other" && <button type="button" role="switch" aria-label={`${r.label} models`} aria-checked={on} disabled={!usable || models.length === 0} className={cx("fy-prov__switch", on && "is-on")} onClick={() => { for (const m of models) setModelEnabled(m.id, !on); }}><span /></button>}
+      </div>;
+    })() : (
       <button
         type="button"
         key={r.id}
@@ -605,8 +664,9 @@ export function SettingsProvidersScreen() {
     ));
 
   return (
-    <div data-screen="settings-providers" className="fy-cols">
-      <div className="fy-cols__list" role="tablist" aria-label="Providers">
+    <div data-screen="settings-providers" className={cx("fy-cols", (asked !== null || askedComponent !== null) && "fy-cols--detail")}>
+      <div className="fy-cols__list" role={compact ? undefined : "tablist"} aria-label="Providers">
+        {isRemoteSession() && <div className="fy-providers-host-note"><OnYourPC>keys and sign-ins</OnYourPC></div>}
         <HalfHeading icon={<Cloud size={14} />}>Services you connect</HalfHeading>
         {column(services)}
         <HalfHeading icon={<Monitor size={14} />}>Engines you run</HalfHeading>

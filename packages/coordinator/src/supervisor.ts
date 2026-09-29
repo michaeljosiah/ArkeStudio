@@ -575,7 +575,11 @@ export class ChildSupervisor extends EventEmitter {
         (live.startedAt === null ||
           d.startedAt === null ||
           Math.abs(live.startedAt - d.startedAt) <= DESCENDANT_START_TOLERANCE_MS);
-      if (isOurs) await killTree(d.pid);
+      if (isOurs) {
+        try { await killTree(d.pid); }
+        catch { continue; } // failed inspection/kill keeps ownership for the next sweep
+        if (pidExists(d.pid)) continue;
+      }
       if (live === undefined || isOurs) void this.deps.ledger?.release(d.pid).catch(() => {});
       // A stranger wearing the pid keeps its record; the sweep clears it without a kill.
     }
@@ -816,7 +820,14 @@ export class ChildSupervisor extends EventEmitter {
   private async forceStop(child: ChildProcess): Promise<void> {
     if (child.pid === undefined) return;
     // taskkill /T takes the whole tree — a bare kill() orphans grandchildren on Windows.
-    await killTree(child.pid);
+    try { await killTree(child.pid); }
+    catch {
+      // A timed out taskkill must not abort shutdown before survivor reaping and timer
+      // cleanup. The process handle still identifies our own child for a direct fallback.
+      if (child.exitCode === null && child.signalCode === null) {
+        try { child.kill("SIGKILL"); } catch { /* ledger and Job Object remain the backstops */ }
+      }
+    }
   }
 }
 

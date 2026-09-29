@@ -1,0 +1,183 @@
+{
+  "recordedOn": "2026-09-24",
+  "platform": "Windows",
+  "node": "24.11.1",
+  "electron": "43.2.0",
+  "ffmpeg": "8.1.1-full_build-www.gyan.dev",
+  "fixtureTests": 3,
+  "epubcheck": {
+    "version": "5.4.0",
+    "fatals": 0,
+    "errors": 0,
+    "warnings": 0,
+    "messages": []
+  },
+  "packages": [
+    {
+      "name": "narrated.epub",
+      "sha256": "f6c78e168e07a0d2977162e66c697b0165ad3a70b0fd1542a09f0b3e0773e3ad"
+    },
+    {
+      "name": "readium.audiobook",
+      "sha256": "f614fcbdd6a28312692ff940e93fad112f5cf68088c97d565545a37b0062631f"
+    },
+    {
+      "name": "w3c.lpf",
+      "sha256": "e3a00de32278c2124845b912fc5eb8b0cfe4f33971654f66be03cd6cb21ef4c2"
+    }
+  ],
+  "reader": {
+    "navigator": "@readium/navigator 2.10.3",
+    "shared": "2.5.1",
+    "illustratedPage": true,
+    "pageViewport": [
+      640,
+      640
+    ],
+    "imageAlt": "A gold light above a blue harbour",
+    "anchors": [
+      "text-f427c85c80f8d294",
+      "text-9c9e388a459b4d80"
+    ],
+    "automaticChapterTransition": true,
+    "seekSeconds": 2.5,
+    "title": "The harbour lights",
+    "chapterTitles": [
+      "Chapter 1",
+      "Chapter 2"
+    ],
+    "readAlong": "Experimental host maps Readium audio clock to preserved Guided Navigation anchors",
+    "errors": [],
+    "blockedExternalRequests": []
+  },
+  "schemas": {
+    "readiumShared": "2.5.1",
+    "readiumManifests": 2,
+    "guidedAnchors": 2,
+    "directW3cDeserialization": "unsupported",
+    "packageClosure": [
+      "readium.audiobook",
+      "w3c.lpf"
+    ],
+    "guidedSchema": "The pinned upstream schema references missing object.schema.json: https://raw.githubusercontent.com/readium/guided-navigation/f5cb2b2d064e62dce16058da3460875224f30f20/schema/object.schema.json",
+    "negativeControls": 1,
+    "sources": [
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/publication.schema.json",
+        "sha256": "8f9bbe70dfb2793783d370a09db1b9e4b6022b83db164541e2aa382d213046ff"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/extensions/epub/subcollections.schema.json",
+        "sha256": "64ec516326c0ccb246d69c6b340c3f9fd8454c5022ac0b22f0641c584e87f62b"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/link.schema.json",
+        "sha256": "79cd0daf776964934507af6116fd21d02e618397247715ed3470a129ac517b28"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/extensions/epub/properties.schema.json",
+        "sha256": "9314e49ec3dca79ca89ae93d5fcb2c29155699e95a9b5e4dc4079614734df64c"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/extensions/encryption/properties.schema.json",
+        "sha256": "a1c3b60c0ceb843d8e21466c089b4f46071f1331e75a7785e3504674eff9ee7a"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/opds-community/specs/8fda670fc72f110abcf68ad5d26e99ecfeeabf03/schema/properties.schema.json",
+        "sha256": "e65f63b1c0048d8d267b690398656d072dc13116536145b6a988c8c1bd1603ea"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/opds-community/specs/8fda670fc72f110abcf68ad5d26e99ecfeeabf03/schema/acquisition-object.schema.json",
+        "sha256": "82b0d83eea6ac9ecb20ce40f202ed4cb53b53e33abedaec8384e8f8002d0374a"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/subcollection.schema.json",
+        "sha256": "fd95b6fd95d104b41acb1066c3faefab295e9c6020533db9d691d02d907403e4"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/metadata.schema.json",
+        "sha256": "554848b3c80aa5c78c8cac63da716d0ba26891f4a351faf6ce0e95e7395572dd"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/extensions/epub/metadata.schema.json",
+        "sha256": "1fb524eeafafaf31a64d94179cb7486bc1cf638dd2b60130fca4f442f3fa4f0a"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/language-map.schema.json",
+        "sha256": "9c8ec169789b0d53c518b7ec0d9ac497a9a64af4d3e7cd2258d4e5ec7e2bf51c"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/altIdentifier.schema.json",
+        "sha256": "45f7d0146551740a2bd381cbc63c39038d0081a05fcf2dbcb7234aff7c41f8a1"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/a11y.schema.json",
+        "sha256": "e06834cc80be2239c4bcab95098a43f894da42beefe73b71690e18d013dbae6a"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/contributor.schema.json",
+        "sha256": "b2c6faffe22b52625f6aa8d9dcc0824dbe81321384d41de5ccbbd0c8e7914f65"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/subject.schema.json",
+        "sha256": "de23387b6bd17ccbb71e3e39904af07d952037c641df47480c4e227751ee89c3"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/collection.schema.json",
+        "sha256": "42fd72ec94fea39292f6a86de1964028836c8d6760c19b71fe7300e7a37c7c83"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/periodical.schema.json",
+        "sha256": "e1e95f5202235a3c38034879d3a9c1b07131950c5abf26a0a2bfa775c049b807"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/issue.schema.json",
+        "sha256": "50a59c0f877a96ca6f13e74da5265bcc9dcc47608437af02c8e503711bbf56a4"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/article.schema.json",
+        "sha256": "8bc6a929f796d8277fbec6aeacaa1da286a7f8c5fddb32cb2b2c741f1973d5ab"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/chapter.schema.json",
+        "sha256": "9b182ab7cf67dc29fa3306d84a0472090f799d92a899ebe93a4a442204556f54"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/series.schema.json",
+        "sha256": "508f59ecb80c892c3a332b98cdda8b4f3d87eb86056105a0119081efc22c8a50"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/episode.schema.json",
+        "sha256": "88b42128ad31b5adacc46a77f7b5dc8247746eec6990f52e7187c351fd96cf56"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/season.schema.json",
+        "sha256": "bb890cf5272b4a40ff50eb27c85f3c5ddd12040fec57445ce2a083f8cc0088e8"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/storyArc.schema.json",
+        "sha256": "6d5afaeae4b6921f6d01ee025e89fea9560ea1e96784be9419cf50b1ee12f1f3"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/webpub-manifest/9bcf48e3108c567d1d3eb2e7ab0f847d62725691/schema/volume.schema.json",
+        "sha256": "0f6b7c8c91344f77cad9136709dc54f259460a0fb233d155a3ac1993d3150a00"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/guided-navigation/f5cb2b2d064e62dce16058da3460875224f30f20/schema/document.schema.json",
+        "sha256": "da9bd54bde27c9ecaa91fb8a8688211384e3ad1d686213ffbd09d70d90dfcb7b"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/guided-navigation/f5cb2b2d064e62dce16058da3460875224f30f20/schema/text.schema.json",
+        "sha256": "80a710bc855c86beea31acda1ad868103819d924c11fb93d5c322afb26f94cfc"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/guided-navigation/f5cb2b2d064e62dce16058da3460875224f30f20/schema/roles.schema.json",
+        "sha256": "87cb130f379fda474b5f1de8426c57eaf76f9b27cbbd50d38f52df5cdef73520"
+      },
+      {
+        "source": "https://raw.githubusercontent.com/readium/guided-navigation/f5cb2b2d064e62dce16058da3460875224f30f20/schema/object.schema.json",
+        "status": 404
+      }
+    ]
+  }
+}

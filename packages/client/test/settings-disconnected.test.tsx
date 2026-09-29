@@ -18,7 +18,7 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, " ");
 
-function render(path: string, connection: "connecting" | "open" | "closed"): string {
+function render(path: string, connection: "connecting" | "open" | "closed" | "auth-refused"): string {
   __setStateForTest(FIXTURE_STATE, { connection });
   return plain(
     renderToString(
@@ -42,7 +42,7 @@ describe("Settings without a coordinator", () => {
   it("says the same thing the startup screen says, in the same words", () => {
     // Three screens wait on this and there is one sentence between them. A second wording would
     // read as a second condition.
-    assert.match(render("/settings/providers", "closed"), /dev browser session/);
+    assert.match(render("/settings/providers", "closed"), /Studio server is running/);
   });
 
   it("stays quiet while the first connection is still being attempted", () => {
@@ -55,4 +55,19 @@ describe("Settings without a coordinator", () => {
   it("stays out of the way once connected", () => {
     assert.doesNotMatch(render("/settings/providers", "open"), /Waiting for the coordinator/);
   });
+});
+
+it("distinguishes an expired session from an offline server", () => {
+  const html = render("/settings/providers", "auth-refused");
+  assert.match(html, /Session link is out of date/);
+  assert.match(html, /new Arke session link/);
+  assert.doesNotMatch(html, /Waiting for the coordinator|dev:coordinator/);
+});
+
+
+it("keeps session recovery visible outside settings without replacing the route", () => {
+  for (const path of ["/worlds", `/w/${FIXTURE_STATE.world!.meta.worldId}`, `/w/${FIXTURE_STATE.world!.meta.worldId}/p/saltlight/story`]) {
+    const html = render(path, "auth-refused");
+    assert.equal(html.split("Session link is out of date").length - 1, 1);
+  }
 });

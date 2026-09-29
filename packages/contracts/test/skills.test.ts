@@ -1,6 +1,7 @@
+import { loadedSkillFor as skillFor } from "./skill-fixture.js";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { skillFor, skillLabel, SKILLS } from "../src/skills.js";
+import { skillLabel, SKILLS } from "../src/skills.js";
 import { skillForAgent } from "../src/agent-session.js";
 
 /**

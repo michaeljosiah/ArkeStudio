@@ -1,9 +1,15 @@
-import { PerformanceBiblePanel } from "../components/performance-bible-panel.js";
-import { CharacterVoiceSamplePanel } from "../components/character-voice-sample.js";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
+import { HeldBar } from "../components/held-bar.js";
+import { PageSheet } from "../components/page-sheet.js";
+import { useMediaQuery } from "../lib/media-query.js";
+import { ReadAloudConfirmation } from "../components/read-aloud-confirmation.js";
+import { CharacterHeader } from "./character-reference.js";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import {
+  artifactPosterPath,
   CHARACTER_ROLE_MAX,
+  MICRODRAMA_DEFAULTS,
+  newId,
   deriveCut,
   designatedCompilation,
   formatMicroUsd,
@@ -17,7 +23,6 @@ import {
   worldSheets,
   type CanonEntry,
   type FrameRate,
-  type Job,
   type PendingSheet,
   type RippleItem,
   type Sheet,
@@ -26,18 +31,19 @@ import {
   legacyVoiceModel,
   voiceTargetKey,
   supportsVoiceUse,
-  isClonedVoice,
   isGeneratedArtifact,
   orderedShots,
+  sortScenes,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
-import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
-import { ChevronRight, Plus, Search } from "../components/icons.js";
+import { Badge, Button, Callout, Card, IconButton, Input, Textarea, cx } from "../components/ui.js";
+import { Archive, ArrowRight, ChevronRight, Copy, Lock, Message, More, Pencil, Plus, Search, Sparkle, Speaker, Upload, Users } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { ArtifactViewer } from "../components/artifact-viewer.js";
+import { EditorDialog } from "../components/editor-dialog.js";
 import {
   characterPortraitPath,
   locationPortraitPath,
@@ -49,23 +55,23 @@ import { DictationButton } from "../components/dictation.js";
 import { ExtractionOffer } from "../components/extraction-offer.js";
 import { PageReadControl, usePageRead, type PageReadBlock } from "../components/page-read.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
-import { Wave } from "./production.js";
+import { episodeThumbnailPath } from "./production-episode-picker.js";
+import { takeMediaPath } from "../lib/take-presentation.js";
+import { Wave } from "../components/wave.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
-import { artifactOpenLabel } from "../lib/artifact-view.js";
+import { artifactDisplayName, artifactOpenLabel, artifactUses, linkNameResolver } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
-import { playClip, type Clip } from "../lib/audio.js";
+import { clearQueue, enqueueClip, playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
 import { ReadAloud } from "../components/read-aloud.js";
 import { foundingNote } from "../components/queue-note.js";
-import { CloneVoiceDialog } from "../components/clone-voice-dialog.js";
+import { followLink } from "../lib/activity-panel.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { SingleActFeedback, useSingleAct } from "../components/single-act.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import { useTalkItThrough } from "../lib/talk-it-through.js";
 import {
   askCanon,
-  assignVoice,
-  subscribeVoiceAssignmentResults,
   subscribeSheetEditResults,
   subscribeCanonContradictions,
   subscribeVoiceUploadConfirmations,
@@ -98,7 +104,9 @@ import {
   restoreSheetVersion,
   extractArtifact,
   fileArtifactMsg,
-  importFolder,
+  uploadArtifacts,
+  retireArtifact,
+  restoreArtifact,
   providerIdOf,
   requestVoiceCandidates,
   requestVoicePreview,
@@ -117,9 +125,8 @@ import {
   useStore,
   useTranscripts,
   useVoiceCandidates,
-  useVoicePreviews,
   useVoiceAudio,
-  useVoiceSidecar,
+  useVoiceParts,
   useWorld,
   type AuthoringActivity,
   renameWorld,
@@ -140,11 +147,18 @@ function limitedFeatureCopy(copy: string): string {
 }
 
 export function WorldLayout() {
+  const compact = useMediaQuery("(max-width: 1099px)");
   const { worldId } = useParams();
   const location = useLocation();
-  useOpenWorldGuard(worldId);
-  const { state } = useStore();
-  const world = state?.world;
+  /*
+   * Every route test on this layout reads this rather than `location.pathname` (codex,
+   * 2026-09-09). A bookmarked or typed address may end in a slash — `/w/<id>/chat/` — and the
+   * router renders the route either way, so a check anchored on the end of the path quietly
+   * says no. That answer decides whether a screen is a fixed frame, and getting it wrong puts
+   * the composer, Save or the key art back below the fold (issue 1007).
+   */
+  const path = location.pathname.replace(/\/+$/, "");
+  const world = useOpenWorldGuard(worldId);
   const refusal = useWorldOpenRefusal(worldId);
   // One Cast tab for the world's three kinds of sheet (design 54c). The ledgers keep their
   // addresses — /cast, /locations, /factions — and a chip row on each moves between them, so
@@ -161,31 +175,58 @@ export function WorldLayout() {
     ["artifacts", "Artifacts"],
     ["productions", "Productions"],
   ] as const;
-  const onSheets = /\/(cast|locations|factions)(\/|$)/.test(location.pathname);
+  const onSheets = /\/(cast|locations|factions|props)(\/|$)/.test(path);
+  const characterGeneration = path.endsWith("/main-photo") || path.endsWith("/model-sheet");
   if (
-    location.pathname.endsWith("/art-direction/propose") ||
-    location.pathname.endsWith("/main-photo") ||
-    location.pathname.endsWith("/model-sheet") ||
+    path.endsWith("/art-direction/propose") ||
+    path.endsWith("/main-photo") ||
+    path.endsWith("/model-sheet") ||
     // The bench is a fixed workspace with its own breadcrumb chrome (design 68b) — the pill
     // nav and hero scroll of the world pages would sit on top of its three columns.
-    location.pathname.includes("/artifacts/bench")
+    path.includes("/artifacts/bench")
   ) {
     return (
-      <div className="fy-app">
+      <div className={cx("fy-app", characterGeneration && "fy-worldapp fy-character-generation")}>
+        {characterGeneration && world && <div className="fy-character-generation__backdrop">
+          <AppChrome back={{ label: "Worlds", to: "/worlds" }} context={{ label: world.meta.name }} />
+          <WorldNavigation path={path}>
+            {nav.map(([slug, label]) => <Link key={slug} to={`/w/${worldId}${slug ? `/${slug}` : ""}`}
+              aria-current={slug === "cast" ? "page" : undefined}
+              className={cx("fy-pillnav__item", slug === "cast" && "fy-pillnav__item--active")}>{label}</Link>)}
+          </WorldNavigation>
+          <CharacterHeader active="reference" />
+        </div>}
         <div className="fy-content fy-content--fixed">
           {refusal ? (
             <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} stranded />
-          ) : (
+          ) : world ? (
             <Outlet />
+          ) : (
+            <>
+              <AppChrome back={{ label: "Worlds", to: "/worlds" }} />
+              <Loading label="opening the world" />
+            </>
           )}
         </div>
       </div>
     );
   }
-  const onArtDirection = location.pathname.endsWith("/art-direction");
-  const onCast = location.pathname.endsWith("/cast");
+  const onArtDirection = path.endsWith("/art-direction");
+  const onCast = path.endsWith("/cast") || (compact && /\/(cast|locations|factions|props)(\/|$)/.test(path));
+  /*
+   * The world screens that are a fixed frame rather than a page that scrolls: art direction's
+   * two picture bands, and the gate screens, whose two columns each scroll inside themselves.
+   * They were sized against the viewport minus a constant, which was 28px optimistic even with
+   * nothing above them and had no answer at all for a banner that was (issue 1007) — so the
+   * edit sheet's Save and World Chat's composer sat below the fold. The column measures the
+   * room it actually has and gives the screen the remainder.
+   */
+  const fixedFrame =
+    onArtDirection ||
+    /\/(chat|edit)(\/[^/]+)?$/.test(path) ||
+    /\/canon\/(new|[^/]+\/thread)$/.test(path);
   return (
-    <div className="fy-app">
+    <div className="fy-app fy-worldapp">
       <AppChrome
         back={{ label: "Worlds", to: "/worlds" }}
         context={
@@ -195,59 +236,114 @@ export function WorldLayout() {
         }
         divided={onArtDirection}
       />
-      <div className={cx("fy-content", onCast && "fy-content--cast")}>
-        <nav className="fy-pillnav">
+      {/* Art direction is the one world screen laid out as a fixed-height row rather than a
+          column that scrolls, so it is the one that has to be told how much room it has. The
+          column measures it instead of subtracting a guessed constant from the viewport: the
+          nav above it is sticky and therefore in flow, and any condition banner is too. */}
+      <div className={cx("fy-content", fixedFrame && "fy-content--fill", onCast && "fy-content--cast", path.includes("/productions/setup/") && "fy-content--setup")}>
+        <WorldNavigation path={path}>
           {nav.map(([slug, label]) => (
-            <NavLink
-              key={slug}
-              to={`/w/${worldId}${slug ? `/${slug}` : ""}`}
-              end={slug === ""}
-              className={({ isActive }) =>
-                cx(
-                  "fy-pillnav__item",
-                  (isActive || (slug === "cast" && onSheets)) && "fy-pillnav__item--active",
-                )
-              }
-            >
-              {label}
-            </NavLink>
+            slug === "cast" && onSheets ? (
+              <Link key={slug} to={`/w/${worldId}/cast`} aria-current="page"
+                className="fy-pillnav__item fy-pillnav__item--active">
+                {label}
+              </Link>
+            ) : (
+              <NavLink
+                key={slug}
+                to={`/w/${worldId}${slug ? `/${slug}` : ""}`}
+                end={slug === ""}
+                className={({ isActive }) =>
+                  cx(
+                    "fy-pillnav__item",
+                    isActive && "fy-pillnav__item--active",
+                  )
+                }
+              >
+                {label}
+              </NavLink>
+            )
           ))}
-        </nav>
+        </WorldNavigation>
         <WorldConditionBanners />
-        {refusal ? <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} /> : <Outlet />}
+        {refusal ? <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} /> :
+          world ? <Outlet /> : <Loading label="opening the world" />}
       </div>
     </div>
   );
 }
 
+/** The capsule stays put on desktop; a phone scrolls its pills independently of the page. */
+function WorldNavigation({ path, children }: { path: string; children: ReactNode }) {
+  const sentinel = useRef<HTMLSpanElement>(null);
+  const nav = useRef<HTMLElement>(null);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return;
+    const marker = sentinel.current!;
+    const observer = new IntersectionObserver(([entry]) => setStuck(!entry!.isIntersecting), {
+      root: marker.closest(".fy-content"),
+    });
+    observer.observe(marker);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (window.matchMedia?.("(max-width: 599px)").matches) {
+      nav.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "center" });
+    }
+  }, [path]);
+  return <>
+    <span ref={sentinel} className="fy-worldnav__sentinel" aria-hidden="true" />
+    <div className={cx("fy-worldnav", stuck && "fy-worldnav--stuck")}>
+      <nav ref={nav} className="fy-pillnav" aria-label="World">{children}</nav>
+    </div>
+  </>;
+}
+
 /** Staleness, closed-world edits and parse failures — stated, never silent. */
 function WorldConditionBanners() {
   const { worldId } = useParams();
+  const location = useLocation();
   const world = useWorld();
   const navigate = useNavigate();
   const clientState = useClientState();
   if (!world || world.meta.worldId !== worldId) return null;
   // The completion notice (SPEC-031 R-44..R-47): persists until dismissed or the work it
   // names is no longer outstanding, and its one action opens the screen that can act.
+  //
+  // On Overview and nowhere else (issue 1007). R-44 raises it on arrival at the world, and
+  // Overview is the arrival; drawing it on all nine tabs made it a permanent 110px band on
+  // top of nine screens laid out against the window, which is what pushed Save off the foot
+  // of the edit sheet, the composer off World Chat and the key art below the fold. It is one
+  // row now — title, cause, date, two presses — rather than a callout with a paragraph in it.
+  // Trailing slashes stripped, for the reason WorldLayout strips them: `/w/<id>/` is the
+  // Overview, and a typed address that ends in one must not be read as some other tab.
+  const onOverview = location.pathname.replace(/\/+$/, "") === `/w/${worldId}`;
   const build = clientState?.app.builds.find((candidate) => candidate.worldId === worldId) ?? null;
-  const notice = build ? foundingNote(build) : null;
+  const notice = onOverview && build ? foundingNote(build) : null;
+  // A problem is a file that could not be read and is skipped, or — the other kind — a record
+  // that loaded and stands but says the same word as another (two props on one mention, issue
+  // 1116). The second is not data lost, so it is not described as such.
+  const unreadable = world.problems.filter((problem) => problem.kind !== "conflict");
+  const conflicts = world.problems.filter((problem) => problem.kind === "conflict");
   const hasConditions = world.externalEdits.length > 0 || world.problems.length > 0 || notice !== null;
   if (!hasConditions) return null;
   return (
-    <div style={{ display: "grid", gap: "var(--space-3)", padding: "var(--space-4) var(--gutter) 0" }}>
+    <div className="fy-worldconditions">
       {notice && (
-        <Callout tone="warning" title={notice.title}>
-          {notice.reason}
-          <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-2)", alignItems: "center" }}>
-            <Button onClick={() => navigate(notice.action!.to)}>{notice.action!.label}</Button>
-            <Button variant="ghost" onClick={() => dismissBuildNotice(worldId!)}>
-              Dismiss
-            </Button>
-            <span className="mono" style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)" }}>
-              {notice.meta}
-            </span>
-          </div>
-        </Callout>
+        <div className="fy-buildnotice" role="status">
+          <span className="fy-buildnotice__dot" aria-hidden="true" />
+          <span className="fy-buildnotice__title">{notice.title}</span>
+          {notice.reason && <span className="fy-buildnotice__cause">{notice.reason}</span>}
+          {notice.meta !== "" && <span className="fy-buildnotice__when">{notice.meta}</span>}
+          {/* Activity is a panel over this screen (design turn 136): the notice opens it in place. */}
+          <button type="button" className="fy-buildnotice__act" onClick={() => followLink(navigate, notice.action!.to)}>
+            {notice.action!.label}
+          </button>
+          <button type="button" className="fy-buildnotice__act" onClick={() => dismissBuildNotice(worldId!)}>
+            Dismiss
+          </button>
+        </div>
       )}
       {world.externalEdits.length > 0 && (
         <Callout
@@ -258,7 +354,7 @@ function WorldConditionBanners() {
           their version, so the history still explains itself.
           <div style={{ display: "grid", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
             {world.externalEdits.map((e) => (
-              <div key={e.path} style={{ display: "flex", gap: "var(--space-3)", alignItems: "center" }}>
+              <div key={e.path} className="fy-worldconditions__edit">
                 <span className="mono" style={{ fontSize: "var(--text-xs)" }}>
                   {e.path} · {e.kind}
                 </span>
@@ -269,11 +365,23 @@ function WorldConditionBanners() {
           </div>
         </Callout>
       )}
-      {world.problems.length > 0 && (
-        <Callout tone="danger" title={`${world.problems.length} file(s) could not be read`}>
-          The rest of the world is open and usable; these files are skipped until fixed:
+      {unreadable.length > 0 && (
+        <Callout tone="danger" title={`${unreadable.length} file(s) could not be read`}>
+          These files are skipped until fixed:
           <div style={{ display: "grid", gap: "var(--space-1)", marginTop: "var(--space-2)" }}>
-            {world.problems.map((p) => (
+            {unreadable.map((p) => (
+              <span key={p.path} className="mono" style={{ fontSize: "var(--text-xs)" }}>
+                {p.path} — {p.message}
+              </span>
+            ))}
+          </div>
+        </Callout>
+      )}
+      {conflicts.length > 0 && (
+        <Callout tone="warning" title={`${conflicts.length} record(s) say the same word`}>
+          Loaded, and in use until renamed:
+          <div style={{ display: "grid", gap: "var(--space-1)", marginTop: "var(--space-2)" }}>
+            {conflicts.map((p) => (
               <span key={p.path} className="mono" style={{ fontSize: "var(--text-xs)" }}>
                 {p.path} — {p.message}
               </span>
@@ -334,9 +442,8 @@ export function WorldOverviewScreen() {
   // The world's own cast, not every sheet on disk: a production's guests live in the same
   // directories and would otherwise crowd the fan with people the world has never met
   // (SPEC-020 R-8).
-  const characters = worldSheets(world.sheets)
-    .filter((s) => s.type === "character" && s.retired !== true)
-    .slice(0, 5);
+  const cast = worldSheets(world.sheets).filter((s) => s.type === "character" && s.retired !== true);
+  const characters = cast.slice(0, 5);
   // The fan is where "1 awaiting you" and "No one lives here yet" used to sit on screen at the
   // same time, saying opposite things about the same world (issue 228). The one awaiting is a
   // character being drafted, so it takes a card in the fan like any other.
@@ -358,6 +465,7 @@ export function WorldOverviewScreen() {
   ];
   return (
     <div data-screen="world-overview">
+      <div className="fy-worldintro">
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">
           A world of yours · canon v{world.meta.canonRevision}
@@ -413,6 +521,10 @@ export function WorldOverviewScreen() {
           four controls over an image the hero does not even show, under the world's own title.
         */}
       </div>
+      <div className="fy-worldcast__head">
+        <span className="fy-hero__eyebrow">Cast · {cast.length}</span>
+        <Link to={`/w/${worldId}/cast`}>All <ArrowRight size={14} /></Link>
+      </div>
       <div className="fy-fan">
         {characters.map((sheet, i) => {
           const slot = FAN[i] ?? FAN[2]!;
@@ -420,7 +532,7 @@ export function WorldOverviewScreen() {
             <div
               key={sheet.id}
               className="fy-fan__slot"
-              style={{ marginLeft: slot.left, top: slot.top, zIndex: slot.z }}
+              style={{ "--fan-x": `${slot.left}px`, "--fan-y": `${slot.top}px`, "--fan-r": `${slot.rotate}deg`, zIndex: slot.z } as CSSProperties}
             >
               <div
                 className="fy-fan__drift"
@@ -428,7 +540,6 @@ export function WorldOverviewScreen() {
               >
                 <div
                   className="fy-polaroid"
-                  style={{ transform: `rotate(${slot.rotate}deg)` }}
                   onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}`)}
                 >
                   <div className="fy-polaroid__frame">
@@ -459,7 +570,7 @@ export function WorldOverviewScreen() {
             <div
               key={sheet.proposalId}
               className="fy-fan__slot"
-              style={{ marginLeft: slot.left, top: slot.top, zIndex: slot.z }}
+              style={{ "--fan-x": `${slot.left}px`, "--fan-y": `${slot.top}px`, "--fan-r": `${slot.rotate}deg`, zIndex: slot.z } as CSSProperties}
             >
               <div
                 className="fy-fan__drift"
@@ -467,7 +578,6 @@ export function WorldOverviewScreen() {
               >
                 <div
                   className="fy-polaroid fy-polaroid--pending"
-                  style={{ transform: `rotate(${slot.rotate}deg)` }}
                   onClick={() => navigate(pendingSheetRoute(worldId, sheet) ?? `/w/${worldId}/cast`)}
                 >
                   <div className="fy-polaroid__frame fy-polaroid__frame--pending">
@@ -526,6 +636,7 @@ export function WorldOverviewScreen() {
           </div>
           <Button variant="secondary">Write</Button>
         </div>
+      </div>
       </div>
       {/*
        * Below the fold (design 63b). Needs you, Open threads and Recent changes used to stack
@@ -652,12 +763,12 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
   const navigate = useNavigate();
   const productions = world.productions;
   return (
-    <section className="fy-wsection">
+    <section className="fy-wsection fy-wsection--productions">
       <SectionHead
         eyebrow="Productions"
         title="One world, many forms."
         aside={
-          <Button variant="secondary" onClick={() => navigate(`/w/${worldId}/productions/new`)}>
+          <Button className="fy-world-newproduction" variant="secondary" onClick={() => navigate(`/w/${worldId}/productions/new`)}>
             <Plus size={13} /> New production
           </Button>
         }
@@ -672,8 +783,8 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
           // Never a hole where a card is missing: two productions are two halves, not two thirds
           // of a row — the rule the location and faction grids already follow.
           style={{
-            gridTemplateColumns: `repeat(${Math.min(Math.max(productions.length, 2), 3)}, minmax(0, 1fr))`,
-          }}
+            "--cols": Math.min(Math.max(productions.length, 2), 3),
+          } as CSSProperties}
         >
           {productions.map((p) => {
             const shots = p.scenes.flatMap((s) => orderedShots(s));
@@ -731,6 +842,7 @@ const PROPOSAL_WHY: Record<string, string> = {
   "canon-settle": "a thread to settle",
   "chapter-draft": "drafted chapter",
   "story-overview": "story overview",
+  "prose-style": "prose style",
   "season-edit": "season change",
   "episode-edit": "episode change",
   "series-edit": "series change",
@@ -801,7 +913,11 @@ function NeedsYou({ worldId, world }: { worldId: string; world: WorldBundle }) {
  * Each ledger keeps its own address and presentation; this row is how you move between them,
  * with the counts carried so an empty kind says so before you visit it.
  */
-function SheetKindNav({ active }: { active: Sheet["type"] | "prop" }) {
+export function SheetKindNav({ active }: { active: Sheet["type"] | "prop" }) {
+  const nav = useRef<HTMLElement>(null);
+  useEffect(() => {
+    nav.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ inline: "center", block: "nearest" });
+  }, [active]);
   const { worldId } = useParams();
   const world = useWorld();
   // Props sit beside the sheets they are deliberately not one of (design turn 105; issue 537).
@@ -816,7 +932,7 @@ function SheetKindNav({ active }: { active: Sheet["type"] | "prop" }) {
     ["prop", "Props", "props"],
   ] as const;
   return (
-    <nav className="fy-sheetkinds" aria-label="Kind of sheet">
+    <nav ref={nav} className="fy-sheetkinds" aria-label="Kind of sheet">
       <div className="fy-seg">
         {items.map(([type, label, slug]) =>
           type === active ? (
@@ -903,11 +1019,9 @@ function pendingSheetState(activity: AuthoringActivity | undefined, destination:
 function PendingSheetCards({
   worldId,
   pending,
-  frameHeight,
 }: {
   worldId: string | undefined;
   pending: readonly PendingSheet[];
-  frameHeight: number;
 }) {
   const authoring = useAuthoring();
   const world = useWorld();
@@ -931,7 +1045,7 @@ function PendingSheetCards({
             }}
             aria-label={`${sheet.name} — ${state.foot}. ${destination === "here" ? "Review here" : destination === "conversation" ? "Open conversation" : "Open Approvals"}.`}
           >
-            <div className="fy-gridcard__frame fy-gridcard__frame--pending" style={{ height: frameHeight }}>
+            <div className="fy-gridcard__frame fy-gridcard__frame--pending">
               {state.tone === "live" ? (
                 <Loading label={`Drafting ${sheet.name}`} size={40} />
               ) : (
@@ -946,7 +1060,7 @@ function PendingSheetCards({
                 <span className={`fy-dot fy-dot--${state.tone}`} style={{ width: 6, height: 6 }} />
               </div>
               <div className="fy-gridcard__body">{state.body}</div>
-              <div className="fy-gridcard__foot" style={{ marginTop: 9 }}>
+              <div className="fy-gridcard__foot fy-gridcard__foot--spaced">
                 {state.foot}
               </div>
             </div>
@@ -1059,6 +1173,8 @@ function SheetGrid({
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const sheetRefs = useSheetRefs();
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
   // Ledgers are the world's, so guests are absent from the list and from both tallies — a
   // retired count that included another production's one-offs would not add up to anything the
   // user could click through to (SPEC-020 R-8).
@@ -1105,6 +1221,13 @@ function SheetGrid({
     if (!worldId) return;
     for (const sheet of sheets) requestSheetRefs(worldId, sheet.id);
   }, [worldId, sheets.map((sheet) => sheet.id).join("|")]);
+  const ledgerHead = <div className="fy-ledgerhead">
+    <div className="fy-ledgerhead__copy">
+      <span className="fy-ledgerhead__label">{kind === "character" ? "The cast" : title} · {sheets.length}</span>
+      <span className="fy-ledgerhead__meta">{locked} canon-locked · {sketches} sketch{sketches === 1 ? "" : "es"}{retired > 0 ? ` · ${retired} retired` : ""}{pendingSuffix(pending)}</span>
+    </div>
+    <Button variant="primary" className="fy-kind-new" onClick={() => navigate(newPath)}><Plus /> New</Button>
+  </div>;
   return (
     <div data-screen={screenId}>
       <div className="fy-corner">
@@ -1113,6 +1236,7 @@ function SheetGrid({
         </Button>
       </div>
       <SheetKindNav active={kind} />
+      {(phone || (compact && sheets.length === 0 && pending.length === 0)) && <div className="fy-cast-mobile-head">{ledgerHead}</div>}
       {/* An empty state means "nothing here", never "something is on its way" (issue 228). One
           drafting row is enough to make this list a list. */}
       {sheets.length === 0 && pending.length === 0 ? (
@@ -1148,16 +1272,19 @@ function SheetGrid({
                     />
                   )}
                 </div>
+                <div className="fy-feature__copy">
                 <div className="fy-feature__title">
-                  {featured.name}
+                  <span>{featured.name}</span>
                   <span
                     className={cx("fy-dot", featured.status === "locked" ? "fy-dot--ok" : "fy-dot--sketch")}
                   />
                   <span className="fy-feature__note">
+                    <span className={`fy-dot fy-feature__status-dot fy-dot--${featured.status === "locked" ? "ok" : "sketch"}`} />
                     {featured.status === "locked" ? "canon locked" : "sketch"}
                   </span>
                 </div>
                 <div className="fy-feature__sub">{limitedFeatureCopy(featureCopy(featured))}</div>
+                </div>
                 <div className="fy-feature__actions">
                   <Button variant="primary" size="sm" onClick={() => navigate(detailPath(featured.id))}>
                     Open sheet
@@ -1176,16 +1303,7 @@ function SheetGrid({
             </div>
           )}
           <div className="fy-split__main">
-            <div className="fy-ledgerhead">
-              <span className="fy-ledgerhead__label">
-                {kind === "character" ? "The cast" : title} · {sheets.length}
-              </span>
-              <span className="fy-ledgerhead__meta">
-                {locked} canon-locked · {sketches} sketch{sketches === 1 ? "" : "es"}
-                {retired > 0 ? ` · ${retired} retired` : ""}
-                {pendingSuffix(pending)}
-              </span>
-            </div>
+            {!phone && ledgerHead}
             <div className="fy-ledger">
               <PendingSheetRows worldId={worldId} pending={pending} />
               {sheets.map((sheet) => (
@@ -1210,27 +1328,25 @@ function SheetGrid({
                       radius={6}
                     />
                   </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div className="fy-row__name">
-                      {sheet.name}
-                      <span
-                        className={cx("fy-dot", sheet.status === "locked" ? "fy-dot--ok" : "fy-dot--sketch")}
-                        style={{ width: 6, height: 6 }}
-                        aria-hidden="true"
-                      />
-                    </div>
+                  <div className="fy-row__copy" style={{ minWidth: 0 }}>
+                    <div className="fy-row__name">{sheet.name}</div>
                     <div className="fy-row__sub">{roleOf(sheet)}</div>
                   </div>
-                  <span className="fy-row__meta">{reachOf(sheet)}</span>
+                  {/*
+                    The status is a word, not a tint (issue 1010, U3). A dot after every name on a
+                    list of names is the same colour on most of them and carries no key, so it
+                    reads as decoration; the head above already counts the two states, and the
+                    row's own strip is where the rest of its facts are.
+                  */}
+                  <span className="fy-row__meta">
+                    {sheet.status === "locked" ? "locked" : "sketch"} · {reachOf(sheet)}
+                  </span>
                   <span className="fy-row__chev">
                     <ChevronRight />
                   </span>
                 </button>
               ))}
             </div>
-            <p className="fy-footnote">
-              Everything you produce pulls from these sheets: change one here and it changes everywhere.
-            </p>
           </div>
         </div>
       )}
@@ -1245,7 +1361,7 @@ export function CastScreen() {
       kind="character"
       screenId="cast"
       title="Cast"
-      hint="Characters carry essence, appearance, relationships and a voice."
+      hint="Start with a sentence."
       newPath={`/w/${worldId}/cast/new`}
       detailPath={(id) => `/w/${worldId}/cast/${id}`}
     />
@@ -1273,6 +1389,7 @@ function firstSentence(text: string): string {
 }
 
 export function LocationsScreen() {
+  const phone = useMediaQuery("(max-width: 599px)");
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
@@ -1286,28 +1403,23 @@ export function LocationsScreen() {
         </Button>
       </div>
       <SheetKindNav active="location" />
-      <div className="fy-hero">
+      <div className="fy-hero fy-kind-head">
         <div className="fy-hero__eyebrow">
-          {world?.meta.name} · {places.length} place{places.length === 1 ? "" : "s"}
+          {phone ? `${places.filter(s => s.status === "locked").length} canon-locked · ${places.filter(s => s.status !== "locked").length} sketches` : `${world?.meta.name} · ${places.length} place${places.length === 1 ? "" : "s"}`}
           {pendingSuffix(pending)}
         </div>
-        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
-          Locations
+        <h1 className="fy-hero__title fy-kind-title">
+          {phone ? `Places · ${places.length}` : "Locations"}
         </h1>
-        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 480 }}>
-          Every place is a sheet, look, sound, customs. Scenes inherit them; generations cite them.
-        </p>
+        <Button variant="primary" className="fy-kind-new" onClick={() => navigate(`/w/${worldId}/locations/new`)}><Plus /> New</Button>
       </div>
       <div
-        className="fy-cardgrid"
-        style={{
-          gridTemplateColumns: `repeat(${Math.min(Math.max(places.length + pending.length, 2), 4)}, minmax(0, 1fr))`,
-        }}
+        className={`fy-cardgrid fy-location-grid fy-kind-grid fy-kind-grid--${Math.min(Math.max(places.length + pending.length, 2), 4)}`}
       >
         {/* Pending cards lead, and it has to be the markup rather than a comment: a world with
             a screen's worth of places would otherwise put the one just submitted below the
             fold, which is the same "did that work?" the empty state caused (issue 228). */}
-        <PendingSheetCards worldId={worldId} pending={pending} frameHeight={270} />
+        <PendingSheetCards worldId={worldId} pending={pending} />
         {places.map((s) => (
           <button
             key={s.id}
@@ -1315,7 +1427,7 @@ export function LocationsScreen() {
             className="fy-gridcard fy-gridcard--media fy-gridcard--fixed"
             onClick={() => navigate(`/w/${worldId}/locations/${s.id}`)}
           >
-            <div className="fy-gridcard__frame" style={{ height: 270 }}>
+            <div className="fy-gridcard__frame">
               <Portrait
                 worldSlug={world?.meta.slug}
                 path={locationPortraitPath(world, s.id)}
@@ -1323,15 +1435,12 @@ export function LocationsScreen() {
               />
             </div>
             <div className="fy-gridcard__pad">
+              {/* No dot: the foot two lines below already says locked or sketch (issue 1010). */}
               <div className="fy-gridcard__title">
                 <span className="fy-gridcard__name">{s.name}</span>
-                <span
-                  className={`fy-dot fy-dot--${s.status === "locked" ? "ok" : "sketch"}`}
-                  style={{ width: 6, height: 6 }}
-                />
               </div>
               <div className="fy-gridcard__body">{sheetLede(s)}</div>
-              <div className="fy-gridcard__foot" style={{ marginTop: 9 }}>
+              <div className="fy-gridcard__foot fy-gridcard__foot--spaced">
                 {s.status === "locked" ? `locked · v${s.version}` : `sketch · v${s.version}`}
                 {s.canonRules.length > 0 ? ` · ${s.canonRules.join(", ")}` : ""}
               </div>
@@ -1358,26 +1467,20 @@ export function FactionsScreen() {
   return (
     <div data-screen="factions">
       <SheetKindNav active="faction" />
-      <div className="fy-hero">
+      <div className="fy-hero fy-kind-head">
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {factions.length} faction{factions.length === 1 ? "" : "s"}
           {pendingSuffix(pending)}
         </div>
-        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+        <h1 className="fy-hero__title fy-kind-title">
           Factions
         </h1>
-        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 460 }}>
-          Who wants what, and what they'd never admit. Scenes borrow their pressure.
-        </p>
+        <Button variant="primary" className="fy-kind-new" onClick={() => navigate(`/w/${worldId}/factions/new`)}><Plus /> New</Button>
       </div>
       <div
-        className="fy-cardgrid"
-        style={{
-          gridTemplateColumns: `repeat(${Math.min(Math.max(factions.length + pending.length, 2), 3)}, minmax(0, 1fr))`,
-          padding: "32px 150px 46px",
-        }}
+        className={`fy-cardgrid fy-faction-grid fy-kind-grid fy-kind-grid--${Math.min(Math.max(factions.length + pending.length, 2), 3)}`}
       >
-        <PendingSheetCards worldId={worldId} pending={pending} frameHeight={210} />
+        <PendingSheetCards worldId={worldId} pending={pending} />
         {factions.map((s) => {
           const wants = facet(s, "want");
           const fears = facet(s, "fear");
@@ -1388,20 +1491,17 @@ export function FactionsScreen() {
               className="fy-gridcard fy-gridcard--media fy-gridcard--fixed fy-gridcard--fixed-faction"
               onClick={() => navigate(`/w/${worldId}/factions/${s.id}`)}
             >
-              <div className="fy-gridcard__frame" style={{ height: 210 }}>
+              <div className="fy-gridcard__frame">
                 <Portrait
                   worldSlug={world?.meta.slug}
                   path={sheetPortraitPath(s.id)}
                   label={`${s.name}: emblem or scene`}
                 />
               </div>
-              <div className="fy-gridcard__pad" style={{ padding: "2px 8px 0" }}>
+              <div className="fy-gridcard__pad">
+                {/* No dot: the foot says locked or sketch in words (issue 1010). */}
                 <div className="fy-gridcard__title">
                   <span className="fy-gridcard__name">{s.name}</span>
-                  <span
-                    className={`fy-dot fy-dot--${s.status === "locked" ? "ok" : "sketch"}`}
-                    style={{ width: 6, height: 6 }}
-                  />
                 </div>
                 <div className="fy-gridcard__body">{sheetLede(s)}</div>
                 {/*
@@ -1467,6 +1567,7 @@ function VoiceCard({
   onChange: () => void;
 }) {
   const voice = sheet.voice;
+  const models = useStore().state?.app.manifest?.models ?? [];
   const world = useWorld();
   const sample = world?.referenceKits.find(k => k.sheetId === sheet.id)?.designatedVoiceSample;
   const sampleClip: Clip | null = sample ? { id: `${sheet.id}/${sample.file}`, url: mediaUrl(worldSlug, `references/${sheet.id}/${sample.file}`), title: `${sheet.name} · assigned voice reference` } : null;
@@ -1479,6 +1580,7 @@ function VoiceCard({
   const [uploadConfirmation, setUploadConfirmation] = useState<{
     destinationLabel: string;
     confirmationToken: string;
+    destinationNotice?: string;
   } | null>(null);
   const played = useRef<string | null>(null);
   const voiceModel = voice
@@ -1548,7 +1650,7 @@ function VoiceCard({
           <Button variant="ghost" disabled={busy} onClick={() => start()}>
             {busy
               ? "Preparing…"
-              : `Hear this voice${cloudPrice !== null ? ` · ${formatMicroUsd(cloudPrice)}` : ""}`}
+              : `Hear this voice${cloudPrice !== null ? ` · ${models.some(model => model.provider === voice.provider && model.id === voiceModel && model.pricing.kind === "perToken") ? "up to " : ""}${formatMicroUsd(cloudPrice)}` : ""}`}
           </Button>
         ) : (
           voice &&
@@ -1574,11 +1676,11 @@ function VoiceCard({
                 : "Assign a recorded reference or choose a text-to-speech voice"}
           </div>
           {voice && !sample && (
-            <div style={{ color: "var(--neutral-400)", marginTop: 6, overflow: "hidden" }}>
+            <div className="fy-voicecard__wave">
               <Wave
                 seed={`${voice.provider}/${voiceModel ?? "legacy"}/${voice.voiceId}`}
-                width={290}
                 height={22}
+                stretch
               />
             </div>
           )}
@@ -1590,6 +1692,7 @@ function VoiceCard({
       {uploadConfirmation && (
         <RemoteVoiceUploadConfirmation
           destinationLabel={uploadConfirmation.destinationLabel}
+          destinationNotice={uploadConfirmation.destinationNotice}
           onCancel={() => {
             setUploadConfirmation(null);
             pendingRequest.current = null;
@@ -1608,6 +1711,8 @@ function VoiceCard({
 }
 
 function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: string }) {
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
   const { worldId, sheetId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const sheet = useSheet(worldId, sheetId);
@@ -1619,6 +1724,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   // Look and a faction's Wants are prose of the same kind, on screens that could not be heard.
   const [read, setRead] = useState<{ requestId: string; section: string } | null>(null);
   const readResult = read ? voiceAudio[read.requestId] : undefined;
+  const [submittedRead, setSubmittedRead] = useState<string | null>(null);
   // Reading a section aloud is narration, not dialogue: it uses the app's narrator, so it does
   // not depend on this character having a voice of their own. Gating it on `sheet.voice` was
   // the client half of the same mistake the coordinator made — prose ABOUT somebody read in
@@ -1628,8 +1734,39 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
     narrator && !supportsVoiceUse(narrator, "narration")
       ? DEFAULT_NARRATOR.label
       : (narrator?.label ?? narrator?.voiceId ?? DEFAULT_NARRATOR.label);
+  /*
+   * A long section arrives in pieces — a local read's synthesis chunks, and a cloud read over
+   * its reader's cap (issue 1208) — each queued as it lands so the first sounds while the rest
+   * are still being made; the player walks on to the next. This screen used to play only the
+   * newest event, so a second piece replaced the first mid-sentence. A short section still
+   * arrives whole and takes the single-clip path below, unchanged.
+   *
+   * Cloud pieces land in whatever order the reader finishes them, so the effect follows how
+   * many exist rather than how far the array reaches (codex on PR 1210): a second piece landing
+   * first fills the array to its final length, and the first piece filling the gap behind it
+   * would otherwise change nothing the effect watches.
+   */
+  const parts = useVoiceParts()[read?.requestId ?? ""] ?? [];
+  const landed = parts.filter((file) => file !== undefined).length;
+  const queued = useRef(0);
+  useEffect(() => {
+    if (!read || !world || !sheet) return;
+    for (let i = queued.current; i < parts.length; i += 1) {
+      const file = parts[i];
+      if (file === undefined) return; // a gap means the piece is still being made; wait for it
+      void enqueueClip({
+        id: read.requestId,
+        url: mediaUrl(world.meta.slug, file),
+        title: `${sheet.name} · ${read.section}`,
+        sub: `read aloud · ${narratorLabel}`,
+        part: i,
+      });
+      queued.current = i + 1;
+    }
+  }, [read?.requestId, read?.section, landed, world?.meta.slug, sheet?.name, narratorLabel]);
   // A read the user asked for plays as soon as it lands, rather than making them click twice.
   useEffect(() => {
+    if (parts.length > 0) return; // a streamed read is already sounding
     if (read && readResult?.status === "ready" && readResult.file && world && sheet) {
       void playClip({
         id: readResult.requestId,
@@ -1643,6 +1780,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
     readResult?.requestId,
     readResult?.status,
     readResult?.file,
+    parts.length,
     world?.meta.slug,
     sheet?.name,
     narratorLabel,
@@ -1682,6 +1820,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const [renaming, setRenaming] = useState<string | null>(null);
   const [duplicating, setDuplicating] = useState<string | null>(null);
   const lifecycle = useSingleAct();
+  const { talk: talkAboutSheet, starting: sheetTalkStarting } = useTalkItThrough(worldId);
 
   useEffect(() => {
     if (worldId && sheetId) requestSheetRefs(worldId, sheetId);
@@ -1699,11 +1838,6 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const sheetPath = `${sheet.type === "character" ? "characters" : `${sheet.type}s`}/${sheet.id}.md`;
   const refs = sheetRefsMap[sheet.id];
   const isCharacter = sheet.type === "character";
-  /**
-   * The sheet is in front of them, so the conversation should start knowing that rather than
-   * making them describe the character they were just reading.
-   */
-  const { talk: talkAboutSheet, starting: sheetTalkStarting } = useTalkItThrough(worldId);
   const mainPhoto = kit ? mainPhotoFor(kit) : null;
   const characterSheet = kit ? designatedCompilation(kit) : null;
   const slug = world.meta.slug;
@@ -1727,32 +1861,30 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
       if (!worldId) return;
       // A second read replaces the first: two voices over one another is never what was meant.
       pageRead.stop();
+      queued.current = 0;
+      clearQueue();
       setRead({ requestId: readSheetSection(worldId, sheet.id, heading), section: heading });
     };
-    const note =
-      active?.status === "confirmation-required" ? (
-        <span className="fy-textactions__note">
-          Exact {heading} will be sent to ElevenLabs and retained in Activity.
-          <Button
-            onClick={() => {
-              if (worldId && read && active.confirmationToken)
-                readSheetSection(worldId, sheet.id, heading, read.requestId, active.confirmationToken);
-            }}
-          >
-            Confirm {active.characterCount} characters · {formatMicroUsd(active.estimatedMicroUsd)}
-          </Button>
-        </span>
-      ) : read?.section === heading && !active ? (
-        <span className="fy-textactions__note">Preparing audio…</span>
-      ) : undefined;
-    return { clip, onRead, note };
+    const quote = `${read?.requestId}:${active?.confirmationToken ?? ""}`;
+    const confirmation = active?.status === "confirmation-required" && quote !== submittedRead ? (
+      <ReadAloudConfirmation title={`${sheet.name} · ${heading}`} result={active} onCancel={() => setRead(null)} onConfirm={token => {
+        if (worldId && read) {
+          setSubmittedRead(quote);
+          readSheetSection(worldId, sheet.id, heading, read.requestId, token);
+        }
+      }} />
+    ) : null;
+    const note = read?.section === heading && (!active || (active.status === "confirmation-required" && submittedRead === quote))
+      ? <span className="fy-textactions__note">Preparing audio…</span> : undefined;
+    return { clip, onRead, note, confirmation };
   };
   // Text with the hover read-aloud/copy affordance (design 3a). The prose element differs by
   // section — a lead paragraph, a grid cell — so the caller passes it; the host is the same.
   const readableProse = (heading: string, body: string, prose: ReactNode) => {
-    const { clip, onRead, note } = sectionAudio(heading);
+    const { clip, onRead, note, confirmation } = sectionAudio(heading);
     return (
       <div className="fy-texthost">
+        {confirmation}
         {prose}
         <TextActions clip={clip} onRead={onRead} copyText={body} readLabel="Read aloud" note={note} />
         {read?.section === heading && readResult?.status === "failed" && (
@@ -1797,8 +1929,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           </div>
           <div className="fy-designcard__caption">
             <span className="fy-designcard__title">Main photo</span>
-            <span className={`fy-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />
-            <span className="fy-designcard__note">{mainPhoto ? "identity anchor" : "outstanding"}</span>
+            <span className={`fy-dot fy-designcard__desktop-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />
+            <span className="fy-designcard__note"><span className={`fy-dot fy-designcard__compact-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />{mainPhoto ? "identity anchor" : "outstanding"}</span>
           </div>
         </div>
       </div>
@@ -1817,29 +1949,47 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         </span>
         <strong>Character sheet</strong>
         <small>{characterSheet ? "accepted · current" : "outstanding"}</small>
+        <span className="fy-overview-sheet__chevron"><ChevronRight /></span>
       </button>
     </div>
   ) : null;
+  const characterTabs = isCharacter && (
+    <nav className="fy-seg fy-character-overview-tabs" aria-label="Character pages">
+      <span className="fy-seg__item fy-seg__item--active" aria-current="page">Overview</span>
+      <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}>
+        Reference
+      </button>
+      <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/looks`)}>
+        More looks
+      </button>
+      <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}>
+        Voice
+      </button>
+    </nav>
+  );
+  const sheetHeading = (
+    <h1
+      className={isCharacter ? "fy-sheet__name" : "fy-locdetail__name"}
+      style={isCharacter ? undefined : { marginTop: 10 }}
+    >
+      {sheet.name}
+    </h1>
+  );
+  const header = <div className="fy-sheet__header">
+    <div className="fy-sheet__eyebrow">{sheet.type}{sheet.role ? ` · ${sheet.role}` : ""}</div>
+    {isCharacter ? <div className="fy-sheet__heading">{sheetHeading}{characterTabs}</div> : sheetHeading}
+  </div>;
   const main = (
     <div
       className={isCharacter ? "fy-sheet__main" : undefined}
       style={isCharacter ? undefined : { display: "grid", gap: "var(--space-4)", alignContent: "start" }}
     >
       <div>
-        <div className="fy-sheet__eyebrow">
-          {sheet.type}
-          {sheet.role ? ` · ${sheet.role}` : ""}
-        </div>
-        <h1
-          className={isCharacter ? "fy-sheet__name" : "fy-locdetail__name"}
-          style={isCharacter ? undefined : { marginTop: 10 }}
-        >
-          {sheet.name}
-        </h1>
+        {!(phone && isCharacter) && header}
         <div className="fy-sheet__badges">
-          <Badge tone={sheet.status === "sketch" ? "outline" : "neutral"}>
+          {compact && isCharacter ? <><Badge tone="outline">v{sheet.version}</Badge><Badge tone="outline">{sheet.status === "locked" && <Lock size={10} />}{sheet.status === "locked" ? "locked" : "sketch"}</Badge></> : <Badge tone={sheet.status === "sketch" ? "outline" : "neutral"}>
             {sheet.status === "sketch" ? `sketch · v${sheet.version}` : `v${sheet.version} · locked`}
-          </Badge>
+          </Badge>}
           {sheet.retired && <Badge tone="danger">retired</Badge>}
           {/* A guest reached from the world's own address says whose it is, or the sheet reads
                 as a member of a cast it was deliberately kept out of (SPEC-020 R-10). */}
@@ -1856,28 +2006,36 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         {/* Reference, More looks and Voice live in the tab row (design 54): a destination
               appears once per screen, so this row keeps only what the tabs do not offer. */}
         <Button
+          variant={compact && isCharacter ? "primary" : "secondary"}
           onClick={() =>
             navigate(
               `/w/${worldId}/${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${sheet.id}/edit`,
             )
           }
         >
-          Edit the sheet
+          {compact && isCharacter && <Pencil />} Edit the sheet
         </Button>
         <Button
+          className="fy-sheet__icon-action"
+          aria-label={sheetTalkStarting ? "Starting…" : sheet.type === "character" ? "Talk about them" : "Talk about it"}
           onClick={() =>
             talkAboutSheet(sheet.name, { kind: "sheet", sheetKind: sheet.type, sheetId: sheet.id })
           }
           disabled={sheetTalkStarting}
         >
-          {sheetTalkStarting ? "Starting…" : "Talk about them"}
+          <span className="fy-sheet__action-icon"><Message /></span>
+          <span className="fy-sheet__action-label">{sheetTalkStarting ? "Starting…" : sheet.type === "character" ? "Talk about them" : "Talk about it"}</span>
         </Button>
         {/* Page scale (issue 859). The speaker on each paragraph reads that paragraph; this
               reads the sheet through, in the order declared above. Offered only when there is
               more than one block — a page read of one block is the block read with more words
               on the button. */}
-        {pageBlocks.length > 1 && <PageReadControl read={pageRead} label="Read the sheet" />}
+        {pageBlocks.length > 1 && (compact && isCharacter && !pageRead.reading
+          ? <IconButton label="Read the sheet" onClick={pageRead.begin}><Speaker /></IconButton>
+          : <PageReadControl read={pageRead} label="Read the sheet" />)}
         <Button
+          className="fy-sheet__icon-action"
+          aria-label={sheet.status === "locked" ? "Unlock" : "Lock to canon"}
           onClick={() => {
             if (!worldId) return;
             lifecycle.track(setSheetStatus(worldId, sheetPath, sheet.status === "locked" ? "sketch" : "locked"));
@@ -1888,7 +2046,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
               : "Locking makes the identity settled — no image required first"
           }
         >
-          {sheet.status === "locked" ? "Unlock" : "Lock to canon"}
+          <span className="fy-sheet__action-icon"><Lock /></span>
+          <span className="fy-sheet__action-label">{sheet.status === "locked" ? "Unlock" : "Lock to canon"}</span>
         </Button>
       </div>
       {isCharacter && (
@@ -1899,44 +2058,52 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           onChange={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}
         />
       )}
+      {/* A second row of words under three primary buttons read as six things to do rather than
+          three and a housekeeping drawer (issue 1010, U1). The verbs are their own glyphs now,
+          with the word — and, where it earns one, the consequence — in the tip. */}
       <div className="fy-sheet__quiet">
-        <Button variant="ghost" onClick={() => setRenaming(renaming === null ? sheet.name : null)}>
-          Rename
-        </Button>
-        <Button
-          variant="ghost"
+        <IconButton
+          label="Rename"
+          aria-pressed={renaming !== null}
+          onClick={() => setRenaming(renaming === null ? sheet.name : null)}
+        >
+          <Pencil />
+        </IconButton>
+        <IconButton
+          label="Duplicate"
+          aria-pressed={duplicating !== null}
           onClick={() => setDuplicating(duplicating === null ? `${sheet.name} (copy)` : null)}
         >
-          Duplicate
-        </Button>
+          <Copy />
+        </IconButton>
         {/* One way only (SPEC-020 R-15, D7): a sheet promoted by mistake is retired, because
               demotion would either break the citations outside the production or need an
               exception for widely-cited guests. */}
         {sheet.production !== undefined && (
-          <Button
-            variant="ghost"
+          <IconButton
+            label="Promote to the world"
+            hint={`out of ${sheet.production}, keeping the id, every citation and the reference kit`}
             onClick={() => worldId && lifecycle.track(promoteGuest(worldId, sheetPath))}
-            title={`Moves ${sheet.name} out of ${sheet.production} and into the world's cast — the id, every citation and the reference kit stay`}
           >
-            Promote to the world
-          </Button>
+            <Users />
+          </IconButton>
         )}
-        <Button
-          variant="ghost"
+        <IconButton
+          label="Retire"
+          hint="stays resolvable for existing citations; leaves pickers for new work"
           disabled={sheet.retired === true}
           onClick={() => worldId && retireEntity(worldId, sheetPath)}
-          title="Stays resolvable for existing citations; leaves pickers for new work"
         >
-          Retire
-        </Button>
+          <Archive />
+        </IconButton>
       </div>
       {renaming !== null && (
-        <Card className="scr-form">
+        <Card className="scr-form fy-sheet-inline-form">
           <div className="scr-field">
             <label className="scr-field__label">New name — the id and every citation stay</label>
             <Input value={renaming} onChange={(e) => setRenaming(e.target.value)} />
           </div>
-          <div style={{ display: "flex", gap: "var(--space-2)" }}>
+          <div className="fy-sheet-inline-form__actions">
             <Button
               variant="primary"
               disabled={renaming.trim().length === 0 || renaming.trim() === sheet.name}
@@ -1953,14 +2120,14 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         </Card>
       )}
       {duplicating !== null && (
-        <Card className="scr-form">
+        <Card className="scr-form fy-sheet-inline-form">
           <div className="scr-field">
             <label className="scr-field__label">
               Duplicate as — a sketch recording its origin at v{sheet.version}; {sheet.name} is untouched
             </label>
             <Input value={duplicating} onChange={(e) => setDuplicating(e.target.value)} />
           </div>
-          <div style={{ display: "flex", gap: "var(--space-2)" }}>
+          <div className="fy-sheet-inline-form__actions">
             <Button
               variant="primary"
               disabled={duplicating.trim().length === 0}
@@ -1997,15 +2164,10 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           const body = <div className="fy-sheet__secbody">{s.body}</div>;
           return (
             <div key={s.heading}>
-              <div className="fy-sheet__sechead" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {s.heading}
-                {!isCharacter && (
-                  <span
-                    className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`}
-                    style={{ width: 5, height: 5 }}
-                  />
-                )}
-              </div>
+              {/* Every heading on a location record used to carry the sheet's status as a dot —
+                  the same colour on all of them, saying once per section what the badge under the
+                  name says once for the record (issue 1010, U3). */}
+              <div className="fy-sheet__sechead">{s.heading}</div>
               {readable ? readableProse(s.heading, s.body, body) : body}
             </div>
           );
@@ -2015,22 +2177,22 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         <Section title="Canon rules" aside={<span>owned by canon — edit in canon, not here</span>}>
           {rules.map((rule) => (
             <div key={rule.id} className="scr-canonrule">
-              <span className="mono" style={{ color: "var(--muted-foreground)" }}>
-                {rule.id}
-              </span>
+              {compact ? (
+                <button className="fy-sheet-canon-link mono" aria-label={`Edit ${rule.id} in canon`} onClick={() => navigate(`/w/${worldId}/canon/${rule.id}`)}>{rule.id}</button>
+              ) : <span className="mono" style={{ color: "var(--muted-foreground)" }}>{rule.id}</span>}
               <span className="scr-prose">{rule.body}</span>
-              <span className="scr-canonrule__note">
+              {!compact && <span className="scr-canonrule__note">
                 <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/canon/${rule.id}`)}>
                   Edit in canon →
                 </Button>
-              </span>
+              </span>}
             </div>
           ))}
         </Section>
       )}
       {(sheet.links.length > 0 || (refs?.incomingLinks.length ?? 0) > 0) && (
         <Section title="Linked">
-          <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+          <div className="fy-sheet-links">
             {sheet.links.map((link) => {
               const other = world.sheets.find((s) => s.id === link);
               if (!other)
@@ -2044,8 +2206,10 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
                 <Button
                   key={link}
                   variant="secondary"
+                  className="fy-sheet-link"
                   onClick={() => navigate(`/w/${worldId}/${base}/${link}`)}
                 >
+                  <span className="fy-sheet-link__face"><Portrait worldSlug={slug} path={sheetPortraitPath(other.id)} label="" radius={16} /></span>
                   {other.name} →
                 </Button>
               );
@@ -2056,7 +2220,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
                 const other = world.sheets.find((s) => s.id === id);
                 const base = other ? (other.type === "character" ? "cast" : `${other.type}s`) : "cast";
                 return (
-                  <Button key={id} variant="ghost" onClick={() => navigate(`/w/${worldId}/${base}/${id}`)}>
+                  <Button key={id} variant="ghost" className="fy-sheet-link" onClick={() => navigate(`/w/${worldId}/${base}/${id}`)}>
+                    {other && <span className="fy-sheet-link__face"><Portrait worldSlug={slug} path={sheetPortraitPath(other.id)} label="" radius={16} /></span>}
                     ← {other?.name ?? id}
                   </Button>
                 );
@@ -2097,36 +2262,11 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   );
   if (isCharacter) {
     return (
-      <>
-        <nav className="fy-seg fy-character-overview-tabs">
-          <span className="fy-seg__item fy-seg__item--active">Overview</span>
-          <button
-            type="button"
-            className="fy-seg__item"
-            onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}
-          >
-            Reference
-          </button>
-          <button
-            type="button"
-            className="fy-seg__item"
-            onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/looks`)}
-          >
-            More looks
-          </button>
-          <button
-            type="button"
-            className="fy-seg__item"
-            onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}
-          >
-            Voice
-          </button>
-        </nav>
-        <div className="fy-sheet" data-screen={screenId}>
-          {side}
-          {main}
-        </div>
-      </>
+      <div className="fy-sheet" data-screen={screenId}>
+        {phone && header}
+        {side}
+        {main}
+      </div>
     );
   }
   // Locations and factions (prototype 23b): full-height establishing view, facts to the right.
@@ -2364,11 +2504,14 @@ export function CharacterEditScreen() {
                     placeholder="Tide-caller"
                     onChange={(e) => setEditedRole(e.target.value)}
                   />
-                  <span className="fy-mono" style={{ display: "block", marginTop: 6 }}>
-                    the one line under their name on the world hub — short enough to read at a glance
-                  </span>
                 </div>
               )}
+              {/*
+                A sheet's sections are paragraphs, not a line each, and the shared textarea's
+                112px showed about four lines of them behind an inner scrollbar — two nested
+                scrollers on a page that already scrolls (issue 1007). The editor is the point
+                of this screen, so it gets the room; the column scrolls, as it did.
+              */}
               {sections.map((s, i) => {
                 const isChanged = s.body !== sheet?.sections[i]?.body;
                 return (
@@ -2378,6 +2521,7 @@ export function CharacterEditScreen() {
                       {isChanged && <span className="fy-changedtag">· changed</span>}
                     </div>
                     <Textarea
+                      className="fy-sheetedit__prose"
                       value={s.body}
                       onChange={(e) => setEdited((prev) => ({ ...prev, [s.heading]: e.target.value }))}
                     />
@@ -2388,13 +2532,7 @@ export function CharacterEditScreen() {
           ) : (
             <>
               {transcript.length === 0 && (
-                <div className="fy-bubble--gate">
-                  Tell the studio what has changed. It drafts inside a proposal — its own copy of this sheet —
-                  and reads the rest of the world through canon search, never the folder.
-                  <div className="fy-bubble__note">
-                    you accept or discard the result · nothing lands until then
-                  </div>
-                </div>
+                <div className="fy-bubble--gate">What has changed?</div>
               )}
               {transcript.map((turn, i) => (
                 <div
@@ -2522,16 +2660,8 @@ export function CharacterEditScreen() {
             </div>
           ))}
           {changedCount === 0 && (
-            <div className="fy-mono" style={{ marginTop: 12 }}>
-              nothing changed yet — edits preview here before they save
-            </div>
+            <div className="fy-mono" style={{ marginTop: 12 }}>nothing changed yet</div>
           )}
-        </div>
-        <div className="fy-draftcard">
-          <div style={{ font: "600 13px var(--font-sans)" }}>After save</div>
-          <div className="fy-mono" style={{ marginTop: 10 }}>
-            ripples are computed under the world lock · any non-empty result appears here after the edit lands
-          </div>
         </div>
         <div style={{ flex: 1, minHeight: 16 }} />
         <div style={{ display: "grid", gap: 8 }}>
@@ -2575,542 +2705,6 @@ export function CharacterEditScreen() {
 }
 
 // ---- Voice ----------------------------------------------------------------
-
-export function VoicePickerScreen() {
-  const { worldId, sheetId } = useParams();
-  const world = useOpenWorldGuard(worldId);
-  const navigate = useNavigate();
-  const sheet = useSheet(worldId, sheetId);
-  const [provider, setProvider] = useState<"kokoro" | "elevenlabs">("elevenlabs");
-  const [voiceId, setVoiceId] = useState("");
-  const [label, setLabel] = useState("");
-  const [manual, setManual] = useState(false);
-  const [clearing, setClearing] = useState(false);
-  const clearingRequest = useRef<string | null>(null);
-  const [manualRefusal, setManualRefusal] = useState<string | null>(null);
-  const sheetPath = sheet ? `characters/${sheet.id}.md` : null;
-  // Clearing commits straight through; drop the busy state once the sheet has no voice again.
-  useEffect(() => {
-    if (clearing && !sheet?.voice) setClearing(false);
-  }, [sheet?.voice, clearing]);
-  useEffect(
-    () =>
-      subscribeVoiceAssignmentResults((result) => {
-        if (result.requestId !== clearingRequest.current) return;
-        clearingRequest.current = null;
-        setClearing(false);
-        setManualRefusal(
-          result.status === "refused" ? (result.reason ?? "The voice could not be changed.") : null,
-        );
-      }),
-    [],
-  );
-  return (
-    <div className="fy-app" data-screen="voice-picker" style={{ minHeight: "calc(100vh - 44px)" }}>
-      <div className="fy-scrim">
-        {sheet && (
-          <div className="fy-scrim__art">
-            <Portrait worldSlug={world?.meta.slug} path={sheetPortraitPath(sheet.id)} label="" radius={0} />
-          </div>
-        )}
-        <div className="fy-scrim__wash" />
-        <div className="fy-scrim__center">
-          <div className="fy-dialog" style={{ maxWidth: 660 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ width: 34, height: 34, borderRadius: 99, overflow: "hidden", flex: "none" }}>
-                <Portrait
-                  worldSlug={world?.meta.slug}
-                  path={sheet ? sheetPortraitPath(sheet.id) : ""}
-                  label=""
-                  radius={99}
-                />
-              </span>
-              <div style={{ flex: 1 }}>
-                <div style={{ font: "650 20px var(--font-sans)", letterSpacing: "-0.02em" }}>
-                  {sheet ? `Choose ${sheet.name.split(" ")[0]}'s voice` : "Choose a voice"}
-                </div>
-                <div
-                  style={{
-                    font: "400 12px var(--font-sans)",
-                    color: "var(--muted-foreground)",
-                    marginTop: 2,
-                  }}
-                >
-                  Auditions read their own lines from the canon, not a stock sentence.
-                </div>
-              </div>
-              {sheet?.voice && (
-                <span className="fy-mono">
-                  current · {sheet.voice.label ?? sheet.voice.voiceId} ({sheet.voice.provider}) at v
-                  {sheet.voice.assignedAtVersion}
-                </span>
-              )}
-            </div>
-            {world && sheet && <PerformanceBiblePanel key={`${world.meta.worldId}/${sheet.id}/bible`} world={world} sheet={sheet} />}
-            {world && sheet && <CharacterVoiceSamplePanel key={`${world.meta.worldId}/${sheet.id}`} world={world} sheet={sheet} />}
-            <h2>Text-to-speech voice</h2>
-            <DegradedBanner component="voice" />
-            <VoiceCandidatesPanel worldId={worldId} sheetId={sheetId} sheetPath={sheetPath} />
-            {manualRefusal !== null && <p className="fy-refusal">{manualRefusal}</p>}
-            <div>
-              <button
-                type="button"
-                className="fy-mono"
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  cursor: "pointer",
-                  textDecoration: "underline",
-                  textUnderlineOffset: 3,
-                }}
-                onClick={() => setManual((m) => !m)}
-              >
-                {manual ? "Hide direct assignment" : "Assign directly · provider + voice id"}
-              </button>
-              {manual && (
-                <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-                  <div className="fy-choicerow">
-                    {(["elevenlabs", "kokoro"] as const).map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        className={cx("fy-filterchip", p === provider && "fy-filterchip--active")}
-                        style={{ border: p === provider ? "none" : "1px solid var(--border)" }}
-                        onClick={() => setProvider(p)}
-                      >
-                        {p}
-                      </button>
-                    ))}
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <Input
-                      placeholder="Voice id · v_8Kq2"
-                      value={voiceId}
-                      onChange={(e) => setVoiceId(e.target.value)}
-                    />
-                    <Input
-                      placeholder="Label · Low tide"
-                      value={label}
-                      onChange={(e) => setLabel(e.target.value)}
-                    />
-                    <Button
-                      variant="primary"
-                      disabled={!worldId || !sheetPath || voiceId.trim().length === 0}
-                      onClick={() => {
-                        if (!worldId || !sheetPath) return;
-                        setManualRefusal(null);
-                        clearingRequest.current = assignVoice(worldId, sheetPath, {
-                          provider,
-                          model: provider === "kokoro" ? "kokoro-82m" : "eleven_multilingual_v2",
-                          voiceId: voiceId.trim(),
-                          ...(label.trim() ? { label: label.trim() } : {}),
-                        });
-                        if (clearingRequest.current === null)
-                          setManualRefusal("The studio is disconnected — the voice was not changed.");
-                      }}
-                    >
-                      Assign
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              <span className="fy-mono">
-                your own change · applies at once · versions the sheet · updates every production
-              </span>
-              <span style={{ flex: 1 }} />
-              {sheet?.voice && (
-                <Button
-                  variant="ghost"
-                  disabled={clearing}
-                  onClick={() => {
-                    if (worldId && sheetPath) {
-                      setClearing(true);
-                      setManualRefusal(null);
-                      clearingRequest.current = assignVoice(worldId, sheetPath, null);
-                      if (clearingRequest.current === null) {
-                        setClearing(false);
-                        setManualRefusal("The studio is disconnected — the voice was not changed.");
-                      }
-                    }
-                  }}
-                >
-                  {clearing ? <Loading inline label="Clearing…" /> : "Clear voice"}
-                </Button>
-              )}
-              <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/cast/${sheetId}`)}>
-                Back to the sheet
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** `speaking · step 20 of 25`, or nothing when the engine is not counting (SPEC-021 D16). */
-function stepOf(jobs: readonly Job[], requestId: string): string | null {
-  const job = jobs.find((j) => j.params["requestId"] === requestId);
-  const step = job?.step;
-  return step ? `${step.stage} · step ${step.done} of ${step.total}` : null;
-}
-
-function VoiceCandidatesPanel({
-  worldId,
-  sheetId,
-  sheetPath,
-}: {
-  worldId: string | undefined;
-  sheetId: string | undefined;
-  sheetPath: string | null;
-}) {
-  const candidates = useVoiceCandidates()[sheetId ?? ""];
-  const previews = useVoicePreviews();
-  const sidecar = useVoiceSidecar();
-  const voiceAudio = useVoiceAudio();
-  const world = useWorld();
-  const sheet = useSheet(worldId, sheetId);
-  const [requests, setRequests] = useState<Record<string, string>>({});
-  const requestKeys = useRef(new Map<string, string>());
-  const [assigning, setAssigning] = useState<string | null>(null);
-  const assigningRequest = useRef<string | null>(null);
-  const [assignmentRefusal, setAssignmentRefusal] = useState<string | null>(null);
-  const [uploadConfirmation, setUploadConfirmation] = useState<{
-    destinationLabel: string;
-    confirmationToken: string;
-    action: { kind: "preview"; key: string };
-  } | null>(null);
-  const [where, setWhere] = useState<"all" | "cloud" | "local">("all");
-  const [cloning, setCloning] = useState(false);
-  // Job rows carry what the engine is counting; the row below reads its own by requestId.
-  const jobs = useStore().state?.app.jobs ?? [];
-  const autoPlayed = useRef(new Set<string>());
-  // Assigning commits straight through (no gate), so the change lands in the next world snapshot:
-  // the pressed row stays busy until this sheet's voice is the one we just assigned.
-  useEffect(() => {
-    const assignedModel = sheet?.voice
-      ? (sheet.voice.model ??
-        legacyVoiceModel(sheet.voice.provider, sheet.voice.voiceId, world?.clonedVoices ?? []))
-      : null;
-    if (
-      assigning &&
-      sheet?.voice &&
-      assignedModel &&
-      voiceTargetKey({
-        provider: sheet.voice.provider,
-        model: assignedModel,
-        voiceId: sheet.voice.voiceId,
-      }) === assigning
-    ) {
-      setAssigning(null);
-    }
-  }, [sheet?.voice, assigning, world?.clonedVoices]);
-  useEffect(
-    () =>
-      subscribeVoiceAssignmentResults((result) => {
-        if (result.requestId !== assigningRequest.current) return;
-        assigningRequest.current = null;
-        setAssigning(null);
-        setAssignmentRefusal(
-          result.status === "refused" ? (result.reason ?? "The voice could not be assigned.") : null,
-        );
-      }),
-    [],
-  );
-  useEffect(
-    () =>
-      subscribeVoiceUploadConfirmations((confirmation) => {
-        const key = requestKeys.current.get(confirmation.requestId);
-        if (!key) return;
-        setUploadConfirmation({
-          destinationLabel: confirmation.destinationLabel,
-          confirmationToken: confirmation.confirmationToken,
-          action: { kind: "preview", key },
-        });
-      }),
-    [],
-  );
-  // Matching is what this screen is for, not a step inside it: the picker opens on the ranked
-  // list and states what it matched on, rather than asking first and showing nothing until then.
-  useEffect(() => {
-    if (worldId && sheetId) requestVoiceCandidates(worldId, sheetId);
-  }, [worldId, sheetId]);
-  useEffect(() => {
-    for (const [key, requestId] of Object.entries(requests)) {
-      const result = voiceAudio[requestId];
-      if (result?.status === "ready" && result.file && world && !autoPlayed.current.has(requestId)) {
-        autoPlayed.current.add(requestId);
-        const candidate = candidates?.ranked.find((r) => voiceTargetKey(r.candidate) === key)?.candidate;
-        void playClip({
-          id: requestId,
-          url: mediaUrl(world.meta.slug, result.file),
-          title: candidate?.label ?? "Voice preview",
-          sub: `preview · ${candidate?.provider ?? "voice"}`,
-        });
-      }
-    }
-  }, [requests, voiceAudio, world, candidates]);
-  return (
-    <>
-      {sidecar && sidecar.state !== "ready" && (
-        <Callout tone="warning" title={`Local voice — ${sidecar.state}`}>
-          {sidecar.detail}
-        </Callout>
-      )}
-      {assignmentRefusal !== null && <p className="fy-refusal">{assignmentRefusal}</p>}
-      {/* The catalogue, plainly. Matching the written voice was a step and a score on every
-          row for a judgement the ear makes in two seconds — the previews are the point. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span className="fy-mono">
-          {candidates
-            ? `${candidates.ranked.length} voice${candidates.ranked.length === 1 ? "" : "s"} · previews read ${
-                candidates.previewLine.source === "own-line"
-                  ? "their own line"
-                  : candidates.previewLine.source === "drafted"
-                    ? "a line drafted from the sheet"
-                    : "a stock sentence"
-              }`
-            : "loading voices…"}
-        </span>
-      </div>
-      {/* Where a voice lives, as a tab — the same organisation the bench's reading picker uses
-          (design 70). Six local voices were otherwise lost among fifty cloud ones, and "can this
-          machine say it without spending" is the first question anyone asks of this list. */}
-      {candidates && (
-        <div className="fy-voices__tabs" style={{ padding: 0 }}>
-          {(["all", "cloud", "local"] as const).map((tab) => {
-            const count =
-              tab === "all"
-                ? candidates.ranked.length
-                : candidates.ranked.filter(({ candidate }) =>
-                    tab === "local" ? candidate.local : !candidate.local,
-                  ).length;
-            return (
-              <button
-                key={tab}
-                type="button"
-                className={cx("fy-voices__tab", where === tab && "fy-voices__tab--on")}
-                data-testid={`voice-tab-${tab}`}
-                onClick={() => setWhere(tab)}
-              >
-                {`${tab === "all" ? "All" : tab === "cloud" ? "Cloud" : "On this machine"} ${count}`}
-              </button>
-            );
-          })}
-          <span style={{ flex: 1 }} />
-          {/* The only control on this row that adds to the catalogue rather than filtering it.
-              A voice cloned while casting this character is still the world's afterwards — the
-              sheet travels with it as provenance, never as ownership (74, binding). */}
-          <Button variant="ghost" data-testid="clone-open" onClick={() => setCloning(true)}>
-            Clone a voice
-          </Button>
-        </div>
-      )}
-      {worldId && (
-        <CloneVoiceDialog
-          open={cloning}
-          worldId={worldId}
-          {...(sheetId !== undefined ? { sheetId } : {})}
-          onClose={() => setCloning(false)}
-          onCloned={() => {
-            // The new voice arrives in the next world snapshot; re-rank so it is placed against
-            // this character's written voice rather than appended after everything.
-            if (worldId && sheetId) requestVoiceCandidates(worldId, sheetId);
-          }}
-        />
-      )}
-      {uploadConfirmation &&
-        (() => {
-          const ranked = candidates?.ranked.find(
-            ({ candidate }) => voiceTargetKey(candidate) === uploadConfirmation.action.key,
-          )?.candidate;
-          return (
-            <RemoteVoiceUploadConfirmation
-              destinationLabel={uploadConfirmation.destinationLabel}
-              onCancel={() => {
-                setRequests((current) => {
-                  const next = { ...current };
-                  delete next[uploadConfirmation.action.key];
-                  return next;
-                });
-                for (const [requestId, key] of requestKeys.current) {
-                  if (key === uploadConfirmation.action.key) requestKeys.current.delete(requestId);
-                }
-                setUploadConfirmation(null);
-              }}
-              onConfirm={() => {
-                if (!worldId || !sheetId || !ranked) return;
-                const provider = providerIdOf(ranked.provider);
-                if (!provider) return;
-                const requestId = requestVoicePreview(
-                  worldId,
-                  sheetId,
-                  provider,
-                  ranked.model,
-                  ranked.voiceId,
-                  uploadConfirmation.confirmationToken,
-                );
-                for (const [oldRequestId, key] of requestKeys.current) {
-                  if (key === uploadConfirmation.action.key) requestKeys.current.delete(oldRequestId);
-                }
-                requestKeys.current.set(requestId, uploadConfirmation.action.key);
-                setRequests((current) => ({ ...current, [uploadConfirmation.action.key]: requestId }));
-                setUploadConfirmation(null);
-              }}
-            />
-          );
-        })()}
-      {/* The catalogue scrolls inside its own pane rather than growing the page: fifty voices
-          otherwise push the assign controls, and the sheet under them, off the bottom. */}
-      {candidates && (
-        <div className="fy-voicelist">
-          {candidates.ranked
-            .filter(({ candidate }) =>
-              where === "all" ? true : where === "local" ? candidate.local : !candidate.local,
-            )
-            .map(({ candidate }) => {
-              const key = voiceTargetKey(candidate);
-              const preview = previews[key];
-              const previewPrice = candidates.previewMicroUsdByVoice[key] ?? candidates.cloudPreviewMicroUsd;
-              const requestId = requests[key];
-              const result = requestId ? voiceAudio[requestId] : undefined;
-              // The one that is already this character's voice, not the one that scored best.
-              const assignedModel = sheet?.voice
-                ? (sheet.voice.model ??
-                  legacyVoiceModel(sheet.voice.provider, sheet.voice.voiceId, world?.clonedVoices ?? []))
-                : null;
-              const assigned =
-                sheet?.voice?.provider === candidate.provider &&
-                assignedModel === candidate.model &&
-                sheet.voice.voiceId === candidate.voiceId;
-              const unavailable = candidate.unavailableReason;
-              return (
-                <div
-                  key={key}
-                  className={cx("fy-voicerow", assigned && "fy-voicerow--selected")}
-                  style={{ cursor: "default" }}
-                >
-                  <ClipPlayButton
-                    small
-                    busy={unavailable === undefined && Boolean(requestId && !result)}
-                    clip={
-                      result?.status === "ready" && result.file && world
-                        ? {
-                            id: result.requestId,
-                            url: mediaUrl(world.meta.slug, result.file),
-                            title: candidate.label,
-                            sub: `preview · ${candidate.provider}`,
-                          }
-                        : null
-                    }
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="fy-voicerow__name">{candidate.label}</div>
-                    <div className="fy-voicerow__sub">
-                      {candidate.provider}
-                      {/* A cloned voice is local AND was itself cloned, so the preset's line —
-                        "fixed catalogue, cannot be cloned" — read as a flat contradiction on the
-                        one row it was never written for. Kokoro's catalogue is what is fixed. */}
-                      {isClonedVoice(candidate)
-                        ? candidate.local
-                          ? " · cloned — on this machine"
-                          : " · cloned — remote engine"
-                        : candidate.local
-                          ? " · local — fixed catalogue, cannot be cloned"
-                          : candidate.canClone
-                            ? " · cloning available"
-                            : ""}
-                      {candidate.attributes.length > 0 ? ` · ${candidate.attributes.join(", ")}` : ""}
-                    </div>
-                    {unavailable !== undefined && (
-                      <div className="fy-voicerow__sub">Unavailable · {unavailable}</div>
-                    )}
-                  </div>
-                  {assigned && (
-                    <span className="fy-mono" style={{ whiteSpace: "nowrap" }}>
-                      current
-                    </span>
-                  )}
-                  {/* Generating a preview is the button's job; playing one back is the circle's,
-                    and pause and scrub belong to the dock. */}
-                  {!result?.file && (
-                    <button
-                      type="button"
-                      className="ui-btn ui-btn--ghost ui-btn--default"
-                      disabled={unavailable !== undefined || Boolean(requestId && !result)}
-                      onClick={() => {
-                        // Whatever the catalogue offered can be asked for. The pair that used to be
-                        // named here was narrower than the wire's, so a cloned voice listed with a
-                        // Preview button that did nothing at all when pressed.
-                        const provider = providerIdOf(candidate.provider);
-                        if (!worldId || !sheetId || !provider) return;
-                        const requestId = requestVoicePreview(
-                          worldId,
-                          sheetId,
-                          provider,
-                          candidate.model,
-                          candidate.voiceId,
-                        );
-                        requestKeys.current.set(requestId, key);
-                        setRequests((current) => ({
-                          ...current,
-                          [key]: requestId,
-                        }));
-                      }}
-                    >
-                      {requestId && !result
-                        ? // What the engine says it is doing, when it says anything (SPEC-021 D16).
-                          // Named rather than shown as a percentage: these are one node's steps, so
-                          // a bare bar would sweep to full and then sit through the rest of the graph.
-                          (stepOf(jobs, requestId) ?? "Preparing…")
-                        : candidate.local
-                          ? "Preview · free"
-                          : `Preview${previewPrice !== null && previewPrice !== undefined ? ` · ${formatMicroUsd(previewPrice)}` : ""}`}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="ui-btn ui-btn--secondary ui-btn--default"
-                    disabled={unavailable !== undefined || assigning === key || assigned}
-                    onClick={() => {
-                      const provider = providerIdOf(candidate.provider);
-                      if (worldId && sheetPath && provider) {
-                        setAssigning(key);
-                        setAssignmentRefusal(null);
-                        assigningRequest.current = assignVoice(worldId, sheetPath, {
-                          provider,
-                          model: candidate.model,
-                          voiceId: candidate.voiceId,
-                          label: candidate.label,
-                        });
-                        if (assigningRequest.current === null) {
-                          setAssigning(null);
-                          setAssignmentRefusal("The studio is disconnected — the voice was not changed.");
-                        }
-                      }
-                    }}
-                  >
-                    {assigning === key ? (
-                      <Loading inline label="Assigning…" />
-                    ) : assigned ? (
-                      "Assigned"
-                    ) : (
-                      "Assign"
-                    )}
-                  </button>
-                  {(result?.error ?? preview?.error) && (
-                    <span className="fy-mono">{result?.error ?? preview?.error}</span>
-                  )}
-                </div>
-              );
-            })}
-        </div>
-      )}
-    </>
-  );
-}
 
 // ---- New sheet screens -----------------------------------------------------
 
@@ -3210,7 +2804,7 @@ function NewSheetScreen({
                 <>
                   <Input placeholder="Their name" value={name} onChange={(e) => setName(e.target.value)} />
                   <Textarea
-                    placeholder="A ferryman who refuses payment in coin, only in secrets."
+                    placeholder="Who are they, and what do they want?"
                     value={sentence}
                     onChange={(e) => setSentence(e.target.value)}
                     style={{ minHeight: 96, font: "400 15px/1.6 var(--font-sans)" }}
@@ -3388,6 +2982,9 @@ export const NewCharacterScreen = () => (
 export const NewLocationScreen = () => (
   <NewSheetScreen screenId="new-location" title="New location" sheetType="location" />
 );
+export const NewFactionScreen = () => (
+  <NewSheetScreen screenId="new-faction" title="New faction" sheetType="faction" />
+);
 
 // ---- Canon -----------------------------------------------------------------
 
@@ -3429,10 +3026,16 @@ function useCanonCandidateCheck(
 function CanonCandidates({
   checked,
   candidates,
+  compact = false,
 }: {
   checked: boolean;
+  compact?: boolean;
   candidates: Array<{ entryId: string; title: string; statement: string }>;
 }) {
+  if (compact) return <div className="fy-canon-candidates" aria-live="polite">
+    <div>Contradiction candidates · {checked ? candidates.length === 0 ? "none" : candidates.length : "not yet checked"}</div>
+    {candidates.map(candidate => <div key={candidate.entryId}>{candidate.entryId} · {candidate.title}</div>)}
+  </div>;
   return (
     <div className="fy-draftcard">
       <div style={{ font: "600 13px var(--font-sans)" }}>Contradiction candidates · advisory</div>
@@ -3500,6 +3103,10 @@ function AskOutcome({
             </button>
           </div>
         ))}
+        <div className="fy-canon-answer-actions fy-phone-only">
+          {[...new Set(result.claims.map((claim) => claim.entryId))].map((id) => <Button key={id} onClick={() => navigate(`/w/${worldId}/canon/${id}`)}>Open {id}</Button>)}
+          <Button variant="primary" onClick={() => navigate(`/w/${worldId}/canon/new`, { state: { seed: result.claims.map((claim) => claim.text).join("\n\n"), title: question, entryType: "lore" } })}>Save as lore note</Button>
+        </div>
         <div className="scr-answer__foot">
           Every quoted span was verified against its entry. Searched {result.searched} entries.
         </div>
@@ -3529,7 +3136,7 @@ function AskOutcome({
           <ClosestList worldId={worldId} closest={result.closest} />
         </div>
       )}
-      <div style={{ display: "flex", gap: "var(--space-2)" }}>
+      <div className="fy-canon-answer-actions">
         <Button variant="primary" onClick={openAsThread}>
           Open as a thread
         </Button>
@@ -3575,6 +3182,20 @@ function ClosestList({
       ))}
     </div>
   );
+}
+
+/** Generated thread titles are often the question, shortened for storage (issue 1003). */
+function threadQuestion(entry: CanonEntry): { text: string; context: string } | null {
+  if (entry.status !== "open") return null;
+  const title = entry.title.trim().replace(/\s+/g, " ");
+  // Refused asks append candidate context; it is not part of the generated title.
+  const body = entry.body.replace(/\n+Considered when this was asked: [^\n]* — none of them decides it\.\s*$/, "").trim();
+  const question = body.replace(/\s+/g, " ");
+  // Only the known 77-character truncation is generated; an authored ellipsis is a title.
+  const generated = body.length > 80 && entry.title.trim() === `${body.slice(0, 77)}…`;
+  return question && (title === question || generated)
+    ? { text: body, context: entry.body.trim().slice(body.length).trim() }
+    : null;
 }
 
 export function CanonScreen() {
@@ -3631,18 +3252,21 @@ export function CanonScreen() {
 
   return (
     <div data-screen="canon">
-      <div className="fy-corner">
+      <div className="fy-corner fy-canon-corner">
         <Button variant="primary" onClick={() => navigate(`/w/${worldId}/canon/new`)}>
           New entry
         </Button>
       </div>
       <div className="fy-hero">
-        <div className="fy-hero__eyebrow">
-          {world?.meta.name} · {world?.canon.length ?? 0} entries · v{world?.meta.canonRevision}
+        <div className="fy-document-head">
+          <div className="fy-document-head__text">
+            <div className="fy-hero__eyebrow">
+              {world?.meta.name} · {world?.canon.length ?? 0} entries · v{world?.meta.canonRevision}
+            </div>
+            <h1 className="fy-hero__title fy-document-title">Canon</h1>
+          </div>
+          <Button className="fy-phone-only" variant="primary" onClick={() => navigate(`/w/${worldId}/canon/new`)}><Plus size={16} /> New</Button>
         </div>
-        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
-          Canon
-        </h1>
         <div className="fy-askbar">
           <Search size={15} />
           <input
@@ -3661,9 +3285,6 @@ export function CanonScreen() {
           >
             Ask
           </Button>
-        </div>
-        <div className="fy-mono" style={{ marginTop: 8 }}>
-          answers come only from entries, with verified quotes · when canon has not decided, it says so
         </div>
         <div className="fy-filterrow">
           <button
@@ -3686,10 +3307,8 @@ export function CanonScreen() {
         </div>
       </div>
       {(result || (askId && !result) || serverSearch) && (
-        <div style={{ maxWidth: 720, margin: "20px auto 0", padding: "0 24px", display: "grid", gap: 10 }}>
-          {askId && !result && (
-            <Callout title="Asking canon…">Retrieval first, then a grounded read of the candidates.</Callout>
-          )}
+        <div className="fy-canon-result">
+          {askId && !result && <Callout title="Asking canon…">{null}</Callout>}
           {result && worldId && <AskOutcome worldId={worldId} question={askedQuestion} result={result} />}
           {serverSearch && (
             <span className="fy-mono">
@@ -3699,18 +3318,20 @@ export function CanonScreen() {
           )}
         </div>
       )}
-      <div className="fy-cardgrid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
-        {shown.map((entry) =>
-          entry.status === "open" ? (
+      <div className="fy-cardgrid fy-canon-grid">
+        {shown.map((entry) => {
+          const question = threadQuestion(entry);
+          const body = question?.context ?? entry.body;
+          return entry.status === "open" ? (
             <div key={entry.id} className="fy-gridcard fy-gridcard--quiet">
               <div className="fy-gridcard__id" style={{ display: "flex", alignItems: "center", gap: 7 }}>
                 <span className="fy-dot fy-dot--warn" style={{ width: 7, height: 7 }} />
                 {entry.id} · open thread
               </div>
-              <div className="fy-gridcard__title">{entry.title}</div>
-              <div className="fy-gridcard__body">
-                {entry.body.length > 150 ? `${entry.body.slice(0, 147)}…` : entry.body}
-              </div>
+              <div className="fy-gridcard__title">{question?.text ?? entry.title}</div>
+              {body && <div className="fy-gridcard__body">
+                {body.length > 150 ? `${body.slice(0, 147)}…` : body}
+              </div>}
               <div style={{ marginTop: 12 }}>
                 <Button onClick={() => navigate(`/w/${worldId}/canon/${entry.id}/thread`)}>
                   Draft in context
@@ -3738,8 +3359,8 @@ export function CanonScreen() {
                 {entry.amendedAt !== undefined ? ` · amended v${entry.amendedAt}` : ""}
               </div>
             </button>
-          ),
-        )}
+          );
+        })}
         {shown.length === 0 && (
           <EmptyState title="No matches" hint="The closest entries appear in the ask refusal above." />
         )}
@@ -3759,9 +3380,12 @@ export function CanonEntryScreen() {
   const navigate = useNavigate();
   const world = useWorld();
   const refs = useCanonRefs();
+  const phone = useMediaQuery("(max-width: 599px)");
+  const amendmentRef = useRef<HTMLDivElement>(null);
   const [amending, setAmending] = useState(false);
   const [statement, setStatement] = useState("");
   const amendment = useSingleAct();
+  useEffect(() => { if (phone && amending) amendmentRef.current?.scrollIntoView({ block: "start" }); }, [phone, amending]);
   const candidates = useCanonCandidateCheck(worldId, entry?.title ?? "", statement, entry?.id, amending);
   const { talk: talkAbout, starting: talkStarting } = useTalkItThrough(worldId);
   /**
@@ -3798,6 +3422,24 @@ export function CanonEntryScreen() {
   // fills that tail and the panel would then say an entry has no history while its records sit
   // intact on disk. Undefined until the detail arrives, so the empty line waits for an answer.
   const history = detail?.history;
+  const citedBy = detail && detail.canonRevision === canonRevision ? detail.citedBy : undefined;
+  const question = threadQuestion(entry);
+  const referenceLink = (id: string, kind: "canon" | "sheet" | "production" | null) => {
+    // Slugs are unique within a kind, not across sheets and productions.
+    const canon = kind === "canon" ? world?.canon.find((candidate) => candidate.id === id) : undefined;
+    const sheet = kind === "sheet" ? world?.sheets.find((candidate) => candidate.id === id) : undefined;
+    const production = kind === "production" ? world?.productions.find((candidate) => candidate.meta.id === id) : undefined;
+    const to = canon ? `canon/${id}` : sheet ? `${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${id}` : production ? `p/${id}` : null;
+    const label = canon ? `${id} · ${canon.title}` : sheet?.name ?? production?.meta.title ?? id;
+    return to ? <Link key={id} to={`/w/${worldId}/${to}`}>{label}</Link> : <span key={id}>{label}</span>;
+  };
+  const retireButton = (
+    <Button variant="ghost" disabled={entry.retired === true}
+      onClick={() => { if (worldId) retireEntity(worldId, `canon/${entry.id}.md`); }}
+      title="Stays resolvable for existing citations; drops out of retrieval">
+      Retire
+    </Button>
+  );
   return (
     <div className="fy-entry" data-screen="canon-entry">
       <div className="fy-entry__main">
@@ -3815,10 +3457,15 @@ export function CanonEntryScreen() {
             </span>
             {entry.retired && <Badge tone="danger">retired</Badge>}
           </div>
-          <h1 className="fy-entry__title">{entry.title}</h1>
+          {!question && <h1 className="fy-entry__title">{entry.title}</h1>}
           {/* The statement is the one thing on this screen somebody reads rather than scans. */}
           <div className="fy-texthost">
-            <div className="fy-entry__body">{entry.body}</div>
+            {question
+              ? <>
+                  <h1 className="fy-entry__title">{question.text}</h1>
+                  {question.context && <div className="fy-entry__body">{question.context}</div>}
+                </>
+              : <div className="fy-entry__body">{entry.body}</div>}
             <ReadAloud
               source={{ of: "canon", canonId: entry.id }}
               title={`${entry.id} · ${entry.title}`}
@@ -3830,9 +3477,9 @@ export function CanonEntryScreen() {
             {entry.settledAt !== undefined && ` · settled v${entry.settledAt}`}
             {entry.amendedAt !== undefined && ` · last amended v${entry.amendedAt}`}
           </div>
-          {detail && (detail.citedBy.sheets.length > 0 || detail.citedBy.entries.length > 0) && (
+          {citedBy && (citedBy.sheets.length > 0 || citedBy.entries.length > 0) && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 16 }}>
-              {detail.citedBy.sheets.map((s) => (
+              {citedBy.sheets.map((s) => (
                 <span key={s.id} className="fy-pill">
                   <span className="fy-pill__avatar">
                     <Portrait
@@ -3842,53 +3489,58 @@ export function CanonEntryScreen() {
                       radius={99}
                     />
                   </span>
-                  {s.id}
+                  {referenceLink(s.id, "sheet")}
                   {s.atVersion !== null ? ` · v${s.atVersion}` : ""}
                 </span>
               ))}
-              {detail.citedBy.entries.map((id) => (
+              {citedBy.entries.map((id) => (
                 <span
                   key={id}
                   className="fy-pill"
-                  style={{ cursor: "pointer" }}
-                  onClick={() => navigate(`/w/${worldId}/canon/${id}`)}
                 >
-                  {id}
+                  {referenceLink(id, "canon")}
                 </span>
               ))}
             </div>
           )}
         </div>
-        {detail && (detail.citedBy.sheets.length > 0 || detail.citedBy.entries.length > 0) && (
-          <div style={{ marginTop: 30, animation: "fy-fade-up 0.7s var(--ease-out) 0.15s both" }}>
-            <div style={{ font: "600 13px var(--font-sans)", marginBottom: 4 }}>Cited by</div>
-            {detail.citedBy.sheets.map((s) => (
+          <section aria-label="Cited by" style={{ marginTop: 30, animation: "fy-fade-up 0.7s var(--ease-out) 0.15s both" }}>
+            <div className="fy-entry-section-title fy-entry-cited-title">Cited by</div>
+            {!citedBy && <div className="fy-mono">Loading citations…</div>}
+            {citedBy && citedBy.sheets.length + citedBy.entries.length + citedBy.productions.length === 0 && (
+              <div className="fy-mono">No citations yet.</div>
+            )}
+            {citedBy?.sheets.map((s) => (
               <div key={s.id} className="fy-citerow">
                 <span style={{ flex: 1 }}>
-                  {s.id}
+                  {referenceLink(s.id, "sheet")}
                   {s.atVersion !== null ? `, sheet v${s.atVersion}` : ""}
                 </span>
-                <span className="fy-mono">from the index, at the version cited</span>
+                <span className="fy-mono">canon reference</span>
                 <ChevronRight size={13} />
               </div>
             ))}
-            {detail.citedBy.entries.map((id) => (
+            {citedBy?.entries.map((id) => (
               <div
                 key={id}
                 className="fy-citerow"
-                style={{ cursor: "pointer" }}
-                onClick={() => navigate(`/w/${worldId}/canon/${id}`)}
               >
-                <span style={{ flex: 1 }}>{id}</span>
+                <span style={{ flex: 1 }}>{referenceLink(id, "canon")}</span>
                 <span className="fy-mono">canon cross-reference</span>
                 <ChevronRight size={13} />
               </div>
             ))}
-          </div>
-        )}
+            {citedBy?.productions.map((id) => (
+              <div key={id} className="fy-citerow">
+                <span style={{ flex: 1 }}>{referenceLink(id, "production")}</span>
+                <span className="fy-mono">production reference</span>
+                <ChevronRight size={13} />
+              </div>
+            ))}
+          </section>
       </div>
       <div className="fy-entry__side">
-        <div style={{ font: "600 13px var(--font-sans)" }}>History</div>
+        <div className="fy-entry-section-title">History</div>
         <div style={{ marginTop: 4 }}>
           {history?.length === 0 && (
             <div className="fy-mono" style={{ padding: "9px 0" }}>
@@ -3917,25 +3569,31 @@ export function CanonEntryScreen() {
           )}
         </div>
         {detail && detail.ripples.length > 0 && (
-          <div className="fy-draftcard">
-            <div style={{ font: "600 13px var(--font-sans)" }}>Changing this ripples</div>
+          <div className="fy-draftcard fy-entry-ripples">
+            <div className="fy-entry-section-title">Changing this ripples</div>
             <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
               {detail.ripples.map((r, i) => (
-                <span key={i} className="fy-ripplerow">
+                <div key={i} className="fy-ripplerow">
                   <span className="fy-dot fy-dot--warn" />
-                  {r.kind} · {r.summary}
-                </span>
+                  <div>
+                    {r.summary}
+                    {r.targets.length > 0 && <div className="fy-mono" style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 4 }}>
+                      {r.targets.map((id) => referenceLink(id, r.kind === "productions-see-new-revision" ? "production" :
+                        r.kind === "contradiction-candidates" || r.kind === "gains-cross-reference" ? "canon" : null))}
+                    </div>}
+                  </div>
+                </div>
               ))}
             </div>
             {/* Said as it now happens (issue 747): the amendment is ripple-checked and versioned
                 on the press, so describing a proposal step set up the same wait the button did. */}
             <div className="fy-mono" style={{ marginTop: 10 }}>
-              an amendment is ripple-checked, then versioned · the previous version is one undo away
+              ripple-checked, then versioned
             </div>
           </div>
         )}
         {amending && worldId && (
-          <div className="fy-draftcard">
+          <div className="fy-draftcard fy-entry-amendment" ref={amendmentRef}>
             <div className="fy-fieldlabel">Amended statement</div>
             <Textarea value={statement} onChange={(e) => setStatement(e.target.value)} />
             <CanonCandidates checked={candidates.checked} candidates={candidates.candidates} />
@@ -3957,7 +3615,7 @@ export function CanonEntryScreen() {
           </div>
         )}
         <div style={{ flex: 1, minHeight: 16 }} />
-        <div style={{ display: "grid", gap: 8 }}>
+        <HeldBar className="fy-entry-actions">
           {entry.status === "open" ? (
             <Button variant="primary" onClick={() => navigate(`/w/${worldId}/canon/${entry.id}/thread`)}>
               Open thread
@@ -3975,24 +3633,20 @@ export function CanonEntryScreen() {
                   setAmending(true);
                 }}
               >
-                Amend this entry
+                {phone ? "Amend" : "Amend this entry"}
               </Button>
               <Button variant="ghost" onClick={talkThroughEntry} disabled={talkStarting}>
                 {talkStarting ? "Starting…" : "Talk it through"}
               </Button>
-              <Button
-                variant="ghost"
-                disabled={entry.retired === true}
-                onClick={() => {
-                  if (worldId) retireEntity(worldId, `canon/${entry.id}.md`);
-                }}
-                title="Stays resolvable for existing citations; drops out of retrieval"
-              >
-                Retire
-              </Button>
+              {phone ? (
+                <details className="fy-bar-menu">
+                  <summary aria-label="Entry options">⋯</summary>
+                  <div>{retireButton}</div>
+                </details>
+              ) : retireButton}
             </>
           )}
-        </div>
+        </HeldBar>
       </div>
     </div>
   );
@@ -4002,12 +3656,19 @@ const SETTLE_TYPES = ["rule", "lore", "location", "faction", "timeline", "tone"]
 
 export function CanonThreadScreen() {
   const { entry, worldId } = useCanonEntry();
+  const question = entry ? threadQuestion(entry) : null;
+  const context = question?.context ?? entry?.body;
   const world = useWorld();
   const navigate = useNavigate();
+  const phone = useMediaQuery("(max-width: 599px)");
+  const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
+  const [settleOpen, setSettleOpen] = useState(false);
+  useEffect(() => { if (!phone) setSettleOpen(false); }, [phone]);
   const { state } = useStore();
   const [resolvedType, setResolvedType] = useState<(typeof SETTLE_TYPES)[number]>("lore");
   const [statement, setStatement] = useState("");
   const settlement = useSingleAct();
+  const candidates = useCanonCandidateCheck(worldId, entry?.title ?? "", statement, entry?.id, phone && settleOpen);
   const [message, setMessage] = useState("");
   const harnessReady = state?.app.health.harness.status === "healthy";
   // What has been attached here this session. Dismissing a chip stops the conversation
@@ -4067,6 +3728,85 @@ export function CanonThreadScreen() {
     setMessage("");
   };
 
+  const settlementFields = (
+    <div className="fy-thread-fields">
+      <div className="fy-fieldlabel">What it turned out to be</div>
+      <div className="fy-choicerow">
+        {SETTLE_TYPES.map((t) => (
+          <button
+            key={t}
+            type="button"
+            className={cx("fy-filterchip", t === resolvedType && "fy-filterchip--active")}
+            style={{ border: t === resolvedType ? "none" : "1px solid var(--border)" }}
+            onClick={() => setResolvedType(t)}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+      <div className="fy-fieldlabel" style={{ marginTop: 15 }}>
+        The settled statement
+      </div>
+      <Textarea
+        placeholder="What is now established as true in this world?"
+        value={statement}
+        onChange={(e) => setStatement(e.target.value)}
+      />
+    </div>
+  );
+  const proposalPreview = (
+    <div className="fy-thread-preview">
+      {!phone && <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <div style={{ font: "600 15px var(--font-sans)" }}>Proposed entry</div>
+        <span className="fy-mono" style={{ color: "var(--warning)" }}>
+          settles the thread
+        </span>
+      </div>}
+      <div className="fy-draftcard">
+        <div className="fy-gridcard__id">
+          {entry?.id ?? "CANON-…"} · {resolvedType}
+        </div>
+        {entry && !question && <div style={{ font: "600 16px var(--font-sans)", letterSpacing: "-0.01em", marginTop: 7 }}>
+          {entry.title}
+        </div>}
+        <div
+          style={{
+            font: "400 12.5px/1.65 var(--font-sans)",
+            color: "var(--muted-foreground)",
+            marginTop: 8,
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {statement.trim() || "The settled statement appears here as you write it."}
+        </div>
+      </div>
+
+    </div>
+  );
+  const settlementActions = (
+    <div className="fy-settlement-actions">
+      <Button
+        variant="primary"
+        disabled={!entry || !worldId || statement.trim().length === 0}
+        onClick={() => {
+          if (!entry || !worldId) return;
+          settlement.track(settleThread(worldId, entry.id, resolvedType, statement.trim()));
+        }}
+      >
+        Settle thread
+      </Button>
+      <div
+        style={{
+          font: "400 11px/1.5 var(--font-sans)",
+          color: "var(--muted-foreground)",
+          textAlign: "center",
+        }}
+      >
+        {phone ? `The canon moves to v${(world?.meta.canonRevision ?? 0) + 1}.` : "This press accepts the settlement. The canon revision moves once."}
+      </div>
+      <SingleActFeedback result={settlement.result} undoLabel="Reopen thread" onUndo={settlement.undo} />
+    </div>
+  );
   return (
     <div className="fy-gate" data-screen="canon-thread">
       <div className="fy-gate__main">
@@ -4075,14 +3815,14 @@ export function CanonThreadScreen() {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span className="fy-dot fy-dot--warn" style={{ width: 7, height: 7 }} />
               <span className="fy-eyebrow-sm">
-                OPEN THREAD{entry ? ` · ${entry.id} · since v${entry.introducedAt}` : ""}
+                {phone ? "Open thread" : "OPEN THREAD"}{entry ? ` · ${entry.id} · since v${entry.introducedAt}` : ""}
               </span>
             </div>
-            <h1 className="fy-story__h1">{entry ? entry.title : "Thread"}</h1>
+            <h1 className="fy-story__h1">{question?.text ?? entry?.title ?? "Thread"}</h1>
           </div>
         </div>
         <div className="fy-gate__body" style={{ gap: 14 }}>
-          {entry && <div className="fy-bubble--gate">{entry.body}</div>}
+          {context && <div className="fy-bubble--gate">{context}</div>}
           {transcript.length === 0 && (
             <div className="fy-bubble--gate">
               Talk it through — the studio drafts the answer on a proposal over this entry, checked against
@@ -4110,7 +3850,10 @@ export function CanonThreadScreen() {
             </div>
           )}
           {chatProposal && <ConnectedProposalPanel key={chatProposal.proposal.id} staged={chatProposal} />}
-          <div style={{ marginTop: 2 }}>
+          <HeldBar className="fy-thread-composer">
+            {phone && <button type="button" className="fy-thread-peek" onClick={() => setSettleOpen(true)} aria-haspopup="dialog">
+              <span><b>Proposed entry{entry ? ` · ${entry.id}` : ""}</b><span>{resolvedType} · draft · {candidates.checked ? `${candidates.candidates.length} contradiction candidates` : "not yet checked"}</span></span><ChevronRight size={18} />
+            </button>}
             <Composer
               value={message}
               onChange={setMessage}
@@ -4152,82 +3895,20 @@ export function CanonThreadScreen() {
                 onDismiss={() => setOfferDone((prev) => [...prev, offer.id])}
               />
             )}
-          </div>
-          <div style={{ marginTop: "auto" }}>
-            <div className="fy-fieldlabel">What it turned out to be</div>
-            <div className="fy-choicerow">
-              {SETTLE_TYPES.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  className={cx("fy-filterchip", t === resolvedType && "fy-filterchip--active")}
-                  style={{ border: t === resolvedType ? "none" : "1px solid var(--border)" }}
-                  onClick={() => setResolvedType(t)}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-            <div className="fy-fieldlabel" style={{ marginTop: 15 }}>
-              The settled statement
-            </div>
-            <Textarea
-              placeholder="The Chorister was taught by the god itself, in the winter it walked in…"
-              value={statement}
-              onChange={(e) => setStatement(e.target.value)}
-            />
-          </div>
+          </HeldBar>
+          {!phone && !fold && settlementFields}
         </div>
       </div>
-      <div className="fy-gate__side">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          <div style={{ font: "600 15px var(--font-sans)" }}>Proposed entry</div>
-          <span className="fy-mono" style={{ color: "var(--warning)" }}>
-            settles the thread
-          </span>
-        </div>
-        <div className="fy-draftcard">
-          <div className="fy-gridcard__id">
-            {entry?.id ?? "CANON-…"} · {resolvedType}
-          </div>
-          <div style={{ font: "600 16px var(--font-sans)", letterSpacing: "-0.01em", marginTop: 7 }}>
-            {entry?.title}
-          </div>
-          <div
-            style={{
-              font: "400 12.5px/1.65 var(--font-sans)",
-              color: "var(--muted-foreground)",
-              marginTop: 8,
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            {statement.trim() || "The settled statement appears here as you write it."}
-          </div>
-        </div>
+      {!phone && <div className="fy-gate__side">
+        {proposalPreview}
+        {fold && <details className="fy-thread-edit"><summary>Edit proposed entry</summary>{settlementFields}</details>}
         <div style={{ flex: 1, minHeight: 16 }} />
-        <div style={{ display: "grid", gap: 8 }}>
-          <Button
-            variant="primary"
-            disabled={!entry || !worldId || statement.trim().length === 0}
-            onClick={() => {
-              if (!entry || !worldId) return;
-              settlement.track(settleThread(worldId, entry.id, resolvedType, statement.trim()));
-            }}
-          >
-            Settle thread
-          </Button>
-          <div
-            style={{
-              font: "400 11px/1.5 var(--font-sans)",
-              color: "var(--muted-foreground)",
-              textAlign: "center",
-            }}
-          >
-            This press accepts the settlement. The canon revision moves once.
-          </div>
-          <SingleActFeedback result={settlement.result} undoLabel="Reopen thread" onUndo={settlement.undo} />
-        </div>
-      </div>
+        {settlementActions}
+      </div>}
+      <PageSheet open={phone && settleOpen} title="Proposed entry" onClose={() => setSettleOpen(false)} footer={settlementActions}>
+        {settlementFields}{proposalPreview}
+        <CanonCandidates compact checked={candidates.checked} candidates={candidates.candidates} />
+      </PageSheet>
     </div>
   );
 }
@@ -4237,9 +3918,11 @@ export function NewCanonScreen() {
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const location = useLocation();
-  const seed = (location.state as { seed?: string } | null)?.seed;
-  const [entryType, setEntryType] = useState<(typeof SETTLE_TYPES)[number]>("rule");
-  const [title, setTitle] = useState("");
+  const phone = useMediaQuery("(max-width: 599px)");
+  const initial = location.state as { seed?: string; title?: string; entryType?: "lore" } | null;
+  const seed = initial?.seed;
+  const [entryType, setEntryType] = useState<(typeof SETTLE_TYPES)[number]>(initial?.entryType === "lore" ? "lore" : "rule");
+  const [title, setTitle] = useState(initial?.title ?? "");
   const [statement, setStatement] = useState(seed ?? "");
   const creation = useSingleAct();
   const candidates = useCanonCandidateCheck(worldId, title, statement);
@@ -4249,7 +3932,7 @@ export function NewCanonScreen() {
       <div className="fy-gate__main">
         <div className="fy-gate__head">
           <div style={{ flex: 1 }}>
-            <div className="fy-eyebrow-sm">NEW CANON ENTRY · WILL BE {nextId}</div>
+            <div className="fy-eyebrow-sm">{phone ? "New canon entry · will be" : "NEW CANON ENTRY · WILL BE"} {nextId}</div>
             <h1 className="fy-story__h1">The entry, field by field.</h1>
           </div>
         </div>
@@ -4282,14 +3965,15 @@ export function NewCanonScreen() {
               onChange={(e) => setStatement(e.target.value)}
             />
           </div>
-          <div className="fy-mono">
+          {phone && <CanonCandidates compact checked={candidates.checked} candidates={candidates.candidates} />}
+          <div className="fy-mono fy-canon-id-note">
             ids are permanent — the entry reserves {nextId} at staging and keeps it forever · retired ids are
             never reused, so citations never drift
           </div>
         </div>
       </div>
       <div className="fy-gate__side">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <div className="fy-canon-proposal-title">
           <div style={{ font: "600 15px var(--font-sans)" }}>Proposed entry</div>
           <span className="fy-mono" style={{ color: "var(--warning)" }}>
             draft · enters as proposed
@@ -4313,9 +3997,9 @@ export function NewCanonScreen() {
             {statement.trim() || "The statement appears here as you write it."}
           </div>
         </div>
-        <CanonCandidates checked={candidates.checked} candidates={candidates.candidates} />
+        {!phone && <CanonCandidates checked={candidates.checked} candidates={candidates.candidates} />}
         <div style={{ flex: 1, minHeight: 16 }} />
-        <div style={{ display: "grid", gap: 8 }}>
+        <HeldBar className="fy-new-canon-actions">
           <Button
             variant="primary"
             disabled={!worldId || title.trim().length === 0 || statement.trim().length === 0}
@@ -4328,9 +4012,9 @@ export function NewCanonScreen() {
           </Button>
           <SingleActFeedback result={creation.result} undoLabel="Retire entry" onUndo={creation.undo} />
           <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/canon`)}>
-            Discard · nothing saved
+            {phone ? "Discard" : "Discard · nothing saved"}
           </Button>
-        </div>
+        </HeldBar>
       </div>
     </div>
   );
@@ -4342,14 +4026,30 @@ export function ArtifactsScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = useMediaQuery("(max-width: 599px)");
+  const [menuId, setMenuId] = useState<string | null>(null);
   // The world's own shelf (SPEC-020 R-13): artifacts a production owns are shown there, and
   // counting them here would make "12 files" a number no filter on this screen can reach.
-  const artifacts = (world?.artifacts ?? []).filter((a) => a.production === undefined);
+  const shelfArtifacts = (world?.artifacts ?? []).filter((a) => a.production === undefined);
+  const [retiredOnly, setRetiredOnly] = useState(false);
+  const retiredCount = shelfArtifacts.filter(a => a.retiredAt !== undefined).length;
+  const artifacts = shelfArtifacts.filter(a => (a.retiredAt !== undefined) === retiredOnly);
   const report = useImportReport();
-  const notices = useArtifactNotices();
-  const [importPath, setImportPath] = useState("");
-  // The path row appears on request (design 68a puts only the button pair in the header row).
-  const [importing, setImporting] = useState(false);
+  /*
+   * The world's own refusals, not every surface's (Codex round 1).
+   *
+   * `artifactNotices` is one global list, and a `needs-consent` notice is an offer to retry at a
+   * scope — this one retries at the world's. A production's refusal answered here would file its
+   * bytes as the world's, which is the escape hatch firing where nobody invoked it. A notice
+   * with no scope is a filing that stated no opinion, and the world is what that means.
+   */
+  const notices = useArtifactNotices().filter((n) => (n.production ?? null) === null);
+  const [dropActive, setDropActive] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const upload = (files?: readonly File[]) => {
+    if (worldId) setUploadError(uploadArtifacts(worldId, files).reason ?? null);
+  };
   const [kindFilter, setKindFilter] = useState<string | null>(null);
   // "Made here" combines with the kind filter rather than replacing it (issue 305 §2).
   const [madeHereOnly, setMadeHereOnly] = useState(false);
@@ -4363,25 +4063,31 @@ export function ArtifactsScreen() {
    * its import report and its scroll position.
    */
   const [openArtifactId, setOpenArtifactId] = useState<string | null>(null);
+  const [retireId, setRetireId] = useState<string | null>(null);
+  const retiringArtifact = artifacts.find(a => a.id === retireId) ?? null;
+  const uses = world && retiringArtifact ? artifactUses(world, retiringArtifact) : [];
   const openTrigger = useRef<HTMLButtonElement | null>(null);
+  const closeRetirement = () => {
+    setRetireId(null);
+    openTrigger.current?.focus();
+  };
   // Whatever made it, not the bench alone (issue 475): a character's generated references are
   // filed here too, and the chip that counts what this application made counts those as well.
   const madeHere = (a: (typeof artifacts)[number]) => isGeneratedArtifact(a);
   // Superseded artifacts drop out of the listing the way they drop out of pickers (R-5).
-  const superseded = new Set(artifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
+  const superseded = new Set(shelfArtifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
   const visible = artifacts.filter(
     (a) =>
-      !superseded.has(a.id) &&
+      (retiredOnly || !superseded.has(a.id)) &&
       (kindFilter === null || a.kind === kindFilter) &&
       (!madeHereOnly || madeHere(a)),
   );
   const kinds = [...new Set(artifacts.map((a) => a.kind))];
   const madeHereCount = artifacts.filter((a) => !superseded.has(a.id) && madeHere(a)).length;
-  const batches = artifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
-  // The design's card metas name things, not slugs ("The Vigil", never "the-vigil"). Sheets
-  // resolve by id, canon by CANON id; a link that names neither keeps its own spelling.
-  const linkName = (link: string): string =>
-    world?.sheets.find((s) => s.id === link)?.name ?? world?.canon.find((c) => c.id === link)?.title ?? link;
+  const batches = shelfArtifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
+  // Resolve names from this world's existing records; unknown links retain their spelling. The
+  // Cut names its rows by the same rule (issue 1005), so the resolver lives beside the display name.
+  const linkName = linkNameResolver(world);
   const kindLabel: Record<string, string> = {
     image: "Images",
     board: "Boards",
@@ -4389,44 +4095,65 @@ export function ArtifactsScreen() {
     video: "Video",
     document: "Documents",
   };
-  return (
-    <div data-screen="artifacts">
-      {/* The only entrance to the bench (issue 305 §2), placed as the master places it
-          (design 68a): on the pill nav's own row, right-aligned. Outside the hero — the
-          hero's entrance animation leaves a transform behind, and a transformed ancestor
-          would quietly become this pair's containing block. A production's Generate has
-          shots to answer to, so it never grows one. */}
-      <div className="fy-artifacts-door">
-        <Button variant="outline" onClick={() => setImporting((v) => !v)}>
-          Import folder
-        </Button>
+  const menuArtifact = visible.find(item => item.id === menuId);
+  const addFilesCard = (
+    <button
+      key="add-files"
+      type="button"
+      aria-label="Add files"
+      onClick={() => upload()}
+      className={cx("fy-gridcard fy-gridcard--quiet fy-artifact-add", dropActive && "fy-artifact-add--over")}
+    >
+      <span className="fy-newprodcard__ring" style={{ width: 40, height: 40 }}>
+        {compact ? <Upload size={22} /> : <Plus size={18} />}
+      </span>
+      <div>
+        <div style={{ font: "600 14px var(--font-sans)" }}>{compact ? "Add files" : dropActive ? "Drop to add files" : "Drop files or click to add"}</div>
+        <div
+          style={{ font: "400 10.5px var(--font-mono)", color: "var(--muted-foreground)", marginTop: 4 }}
+        >
+          up to 16 files · audio · documents · images
+        </div>
+      </div>
+    </button>
+  );
+  // Turn 164 keeps the picker in the fifth slot; later artifacts continue in shelf order.
+  const cards = compact ? [...visible.slice(0, 4), null, ...visible.slice(4)] : [...visible, null];
+  const doors = (<div className="fy-artifacts-door">
+        <Button variant="outline" onClick={() => upload()}>{compact && <Upload size={16} />}Add files</Button>
         <Button
           variant="primary"
           data-testid="artifacts-generate"
           onClick={() => void navigate(`/w/${worldId}/artifacts/bench`)}
         >
-          Generate
+          {compact && <Sparkle size={16} />}Generate
         </Button>
-      </div>
+      </div>);
+  return (
+    <div data-screen="artifacts">
+      {!compact && doors}
       <div className="fy-hero">
+        <div className="fy-artifacts-head"><div>
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {visible.length} file{visible.length === 1 ? "" : "s"}
           {madeHereCount > 0 ? ` · ${madeHereCount} made here` : ""}
           {superseded.size > 0 ? ` · ${superseded.size} superseded — history keeps them` : ""}
         </div>
-        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+        <h1 className="fy-hero__title fy-artifacts-title">
           Artifacts
         </h1>
-        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 460 }}>
-          Recordings, documents and references: filed against the world, attachable to any generation.
-        </p>
+        </div>{compact && doors}</div>
         <div className="fy-filterrow">
           <button
             type="button"
-            className={cx("fy-filterchip", kindFilter === null && "fy-filterchip--active")}
-            onClick={() => setKindFilter(null)}
+            className={cx("fy-filterchip", !retiredOnly && kindFilter === null && "fy-filterchip--active")}
+            onClick={() => { setRetiredOnly(false); setKindFilter(null); }}
           >
-            All {artifacts.filter((a) => !superseded.has(a.id)).length}
+            All {shelfArtifacts.filter((a) => a.retiredAt === undefined && !superseded.has(a.id)).length}
+          </button>
+          <button type="button" className={cx("fy-filterchip", retiredOnly && "fy-filterchip--active")}
+            onClick={() => { setRetiredOnly(true); setKindFilter(null); setMadeHereOnly(false); }}>
+            Retired {retiredCount}
           </button>
           {kinds.map((k) => (
             <button
@@ -4436,7 +4163,7 @@ export function ArtifactsScreen() {
               onClick={() => setKindFilter(k)}
             >
               {kindLabel[k] ?? k.charAt(0).toUpperCase() + k.slice(1)}{" "}
-              {artifacts.filter((a) => a.kind === k && !superseded.has(a.id)).length}
+              {artifacts.filter((a) => a.kind === k && (retiredOnly || !superseded.has(a.id))).length}
             </button>
           ))}
           {madeHereCount > 0 && (
@@ -4449,29 +4176,10 @@ export function ArtifactsScreen() {
             </button>
           )}
         </div>
-        {importing && (
-          <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 16 }}>
-            <Input
-              // A JSX attribute string is literal — no escapes — so backslashes doubled for a JS
-              // string rendered on screen as they were written. The braces make it a JS string.
-              placeholder={"C:\\path\\to\\your\\notes"}
-              value={importPath}
-              onChange={(e) => setImportPath(e.target.value)}
-              style={{ minWidth: 280 }}
-            />
-            <Button
-              variant="primary"
-              disabled={importPath.trim().length === 0}
-              onClick={() => {
-                if (worldId) importFolder(worldId, importPath.trim());
-              }}
-            >
-              Import
-            </Button>
-          </div>
-        )}
+
       </div>
-      <div style={{ maxWidth: 860, margin: "0 auto", padding: "12px 24px 0", display: "grid", gap: 10 }}>
+      <div className="fy-artifact-notices">
+        {uploadError && <Callout tone="warning" title="Import unavailable">{uploadError}</Callout>}
         {notices.map((n, i) => (
           <Callout
             key={`${n.sourcePath}-${i}`}
@@ -4536,7 +4244,7 @@ export function ArtifactsScreen() {
             <div className="scr-sectionlist">
               {artifact.extraction!.pending.map((candidate) => (
                 <div key={candidate.hash} className="scr-sheetsection">
-                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+                  <div className="fy-artifact-candidate">
                     <Badge tone="outline">{candidate.kind}</Badge>
                     <strong style={{ font: "var(--type-ui)" }}>{candidate.name}</strong>
                     {candidate.section && (
@@ -4550,7 +4258,7 @@ export function ArtifactsScreen() {
                     “{candidate.quote}”{candidate.line !== undefined ? ` — line ${candidate.line}` : ""} ·
                     verified against the source
                   </span>
-                  <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                  <div className="fy-artifact-candidate__actions">
                     <Button
                       onClick={() => {
                         if (worldId) resolveExtraction(worldId, artifact.id, candidate.hash, "accept");
@@ -4574,25 +4282,41 @@ export function ArtifactsScreen() {
         ))}
       </div>
       <div
-        className="fy-cardgrid"
-        style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", paddingTop: 24 }}
+        className="fy-cardgrid fy-artifact-grid"
+        onDragOver={(event) => {
+          if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          setDropActive(true);
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropActive(false);
+        }}
+        onDrop={(event) => {
+          if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+          event.preventDefault();
+          setDropActive(false);
+          if (event.dataTransfer.files.length) upload(Array.from(event.dataTransfer.files));
+        }}
       >
-        {visible.map((a) => {
-          const name = a.file.split("/").pop() ?? a.file;
+        {cards.map((a) => {
+          if (a === null) return addFilesCard;
+          const filename = a.file.split("/").pop() ?? a.file;
+          const name = artifactDisplayName(a, linkName);
           const isImage = a.kind === "image" || /\.(png|jpe?g|webp|gif)$/i.test(a.file);
           // One line, the design's vocabulary (68a): type · made here · duration · linked. An
           // uploaded file carries no provenance token — where it came from is not what it is.
           const meta = [
-            name.includes(".") ? name.split(".").pop() : a.kind,
+            filename.includes(".") ? filename.split(".").pop() : a.kind,
             ...(madeHere(a) ? [generatedOriginLabel(a)] : []),
             ...(a.mediaInfo?.durationSec !== undefined ? [formatSeconds(a.mediaInfo.durationSec)] : []),
-            ...(a.links.length > 0 ? [`linked: ${a.links.slice(0, 2).map(linkName).join(", ")}`] : []),
+            ...(a.links.length > 0 ? [`linked: ${a.links.slice(0, 2).map((link) => linkName(link, a.links)).join(", ")}`] : []),
           ].join(" · ");
           return (
             <div
               key={a.id}
-              className="fy-gridcard fy-gridcard--openable"
-              style={isImage ? { padding: "10px 10px 14px" } : { padding: 16 }}
+              className={cx("fy-gridcard fy-gridcard--openable", isImage && "fy-artifact--image")}
+              style={{ opacity: a.retiredAt ? 0.65 : 1 }}
             >
               {/*
                 * The open target: one real <button> laid over the card, so a pointer and a
@@ -4604,25 +4328,37 @@ export function ArtifactsScreen() {
               <button
                 type="button"
                 className="fy-gridcard__open"
-                aria-label={artifactOpenLabel(a)}
-                title={artifactOpenLabel(a)}
+                aria-label={artifactOpenLabel(a, name)}
+                title={filename}
                 onClick={(event) => {
                   openTrigger.current = event.currentTarget;
                   setOpenArtifactId(a.id);
                 }}
               />
+              {compact ? <button type="button" className="fy-artifact-more" aria-label={`Options for ${name}`} onClick={() => setMenuId(a.id)}><More size={16} /></button> : a.retiredAt ? (
+                <button type="button" className="fy-artifact-retire" aria-label={`Restore ${name}`}
+                  onClick={() => { if (worldId) restoreArtifact(worldId, a.id); }}>Restore</button>
+              ) : (
+                <button type="button" className="fy-artifact-retire" aria-label={`Remove ${name} from shelf`}
+                  onClick={(event) => { openTrigger.current = event.currentTarget; setRetireId(a.id); }}>Remove</button>
+              )}
               {isImage ? (
-                <div className="fy-imghost" style={{ width: "100%", height: 110 }}>
+                <div className="fy-imghost fy-artifact-frame">
                   <Portrait
                     worldSlug={world?.meta.slug}
                     path={`artifacts/${a.file}`}
                     label={name}
-                    download
-                    downloadName={name}
+                    download={!compact}
+                    downloadName={filename}
                   />
                 </div>
+              ) : compact && a.kind === "video" ? (
+                <div className="fy-imghost fy-artifact-frame">
+                  <Portrait worldSlug={world?.meta.slug} path={artifactPosterPath(a.id)} label={name} radius={8} />
+                  {a.mediaInfo && <span className="fy-artifact-duration">{formatSeconds(a.mediaInfo.durationSec)}</span>}
+                </div>
               ) : a.kind === "audio" ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div className="fy-artifact-audio fy-artifact-frame">
                   <ClipPlayButton
                     small
                     clip={
@@ -4636,24 +4372,26 @@ export function ArtifactsScreen() {
                         : null
                     }
                   />
-                  <span style={{ color: "var(--neutral-400)", overflow: "hidden" }}>
-                    <Wave seed={a.file} width={120} height={18} />
+                  <span className="fy-artifact-wave">
+                    <Wave seed={a.file} width={compact ? 240 : 120} height={compact ? 26 : 18} stretch={compact} />
                   </span>
                 </div>
               ) : (
-                <div className="fy-doclines">
+                <div className="fy-doclines fy-artifact-frame">
                   <span style={{ width: "80%" }} />
                   <span style={{ width: "95%" }} />
                   <span style={{ width: "60%" }} />
+                  {compact && <><span style={{ width: "85%" }} /><span style={{ width: "95%" }} /><span style={{ width: "60%" }} /></>}
                 </div>
               )}
-              <div style={isImage ? { padding: "0 6px" } : undefined}>
-                <div style={{ font: "600 14px var(--font-sans)", margin: "12px 0 3px" }}>{name}</div>
+              <div className="fy-artifact-caption">
+                <div className="fy-artifact-name">{name}</div>
                 <div className="fy-mono">{meta}</div>
+                {a.retiredAt && <Badge tone="danger">retired</Badge>}
                 {a.supersedes !== undefined && (
                   <div className="fy-mono">supersedes {a.supersedes.slice(0, 10)}…</div>
                 )}
-                {a.kind === "document" && (
+                {!compact && a.kind === "document" && (
                   /* An offer, not a headline — card-meta quiet, or it reads as the card's title. */
                   <button
                     type="button"
@@ -4670,102 +4408,115 @@ export function ArtifactsScreen() {
           );
         })}
         {/* A cell of the same grid, filling out the last row (design 68a) — never its own band. */}
-        <div
-          className="fy-gridcard fy-gridcard--quiet"
-          style={{
-            border: "1.5px dashed var(--neutral-300)",
-            background: "transparent",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 14,
-            minHeight: 176,
-            boxShadow: "none",
-          }}
-        >
-          <span className="fy-newprodcard__ring" style={{ width: 40, height: 40 }}>
-            <Plus size={18} />
-          </span>
-          <div>
-            <div style={{ font: "600 14px var(--font-sans)" }}>Drop anything</div>
-            <div
-              style={{ font: "400 10.5px var(--font-mono)", color: "var(--muted-foreground)", marginTop: 4 }}
-            >
-              audio · documents · boards · stems
-            </div>
-          </div>
-        </div>
+
         {artifacts.length === 0 && (
           <EmptyState
-            title="Nothing filed yet"
-            hint="Drop recordings, documents, boards or images to file them against the world."
+            title={retiredOnly ? "No retired artifacts" : "Nothing filed yet"}
+            hint={phone ? "Add recordings, documents, boards or images to this world." : "Drop recordings, documents, boards or images to file them against the world."}
           />
         )}
       </div>
+      <PageSheet open={Boolean(menuArtifact)} title={menuArtifact ? artifactDisplayName(menuArtifact, linkName) : "Artifact"} onClose={() => setMenuId(null)}>
+        {menuArtifact && <>
+          {menuArtifact.retiredAt ? <Button variant="outline" onClick={() => { if (worldId) restoreArtifact(worldId, menuArtifact.id); setMenuId(null); }}>Restore</Button>
+            : <Button variant="outline" onClick={() => { setMenuId(null); setRetireId(menuArtifact.id); }}>Remove from shelf</Button>}
+          {menuArtifact.kind === "document" && <Button variant="ghost" onClick={() => { if (worldId) extractArtifact(worldId, menuArtifact.id); setMenuId(null); }}>Lift facts</Button>}
+        </>}
+      </PageSheet>
       <ArtifactViewer
         artifact={artifacts.find((a) => a.id === openArtifactId) ?? null}
-        artifacts={artifacts}
+        artifacts={shelfArtifacts}
+        visibleArtifacts={visible}
+        onNavigate={setOpenArtifactId}
         worldSlug={world?.meta.slug}
         linkName={linkName}
+        onRetire={retiredOnly ? undefined : (artifactId) => { setOpenArtifactId(null); setRetireId(artifactId); }}
         onClose={() => {
           setOpenArtifactId(null);
           // A dialog that dropped focus leaves the keyboard at the top of the document.
-          openTrigger.current?.focus();
+          if (retireId === null) openTrigger.current?.focus();
         }}
       />
+      <EditorDialog open={retiringArtifact !== null} title="Remove from shelf?" subtitle={retiringArtifact?.file}
+        onClose={closeRetirement}>
+        <p>This retires the artifact from the shelf and file pickers. Its file and provenance stay in the world;
+          existing clips, references and exports keep working. No disk space is freed.</p>
+        <p>Retired items stay on the shelf behind the Retired filter, where you can restore them.</p>
+        <p>{uses.length ? "Current uses — kept intact:" : "No current uses found in the loaded world records. History is kept."}</p>
+        {uses.length > 0 && <ul style={{ maxHeight: 200, overflowY: "auto" }}>{uses.map(use => <li key={use}>{use}</li>)}</ul>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Button variant="outline" onClick={closeRetirement}>Cancel</Button>
+          <Button variant="primary" onClick={() => {
+            if (worldId && retiringArtifact) retireArtifact(worldId, retiringArtifact.id);
+            setRetireId(null);
+          }}>Remove from shelf</Button>
+        </div>
+      </EditorDialog>
     </div>
   );
 }
 
 // ---- Productions -----------------------------------------------------------
 
-const PRODUCTION_TILT = [
-  { rotate: -1.6, top: 0, drift: "7.6s" },
-  { rotate: 1.2, top: -8, drift: "8.3s" },
-  { rotate: -1, top: 0, drift: "7.9s" },
-] as const;
-
 export function ProductionsScreen() {
+  const phone = useMediaQuery("(max-width: 599px)");
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const productions = world?.productions ?? [];
   const artOf = (p: (typeof productions)[number]): string => {
+    const accepted = episodeThumbnailPath(p, { scenes: sortScenes(p.scenes).map((scene) => scene.id) });
+    if (accepted) return accepted;
     const board = p.scenes.find((s) => s.board)?.board;
     if (board) return `productions/${p.meta.id}/${board.image}`;
     const take = p.takes.find((t) => t.media);
-    if (take) return `productions/${p.meta.id}/takes/${take.id}/${take.media}`;
+    if (take) return takeMediaPath(p, take) ?? world?.keyArt ?? "";
     return world?.keyArt ?? "";
   };
   return (
     <div data-screen="productions">
-      <div className="fy-hero">
-        <div className="fy-hero__eyebrow">{world?.meta.name} · shared cast, shared canon</div>
-        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
-          Productions
-        </h1>
-        <p className="fy-hero__lede" style={{ fontSize: 16, maxWidth: 480 }}>
-          {productions.length === 1 ? "One lens" : `${productions.length || "New"} lenses`} over one world.
-          Change a character once and it lands in all of them.
-        </p>
+      <div className="fy-hero fy-productions-head">
+        <div><div className="fy-hero__eyebrow">{world?.meta.name} · shared cast, shared canon</div>
+        <h1 className="fy-hero__title">Productions</h1></div>
+        {phone && <Button variant="primary" onClick={() => navigate(`/w/${worldId}/productions/new`)}><Plus size={16} />New</Button>}
       </div>
+      {world?.conversations.some(conversation => conversation.entryContext?.kind === "production-setup") && (
+        <section aria-label="Production setups" className="fy-production-resumes">
+          <h2 style={{ fontSize: 18 }}>In development</h2>
+          {world.conversations.filter(conversation => conversation.entryContext?.kind === "production-setup").map(conversation => (
+            <Button key={conversation.id} variant="ghost" onClick={() => navigate(`/w/${worldId}/productions/setup/${conversation.id}`)}>
+              Resume {conversation.title}{conversation.setupStatus === "creating" ? " · resolving creation" : ""}
+            </Button>
+          ))}
+        </section>
+      )}
       <div className="fy-prodcards">
         {productions.map((p, i) => {
-          const tilt = PRODUCTION_TILT[i % PRODUCTION_TILT.length]!;
+          const chapters = p.chapters.filter(chapter => !chapter.retired);
+          const drafted = chapters.filter(chapter => (chapter.words ?? 0) > 0).length;
+          const story = phone && productionShape(p.meta).hasChapters;
           const shots = p.scenes.flatMap((s) => orderedShots(s));
           const covered = shots.filter((s) => p.selections[s.id]?.acceptedTakeId).length;
           const active = p.meta.status !== "complete" && shots.length > 0 && covered < shots.length;
+          const progress = (<div className="fy-progress">
+                    <div
+                      className="fy-progress__fill"
+                      style={{
+                        width: `${story ? (chapters.length ? Math.round(drafted / chapters.length * 100) : 0) : shots.length > 0 ? Math.round((covered / shots.length) * 100) : 0}%`,
+                      }}
+                    />
+                  </div>);
           return (
             <div
               key={p.meta.id}
-              style={{
-                animation: `fy-drift ${tilt.drift} ease-in-out infinite alternate`,
-                marginTop: tilt.top,
-              }}
+              className={`fy-prodcard-slot fy-prodcard-slot--${i % 3}`}
             >
               <div
                 className={cx("fy-prodcard", active && "fy-prodcard--active")}
-                style={{ transform: `rotate(${tilt.rotate}deg)` }}
+                role={phone ? "link" : undefined}
+                tabIndex={phone ? 0 : undefined}
+                aria-label={phone ? `Open ${p.meta.title}` : undefined}
+                onKeyDown={event => { if (event.target === event.currentTarget && event.key === "Enter") navigate(`/w/${worldId}/p/${p.meta.id}`); }}
                 onClick={() => navigate(`/w/${worldId}/p/${p.meta.id}`)}
               >
                 <div className="fy-prodcard__frame">
@@ -4781,23 +4532,17 @@ export function ProductionsScreen() {
                     <Badge tone="outline">{productionShape(p.meta).displayLabel}</Badge>
                     {active && <span className="fy-dot fy-dot--warn" />}
                     <span style={{ marginLeft: "auto" }} className="fy-mono">
-                      {shots.length > 0 ? `${covered} of ${shots.length} shots` : `${p.takes.length} takes`}
+                      {story ? `${drafted} of ${chapters.length} chapters` : shots.length > 0 ? `${covered} of ${shots.length} shots` : `${p.takes.length} takes`}
                     </span>
                   </div>
                   <div className="fy-prodcard__name">{p.meta.title}</div>
                   <div className="fy-prodcard__sub">{p.meta.logline ?? p.meta.status}</div>
-                  <div className="fy-progress">
-                    <div
-                      className="fy-progress__fill"
-                      style={{
-                        width: `${shots.length > 0 ? Math.round((covered / shots.length) * 100) : 0}%`,
-                      }}
-                    />
-                  </div>
-                  <div style={{ marginTop: 14 }}>
-                    <Button variant={active ? "primary" : "secondary"}>Open the workspace</Button>
-                  </div>
+                  {!phone && progress}
+                  {!phone && <div style={{ marginTop: 14 }}>
+                    <Button variant={active ? "primary" : "secondary"} onClick={event => { event.stopPropagation(); navigate(`/w/${worldId}/p/${p.meta.id}`); }}>Open the workspace</Button>
+                  </div>}
                 </div>
+                {phone && progress}
               </div>
             </div>
           );
@@ -4811,16 +4556,6 @@ export function ProductionsScreen() {
             <Plus size={18} />
           </span>
           <span style={{ font: "600 14px var(--font-sans)" }}>New production</span>
-          <span
-            style={{
-              font: "400 12px/1.5 var(--font-sans)",
-              color: "var(--muted-foreground)",
-              textAlign: "center",
-              maxWidth: 140,
-            }}
-          >
-            Same cast. Any format: film, stills, book.
-          </span>
         </button>
       </div>
     </div>
@@ -4897,18 +4632,42 @@ export const VIDEO_KIND_CHOICES = [
 ] as const;
 
 /**
+ * What `CHOOSE` asks (turn 174): which of the two interactive kinds. Each is named for what the
+ * viewer does — watch, or read — because the first names drawn for them ("Moving pictures",
+ * "Illustrated") said neither, and "Illustrated" already names an art direction an interactive
+ * movie can wear. Both write the video medium and route by choice; a visual novel reads its
+ * scenes as beats of picture, text and voice instead of playing them as clips.
+ */
+export const INTERACTIVE_KIND_CHOICES = [
+  {
+    id: "interactive",
+    label: "Interactive movie",
+    body: "Scenes play as video. Choose at the end of each.",
+    aspect: "16:9",
+  },
+  {
+    id: "visual-novel",
+    label: "Visual novel",
+    body: "Pictures, text and voices. Read at your own pace, then choose.",
+    aspect: "16:9",
+  },
+] as const;
+
+type KindChoice = { id: string; label: string; body: string; aspect: string };
+
+/**
  * The kinds that write themselves down. The rest are the medium's plain default (SPEC-023 R-2).
  * `interactive` is still one of them and still reads back the same way — it just arrives from
  * the door now rather than from the kind row (turn 113a).
  */
-const STORED_KINDS = new Set(["microdrama", "music-video", "interactive"]);
+const STORED_KINDS = new Set(["microdrama", "music-video", "interactive", "visual-novel"]);
 
 /*
  * The kinds with a plate in `public/video-kinds`. Other is deliberately absent: an image of
  * "nothing assumed" would be a picture of something, and the empty box saying so is the truer
  * one. A kind added without a plate falls back to that same empty box rather than breaking.
  */
-export const KIND_PLATES = new Set(["microdrama", "film", "music-video"]);
+export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive", "visual-novel"]);
 
 /** The episode-length ranges step two offers, and the seconds each one means (turn 53). */
 export const EPISODE_LENGTH_CHOICES = [
@@ -4929,52 +4688,37 @@ export function parseEpisodeLength(value: string): { min: number; max: number } 
   return { min: min!, max: max! };
 }
 
-type VideoKind = (typeof VIDEO_KIND_CHOICES)[number]["id"];
-
 /**
  * What each card has left to ask. Step two always renders now (turn 113): it is the screen that
  * holds the name, so a card with nothing else to ask shows the name alone rather than sending
- * the person through a dialog the other cards do not get. `choose` is empty until branching has
- * kinds of its own — its card already names three — and `write` until a story does.
+ * the person through a dialog the other cards do not get. `choose` has had kinds of its own since
+ * turn 174 — an interactive movie or a visual novel — and `write` is empty until a story does.
  */
-const KINDS_BY_DOOR: Record<DoorId, readonly (typeof VIDEO_KIND_CHOICES)[number][]> = {
+export const KINDS_BY_DOOR: Record<DoorId, readonly KindChoice[]> = {
   write: [],
   watch: VIDEO_KIND_CHOICES,
-  choose: [],
+  choose: INTERACTIVE_KIND_CHOICES,
 };
 
-/**
- * What a micro drama starts with. `episodeEnding` is deliberately not here (turn 99): how a
- * season ends is storytelling, and asking it in a dropdown of somebody who has not written a
- * line makes it a setting. It reaches `season.ending` through the conversation instead.
- */
-/**
- * How many episodes a season can be promised (2026-08-23).
- *
- * This was 5 to 12, which is a short film cut into pieces rather than a vertical series. The
- * form runs 60 to 100 drops, and a season written to eight has a different spine from one
- * written to eighty: eight holds a reveal at four, eighty holds it at forty and spends the
- * difference on the audience knowing what the characters do not. A door that could not say
- * eighty made every season it opened the wrong shape, and the author found out at the point
- * where the shape is expensive to change.
- *
- * Twelve and under stay, because a sample cut to sell the run is a real thing to be making —
- * they are the exception in the list now rather than the whole of it.
- */
-export const EPISODE_COUNT_CHOICES = [8, 12, 20, 30, 40, 60, 80, 100];
+/** The kind each door's row starts on, and so what an untouched step two creates. */
+const DEFAULT_KIND_BY_DOOR: Record<DoorId, string> = {
+  write: "",
+  watch: "film",
+  choose: "interactive",
+};
+
+/** The question step two asks above a door's kind row. */
+const KIND_QUESTION: Record<DoorId, string> = {
+  write: "",
+  watch: "What kind of video?",
+  choose: "What kind of interactive?",
+};
+
 export const FRAME_RATE_CHOICES = [24, 25, 30] as const satisfies readonly FrameRate[];
 
-export const MICRODRAMA_DEFAULTS = {
-  // 60 rather than 7: the low end of what the form actually runs, so the season a person opens
-  // without touching this is a vertical series and not a short film in slices.
-  episodeCount: 60,
-  episodeSecondsMin: 45,
-  episodeSecondsMax: 75,
-  hookWindowSec: 3,
-  exportPreset: "social-1080x1920",
-};
-
 export function NewProductionScreen() {
+  const phone = useMediaQuery("(max-width: 599px)");
+  const Footer = phone ? HeldBar : "div";
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
@@ -4982,14 +4726,14 @@ export function NewProductionScreen() {
   // of what step one produces. There is no default — a preselected card would answer the
   // question the screen is asking.
   const [door, setDoor] = useState<DoorId | null>(null);
-  const [videoKind, setVideoKind] = useState<VideoKind>("film");
+  // The kind the row has selected, for whichever door was pressed; seeded from the door.
+  const [videoKind, setVideoKind] = useState<string>("film");
   const [title, setTitle] = useState("");
   // Seeded from the kind and re-seeded whenever the kind changes: a default the kind can answer
   // is the kind's to answer (turn 99), and a film that silently kept a micro drama's 9:16 would
   // be the exact failure the grouping is meant to prevent.
   const [aspect, setAspect] = useState<string>(VIDEO_KIND_CHOICES[1].aspect);
   const [frameRate, setFrameRate] = useState<FrameRate>(24);
-  const [episodeCount, setEpisodeCount] = useState(MICRODRAMA_DEFAULTS.episodeCount);
   const [episodeLength, setEpisodeLength] = useState(
     `${MICRODRAMA_DEFAULTS.episodeSecondsMin}-${MICRODRAMA_DEFAULTS.episodeSecondsMax}`,
   );
@@ -5024,15 +4768,15 @@ export function NewProductionScreen() {
         title: title.trim(),
         medium: chosen.medium,
         /*
-         * The card's own kind wins where it has one — `CHOOSE` writes `interactive` without ever
-         * showing a kind row (turn 113a) — and otherwise the kind row answers for it. The two
-         * cannot both apply: a card that carries a kind has no kinds left to offer.
+         * The kind row answers where the card has one — `CHOOSE` has offered an interactive movie
+         * or a visual novel since turn 174 — and a card's own kind stands in where it has no row,
+         * which is how `CHOOSE` wrote `interactive` from turn 113a until then.
          */
-        ..."productionKind" in chosen
-          ? { productionKind: chosen.productionKind }
-          : chosen.medium === "video" && STORED_KINDS.has(videoKind)
-            ? { productionKind: videoKind }
-            : {},
+        ...(kinds.length > 0 && chosen.medium === "video" && STORED_KINDS.has(videoKind)
+          ? { productionKind: videoKind }
+          : "productionKind" in chosen
+            ? { productionKind: chosen.productionKind }
+            : {}),
         // The frame a video delivers in is answerable for every kind, so it travels for every
         // kind (turn 99): before this, a film could not be made vertical until after it existed.
         ...(chosen.medium === "video" ? { aspect } : {}),
@@ -5045,7 +4789,6 @@ export function NewProductionScreen() {
               seriesTitle: title.trim(),
               defaults: {
                 ...MICRODRAMA_DEFAULTS,
-                episodeCount,
                 ...(lengthRange
                   ? { episodeSecondsMin: lengthRange.min, episodeSecondsMax: lengthRange.max }
                   : {}),
@@ -5068,16 +4811,15 @@ export function NewProductionScreen() {
    */
   if (chosen) {
     return (
-      <div className="fy-dialogwrap" data-screen="new-production" style={{ position: "relative" }}>
+      <div className="fy-dialogwrap fy-production-step" data-screen="new-production">
         <ProductionDialogBackdrop world={world} />
         <div
-          className="fy-dialog"
-          style={{ maxWidth: kinds.length > 0 ? 980 : 560, position: "relative" }}
+          className={cx("fy-dialog fy-production-step__panel", kinds.length > 0 && "fy-production-step__panel--kinds")}
         >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <div className="fy-production-step__head">
             {kinds.length > 0 ? (
               <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>
-                What kind of video?
+                {KIND_QUESTION[chosen.id]}
               </div>
             ) : (
               // The eyebrow names the card that was pressed. Without a kind row there is nothing
@@ -5093,13 +4835,7 @@ export function NewProductionScreen() {
             </div>
           )}
           {kinds.length > 0 && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: `repeat(${kinds.length}, minmax(0, 1fr))`,
-              gap: 12,
-            }}
-          >
+          <div className="fy-production-kinds">
             {kinds.map((k) => (
               <button
                 key={k.id}
@@ -5110,22 +4846,7 @@ export function NewProductionScreen() {
                   setAspect(k.aspect);
                 }}
               >
-                <div
-                  aria-hidden="true"
-                  style={{
-                    height: 98,
-                    borderRadius: 9,
-                    border: "1px solid var(--border)",
-                    background: "var(--muted)",
-                    marginBottom: 12,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    // The plate is drawn to the box's edges, so the radius has to clip it or the
-                    // four corners square off and the row stops looking like one set of cards.
-                    overflow: "hidden",
-                  }}
-                >
+                <div aria-hidden="true" className="fy-production-kind__plate">
                   {KIND_PLATES.has(k.id) ? (
                     // Relative, not absolute: the packaged app loads from file://, where a
                     // leading slash resolves to the filesystem root and every plate 404s (the
@@ -5136,7 +4857,7 @@ export function NewProductionScreen() {
                       style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                     />
                   ) : (
-                    <span className="fy-mono">no defaults</span>
+                    <span aria-hidden="true" style={{ color: "var(--muted-foreground)", fontSize: 24 }}>·</span>
                   )}
                 </div>
                 <div className="fy-radio__head">
@@ -5161,14 +4882,14 @@ export function NewProductionScreen() {
             media on step one, and a micro drama was then asked for a SERIES name here as well —
             two fields for one thing, since the second already defaulted to the first.
           */}
+          {phone && <label className="fy-production-step__name" htmlFor="production-name">Name</label>}
           <Input
+            id="production-name"
+            aria-label="Name"
             placeholder="Name it · working titles are fine"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
           />
-          {isMicrodrama && (
-            <span className="fy-mono">names the series · Season 1 created with it</span>
-          )}
           {/*
             Everything the kind can answer, under one label that says what it is (turn 99). What
             is not here is ENDING: it sat in this row as though how a season ends were a setting,
@@ -5181,33 +4902,26 @@ export function NewProductionScreen() {
           <div style={{ display: "grid", gap: 8 }}>
             <div className="fy-mono">DEFAULTS · CHANGE LATER</div>
             {/* Four stable slots keep frame and rate compact while leaving room for episodic defaults. */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+            <div className="fy-production-defaults">
               <DefaultSelect label="FRAME" value={aspect} onChange={setAspect}>
                 <option value="9:16">9:16 vertical</option>
                 <option value="16:9">16:9 landscape</option>
               </DefaultSelect>
-              <DefaultSelect
-                label="RATE"
-                value={String(frameRate)}
-                onChange={(value) => setFrameRate(Number(value) as FrameRate)}
-              >
-                {FRAME_RATE_CHOICES.map((rate) => (
-                  <option key={rate} value={String(rate)}>{rate} fps</option>
-                ))}
-              </DefaultSelect>
+              {/* A visual novel plays pictures, not frames: a rate would be a setting nothing
+                  reads. It still travels at its default, so an export to film has one. */}
+              {videoKind !== "visual-novel" && (
+                <DefaultSelect
+                  label="RATE"
+                  value={String(frameRate)}
+                  onChange={(value) => setFrameRate(Number(value) as FrameRate)}
+                >
+                  {FRAME_RATE_CHOICES.map((rate) => (
+                    <option key={rate} value={String(rate)}>{rate} fps</option>
+                  ))}
+                </DefaultSelect>
+              )}
               {isMicrodrama && (
                 <>
-                  <DefaultSelect
-                    label="EPISODES"
-                    value={String(episodeCount)}
-                    onChange={(v) => setEpisodeCount(Number(v))}
-                  >
-                    {EPISODE_COUNT_CHOICES.map((n) => (
-                      <option key={n} value={String(n)}>
-                        {n}
-                      </option>
-                    ))}
-                  </DefaultSelect>
                   {/* The range a season is written to, and the reason a Microdrama is a
                       Microdrama. It reaches season.json, where the season shows it back. */}
                   <DefaultSelect label="LENGTH" value={episodeLength} onChange={setEpisodeLength}>
@@ -5229,13 +4943,13 @@ export function NewProductionScreen() {
           )}
           {/* The narrow screen has no room to run this beside the buttons — it wrapped to two
               lines and crowded them — so there it takes a row of its own. */}
-          {kinds.length === 0 && (
-            <span className="fy-mono">
-              joins {world?.meta.name ?? "the world"} · {characters} characters, every location, the whole canon
+          {(phone || kinds.length === 0) && (
+            <span className="fy-mono fy-production-step__joins">
+              joins {world?.meta.name ?? "the world"} · {phone ? "cast, locations, canon" : `${characters} characters, every location, the whole canon`}
             </span>
           )}
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            {kinds.length > 0 && (
+          <Footer className="fy-production-step__foot">
+            {!phone && kinds.length > 0 && (
               <span className="fy-mono">
                 joins {world?.meta.name ?? "the world"} · {characters} characters, every location, the whole canon
               </span>
@@ -5258,12 +4972,7 @@ export function NewProductionScreen() {
                     ? "Create and open day one"
                     : "Create and open it"}
             </Button>
-          </div>
-          {/* The promise the action needs beside it: pressing this spends nothing. Right-aligned
-              because it belongs to the button above it, not to the joins line on the left. */}
-          <span className="fy-mono" style={{ textAlign: "right" }}>
-            nothing generates
-          </span>
+          </Footer>
         </div>
       </div>
     );
@@ -5284,10 +4993,10 @@ export function NewProductionScreen() {
      * blurred behind a panel — which on a full page read as a grey band that stopped partway
      * down instead of a backdrop. The blurred art belongs to step two, which is still a dialog.
      */
-    <div data-screen="new-production">
+    <div data-screen="new-production" className="fy-production-door">
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">Create something new</div>
-        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+        <h1 className="fy-hero__title">
           What should this world become next?
         </h1>
         {/* Wide enough to hold the sentence on one line: broken over two it reads as a paragraph
@@ -5296,33 +5005,25 @@ export function NewProductionScreen() {
           Choose a card that feels closest. The format can become more specific afterwards.
         </p>
       </div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, minmax(0, 372px))",
-          justifyContent: "center",
-          gap: 30,
-          // The rhythm .fy-prodcards uses between a hero and the row under it.
-          padding: "40px 24px 0",
-        }}
-      >
+      <div className="fy-production-doors">
           {DOOR_CHOICES.map((d, i) => (
             <button
               key={d.id}
               type="button"
-              className="fy-door"
-              // Staggered so the row arrives as a row rather than three things appearing at once.
-              style={{ animationDelay: `${i * 0.06}s` }}
+              className={`fy-door fy-door--${i}`}
               onClick={() => {
+                if (d.id === "watch") {
+                  navigate(`/w/${worldId}/productions/setup/${newId("cv")}`);
+                  return;
+                }
                 setDoor(d.id);
-                // A card that carries no kind still delivers in a frame, and the kind row it is
-                // about to see (or not see) is what would otherwise have seeded this.
+                // The row starts on the door's first kind, and the frame is that kind's: a card
+                // that carries no kind still delivers in a frame, and the kind row it is about to
+                // see (or not see) is what would otherwise have seeded this.
+                const startKind = DEFAULT_KIND_BY_DOOR[d.id];
+                setVideoKind(startKind);
                 if (d.medium === "video") {
-                  setAspect(
-                    "productionKind" in d
-                      ? "16:9"
-                      : (VIDEO_KIND_CHOICES.find((k) => k.id === videoKind)?.aspect ?? "16:9"),
-                  );
+                  setAspect(KINDS_BY_DOOR[d.id].find((k) => k.id === startKind)?.aspect ?? "16:9");
                 }
               }}
             >
@@ -5331,7 +5032,7 @@ export function NewProductionScreen() {
                 keyframe ends on `transform: none`, which would flatten a rotation on the same
                 element the moment the entrance finished.
               */}
-              <span className="fy-door__print" style={{ transform: `rotate(${[-1.2, 0, 1][i]}deg)` }}>
+              <span className="fy-door__print">
                 {/* Relative, not absolute: the packaged app loads from file://, where a leading
                     slash resolves to the filesystem root and every card 404s. */}
                 <img src={`./doors/${d.id}.webp`} alt="" aria-hidden="true" />

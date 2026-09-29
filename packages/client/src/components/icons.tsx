@@ -5,7 +5,8 @@
  */
 
 function icon(paths: React.ReactNode) {
-  return function Icon({ size = 14 }: { size?: number }) {
+  // `stroke` exists for the launch surface's 52px marks, where the house 1.75 reads as bold.
+  return function Icon({ size = 14, stroke = 1.75 }: { size?: number; stroke?: number }) {
     return (
       <svg
         width={size}
@@ -13,7 +14,7 @@ function icon(paths: React.ReactNode) {
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.75"
+        strokeWidth={stroke}
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden
@@ -78,8 +79,12 @@ export const Inbox = icon(
     <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
   </>,
 );
-export const ActivityIcon = icon(
-  <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />,
+/* Activity opens a notification panel since design turn 136, and wears the glyph one expects of one. */
+export const Bell = icon(
+  <>
+    <path d="M10.268 21a2 2 0 0 0 3.464 0" />
+    <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />
+  </>,
 );
 export const Plus = icon(
   <>
@@ -163,6 +168,7 @@ export const Sparkle = icon(
   <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />,
 );
 export const Play = icon(<polygon points="6 3 20 12 6 21 6 3" />);
+export const Pause = icon(<><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></>);
 export const Speaker = icon(
   <>
     <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
@@ -234,6 +240,25 @@ export const Lock = icon(
     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
   </>,
 );
+// Full screen on Flow and the Stage (SPEC-044 R-37): the glyph, and the same one reversed to leave.
+export const Maximize2 = icon(
+  <>
+    <polyline points="15 3 21 3 21 9" />
+    <polyline points="9 21 3 21 3 15" />
+    <line x1="21" x2="14" y1="3" y2="10" />
+    <line x1="3" x2="10" y1="21" y2="14" />
+  </>,
+);
+
+export const Minimize2 = icon(
+  <>
+    <polyline points="4 14 10 14 10 20" />
+    <polyline points="20 10 14 10 14 4" />
+    <line x1="14" x2="21" y1="10" y2="3" />
+    <line x1="3" x2="10" y1="21" y2="14" />
+  </>,
+);
+
 // The Arke dock's unpin control and its collapsed rail (SPEC-036): the assistant is pinned beside
 // the work rather than toggled from the toolbar, so the glyph is a pin, not an eye.
 export const Pin = icon(
@@ -271,6 +296,25 @@ export const User = icon(
     <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
     <circle cx="12" cy="7" r="4" />
   </>,
+);
+/* The three the Arke account wears (design turn 151): a door that leaves the app, the way out,
+   and the wait on the browser. */
+export const ArrowUpRight = icon(
+  <>
+    <path d="M7 7h10v10" />
+    <path d="M7 17 17 7" />
+  </>,
+);
+export const LogOut = icon(
+  <>
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <polyline points="16 17 21 12 16 7" />
+    <line x1="21" x2="9" y1="12" y2="12" />
+  </>,
+);
+export const LoaderCircle = icon(<path d="M21 12a9 9 0 1 1-6.219-8.56" />);
+export const BookOpen = icon(
+  <><path d="M12 7C9 4 6 4 2 5v15c4-1 7-1 10 2 3-3 6-3 10-2V5c-4-1-7-1-10 2Z" /><path d="M12 7v15" /></>,
 );
 export const Book = icon(
   <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />,
@@ -412,6 +456,34 @@ export const Monitor = icon(
   </>,
 );
 export const Cloud = icon(<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />);
+export const Laptop = icon(<path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16" />);
+export const ArrowRight = icon(<><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></>);
+export const FramePrevious = icon(<><path d="M6 5v14" /><path d="m18 5-9 7 9 7Z" /></>);
+export const FrameNext = icon(<><path d="M18 5v14" /><path d="m6 5 9 7-9 7Z" /></>);
+export const MenuLines = icon(<path d="M4 6h16M4 12h16M4 18h16" />);
+/** A studio that does not answer: the plug pulled apart. */
+export const Unplug = icon(
+  <>
+    <path d="m19 5 3-3" />
+    <path d="m2 22 3-3" />
+    <path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z" />
+    <path d="M7.5 13.5 10 11" />
+    <path d="M10.5 16.5 13 14" />
+    <path d="m12 6 6 6 2.3-2.3a2.4 2.4 0 0 0 0-3.4l-2.6-2.6a2.4 2.4 0 0 0-3.4 0Z" />
+  </>,
+);
+/** A link that no longer opens anything. */
+export const LinkOff = icon(
+  <>
+    <path d="M9 17H7A5 5 0 0 1 7 7" />
+    <path d="M15 7h2a5 5 0 0 1 4 8" />
+    <path d="M8 12h4" />
+    <path d="m2 2 20 20" />
+  </>,
+);
+/** A phone asking to pair (design turn 158j). */
+export const Smartphone = icon(<><rect width="14" height="20" x="5" y="2" rx="2" ry="2" /><path d="M12 18h.01" /></>);
+export const CircleAlert = icon(<><circle cx="12" cy="12" r="10" /><path d="M12 8v4" /><path d="M12 16h.01" /></>);
 
 /** Runs on this device — the shield is the claim, the tick is that it holds. */
 export const Shield = icon(
@@ -493,12 +565,49 @@ export const Collapse = icon(<><path d="M10 6 4 12l6 6" /><path d="m14 6 6 6-6 6
 export const Snap = icon(<><path d="M9 3v18" /><path d="M15 3v18" /></>);
 export const Duck = icon(<><path d="M2 12h3l3-8 4 16 3-8h5" /></>);
 export const Locate = icon(<><circle cx="12" cy="12" r="3" /><path d="M12 2v3" /><path d="M12 19v3" /><path d="M2 12h3" /><path d="M19 12h3" /></>);
+/* The Bench rail's Cut mark (design 142a): a clapperboard, so Takes and Cut do not share a camera. */
+export const Clapper = icon(<><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z" /><path d="m6.2 5.3 3.1 3.9" /><path d="m12.4 3.4 3.1 4" /><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></>);
+/* The Bench's "Not this" on a take's session line (design 142a). */
+export const ThumbsDown = icon(<><path d="M17 14V2" /><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z" /></>);
 
 // ---- Settings actions (SPEC-042 R-18): the verb's icon, beside the verb ----------------------
 export const Pencil = icon(<><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></>);
 export const RefreshCw = icon(<><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></>);
+export const ChartLine = icon(<><path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="m19 9-5 5-4-4-3 3" /></>);
 export const LinkMark = icon(<><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></>);
 export const Power = icon(<><path d="M12 2v10" /><path d="M18.4 6.6a9 9 0 1 1-12.77.04" /></>);
 export const FileText = icon(<><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v5h5" /><path d="M9 13h6" /><path d="M9 17h4" /></>);
 export const ArrowLeftRight = icon(<><path d="m8 3-4 4 4 4" /><path d="M4 7h16" /><path d="m16 21 4-4-4-4" /><path d="M20 17H4" /></>);
 export const Wrench = icon(<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />);
+
+// ---- Row verbs and one-register toolbars (issue 1010) ----------------------------------------
+export const ChevronUp = icon(<path d="m18 15-6-6-6 6" />);
+/* The open storyboard row's panels and its location chip (design turn 143). */
+export const StickyNote = icon(<><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9l7-7V5a2 2 0 0 0-2-2z" /><path d="M15 21v-5a2 2 0 0 1 2-2h5" /></>);
+export const MapPin = icon(<><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>);
+export const Help = icon(<><circle cx="12" cy="12" r="10" /><path d="M9.1 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><path d="M12 17h.01" /></>);
+/* A track of sound, and the plus that adds one — the verb drawn as its own noun. */
+export const AudioPlus = icon(<><path d="M3 10v4M7 6v12M11 9v6" /><path d="M16 13h6M19 10v6" /></>);
+export const Tag = icon(<><path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.42l8.7 8.7a2 2 0 0 0 2.83 0l6.58-6.58a2 2 0 0 0 0-2.83z" /><path d="M7.5 7.5h.01" /></>);
+/* Split is not the blade: the tool cuts wherever you click, this one cuts at the playhead — so
+   the mark is the line between two pieces rather than a second pair of scissors. */
+export const SplitMark = icon(<><path d="M12 3v18" /><path d="M8 8H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h4" /><path d="M16 8h4a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-4" /></>);
+
+/* The branch map's marks (design turn 157): an ending's flag, a warning's triangle, an exclusion. */
+export const Flag = icon(<><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" x2="4" y1="22" y2="15" /></>);
+export const TriangleAlert = icon(<><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /><path d="M12 9v4" /><path d="M12 17h.01" /></>);
+export const EyeOff = icon(
+  <>
+    <path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" />
+    <path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" />
+    <path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" />
+    <path d="m2 2 20 20" />
+  </>,
+);
+
+// Settings section marks, transcribed from turn 175.
+export const Key = icon(<><circle cx="7.5" cy="15.5" r="5.5" /><path d="m21 2-9.6 9.6" /><path d="m15.5 7.5 3 3L22 7l-3-3" /></>);
+export const Sliders = icon(<><path d="M20 7h-9" /><path d="M14 17H5" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" /></>);
+export const Wifi = icon(<><path d="M12 20h.01" /><path d="M2 8.82a15 15 0 0 1 20 0" /><path d="M5 12.86a10 10 0 0 1 14 0" /><path d="M8.5 16.43a5 5 0 0 1 7 0" /></>);
+export const Cpu = icon(<><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></>);
+export const Palette = icon(<><circle cx="13.5" cy="6.5" r=".5" /><circle cx="17.5" cy="10.5" r=".5" /><circle cx="8.5" cy="7.5" r=".5" /><circle cx="6.5" cy="12.5" r=".5" /><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.84-.44-1.13-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.55-2.5 5.55-5.55C21.96 6.01 17.46 2 12 2z" /></>);

@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
-import type { ManifestModel, RecipeIdentity } from "@arke-studio/contracts";
+import type { ManifestModel, RecipeIdentity, AdapterSelection } from "@arke-studio/contracts";
 import { KREA2_IMAGE, KREA2_BUCKETS } from "./krea2-recipe.js";
+import { QWEN21_IMAGE, QWEN21_BUCKETS } from "./qwen21-recipe.js";
+import { H3_REFERENCE, H3_REFERENCE_MODEL } from "./h3-reference-recipe.js";
 
 /**
  * The recipe catalogue (SPEC-021 §2.3): hand-authored, shipped, versioned — never fetched,
@@ -62,6 +64,9 @@ export interface RecipeCustomNode {
 }
 
 export interface ComfyUiRecipe {
+  adapters?: AdapterSelection[];
+  /** Catalogue-only adapter insertion point; absent means no selectable adapter support. */
+  adapterSlot?: readonly [nodeId: string, input: string];
   id: string;
   /**
    * `voice-tts` joins image and video (SPEC-021, amended 2026-08-19). Voxa covers preset speech and
@@ -101,10 +106,13 @@ export interface ComfyUiRecipe {
     nodes: readonly string[];
     /** The optional input slot they feed, cleared with them. */
     slot: readonly [nodeId: string, inputKey: string];
+    extraSlots?: ReadonlyArray<readonly [nodeId: string, inputKey: string]>;
   };
   /** Ordered optional reference inputs; absent pictures remove only their declared carriers. */
   referenceImages?: ReadonlyArray<NonNullable<ComfyUiRecipe["referenceFrame"]>>;
-  /** Use ordinary text conditioning when no references were supplied. Both paths are authored. */
+  referenceVideos?: ReadonlyArray<NonNullable<ComfyUiRecipe["referenceFrame"]>>;
+  referenceAudio?: ReadonlyArray<NonNullable<ComfyUiRecipe["referenceFrame"]>>;
+  /** Switch an authored conditioning or latent input when no references were supplied. */
   referenceConditioning?: {
     nodes: readonly string[];
     slot: readonly [nodeId: string, inputKey: string];
@@ -123,6 +131,7 @@ export interface ComfyUiRecipe {
     unavailableReason?: string;
   };
   hardware: {
+    accelerator?: "cuda";
     /** The card-size floor: total VRAM the machine must have, or the recipe is disabled. */
     minVramMb: number;
     /**
@@ -406,6 +415,7 @@ export const H3_FRAMES_BY_SECONDS: Record<string, number> = {
  * `speechVideo: "untested"` still does not claim.
  */
 const H3_VIDEO: ComfyUiRecipe = {
+  adapterSlot: ["3", "model"],
   id: "comfyui-h3-video",
   capability: "video",
   displayName: "Local · H3 Video",
@@ -745,7 +755,7 @@ const CLONED_VOICE: ComfyUiRecipe = {
   },
 };
 
-export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([KREA2_IMAGE, DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO, H3_VIDEO_768, CLONED_VOICE]);
+export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([KREA2_IMAGE, QWEN21_IMAGE, DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO, H3_VIDEO_768, H3_REFERENCE, CLONED_VOICE]);
 
 export function comfyUiRecipeById(modelId: string): ComfyUiRecipe | null {
   return COMFYUI_RECIPES.find((recipe) => recipe.id === modelId) ?? null;
@@ -782,6 +792,10 @@ function sha256Hex(text: string): string {
 }
 
 export function recipeTemplateDigest(recipe: ComfyUiRecipe): string {
+  if (recipe.referenceVideos || recipe.referenceAudio) {
+    return sha256Hex(canonicalJson({ graph: recipe.graph, referenceImages: recipe.referenceImages ?? [],
+      referenceVideos: recipe.referenceVideos ?? [], referenceAudio: recipe.referenceAudio ?? [] }));
+  }
   if (recipe.referenceImages !== undefined) {
     return sha256Hex(canonicalJson({
       graph: recipe.graph,
@@ -808,6 +822,7 @@ export function comfyUiRecipeIdentity(recipe: ComfyUiRecipe): RecipeIdentity {
     version: recipe.recipeVersion,
     templateDigest: recipeTemplateDigest(recipe),
     dependencyDigest: recipeDependencyDigest(recipe),
+    ...(recipe.adapters?.length ? { adapters: recipe.adapters } : {}),
   };
 }
 
@@ -926,6 +941,7 @@ export const WAN_DIMENSIONS: Record<string, { width: number; height: number }> =
 export const IMAGE_DIMENSIONS: Record<string, Record<string, { width: number; height: number }>> = {
   [DRAFT_IMAGE.id]: SDXL_BUCKETS,
   [KREA2_IMAGE.id]: KREA2_BUCKETS,
+  [QWEN21_IMAGE.id]: QWEN21_BUCKETS,
 };
 
 /**
@@ -976,9 +992,11 @@ export const VIDEO_DERIVATIONS: Record<
   [DRAFT_VIDEO.id]: { dimensions: WAN_DIMENSIONS, framesBySeconds: WAN_FRAMES_BY_SECONDS },
   [H3_VIDEO.id]: { dimensions: H3_DIMENSIONS, framesBySeconds: H3_FRAMES_BY_SECONDS },
   [H3_VIDEO_768.id]: { dimensions: H3_768_DIMENSIONS, framesBySeconds: H3_768_FRAMES_BY_SECONDS },
+  [H3_REFERENCE.id]: { dimensions: H3_DIMENSIONS, framesBySeconds: { "5": 124 } },
 };
 
 export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
+  H3_REFERENCE_MODEL,
   {
     id: KREA2_IMAGE.id,
     provider: "comfyui",
@@ -990,9 +1008,20 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
       resolutions: ["2048"],
       tiers: { "2K": "2048" },
       aspects: Object.keys(KREA2_BUCKETS),
+      // The rebalance node labels each picture "Picture N:" ahead of the prompt, so a brief's
+      // "@Image N" has to arrive as "Picture N" or it names something the encoder never saw
+      // (issue 1083). The H3 row declares its grammar the same way.
+      referenceSyntax: "picture-labels",
     },
     pricing: { kind: "unmetered" },
     requires: { vramMb: KREA2_IMAGE.hardware.minVramMb, memMb: KREA2_IMAGE.hardware.minMemMb },
+  },
+  {
+    id: QWEN21_IMAGE.id, provider: "comfyui", capability: "image", displayName: QWEN21_IMAGE.displayName,
+    accepts: { referenceImages: 1, referenceRoles: false, startFrame: false, endFrame: false },
+    limits: { maxPromptChars: 2000, resolutions: ["1024"], tiers: { "1K": "1024" }, aspects: Object.keys(QWEN21_BUCKETS), referenceSyntax: "qwen-image21" },
+    pricing: { kind: "unmetered" },
+    requires: { accelerator: ["cuda"], vramMb: QWEN21_IMAGE.hardware.minVramMb, recommendedVramMb: QWEN21_IMAGE.hardware.recommendedVramMb, memMb: QWEN21_IMAGE.hardware.minMemMb },
   },
   {
     id: CLONED_VOICE.id,

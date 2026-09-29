@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -16,12 +13,11 @@ import { FIXTURE_STATE } from "./fixture-state.js";
  *
  * The rule this screen exists to prove is a deletion: `statedElsewhere` suppressed a component
  * from one group because four other groups might already state it, conditionally, with a rule
- * per destination. R-6 requires it deleted rather than rewritten, and makes its survival a
- * finding about the split rather than a piece of tidying — so the first case here is that the
- * function is gone from the source, not merely unused.
+ * per destination. R-6 requires it deleted rather than rewritten. What proves it here is the
+ * rendered rail — every engine states its own components and nothing states another's — not a
+ * grep of the source for the function's name. The old addresses (`local-runtime`, `local-ai`,
+ * `engines`) are covered by retired-routes.test.tsx, which mounts them and reads where they land.
  */
-
-const HERE = dirname(fileURLToPath(import.meta.url));
 
 function component(patch: Partial<SetupComponent> & Pick<SetupComponent, "id">): SetupComponent {
   return {
@@ -85,20 +81,6 @@ function render(path: string, state: ClientState = stateWith()): string {
 }
 
 const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, " ");
-
-describe("the suppression is deleted, not relocated (R-6, D22, matrix row 39)", () => {
-  it("no source file declares statedElsewhere or its table", async () => {
-    // Rewriting it to suit the new rail would preserve the fault in a new shape. Deleting it is
-    // what makes the split testable — and this is that test.
-    for (const file of ["screens/shell.tsx", "screens/engine-panes.tsx", "screens/local-models.tsx"]) {
-      const source = await readFile(join(HERE, "..", "src", file), "utf8");
-      // The declarations, not the word: this file's own prose says why it went, and a comment
-      // recording a deletion is the opposite of the thing being asserted against.
-      assert.doesNotMatch(source, /function statedElsewhere/, file);
-      assert.doesNotMatch(source, /const STATED_ELSEWHERE/, file);
-    }
-  });
-});
 
 describe("Engines: one row per engine, and the components under it (R-68, R-71)", () => {
   it("folds a ComfyUI status that arrives after the startup snapshot", () => {
@@ -313,26 +295,5 @@ describe("Engines: one row per engine, and the components under it (R-68, R-71)"
     // in place of the count it has no answer for, and the pane says where.
     assert.match(plain(render("/settings/providers", remote)), /ComfyUI\s+elsewhere/);
     assert.match(plain(render("/settings/providers?provider=comfyui", remote)), /another machine/);
-  });
-});
-
-describe("Local runtime is gone, and its address is not (R-73)", () => {
-  it("no screen renders the old id, anywhere in the client", async () => {
-    for (const file of ["App.tsx", "screens/shell.tsx", "screens/engine-panes.tsx", "screens/local-models.tsx"]) {
-      const source = await readFile(join(HERE, "..", "src", file), "utf8");
-      assert.doesNotMatch(source, /settings-local-runtime/, file);
-    }
-  });
-
-  it("keeps the old route mounted as a redirect rather than a hole", async () => {
-    // A link, a bookmark or a remedy written against the old address lands on the half that
-    // answers the same question — which is the dangling remedy SPEC-032 §2.4 exists to prevent.
-    // Asserted on the route rather than the render: `<Navigate>` needs a second pass, and
-    // `renderToString` only makes one.
-    const app = await readFile(join(HERE, "..", "src", "App.tsx"), "utf8");
-    assert.match(app, /path="local-runtime" element=\{<Navigate to="\/settings\/providers" replace \/>\}/);
-    // The two screens Providers absorbed keep answering too (SPEC-034 R-5).
-    assert.match(app, /path="local-ai" element=\{<Navigate to="\/settings\/providers" replace \/>\}/);
-    assert.match(app, /path="engines" element=\{<Navigate to="\/settings\/providers" replace \/>\}/);
   });
 });

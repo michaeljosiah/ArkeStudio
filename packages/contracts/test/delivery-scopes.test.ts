@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   applyTimelineCommands,
+  AudioQcReportSchema,
   audioAtSec,
   buildFfmpegArgs,
   buildRenderPlan,
+  buildVideoPublicationPlan,
+  VideoPublicationRequestSchema,
   cueAtSec,
   episodeTimelineRange,
   pictureAtSec,
+  PerformanceRecordSchema,
+  DialogueTimingIntentSchema,
   seedSpinePictureTimeline,
   seedStoryPictureTimeline,
   spineTimelineFingerprint,
@@ -18,7 +23,84 @@ import {
   type ProductionSpine,
   type RenderArtifact,
   type Scene,
+  type TimelineClip,
+  type VideoPublicationRequest,
 } from "../src/index.js";
+
+describe("video publication scope parity (SPEC-048)", () => {
+  const request = (revision: number | null): VideoPublicationRequest => ({
+    productionId: "bell-watch", id: "urn:uuid:12345678-1234-1234-1234-123456789012", title: "Bell Watch", edition: "1", language: "en",
+    preset: "review-cut", timelineRevision: revision, scope: { kind: "episode", episodeId: "ep_two" },
+    textTracks: [{ trackId: "tr_en", kind: "captions", label: "English CC", default: true },
+      { trackId: "tr_fr", kind: "subtitles", label: "French", default: false }],
+  });
+
+  it("rebases and clips each selected track exactly like the episode RenderPlan", () => {
+    const value = production();
+    const timeline = applyTimelineCommands(seedStoryPictureTimeline(value), [
+      { kind: "set-track", trackId: "tr_picture", muted: true },
+      { kind: "add-subtitle-track", trackId: "tr_en", name: "English", language: "en" },
+      { kind: "add-cue", trackId: "tr_en", cue: { id: "cu_cross", text: "Across the cut", startFrame: 75, endFrame: 125 } },
+      { kind: "add-subtitle-track", trackId: "tr_fr", name: "French", language: "fr" },
+      { kind: "add-cue", trackId: "tr_fr", cue: { id: "cu_end", text: "Fin", startFrame: 225, endFrame: 300 } },
+    ]);
+    const input = { production: value, artifacts, timeline: { status: "ready" as const, timeline } };
+    const settings = request(timeline.revision);
+    const { plan } = ok(buildVideoPublicationPlan(input, settings));
+    assert.equal(plan.render.totalSec, 6);
+    assert.equal(plan.render.subtitles, null);
+    assert.equal(plan.render.burnIn, undefined);
+    assert.deepEqual(plan.media, [], "intentional blank picture needs no source media");
+    for (const [index, track] of settings.textTracks.entries()) {
+      const expected = ok(buildRenderPlan({ ...input, scope: settings.scope, preset: settings.preset,
+        subtitles: { trackId: track.trackId, mode: "sidecar", sidecar: "vtt" } })).plan.subtitles!;
+      assert.deepEqual(plan.textTracks[index]!.cues, expected.cues);
+    }
+    assert.equal(plan.textTracks[0]!.cues[0]!.startSec, 0);
+    assert.equal(plan.textTracks[1]!.cues[0]!.endSec, 6);
+  });
+
+  it("refuses gaps representing missing footage, unknown sound, stale revisions and legacy captions", () => {
+    const value = production(), timeline = seedStoryPictureTimeline(value);
+    const input = { production: value, artifacts, timeline: { status: "ready" as const, timeline } };
+    const settings = { ...request(timeline.revision), textTracks: [] };
+    let result = buildVideoPublicationPlan(input, settings);
+    assert.ok(!result.ok); assert.match(result.reason, /Missing picture/);
+    timeline.tracks[0]!.clips = timeline.tracks[0]!.clips.filter(clip => clip.id === "cl_sh-3");
+    delete value.takeMediaInfo[TAKE_C];
+    result = buildVideoPublicationPlan(input, settings);
+    assert.ok(!result.ok); assert.match(result.reason, /Unmeasured audio/);
+    result = buildVideoPublicationPlan(input, { ...settings, timelineRevision: 999 });
+    assert.ok(!result.ok); assert.match(result.reason, /revision changed/);
+    // A saved timeline's absent state must not drop a requested caption choice on the
+    // legacy episode branch, even when the legacy movie itself resolves successfully.
+    value.episodes[1]!.scenes = ["sc_b"];
+    value.scenes[1] = scene("sc_b", 2, [{ id: "sh_3" }]);
+    result = buildVideoPublicationPlan({ ...input, timeline: { status: "absent" } }, request(null));
+    assert.ok(!result.ok); assert.match(result.reason, /saved timeline/);
+  });
+
+  it("rejects duplicate track choices and more than one default before capture", () => {
+    const settings = request(1);
+    assert.equal(VideoPublicationRequestSchema.safeParse({ ...settings, textTracks: [settings.textTracks[0], settings.textTracks[0]] }).success, false);
+    assert.equal(VideoPublicationRequestSchema.safeParse({ ...settings, textTracks: settings.textTracks.map(track => ({ ...track, default: true })) }).success, false);
+  });
+
+  it("refuses leading and internal blank lines that would terminate a WebVTT cue", () => {
+    const value = production();
+    for (const text of ["\nHello", " \t\nHello", "Hello\n\nWorld", "Hello\n \nWorld", "Hello\0"]) {
+      const timeline = applyTimelineCommands(seedStoryPictureTimeline(value), [
+        { kind: "set-track", trackId: "tr_picture", muted: true },
+        { kind: "add-subtitle-track", trackId: "tr_en", name: "English", language: "en" },
+        { kind: "add-cue", trackId: "tr_en", cue: { id: "cu_invalid", text, startFrame: 100, endFrame: 125 } },
+      ]);
+      const settings = request(timeline.revision);
+      settings.textTracks = [settings.textTracks[0]!];
+      const result = buildVideoPublicationPlan({ production: value, artifacts, timeline: { status: "ready", timeline } }, settings);
+      assert.ok(!result.ok); assert.match(result.reason, /blank line or unsupported control/);
+    }
+  });
+});
 
 /**
  * Every visible track in production, episode and music-timed delivery (SPEC-037 R-32..R-34,
@@ -118,6 +200,108 @@ function ok<T extends { ok: boolean }>(result: T): Extract<T, { ok: true }> {
 }
 
 describe("one timeline, three delivery scopes (#682)", () => {
+  it("keeps speech ducking at episode edges without reading an excluded artifact (#895)", () => {
+    for (const [episodeId, voiceStartFrame, startSec, endSec] of [["ep_one", 89, 0, 3.52], ["ep_two", 60, 3.52, 9.52]] as const) {
+      const value = production(), timeline = seedStoryPictureTimeline(value);
+      timeline.migratedCut = true;
+      timeline.tracks.push({ id: "tr_voice", kind: "dialogue", name: "Voice", order: 1, muted: false, clips: [{
+        id: "cl_voice", startFrame: voiceStartFrame, durationFrames: 25, sourceInFrames: 0,
+        source: { kind: "artifact", artifactId: BELLS, label: "Voice" },
+      }] }, { id: "tr_music", kind: "music", name: "Music", order: 2, muted: false, clips: [{
+        id: "cl_music", startFrame: 0, durationFrames: 238, sourceInFrames: 0,
+        source: { kind: "artifact", artifactId: SONG, label: "Music" },
+      }] });
+      const scope = { kind: "episode" as const, episodeId }, state = { status: "ready" as const, timeline };
+      const full = ok(buildRenderPlan({ production: value, artifacts, timeline: state, scope: { kind: "production" }, preset: "review-cut" }));
+      const expected = windowPlan(full.plan, startSec, endSec, scope);
+      for (const catalog of [artifacts, artifacts.filter(artifact => artifact.id !== BELLS),
+        artifacts.map(artifact => artifact.id === BELLS ? { ...artifact, production: "another-production" } : artifact)]) {
+        const result = ok(buildRenderPlan({ production: value, artifacts: catalog, timeline: state, scope, preset: "review-cut" }));
+        assert.deepEqual(result.plan, expected);
+        assert.ok(!result.plan.audio.some(item => item.clipId === "cl_voice"));
+      }
+      const edge = episodeId === "ep_one" ? endSec - 0.01 : 0;
+      assert.ok(audioAtSec(expected, edge).find(item => item.clipId === "cl_music")!.effectiveGainDb < 0);
+    }
+  });
+
+  it("retains mutual dialogue approval across an episode boundary without delivering the partner's excluded sound (#895)", () => {
+    const value = production();
+    const timeline = seedStoryPictureTimeline(value);
+    value.timeline = { status: "ready", timeline };
+    const clips: TimelineClip[] = [];
+    for (const [shotId, partner, startFrame, durationSec, suffix] of [["sh_2", "sh_3", 50, 2, "1"], ["sh_3", "sh_2", 88, 1, "2"]] as const) {
+      const id = `pf_01J8G0000000000000000000P${suffix}`, hash = `sha256:${suffix.repeat(64)}`;
+      const technical = { container: "wav", codec: "pcm_s16le", sampleFormat: "s16", sampleRateHz: 48000, channels: 1, bitDepth: 16, durationSec, sizeBytes: 96000 * durationSec };
+      value.performances.push(PerformanceRecordSchema.parse({ id, kind: "scratch", file: `sha256-${suffix.repeat(64)}.wav`, createdAt: AT, recordedAt: AT,
+        target: { productionId: value.meta.id, sceneId: shotId === "sh_2" ? "sc_a" : "sc_b", sceneVersion: 1, shotId, speakerSheetId: "speaker", authoredTextHash: hash },
+        captureAcknowledgement: { basis: "self", statementVersion: 1, at: AT },
+        provenance: { schemaVersion: 1, source: { kind: "performance-recording", productionId: value.meta.id, performanceId: id, sourceFile: "capture.wav", sourceMediaHash: hash },
+          sourceTechnical: technical, outputHash: hash, outputTechnical: technical, preparation: [], createdAt: AT,
+          qualityReport: { schemaVersion: 1, sourceHash: hash, analyzer: { id: "arke-pcm-qc", version: 1, policyVersion: 1 }, analyzedAt: AT, technical,
+            measurements: Object.fromEntries(Object.keys(AudioQcReportSchema.shape.measurements.shape).map(key => [key, null])),
+            checks: Object.fromEntries(Object.keys(AudioQcReportSchema.shape.checks.shape).map(key => [key, { outcome: "unavailable", code: "fixture" }])),
+          },
+        },
+      }));
+      clips.push({ id: `cl_dialogue-${suffix}`, startFrame, durationFrames: durationSec * 25, sourceInFrames: 0,
+        source: { kind: "performance", performanceId: id, shotId, sourceHash: hash, label: shotId, leadInSec: 0,
+          timing: DialogueTimingIntentSchema.parse({ overflow: { mode: "overlap", withShotId: partner } }) } });
+    }
+    // Performance overlaps live on separate lanes, as the atomic placement command writes them.
+    clips.forEach((clip, index) => timeline.tracks.push({ id: `tr_dialogue-${index}`, kind: "dialogue", name: "Dialogue", order: index + 1, muted: false, clips: [clip] }));
+    const input = { production: value, artifacts, timeline: value.timeline, preset: "review-cut" as const };
+    const full = ok(buildRenderPlan({ ...input, scope: { kind: "production" } }));
+    for (const [episodeId, startSec, endSec] of [["ep_one", 0, 3.52], ["ep_two", 3.52, 9.52]] as const) {
+      const scope = { kind: "episode" as const, episodeId };
+      assert.deepEqual(ok(buildRenderPlan({ ...input, scope })).plan, windowPlan(full.plan, startSec, endSec, scope));
+    }
+    const first = ok(buildRenderPlan({ ...input, scope: { kind: "episode", episodeId: "ep_one" } }));
+    assert.deepEqual(first.plan.audio.filter(item => item.role === "dialogue").map(item => item.clipId), ["cl_dialogue-1"]);
+    const source = clips[1]!.source; assert.ok(source.kind === "performance");
+    source.timing.overflow = { mode: "forbid" };
+    const refused = buildRenderPlan({ ...input, scope: { kind: "episode", episodeId: "ep_one" } });
+    assert.ok(!refused.ok); assert.match(refused.reason, /mutual approval/);
+  });
+
+  for (const lane of ["base", "overlay", "audio"] as const) {
+    it(`ignores unavailable ${lane} media outside an episode, but refuses it inside (#895)`, () => {
+      const value = production();
+      const timeline = seedStoryPictureTimeline(value);
+      timeline.migratedCut = true;
+      const artifactId = lane === "audio" ? BELLS : PLATE;
+      const clip = { id: "cl_scoped" as const, startFrame: 250, durationFrames: 25, sourceInFrames: 0,
+        source: { kind: "artifact" as const, artifactId, label: "Scoped media" } };
+      if (lane === "base") timeline.tracks[0]!.clips.push(clip);
+      else timeline.tracks.push({ id: "tr_scoped", kind: lane === "audio" ? "audio" : "picture", name: "Scoped", order: 10, muted: false, clips: [clip] });
+      const scope = { kind: "episode" as const, episodeId: "ep_one" };
+      const state = { status: "ready" as const, timeline };
+      const expected = ok(buildRenderPlan({ production: value, artifacts, timeline: state, scope, preset: "review-cut" }));
+      const catalogs = [artifacts.filter(artifact => artifact.id !== artifactId),
+        artifacts.map(artifact => artifact.id === artifactId ? { ...artifact, production: "another-production" } : artifact)];
+      for (const catalog of catalogs) {
+        assert.deepEqual(buildRenderPlan({ production: value, artifacts: catalog, timeline: state, scope, preset: "review-cut" }), expected);
+        assert.equal(buildRenderPlan({ production: value, artifacts: catalog, timeline: state, scope: { kind: "production" }, preset: "review-cut" }).ok, false);
+      }
+      clip.startFrame = lane === "base" ? 25 : 0;
+      if (lane === "base") timeline.tracks[0]!.clips.find(candidate => candidate.id === "cl_sh-1")!.durationFrames = 25;
+      for (const catalog of catalogs) {
+        const refused = buildRenderPlan({ production: value, artifacts: catalog, timeline: state, scope, preset: "review-cut" });
+        assert.ok(!refused.ok); assert.match(refused.reason, /cl_scoped cites artifact/);
+      }
+    });
+  }
+
+  it("ignores unmigrated legacy overlays outside a saved episode window (#895)", () => {
+    const value = production({ cut: { audio: [], overlays: [{ id: "ov_01J8G0000000000000000000B1", artifactId: PLATE, startSec: 6, endSec: 7, lane: 0, audio: "keep" }] } });
+    const timeline = { status: "ready" as const, timeline: seedStoryPictureTimeline(value) };
+    const scope = { kind: "episode" as const, episodeId: "ep_one" };
+    assert.ok(buildRenderPlan({ production: value, artifacts: [], timeline, scope, preset: "review-cut" }).ok);
+    value.cut.overlays[0]!.startSec = 1;
+    const refused = buildRenderPlan({ production: value, artifacts: [], timeline, scope, preset: "review-cut" });
+    assert.ok(!refused.ok); assert.match(refused.reason, /which this world does not have/);
+  });
+
   it("derives a contiguous episode range and refuses an interleaved one by name", () => {
     const value = production();
     const seeded = seedStoryPictureTimeline(value);
@@ -175,7 +359,7 @@ describe("one timeline, three delivery scopes (#682)", () => {
     // The plate straddles the cut: its head is gone, the rest is there, held as a still.
     assert.deepEqual(two.overlays, [{ path: "artifacts/plate.png", startSec: 0, endSec: 1.48, still: true }]);
     // The bed started 1.52s before the episode: it enters 1.52s into its source.
-    assert.deepEqual(two.audio.map((clip) => [clip.startSec, clip.endSec, Math.round(clip.sourceInSec * 100) / 100]), [[0, 4.48, 1.52]]);
+    assert.deepEqual(two.audio.map((clip) => [clip.startSec, Math.round(clip.endSec * 100) / 100, Math.round(clip.sourceInSec * 100) / 100]), [[0, 4, 0], [0, 4.48, 1.52]]);
     assert.deepEqual(two.burnIn?.cues.map((cue) => [Math.round(cue.startSec * 100) / 100, Math.round(cue.endSec * 100) / 100]), [[0, 1.48]]);
     const graph = buildFfmpegArgs(two, "/w", "/out.mp4", "/f.ttf");
     assert.match(graph[graph.indexOf("-filter_complex") + 1]!, /concat=n=2:v=1:a=0/, "the two episode-two shots and nothing of episode one");

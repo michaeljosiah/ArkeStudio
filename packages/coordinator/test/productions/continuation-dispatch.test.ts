@@ -307,6 +307,15 @@ describe("continuation dispatch (SPEC-019 T-31, issues 461 and 629)", () => {
     assert.equal(pass.params["durationSec"], 6, "priced on the reference route's own menu");
   });
 
+  it("applies the aggregate video minimum to the single carried clip", async () => {
+    const model = { ...H3_LIKE, limits: { ...H3_LIKE.limits, minReferenceVideoSec: 2 } };
+    const { plan } = await planFor({ model, takes: [take(TK_1, { params: { durationSec: 1 } } as Partial<Take>)] });
+    assert.equal(plan.shots[1]?.continuation, undefined);
+    assert.match(plan.warnings.continuationUnavailable[0]!.reason, /2s reference minimum/);
+    const accepted = await planFor({ model, takes: [take(TK_1, { params: { durationSec: 2 } } as Partial<Take>)] });
+    assert.equal(accepted.plan.shots[1]?.continuation?.kind, "carry");
+  });
+
   it("budgets the carried clip in seconds, and refuses a length it cannot state (issue 852)", async () => {
     const reasonFor = async (predecessor: Take) => {
       const { plan } = await planFor({ model: H3_LIKE, takes: [predecessor] });

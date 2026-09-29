@@ -161,6 +161,8 @@ describe("world ownership: a read-only open resolves nothing (R-15)", () => {
 
   it("opens a clean world read-only with no problems and no lock", async () => {
     const dir = await makeTempWorld();
+    const writable = await WorldStore.open(dir, { clock: CLOCK });
+    await writable.close(); // A clean baseline includes the current history snapshots.
     const store = await WorldStore.open(dir, { readOnly: true, clock: CLOCK });
     closeOnCleanup(() => store.close().catch(() => {}));
     assert.deepEqual(store.getBundle().problems, []);

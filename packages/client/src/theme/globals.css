@@ -56,6 +56,13 @@ code,
   font: var(--type-mono);
 }
 
+/* Preformatted text keeps its whitespace without the browser's monospace default. */
+pre,
+kbd,
+samp {
+  font-family: var(--font-sans);
+}
+
 :focus-visible {
   outline: none;
   box-shadow: var(--shadow-focus);

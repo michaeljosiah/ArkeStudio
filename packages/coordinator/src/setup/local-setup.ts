@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, rm, stat, link, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import {
@@ -46,7 +46,11 @@ export interface SetupDeps {
     body: AsyncIterable<Uint8Array>;
   }>;
   /** Run a program to completion. Used for the third-party installer and `ollama pull`. */
-  run(command: string, args: readonly string[], signal: AbortSignal): Promise<{ code: number; output: string }>;
+  run(
+    command: string, args: readonly string[], signal: AbortSignal,
+    /** Each piece of output as it arrives, for a program that reports its own progress. */
+    onOutput?: (text: string) => void,
+  ): Promise<{ code: number; output: string }>;
   /** Absolute path of a command on PATH, or null. */
   which(command: string): Promise<string | null>;
   /** Does something answer here? Ollama's own API is the surest sign it is installed. */
@@ -79,6 +83,10 @@ export interface SetupOptions {
   componentLocations?: Record<string, () => string | null | undefined>;
   /** Awaited after a newly installed component becomes ready, before dependants are attempted. */
   onComponentReady?: (componentId: string) => Promise<void>;
+  /** Application policy rechecked for queued/resumed optional downloads. */
+  beforeComponentInstall?: (componentId: string) => Promise<void>;
+  /** Invoked only for bytes this service actually downloaded and verified. */
+  onFileInstalled?: (componentId: string, path: string) => Promise<void>;
 }
 
 interface Live extends SetupComponent {
@@ -172,6 +180,8 @@ export class LocalSetupService {
   /** The install action a paused member belongs to, persisted into its receipt for restart. */
   private readonly pendingClosures = new Map<string, readonly string[]>();
   private readonly receiptUpdates = new Set<Promise<void>>();
+  /** Observed per-file bytes, refreshed by detection and the existing transfer loop. */
+  private readonly fileProgress = new Map<string, number>();
 
   constructor(
     private readonly deps: SetupDeps,
@@ -191,7 +201,7 @@ export class LocalSetupService {
         bytesTotal: entry.sizeMb * 1024 * 1024,
         bytesPerSecond: null,
         pauseSupported: false,
-        ...(entry.caveat !== undefined ? { detail: entry.caveat } : {}),
+        ...(entry.caveat !== undefined ? { caveat: entry.caveat, detail: entry.caveat } : {}),
         // Carried onto the wire so a capability row can ask what a component makes available
         // without a second copy of the catalogue in the renderer (SPEC-033 R-39).
         ...(entry.provides !== undefined ? { provides: [...entry.provides] } : {}),
@@ -209,12 +219,19 @@ export class LocalSetupService {
 
   status(): SetupStatus {
     return {
-      components: [...this.components.values()].map(({ entry, ...c }) => ({
+      components: [...this.components.values()].map(({ entry, ...c }) => {
+        const location = this.installLocationOf(entry);
+        return {
         ...c,
         // Resolved at publication time because a newly activated or remapped engine can change
         // where dependent weights land without rebuilding the setup service.
-        installLocation: this.installLocationOf(entry),
-      })),
+        installLocation: location,
+        files: entry.spec.kind === "files" && location ? entry.spec.files.map((file) => {
+          const target = join(location, file.file);
+          return { key: createHash("sha256").update(JSON.stringify([target, file.sha256 ?? file.url, file.sizeMb])).digest("hex"), sizeMb: file.sizeMb,
+            bytesDone: componentIsSettled(c.state) ? file.sizeMb * 1024 * 1024 : Math.min(file.sizeMb * 1024 * 1024, this.fileProgress.get(target) ?? 0) };
+        }) : undefined,
+      }; }),
       running: this.running,
       diskFreeMb: this.diskFreeMb,
       diskCheckedAt: this.diskCheckedAt,
@@ -401,12 +418,14 @@ export class LocalSetupService {
     let paused: OwnedDownload | null = null;
     for (const { spec, target } of this.downloadTargets(entry)) {
       const complete = await stat(toExtendedLength(target)).catch(() => null);
+      this.fileProgress.set(target, complete?.isFile() ? complete.size : 0);
       if (complete?.isFile() && complete.size > 0) {
         bytesDone += complete.size;
         continue;
       }
       const owned = await this.ownedDownload(entry.id, spec, target, true);
       if (owned !== null) {
+        this.fileProgress.set(target, owned.receipt.durableBytes);
         bytesDone += owned.receipt.durableBytes;
         paused = owned;
       }
@@ -580,8 +599,11 @@ export class LocalSetupService {
             pauseSupported: paused.pauseSupported,
             detail: paused.detail,
           });
-          recoveredClosures.push({ pausedId: id, componentIds: paused.closureIds });
-          for (const member of paused.closureIds) this.pendingClosures.set(member, paused.closureIds);
+          // An Install may have widened this closure while the receipt rewrite is still in
+          // flight. Detection must not replace that newer request with the older disk snapshot.
+          const closureIds = this.pendingClosures.get(id) ?? paused.closureIds;
+          recoveredClosures.push({ pausedId: id, componentIds: closureIds });
+          for (const member of closureIds) this.pendingClosures.set(member, closureIds);
         } else if (c.state === "present" || c.state === "paused") {
           this.set(id, {
             state: c.entry.optional === true ? "available" : "queued",
@@ -819,6 +841,7 @@ export class LocalSetupService {
   private async install(entry: CatalogueEntry): Promise<void> {
     const spec = entry.spec;
     try {
+      await this.opts.beforeComponentInstall?.(entry.id);
       if (spec.kind === "files") {
         const repairBlock = this.repairBlocks.get(entry.id);
         if (repairBlock !== undefined) {
@@ -846,6 +869,7 @@ export class LocalSetupService {
           const target = join(dir, f.file);
           const existing = await stat(toExtendedLength(target)).catch(() => null);
           if (existing !== null && existing.size > 0) {
+            this.fileProgress.set(target, existing.size);
             done += existing.size;
             this.set(entry.id, { bytesDone: done });
             this.publish();
@@ -998,7 +1022,9 @@ export class LocalSetupService {
         return;
       }
 
-      // A pull: the runtime fetches its own model and reports its own progress; ours is coarse.
+      // A pull: the runtime fetches its own model and prints its own progress, which is read
+      // back here. Read as a finished program only, a 7 GB pull said "0%" for ten minutes and
+      // then "installed", which looks like a hang the whole way (issue 1289).
       this.set(entry.id, {
         state: "installing",
         detail: `${spec.command} ${spec.args.join(" ")}`,
@@ -1006,7 +1032,14 @@ export class LocalSetupService {
         pauseSupported: false,
       });
       this.publish();
-      const pulled = await this.deps.run(spec.command, spec.args, this.abort.signal);
+      const progress = new PullProgress();
+      let published = 0;
+      const pulled = await this.deps.run(spec.command, spec.args, this.abort.signal, (text) => {
+        if (!progress.read(text)) return;
+        this.set(entry.id, { bytesDone: progress.done, bytesPerSecond: progress.perSecond });
+        // Twice a second is a moving bar; every chunk would be a frame per carriage return.
+        if (Date.now() - published >= 500) { published = Date.now(); this.publish(); }
+      });
       if (pulled.code !== 0) {
         this.set(entry.id, { state: "failed", detail: firstLine(pulled.output) || `${spec.command} exited ${pulled.code}` });
       } else {
@@ -1146,6 +1179,7 @@ export class LocalSetupService {
       preserve: null,
     };
     this.activeTransfer = transfer;
+    this.fileProgress.set(target, resumedAt);
     const started = Date.now();
     let received = 0;
     let lastEmit = 0;
@@ -1220,6 +1254,7 @@ export class LocalSetupService {
             offset += bytesWritten;
           }
           received += chunk.byteLength;
+          this.fileProgress.set(target, resumedAt + received);
           const now = Date.now();
           if (now - lastCheckpoint >= Math.max(5_000, (this.opts.throttleMs ?? DEFAULT_THROTTLE_MS) * 10)) {
             lastCheckpoint = now;
@@ -1257,11 +1292,20 @@ export class LocalSetupService {
         receipt.partialPath,
         () => transfer.abort.signal.aborted || this.abort.signal.aborted || this.disposed,
       );
+      await this.opts.beforeComponentInstall?.(componentId);
       if (transfer.abort.signal.aborted || this.abort.signal.aborted || this.disposed) throw new Error("stopped");
       // Only a verified whole file takes the real name. Rename remains the atomic visibility step.
-      await rm(toExtendedLength(target), { force: true }).catch(() => {});
-      await rename(toExtendedLength(receipt.partialPath), toExtendedLength(target));
+      if (this.components.get(componentId)?.entry.preserveExistingFiles) {
+        // Publishing a hard link fails if a user supplied the destination during transfer.
+        // The verified staging file is on this volume; no overwrite window is introduced.
+        await link(toExtendedLength(receipt.partialPath), toExtendedLength(target));
+        await unlink(toExtendedLength(receipt.partialPath));
+      } else {
+        await rm(toExtendedLength(target), { force: true }).catch(() => {});
+        await rename(toExtendedLength(receipt.partialPath), toExtendedLength(target));
+      }
       landed = true;
+      await this.opts.onFileInstalled?.(componentId, target);
       await rm(toExtendedLength(receiptPath), { force: true }).catch(() => {});
     } catch (err) {
       failure = err;
@@ -1281,6 +1325,7 @@ export class LocalSetupService {
         }
         const info = await stat(toExtendedLength(receipt.partialPath));
         receipt.durableBytes = info.size;
+        this.fileProgress.set(target, receipt.durableBytes);
         await this.writeReceipt(receiptPath, receipt);
         this.set(componentId, { bytesDone: alreadyDone + receipt.durableBytes });
         throw new DownloadPausedError(
@@ -1297,6 +1342,7 @@ export class LocalSetupService {
         receipt.rangeSupported &&
         receipt.durableBytes > 0;
       if (retainForResume) {
+        this.fileProgress.set(target, receipt.durableBytes);
         throw new DownloadPausedError(
           `paused after ${failure instanceof Error ? failure.message : String(failure)}`,
           true,
@@ -1305,6 +1351,7 @@ export class LocalSetupService {
       try {
         await rm(toExtendedLength(receipt.partialPath), { force: true });
         await rm(toExtendedLength(receiptPath), { force: true });
+        this.fileProgress.set(target, 0);
         this.set(componentId, { bytesDone: alreadyDone });
       } catch (err) {
         this.set(componentId, {
@@ -1316,7 +1363,17 @@ export class LocalSetupService {
       }
       throw failure;
     }
+    this.fileProgress.set(target, receipt.durableBytes);
     return receipt.durableBytes;
+  }
+
+  /** Pause only the current ranged HTTP transfer; installers and runtime-owned pulls are untouched. */
+  suspendComponent(componentId: string): void {
+    if (this.activeTransfer?.componentId === componentId) {
+      if (this.activeTransfer.rangeSupported) this.activeTransfer.preserve = "pause";
+      this.activeTransfer.abort.abort();
+    }
+    this.skip(componentId);
   }
 
   /** Pause only the current ranged HTTP transfer; installers and runtime-owned pulls are untouched. */
@@ -1759,6 +1816,48 @@ export class LocalSetupService {
 
 function gb(mb: number): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
+}
+
+/**
+ * `ollama pull`'s own progress, read from what it prints (issue 1289). Off a terminal it still
+ * draws its bars: each redraw begins at column one (`ESC[1G`), several layers redraw together
+ * after a cursor-up, and a layer reads `pulling 59656d7494d6:  45% ▕██▏ 3.3 GB/7.4 GB 30 MB/s`
+ * until it is finished, when the pair becomes its size alone. Sizes are decimal, as Ollama
+ * prints them. A line that does not match changes nothing, so a format this does not know
+ * leaves the bar where it was rather than moving it wrongly.
+ */
+export class PullProgress {
+  private readonly layers = new Map<string, number>();
+  private carry = "";
+  done = 0;
+  perSecond: number | null = null;
+
+  /** Whether this text moved the count. */
+  read(text: string): boolean {
+    // eslint-disable-next-line no-control-regex
+    const pieces = (this.carry + text).split(/\r|\n|\u001b\[\d*[AG]/);
+    this.carry = pieces.pop() ?? "";
+    let moved = false;
+    for (const piece of pieces) {
+      // eslint-disable-next-line no-control-regex
+      const line = piece.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
+      const layer = /pulling ([0-9a-f]{6,}):\s+\d+%.*?([\d.]+\s*[KMGT]?B)(?:\s*\/\s*([\d.]+\s*[KMGT]?B))?(?:\s+([\d.]+\s*[KMGT]?B)\/s)?/.exec(line);
+      if (!layer) continue;
+      const done = bytes(layer[2]!);
+      if (done === null) continue;
+      if (this.layers.get(layer[1]!) !== done) { this.layers.set(layer[1]!, done); moved = true; }
+      if (layer[4] !== undefined) this.perSecond = bytes(layer[4]);
+    }
+    if (moved) this.done = [...this.layers.values()].reduce((sum, value) => sum + value, 0);
+    return moved;
+  }
+}
+
+function bytes(size: string): number | null {
+  const found = /^([\d.]+)\s*([KMGT]?)B$/.exec(size.trim());
+  if (!found) return null;
+  const scale = { "": 1, K: 1e3, M: 1e6, G: 1e9, T: 1e12 }[found[2] as "" | "K" | "M" | "G" | "T"];
+  return Math.round(Number(found[1]) * scale);
 }
 
 function firstLine(text: string): string {

@@ -7,6 +7,7 @@ import {
   ConversationActionReceiptSchema,
   ConversationActionShownProjectionSchema,
   LOCAL_ACTOR_ID,
+  isRemoteHostConversationAction,
   newId,
   type ArkeReadObservation,
   type ConversationActionAuthorityBinding,
@@ -464,6 +465,12 @@ export class ConversationActionLifecycle {
     const meta = await store.readMeta();
     if (!meta) return refuse("unknown-conversation", "That conversation is no longer available.");
     const events = (await store.read()).events;
+    const loaded = foldConversation(meta.id, meta.createdAt, events).view;
+    const action = loaded.actions.find((one) => one.actionId === input.actionId);
+    // This must precede the idempotent path too: replaying a desktop approval may resume work.
+    if (input.hostActions === "refuse" && input.decision === "approve" && action && isRemoteHostConversationAction(action.actionKind)) {
+      return refuse("host-only", "Approve this action on your PC.", action.status);
+    }
     const existingRequest = events.find((event) => event.requestId === input.requestId);
     if (existingRequest) {
       if (
@@ -494,8 +501,6 @@ export class ConversationActionLifecycle {
       };
     }
 
-    const loaded = foldConversation(meta.id, meta.createdAt, events).view;
-    const action = loaded.actions.find((one) => one.actionId === input.actionId);
     if (!action) {
       const owner = await this.findActionConversation(input.actionId);
       return owner && owner !== input.conversationId

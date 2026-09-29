@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RecipeIdentitySchema } from "./comfyui.js";
 import { BenchParamsSchema, BenchReferenceTokenSchema } from "./bench.js";
 import { MediaInfoSchema } from "./media.js";
 import { ActualCostSourceSchema, ProvenanceSchema } from "./take.js";
@@ -81,6 +82,7 @@ export const ArtifactBenchGenerationSchema = z
     model: z.string().min(1),
     /** The recipe version, when the model is a local recipe (SPEC-021 R-13) — part of "how the bytes were made". */
     recipeVersion: z.number().int().min(1).optional(),
+    recipe: RecipeIdentitySchema.optional(),
     params: BenchParamsSchema,
     requestedSeed: z.number().int().optional(),
     /** From the matching ledger entry; null when the ledger had no actual figure. */
@@ -103,6 +105,7 @@ export const CharacterReferenceWorkflowSchema = z.enum([
   "character-voice-sample",
   "character-look",
   "reference-tile",
+  "location-view-candidate",
 ]);
 export type CharacterReferenceWorkflow = z.infer<typeof CharacterReferenceWorkflowSchema>;
 
@@ -157,9 +160,81 @@ export const ArtifactReferenceGenerationSchema = z
   .strict();
 export type ArtifactReferenceGeneration = z.infer<typeof ArtifactReferenceGenerationSchema>;
 
+/**
+ * An audiobook take (design turn 146, SPEC-047 R-3): one block of a chapter, read in one voice.
+ * The block is named by chapter, paragraph and occurrence and by the hash of its words; the
+ * voice by provider, model and id, with the sheet and the version its voice was assigned at
+ * (SPEC-013 R-18), so a take can say months later whose voice it was and why. Owned by the
+ * production, listed on Artifacts, borrowable by the Cut — and never in the speech cache.
+ */
+export const ArtifactAudiobookGenerationSchema = z
+  .object({
+    source: z.literal("audiobook"),
+    jobId: JobIdSchema.optional(),
+    productionId: SlugSchema,
+    chapterId: SlugSchema,
+    chapterVersion: z.number().int().min(1),
+    /** `title`, or `p<paragraph>.<n>` — the block's key in the chapter's audiobook record. */
+    block: z.string().min(1),
+    paragraph: z.number().int().min(-1),
+    textHash: z.string().min(1),
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    voiceId: z.string().min(1),
+    voiceLabel: z.string().min(1).optional(),
+    sheetId: SlugSchema.optional(),
+    sheetVersion: z.number().int().min(1).optional(),
+    /** How many provider requests were joined into this one file (SPEC-047 R-5). */
+    parts: z.number().int().min(1),
+    characters: z.number().int().min(0),
+    estimatedMicroUsd: z.number().int().min(0),
+    costMicroUsd: z.number().int().min(0).nullable(),
+    /**
+     * The direction the take was made under (SPEC-047 R-6, R-8): the plan's name, its delivery,
+     * and the digest of the text the reader was actually sent — the words with the tags in —
+     * which lives here and never on the chapter. Absent for a take made with no direction.
+     */
+    directionHash: z.string().min(1).optional(),
+    delivery: z.string().min(1).optional(),
+    providerTextHash: z.string().min(1).optional(),
+    /**
+     * The take the record held when this one was made (SPEC-047 R-4, issue 1190): a block made
+     * again is another take beside that one, never the one on the shelf handed back, and the
+     * take it stands beside is its name — so a run that ended after this file landed and before
+     * the record took it finds it again, and the next remake is another. Absent for a block's
+     * first take, and for one that restores a take whose media was gone.
+     */
+    remakeOf: ArtifactIdSchema.optional(),
+    /**
+     * A take a person recorded rather than a voice made (SPEC-047 R-34): the file brought in and
+     * the file prepared from it, by hash, and the rights acknowledgement it was kept under (R-36).
+     * The reader fields then name the recording (`recording · recorded`), never a voice.
+     */
+    recording: z
+      .object({
+        sourceHash: z.string().min(1),
+        preparedHash: z.string().min(1),
+        acknowledgementId: z.string().min(1),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type ArtifactAudiobookGeneration = z.infer<typeof ArtifactAudiobookGenerationSchema>;
+
+export const ArtifactFoundingGenerationSchema = z.object({
+  recipe: RecipeIdentitySchema.optional(),
+  source: z.literal("founding"), jobId: JobIdSchema, genesisId: z.string(), target: z.string(),
+  label: z.string(), prompt: z.string(), provider: z.string(), model: z.string(),
+  params: z.record(z.string(), z.unknown()), links: z.array(z.string()),
+  estimatedMicroUsd: z.number().int().min(0), costMicroUsd: z.number().int().min(0).nullable(),
+}).strict();
+
 export const ArtifactGenerationSchema = z.union([
+  ArtifactFoundingGenerationSchema,
   ArtifactBenchGenerationSchema,
   ArtifactReferenceGenerationSchema,
+  ArtifactAudiobookGenerationSchema,
 ]);
 export type ArtifactGeneration = z.infer<typeof ArtifactGenerationSchema>;
 
@@ -234,6 +309,8 @@ export const ArtifactSidecarSchema = z
     /** Present exactly on boundary stills cut from accepted footage (issue 154). */
     boundaryExtraction: BoundaryExtractionSchema.optional(),
     created: IsoDateTimeSchema,
+    /** Removed from shelves and pickers; bytes and existing citations remain intact (#957). */
+    retiredAt: IsoDateTimeSchema.optional(),
   })
   .strict()
   // A boundary frame is a picture by definition (issue 154): a video filed with extraction
@@ -251,7 +328,7 @@ export type ArtifactSidecar = z.infer<typeof ArtifactSidecarSchema>;
  */
 export function pickableArtifacts(artifacts: readonly ArtifactSidecar[]): ArtifactSidecar[] {
   const superseded = new Set(artifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
-  return artifacts.filter((a) => !superseded.has(a.id));
+  return artifacts.filter((a) => a.retiredAt === undefined && !superseded.has(a.id));
 }
 
 /**

@@ -5,9 +5,13 @@ import {
   ENGINE_PROVIDERS,
   PROVIDERS as PROVIDER_TABLE,
   comfyUiWeightsComponentId,
+  credentialFaulted,
   deriveCapabilityAvailability,
   engineOfProvider,
   modelPriceCopy,
+  modelEligible,
+  modelCapabilityCopy,
+  residencyNote,
   type Capability,
   type EngineId,
   type ManifestModel,
@@ -16,6 +20,8 @@ import {
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
 import { Cloud, Monitor, RefreshCw } from "../components/icons.js";
+import { OnYourPC } from "../components/on-your-pc.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import {
   setModelEnabled,
@@ -28,9 +34,10 @@ import {
   useStore,
   verifyComfyUiRecipe,
 } from "../lib/store.js";
+import { eligibilityInputs } from "../components/dispatch-bar.js";
 import { recipeFacts } from "./engine-panes.js";
 import { LocalModelRow, entryStatusLine, localEntries, type Entry } from "./local-models.js";
-import { KEYED_PROVIDERS, ProviderKeyLine, ProviderToolLine } from "./settings-providers.js";
+import { cannotPay, KEYED_PROVIDERS, ProviderKeyLine, ProviderToolLine } from "./settings-providers.js";
 import {
   CAPABILITY_ROWS,
   HalfHeading,
@@ -163,7 +170,10 @@ function CloudSection({ provider, models, visual }: { provider: ProviderId; mode
   const status = (state?.app.providers ?? []).find((p) => p.id === provider);
   const disabled = new Set(state?.app.models.disabled ?? []);
   const external = info.credential === "external";
-  const troubled = Boolean(status?.fault) || status?.validation === "invalid";
+  // A store's fault — a key not saved, or not cleared — leaves the credential the provider
+  // holds as it was, so it troubles nothing here (codex on PR 1195).
+  const troubled = credentialFaulted(status) || status?.validation === "invalid";
+  const unpaid = cannotPay(status);
   // What this credential actually unlocks, capability by capability — the same question the
   // generation pickers ask. A key can authenticate and still not do images.
   const unlocked = new Set(
@@ -184,13 +194,17 @@ function CloudSection({ provider, models, visual }: { provider: ProviderId; mode
         ? "Sign in again"
         : "Replace key"
       : !reachable
-        ? external
-          ? "Not unlocked by this account"
-          : "Not unlocked by this key"
+        ? unpaid
+          ? "Can't pay"
+          : external
+            ? "Not unlocked by this account"
+            : "Not unlocked by this key"
         : null;
   const right =
     remedy === null ? (
       <span className="fy-by__state">{`${on} of ${models.length} on`}</span>
+    ) : isRemoteSession() ? (
+      <OnYourPC>{external ? "sign-in" : `the key · ${status?.configured ? "set" : "not set"}`}</OnYourPC>
     ) : (
       <button type="button" className="fy-by__fix" aria-expanded={open} onClick={() => setOpen(!open)}>
         {remedy}
@@ -266,7 +280,7 @@ interface LocalFacts {
 function entryFacts(entry: Entry, onOpenDownloads: () => void): LocalFacts {
   const elsewhere = entry.locality === "remote";
   const moving = entry.component !== undefined && (entry.component.state === "downloading" || entry.component.state === "paused");
-  const controls = elsewhere ? null : (
+  const controls = elsewhere ? null : isRemoteSession() ? <OnYourPC>model installation and removal</OnYourPC> : (
     <>
       {entry.component !== undefined && <SetupTransferControl component={entry.component} />}
       {entry.state === "available" && entry.closure !== undefined && (
@@ -305,7 +319,7 @@ function entryFacts(entry: Entry, onOpenDownloads: () => void): LocalFacts {
       entry.reason && (entry.state === "unsupported" || entry.state === "needs-attention")
         ? { text: entry.reason, warn: !elsewhere && entry.state === "unsupported" }
         : undefined,
-    note: entry.ineligible,
+    note: [entry.ineligible, entry.residency].filter(Boolean).join(" ") || undefined,
     recommended: entry.recommended,
     dim: !elsewhere && entry.declined,
     ready: entry.state === "installed",
@@ -326,9 +340,11 @@ function recipeTileFacts(
   gated: { fit?: "runs-well" | "runs-slowly" | "insufficient" | "unsupported" | "unknown"; reason?: string } | undefined,
   recommended: boolean,
   disabled: boolean,
+  eligible: boolean,
+  residency?: string,
 ): LocalFacts {
   const facts = recipeFacts(recipe, weights, gated);
-  const controls = (
+  const controls = isRemoteSession() ? <OnYourPC>model installation and repair</OnYourPC> : (
     <>
       {weights?.state === "available" && (
         <Button onClick={() => setupRetry(weights.id)}>Download · {sizeMb(weights.sizeMb)}</Button>
@@ -359,7 +375,7 @@ function recipeTileFacts(
     tone: facts.tone,
     bar: facts.moving || facts.paused ? facts.pct : undefined,
     reason: facts.reason,
-    note: disabled ? "turned off in AI models" : undefined,
+    note: [disabled ? "turned off in AI models" : recipe.state === "unknown" && eligible ? "Generation is allowed." : undefined, residency].filter(Boolean).join(" ") || undefined,
     recommended,
     dim: facts.dim,
     ready: recipe.state === "ready",
@@ -369,7 +385,7 @@ function recipeTileFacts(
 }
 
 /** A local model as a tile: name, size, state, the controls its row had, and its one clause (R-13, R-16). */
-function LocalTile({ facts }: { facts: LocalFacts }) {
+function LocalTile({ facts, externalEngine }: { facts: LocalFacts; externalEngine: boolean }) {
   return (
     <div
       className={cx("fy-mtile", facts.dim && "fy-mtile--out")}
@@ -386,7 +402,24 @@ function LocalTile({ facts }: { facts: LocalFacts }) {
           <span style={{ flex: 1 }} />
           <RuntimeStatus tone={facts.tone}>{facts.word}</RuntimeStatus>
         </div>
+        {/* These terms and setup steps matter before a large download (issue 1226), even when
+            readiness cannot get past an unreachable engine. Keep the measured reason below. */}
+        {facts.model.id === "comfyui-qwen21-image" && (
+          <>
+            <div className="fy-set__why">
+              <span>Noncommercial research · <a className="fy-set__link" href="https://huggingface.co/Qwen/Qwen-Image-2.1/blob/790c92633540aa0cb11d9abf19eb46d861714758/LICENSE" target="_blank" rel="noopener noreferrer">Licence</a></span>
+            </div>
+            {externalEngine && (
+              <div className="fy-set__why">
+                <span>Dedicated engine profile required · <a className="fy-set__link" href="https://github.com/michaeljosiah/ArkeStudio/blob/e98271edd7d4754fa986128f13379281fa7fff0e/docs/development/qwen21.md#externally-managed-url-engines" target="_blank" rel="noopener noreferrer">Setup</a></span>
+              </div>
+            )}
+          </>
+        )}
         <div className="fy-mtile__does">{facts.controls}</div>
+        {((facts.model.accepts.referenceVideos ?? 0) > 0 || (facts.model.accepts.referenceAudio ?? 0) > 0) && (
+          <div className="fy-mtile__meta">{modelCapabilityCopy(facts.model)}</div>
+        )}
         {facts.reason !== undefined && (
           <div className="fy-set__why">
             <span className={cx("fy-set__dot", facts.reason.warn && "fy-set__dot--warn")} />
@@ -475,6 +508,8 @@ function LocalSection({ engine, models, visual }: { engine: EngineId; models: Ma
           gated,
           state?.app.runtime?.recommended[model.capability] === model.id,
           disabled.has(model.id),
+          modelEligible(model, eligibilityInputs(state)),
+          residencyNote(state?.app.residency?.find((reading) => reading.provider === model.provider && reading.model === model.id)),
         ),
       };
     }
@@ -482,13 +517,14 @@ function LocalSection({ engine, models, visual }: { engine: EngineId; models: Ma
     return { model, entry, facts: entry !== undefined ? entryFacts(entry, onOpenDownloads) : undefined };
   });
   const ready = items.filter((i) => i.facts?.ready === true).length;
+  const unchecked = items.filter((i) => recipes.get(i.model.id)?.state === "unknown").length;
   const right = (
-    <span className="fy-by__state">{remote ? "elsewhere" : `${ready} of ${ids.size} ready`}</span>
+    <span className="fy-by__state">{remote ? "elsewhere" : unchecked > 0 ? `${ready} ready · ${unchecked} unchecked` : `${ready} of ${ids.size} ready`}</span>
   );
   return (
     <Section id={engine} name={ENGINE_LABEL[engine]} right={right}>
       {visual ? (
-        <div className="fy-tiles">{items.map((i) => i.facts && <LocalTile key={i.model.id} facts={i.facts} />)}</div>
+        <div className="fy-tiles">{items.map((i) => i.facts && <LocalTile key={i.model.id} facts={i.facts} externalEngine={comfyui?.engine.source === "user-url"} />)}</div>
       ) : (
         <div className="fy-rows">
           {items.map((i) =>

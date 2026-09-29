@@ -1,3 +1,7 @@
+import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema, checkPropName, newId } from "@arke-studio/contracts";
+import { createProp, addPropState, renameProp, acceptPropStateReference } from "../references/props.js";
+import { createHash } from "node:crypto";
+import { readContainedImageReferences } from "../world/reference-files.js";
 import { readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
@@ -6,6 +10,7 @@ import {
   CanonEntrySchema,
   deriveArtDirectionDescription,
   buildRenderPlan,
+  legacyArtifactScopeRefusal,
   productionFrameRate,
   productionShape,
   SceneRecordSchema,
@@ -43,6 +48,8 @@ import {
   WorldChatProductionMetadataActionSchema,
   WorldChatProductionModelActionSchema,
   WorldChatProductionOverviewActionSchema,
+  WorldChatProductionProseStyleActionSchema,
+  type WorldChatSubject,
   WorldChatProductionSceneActionSchema,
   WorldChatProductionSceneDeleteActionSchema,
   WorldChatProductionSceneOrderActionSchema,
@@ -127,6 +134,7 @@ import {
   type WorldChatPreparedAction,
 } from "@arke-studio/contracts";
 import { resolveCandidate } from "../artifacts/extraction.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 import {
   ATTACHABLE_EXTENSIONS,
   addLinks,
@@ -167,6 +175,7 @@ import {
   interactiveFindings,
   proposeBranchCanon,
   saveRouting,
+  type BeatVoices,
 } from "../productions/interactive.js";
 import {
   createProductionFromPlan,
@@ -204,6 +213,7 @@ import {
 import { acceptMainPhoto } from "../references/main-photo.js";
 import {
   pendingReferenceTake,
+  recordUploadedPropImage,
   recordReferenceReview,
   referenceReviewDecision,
 } from "../references/takes.js";
@@ -248,6 +258,7 @@ import {
   seriesFence,
   sheetsFence,
   storyFence,
+  chapterFence,
   spineFence,
   timelineFence,
   takesFence,
@@ -257,7 +268,7 @@ import {
   jobsFence,
   type ArkeExportReadRecord,
 } from "./target-reads.js";
-import { stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
+import { foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
   stageWorldChatArtDirectionAction,
   stageWorldChatCanonAction,
@@ -285,6 +296,13 @@ export interface WorldChatActionTurn {
   readonly actions: readonly ModelWorldChatAction[];
   /** Present on live runs; absent only on callers created before complete target receipts. */
   readonly receipts?: readonly WorldChatCheckReceipt[];
+  /**
+   * What was selected while the line was said (turn 128): a passage revision the model returns
+   * is held against it, so the action can only aim at the words the author pointed at.
+   */
+  readonly subject?: WorldChatSubject;
+  /** The line asked for a reply and nothing else (turn 128): an action it returns is refused. */
+  readonly replyOnly?: boolean;
   readonly at: string;
 }
 
@@ -352,6 +370,11 @@ export interface WorldChatActionAdapterDeps {
     card: ConversationActionCard,
   ) => Promise<ConversationActionExecutionOutcome>;
   readonly cancelExport?: (exportId: string) => boolean;
+  /**
+   * A visual novel's prepared voices for its package (turn 174), scene by scene — the same resolver
+   * the branch map's export uses, so the two exports cannot ship different packages.
+   */
+  readonly interactiveExportVoices?: (productionId: string) => BeatVoices | undefined;
 }
 
 function completeObservation(
@@ -381,6 +404,8 @@ function completeObservation(
 }
 
 const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly ArkeReadRequirement[]> = {
+  "prop-authoring": ["references", "sheets"],
+  "prop-reference": ["references", "artifacts"],
   "world-metadata": ["world-metadata", "art-direction"],
   canon: ["canon", "sheets"],
   "canon-retire": ["canon", "sheets"],
@@ -419,9 +444,12 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-model": ["production-metadata"],
   "production-series": ["production-metadata", "series"],
   "production-overview": ["story"],
+  "production-prose-style": ["story"],
   "production-season": ["seasons"],
   "production-episode": ["episodes"],
-  "production-chapter": ["chapters"],
+  // The story read carries the prose style (turn 128): a draft or a revision that never saw it
+  // cannot be said to hold to it, so the read is required, not hoped for.
+  "production-chapter": ["chapters", "story"],
   "production-scene": ["scenes"],
   "production-episode-order": ["episodes"],
   "production-chapter-order": ["chapters"],
@@ -437,6 +465,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-take-review": ["takes"],
   "production-take-trim": ["takes"],
   "production-stage-playblast": ["scenes"],
+  "production-stage-construct": ["scenes"],
   "audio-spine-command": ["spine"],
   "production-routing": ["routing", "scenes"],
   "production-routing-traversal": ["routing", "scenes"],
@@ -470,8 +499,9 @@ function currentWorldObservation(
     }
     case "series": return { target: store.worldId, fence: seriesFence(bundle) };
     case "story": {
-      const productionId = target ?? store.worldId;
-      return { target: productionId, fence: storyFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
+      const targetId = target ?? store.worldId;
+      const [productionId, section] = targetId.split(":");
+      return { target: targetId, fence: storyFence(bundle.productions.find((candidate) => candidate.meta.id === productionId), section === "overview" ? section : undefined) };
     }
     case "seasons": {
       const productionId = target ?? store.worldId;
@@ -482,8 +512,16 @@ function currentWorldObservation(
       return { target: productionId, fence: episodesFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
     }
     case "chapters": {
-      const productionId = target ?? store.worldId;
-      return { target: productionId, fence: chaptersFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
+      // `productionId:chapterId` is one chapter's read (get_chapter), fenced on that chapter
+      // alone; the bare production id is the list (codex on PR 899).
+      const targetId = target ?? store.worldId;
+      const [productionId, chapterId, section] = targetId.split(":");
+      const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
+      if (chapterId) {
+        const canonical = canonicalChapterId(store, productionId!, chapterId);
+        return { target: `${productionId}:${canonical}${section === "plan" || section === "ending" ? `:${section}` : ""}`, fence: chapterFence(production, canonical) };
+      }
+      return { target: targetId, fence: chaptersFence(production) };
     }
     case "scenes": {
       const targetId = target ?? store.worldId;
@@ -550,7 +588,8 @@ function productionActionTargets(
       { requirement: "production-metadata", target: action.productionId },
       { requirement: "series", target: worldId },
     ];
-    case "production-overview": return [{ requirement: "story", target: action.productionId }];
+    case "production-overview":
+    case "production-prose-style": return [{ requirement: "story", target: action.productionId }];
     case "production-season": return [
       { requirement: "seasons", target: action.productionId },
       ...(action.changes.arcs !== undefined && action.changes.arcs !== null
@@ -565,15 +604,23 @@ function productionActionTargets(
         : []),
     ];
     case "production-chapter": {
-      const draws = action.change.operation === "create" ? action.change.draws : action.change.changes.draws;
+      const draws = action.change.operation === "create" ? action.change.draws : action.change.operation === "edit" ? action.change.changes.draws : undefined;
+      const resolvesViewpoint = action.change.operation === "outline"
+        ? action.change.chapters.some((chapter) => chapter.viewpointCharacter !== undefined)
+        : action.change.operation === "create" ? action.change.viewpointCharacter !== undefined
+        : action.change.changes.viewpointCharacter != null;
+      // A passage is quoted from a read of that chapter (turn 128), so the read is required by
+      // name, and its fence is the chapter's own hash: a chapter saved since the quote was taken
+      // sends the model back to read it again rather than to guess.
+      const quotedFrom = action.change.operation === "edit" && action.change.changes.passage !== undefined
+        ? [{ requirement: "chapters" as const, target: `${action.productionId}:${canonicalChapterId(store, action.productionId, action.change.chapterId)}` }]
+        : [];
       return [
         { requirement: "chapters", target: action.productionId },
-        ...(draws
-          ? [
-              { requirement: "sheets" as const, target: worldId },
-              { requirement: "canon" as const, target: worldId },
-            ]
-          : []),
+        ...quotedFrom,
+        { requirement: "story", target: action.productionId },
+        ...(draws || resolvesViewpoint ? [{ requirement: "sheets" as const, target: worldId }] : []),
+        ...(draws ? [{ requirement: "canon" as const, target: worldId }] : []),
       ];
     }
     case "production-scene": return [
@@ -614,6 +661,7 @@ function productionActionTargets(
     ];
     case "production-take-review":
     case "production-take-trim": return [{ requirement: "takes", target: action.productionId }];
+    case "production-stage-construct":
     case "production-stage-playblast": return [
       { requirement: "scenes", target: `${action.productionId}:${action.sceneId}` },
     ];
@@ -681,7 +729,9 @@ function worldActionObservations(
   if (missing) throw new Error(`A ${action.kind} action requires a complete current ${missing} read.`);
   const wrongTarget = productionActionTargets(store, action).find((required) =>
     !observations.some((observation) =>
-      observation.requirement === required.requirement && observation.target === required.target));
+      observation.requirement === required.requirement &&
+      (observation.target === required.target ||
+        (action.kind === "production-chapter" && required.requirement === "story" && observation.target === `${required.target}:overview`))));
   if (wrongTarget) {
     throw new Error(`A ${action.kind} action requires the complete current ${wrongTarget.requirement} read for ${wrongTarget.target}.`);
   }
@@ -725,6 +775,8 @@ function preparedWorldPayload(
     case "reference-master-look-result-use": return WorldChatReferenceMasterLookResultUseActionSchema.parse({ kind: "world-chat-reference-master-look-result-use", ...common });
     case "reference-image-discard": return WorldChatReferenceImageDiscardActionSchema.parse({ kind: "world-chat-reference-image-discard", ...common });
     case "voice-assignment": return WorldChatVoiceAssignmentActionSchema.parse({ kind: "world-chat-voice-assignment", ...common });
+    case "prop-authoring": return WorldChatPropAuthoringActionSchema.parse({ kind: "world-chat-prop-authoring", ...common });
+    case "prop-reference": return WorldChatPropReferenceActionSchema.parse({ kind: "world-chat-prop-reference", ...common });
     case "voice-audition": return WorldChatVoiceAuditionActionSchema.parse({ kind: "world-chat-voice-audition", ...common });
     case "voice-clone": return WorldChatVoiceCloneActionSchema.parse({ kind: "world-chat-voice-clone", ...common });
     case "voice-clip-review": return WorldChatVoiceClipReviewActionSchema.parse({ kind: "world-chat-voice-clip-review", ...common });
@@ -740,6 +792,7 @@ function preparedWorldPayload(
     case "production-model": return WorldChatProductionModelActionSchema.parse({ kind: "world-chat-production-model", ...common });
     case "production-series": return WorldChatProductionSeriesActionSchema.parse({ kind: "world-chat-production-series", ...common });
     case "production-overview": return WorldChatProductionOverviewActionSchema.parse({ kind: "world-chat-production-overview", ...common });
+    case "production-prose-style": return WorldChatProductionProseStyleActionSchema.parse({ kind: "world-chat-production-prose-style", ...common });
     case "production-season": return WorldChatProductionSeasonActionSchema.parse({ kind: "world-chat-production-season", ...common });
     case "production-episode": return WorldChatProductionEpisodeActionSchema.parse({ kind: "world-chat-production-episode", ...common });
     case "production-chapter": return WorldChatProductionChapterActionSchema.parse({ kind: "world-chat-production-chapter", ...common });
@@ -757,6 +810,7 @@ function preparedWorldPayload(
     case "production-take-generation": return WorldChatProductionTakeGenerationActionSchema.parse({ kind: "world-chat-production-take-generation", ...common });
     case "production-take-review": return WorldChatProductionTakeReviewActionSchema.parse({ kind: "world-chat-production-take-review", ...common });
     case "production-take-trim": return WorldChatProductionTakeTrimActionSchema.parse({ kind: "world-chat-production-take-trim", ...common });
+    case "production-stage-construct": return WorldChatProductionStageConstructActionSchema.parse({ kind: "world-chat-production-stage-construct", ...common });
     case "production-stage-playblast": return WorldChatProductionStagePlayblastActionSchema.parse({ kind: "world-chat-production-stage-playblast", ...common });
     case "audio-spine-command": return WorldChatAudioSpineActionSchema.parse({ kind: "world-chat-audio-spine-command", ...common });
     case "production-routing": return WorldChatProductionRoutingActionSchema.parse({ kind: "world-chat-production-routing", ...common });
@@ -894,6 +948,54 @@ function actionProduction(action: ModelWorldChatAction, contextProductionId: str
   return undefined;
 }
 
+/**
+ * A chapter's canonical id from either spelling (codex on PR 899): `get_chapter` and the chapter
+ * edit both accept the frontmatter id or the file stem, and a receipt is matched by exact target,
+ * so both sides name the chapter the same way or a current read is refused as missing.
+ */
+function canonicalChapterId(store: WorldStore, productionId: string, chapterId: string): string {
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+  return production?.chapters.find((chapter) => chapter.id === chapterId || chapter.file === chapterId)?.id ?? chapterId;
+}
+
+/**
+ * A passage revision is held to the passage that was selected (turn 128, codex round three): the
+ * selection, the chapter and the paragraph exist as a structured subject on the turn, not only
+ * in the words said, so an action that comes back naming another chapter, another paragraph, or
+ * words outside the selection is refused by name rather than staged. Whitespace is folded on both
+ * sides, because the selection is rendered text and the quote is the file's.
+ */
+function heldToPassage(store: WorldStore, action: ModelWorldChatAction, subject: WorldChatSubject | undefined): void {
+  if (subject?.kind !== "passage") return;
+  if (action.kind !== "production-chapter" || action.change.operation !== "edit" || action.change.changes.passage === undefined) return;
+  const passage = action.change.changes.passage;
+  // Both spellings of a chapter resolve to its id before they are compared (codex, round four):
+  // the subject names the id, the edit may name the file stem, and both mean one chapter.
+  const asked = canonicalChapterId(store, action.productionId, subject.chapterId);
+  const named = canonicalChapterId(store, action.productionId, action.change.chapterId);
+  if (named !== asked) {
+    throw new Error(`This ask was about a passage in chapter ${asked}; the revision names ${named}.`);
+  }
+  // A paragraph the ask named must come back on the action, not only match when present: an
+  // action without one falls back to the whole chapter, where a twin of the selected words could
+  // be the one changed after the author typed over the selected copy.
+  if (subject.paragraph !== undefined && passage.paragraph === undefined) {
+    throw new Error(`This ask was about paragraph ${subject.paragraph} of chapter ${asked}; the revision must name that paragraph.`);
+  }
+  if (subject.paragraph !== undefined && passage.paragraph !== undefined && passage.paragraph !== subject.paragraph) {
+    throw new Error(`This ask was about paragraph ${subject.paragraph} of chapter ${asked}; the revision names paragraph ${passage.paragraph}.`);
+  }
+  // Folded as the replacement matcher folds (codex on PR 903, round four): whitespace, and then
+  // the emphasis markers too, so a quote of the file's `__not__` is within a selection the
+  // editor served as `**not**` — the same fallback the matcher advertises, or the guard would
+  // refuse what the matcher would have found.
+  const within = foldedText(subject.text, false).includes(foldedText(passage.find, false))
+    || foldedText(subject.text, true).includes(foldedText(passage.find, true));
+  if (!within) {
+    throw new Error("The revision's passage is not within the words this ask was about; quote from the selection, or ask about the chapter instead.");
+  }
+}
+
 function worldActionTargets(
   store: WorldStore,
   action: ModelWorldChatAction,
@@ -901,6 +1003,8 @@ function worldActionTargets(
 ): ConversationActionTarget[] {
   switch (action.kind) {
     case "world-metadata": return [{ kind: "world", id: "metadata", label: "World metadata" }];
+    case "prop-authoring": return [{ kind: "prop", id: "propId" in action.change ? action.change.propId : fallbackId, label: action.change.name }];
+    case "prop-reference": return [{ kind: "prop", id: action.propId, label: action.stateId }, { kind: "artifact", id: action.artifactId, label: action.artifactId }];
     case "canon-retire":
     case "canon-restore": return [{ kind: "canon", id: action.entryId, label: action.entryId }];
     case "canon": {
@@ -996,13 +1100,16 @@ function worldActionTargets(
       label: action.change.operation === "edit" ? action.change.seriesId : action.change.title,
     }];
     case "production-overview": return [{ kind: "story", id: action.productionId, label: "Story overview" }];
+    case "production-prose-style": return [{ kind: "story", id: action.productionId, label: "Prose style" }];
     case "production-season": return [{ kind: "season", id: action.productionId, label: "Season" }];
     case "production-episode": return [{
       kind: "episode",
       id: action.change.operation === "edit" ? action.change.episodeId : fallbackId,
       label: action.change.operation === "edit" ? action.change.episodeId : action.change.title,
     }];
-    case "production-chapter": return [{
+    case "production-chapter": return action.change.operation === "outline"
+      ? action.change.chapters.map((chapter, index) => ({ kind: "chapter" as const, id: `${fallbackId}-${index}`, label: chapter.title }))
+      : [{
       kind: "chapter",
       id: action.change.operation === "edit" ? action.change.chapterId : fallbackId,
       label: action.change.operation === "edit" ? action.change.chapterId : action.change.title,
@@ -1038,6 +1145,7 @@ function worldActionTargets(
       { kind: "take", id: action.takeId, label: action.takeId },
       { kind: "shot", id: action.shotId, label: action.shotId },
     ];
+    case "production-stage-construct":
     case "production-stage-playblast": return [
       { kind: "scene", id: action.sceneId, label: action.sceneId },
       { kind: "shot", id: action.shotId, label: action.shotId },
@@ -1066,6 +1174,15 @@ export function prepareWorldChatActions(
   turn: WorldChatActionTurn,
   deps: WorldChatActionAdapterDeps = {},
 ): PreparedWorldChatAction[] {
+  // A quick ask that promised a reply and nothing else (turn 128) is held to the promise here,
+  // whatever the model returned and through whichever channel — candidates, bible edits, scene
+  // edits, editor requests or actions: `Hold this against the style` stages nothing.
+  if (
+    turn.replyOnly === true &&
+    (turn.actions.length > 0 || turn.candidates.length > 0 || turn.groups.length > 0 || turn.bibleEdits.length > 0 || turn.sceneEdits.length > 0 || turn.editorRequests.length > 0)
+  ) {
+    throw new Error("This ask was for a reply only; nothing is staged from it. Say what you would change, and the author will ask for it.");
+  }
   const prepared: PreparedWorldChatAction[] = [];
   const candidateById = new Map(turn.existingCandidates.map((candidate) => [candidate.id, candidate]));
   for (const candidate of turn.candidates) candidateById.set(candidate.id, candidate);
@@ -1124,7 +1241,11 @@ export function prepareWorldChatActions(
   const plannedSeriesIds = new Set<string>();
   for (const [index, rawAction] of turn.actions.entries()) {
     const action = scopedWorldAction(store, rawAction, contextProductionId);
+    heldToPassage(store, action, turn.subject);
     const productionId = actionProduction(action, contextProductionId);
+    if (action.kind === "production-chapter" && action.change.operation === "edit") {
+      resolveChapterViewpointEdit(store, action.productionId, action.change.changes.viewpointCharacter);
+    }
     const payload = preparedWorldPayload(store, action, productionId, turn.at);
     if (payload.kind === "world-chat-production-create") {
       if (plannedProductionIds.has(payload.plan.production.id)) {
@@ -1271,6 +1392,10 @@ async function proposalProjection(
       after: clipped(field.proposed),
     })),
   );
+  // Outline omissions use chapter positions, so even 100 entries fit in one review field.
+  if (proposal.kind === "chapter-draft" && proposal.summary.includes("viewpoint character left unset")) {
+    fields.push({ label: "Viewpoint characters", before: null, after: clipped(proposal.summary) });
+  }
   return {
     authority: { kind: "proposal-manager", id: proposal.id },
     authorityRevision: proposal.draftRevision,
@@ -2161,6 +2286,49 @@ async function sharedResourceProjection(
       };
       break;
     }
+    case "world-chat-prop-authoring": {
+      authority = { kind: "reference-kit", id: intent.actionId };
+      const change = payload.action.change;
+      const existing = "propId" in change ? bundle.props.find(prop => prop.id === change.propId) : undefined;
+      if ("propId" in change && !existing) throw new Error("The prop is no longer available.");
+      if ((change.operation === "create" || change.operation === "rename") &&
+        !checkPropName(change.name, bundle.props.filter(prop => prop.id !== existing?.id), bundle.sheets).ok) throw new Error("The prop name is already in use.");
+      if (change.operation === "rename-state" && !existing?.states.some(state => state.id === change.stateId)) throw new Error("The state is no longer available.");
+      if (change.operation === "create" && new Set(change.states.map(name => name.toLowerCase())).size !== change.states.length) throw new Error("State names must be distinct.");
+      if ((change.operation === "add-state" || change.operation === "rename-state") && existing?.states.some(state =>
+        (change.operation !== "rename-state" || state.id !== change.stateId) && state.name.toLowerCase() === change.name.toLowerCase())) throw new Error("That state name already exists.");
+      shown = {
+        title: change.operation === "create" ? "Create a prop and its states" : "Change a prop",
+        consequence: "Saves the displayed prop and state names through the prop domain. References are approved separately.",
+        affectedTargets: [...intent.targets], ripples: [], permissionReason: "authored-change",
+        body: { family: "command", commands: [
+          { label: change.operation, detail: change.name },
+          ...(change.operation === "rename-state" ? [{ label: "Current state", detail: existing!.states.find(state => state.id === change.stateId)!.name }] : []),
+          ...(existing ? [{ label: "Current prop", detail: existing.name + " · " + existing.states.map(state => state.name).join(", ") }] : []),
+          ...(change.operation === "create" ? change.states.map(name => ({ label: "State", detail: name })) : []),
+        ], expectedResult: "The exact names shown are saved with stable prop and state identities.", undoAvailable: false },
+      };
+      break;
+    }
+    case "world-chat-prop-reference": {
+      authority = { kind: "reference-kit", id: intent.actionId };
+      const prop = bundle.props.find(prop => prop.id === payload.action.propId);
+      const state = prop?.states.find(state => state.id === payload.action.stateId);
+      const artifact = bundle.artifacts.find(artifact => artifact.id === payload.action.artifactId);
+      if (!prop || !state || !artifact || !["image", "board"].includes(artifact.kind)) throw new Error("The prop, state, or image artifact is unavailable.");
+      if (state.reference && !payload.action.replace) throw new Error("This state already has a reference; propose an explicit replacement.");
+      const path = `artifacts/${artifact.file}`;
+      const [image] = await readContainedImageReferences(store.dir, [path]);
+      if ("sha256:" + createHash("sha256").update(image!.data).digest("hex").slice(0, 16) !== artifact.hash) throw new Error("The artifact image changed.");
+      shown = {
+        title: payload.action.replace ? "Replace the prop state reference" : "Use this prop state reference",
+        consequence: "Links the retained artifact and accepts an immutable reference for this exact state.",
+        affectedTargets: [...intent.targets], ripples: [], permissionReason: "authored-change",
+        body: { family: "take-review", mediaKind: "image", mediaId: artifact.id, mediaPath: path,
+          destination: prop.name + " · " + state.name, currentSelection: state.reference?.id ?? null },
+      };
+      break;
+    }
     case "world-chat-voice-audition":
       authority = { kind: "voice", id: intent.actionId };
       shown = {
@@ -2686,6 +2854,16 @@ async function sharedResourceProjection(
       };
       break;
     }
+    case "world-chat-production-stage-construct": {
+      authority = { kind: "scene-store", id: intent.actionId };
+      const production = bundle.productions.find(p => p.meta.id === payload.action.productionId);
+      const scene = production?.scenes.find(s => s.id === payload.action.sceneId);
+      const shot = scene && orderedShots(scene).find(s => s.id === payload.action.shotId);
+      if (!shot || !scene) throw new Error("That Stage shot is no longer available.");
+      shown = { title: `Construct the blockout for ${shot.title}`, consequence: "Uses the configured language model for up to three turns and five minutes, then opens an editable Stage draft. Keep applies it to this shot.", affectedTargets: [...intent.targets], ripples: [], permissionReason: "authored-change", body: { family: "host-action", action: payload.action.instruction, effect: `Preserve ${payload.action.preserve}. Inspect rendered views before human review.` } };
+      authorityRevision = scene.version;
+      break;
+    }
     case "world-chat-production-stage-playblast": {
       authority = { kind: "scene-store", id: intent.actionId };
       const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
@@ -2811,6 +2989,7 @@ async function sharedResourceProjection(
             ...(payload.action.subtitles ? { subtitles: payload.action.subtitles } : {}),
           });
       if (projected?.ok === false) approvalBlockedReason = projected.reason;
+      if (projected === null) approvalBlockedReason ??= legacyArtifactScopeRefusal(production, bundle.artifacts, timeline, payload.action.scope) ?? undefined;
       if (!deps.startProductionExport) approvalBlockedReason ??= "Local video export is unavailable in this host.";
       const sidecar = payload.action.subtitles && (payload.action.subtitles.mode === "sidecar" || payload.action.subtitles.mode === "burn-in+sidecar")
         ? payload.action.subtitles.sidecar ?? "srt"
@@ -3326,6 +3505,44 @@ async function executeSharedResource(
       );
       return { status: "completed", receipt: { kind: "sheet-version", id: result.commitId, summary: payload.action.voice ? "The voice was assigned." : "The voice assignment was removed." } };
     }
+    case "world-chat-prop-authoring": {
+      const change = payload.action.change;
+      let id: string;
+      if (change.operation === "create") {
+        const prop = await createProp(store, change.name, { ...options, id: `prop_${action.actionId.slice(4)}`,
+          states: change.states.map(name => ({ id: newId("pst"), name })) });
+        if (!prop) throw new Error("That prop name is no longer available.");
+        id = prop.id;
+      } else if (change.operation === "add-state") {
+        const state = await addPropState(store, change.propId, change.name, { ...options, id: `pst_${action.actionId.slice(4)}` });
+        if (!state) throw new Error("The prop is no longer available.");
+        id = state.id;
+      } else {
+        await renameProp(store, change.propId, change.name, change.operation === "rename-state" ? change.stateId : undefined, options);
+        id = change.propId;
+      }
+      return { status: "completed", receipt: { kind: "prop", id, summary: "The approved prop change was saved." } };
+    }
+    case "world-chat-prop-reference": {
+      const input = payload.action;
+      const prop = store.getBundle().props.find(prop => prop.id === input.propId);
+      const artifact = store.getBundle().artifacts.find(artifact => artifact.id === input.artifactId);
+      if (!prop || !artifact) throw new Error("The target or source is unavailable.");
+      const [image] = await readContainedImageReferences(store.dir, [`artifacts/${artifact.file}`]);
+      if ("sha256:" + createHash("sha256").update(image!.data).digest("hex").slice(0, 16) !== artifact.hash) throw new Error("The artifact image changed.");
+      const take = await recordUploadedPropImage(store, input.propId, input.stateId, image!.name, image!.data,
+        { requestId: action.actionId, precondition });
+      // Creating our pending take changes the collection fence. Preserve the reviewed target
+      // and artifact individually while committing the reference and its artifact link together.
+      const stable = () => JSON.stringify(store.getBundle().props.find(one => one.id === prop.id)) !== JSON.stringify(prop) ||
+        JSON.stringify(store.getBundle().artifacts.find(one => one.id === artifact.id)) !== JSON.stringify(artifact)
+        ? "The prop or artifact changed during acceptance." : null;
+      const result = await acceptPropStateReference(store, { propId: input.propId, stateId: input.stateId,
+        selection: { source: "take", takeId: take.id }, replace: input.replace },
+        { ...options, artifactId: artifact.id, precondition: stable });
+      if (result.status !== "accepted") throw new Error(result.reason);
+      return { status: "completed", receipt: { kind: "prop-reference", id: take.id, summary: "The image was approved for this state and linked from its artifact." } };
+    }
     case "world-chat-voice-clone": {
       const selected = await deps.pickFiles?.({ accept: [...CLONEABLE_AUDIO_EXTENSIONS] }) ?? [];
       if (selected.length === 0) return { status: "cancelled", detail: "No recording was selected." };
@@ -3462,12 +3679,13 @@ async function executeSharedResource(
       const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
       const sceneFile = production?.sceneFiles[payload.action.sceneId];
       if (!scene || !sceneFile) throw new Error("That scene is no longer in this production.");
+      const command = sceneCommandFrom(payload.action.command);
       await applySceneCommand(store, {
         productionId: payload.action.productionId,
         sceneFile,
         sceneId: payload.action.sceneId,
         baseVersion: scene.version,
-        command: sceneCommandFrom(payload.action.command),
+        command,
         requestId: action.actionId,
       }, deps.activePlans ? { activePlans: deps.activePlans } : {});
       return { status: "completed", receipt: { kind: "scene-version", id: `${scene.id}-v${scene.version + 1}`, summary: "The semantic scene command was applied." } };
@@ -3549,6 +3767,7 @@ async function executeSharedResource(
       }, options);
       return { status: "completed", receipt: { kind: "take-trim", id: payload.action.shotId, summary: "The selected take's trim-in was updated." } };
     }
+    case "world-chat-production-stage-construct": return { status: "awaiting-host", detail: "Waiting for the Stage construction surface." };
     case "world-chat-production-stage-playblast": {
       return { status: "awaiting-host", detail: "Waiting for the desktop renderer to record the Stage." };
     }
@@ -3586,9 +3805,11 @@ async function executeSharedResource(
     case "world-chat-production-interactive-export": {
       const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
       if (!production) throw new Error("That production is no longer in this world.");
+      const voices = deps.interactiveExportVoices?.(production.meta.id);
       const result = await exportInteractive(store, production, now, {
         exportId: action.authority.id,
         precondition,
+        ...(voices === undefined ? {} : { voices }),
       });
       return result.ok
         ? {
@@ -3700,7 +3921,10 @@ export function worldChatActionAdapters(
       if (candidates.length > 0 && candidates.every((candidate) => candidate.status === "accepted")) {
         return { status: "completed", receipt: { kind: "proposal", id: action.authority.id, summary: "The proposal was accepted." } };
       }
-      if (candidates.some((candidate) => candidate.status === "discarded")) {
+      const discarded = (await readChanges(join(store.dir, "changes.jsonl"))).some(
+        (record) => record.entity === `.proposals/${action.authority.id}` && record.discarded === true,
+      );
+      if (discarded || candidates.some((candidate) => candidate.status === "discarded")) {
         return { status: "cancelled", detail: "The proposal was discarded outside this card." };
       }
       return null;
@@ -4094,7 +4318,10 @@ export function worldChatActionAdapters(
       } catch (error) {
         if (error instanceof WorldStateStaleError || error instanceof CommitStaleError) {
           await removePreparation(store, "world", action.actionId);
-          return { status: "stale", detail: error instanceof WorldStateStaleError ? error.detail : error.message };
+          return {
+            status: "stale",
+            detail: error instanceof WorldStateStaleError ? error.detail : describeCoordinatorError(error),
+          };
         }
         throw error;
       }
@@ -4171,7 +4398,10 @@ export function worldChatActionAdapters(
         } catch (error) {
           if (error instanceof WorldStateStaleError || error instanceof CommitStaleError) {
             await removePreparation(store, "world", action.actionId);
-            return { status: "stale", detail: error instanceof WorldStateStaleError ? error.detail : error.message };
+            return {
+              status: "stale",
+              detail: error instanceof WorldStateStaleError ? error.detail : describeCoordinatorError(error),
+            };
           }
           throw error;
         }
@@ -4251,6 +4481,15 @@ export function worldChatActionAdapters(
             }
           : null;
       },
+      ...(actionKind === "world-chat-production-stage-construct" ? {
+        completeHost: async (action: ConversationActionCard, value: unknown): Promise<ConversationActionExecutionOutcome> => {
+          const input = value as { kind?: string; shotId?: string; sceneId?: string; status?: string; detail?: string };
+          const prepared = WorldChatProductionStageConstructActionSchema.safeParse(await readPreparation(store, "world", action));
+          if (!prepared.success || input.kind !== "stage-constructor-result" || input.shotId !== prepared.data.action.shotId || input.sceneId !== prepared.data.action.sceneId) return { status: "failed", detail: "The Stage construction did not match the approved shot." };
+          await removePreparation(store, "world", action.actionId);
+          return input.status === "ready" ? { status: "completed", receipt: { kind: "stage-draft", id: action.actionId, summary: "Constructed and inspected an editable Stage draft. Keep applies it." } } : { status: "failed", detail: input.detail ?? "Stage construction stopped." };
+        },
+      } : {}),
       ...(actionKind === "world-chat-production-stage-playblast"
         ? {
             completeHost: async (action: ConversationActionCard, value: unknown): Promise<ConversationActionExecutionOutcome> => {
@@ -4299,7 +4538,8 @@ export function worldChatActionAdapters(
                 message.durationSec === undefined ||
                 message.aspect === undefined ||
                 message.sourcePath === undefined ||
-                message.openingFrameSourcePath === undefined
+                message.openingFrameSourcePath === undefined ||
+                message.referenceFrames === undefined
               ) {
                 await removePreparation(store, "world", action.actionId);
                 return { status: "failed", detail: "The Stage completion was incomplete or named another target." };
@@ -4314,10 +4554,12 @@ export function worldChatActionAdapters(
                   stagingVersion: message.stagingVersion,
                   sourcePath: message.sourcePath,
                   openingFrameSourcePath: message.openingFrameSourcePath,
+                  referenceFrames: message.referenceFrames,
                   durationSec: message.durationSec,
                   aspect: message.aspect,
                   ...(message.lens !== undefined ? { lens: message.lens } : {}),
                 }, {
+                  ...(deps.mediaProbe ? { mediaProbe: deps.mediaProbe } : {}),
                   source: `world-chat:${action.conversationId}:${action.actionId}`,
                   requestId: action.actionId,
                   precondition: observationPrecondition(store, action),
@@ -4347,7 +4589,10 @@ export function worldChatActionAdapters(
                   };
                 }
                 if (error instanceof WorldStateStaleError || error instanceof CommitStaleError) {
-                  return { status: "stale", detail: error instanceof WorldStateStaleError ? error.detail : error.message };
+                  return {
+                    status: "stale",
+                    detail: error instanceof WorldStateStaleError ? error.detail : describeCoordinatorError(error),
+                  };
                 }
                 return { status: "failed", detail: "The host could not file the Stage recording." };
               }
@@ -4358,6 +4603,8 @@ export function worldChatActionAdapters(
   };
 
   const sharedResources = [
+    "world-chat-prop-authoring",
+    "world-chat-prop-reference",
     "world-chat-artifact-import",
     "world-chat-artifact-metadata",
     "world-chat-artifact-extraction",
@@ -4399,6 +4646,7 @@ export function worldChatActionAdapters(
     "world-chat-production-take-review",
     "world-chat-production-take-trim",
     "world-chat-production-stage-playblast",
+    "world-chat-production-stage-construct",
     "world-chat-audio-spine-command",
     "world-chat-production-routing",
     "world-chat-production-routing-traversal",
@@ -4443,6 +4691,14 @@ export function worldChatActionAdapters(
   const productionOverview = proposalBacked(
     "world-chat-production-overview",
     (value) => WorldChatProductionOverviewActionSchema.parse(value),
+    (intent, payload, precondition) => {
+      if (!gate) throw new Error("The proposal authority is unavailable.");
+      return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
+    },
+  );
+  const productionProseStyle = proposalBacked(
+    "world-chat-production-prose-style",
+    (value) => WorldChatProductionProseStyleActionSchema.parse(value),
     (intent, payload, precondition) => {
       if (!gate) throw new Error("The proposal authority is unavailable.");
       return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
@@ -4571,6 +4827,7 @@ export function worldChatActionAdapters(
     artDirectionRestore,
     productionSeries,
     productionOverview,
+    productionProseStyle,
     productionSeason,
     productionEpisode,
     productionChapter,
@@ -4601,4 +4858,9 @@ async function saveProposalPoint(
   });
   if (staged.proposalIds.length !== 1) throw new Error("A conversation action must bind one proposal authority.");
   return staged.proposalIds[0]!;
+}
+
+export async function stageConstructionHandoff(store: WorldStore, action: ConversationActionCard) {
+  const parsed = WorldChatProductionStageConstructActionSchema.safeParse(await readPreparation(store, "world", action));
+  return parsed.success ? parsed.data.action : null;
 }

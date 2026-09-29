@@ -4,6 +4,7 @@ import { basename, isAbsolute, join, relative, sep } from "node:path";
 import {
   ArtifactSidecarSchema,
   CLONED_VOICES_PATH,
+  ClonedVoiceSchema,
   newClonedVoice,
   ulid,
   type ArtifactSidecar,
@@ -113,6 +114,8 @@ export interface CloneVoiceInput {
   name: string;
   description: string;
   consent: boolean;
+  /** The recording's language (ISO 639-1); English when not said (issue 1163). */
+  language?: string;
   /** The sheet this was cloned while casting, if any — a link, never ownership (§2.3). */
   sheetId?: string;
   mutation?: { source?: string; requestId?: string; precondition?: WorldStatePrecondition };
@@ -184,6 +187,7 @@ async function cloneVoiceSerialised(
     description: input.description,
     clip: "pending",
     consent: input.consent,
+    ...(input.language !== undefined ? { language: input.language } : {}),
     created: store.now(),
     taken,
   });
@@ -363,6 +367,60 @@ async function cloneVoiceSerialised(
   return { ok: true, voice: entry };
 }
 
+export type DeleteVoiceOutcome = { ok: true; voice: ClonedVoice } | { ok: false; reason: string };
+
+/**
+ * Delete a cloned voice from the library (SPEC-046 R-15, issue 1162).
+ *
+ * The entry goes first and the clip after, under the same gate the clone holds: an id freed
+ * here is one the next clone may mint again, and its clip would land at the same path — so the
+ * removal cannot run beside a clone. The order is the safe one for a crash between the two: an
+ * entry whose clip is gone refuses a read with its reason (§1.3), while a clip nothing names is
+ * inert. The provenance artifact stays — it records that a recording was filed, which deleting
+ * the voice does not unmake — and what a hosted reader holds is the caller's to remove after,
+ * from the entry this returns: the ids on it are the only handle on the vendor's copies.
+ *
+ * The entries are patched as read, like every other write here: a neighbour this build cannot
+ * parse is left exactly as it was.
+ */
+export async function deleteVoice(
+  store: WorldStore,
+  voiceId: string,
+  mutation: { source?: string; requestId?: string } = {},
+): Promise<DeleteVoiceOutcome> {
+  try {
+    return await store.gateOp(async () => {
+      const existingRaw = await readLibraryRaw(store);
+      const entries = rawEntries(existingRaw);
+      const index = entries.findIndex((entry) => entry?.["id"] === voiceId);
+      const parsed = index === -1 ? null : ClonedVoiceSchema.safeParse(entries[index]);
+      if (existingRaw === null || parsed === null || !parsed.success) {
+        return { ok: false, reason: "that cloned voice is no longer in this world" };
+      }
+      const voice = parsed.data;
+      await store.commitUnserialised({
+        kind: "voice-delete",
+        source: mutation.source ?? "form",
+        files: [
+          {
+            path: CLONED_VOICES_PATH,
+            action: "replace",
+            content: JSON.stringify({ voices: entries.filter((_, at) => at !== index) }, null, 2) + "\n",
+            baseHash: sha256(existingRaw),
+          },
+        ],
+        ...(mutation.requestId !== undefined ? { requestId: mutation.requestId } : {}),
+      });
+      // The clip is removed only where the schema already confined it: a path that could reach
+      // outside `voices/` never parsed as a voice, and `clipFor` would have refused it too.
+      await rm(toExtendedLength(join(store.dir, fromPortable(voice.clip))), { force: true }).catch(() => {});
+      return { ok: true, voice };
+    });
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : "the voice library could not be written" };
+  }
+}
+
 /**
  * The library's entries exactly as written, unparsed. The append path uses these rather than
  * `parseVoiceLibrary`'s output so an entry this build does not understand survives a clone
@@ -445,4 +503,73 @@ export async function clipFor(store: WorldStore, voice: ClonedVoice): Promise<Di
   } catch {
     return null;
   }
+}
+
+/**
+ * What a hosted reader holds of a voice (SPEC-046 R-13, R-16), written onto the library entry:
+ * the once-per-vendor confirmation, and — for a reader that keeps the clip on its account — the
+ * slot it keeps it under with the hash of the clip it was made from. Patched into the entries AS
+ * READ for the same reason the clone path appends to them: an entry this build does not
+ * understand survives, and a malformed neighbour is left exactly as it was.
+ */
+export async function recordVoiceReader(
+  store: WorldStore,
+  voiceId: string,
+  provider: string,
+  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string; stale?: string[]; pending?: string[]; language?: string },
+): Promise<void> {
+  // Read, patch and commit as one: two overlapping records — a confirmation for one reader while
+  // another's slot flow lands — would both read the file before either committed, and the second
+  // would reach the commit with a stale base hash and fail (codex on PR 1153). One at a time per
+  // store; the commit's own serialisation is below this and cannot see the read.
+  const previous = readerWrites.get(store) ?? Promise.resolve();
+  const run = previous.then(() => recordVoiceReaderNow(store, voiceId, provider, patch), () => recordVoiceReaderNow(store, voiceId, provider, patch));
+  const settled = run.then(() => undefined, () => undefined);
+  readerWrites.set(store, settled);
+  try {
+    await run;
+  } finally {
+    if (readerWrites.get(store) === settled) readerWrites.delete(store);
+  }
+}
+
+const readerWrites = new WeakMap<WorldStore, Promise<void>>();
+
+async function recordVoiceReaderNow(
+  store: WorldStore,
+  voiceId: string,
+  provider: string,
+  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string; stale?: string[]; pending?: string[]; language?: string },
+): Promise<void> {
+  const existingRaw = await readLibraryRaw(store);
+  if (existingRaw === null) throw new Error("the voice library is missing");
+  const entries = rawEntries(existingRaw);
+  const entry = entries.find((candidate) => candidate?.["id"] === voiceId);
+  if (!entry) throw new Error("that cloned voice is no longer in this world");
+  const remote = (typeof entry["remote"] === "object" && entry["remote"] !== null ? entry["remote"] : {}) as Record<string, Record<string, unknown>>;
+  const current = typeof remote[provider] === "object" && remote[provider] !== null ? remote[provider] : {};
+  const next: Record<string, unknown> = { ...current, ...patch };
+  // An emptied list is no list: the key comes off rather than sitting as `[]` forever.
+  for (const list of ["stale", "pending"]) if (Array.isArray(next[list]) && next[list].length === 0) delete next[list];
+  // A new slot without a language of the vendor's is one the stated language stood for: what an
+  // older slot was heard as says nothing about this one.
+  if ("voiceId" in patch && !("language" in patch)) delete next["language"];
+  entry["remote"] = { ...remote, [provider]: next };
+  await store.commit({
+    kind: "voice-reader",
+    source: "app",
+    files: [
+      {
+        path: CLONED_VOICES_PATH,
+        action: "replace",
+        content: JSON.stringify({ voices: entries }, null, 2) + "\n",
+        baseHash: sha256(existingRaw),
+      },
+    ],
+  });
+}
+
+/** The hash the library compares a reader's slot against: the clip's bytes, as `clipFor` reads them. */
+export function clipHashOf(clip: DispatchVoiceReference): string {
+  return `sha256:${createHash("sha256").update(clip.data).digest("hex")}`;
 }

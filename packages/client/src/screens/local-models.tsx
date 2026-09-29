@@ -1,3 +1,5 @@
+import { OnYourPC } from "../components/on-your-pc.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 import { useEffect } from "react";
 import {
   FIT_LABEL,
@@ -6,6 +8,7 @@ import {
   comfyUiWeightsComponentId,
   formatGb,
   localModelRowState,
+  residencyNote,
   setupClosure,
   transferProgress,
   PROVIDERS as PROVIDER_TABLE,
@@ -58,6 +61,7 @@ const STATE_TONE: Partial<Record<LocalModelRowState, RuntimeTone>> = {
 export interface Entry {
   model: ManifestModel;
   state: LocalModelRowState;
+  residency?: string;
   /**
    * Which machine actually runs it (R-9). No longer folded into the row state, and this screen
    * has no engine pane to state it in yet, so the row states it here until issue 623 lands one.
@@ -131,6 +135,7 @@ export function localEntries(
     return {
       model,
       state: rowState,
+      residency: residencyNote(state?.app.residency?.find((reading) => reading.provider === model.provider && reading.model === model.id)),
       locality,
       declined,
       reason: gated?.reason,
@@ -342,6 +347,7 @@ export function LocalModelRow({
         </div>
         {entry.recommended && <span className="fy-prov__unverified">recommended</span>}
         <RuntimeStatus tone={elsewhere ? undefined : STATE_TONE[state]}>{line}</RuntimeStatus>
+        {isRemoteSession() ? <OnYourPC>model installation and removal</OnYourPC> : <>
         {!elsewhere && entry.component !== undefined && <SetupTransferControl component={entry.component} />}
         {/*
          * Starting work stays where the decision is made; watching it belongs to Downloads
@@ -390,6 +396,7 @@ export function LocalModelRow({
             Downloads
           </button>
         )}
+        </>}
       </div>
       {/* Stated by count, and only by count (R-41). `Install ComfyUI 0.3.48 and its nodes` is the
           machine's sentence; the components themselves are behind the detail. */}
@@ -427,12 +434,14 @@ export function LocalModelRow({
           <span>{entry.reason}</span>
         </div>
       )}
+      {entry.component?.caveat && <div className="fy-set__why"><span>{entry.component.caveat}</span></div>}
       {entry.ineligible && (
         <div className="fy-set__why">
           <span className="fy-set__dot fy-set__dot--warn" />
           <span>{entry.ineligible}</span>
         </div>
       )}
+      {entry.residency && <div className="fy-set__why" role="status"><span className="fy-set__dot fy-set__dot--warn" /><span>{entry.residency}</span></div>}
       {open && (
         <div className="fy-set__why">
           <span className="fy-set__dot" />

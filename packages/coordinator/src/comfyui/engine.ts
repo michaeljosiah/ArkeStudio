@@ -35,6 +35,7 @@ export interface ComfyUiRecipeFacts {
   capability: "image" | "video" | "voice-tts";
   version: number;
   minVramMb: number;
+  accelerator?: "cuda";
   /** The busy check's floor — free VRAM, a different question from the card-size floor above. */
   minFreeVramMb: number;
   /** The measured system-memory floor, where the recipe states one — offloading spends RAM. */
@@ -57,6 +58,8 @@ export interface ComfyUiRecipeFacts {
 }
 
 export interface EngineServiceDeps {
+  /** A separate supervised process for a recipe whose startup settings cannot be shared. */
+  launch?: { id: string; args: readonly string[]; customNodesDir: string; nodeRefs: Readonly<Record<string, string>> };
   appRoot: string;
   recipes: readonly ComfyUiRecipeFacts[];
   fetch: (url: string, init?: RequestInit) => Promise<Response>;
@@ -74,11 +77,13 @@ export interface EngineServiceDeps {
   registerSupervisorExitBackstop: (supervisor: ChildSupervisor) => () => void;
   /** Mints a per-process epoch without exposing a pid in job or renderer state. */
   createProcessEpoch: () => string;
+  /** A conservative process-existence probe for confirming an exited unload target. */
+  processExists?: (pid: number) => boolean;
   /**
    * Free graphics memory right now, in MB, or null where the device cannot be asked
    * (SPEC-022 §2.6). Optional: a build that cannot ask simply gates on total VRAM as before.
    */
-  freeVramMb?: () => Promise<number | null>;
+  freeVramMb?: (model?: string) => Promise<number | null>;
   /**
    * Free system memory right now, in MB, or null where it cannot be asked (issue 846). Optional
    * for the same reason: without it a recipe's free-RAM floor is simply not checked here.
@@ -332,6 +337,8 @@ export class ComfyUiEngineService {
   private hashAbort = new AbortController();
   /** Opaque identity replaced for every spawned process, including same-path restarts. */
   private currentProcessEpoch: string | null = null;
+  private profileMissingFile: string | null = null;
+  private readonly endpointPids = new Map<string, number>();
   private readonly subscribers = new Set<() => void>();
   private readonly readinessWaiters = new Set<(ready: boolean) => void>();
   private disposed = false;
@@ -510,25 +517,38 @@ export class ComfyUiEngineService {
 
   private async startSupervision(root: string): Promise<void> {
     if (this.disposed) return;
+    this.profileMissingFile = null;
+    if (this.deps.launch) {
+      const models = this.modelsDir();
+      if (models === null) return;
+      for (const recipe of this.deps.recipes) for (const file of recipe.checkpoints) {
+        if (!(await this.deps.fileExists(join(models, file.file)))) {
+          this.profileMissingFile = file.file;
+          return;
+        }
+      }
+    }
     const layout = await this.portableLayout(root);
     if (layout === null || this.disposed) return; // resolve() already recorded the problem
     const args = ["-s", layout.main, "--port", "{port}", "--listen", "127.0.0.1", "--disable-metadata"];
+    if (this.deps.launch) args.push(...this.deps.launch.args);
     // A models override reaches a spawned engine through an extra-model-paths file — the
     // engine must actually read the folder verification hashes, or R-8's "no re-download"
     // would verify one library while the engine loads another.
-    if (this.settings.modelsDir !== null) {
-      const yamlPath = join(this.deps.appRoot, "comfyui-extra-model-paths.yaml");
-      const dir = this.settings.modelsDir.replaceAll("\\", "/");
+    if (this.settings.modelsDir !== null || this.deps.launch) {
+      const yamlPath = join(this.deps.appRoot, `${this.deps.launch?.id ?? "comfyui"}-extra-model-paths.yaml`);
+      const dir = (this.settings.modelsDir ?? this.modelsDir()!).replaceAll("\\", "/");
       await this.deps.writeTextFile(
         yamlPath,
         [
           "arke:",
-          `  base_path: ${dir}`,
+          `  base_path: ${JSON.stringify(dir)}`,
           "  checkpoints: checkpoints",
           "  diffusion_models: diffusion_models",
           "  text_encoders: text_encoders",
           "  vae: vae",
           "  loras: loras",
+          ...(this.deps.launch ? [`  custom_nodes: ${JSON.stringify(this.deps.launch.customNodesDir.replaceAll("\\", "/"))}`] : []),
           "",
         ].join("\n"),
       );
@@ -536,7 +556,7 @@ export class ComfyUiEngineService {
       args.push("--extra-model-paths-config", yamlPath);
     }
     const supervisor = this.deps.createSupervisor({
-      id: "comfyui",
+      id: this.deps.launch?.id ?? "comfyui",
       command: layout.python,
       args,
       healthPath: "/system_stats",
@@ -624,6 +644,13 @@ export class ComfyUiEngineService {
   }
 
   // ---- the public surface --------------------------------------------------
+
+  /** Weight completion may activate a profile that had no process to supervise at startup. */
+  async activateInstalledProfile(): Promise<void> {
+    if (this.deps.launch && this.supervisor === null && this.resolved.source !== "user-url" && !this.disposed) {
+      await this.applySettings(this.settings);
+    }
+  }
 
   /**
    * Apply Settings (§2.2): re-resolve, restart supervision, re-probe, publish.
@@ -786,7 +813,7 @@ export class ComfyUiEngineService {
   }
 
   /** Where a dispatch reaches the engine right now, or null when nothing healthy answers. */
-  baseUrl(): string | null {
+  baseUrl(_model?: string): string | null {
     if (this.resolved.source === "user-url") {
       // Reachable is not enough: an engine below the version floor answers perfectly well,
       // and dispatching to it would discover the incompatibility as a failed generation.
@@ -794,19 +821,22 @@ export class ComfyUiEngineService {
     }
     const supervisor = this.supervisor;
     if (supervisor && supervisor.status === "healthy" && supervisor.port !== null) {
-      return `http://127.0.0.1:${supervisor.port}`;
+      const url = `http://127.0.0.1:${supervisor.port}`;
+      if (supervisor.pid != null) this.endpointPids.set(url, supervisor.pid);
+      if (this.endpointPids.size > 128) this.endpointPids.delete(this.endpointPids.keys().next().value!);
+      return url;
     }
     return null;
   }
 
   /** The opaque instance digest of the currently resolved engine (§2.11), or null when absent. */
-  instanceId(): string | null {
+  instanceId(_model?: string): string | null {
     const location = this.resolved.source === "user-url" ? this.resolved.url : this.resolved.root;
     if (this.resolved.source === "absent" || location === null) return null;
-    return engineInstanceId(this.resolved.source, location);
+    return engineInstanceId(this.resolved.source, this.deps.launch && this.resolved.source !== "user-url" ? `${location}|${this.deps.launch.id}` : location);
   }
 
-  engineIdentity(): JobEngineIdentity | null {
+  engineIdentity(_model?: string): JobEngineIdentity | null {
     const id = this.instanceId();
     if (id === null || this.resolved.source === "absent") return null;
     if (this.resolved.source === "user-url") {
@@ -839,9 +869,26 @@ export class ComfyUiEngineService {
     }
   }
 
+  /** Only a known owned process's confirmed exit can waive a failed unload request. */
+  isManagedEndpointGone(url: string): boolean {
+    if (this.resolved.source === "user-url") return false;
+    const pid = this.endpointPids.get(url);
+    if (pid === undefined) return false;
+    if (this.deps.processExists) return !this.deps.processExists(pid);
+    try { process.kill(pid, 0); return false; }
+    catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+  }
+
+  /** Healthy routes available for provider-wide lifecycle decisions. */
+  baseUrls(): readonly string[] {
+    const base = this.baseUrl();
+    return base === null ? [] : [base];
+  }
+
   /** Wait for a spawned child to settle without making coordinator startup wait on it. */
   waitUntilReady(timeoutMs = 120_000): Promise<boolean> {
     if (this.baseUrl() !== null) return Promise.resolve(true);
+    if (this.profileMissingFile !== null) return Promise.resolve(false);
     if (this.disposed || this.engineStatus().state !== "starting") return Promise.resolve(false);
     return new Promise((resolveReady) => {
       let timer: NodeJS.Timeout;
@@ -1081,7 +1128,8 @@ export class ComfyUiEngineService {
         };
         return record(verdict);
       }
-      const nodeDir = join(customNodesDir, node.id);
+      const bundled = this.resolved.source !== "user-url" && this.deps.launch?.nodeRefs[node.id];
+      const nodeDir = join(bundled ? this.deps.launch!.customNodesDir : customNodesDir, node.id);
       if (!(await this.deps.fileExists(nodeDir))) {
         const verdict = { ok: false as const, reason: `custom node ${node.id} is missing from the engine`, reasonKind: "node" as const };
         return record(verdict);
@@ -1093,7 +1141,11 @@ export class ComfyUiEngineService {
           reasonKind: "verification",
         };
       }
-      const ref = await this.deps.readNodeRef(nodeDir).catch(() => null);
+      // Qwen's guard is a single Python module. Verify its bytes even in an external
+      // installation, where a marker can outlive a modification to the installed code.
+      const ref = bundled || node.id === "ArkeQwen21Runtime"
+        ? await this.deps.hashFile(join(nodeDir, "__init__.py"), hashSignal, true)
+        : await this.deps.readNodeRef(nodeDir).catch(() => null);
       if (generation !== this.verificationGeneration) {
         return {
           ok: false,
@@ -1284,6 +1336,9 @@ export class ComfyUiEngineService {
 
     // A known-incomplete closure is a hard dependency refusal, not an empty dependency set.
     if (recipe.unavailableReason !== undefined) return disabled("catalogue", recipe.unavailableReason);
+    if (this.deps.launch && engine.source !== "user-url" && this.profileMissingFile !== null) {
+      return disabled("files", `${this.profileMissingFile} is missing from the models folder`);
+    }
 
     // 1 · The engine itself.
     if (engine.state === "absent") return disabled("engine", "no ComfyUI engine is configured or installed");
@@ -1361,7 +1416,16 @@ export class ComfyUiEngineService {
     // 6 · Hardware (§2.7): both figures when measured; unknown stays unknown and dispatches (D15).
     // Desktop probes describe this computer. Applying them to a non-loopback URL would report
     // this machine's card as if it belonged to the remote engine.
-    const vram = engine.locality === "remote" ? null : (probes?.vramMb ?? null);
+    const accelerator = recipe.accelerator;
+    const families = probes?.accelerators;
+    if (engine.locality !== "remote" && accelerator && families && !families.includes(accelerator)) {
+      return disabled("vram", `Needs ${accelerator.toUpperCase()}. This machine does not report a compatible accelerator.`);
+    }
+    const localVram = accelerator
+      ? (probes?.vramMbByAccelerator?.[accelerator]
+        ?? (families?.length === 1 && families[0] === accelerator ? probes?.vramMb : null))
+      : probes?.vramMb;
+    const vram = engine.locality === "remote" ? null : (localVram ?? null);
     if (vram === null) {
       return {
         ...base,

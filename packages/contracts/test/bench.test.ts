@@ -38,7 +38,7 @@ const MODEL: ManifestModel = {
   capability: "image",
   displayName: "Test Image",
   accepts: { referenceImages: 3, startFrame: false, endFrame: false },
-  limits: { maxReferenceAudioSec: 60 },
+  limits: { maxReferenceAudioSec: 60, referenceAudioField: "audio_urls" },
   pricing: { kind: "perImage", microUsdPerImage: 60000 },
 };
 

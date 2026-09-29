@@ -26,9 +26,26 @@ const assemble = (claude: Record<string, unknown>) =>
     appRoot: process.cwd(),
     claude: { cache: new ConfinementCache(), ...claude },
     v1: { runCommand: async () => ({ status: 1, stdout: "" }) } as never,
+    v2: { runCommand: async () => ({ status: 1, stdout: "" }) },
   });
 
 describe("the bring-your-own Claude lane (SPEC-005 R-1, R-4)", () => {
+  it("never discovers OpenCode when Claude is selected, and an explicit engine overrides a legacy flag", async () => {
+    const unrelated = async () => { throw new Error("OpenCode discovery must not run"); };
+    const selected = await assembleHarness({ appRoot: process.cwd(), engine: "claude",
+      claude: { cache: new ConfinementCache(), runCommand: runCommand("2.1.235"), runTurn: verified },
+      v1: { runCommand: unrelated }, v2: { runCommand: unrelated },
+    });
+    assert.equal(selected.adapter?.id, "claude");
+    assert.equal(selected.supervisor, null);
+    const absent = async () => ({ status: 1, stdout: "" });
+    const overridden = await assembleHarness({ appRoot: process.cwd(), engine: "opencode",
+      claude: { enabled: true, runCommand: unrelated, runTurn: broken },
+      v1: { runCommand: absent }, v2: { runCommand: absent },
+    });
+    assert.equal(overridden.adapter, null);
+    assert.ok(overridden.supervisor);
+  });
   it("is not taken unless asked for — OpenCode is the default and ships in the installer", async () => {
     const wiring = await assemble({ enabled: false, runCommand: runCommand("2.1.235"), runTurn: verified });
     assert.notEqual(wiring.harnessInfo?.generation, "claude");
@@ -45,6 +62,11 @@ describe("the bring-your-own Claude lane (SPEC-005 R-1, R-4)", () => {
     assert.equal(wiring.harnessInfo?.version, "2.1.235");
     assert.equal(wiring.harnessInfo?.beta, false, "beta is a v2-generation concept");
     assert.ok(wiring.adapter, "an adapter to author with");
+    assert.equal(wiring.supervisor, null, "Claude does not depend on an OpenCode process");
+    assert.equal(wiring.adapter.capabilities().has("models"), true);
+    await wiring.adapter.init();
+    assert.equal(wiring.adapter.readiness().ready, true);
+    await wiring.adapter.dispose?.();
     assert.ok(wiring.logLines.some((l) => l.includes("confinement verified")));
     assert.ok(
       wiring.logLines.some((l) => l.includes("your Claude subscription")),
@@ -66,10 +88,13 @@ describe("the bring-your-own Claude lane (SPEC-005 R-1, R-4)", () => {
     await wiring.relaunchHarness({ anthropic: "sk-should-not-matter" });
   });
 
-  it("falls back to OpenCode when the probe refuses, and says why (R-4)", async () => {
+  it("keeps the requested engine blocked when the probe refuses and states why (R-4)", async () => {
     const wiring = await assemble({ enabled: true, runCommand: runCommand("2.1.235"), runTurn: broken });
     assert.notEqual(wiring.harnessInfo?.generation, "claude", "unverified is not offered");
-    const said = wiring.logLines.find((l) => l.startsWith("Claude Code asked for but not used"));
+    assert.equal(wiring.supervisor, null);
+    assert.equal(wiring.adapter, null);
+    assert.match(wiring.unavailableReason!, /does not honour the tool gate/);
+    const said = wiring.logLines.find((l) => l.startsWith("Claude Code unavailable"));
     assert.ok(said, "a refusal is a statement, not a silence");
     assert.match(said!, /does not honour the tool gate/);
   });
@@ -83,7 +108,7 @@ describe("the bring-your-own Claude lane (SPEC-005 R-1, R-4)", () => {
 
   it("names both versions when the install is below the floor", async () => {
     const wiring = await assemble({ enabled: true, runCommand: runCommand("2.1.177"), runTurn: verified });
-    const said = wiring.logLines.find((l) => l.startsWith("Claude Code asked for but not used"));
+    const said = wiring.logLines.find((l) => l.startsWith("Claude Code unavailable"));
     assert.match(said!, /2\.1\.177/);
     assert.match(said!, /2\.1\.227/);
   });

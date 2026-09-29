@@ -48,14 +48,15 @@ export function nodeSetupDeps(): SetupDeps {
       };
     },
 
-    run(command, args, signal) {
+    run(command, args, signal, onOutput) {
       return new Promise((resolve) => {
         const child = spawn(command, [...args], { windowsHide: true, shell: false });
         let output = "";
         const onAbort = () => child.kill();
         signal.addEventListener("abort", onAbort, { once: true });
-        child.stdout?.on("data", (c: Buffer) => (output += c.toString()));
-        child.stderr?.on("data", (c: Buffer) => (output += c.toString()));
+        const take = (c: Buffer) => { const text = c.toString(); output += text; onOutput?.(text); };
+        child.stdout?.on("data", take);
+        child.stderr?.on("data", take);
         child.on("error", (err) => {
           signal.removeEventListener("abort", onAbort);
           resolve({ code: 1, output: String(err) });

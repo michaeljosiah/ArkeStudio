@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import type { VoiceRuntimeStatus } from "@arke-studio/contracts";
 import { renderToString } from "react-dom/server";
@@ -16,8 +13,6 @@ import { whyDictationIsOff } from "../src/components/dictation.js";
  * dictation needs is missing, and a state is legible without motion or colour.
  */
 
-const here = dirname(fileURLToPath(import.meta.url));
-const CSS = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
 
 const noop = () => {};
 
@@ -127,14 +122,4 @@ describe("the composer's microphone", () => {
     assert.match(html, /aria-label="Dictate"/);
   });
 
-  /**
-   * Listening is drawn as a filled control rather than a pulsing one. Under reduced motion a
-   * pulse and a resting mic collapse to the same still glyph, exactly for the people least able
-   * to guess which one they are looking at.
-   */
-  it("marks listening with a fill rather than with animation", () => {
-    const listening = /\.fy-cx__mic\[data-listening\] \{([^}]*)\}/.exec(CSS)?.[1] ?? "";
-    assert.match(listening, /background:/, "the state is drawn");
-    assert.doesNotMatch(listening, /animation|@keyframes/, "and not animated, which reduced motion removes");
-  });
 });

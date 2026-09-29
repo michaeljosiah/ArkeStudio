@@ -45,6 +45,8 @@ ${text.slice(0, 24_000)}`;
 }
 
 const WALL_CLOCK_MS = 120_000;
+/** On Arke's local harness: a model on the person's own card is slower and costs nothing to wait for (issue 1289). */
+const LOCAL_WALL_CLOCK_MS = 10 * 60_000;
 
 export function makeAdapterExtractor(
   adapter: HarnessAdapter,
@@ -56,10 +58,16 @@ export function makeAdapterExtractor(
     if (signal?.aborted) throw stopped();
     const sandbox = join(scratchRoot, `extract-${Date.now().toString(36)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
-    const session = await createPreparedSession(adapter, sandbox, sessionInput({}), {
-      purpose: "extraction",
-      agent: "canon-author",
-    });
+    let session: Awaited<ReturnType<typeof createPreparedSession>>;
+    try {
+      session = await createPreparedSession(adapter, sandbox, sessionInput({ agent: "canon-author" }), {
+        purpose: "extraction",
+        agent: "canon-author",
+      }, undefined, signal);
+    } catch (error) {
+      if (signal?.aborted) throw stopped();
+      throw error;
+    }
     // Making the sandbox and opening the session takes long enough to be stopped inside — on a
     // slow machine, easily. Checked here so a stop during setup ends it before a turn is ever
     // dispatched, rather than starting one nobody is waiting for.
@@ -99,7 +107,7 @@ export function makeAdapterExtractor(
       // is parked, so it never fires and the extraction waits forever.
       let deadline: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_, reject) => {
-        deadline = setTimeout(() => reject(new Error("extraction took too long")), WALL_CLOCK_MS);
+        deadline = setTimeout(() => reject(new Error("extraction took too long")), adapter.id === "arke" ? LOCAL_WALL_CLOCK_MS : WALL_CLOCK_MS);
       });
       try {
         await Promise.race([collected, timeout]);

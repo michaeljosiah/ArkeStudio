@@ -21,6 +21,7 @@ import type { WorldChatAttachment } from "@arke-studio/contracts";
 import { isTargetReadTool, TARGET_READ_TOOL_NAMES } from "./target-tool-catalog.js";
 import { WorldChatTargetReads, type TargetReadDeps } from "./target-reads.js";
 import type { ResolveWebHost, WebRequest } from "./safe-web.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 
 /**
  * The read-only surface a World Chat run may reach, and the record of what it read
@@ -369,7 +370,7 @@ export class WorldChatRetrieval {
           };
         } catch (err) {
           return {
-            result: { refused: true, reason: err instanceof Error ? err.message : "that page could not be read" },
+            result: { refused: true, reason: describeCoordinatorError(err) },
             receipt: receipt("empty", { querySummary: summarise(url) }),
           };
         }

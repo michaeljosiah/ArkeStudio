@@ -1,6 +1,6 @@
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { WorldChatRun } from "@arke-studio/contracts";
+import type { ConversationId, WorldChatRun } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 import { foldConversation } from "./fold.js";
 import { conversationsDir, WorldChatStore } from "./store.js";
@@ -17,10 +17,20 @@ import { preserveConversationActionTombstones } from "../arke-actions/tombstones
  * terminal event for the same run would make the log say the turn ended twice. The guard is the
  * fold itself: after one repair no run is `running`, so a second pass finds nothing to do.
  *
- * The caller owes one precondition this module cannot check: **the world must not already be
- * open.** A run marked running is indistinguishable from a live one here, so running this against
- * the open world would close a turn somebody is waiting on. Coordinator.openWorld holds that.
+ * The caller owes one precondition this module cannot check: **no turn may be live in the
+ * world.** A run marked running is indistinguishable on disk from a live one, so running this
+ * against a world with a turn in flight would close a turn somebody is waiting on.
+ * Coordinator.openWorld holds that by skipping recovery for a world that was already open, and
+ * by holding turns sent during an open until it settles — the store is installed part-way
+ * through, so "not already open" alone let a line sent in that gap be closed as a crash
+ * (2026-09-26). `isLive` is the second line: the runner knows which of its turns are really in
+ * flight, and a conversation it names is left alone whatever the log says.
  */
+
+export interface RecoveryOptions {
+  /** Whether this process has a turn in flight on the conversation right now. */
+  isLive?: (conversationId: ConversationId) => boolean;
+}
 
 export interface RecoveryOutcome {
   /** Conversations whose interrupted run was made durable on this pass. */
@@ -32,6 +42,7 @@ export interface RecoveryOutcome {
 export async function recoverConversations(
   worldPath: string,
   now: () => string = () => new Date().toISOString(),
+  options: RecoveryOptions = {},
 ): Promise<RecoveryOutcome> {
   const outcome: RecoveryOutcome = { repaired: [], sweptTombstones: [] };
   const root = conversationsDir(worldPath);
@@ -49,18 +60,29 @@ export async function recoverConversations(
       continue;
     }
     if (entry.startsWith(".")) continue;
-    if (await repairInterruptedRun(join(root, entry), now)) outcome.repaired.push(entry);
+    if (await repairInterruptedRun(join(root, entry), now, options.isLive)) outcome.repaired.push(entry);
   }
   return outcome;
 }
 
 /** Returns true when this pass wrote a terminal event that was previously missing. */
-async function repairInterruptedRun(dir: string, now: () => string): Promise<boolean> {
+async function repairInterruptedRun(
+  dir: string,
+  now: () => string,
+  isLive: (conversationId: ConversationId) => boolean = () => false,
+): Promise<boolean> {
   const store = new WorldChatStore(dir);
   const meta = await store.readMeta();
   if (!meta) return false;
 
+  // Asked on both sides of the read. The runner registers a turn before appending its running
+  // run and lets go only after appending its end, so a turn live at either moment is one this
+  // log may show mid-flight — or, if it ended in between, already ended by its own hand. A turn
+  // that started and finished wholly between the two would slip past; the coordinator's hold on
+  // turns during an open is what keeps one from starting at all.
+  if (isLive(meta.id)) return false;
   const { events } = await store.read();
+  if (isLive(meta.id)) return false;
   const folded = foldConversation(meta.id, meta.createdAt, events);
   if (!folded.needsInterruptedRunRepair) return false;
 

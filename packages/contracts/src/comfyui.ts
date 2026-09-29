@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
 import { CapabilitySchema } from "./provider.js";
+import { AdapterSelectionsSchema } from "./adapters.js";
 
 /**
  * The ComfyUI engine and its recipes (SPEC-021). Deliberately not `ProviderToolStatus`: that is
@@ -93,6 +94,8 @@ export const RecipeIdentitySchema = z
      * either ran on this version or never ran. Absent for jobs enqueued before it existed.
      */
     engineVersion: z.string().min(1).optional(),
+    /** Ordered immutable adapter choices, preserved with the recipe and resulting take. */
+    adapters: AdapterSelectionsSchema.optional(),
   })
   .strict();
 export type RecipeIdentity = z.infer<typeof RecipeIdentitySchema>;

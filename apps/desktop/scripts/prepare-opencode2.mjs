@@ -65,24 +65,27 @@ if (untar.status !== 0) throw new Error(`tar failed with exit code ${untar.statu
 
 const binary = join(extracted, "package", "bin", "opencode2.exe");
 if (!existsSync(binary)) throw new Error("the platform package did not contain bin/opencode2.exe");
-cpSync(binary, join(stage, "opencode2.exe"));
-assertPeArchitecture(join(stage, "opencode2.exe"), arch);
+assertPeArchitecture(binary, arch);
 
-// The staged binary must BE the pin, and must run on this machine — asked, not assumed.
+// Probe the verified extracted binary before copying it. Running the executable in stage
+// leaves Windows holding the directory that the final swap needs to rename (#1227).
 // This probe's one job is catching an incoherent pin (sha bumped, version field stale), so
 // the match is boundary-anchored: a stale version that happens to prefix the new build's
 // must not pass. Executable when the arches match, and on ARM64 hosts too — Windows on ARM
 // runs x64 under emulation, which is the packaged story (see package-windows.mjs).
 if (arch === process.arch || process.arch === "arm64") {
-  const probe = spawnSync(join(stage, "opencode2.exe"), ["--version"], { encoding: "utf8", shell: false, timeout: 30_000 });
+  const probe = spawnSync(binary, ["--version"], { encoding: "utf8", shell: false, timeout: 30_000 });
   const reported = (probe.stdout ?? "").trim();
   const pinned = new RegExp(`(^|[\\s v])${metadata.opencode2.version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|\\s)`);
   if (probe.status !== 0 || !pinned.test(reported)) {
     throw new Error(
-      `staged opencode2 did not answer with the pinned version: expected ${metadata.opencode2.version}, got "${reported || probe.stderr || "no output"}"`,
+      `extracted opencode2 did not answer with the pinned version: expected ${metadata.opencode2.version}, got "${reported || probe.stderr || "no output"}"`,
     );
   }
 }
+
+cpSync(binary, join(stage, "opencode2.exe"));
+assertPeArchitecture(join(stage, "opencode2.exe"), arch);
 
 await download(
   metadata.opencode2.license.url,

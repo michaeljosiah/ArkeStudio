@@ -49,8 +49,8 @@ const CHARS_PER_TOKEN = 3.5;
  * What else is in the window, which this budget never sees and must not spend.
  *
  * `assembleContext` measures its own sections and nothing else. The window also has to hold the
- * world-builder agent's prompt and the result-shape guide appended to it — about 18,400
- * characters together, near 5,300 tokens, measured rather than guessed — plus the tool schemas
+ * world-builder agent's prompt and the result-shape guide appended to it — about 34,600
+ * characters together by 2026-09-25, 8,700 tokens as Gemma 4 counts them — plus the tool schemas
  * the harness injects, whatever the turn reads back through its tools while it runs, and the
  * reply, which for this agent is a JSON result carrying candidates and their evidence.
  *
@@ -81,11 +81,39 @@ function reservedTokens(inputTokenLimit: number): number {
  * 32,000-token model 120,000 characters, which is over its limit before a single section is
  * measured — the overflow above, arriving by way of the safety net.
  */
-export function budgetFor(inputTokenLimit: number | undefined): number {
+export function budgetFor(inputTokenLimit: number | undefined, harnessReserve?: number): number {
   if (!inputTokenLimit || inputTokenLimit <= 0) return FALLBACK_BUDGET_CHARS;
+  if (harnessReserve !== undefined) {
+    /*
+     * A harness that owns its prompt and checks the fit itself (issue 1265). Its reserve is the
+     * prompt, tools and reply as it counts them, so what is left is measured in its count too:
+     * sized at three and a half characters a token against a 12,000-token reserve, a chapter ask
+     * on a 32k local window was refused before the model saw it, every time. The share still
+     * covers what the turn reads back while it runs.
+     */
+    const reserved = Math.max(reservedTokens(inputTokenLimit), harnessReserve + Math.round(inputTokenLimit * HARNESS_READ_SHARE));
+    const spendable = Math.min(Math.max(0, inputTokenLimit - reserved), HARNESS_PROMPT_CAP_TOKENS);
+    return Math.floor(spendable * HARNESS_CHARS_PER_TOKEN);
+  }
   const spendable = Math.max(0, inputTokenLimit - reservedTokens(inputTokenLimit));
   return Math.floor(spendable * CHARS_PER_TOKEN);
 }
+
+/** Room kept for tool reads beside a harness's stated reserve. */
+const HARNESS_READ_SHARE = 0.1;
+/**
+ * The most a turn's assembled context may take on a local harness, whatever its window. A 256k
+ * window is room for the turn to read and answer in, not an invitation to fill it: a 12B model
+ * reads a 121,000-token prompt in three minutes on a 10 GB card, and long-context studies find
+ * small models answer better from a short curated context than from a full one. A quarter of the
+ * largest window, so the bible, the summary and the recent turns fit and the rest is fetched.
+ */
+const HARNESS_PROMPT_CAP_TOKENS = 64_000;
+/**
+ * The rate a local harness's own estimate charges this prompt's mix of prose, ids and JSON: it
+ * errs high on purpose, so a message sized at the gentler rate above would not fit its check.
+ */
+const HARNESS_CHARS_PER_TOKEN = 3;
 
 /**
  * What gets cut first when there genuinely is not room, and what is never cut.

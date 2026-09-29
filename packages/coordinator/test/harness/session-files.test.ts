@@ -106,4 +106,52 @@ describe("session preparation lifetime", () => {
       /session creation timed out/,
     );
   });
+
+  it("bounds a session configuration that never settles by the same timeout (issue 1247)", async () => {
+    let prepared = 0;
+    const adapter = {
+      id: "never-configured",
+      capabilities: () => new Set(),
+      readiness: () => ({ ready: true }),
+      sessionFiles: () => [],
+      prepareSession: () => { prepared += 1; },
+      async createSession() { return { sessionId: "unexpected" }; },
+      async sendMessage() { throw new Error("unused"); },
+      async dispatchAsync() { throw new Error("unused"); },
+      streamEvents() { return { [Symbol.asyncIterator]: async function* () {} }; },
+    } as HarnessAdapter;
+    const dir = await tempDir("arke-session-files-");
+    await assert.rejects(
+      createPreparedSession(adapter, dir, new Promise<never>(() => {}), { purpose: "authoring" }, 10),
+      /session creation timed out/,
+    );
+    assert.equal(prepared, 0, "nothing was prepared for a configuration that never arrived");
+  });
+
+  it("ends a session creation at the caller's stop while its configuration is still being decided (issue 1247)", async () => {
+    let prepared = 0;
+    let created = 0;
+    const adapter = {
+      id: "stopped-while-configuring",
+      capabilities: () => new Set(),
+      readiness: () => ({ ready: true }),
+      sessionFiles: () => [],
+      prepareSession: () => { prepared += 1; },
+      async createSession() { created += 1; return { sessionId: "unexpected" }; },
+      async sendMessage() { throw new Error("unused"); },
+      async dispatchAsync() { throw new Error("unused"); },
+      streamEvents() { return { [Symbol.asyncIterator]: async function* () {} }; },
+    } as HarnessAdapter;
+    const dir = await tempDir("arke-session-files-");
+    let decide!: (input: { model?: string }) => void;
+    const deciding = new Promise<{ model?: string }>((resolve) => { decide = resolve; });
+    const stop = new AbortController();
+    const creation = createPreparedSession(adapter, dir, deciding, { purpose: "authoring" }, 5_000, stop.signal);
+    stop.abort(new Error("run stopped"));
+    await assert.rejects(creation, /run stopped/);
+    decide({});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(prepared, 0, "nothing was prepared for a run that had stopped");
+    assert.equal(created, 0);
+  });
 });

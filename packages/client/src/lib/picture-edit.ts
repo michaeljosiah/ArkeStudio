@@ -2,6 +2,7 @@ import {
   TimelineOperationRefused,
   applyTimelineCommands,
   orderedTrackClips,
+  type FrameRate,
   type ProductionTimeline,
   type SourceLengthFrames,
   type TimelineClip,
@@ -92,6 +93,64 @@ export function trackDragCommand(
   if (clip === undefined || deltaFrames === 0) return null;
   const startFrame = Math.max(0, clip.startFrame + deltaFrames);
   return startFrame === clip.startFrame ? null : { kind: "move-to-frame", clipId, startFrame };
+}
+
+/** The Inspector's timing rows: where the clip sits, its two edges, and how long it runs. */
+export type TimingField = "position" | "in" | "out" | "duration";
+
+/**
+ * `HH:MM:SS:FF`, `MM:SS:FF`, `MM:SS` or `SS` to whole frames, or null. Strict where the scrub
+ * bar's parser is forgiving: that one strips whatever it does not understand, so "1.5" would
+ * read as fifteen seconds, and "00:00:00:99" as nearly four — and here a misread commits a trim.
+ * Digits and colons only, seconds under sixty once minutes are named, minutes under sixty once
+ * hours are, frames under the rate.
+ */
+export function timecodeFrames(text: string, frameRate: FrameRate): number | null {
+  const trimmed = text.trim();
+  if (!/^\d+(?::\d+){0,3}$/.test(trimmed)) return null;
+  const parts = trimmed.split(":").map(Number);
+  if (parts.some((part) => !Number.isSafeInteger(part))) return null;
+  const at = (index: number): number => parts[index] ?? 0;
+  const [hours, minutes, seconds, frames] =
+    parts.length === 1 ? [0, 0, at(0), 0]
+    : parts.length === 2 ? [0, at(0), at(1), 0]
+    : parts.length === 3 ? [0, at(0), at(1), at(2)]
+    : [at(0), at(1), at(2), at(3)];
+  if (parts.length > 1 && seconds >= 60) return null;
+  if (parts.length > 3 && minutes >= 60) return null;
+  if (frames >= frameRate) return null;
+  const total = ((hours * 60 + minutes) * 60 + seconds) * frameRate + frames;
+  return Number.isSafeInteger(total) ? total : null;
+}
+
+/**
+ * The one command a typed timecode becomes, or null. Typing is the keyboard path of the same
+ * edges the grips drag, so an edge reduces through the same clamp: a value past the source or
+ * into a neighbour lands on the nearest legal frame rather than being refused, and the row then
+ * shows where it landed. Text that is not a timecode, or a value that changes nothing, sends
+ * nothing — a write with no change is not an edit.
+ */
+export function timingEntryCommand(
+  clips: readonly TimelineClip[],
+  clipId: TimelineClipId,
+  field: TimingField,
+  text: string,
+  frameRate: FrameRate,
+  sourceLength: SourceLengthFrames = () => undefined,
+): TimelineClipCommand | null {
+  const clip = clips.find((candidate) => candidate.id === clipId);
+  const frames = timecodeFrames(text, frameRate);
+  if (clip === undefined || frames === null) return null;
+  switch (field) {
+    case "position":
+      return frames === clip.startFrame ? null : { kind: "move-to-frame", clipId, startFrame: frames };
+    case "in":
+      return pictureDragCommand(clips, clipId, "trim-start", frames - clip.startFrame, sourceLength);
+    case "out":
+      return pictureDragCommand(clips, clipId, "trim-end", frames - (clip.startFrame + clip.durationFrames), sourceLength);
+    case "duration":
+      return pictureDragCommand(clips, clipId, "trim-end", frames - clip.durationFrames, sourceLength);
+  }
 }
 
 /** The timeline as it would read after `commands`, or null when the batch would be refused. */

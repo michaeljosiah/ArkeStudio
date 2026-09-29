@@ -6,6 +6,7 @@ import WebSocket from "ws";
 import { FrameSchema, type Frame } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
+import type { CredentialStore } from "../../src/credentials/store.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot } from "../world/helpers.js";
 
@@ -74,6 +75,40 @@ function statusFor(frames: Frame[], id: string) {
 }
 
 describe("a credential write is always answered (R-6, issue #227)", () => {
+  it("publishes replacement-key invalidation while fingerprint I/O is still pending", async () => {
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root);
+    const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "changes.jsonl"), appVersion: "test", appRoot: root,
+      cipher: devCipher(), validators: { fal: { validateKey: async () => [{ capability: "image", available: true }] } } });
+    const { port, token } = await coordinator.start(0);
+    const client = new TestClient(port);
+    let finishFingerprint: ((fingerprint: string) => void) | undefined;
+    await client.open();
+    try {
+      client.send({ kind: "hello", token, lastSeq: 0 });
+      await client.until((f) => f.kind === "snapshot", "snapshot");
+      client.send({ kind: "set-credential", provider: "fal", key: KEY });
+      await client.until((f) => Boolean(statusFor([f], "fal")?.credentialFingerprint), "initial fingerprint");
+      client.send({ kind: "validate-provider", provider: "fal" });
+      await client.until((f) => statusFor([f], "fal")?.validation === "valid", "valid credential");
+      const credentials = (coordinator as unknown as { credentials: CredentialStore }).credentials;
+      credentials.fingerprint = () => new Promise((resolve) => { finishFingerprint = resolve; });
+      client.frames.length = 0;
+      client.send({ kind: "set-credential", provider: "fal", key: "replacement-key" });
+      await client.until((f) => statusFor([f], "fal")?.validation === "untested", "reset before fingerprint completion");
+      assert.ok(finishFingerprint, "the metadata read is pending");
+      const providers = coordinator.getState().app.providers.filter((status) => status.id === "fal");
+      assert.equal(providers[0]!.validation, "untested");
+      assert.deepEqual(providers[0]!.probes, []);
+      finishFingerprint("1234ABCD");
+      await client.until((f) => statusFor([f], "fal")?.credentialFingerprint === "1234ABCD", "updated fingerprint");
+    } finally {
+      finishFingerprint?.("1234ABCD");
+      client.close();
+      await coordinator.stop();
+      await provider.close();
+    }
+  });
   it("a build with no credential storage says so, instead of dropping the key", async () => {
     const { root } = await makeTempRoot();
     const provider = new FsWorldProvider(root, { clock: () => "2026-08-09T12:00:00.000Z" });

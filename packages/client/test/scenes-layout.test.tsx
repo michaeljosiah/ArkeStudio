@@ -1,0 +1,228 @@
+import assert from "node:assert/strict";
+import { afterEach, it } from "node:test";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { parseHTML } from "linkedom";
+import { MemoryRouter } from "react-router";
+import type { ClientMessage } from "@arke-studio/contracts";
+import { App } from "../src/App.js";
+import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import type { ArkeBridge } from "../src/arke-bridge.js";
+import { scenesLayoutFixture } from "./scenes-layout-fixture.js";
+import { SceneDock, StageInspectorSheet, useSceneDock } from "../src/screens/scene-workspace/responsive-chrome.js";
+
+const dom = parseHTML("<!doctype html><html><body></body></html>");
+let width = 390;
+let touch = true;
+const listeners = new Set<() => void>();
+Object.assign(dom.window, {
+  innerWidth: 390, innerHeight: 797, getComputedStyle: () => ({ direction: "ltr" }),
+  matchMedia: (query: string) => ({
+    matches: query.split(",").some(part => (!part.includes("hover:") || part.includes("hover: none") === touch) && (!part.includes("pointer:") || part.includes("pointer: coarse") === touch) && [...part.matchAll(/\((min|max)-width: (\d+)px\)/g)].every(([, kind, value]) => kind === "min" ? width >= Number(value) : width <= Number(value))),
+    addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+    removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+  }),
+});
+Object.assign(dom.HTMLElement.prototype, {
+  getBoundingClientRect: () => ({ x: 0, y: 0, left: 0, top: 0, right: 44, bottom: 44, width: 44, height: 44 }),
+  showModal(this: HTMLElement) { this.setAttribute("open", ""); },
+  close(this: HTMLElement) { this.removeAttribute("open"); },
+  scrollIntoView() {},
+});
+Object.assign(Object.getPrototypeOf(dom.document.createElement("video")), { pause() {}, play: () => Promise.resolve() });
+Object.assign(globalThis, {
+  window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Element: dom.Element, Node: dom.Node, Event: dom.Event,
+  IS_REACT_ACT_ENVIRONMENT: true, requestAnimationFrame: (cb: () => void) => setTimeout(cb, 0), cancelAnimationFrame: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
+});
+let root: Root | null = null;
+let sent: ClientMessage[] = [];
+const base = "/w/" + scenesLayoutFixture().world!.meta.worldId + "/p/saltlight/scenes";
+async function mount(route = "/sc_04", size = 390) {
+  width = size; sent = [];
+  const host = dom.document.createElement("div"); dom.document.body.append(host);
+  root = createRoot(host);
+  await act(async () => {
+    __setBridgeForTest({ connect() {}, subscribe() { return () => {}; }, send(raw: string) { sent.push(JSON.parse(raw)); } } as unknown as ArkeBridge);
+    __setStateForTest(scenesLayoutFixture()); __connectionStatusForTest("open");
+    root!.render(<MemoryRouter initialEntries={[base + route]}><App /></MemoryRouter>);
+  });
+}
+afterEach(async () => { await act(async () => root?.unmount()); root = null; touch = true; dom.document.body.replaceChildren(); __setBridgeForTest(null); __connectionStatusForTest("closed"); });
+const find = (selector: string) => dom.document.querySelector(selector) as unknown as HTMLElement;
+const textButton = (text: string, scope = "body") => [...find(scope).querySelectorAll("button")].find(button => button.textContent?.trim() === text) as HTMLElement;
+const click = async (element: HTMLElement) => { assert.ok(element); await act(async () => element.click()); };
+const commands = () => sent.filter((message): message is Extract<ClientMessage, {kind: "scene-command"}> => message.kind === "scene-command").map(message => message.command);
+
+it("gives a phone scene its own back row, two views, read-only scripts and an Arke sheet", async () => {
+  await mount();
+  assert.ok(find(".fy-scene-back")); assert.equal(find(".fy-production-mobile-nav"), null); assert.equal(find(".fy-titlebar"), null);
+  assert.deepEqual([...find('.fy-sw__tabs').querySelectorAll('button')].map(e => e.textContent), ["Storyboard", "Preview"]);
+  assert.equal(find('.fy-swrow__scripteditor'), null); assert.ok(find('.fy-swrow__script-read'));
+  assert.equal(find('.fy-scene-dock[open]'), null);
+  await click(find('.fy-sw__rail')); assert.ok(find('.fy-scene-dock[open]'));
+});
+
+it("moves a shot from its touch sheet without dragging", async () => {
+  await mount(); await click(find('.fy-swrow__frameactions > button:last-child'));
+  const sheet = '.fy-frame-actions-sheet[open]';
+  assert.ok(textButton('Move up', sheet).hasAttribute('disabled'));
+  await click(textButton('Move down', sheet));
+  assert.deepEqual(commands(), [{kind: "move-shot", shotId: "sh_12", to: {after: "sh_13"}}]);
+  assert.equal(find(sheet), null);
+});
+
+it("inserts after a shot through the same canonical scene writer", async () => {
+  await mount(); await click(find('.fy-swrow__frameactions > button:last-child'));
+  await click(textButton('Insert a shot after', '.fy-frame-actions-sheet[open]'));
+  assert.equal(commands()[0]?.kind, "insert-shot");
+  assert.deepEqual((commands()[0] as {at: unknown}).at, {after: "sh_12"});
+});
+
+it("keeps delete behind its existing confirmation", async () => {
+  await mount(); await click(find('.fy-swrow__frameactions > button:last-child'));
+  await click(textButton('Delete shot', '.fy-frame-actions-sheet[open]'));
+  assert.ok(find('[role=alertdialog]')); assert.deepEqual(commands(), []);
+});
+
+it("offers the synopsis from the phone page menu as a sheet", async () => {
+  await mount(); await click(find('.fy-scene-back > button:last-child'));
+  await click(textButton('Scene details', '.fy-scene-page-menu[open]'));
+  assert.ok(find('.fy-page-sheet[open] .fy-sbsynopsis'));
+  await click(find('.fy-page-sheet[open] .fy-sbsynopsis'));
+  const input = find('.fy-page-sheet[open] textarea') as HTMLTextAreaElement;
+  input.value = 'The harbour falls silent.';
+  await act(async () => { find('.fy-page-sheet[open]').dispatchEvent(new dom.Event('cancel', { bubbles: false, cancelable: true })); });
+  assert.ok(input.isConnected);
+  await click(find('.fy-scene-back > button:last-child'));
+  await click(textButton('Scene details', '.fy-scene-page-menu[open]'));
+  assert.equal(find('.fy-page-sheet[open] textarea'), input);
+  assert.equal(input.value, 'The harbour falls silent.');
+  await act(async () => input.dispatchEvent(new dom.Event('focusout', { bubbles: true })));
+  assert.deepEqual(commands(), [{ kind: 'edit-scene', synopsis: 'The harbour falls silent.' }]);
+});
+
+it("opens a shot's page actions and inspector without leaving a floating button over Stage", async () => {
+  await mount('/sc_04/shots/sh_12?view=stage');
+  assert.equal(find('.fy-sw__rail'), null);
+  await click(find('.fy-stage-inspector-open')); assert.ok(find('.fy-stage-inspector-sheet[open]'));
+  await click(find('.fy-stage-inspector-sheet[open] .ui-iconbtn'));
+  await click(find('.fy-scene-back > button:last-child'));
+  assert.ok(textButton('Open in generator', '.fy-scene-page-menu[open]'));
+  await click(textButton('Ask Arke', '.fy-scene-page-menu[open]')); assert.ok(find('.fy-scene-dock[open]'));
+});
+
+it("starts a Fold with both rails put away and shows Flow as a touch list", async () => {
+  await mount('/sc_04', 984);
+  assert.ok(find('.fy-production-drawer-toggle')); assert.equal(find('.fy-production-drawer[open]'), null);
+  assert.equal(find('.fy-scene-dock[open]'), null); assert.ok(find('.fy-sw__rail'));
+  await click(textButton('Flow', '.fy-sw__tabs')); assert.ok(find('[data-touch-list=true]'));
+  assert.ok(textButton('Add shot', '[data-touch-list=true]'));
+});
+
+it("returns to Storyboard when a Fold running Flow becomes a phone", async () => {
+  await mount('/sc_04', 984); await click(textButton('Flow', '.fy-sw__tabs'));
+  await act(async () => { width = 390; for (const listener of listeners) listener(); });
+  assert.equal(find('[data-testid=workspace-flow]'), null); assert.ok(find('[data-testid=workspace-rows]'));
+});
+
+it("retains every camera field behind More on a compact shot", async () => {
+  await mount('/sc_04/shots/sh_12');
+  assert.equal(find('[aria-label="Shot focus"]'), null);
+  assert.ok(find('[aria-label="Shot movement"]'));
+  await click(find('[aria-label="More camera settings"]'));
+  assert.ok(find('[aria-label="Shot focus"]')); assert.ok(find('[aria-label="Shot grade"]'));
+});
+
+it("keeps Rename reachable after the phone replaces the editable title", async () => {
+  await mount('/sc_04/shots/sh_12');
+  await click(find('.fy-scene-back > button:last-child')); await click(textButton('Rename', '.fy-scene-page-menu[open]'));
+  const input = find('.fy-scene-rename input');
+  const key = Object.keys(input).find(name => name.startsWith('__reactProps$'))!;
+  await act(async () => (input as unknown as Record<string, {onChange: (event: {target: {value: string}}) => void}>)[key]!.onChange({target: {value: 'A new name'}}));
+  await click(textButton('Save name', '.fy-scene-rename[open]'));
+  assert.deepEqual(commands(), [{kind: 'edit-shot', shotId: 'sh_12', change: {title: 'A new name'}}]);
+});
+
+for (const shot of [false, true]) it(`cancels a stale ${shot ? "shot" : "scene"} rename when another writer changes it`, async () => {
+  await mount(shot ? '/sc_04/shots/sh_12' : '/sc_04');
+  await click(find('.fy-scene-back > button:last-child')); await click(textButton('Rename', '.fy-scene-page-menu[open]'));
+  const state = scenesLayoutFixture(), scene = state.world!.productions[0]!.scenes.find(scene => scene.id === 'sc_04')!;
+  if (shot && 'shots' in scene) scene.shots[0]!.title = 'Renamed elsewhere'; else scene.title = 'Renamed elsewhere';
+  scene.version++;
+  await act(async () => __setStateForTest(state));
+  assert.equal(find('.fy-scene-rename[open]'), null);
+  assert.deepEqual(commands(), []);
+});
+
+it("preserves the same composer while resizing and putting Arke away", async () => {
+  function Dock() { const [open, setOpen] = useSceneDock(); return <SceneDock open={open} onOpen={() => setOpen(true)} onClose={() => setOpen(false)}><textarea aria-label="Unsent draft" /></SceneDock>; }
+  width = 1360; const host = dom.document.createElement('div'); dom.document.body.append(host); root = createRoot(host);
+  await act(async () => root!.render(<Dock />));
+  const editor = find('[aria-label="Unsent draft"]') as HTMLTextAreaElement; editor.value = 'Keep these unsent words';
+  await act(async () => { width = 984; for (const listener of listeners) listener(); });
+  assert.equal(find('[aria-label="Unsent draft"]'), editor);
+  await click(find('.fy-sw__rail')); assert.equal(editor.value, 'Keep these unsent words');
+  await click(find('.fy-scene-dock .ui-iconbtn'));
+  assert.equal(find('[aria-label="Unsent draft"]'), editor);
+  await act(async () => { width = 1360; for (const listener of listeners) listener(); });
+  assert.equal(find('[aria-label="Unsent draft"]'), editor); assert.equal(editor.value, 'Keep these unsent words');
+});
+
+it("commits the focused storyboard script before switching to a phone", async () => {
+  await mount('/sc_04', 984);
+  const editor = find('.fy-swrow__scripteditor'), textarea = editor.querySelector('textarea')!;
+  const props = (node: Element) => (node as unknown as Record<string, Record<string, (event: unknown) => void>>)[Object.keys(node).find(key => key.startsWith('__reactProps$'))!]!;
+  await act(async () => props(editor).onFocus!({}));
+  await act(async () => props(textarea).onChange!({target:{value:'The revised harbour line'}, currentTarget:{value:'The revised harbour line',selectionStart:27}}));
+  await act(async () => { width = 390; for (const listener of listeners) listener(); });
+  assert.ok(commands().some(command => command.kind === 'edit-shot' && command.change.description === 'The revised harbour line'));
+});
+
+it("labels a compact shot with an accepted clip as rendered", async () => {
+  await mount(); const state = scenesLayoutFixture(), production = state.world!.productions[0]!;
+  const clip = production.takes.find(take => take.kind === 'clip' && take.coversShots.includes('sh_12'))!;
+  production.selections.sh_12 = {acceptedTakeId:clip.id, trimInSec:0};
+  await act(async () => __setStateForTest(state));
+  assert.equal(find('.fy-swrow__titleline .fy-swchip[data-state="rendered"]').textContent, 'Rendered');
+});
+
+it("preserves the Stage inspector's controls while moving into and out of its sheet", async () => {
+  const host = dom.document.createElement('div'); dom.document.body.append(host); root = createRoot(host);
+  const render = (sheet: boolean) => root!.render(<StageInspectorSheet sheet={sheet}><input aria-label="Reference offset" defaultValue="0" /></StageInspectorSheet>);
+  await act(async () => render(false)); const input = find('[aria-label="Reference offset"]') as HTMLInputElement; input.value = '0.7';
+  await act(async () => render(true)); await click(find('.fy-stage-inspector-open'));
+  assert.equal(find('[aria-label="Reference offset"]'), input); assert.equal(input.value,'0.7');
+  await act(async () => render(false)); assert.equal(find('[aria-label="Reference offset"]'), input); assert.equal(input.value,'0.7');
+});
+
+it("preserves an uncommitted grade while compact camera fields are put away",async()=>{
+  await mount('/sc_04/shots/sh_12',1360); const input=find('[aria-label="Shot grade"]') as HTMLInputElement; input.value='Keep the blue shadows';
+  await act(async()=>{width=390;for(const listener of listeners)listener();});
+  assert.equal(find('[aria-label="Shot grade"]'),input); assert.ok(input.closest('[hidden]'));
+  await click(find('[aria-label="More camera settings"]')); assert.equal(input.value,'Keep the blue shadows'); assert.equal(input.closest('[hidden]'),null);
+});
+
+it("retains app navigation on a refused phone deep link",async()=>{
+  await mount('/sc_04/shots/sh_12'); const state=scenesLayoutFixture(); state.worldOpenFailure={worldId:state.world!.meta.worldId,reason:'The world is locked'}; state.world=null;
+  await act(async()=>__setStateForTest(state));
+  assert.ok(find('.fy-titlebar')); assert.match(dom.document.body.textContent??'',/This world did not open/);
+});
+
+it("keeps one read-aloud instance when the frame action menu crosses breakpoints",async()=>{
+  touch = false;
+  await mount(); const button=find('.fy-frame-audio-host button'); assert.ok(button);
+  await act(async()=>{width=1360;for(const listener of listeners)listener();});
+  assert.equal(find('.fy-frame-audio-host button'),button);
+  await act(async()=>{width=390;for(const listener of listeners)listener();});
+  assert.equal(find('.fy-frame-audio-host button'),button);
+});
+it("offers shot ordering in a hover Fold window",async()=>{
+  touch = false; await mount('/sc_04',984); await click(find('.fy-swrow__frameactions > button:last-child'));
+  await click(textButton('Move down','.fy-frame-actions-sheet[open]'));
+  assert.deepEqual(commands(),[{kind:'move-shot',shotId:'sh_12',to:{after:'sh_13'}}]);
+});
+it("retains reorder commands in the compact row menu used by same-picture beats",async()=>{
+  await mount('/sc_04',984); await click(find('.fy-swrow__actionline > .fy-swrow__more:not(.fy-swrow__chevron)'));
+  await click(textButton('Move down','.fy-swrow__menu'));
+  assert.deepEqual(commands(),[{kind:'move-shot',shotId:'sh_12',to:{after:'sh_13'}}]);
+});

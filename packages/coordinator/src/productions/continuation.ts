@@ -1,6 +1,6 @@
-import { copyFile, mkdir, stat } from "node:fs/promises";
-import { join } from "node:path";
-import type { Selections, Take } from "@arke-studio/contracts";
+import { copyFile, mkdir, stat, readFile } from "node:fs/promises";
+import { join, extname } from "node:path";
+import type { Job, Selections, Take } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import type { FfmpegRunner } from "../takes/export.js";
@@ -30,6 +30,28 @@ import type { FfmpegRunner } from "../takes/export.js";
  * continuation, and its callers should not have to know the predicate emigrated.
  */
 export { continuationAvailable, type ContinuationAvailability } from "@arke-studio/contracts";
+
+/** Shared by enqueue preflight and dispatch; a segment must carry its own range. */
+export async function readContinuationSource(store: WorldStore, job: Pick<Job, "params" | "productionId">,
+  ffmpeg: FfmpegRunner | null, signal: AbortSignal, maxBytes?: number) {
+  const production = store.getBundle().productions.find(candidate => candidate.meta.id === job.productionId);
+  const take = production?.takes.find(candidate => candidate.id === job.params.continuedFrom);
+  if (!take) throw new Error("the take this shot was continuing is no longer in this production");
+  const materialise = () => materialiseForContinuation(store, production!.meta.id, take, ffmpeg, signal);
+  // Segment extraction writes a cached file, even during preflight. Serialize it and verify
+  // ownership immediately before that write, just as dispatch must.
+  const { path } = take.segment ? await store.ownedWrite(materialise) : await materialise();
+  const types: Record<string, "video/mp4" | "video/quicktime" | "video/webm"> = {
+    ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+  };
+  const contentType = types[extname(path).toLowerCase()];
+  if (!contentType) throw new Error(`${extname(path) || "that file"} is not a video this can send`);
+  const absolute = toExtendedLength(join(store.dir, fromPortable(path)));
+  if (maxBytes !== undefined && (await stat(absolute)).size > maxBytes) throw new Error("Continuation video exceeds the inline reference size limit.");
+  const data = await readFile(absolute);
+  if (maxBytes !== undefined && data.byteLength > maxBytes) throw new Error("Continuation video exceeds the inline reference size limit.");
+  return { contentType, data };
+}
 
 /**
  * The media a continuation actually extends (R-49, D33).

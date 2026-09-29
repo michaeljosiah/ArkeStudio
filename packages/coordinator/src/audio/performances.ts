@@ -31,8 +31,19 @@ export function performanceTarget(store: WorldStore, input: { productionId: stri
     ...(line.blockId ? { blockId: line.blockId } : {}), authoredTextHash: audioHash(Buffer.from(line.text)) });
   return { target, text: line.text, sheet };
 }
+/**
+ * A read is current while the same line — same shot, speaker, block and wording — is still
+ * there to speak. The scene version is Keep's fence, not the line's identity: choosing a read
+ * for the scene's cast bumps the version itself (SPEC-044 R-15), and an unrelated edit to a
+ * different shot must not silence every read in the scene (R-16 reads staleness off the
+ * authored text hash alone).
+ */
 export function currentPerformanceTarget(store: WorldStore, target: PerformanceTarget): boolean {
-  try { return JSON.stringify(performanceTarget(store, target).target) === JSON.stringify(target); } catch { return false; }
+  try {
+    const { sceneVersion: _now, ...now } = performanceTarget(store, target).target;
+    const { sceneVersion: _then, ...then } = target;
+    return JSON.stringify(now) === JSON.stringify(then);
+  } catch { return false; }
 }
 
 export async function keepPerformanceRecording(store: WorldStore, tools: AudioMediaTools, spool: PerformanceSpool,
@@ -80,7 +91,10 @@ export async function keepPerformanceRecording(store: WorldStore, tools: AudioMe
     if (!currentPerformanceTarget(store, resolved.target)) throw new Error("The authored target changed while audio was being prepared.");
     record = PerformanceRecordSchema.parse({ id, kind: "scratch", target: resolved.target, file: file.slice(prefix.length + 1),
       provenance, createdAt: at, recordedAt: at, transcript,
-      captureAcknowledgement: { basis: request.captureBasis, statementVersion: 1, at } });
+      captureAcknowledgement: { basis: request.captureBasis, statementVersion: 1, at },
+      // Said once, here (SPEC-044 R-14): the attestations bind the bytes this Keep produced.
+      ...(request.attestations?.length ? { attestations: request.attestations.map(kind => ({ audioHash: provenance.outputHash, kind, statementVersion: 1, acknowledgedAt: at })) } : {}),
+      ...(request.cloudBasis ? { cloudBasis: request.cloudBasis } : {}) });
     return { kind: "keep-performance-recording", source: "user", requestId: request.requestId,
       files: [{ path: `${prefix}/performance.json`, action: "create", baseHash: null, content: JSON.stringify(record, null, 2) + "\n" }] };
   });
@@ -122,7 +136,7 @@ export async function performanceConversionRequest(store: WorldStore, model: Man
     basis: request.cloudBasis, scopes: ["cloud-voice-conversion"], statementVersion: 1, at });
   const input = PerformanceConversionInputSchema.parse({ sourcePerformanceId: source.id, sourceHash: hash,
     outputPerformanceId: `pf_${request.requestId}`, target: source.target, voiceAssignment: voice, acknowledgementId,
-    warningCodes: request.warningCodes, attestations, wordingConfirmedAt: at, retention: request.retention });
+    warningCodes: request.warningCodes, attestations, wordingConfirmedAt: at, retention: request.retention, cloudBasis: request.cloudBasis });
   const job: EnqueueInput = { idempotencyKey: request.requestId, worldId: store.worldId, productionId: request.productionId,
     target: { kind: "performance-conversion", id: input.outputPerformanceId }, capability: "voice-conversion", provider: model.provider, model: model.id,
     params: { performanceConversion: input, voiceId: voice.voiceId, retention: request.retention }, estimatedMicroUsd,
@@ -175,6 +189,13 @@ export async function finalizePerformanceConversion(store: WorldStore, tools: Au
     if (!previous) await atomicWriteFile(metadata, sourceJson);
   });
   const candidate = await prepareAudio(store, tools, { kind: "performance-recording", productionId: input.target.productionId, performanceId: input.outputPerformanceId });
+  // What the converted read may say for itself (SPEC-044 R-14): the conversion attested one
+  // speaker, the source's Keep attested the rest, and a voice swap that preserves timing adds
+  // neither a speaker nor music — so the statements re-bind to the bytes this job produced. The
+  // cloud basis is the one the source was sent under: the same recording in another voice.
+  const attested = [...new Set([...input.attestations.map(a => a.kind),
+    ...(source.attestations ?? []).filter(a => a.audioHash === source.provenance.outputHash).map(a => a.kind)])];
+  const cloudBasis = input.cloudBasis ?? source.cloudBasis;
   await acceptPreparedAudio(store, candidate, prefix, (file, provenance) => ({ kind: "performance-converted", source: "system",
     files: [{ path: `${prefix}/performance.json`, action: "create", baseHash: null, content: JSON.stringify(PerformanceRecordSchema.parse({
       id: input.outputPerformanceId, kind: "speech-to-speech", target: input.target, file: file.slice(prefix.length + 1), provenance,
@@ -182,5 +203,7 @@ export async function finalizePerformanceConversion(store: WorldStore, tools: Au
       wordingConfirmedAt: input.wordingConfirmedAt, sourcePerformanceId: input.sourcePerformanceId, sourcePerformanceHash: input.sourceHash,
       jobId: job.id, voiceAssignment: input.voiceAssignment, cost,
       conversion: { provider: "elevenlabs", model: job.model, retention: input.retention, preservesTiming: true, preservesProsody: true },
+      attestations: attested.map(kind => ({ kind, audioHash: provenance.outputHash, statementVersion: 1, acknowledgedAt: input.wordingConfirmedAt })),
+      ...(cloudBasis ? { cloudBasis } : {}),
     }), null, 2) + "\n" }] }));
 }

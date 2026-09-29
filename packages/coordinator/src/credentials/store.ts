@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, open, readFile, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -39,7 +39,7 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 }
 
 /** Reset the file's ACL to the current user alone, inherited permissions removed (R-5). */
-async function lockDownAcl(path: string): Promise<void> {
+export async function lockDownAcl(path: string): Promise<void> {
   if (process.platform === "win32") {
     const user = `${process.env["USERDOMAIN"] ?? "."}\\${process.env["USERNAME"] ?? ""}`;
     await execFileAsync("icacls.exe", [path, "/inheritance:r", "/grant:r", `${user}:F`], {
@@ -147,6 +147,12 @@ export class CredentialStore {
   async has(provider: ProviderId): Promise<boolean> {
     const shape = await this.load();
     return provider in shape.entries;
+  }
+
+  /** Identifies the stored record without decrypting it or exposing any characters of the key. */
+  async fingerprint(provider: ProviderId): Promise<string | undefined> {
+    const encrypted = (await this.load()).entries[provider];
+    return encrypted === undefined ? undefined : createHash("sha256").update(encrypted).digest("hex").slice(0, 8).toUpperCase();
   }
 
   async configuredProviders(): Promise<ProviderId[]> {

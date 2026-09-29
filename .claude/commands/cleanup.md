@@ -32,10 +32,19 @@ script declines something — a refusal is the tool working.
 
 4. Call out by name any worktree in the `would` list. Clean and merged does not mean idle: another
    session may have just pushed and be about to keep working in it. The script cannot know that;
-   the user can.
+   the user can. A worktree that was detached on one run and on a fresh branch at main's HEAD the
+   next is the clearest sign of this — someone has just started there.
 
 5. Only after they agree, re-run with `--apply` and report what actually happened — including any
-   `failed` lines. Do not summarise a partial run as a success.
+   `failed` lines. Do not summarise a partial run as a success. `--keep-worktrees` still takes
+   orphans, so it is the way to clear residue while a live-but-clean worktree stays.
+
+`orphan` lines are directories under `.claude/worktrees` that git no longer lists. On 2026-09-11
+every `git worktree remove` in a run of eleven deregistered its tree, deleted `.git` and the
+tracked files, then failed on a dangling `node_modules/@arke-studio/desktop` junction and left
+~330 MB standing — and twelve older folders of the same shape were already there. The script now
+finishes those off itself and reports the git error when it cannot. An orphan that still has a
+`.git` file is kept and named: git cannot vouch for what is inside, so a person looks first.
 
 ## Never
 

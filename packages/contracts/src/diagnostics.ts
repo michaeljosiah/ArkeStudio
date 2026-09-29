@@ -2,6 +2,7 @@ import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
 import { comfyUiWeightsComponentId, comfyUiWeightsRecipeId } from "./comfyui.js";
 import { PROVIDERS, type ProviderId } from "./provider.js";
+import { formatMicroUsd } from "./money.js";
 import type { ClientState } from "./client-state.js";
 
 /**
@@ -137,7 +138,11 @@ export const CONTROL_REGISTRY = {
     route: "/settings/providers",
     targetParam: "provider",
   },
-  /** Resume a paused provider lane — the message is the explicit confirmation (SPEC-009 D7). */
+  /**
+   * Resume a paused provider lane — the message is the explicit confirmation (SPEC-009 D7).
+   * The route is the panel's name, not a page: the client opens Activity over the screen it
+   * is on for it (design turn 136, SPEC-014 R-20).
+   */
   "queue-resume": {
     label: "Resume",
     place: "Activity · Needs you",
@@ -1167,7 +1172,7 @@ const spendAbovePrevious: Rule = {
           { name: "largest-share", value: winners.join(", "), source: "app.ledger", measuredAt: ctx.now },
         ],
         cause: {
-          statement: `spend rose ${rise} microUSD over the seven days before; ${winners.join(", ")} accounts for the largest share`,
+          statement: `spend rose ${formatMicroUsd(rise)} over the seven days before; ${winners.join(", ")} accounts for the largest share`,
         },
         remedy: null,
         consequences: [],

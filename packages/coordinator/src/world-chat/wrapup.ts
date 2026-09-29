@@ -247,16 +247,13 @@ async function buildAndStage(input: {
       // Creates establish the virtual records that a relationship in the same group may edit.
       const ordered = [...bucket.candidates].sort((left, right) =>
         Number(right.classification === "sheet.create") - Number(left.classification === "sheet.create"));
+      // Each member is built against what the members before it will have written, so two
+      // changes to one file compose instead of each rewriting it from the live record.
       for (const candidate of ordered) {
         const item = materialiseCandidate(candidate, identities, projectedBundle, at, claimed);
         items.push(item);
         built.push(item);
-        for (const sheet of item.projectedSheets ?? []) {
-          projectedBundle = {
-            ...projectedBundle,
-            sheets: [...projectedBundle.sheets.filter((current) => current.id !== sheet.id), sheet],
-          };
-        }
+        if (item.project) projectedBundle = item.project(projectedBundle);
       }
       buckets.push({ key: bucket.key, items });
     }
@@ -302,8 +299,6 @@ async function buildAndStage(input: {
   try {
     for (const bucket of buckets) {
       const lead = bucket.items[0]!;
-      /* Same-sheet members were composed against the preceding projection above. Only that
-       * allowlisted sheet path may collapse to its final content; other duplicate targets refuse. */
       /*
        * A look change cannot travel in a group with anything else.
        *
@@ -343,17 +338,26 @@ async function buildAndStage(input: {
         }
       }
 
+      /*
+       * Two members writing one file compose only when each was built on the last (the projection
+       * above), so the final content for that path carries every member's change. A member without
+       * a projection rewrote the file from the live record, and letting the last one win would
+       * silently drop the others — so that pair refuses, and says which two it is. The two are
+       * named by title and not by path (issue #909): a path is not something a person sees, and
+       * the one the screen showed was already stale by the time it was read. Saying which comes
+       * first is the way out, not the rail: a Save on a grouped point saves the whole group.
+       */
       const paths = bucket.items.flatMap((item) => item.targets.map((t) => t.path));
       const collision = paths.find((path, index) => paths.indexOf(path) !== index);
-      if (
-        collision !== undefined &&
-        bucket.items.some((item) =>
-          item.targets.some((target) => target.path === collision) && item.projectedSheets === undefined)
-      ) {
-        throw new WrapUpError(
-          "materialise",
-          `These land together and two of them rewrite ${collision}, which cannot be written as one change yet. Say which one you want and the other can follow.`,
-        );
+      if (collision !== undefined) {
+        const rewriting = bucket.items.filter((item) => item.targets.some((target) => target.path === collision));
+        if (rewriting.some((item) => item.project === undefined)) {
+          const [first, second] = rewriting;
+          throw new WrapUpError(
+            "materialise",
+            `“${first!.candidate.title}” and “${second!.candidate.title}” change the same record and cannot be written together yet. Say which one you want first, and the other can follow.`,
+          );
+        }
       }
       const proposalTargets = [...new Map(
         bucket.items.flatMap((item) => item.targets).map((target) => [target.path, target]),

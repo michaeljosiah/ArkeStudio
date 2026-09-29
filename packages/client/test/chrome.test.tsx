@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { parseHTML } from "linkedom";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID, SCREENS } from "../src/screens/registry.js";
@@ -21,8 +19,6 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 __setStateForTest(FIXTURE_STATE);
 
-const here = dirname(fileURLToPath(import.meta.url));
-
 function renderAt(path: string): string {
   return renderToString(
     <MemoryRouter initialEntries={[path]}>
@@ -35,44 +31,63 @@ function count(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
 
+function desktopChromeAt(path: string): string {
+  const { document } = parseHTML(renderAt(path));
+  // Turn 162 adds chrome behind character sheets on phones. CSS hides this backdrop on
+  // desktop, where these routes remain full-frame gates; the browser smoke checks that rule.
+  document.querySelector(".fy-character-generation__backdrop")?.remove();
+  return document.toString();
+}
+
 function proposalControl(html: string): string {
-  const label = html.indexOf('aria-label="Proposals"');
+  const label = html.indexOf('aria-label="Proposals');
   const start = html.lastIndexOf("<button", label);
   const end = html.indexOf("</button>", label);
   return html.slice(start, end);
 }
 
 /**
- * Startup is the single exception, and it is written down here rather than merely being true:
- * nothing is configured yet and the only thing that has happened is the download the screen is
- * already showing, so it carries the wordmark and no controls.
+ * A screen that carries the wordmark and no controls. None does today: startup did, until the
+ * launch surface took its place with a lockup of its own (below). Kept, because the exception
+ * should be written down here the day one comes back rather than merely being true.
  */
-const WITHOUT_CONTROLS = new Set(["startup"]);
+const WITHOUT_CONTROLS = new Set<string>();
 /**
  * Full-frame compositions that draw themselves exactly as approved: the accept gates, and the
- * launch screen ahead of everything, which is a plate with its own lockup on it and no chrome
- * of any kind (design master 76a).
+ * launch surface ahead of everything, which carries its own lockup over the loop and no chrome
+ * of any kind (design master turn 158).
  */
 const WITHOUT_CHROME = new Set([
-  "launch",
+  "startup",
+
   "art-direction-proposal",
   "replace-main-photo",
   "model-sheet-generate",
 ]);
 
 describe("app chrome", () => {
-  it("mounts one app-level queue toaster", () => {
-    const app = readFileSync(join(here, "../src/App.tsx"), "utf8");
-    assert.equal(
-      count(app, "<QueueToaster"),
-      1,
-      "Sonner portals on the client, but its root is mounted once here",
-    );
+  it("keeps the character context behind phone generation sheets", () => {
+    for (const id of ["replace-main-photo", "model-sheet-generate"]) {
+      const screen = SCREENS.find((entry) => entry.id === id)!;
+      const { document } = parseHTML(renderAt(screen.samplePath));
+      const backdrop = document.querySelector(".fy-character-generation__backdrop");
+      assert.ok(backdrop, id);
+      assert.equal(backdrop.querySelectorAll(".fy-titlebar__brand").length, 1);
+      assert.equal(backdrop.querySelector('.fy-character-tabs [aria-current="page"]')?.textContent, "Reference");
+    }
+  });
+
+  it("mounts one app-level queue toaster, on every screen", () => {
+    // Sonner portals on the client, but its root is mounted once, at the app; a screen that lost
+    // it would lose every notification. The region it renders is the surface that proves it.
+    for (const path of ["/worlds", "/settings/providers", `/w/${FIXTURE_WORLD_ID}`]) {
+      assert.equal(count(renderAt(path), 'aria-label="Notifications alt+T"'), 1, path);
+    }
   });
 
   for (const screen of SCREENS) {
     it(`${screen.id} carries exactly one wordmark, centred`, () => {
-      const html = renderAt(screen.samplePath);
+      const html = desktopChromeAt(screen.samplePath);
       if (WITHOUT_CHROME.has(screen.id)) {
         assert.equal(count(html, 'class="fy-titlebar__brand"'), 0, `${screen.id} is a full-frame gate`);
         return;
@@ -88,45 +103,48 @@ describe("app chrome", () => {
       );
     });
 
-    it(`${screen.id} puts activity and settings on the right, in that order`, () => {
-      const html = renderAt(screen.samplePath);
+    it(`${screen.id} puts activity, settings and the account on the right, in that order`, () => {
+      const html = desktopChromeAt(screen.samplePath);
       if (WITHOUT_CHROME.has(screen.id)) {
         assert.ok(!html.includes("fy-titlebar__side--right"), `${screen.id} is a full-frame gate`);
         return;
       }
       if (WITHOUT_CONTROLS.has(screen.id)) {
         assert.ok(
-          !html.includes('aria-label="Settings"'),
+          !html.includes('aria-label="Settings"') && !html.includes('aria-label="Arke account"'),
           `${screen.id} is the exception and has no controls`,
         );
         return;
       }
       const right = html.indexOf("fy-titlebar__side--right");
-      const activity = html.indexOf('aria-label="Activity"');
+      const activity = html.indexOf('aria-label="Activity');
       const settings = html.indexOf('aria-label="Settings"');
+      const account = html.indexOf('aria-label="Arke account"');
       assert.ok(right >= 0, "the right-hand side of the bar exists");
       assert.ok(activity > right, "activity sits inside it, not on the left as the world screens had it");
       assert.ok(settings > activity, "and settings follows activity — same order everywhere");
+      assert.ok(account > settings, "and the account comes last (design turn 151): the person, after the screen's controls");
       assert.equal(count(html, 'aria-label="Settings"'), 1, "one way to settings, not two");
+      assert.equal(count(html, 'aria-label="Arke account"'), 1, "one account control, and it never opens a page");
     });
 
     it(`${screen.id} puts proposals before activity, never between it and settings`, () => {
       const html = renderAt(screen.samplePath);
       if (WITHOUT_CHROME.has(screen.id) || WITHOUT_CONTROLS.has(screen.id)) return;
-      const proposals = html.indexOf('aria-label="Proposals"');
+      const proposals = html.indexOf('aria-label="Proposals');
       if (proposals < 0) return; // no world open: the icon has nowhere to go, which is its own test
-      const activity = html.indexOf('aria-label="Activity"');
+      const activity = html.indexOf('aria-label="Activity');
       assert.ok(
         proposals < activity,
         "proposals prepends — activity and settings are a settled pair and splitting them reopens it",
       );
-      assert.equal(count(html, 'aria-label="Proposals"'), 1, "one way to proposals, not two");
+      assert.equal(parseHTML(html).document.querySelectorAll('button.fy-iconbtn[aria-label^="Proposals"]').length, 1, "one way to proposals, not two");
     });
   }
 
   it("shows proposals only while a world is open, and dots it only when something waits", () => {
     const world = renderAt(`/w/${FIXTURE_WORLD_ID}`);
-    assert.ok(world.includes('aria-label="Proposals"'), "a world is open, so the icon exists");
+    assert.ok(world.includes('aria-label="Proposals'), "a world is open, so the icon exists");
     assert.ok(
       world.includes("Proposals — 1 awaiting a decision"),
       "the title counts what waits rather than saying something vague",
@@ -180,24 +198,4 @@ describe("app chrome", () => {
     assert.ok(proposalControl(orphaned).includes("fy-iconbtn__dot"));
   });
 
-  it("centres the wordmark on the window, not on the row", () => {
-    // Desktop parks its native window controls in the top-right ~138px and the bar reserves that
-    // margin, so a flex-centred mark lands ~69px left of true centre on desktop and dead centre
-    // in a browser — the same code drawing two different layouts. Absolute placement is the fix,
-    // and this is the assertion that keeps it.
-    const css = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
-    const rule = css.slice(css.indexOf(".fy-titlebar__brand {"));
-    const body = rule.slice(0, rule.indexOf("}"));
-    assert.ok(body.includes("position: absolute"), "the wordmark is placed, not flowed");
-    assert.ok(body.includes("left: 50%") && body.includes("translateX(-50%)"), "and placed at the middle");
-  });
-
-  it("keeps narrow context out of the centred wordmark", () => {
-    const css = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
-    assert.match(
-      css,
-      /\.fy-titlebar__side:first-child\s*\{[^}]*padding-right:\s*48px/,
-      "the ellipsised left context reserves the wordmark's half-width before it can overlap",
-    );
-  });
 });

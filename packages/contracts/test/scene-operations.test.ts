@@ -388,3 +388,32 @@ describe("edit-scene carries the title (SPEC-036 R-2, amended)", () => {
     assert.equal(editScene(before, {}).synopsis, "The light changes.");
   });
 });
+
+describe("edit-scene carries the inherited context and the cast (SPEC-044 R-7, R-9, R-19)", () => {
+  it("merges inherits per field: a value sets, null clears, an emptied context is dropped whole", () => {
+    const before: GraphScene = { ...graph(["sh_1"]), inherits: { location: "harbour", timeOfDay: "night" } };
+    const moved = editScene(before, { inherits: { location: "counting-room" } });
+    assert.deepEqual(moved.inherits, { location: "counting-room", timeOfDay: "night" });
+    const cleared = editScene(moved, { inherits: { location: null, timeOfDay: null } });
+    assert.equal("inherits" in cleared, false);
+    assert.equal(editScene(before, {}).inherits?.location, "harbour");
+  });
+
+  it("merges the cast per member: a member replaces its entry whole, null removes it, an emptied cast is dropped", () => {
+    const added = editScene(graph(["sh_1"]), { cast: { odile: { added: "2026-09-09T12:00:00.000Z" } } });
+    assert.deepEqual(added.cast, { odile: { added: "2026-09-09T12:00:00.000Z" } });
+    const voiced = editScene(added, { cast: { odile: { ...added.cast!.odile, voice: { kind: "sample" } } } });
+    assert.deepEqual(voiced.cast?.odile, { added: "2026-09-09T12:00:00.000Z", voice: { kind: "sample" } });
+    const removed = editScene(voiced, { cast: { odile: null } });
+    assert.equal("cast" in removed, false);
+  });
+
+  it("the command schema takes both, and a read is named by its id and full hash", () => {
+    const hash = `sha256:${"a".repeat(64)}`;
+    const command = { kind: "edit-scene", inherits: { location: "counting-room", tone: null },
+      cast: { odile: { voice: { kind: "performance", performanceId: "pf_01HZZZZZZZZZZZZZZZZZZZZZZZ", hash } }, maren: null } };
+    assert.ok(SceneCommandSchema.safeParse(command).success);
+    assert.equal(SceneCommandSchema.safeParse({ kind: "edit-scene", cast: { odile: { voice: { kind: "performance", performanceId: "nope", hash } } } }).success, false);
+    assert.equal(SceneCommandSchema.safeParse({ kind: "edit-scene", inherits: { location: "counting-room", weather: "rain" } }).success, false);
+  });
+});

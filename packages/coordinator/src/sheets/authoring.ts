@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   SHEET_SHAPES,
+  propSlugs,
   sheetDir,
   worldSheets,
   type Proposal,
@@ -40,6 +41,9 @@ async function takenSlugs(store: WorldStore, type: SheetKind): Promise<string[]>
     const entries = await readdir(toExtendedLength(join(store.dir, dir))).catch(() => [] as string[]);
     slugs.push(...entries.filter((f) => f.endsWith(".md")).map((f) => f.slice(0, -3)));
   }
+  // The props' slugs are taken too: a mention cites one thing, and a prop refuses a sheet's word
+  // at its own creation (issue 1116), so a sheet minted after the prop steps past it likewise.
+  slugs.push(...propSlugs(store.getBundle().props));
   void type;
   return slugs;
 }
@@ -105,6 +109,7 @@ export function editSheetContent(input: {
       name: input.name ?? sheet.name,
       ...(role !== undefined ? { role } : {}),
       ...(billing !== undefined ? { billing } : {}),
+      ...(sheet.neverDepicted !== undefined ? { neverDepicted: sheet.neverDepicted } : {}),
       ...(region !== undefined ? { region } : {}),
       // The live version, not 1: the committer stamps the real one either way, and restating what
       // the sheet actually says keeps the staged file readable as the thing it is a version of.
@@ -185,6 +190,7 @@ export async function createSheetFromSentence(
     /** The existing destination surface that will hold the ordinary request's decision. */
     attendedSurface?: "sheet-list" | "production-cast";
   },
+  precondition?: WorldStatePrecondition,
 ): Promise<SentenceDraft> {
   const bundle = store.getBundle();
   const slug = uniqueSlug(input.name, input.sheetType, await takenSlugs(store, input.sheetType));
@@ -228,7 +234,7 @@ export async function createSheetFromSentence(
     // Ownership on the proposal, not only in the staged file: the world's surfaces read pending
     // sheets from the proposal and would otherwise show this guest all through its review.
     ...(input.production !== undefined ? { production: input.production } : {}),
-  });
+  }, precondition);
 
   // The count the agent is told about is the world's own cast. A guest drafting against "nine
   // existing characters" when six of them belong to another production would be told the world

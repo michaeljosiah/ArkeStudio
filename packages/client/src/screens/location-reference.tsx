@@ -1,5 +1,6 @@
+import { resolveModel, worldModel } from "../components/dispatch-bar.js";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
   MAX_ACTIVE_LOCATION_VIEWS,
   designatedCompilation,
@@ -17,10 +18,14 @@ import {
 import { GenerationDialog } from "../components/generation-dialog.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { Portrait } from "../components/portrait.js";
-import { Button, Callout, cx } from "../components/ui.js";
+import { Button, Callout, IconButton, cx } from "../components/ui.js";
+import { Upload } from "../components/icons.js";
+import { Loading } from "../components/loading.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
+import { shortDate } from "../lib/format.js";
 import {
   acceptLocationView,
+  attachCharacterLook,
   clearLocationViewUpload,
   generateLocationView,
   clearStagedReference,
@@ -178,6 +183,15 @@ export function LocationReferenceScreen() {
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier }>({});
   const [count, setCount] = useState(2);
   const addRef = useRef<HTMLButtonElement>(null);
+  // The scene dialog's `Add a plate` door lands here with the scene named (SPEC-044 R-18): each
+  // view then offers one press that makes it that scene's plate, the same attachment the dialog's
+  // own cards make.
+  const [searchParams] = useSearchParams();
+  const preset = (() => {
+    const [scope, productionId, sceneId] = (searchParams.get("attach") ?? "").split(":");
+    const scene = scope === "scene" ? world?.productions.find((production) => production.meta.id === productionId)?.scenes.find((candidate) => candidate.id === sceneId) : undefined;
+    return scene !== undefined && productionId !== undefined && sceneId !== undefined ? { productionId, sceneId, number: scene.number } : null;
+  })();
   // A landed upload says itself — the candidate appears below. What it must not do is linger,
   // or the next press of Upload would find the slot already occupied and go quietly dead.
   useEffect(() => {
@@ -244,9 +258,19 @@ export function LocationReferenceScreen() {
               <div className="fy-locref__viewfoot">
                 <h3>{view.name}</h3>
                 <p className="fy-mono">
-                  accepted {new Date(view.acceptedAt).toLocaleDateString()} · sheet v{view.sheetVersion} · look v
+                  accepted {shortDate(view.acceptedAt)} · sheet v{view.sheetVersion} · look v
                   {view.artDirectionVersion}
                 </p>
+                {/* The establishing view is what the sheet opens on and the dialog's Kit card; a scene pins another angle, never that one (codex round 4). */}
+                {preset !== null && index !== 0 && !(kit?.looks ?? []).some((look) => look.id === view.id && look.attachedTo?.kind === "scene" && look.attachedTo.productionId === preset.productionId && look.attachedTo.sceneId === preset.sceneId) ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => attachCharacterLook(worldId, sheetId, view.id, { kind: "scene", productionId: preset.productionId, sceneId: preset.sceneId })}
+                  >
+                    Use in scene {preset.number}
+                  </Button>
+                ) : null}
                 {index === 0 && (
                   // Panel 1 is the anchor every other angle was generated against, so replacing it
                   // is the one generation that is deliberately *not* anchored to anything.
@@ -317,12 +341,10 @@ export function LocationReferenceScreen() {
                     </label>
                     {clash && !active?.confirmReplace && (
                       <Callout tone="warning" title={`Replace “${name.trim()}”?`}>
-                        <p>
-                          This location already has an active view by that name. Accepting replaces it: the old one
-                          becomes superseded, keeps its place in history, and leaves the panel order unchanged.
-                        </p>
+                        <p>This location already has an active view by that name.</p>
                         <Button
                           variant="secondary"
+                          hint="The old view becomes superseded and keeps its place in history."
                           onClick={() =>
                             setNaming({
                               key: candidate.key,
@@ -411,14 +433,14 @@ export function LocationReferenceScreen() {
             <Button ref={addRef} disabled={full} onClick={() => setAdding(true)}>
               {establishing ? "Generate" : "Add a view"}
             </Button>
-            <Button
-              variant="ghost"
+            {/* The glyph, for the same reason the character kit's is one (issue 1010, U1). */}
+            <IconButton
+              label={uploading ? "Uploading…" : canUpload ? "Upload" : UPLOAD_UNAVAILABLE}
               disabled={!canUpload || uploading || full}
-              title={canUpload ? "Use an image from this computer — nothing is generated" : UPLOAD_UNAVAILABLE}
               onClick={() => importLocationViewCandidate(worldId, sheetId)}
             >
-              {uploading ? "Uploading…" : "Upload"}
-            </Button>
+              {uploading ? <Loading inline size={13} /> : <Upload />}
+            </IconButton>
             {!establishing && <span className="fy-locref__note">anchored to the establishing view</span>}
           </div>
           <GenerationDialog
@@ -431,8 +453,8 @@ export function LocationReferenceScreen() {
             title={establishing || replacingEstablishing ? "Generate the establishing view" : "Add a view"}
             lede={
               establishing || replacingEstablishing
-                ? `${sheet.name} · the view every later angle is generated against`
-                : `${sheet.name} · anchored to the establishing view, so it stays the same room`
+                ? `${sheet.name} · establishing view`
+                : `${sheet.name} · anchored to the establishing view`
             }
             promptLabel="Where is the camera?"
             prompt={angle}
@@ -444,8 +466,10 @@ export function LocationReferenceScreen() {
             promptHint="Optional. The place, its look and the angle's name are sent whether or not you write here."
             worldSlug={world.meta.slug}
             reference={world.stagedReferences[stagedReferenceKey("location-view", sheetId)] ?? null}
+            referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("location-view", sheetId), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("location-view", sheetId)] ?? ""]?.worldName }}
             referenceHint="Optional. A photograph or a plate of the place to work from. The establishing view goes first, so this rides only where the model has room for a second image."
             onAttachReference={() => pickStagedReference(worldId, stagedReferenceKey("location-view", sheetId))}
+            worldReferences={{ world, model: resolveModel(state, "image", choice.modelId, worldModel(state, "image")).model, onChoose: (file) => pickStagedReference(worldId, stagedReferenceKey("location-view", sheetId), file) }}
             onClearReference={() => clearStagedReference(worldId, stagedReferenceKey("location-view", sheetId))}
             extra={
               <label className="fy-locref__namefield">
@@ -516,7 +540,7 @@ export function LocationReferenceScreen() {
                   downloadName={`${sheet.name} location sheet`}
                 />
               </div>
-              <p className="fy-mono">{sheetFile} · rebuilt on every acceptance</p>
+              <p className="fy-mono">{sheetFile}</p>
               {/* The same function dispatch composes the preamble from, so what this promises and
                   what a request states cannot drift into disagreeing. */}
               <div className="fy-locref__carries">
@@ -524,12 +548,7 @@ export function LocationReferenceScreen() {
                 <p>{panelMapPhrase(views.map((view) => view.name))}</p>
               </div>
             </>
-          ) : (
-            <p className="fy-locref__note">
-              Accept a second view — a reverse angle, a day pass — and Arke assembles them into one location sheet.
-              That sheet is what a shot carries, so the model sees the room from more than one side.
-            </p>
-          )}
+          ) : null}
         </section>
       </main>
     </div>

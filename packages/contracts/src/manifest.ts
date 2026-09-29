@@ -1,5 +1,6 @@
 import { ModelDialogueGuidanceSchema } from "./provider-guidance.js";
 import { CadenceCapabilitiesSchema } from "./cadence.js";
+import { quoteSpeech, SpeechTokenPricingSchema } from "./speech-pricing.js";
 import { z } from "zod";
 import { IsoDateSchema } from "./ids.js";
 import { formatMicroUsd } from "./money.js";
@@ -35,12 +36,26 @@ export const PricingSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("perMegapixel"), microUsdPerMegapixel: z.number().int().min(0) }).strict(),
-  z.object({ kind: z.literal("perCharacter"), microUsdPerCharacter: z.number().int().min(0) }).strict(),
+  z
+    .object({
+      kind: z.literal("perCharacter"),
+      microUsdPerCharacter: z.number().int().min(0),
+      /**
+       * What the vendor counts as one character (SPEC-046 R-8). Absent means a character is a
+       * character. `cjk-double`: a Chinese, Japanese or Korean character bills as two (Breeze).
+       * `utf8-byte`: the bill is per UTF-8 byte, so an accented letter is two and a CJK character
+       * three (Fish Audio). `billableCharacters` turns text into the count the rate multiplies.
+       */
+      unit: z.enum(["character", "cjk-double", "utf8-byte"]).optional(),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("perToken"),
       microUsdPerMillionInput: z.number().int().min(0),
       microUsdPerMillionOutput: z.number().int().min(0),
+      /** Speech has dated rates and separate text/audio limits (SPEC-049 R-5). */
+      speech: SpeechTokenPricingSchema.optional(),
     })
     .strict(),
   /**
@@ -89,6 +104,9 @@ export const ModelAcceptsSchema = z
     referenceImages: z.number().int().min(0),
     /** True only when the provider has separate style and identity image inputs. */
     referenceRoles: z.boolean().optional(),
+    /** Transport-independent reference support; cloud field names remain wire mappings. */
+    referenceVideos: z.number().int().min(0).optional(),
+    referenceAudio: z.number().int().min(0).optional(),
     startFrame: z.boolean(),
     endFrame: z.boolean(),
   })
@@ -153,6 +171,14 @@ export const ModelLimitsSchema = z
      * put the clip would accept a file and never send it, the failure the budget exists to stop.
      */
     referenceVideoField: z.string().min(1).optional(),
+    referenceAudioField: z.string().min(1).optional(),
+    minReferenceVideoSec: z.number().positive().optional(),
+    maxReferenceVideoBytes: z.number().int().positive().optional(),
+    maxReferenceVideoFileBytes: z.number().int().positive().optional(),
+    referenceVideoPixels: z.object({ min: z.number().positive(), max: z.number().positive() }).optional(),
+    referenceVideoSides: z.object({ min: z.number().positive(), max: z.number().positive() }).optional(),
+    referenceVideoAspect: z.object({ min: z.number().positive(), max: z.number().positive() }).optional(),
+    referenceVideoFps: z.object({ min: z.number().positive(), max: z.number().positive() }).optional(),
     resolutions: z.array(z.string()).optional(),
     /**
      * Normalised tier → the provider's own word for it. The tier is what a user chooses; the
@@ -180,6 +206,18 @@ export const ModelLimitsSchema = z
     maxReferenceVideoSec: z.number().min(0).optional(),
     /** Aggregate seconds of audio reference this model accepts across all clips (R-40, R-41). */
     maxReferenceAudioSec: z.number().min(0).optional(),
+    minReferenceAudioFileSec: z.number().positive().optional(),
+    minReferenceVideoFileSec: z.number().positive().optional(),
+    maxReferenceVideoFileSec: z.number().positive().optional(),
+    maxReferenceAudioFileSec: z.number().positive().optional(),
+    maxCombinedReferences: z.number().int().positive().optional(),
+    /**
+     * Native prompt vocabulary, rendered before review as well as before submission.
+     * `minimax-h3` is H3's own tag grammar. `picture-labels` is the Qwen-Image-Edit convention
+     * the Krea 2 rebalance node reuses: each picture is handed to the encoder behind a
+     * `Picture N:` label ahead of the prompt, so the prose has to call it that (issue 1083).
+     */
+    referenceSyntax: z.enum(["minimax-h3", "picture-labels", "seedance", "qwen-image21"]).optional(),
     /**
      * The longest output the *reference* route will make, where it is shorter than the text
      * route's (probed 2026-08-16).
@@ -203,6 +241,8 @@ export const ModelLimitsSchema = z
      * silently cut at the end loses the shot list rather than the adjectives.
      */
     maxPromptChars: z.number().int().min(1).optional(),
+    /** Conservative request packing budget for spoken text plus separate style, not a token count. */
+    maxSpeechUtf8Bytes: z.number().int().min(1).optional(),
     /** Delivery directions this concrete speech model has a measured wire mapping for. */
     deliveries: z.array(z.enum(["measured", "whispered", "breaking", "cold", "warm", "urgent"])).optional(),
     /** Generated speech container, consumed consistently by cache, verification, media, and events. */
@@ -472,6 +512,8 @@ export interface EstimateInput {
  * fractional intermediate (megapixels, token millionths) rounds once, up, at its own edge —
  * an estimate that errs low teaches the user not to trust it.
  */
+export { billableCharacters } from "./speech-units.js";
+
 export function estimateMicroUsd(model: ManifestModel, input: EstimateInput): number {
   const p = model.pricing;
   // Fractional quantities (seconds, megapixels) become integer milli-units before they meet a
@@ -491,6 +533,7 @@ export function estimateMicroUsd(model: ManifestModel, input: EstimateInput): nu
     case "perCharacter":
       return (input.characters ?? 0) * p.microUsdPerCharacter;
     case "perToken": {
+      if (p.speech !== undefined) throw new Error("Use quoteSpeech for token-priced speech");
       const inCost = Math.ceil(((input.tokensIn ?? 0) * p.microUsdPerMillionInput) / 1_000_000);
       const outCost = Math.ceil(((input.tokensOut ?? 0) * p.microUsdPerMillionOutput) / 1_000_000);
       return inCost + outCost;
@@ -631,20 +674,9 @@ function curatedAspects(model: ManifestModel): readonly string[] {
  * The shapes to offer for this model, in the order to offer them — and an empty list where it has
  * no opinion, which is the signal to draw no control rather than a control over a guess.
  *
- * `limits.aspects` is a *curated offer list*, not a statement of what the route will accept: the
- * fal catalogue's own comment says so, and nano-banana's entry deliberately leaves out ratios the
- * route does have. So a derived default outside that list is not an invalid request — flux takes
- * a 3:2 `image_size` perfectly well — it is simply a shape we had not thought to offer.
- *
- * Which is why the default is folded in rather than corrected away. Given an orientation, the
- * shape that orientation would otherwise have produced comes **first**, so opening a dialog and
- * changing nothing generates exactly what the surface generated before it had a picker. Without
- * one, the curated list stands alone — there is no orientation to have a default for.
- *
- * Snapping the ladder into the curated list instead would have been worse than the inconsistency:
- * flux's nearest offered shape to a 4:5 portrait is 1:1, so every character main photo would have
- * become a square, and an identity anchor cropped to a square is a worse photograph than an
- * unlisted ratio is a bookkeeping error.
+ * Prefer the orientation's default only when the model offers it. Recipe bucket lists are
+ * exhaustive: adding a generic ratio made Krea 2 promise 3:2 while producing 4:3 (#975).
+ * Validation still accepts the output builder's derived shapes through aspectOffered.
  */
 export function offeredAspects(
   model: ManifestModel,
@@ -653,7 +685,9 @@ export function offeredAspects(
   const curated = curatedAspects(model);
   if (curated.length === 0 || options.landscape === undefined) return curated;
   const fallback = derivedAspect(model, options.landscape);
-  return [fallback, ...curated.filter((aspect) => aspect !== fallback)];
+  return curated.includes(fallback)
+    ? [fallback, ...curated.filter((aspect) => aspect !== fallback)]
+    : curated;
 }
 
 /**
@@ -950,6 +984,8 @@ export function modelCapabilityCopy(model: ManifestModel): string {
   const parts: string[] = [];
   if (model.accepts.referenceImages > 0) parts.push(`refs ×${model.accepts.referenceImages}`);
   else parts.push("no refs");
+  if ((model.accepts.referenceVideos ?? 0) > 0) parts.push(`video refs ×${model.accepts.referenceVideos}`);
+  if ((model.accepts.referenceAudio ?? 0) > 0) parts.push(`audio refs ×${model.accepts.referenceAudio}`);
   // Frames read from the same authority the dispatch uses (issue 154): a task-mode route that
   // takes them, or the legacy accepts flags where a row still claims them without one. The old
   // flags-only read printed nothing for every fal video row that genuinely dispatches a first
@@ -1071,9 +1107,22 @@ export function modelPriceCopy(model: ManifestModel): string {
       return formatMicroUsd(pricing.microUsdPerImage);
     case "perMegapixel":
       return `${formatMicroUsd(pricing.microUsdPerMegapixel)} / megapixel`;
-    case "perCharacter":
-      return `${formatMicroUsd(pricing.microUsdPerCharacter)} / character`;
+    case "perCharacter": {
+      // Per million, as every vendor quotes it — a per-character rate is sub-cent and rendered
+      // "$0.00" — and in the unit the vendor bills, so the catalogue does not contradict the
+      // estimate (SPEC-046 R-8; codex on PR 1156).
+      const perMillion = formatMicroUsd(pricing.microUsdPerCharacter * 1_000_000);
+      return pricing.unit === "utf8-byte"
+        ? `${perMillion} / M bytes`
+        : pricing.unit === "cjk-double"
+          ? `${perMillion} / M characters, CJK ×2`
+          : `${perMillion} / M characters`;
+    }
     case "perToken":
+      if (pricing.speech !== undefined) {
+        const quote = quoteSpeech(model, "");
+        return `${formatMicroUsd(quote.tokenRates!.input)} / M text tokens · ${formatMicroUsd(quote.tokenRates!.output)} / M audio tokens${quote.validUntil ? ` · before ${quote.validUntil.slice(0, 10)}` : ""}`;
+      }
       return `${formatMicroUsd(pricing.microUsdPerMillionInput)} / ${formatMicroUsd(
         pricing.microUsdPerMillionOutput,
       )} per M tokens`;

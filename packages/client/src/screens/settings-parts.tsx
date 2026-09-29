@@ -213,10 +213,13 @@ const MARK_SRC: Partial<Record<string, string>> = {
  * black glyph on nothing and would disappear against a dark pane. A source with no bundled mark
  * keeps a monogram in the same slot, so nothing in the layout depends on having one.
  */
-export function ProviderMark({ id, label, size = "sm" }: { id: string; label: string; size?: "sm" | "lg" }) {
+export function ProviderMark({ id, label, size = "sm" }: { id: string; label: string; size?: "xs" | "sm" | "lg" }) {
   const src = MARK_SRC[id];
   return (
-    <span className={cx("fy-mark", size === "lg" && "fy-mark--lg", src === undefined && "fy-mark--letter")} aria-hidden="true">
+    <span
+      className={cx("fy-mark", size === "lg" && "fy-mark--lg", size === "xs" && "fy-mark--xs", src === undefined && "fy-mark--letter")}
+      aria-hidden="true"
+    >
       {src !== undefined ? <img src={src} alt="" /> : label.slice(0, 1).toUpperCase()}
     </span>
   );
@@ -232,6 +235,8 @@ export function ActionButton({
   children,
   danger,
   disabled,
+  hint,
+  testId,
   onClick,
 }: {
   icon: ReactNode;
@@ -239,10 +244,25 @@ export function ActionButton({
   /** Destructive: quiet at rest, the signal colour only under the pointer. */
   danger?: boolean;
   disabled?: boolean;
+  /**
+   * What the press leaves behind, when a person must know it before pressing — `Reset` names
+   * the voice it returns to. On the control, never under it (design turn 137), and drawn by
+   * `.fy-tip` so it reaches keyboard focus as well as the pointer; the bubble hangs from the
+   * button's end because these sit at a row's right edge.
+   */
+  hint?: string;
+  testId?: string;
   onClick: () => void;
 }) {
   return (
-    <button type="button" className={cx("fy-act", danger && "fy-act--danger")} disabled={disabled} onClick={onClick}>
+    <button
+      type="button"
+      className={cx("fy-act", danger && "fy-act--danger", hint !== undefined && "fy-tip fy-tip--end")}
+      disabled={disabled}
+      onClick={onClick}
+      {...(hint === undefined ? {} : { "data-tip": hint, title: hint })}
+      {...(testId === undefined ? {} : { "data-testid": testId })}
+    >
       {icon}
       <span>{children}</span>
     </button>
@@ -255,11 +275,12 @@ export function ActionButton({
  * larger size and never capitals — the first fights the pane title, the second is the eyebrow
  * turn 69 spent a sweep removing.
  */
-export function HalfHeading({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+export function HalfHeading({ icon, children, aside }: { icon: ReactNode; children: ReactNode; aside?: ReactNode }) {
   return (
     <div className="fy-half">
       {icon}
       <span>{children}</span>
+      {aside !== undefined && <span className="fy-half__aside">{aside}</span>}
     </div>
   );
 }

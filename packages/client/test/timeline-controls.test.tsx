@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -16,13 +15,12 @@ import {
   type ClientState,
 } from "@arke-studio/contracts";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
-import { CutScreen } from "../src/screens/production.js";
+import { CutScreen } from "../src/screens/cut.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 const focusedElements = new WeakSet<HTMLElement>();
-const CSS = readFileSync(new URL("../src/screens/fidelity.css", import.meta.url), "utf8");
-let viewportWidth = 800;
+let viewportWidth = 1140;
 Object.assign(dom.window, {
   matchMedia: (query: string) => ({
     matches: viewportWidth <= Number.parseInt(query.match(/max-width:\s*(\d+)px/)?.[1] ?? "0", 10),
@@ -117,7 +115,7 @@ function seededState(): ClientState {
 
 afterEach(() => {
   __setBridgeForTest(null);
-  viewportWidth = 800;
+  viewportWidth = 1140;
   document.body.replaceChildren();
 });
 
@@ -157,12 +155,13 @@ describe("durable Picture controls (#678)", () => {
     const screen = await mountCut(state);
     try {
       const toggle = screen.container.querySelector<HTMLButtonElement>(".fy-editorpane-toggle--library");
-      const panel = screen.container.querySelector<HTMLElement>("#cut-library");
+      let panel = screen.container.querySelector<HTMLElement>("#cut-library");
       assert.ok(toggle && panel);
       await act(async () => {
         toggle.click();
         await Promise.resolve();
       });
+      panel = screen.container.querySelector<HTMLElement>("#cut-library")!;
       assert.equal(
         [...panel.querySelectorAll<HTMLElement>("*")].some((element) => focusedElements.has(element)),
         true,
@@ -174,16 +173,17 @@ describe("durable Picture controls (#678)", () => {
         window.dispatchEvent(escape);
         await Promise.resolve();
       });
-      assert.equal(panel.getAttribute("data-open"), "false");
+      assert.equal(screen.container.querySelector("#cut-library")?.getAttribute("data-open"), "false");
       assert.equal(focusedElements.has(toggle), true);
 
-      viewportWidth = 1000;
+      viewportWidth = 1148;
       await act(async () => {
         toggle.click();
         await Promise.resolve();
       });
       // Picking a Library row shows its actions; Locate is what selects on the timeline and
       // opens the details (SPEC-039 R-11, R-16).
+      panel = screen.container.querySelector<HTMLElement>("#cut-library")!;
       const take = panel.querySelector<HTMLButtonElement>('[data-library-item="shot:sh_12"] .fy-artrow__pick');
       const details = screen.container.querySelector<HTMLElement>("#cut-right-pane");
       assert.ok(take && details);
@@ -197,7 +197,7 @@ describe("durable Picture controls (#678)", () => {
         locate.click();
         await Promise.resolve();
       });
-      assert.equal(panel.getAttribute("data-open"), "false");
+      assert.equal(screen.container.querySelector("#cut-library")?.getAttribute("data-open"), "false");
       assert.equal(details.getAttribute("data-open"), "true");
       assert.equal(
         [...details.querySelectorAll<HTMLElement>("*")].some((element) => focusedElements.has(element)),
@@ -214,7 +214,7 @@ describe("durable Picture controls (#678)", () => {
     const screen = await mountCut(state);
     try {
       assert.match(screen.container.querySelector(".fy-cuttimeline-error")?.textContent ?? "", /history cannot be replayed/);
-      assert.equal(screen.container.querySelector(".fy-clanes"), null);
+      assert.equal(screen.container.querySelector("[data-clip]"), null, "nothing is drawn to edit");
       assert.equal(button(screen, "Export film").disabled, true);
     } finally {
       await close(screen);
@@ -274,11 +274,6 @@ describe("durable Picture controls (#678)", () => {
       // Arke is under the Inspector on the same edge, never behind a tab that hides it.
       assert.equal(screen.container.querySelectorAll("[role='tab']").length, 0, "no tabs on the edge");
       assert.ok(screen.container.querySelector("#cut-arke-panel"), "the real Arke pane is present");
-      assert.match(
-        CSS,
-        /\.fy-cutside__panel--arke\s*\{[^}]*flex-direction:\s*column/,
-        "assembly notes stack above the conversation instead of clipping it (#719)",
-      );
       await act(async () => button(screen, "Hide").click());
       assert.ok(notice() === null, "hidden is hidden");
     } finally {

@@ -37,7 +37,7 @@ export function entryContent(input: {
 export async function stageCanonEntry(
   store: WorldStore,
   gate: ProposalManager,
-  input: { entryType: string; title: string; statement: string },
+  input: { entryType: string; title: string; statement: string; status?: "settled" | "open" },
 ): Promise<Proposal> {
   const [reserved] = await store.allocateCanonIds(1, "form");
   return gate.stage({
@@ -52,7 +52,7 @@ export async function stageCanonEntry(
           id: reserved!,
           type: input.entryType,
           title: input.title,
-          status: "settled",
+          status: input.status ?? "settled",
           statement: input.statement,
         }),
       },

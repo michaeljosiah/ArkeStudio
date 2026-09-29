@@ -1,4 +1,7 @@
 import { CharacterAudioPlanSchema } from "./audio-reference.js";
+import { AdapterSelectionsSchema } from "./adapters.js";
+import { RecipeIdentitySchema } from "./comfyui.js";
+import { valueSchema } from "./value-schema.js";
 import { z } from "zod";
 import {
   ArtifactIdSchema,
@@ -80,6 +83,7 @@ export type BenchImageParams = z.infer<typeof BenchImageParamsSchema>;
 export const BenchVideoParamsSchema = z
   .object({
     kind: z.literal("video"),
+    adapters: AdapterSelectionsSchema.optional(),
     aspect: z.string().min(1).optional(),
     /** Video keeps its own words — "720p", never a normalised tier (manifest.ts). */
     resolution: z.string().min(1).optional(),
@@ -399,6 +403,7 @@ export const BenchRequestSnapshotSchema = z
      * catalogue holds now".
      */
     recipeVersion: z.number().int().min(1).optional(),
+    recipe: RecipeIdentitySchema.optional(),
     params: BenchParamsSchema,
     /**
      * The keyframes that rode, in order, with their content hashes — the same self-contained
@@ -793,12 +798,12 @@ export const BenchSessionSummarySchema = z
 export type BenchSessionSummary = z.infer<typeof BenchSessionSummarySchema>;
 
 /** The loaded workspace on ClientState — one session at a time, like World Chat's. */
-export const BenchWorkspaceSchema = z
+export const BenchWorkspaceSchema = valueSchema(z
   .object({
     worldId: z.string().min(1),
     session: BenchSessionSchema,
   })
-  .strict();
+  .strict());
 export type BenchWorkspace = z.infer<typeof BenchWorkspaceSchema>;
 
 // ---------------------------------------------------------------------------

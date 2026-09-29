@@ -1,7 +1,12 @@
 import { copyFile, mkdir, open, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { conversationActionDigest } from "../arke-actions/digest.js";
 import {
   ART_DIRECTION_PATH,
+  FOUNDING_IMPORTS_SCHEMA_VERSION,
+  CONVERSATIONAL_PROPS_SCHEMA_VERSION,
+  FOUNDING_IMAGES_SCHEMA_VERSION,
+  FOUNDING_CONTENT_SCHEMA_VERSION,
   BuildJournalEntrySchema,
   BuildReviewSchema,
   buildItemDispatches,
@@ -13,9 +18,12 @@ import {
   keyArtBriefSettled,
   locationBriefProse,
   newId,
+  genesisSheetIds,
+  sheetDir,
   ulid,
   type AppSettings,
   type BuildItem,
+  type Capability,
   type BuildJournalEntry,
   type BuildJobFacts,
   type BuildReview,
@@ -31,13 +39,23 @@ import {
   type Sheet,
 } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 import { acceptDecided, type ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "./store.js";
 import { atomicWriteFile } from "./atomic.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { foldBlueprint } from "../harness/blueprint.js";
-import { openThread } from "../canon/authoring.js";
-import { createSheetFromSentence } from "../sheets/authoring.js";
+import { carryGenesisConversation, genesisConversation, frozenFoundingInput, genesisControlDir, reserveGenesisWorld } from "../harness/genesis-conversation.js";
+import { fileArtifact } from "../artifacts/filing.js";
+import { reviewGenesisContent } from "../harness/genesis-review.js";
+import { carryGenesisImageArtifacts, installGenesisImage } from "../harness/genesis-image-carry.js";
+import { carryGenesisSources, carryGenesisCanonSources } from "../harness/genesis-imports.js";
+import { installGenesisProp } from "../harness/genesis-props.js";
+import { installGenesisVoice } from "../harness/genesis-voices.js";
+import { FOUNDING_VOICES_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { openThread, entryContent } from "../canon/authoring.js";
+import { MarkdownFile, sha256 } from "./text-files.js";
+import { buildSheetContent, createSheetFromSentence } from "../sheets/authoring.js";
 import {
   characterSheetRequest,
   imageModelFor,
@@ -78,15 +96,20 @@ export interface FoundingBuildPorts {
   credentialFor(provider: string): Promise<string | null>;
   harnessReady(): boolean;
   genesisDir(genesisId: string): Promise<string>;
+  reviewedBlueprint?(genesisId: string): Promise<GenesisBlueprint>;
+  voiceAvailable?(voice: { provider: string; model: string; voiceId: string }): Promise<boolean>;
+  reviewNotes?(genesisId: string): Promise<string[]>;
   discardGenesis(genesisId: string): Promise<void>;
   releaseGenesis(genesisId: string): void;
   createWorld(input: {
+    creationId?: string;
     name: string;
     logline?: string;
     tone?: string;
     genre?: string;
     artDirection?: string;
     bible?: string;
+    models?: Partial<Record<Capability, string>>;
   }): Promise<{ worldId: string }>;
   openWorld(worldId: string): Promise<void>;
   openStore(): WorldStore | null;
@@ -111,6 +134,7 @@ export interface FoundingBuildPorts {
   cancelJob(jobId: string): Promise<void>;
   queueStatuses(): QueueStatus[];
   refreshWorldSnapshot(worldId: string): Promise<void>;
+  refreshConversations?(worldId: string): Promise<void>;
   refreshWorldList(): Promise<void>;
   emit(event: DomainEvent): void;
   log(record: Record<string, unknown>): void;
@@ -160,11 +184,14 @@ class BuildJournal {
 }
 
 interface ActiveBuild {
+  stopGeneration?: number;
   record: FoundingBuildRecord;
   journal: BuildJournal;
   entries: BuildJournalEntry[];
   stopped: boolean;
   driving: boolean;
+  /** The driver's run, while `driving`: what a press after Stop waits out. */
+  driven?: Promise<void>;
 }
 
 interface ImageRoute {
@@ -196,19 +223,33 @@ export class FoundingBuildService {
 
   constructor(private readonly ports: FoundingBuildPorts) {}
 
+  isBeginning(genesisId: string): boolean { return this.beginning.has(genesisId); }
+
   // -------------------------------------------------------------------------
   // Preconditions and the review (R-10..R-12)
   // -------------------------------------------------------------------------
 
+  /**
+   * The models a world's build reads (design turn 153): the world's own once it exists. Read
+   * through the open store only when it is this world's — another world's choices are not this
+   * one's, and a closed world falls back to Settings exactly as it did before it had any.
+   */
+  private worldModels(worldId: string): Partial<Record<Capability, string>> | undefined {
+    const store = this.ports.openStore();
+    return store && store.worldId === worldId ? store.getBundle().meta.models : undefined;
+  }
+
   /** The frozen image route, or null with the reasons a text-only build is offered (R-11). */
-  private async resolveImageRoute(): Promise<{ route: ImageRoute | null; notes: string[] }> {
+  private async resolveImageRoute(
+    models: Partial<Record<Capability, string>> | undefined,
+  ): Promise<{ route: ImageRoute | null; notes: string[] }> {
     const notes: string[] = [];
     const manifest = this.ports.manifest;
     if (!manifest) {
       notes.push("No model manifest is loaded — every file and sheet will be written, and no images will be made.");
       return { route: null, notes };
     }
-    const model = imageModelFor(await this.ports.loadSettings(), manifest);
+    const model = imageModelFor(await this.ports.loadSettings(), manifest, undefined, models);
     if (!model) {
       notes.push(
         "No image model resolves — every file and sheet will be written, and no images will be made. The images stay runnable in one press once a provider is set up.",
@@ -268,7 +309,13 @@ export class FoundingBuildService {
       : "No look preview was made — this world will be founded without a master look.";
   }
 
-  async plan(genesisId: string, requestId: string, look?: string): Promise<void> {
+  async plan(
+    genesisId: string,
+    requestId: string,
+    look?: string,
+    models?: Partial<Record<Capability, string>>,
+    generateImages = true,
+  ): Promise<void> {
     const refuse = (reason: string) =>
       this.ports.emit({
         at: this.ports.nowIso(),
@@ -279,18 +326,28 @@ export class FoundingBuildService {
         reason,
       });
     let blueprint: GenesisBlueprint;
+    let frozen: Awaited<ReturnType<typeof frozenFoundingInput>>;
     try {
-      blueprint = await foldBlueprint(await this.ports.genesisDir(genesisId));
-    } catch {
-      refuse("the conversation's plan could not be read");
+      const sandbox = await this.ports.genesisDir(genesisId);
+      frozen = await frozenFoundingInput(sandbox);
+      blueprint = frozen?.blueprint ?? (this.ports.reviewedBlueprint ? await this.ports.reviewedBlueprint(genesisId) : await foldBlueprint(sandbox));
+      if (frozen) { models = frozen.models; look = frozen.blueprint.look; generateImages = frozen.generateImages ?? true; }
+    } catch (err) {
+      refuse(describeCoordinatorError(err));
       return;
     }
     if (blueprint.name === undefined) {
       refuse("the world has no name yet — settle one in the conversation first");
       return;
     }
-    const { route, notes } = await this.resolveImageRoute();
-    if (!this.ports.harnessReady()) {
+    if (blueprint.dropped.length) { refuse("Repair the unreadable draft files before beginning."); return; }
+    const resolved = frozen?.authorization ? { route: frozen.authorization.route, notes: [] as string[] } : generateImages ? await this.resolveImageRoute(models) : { route: null, notes: [] };
+    const route = generateImages ? resolved.route : null, notes = generateImages ? resolved.notes : ["No new image generation is authorized. Approved media will be reused."];
+    if (this.ports.reviewNotes) notes.push(...await this.ports.reviewNotes(genesisId));
+    for (const character of blueprint.characters) {
+      if (character.neverDepicted === true) notes.push(`${character.name} — never depicted`);
+    }
+    if (!blueprint.reviewed && !this.ports.harnessReady()) {
       notes.push("OpenCode is not running — sheets will hold their one-line summaries until authored later.");
     }
     const masterLook = await this.masterLookNote(genesisId, effectiveLook(blueprint, look));
@@ -304,10 +361,17 @@ export class FoundingBuildService {
         `${blueprint.dropped.length} blueprint file${blueprint.dropped.length === 1 ? "" : "s"} could not be read and will not build: ${blueprint.dropped.join(", ")}`,
       );
     }
-    const items = compileBuildItems(blueprint, route === null ? null : { model: route.model, referenceImages: route.referenceImages });
+    const items = frozen?.authorization?.items ?? compileBuildItems(blueprint, route === null ? null : { model: route.model, referenceImages: route.referenceImages }, undefined,
+      generateImages ? undefined : "New image generation was declined. Authorize it later in Activity if wanted.");
+    if (keyArtBriefSettled(blueprint.keyArt) && !items.some((item) => item.kind === "key-art")) {
+      notes.push("Key art names a character who is never depicted — key art will not be made.");
+    }
     const generations = items.filter((item) => item.authorized && item.idempotencyKey !== undefined).length;
     const estimateMicroUsd = items.filter((item) => item.authorized).reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
     const plan: BuildReview = BuildReviewSchema.parse({
+      approvalDigest: await this.approvalDigest(genesisId, blueprint, look, models, route, items),
+      approvedContent: { ...blueprint, look: effectiveLook(blueprint, look) },
+      work: items.map(({ key, name, kind, authorized, estimatedMicroUsd }) => ({ key, name, kind, authorized, estimatedMicroUsd })),
       genesisId,
       requestId,
       worldName: blueprint.name,
@@ -315,7 +379,9 @@ export class FoundingBuildService {
         characters: blueprint.characters.length,
         locations: blueprint.locations.length,
         factions: blueprint.factions.length,
-        threads: blueprint.threads.length,
+        canon: (blueprint.canon ?? []).filter(entry => entry.type !== "thread").length,
+        props: blueprint.props?.length ?? 0,
+        threads: blueprint.threads.length + (blueprint.canon ?? []).filter(entry => entry.type === "thread").length,
       },
       generations,
       estimateMicroUsd,
@@ -330,21 +396,48 @@ export class FoundingBuildService {
   // The press (R-13, R-16, R-17)
   // -------------------------------------------------------------------------
 
-  async begin(genesisId: string, requestId: string, look?: string): Promise<void> {
+  private async approvalDigest(genesisId: string, blueprint: GenesisBlueprint, look: string | undefined,
+    models: Partial<Record<Capability, string>> | undefined, route: ImageRoute | null, items: BuildItem[], preview?: { jobId: string; hash: string } | null): Promise<string> {
+    const founded = effectiveLook(blueprint, look);
+    const normalized = { ...blueprint, ...(founded !== undefined ? { look: founded } : {}) };
+    if (founded === undefined) delete normalized.look;
+    const review = blueprint.reviewed ? await reviewGenesisContent(await this.ports.genesisDir(genesisId)) : null;
+    return conversationActionDigest({ proposals: review?.cards.map(card => ({ key: card.key, digest: card.digest, status: card.status })) ?? null,
+      blueprint: normalized, models: models ?? null, route,
+      items: items.map(({ idempotencyKey: _key, ...item }) => item),
+      look: await this.masterLookNote(genesisId, founded),
+      preview: preview === undefined ? await this.previewIdentity(genesisId, founded) : preview });
+  }
+
+  async begin(
+    genesisId: string,
+    requestId: string,
+    look?: string,
+    models?: Partial<Record<Capability, string>>,
+    approvalDigest?: string,
+    generateImages = true,
+  ): Promise<void> {
     // Two presses in one tick are one run (row 8): the second joins the first's promise.
     const inFlight = this.beginning.get(genesisId);
     if (inFlight) return inFlight;
-    const work = this.beginWork(genesisId, requestId, look).finally(() => this.beginning.delete(genesisId));
+    const work = this.beginWork(genesisId, requestId, look, models, approvalDigest, generateImages).finally(() => this.beginning.delete(genesisId));
     this.beginning.set(genesisId, work);
     return work;
   }
 
-  private async beginWork(genesisId: string, requestId: string, look?: string): Promise<void> {
+  private async beginWork(
+    genesisId: string,
+    requestId: string,
+    look?: string,
+    models?: Partial<Record<Capability, string>>,
+    approvalDigest?: string,
+    generateImages = true,
+  ): Promise<void> {
     const sandbox = await this.ports.genesisDir(genesisId);
-    const markerPath = join(sandbox, BEGUN_MARKER);
+    const markerPath = join(genesisControlDir(sandbox), BEGUN_MARKER);
     const marker = await readFile(toExtendedLength(markerPath), "utf8")
       .then((raw) => JSON.parse(raw) as { worldId?: string })
-      .catch(() => null);
+      .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return null; throw err; });
     if (marker?.worldId !== undefined) {
       // A second press, a replayed frame or a resumed session joins the existing run (R-16).
       // A world builds once (R-37): there is no path here that builds it again. A marker
@@ -361,8 +454,11 @@ export class FoundingBuildService {
       }
     }
 
-    const folded = await foldBlueprint(sandbox);
-    const founded = effectiveLook(folded, look);
+    const frozen = await frozenFoundingInput(sandbox);
+    const folded = frozen?.blueprint ?? (this.ports.reviewedBlueprint ? await this.ports.reviewedBlueprint(genesisId) : await foldBlueprint(sandbox));
+    if (folded.dropped.length) throw new Error("Repair the unreadable draft files before beginning.");
+    if (frozen) { models = frozen.models; generateImages = frozen.generateImages ?? true; }
+    const founded = frozen ? folded.look : effectiveLook(folded, look);
     const blueprint: GenesisBlueprint = {
       ...folded,
       ...(founded !== undefined ? { look: founded } : {}),
@@ -379,27 +475,52 @@ export class FoundingBuildService {
       });
       return;
     }
-    const { route } = await this.resolveImageRoute();
-    const items = compileBuildItems(
+    const route = frozen?.authorization ? frozen.authorization.route : generateImages ? (await this.resolveImageRoute(models)).route : null;
+    const items = frozen?.authorization?.items ?? compileBuildItems(
       blueprint,
       route === null ? null : { model: route.model, referenceImages: route.referenceImages },
+      undefined, generateImages ? undefined : "New image generation was declined. Authorize it later in Activity if wanted.",
     );
-    const capMicroUsd = items.filter((item) => item.authorized).reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
+    const capMicroUsd = frozen?.authorization?.capMicroUsd ?? items.filter((item) => item.authorized).reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
+    const reviewedPreview = await this.previewIdentity(genesisId, founded);
+    if (!frozen && approvalDigest !== undefined && approvalDigest !== await this.approvalDigest(genesisId, folded, look, models, route, items, reviewedPreview))
+      throw new Error("The approved content, media choices or generation estimate changed. Review the current build before Begin.");
+    if (!frozen?.authorization) {
+      if (frozen && route && approvalDigest !== await this.approvalDigest(genesisId, folded, founded, models, route, items))
+        throw new Error("Review the current build before recovering this older founding approval.");
+      const identity = reviewedPreview;
+      let preview = null;
+      if (identity) {
+        const carried = await this.carriablePreview(genesisId, founded);
+        if (!carried || carried.jobId !== identity.jobId) throw new Error("The reviewed look preview is unavailable.");
+        const bytes = await readFile(carried.image);
+        if (sha256(bytes) !== identity.hash) throw new Error("The reviewed look preview changed.");
+        const file = `approved-look${carried.extension}`;
+        await atomicWriteFile(join(genesisControlDir(sandbox), file), bytes);
+        preview = { ...identity, file, extension: carried.extension };
+      }
+      await atomicWriteFile(join(genesisControlDir(sandbox), "founding-input.json"), JSON.stringify({
+        blueprint, generateImages, ...(models ? { models } : {}), authorization: { route, items, capMicroUsd, preview },
+      }) + "\n");
+    }
 
     // Wave 0 is the world itself: world.json, art direction v1 from the look the conversation
     // proposed, and the bible it wrote (R-18). The marker is written the moment the world's
     // identity exists and BEFORE the record — every window after that write re-enters the
-    // same founding. One residual sliver remains, between createWorld resolving and the
-    // marker landing; a crash exactly there can orphan one empty world (R-16, noted).
+    // same founding. The reserved identity closes the gap between world creation and the
+    // marker: the filesystem provider publishes the staged world once under that identity.
     let worldId = marker?.worldId;
     if (worldId === undefined) {
+      const reservedWorldId = await reserveGenesisWorld(sandbox);
       const created = await this.ports.createWorld({
+        creationId: reservedWorldId,
         name: blueprint.name,
         ...(blueprint.logline !== undefined ? { logline: blueprint.logline } : {}),
-        ...(blueprint.tone !== undefined ? { tone: blueprint.tone.toLowerCase() } : {}),
-        ...(blueprint.genre !== undefined ? { genre: blueprint.genre.toLowerCase() } : {}),
+        ...(blueprint.tone !== undefined ? { tone: blueprint.reviewed ? blueprint.tone : blueprint.tone.toLowerCase() } : {}),
+        ...(blueprint.genre !== undefined ? { genre: blueprint.reviewed ? blueprint.genre : blueprint.genre.toLowerCase() } : {}),
         ...(blueprint.look !== undefined ? { artDirection: blueprint.look } : {}),
         ...(blueprint.bible !== undefined ? { bible: blueprint.bible } : {}),
+        ...(models !== undefined ? { models } : {}),
       });
       worldId = created.worldId;
       await atomicWriteFile(markerPath, JSON.stringify({ worldId, requestId }) + "\n");
@@ -407,6 +528,44 @@ export class FoundingBuildService {
     await this.ports.openWorld(worldId);
     const store = this.ports.openStore();
     if (!store || store.worldId !== worldId) throw new Error("the new world did not open");
+
+    const foundingEvents = await (await genesisConversation(sandbox)).read();
+    const hasImages = blueprint.selectedImages !== undefined || foundingEvents.events.some(({ event }) =>
+      event.type === "founding.image-decision" || (event.type === "founding.blueprint" &&
+        (event.blueprint.images !== undefined || event.blueprint.selectedImages !== undefined)));
+    const hasSources = (value: unknown): boolean => !!value && typeof value === "object" &&
+      ("sources" in value || Object.values(value).some(hasSources));
+    const hasImports = hasSources(blueprint) || foundingEvents.events.some(({ event }) => hasSources(event));
+    const hasProps = (value: unknown): boolean => !!value && typeof value === "object" &&
+      ("props" in value || ("kind" in value && value.kind === "prop") || Object.values(value).some(hasProps));
+    const hasVoices = blueprint.selectedVoices !== undefined || foundingEvents.events.some(({ event }) => event.type === "founding.voice-decision" ||
+      (event.type === "founding.blueprint" && event.blueprint.voices !== undefined));
+    await store.ensureSchemaVersion(hasVoices ? FOUNDING_VOICES_SCHEMA_VERSION : hasProps(blueprint) || foundingEvents.events.some(({ event }) => hasProps(event)) ? CONVERSATIONAL_PROPS_SCHEMA_VERSION :
+      hasImports ? FOUNDING_IMPORTS_SCHEMA_VERSION : hasImages ? FOUNDING_IMAGES_SCHEMA_VERSION : FOUNDING_CONTENT_SCHEMA_VERSION, "founding-content");
+    if (blueprint.reviewed) {
+      const review = await reviewGenesisContent(sandbox);
+      const remaining = review.cards.filter(card => card.status !== "approved");
+      if (remaining.length) {
+        const log = await genesisConversation(sandbox);
+        for (const card of remaining) {
+          // Each full proposal remains independently readable after the transcript's context
+          // window moves on. Artifact filing deduplicates an interrupted handoff by bytes.
+          const path = join(genesisControlDir(sandbox), "carried-proposals", `founding-proposal-${sha256(card.key).slice(7)}.md`);
+          await mkdir(dirname(path), { recursive: true });
+          await atomicWriteFile(path, `# ${card.title} - ${card.status}\n\nThis proposal is not established world content. Any previously approved version remains in force. Changes still need approval.\n\n${JSON.stringify(card.content, null, 2)}\n`);
+          const filed = await fileArtifact(store, { sourcePath: path });
+          if (filed.outcome !== "filed" && filed.outcome !== "deduplicated") throw new Error(filed.reason);
+          const at = this.ports.nowIso();
+          await log.append({ type: "founding.message", message: {
+            id: newId("msg"), turnId: newId("turn"), role: "studio",
+            text: `Unapproved founding proposal: ${card.title.slice(0, 160)} (${card.status}). The complete proposal is saved in artifacts/${filed.artifact.file}. It can be discussed and revised here; changes still need approval.`,
+            attachmentIds: [], createdAt: at,
+          } }, { at, requestId: `founding-unapproved-proposal:${card.key}:${card.digest}` });
+        }
+      }
+    }
+    await carryGenesisConversation(sandbox, store.dir);
+    await this.ports.refreshConversations?.(worldId);
 
     const record: FoundingBuildRecord = FoundingBuildRecordSchema.parse({
       buildId: newId("fb"),
@@ -524,7 +683,7 @@ export class FoundingBuildService {
         }
         continue;
       }
-      if (item.kind === "world" || item.kind === "author-sheet" || item.kind === "thread" || item.kind === "finalize") {
+      if (item.kind === "world" || item.kind === "author-sheet" || item.kind === "thread" || item.kind === "canon" || item.kind === "prop" || item.kind === "selected-image" || item.kind === "selected-voice" || item.kind === "finalize") {
         // Local work re-runs idempotently through the driver; an intent alone is enough.
         continue;
       }
@@ -536,7 +695,7 @@ export class FoundingBuildService {
       // An intent with a journalled key and no job id: the crash window between the append
       // and the enqueue. Re-enqueueing the same key joins the existing job when one was
       // made, and is the first dispatch when none was (row 22).
-      const { route } = await this.resolveImageRoute();
+      const { route } = await this.resolveImageRoute(this.worldModels(active.record.worldId));
       const jobId = await this.dispatchOne(active, item, route?.model ?? null).catch(() => null);
       await this.settleDispatched(active, item, jobId).catch(() => {});
       settledAny = true;
@@ -553,9 +712,12 @@ export class FoundingBuildService {
 
   async stop(worldId: string): Promise<void> {
     const active = this.builds.get(worldId);
-    if (!active || active.stopped) return;
-    active.stopped = true;
-    await this.append(active, { kind: "stopped", at: this.ports.nowIso() });
+    if (!active) return;
+    active.stopGeneration = (active.stopGeneration ?? 0) + 1;
+    if (!active.stopped) {
+      active.stopped = true;
+      await this.append(active, { kind: "stopped", at: this.ports.nowIso() });
+    }
     // Cancellation of every build job that is not yet terminal is requested, best effort
     // (SPEC-009 R-14). A charge captured anyway is the ledger's to record, and it does.
     const state = this.fold(active);
@@ -600,9 +762,10 @@ export class FoundingBuildService {
     }
     // Chained, not joined: a press naming a different item queues behind the one running
     // rather than being silently dropped.
+    const stopGeneration = this.builds.get(worldId)?.stopGeneration ?? 0;
     const work = (this.runningItems.get(worldId) ?? Promise.resolve())
       .catch(() => {})
-      .then(() => this.runItemsWork(worldId, itemKey));
+      .then(() => this.runItemsWork(worldId, stopGeneration, itemKey));
     this.runningItems.set(worldId, work);
     void work.finally(() => {
       if (this.runningItems.get(worldId) === work) this.runningItems.delete(worldId);
@@ -610,11 +773,18 @@ export class FoundingBuildService {
     return work;
   }
 
-  private async runItemsWork(worldId: string, itemKey?: string): Promise<void> {
+  private async runItemsWork(worldId: string, stopGeneration: number, itemKey?: string): Promise<void> {
     const store = this.ports.openStore();
     if (!store || store.worldId !== worldId) return;
     const active = await this.load(store.dir, worldId);
     if (!active) return;
+    // A stopped driver still settles what it had in flight: the fold reads a cancelled job as
+    // failed the moment the queue says so, but the driver journals it and stands down a beat
+    // later. A press made in that gap is a press after Stop, not during the run, and was
+    // refused silently — Retry did nothing, more often the busier the machine.
+    // It waits the driver out instead; two writers still never share the item.
+    if (active.stopped && active.driving) await active.driven;
+    if ((active.stopGeneration ?? 0) !== stopGeneration) return;
     let state = this.fold(active);
     if (state.status === "running" || active.driving) return;
     // Work a crash left mid-air settles first, with its journalled identity (R-34).
@@ -627,11 +797,12 @@ export class FoundingBuildService {
     if (keys.length === 0) return;
     // An unauthorized item runs only when a route resolves NOW — the reason it was refused
     // may have been fixed, which is the whole point of the press (R-11).
-    const { route } = await this.resolveImageRoute();
+    const { route } = await this.resolveImageRoute(this.worldModels(worldId));
     for (const key of keys) {
+      if ((active.stopGeneration ?? 0) !== stopGeneration) break;
       const item = active.record.items.find((candidate) => candidate.key === key);
       if (!item) continue;
-      await this.runOne(active, item, route?.model ?? null).catch((err) => {
+      await this.runOne(active, item, route?.model ?? null, stopGeneration).catch((err) => {
         this.ports.log({ kind: "build.item-failed", worldId, key, message: err instanceof Error ? err.message : String(err) });
       });
     }
@@ -680,7 +851,7 @@ export class FoundingBuildService {
   private drive(active: ActiveBuild): void {
     if (active.driving) return;
     active.driving = true;
-    void this.driveWork(active)
+    active.driven = this.driveWork(active)
       .catch((err) => {
         this.ports.log({
           kind: "build.drive-failed",
@@ -771,9 +942,10 @@ export class FoundingBuildService {
   // Item runners
   // -------------------------------------------------------------------------
 
-  private async runOne(active: ActiveBuild, item: BuildItem, model: ManifestModel | null): Promise<void> {
+  /** `pressedUnder` is the stop generation an Activity press was made under; the driver passes none. */
+  private async runOne(active: ActiveBuild, item: BuildItem, model: ManifestModel | null, pressedUnder?: number): Promise<void> {
     if (buildItemDispatches(item.kind)) {
-      const jobId = await this.dispatchOne(active, item, model);
+      const jobId = await this.dispatchOne(active, item, model, pressedUnder);
       await this.settleDispatched(active, item, jobId);
       return;
     }
@@ -796,6 +968,32 @@ export class FoundingBuildService {
         case "thread":
           await this.runThread(active, item, store, gate);
           break;
+        case "canon":
+          await this.runCanon(active, item, store, gate);
+          break;
+        case "selected-image": {
+          const selection = active.record.blueprint.selectedImages?.find(selection => selection.target === (item.sheetType ? `${item.sheetType}:${item.subject}` : item.subject));
+          if (!selection) throw new Error("The approved image selection is missing.");
+          await installGenesisImage(await this.ports.genesisDir(active.record.genesisId), selection, active.record.blueprint, store,
+            selection.candidate.jobId ? await this.ports.ledgerEntryFor(selection.candidate.jobId) : undefined);
+          await this.ports.refreshWorldSnapshot(active.record.worldId);
+          break;
+        }
+        case "selected-voice": {
+          const candidate = active.record.blueprint.selectedVoices?.find(one => one.plan.intent.target === `character:${item.subject}`);
+          if (!candidate) throw new Error("The approved voice selection is missing.");
+          if (this.ports.voiceAvailable && !await this.ports.voiceAvailable(candidate.plan.voice)) throw new Error("The selected voice is unavailable. Restore it and retry, or skip this voice assignment.");
+          await installGenesisVoice(store, active.record.blueprint, candidate);
+          await this.ports.refreshWorldSnapshot(active.record.worldId);
+          break;
+        }
+        case "prop": {
+          const prop = active.record.blueprint.props?.find(prop => prop.slug === item.subject);
+          if (!prop) throw new Error("The approved prop is missing.");
+          await installGenesisProp(store, active.record.genesisId, prop);
+          await this.ports.refreshWorldSnapshot(active.record.worldId);
+          break;
+        }
         case "finalize":
           await this.runFinalize(active);
           break;
@@ -810,12 +1008,22 @@ export class FoundingBuildService {
         at: this.ports.nowIso(),
       });
     } catch (err) {
-      // The item fails alone; the run continues to the end (R-23).
+      // The item fails alone; the run continues to the end (R-23). This catch always resolves
+      // normally, so `runItemsWork`'s own `.catch(... this.ports.log(...))` around the call never
+      // fires for a local item — the journal's `detail` used to carry the raw message anyway, but
+      // now that it carries the translated sentence instead, the diagnostic has to be logged here
+      // or it is gone everywhere, not just off the screen.
+      this.ports.log({
+        kind: "build.item-failed",
+        worldId: active.record.worldId,
+        key: item.key,
+        message: err instanceof Error ? err.message : String(err),
+      });
       await this.append(active, {
         kind: "terminal",
         key: item.key,
         outcome: "failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
         at: this.ports.nowIso(),
       });
     }
@@ -826,6 +1034,12 @@ export class FoundingBuildService {
     // The world files were written by the press itself (they hold this record); what is left
     // is what the conversation was handed. Filing dedups by hash, so a crashed pass re-runs.
     await this.ports.carryAttachments(active.record.genesisId, active.record.worldId);
+    const imageStore = this.ports.openStore();
+    if (imageStore?.worldId === active.record.worldId && active.record.blueprint.reviewed) {
+      await carryGenesisSources(await this.ports.genesisDir(active.record.genesisId), active.record.blueprint, imageStore);
+      await carryGenesisImageArtifacts(await this.ports.genesisDir(active.record.genesisId), active.record.genesisId,
+        active.record.blueprint, imageStore, jobId => this.ports.ledgerEntryFor(jobId));
+    }
     // A preview still generating at Begin is cancelled, not waited for: its landing could
     // arrive after the sandbox sweep and resurrect the directory, and an image that was not
     // on disk when the author pressed is not an image the author approved (R-54).
@@ -846,7 +1060,7 @@ export class FoundingBuildService {
   private async carriablePreview(
     genesisId: string,
     foundedLook: string | undefined,
-  ): Promise<{ image: string; extension: string } | null> {
+  ): Promise<{ image: string; jobId: string; extension: string } | null> {
     if (foundedLook === undefined) return null;
     const sandbox = await this.ports.genesisDir(genesisId).catch(() => null);
     if (sandbox === null) return null;
@@ -877,7 +1091,7 @@ export class FoundingBuildService {
     if (landed === undefined) return null;
     const image = join(sandbox, fromPortable(landed));
     if ((await stat(toExtendedLength(image)).catch(() => null))?.isFile() !== true) return null;
-    return { image, extension: landed.slice(landed.lastIndexOf(".")).toLowerCase() || ".png" };
+    return { image, jobId: latest.id, extension: landed.slice(landed.lastIndexOf(".")).toLowerCase() || ".png" };
   }
 
   /**
@@ -886,21 +1100,39 @@ export class FoundingBuildService {
    * look the world was founded on. A preview of rejected words is not carried: a wrong master
    * look is worse than none, because nothing downstream ever asks again.
    */
+  private async previewIdentity(genesisId: string, look: string | undefined) {
+    const preview = await this.carriablePreview(genesisId, look);
+    return preview ? { jobId: preview.jobId, hash: sha256(await readFile(preview.image)) } : null;
+  }
+
   private async carryLookPreview(active: ActiveBuild): Promise<void> {
     const store = this.ports.openStore();
     if (!store || store.worldId !== active.record.worldId) return;
-    const carried = await this.carriablePreview(active.record.genesisId, active.record.blueprint.look);
+    const sandbox = await this.ports.genesisDir(active.record.genesisId);
+    const frozen = await frozenFoundingInput(sandbox);
+    const approved = frozen?.authorization?.preview;
+    const carried = frozen?.authorization
+      ? approved ? { image: join(genesisControlDir(sandbox), approved.file), extension: approved.extension } : null
+      : await this.carriablePreview(active.record.genesisId, active.record.blueprint.look);
+    if (approved && carried && sha256(await readFile(carried.image)) !== approved.hash) throw new Error("The approved look preview changed.");
     if (carried === null) return;
     const { image, extension } = carried;
     const destination = masterLookFile(active.record.artDirectionVersion, extension);
     await store.gateOp(async () => {
       await copyFile(toExtendedLength(image), toExtendedLength(join(store.dir, fromPortable(destination))));
-      // Still v1, written before anything has read it: the record the world was founded
-      // with simply gains the picture the author already approved in conversation.
+      // The store already seeded v1 on open. Complete the record and its snapshot in one
+      // recoverable commit so a restart cannot mistake our own preview for damaged history.
       const recordPath = join(store.dir, fromPortable(ART_DIRECTION_PATH));
-      const parsed = JSON.parse(await readFile(toExtendedLength(recordPath), "utf8")) as Record<string, unknown>;
+      const raw = await readFile(toExtendedLength(recordPath), "utf8");
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      if (parsed["masterLook"] === destination) return;
       parsed["masterLook"] = destination;
-      await atomicWriteFile(recordPath, JSON.stringify(parsed, null, 2) + "\n");
+      await store.commitUnserialised({
+        kind: "founding-look-preview",
+        source: "founding-build",
+        files: [{ path: ART_DIRECTION_PATH, action: "replace", content: JSON.stringify(parsed, null, 2) + "\n",
+          baseHash: sha256(raw), preserveVersion: true }],
+      });
     });
     await this.ports.refreshWorldSnapshot(active.record.worldId).catch(() => {});
   }
@@ -920,11 +1152,42 @@ export class FoundingBuildService {
           ? blueprint.locations.find((candidate) => candidate.slug === item.subject)
           : blueprint.factions.find((candidate) => candidate.slug === item.subject);
     if (!entity || item.sheetType === undefined) throw new Error("the blueprint no longer holds this entity");
+    if (blueprint.reviewed) {
+      if (!entity.sheet) throw new Error("The reviewed sheet has no approved content.");
+      const ids = genesisSheetIds(blueprint);
+      const id = ids.get(`${item.sheetType}:${entity.slug}`)!;
+      if (store.getBundle().sheets.some(sheet => sheet.id === id)) return;
+      const links = (entity.sheet.links ?? []).map(key => {
+        const target = ids.get(key);
+        if (!target) throw new Error("An approved relationship has no approved target.");
+        return target;
+      });
+      const { sections, role, billing, region } = entity.sheet;
+      const content = buildSheetContent({ id, type: item.sheetType, name: entity.name, status: "sketch",
+        sections, links, date: active.record.createdAt.slice(0, 10),
+        extra: { ...(role ? { role } : {}), ...(billing ? { billing } : {}), ...(region ? { region } : {}),
+          ...("neverDepicted" in entity && entity.neverDepicted ? { neverDepicted: true } : {}) },
+      });
+      const receipt = join(store.dir, BUILD_DIR, `sheet-${id}.json`);
+      let proposalId = await readFile(receipt, "utf8").then(raw => JSON.parse(raw).proposalId as string)
+        .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return null; throw err; });
+      if (!proposalId) {
+        proposalId = newId("pr");
+        await store.ownedWrite(() => atomicWriteFile(receipt, JSON.stringify({ proposalId }) + "\n"));
+      }
+      const proposal = await gate.stage({ proposalId, kind: "new-sheet", summary: `Approved founding sheet: ${entity.name}`, source: "chat:studio",
+        targets: [{ path: `${sheetDir(item.sheetType)}/${id}.md`, content }] });
+      const outcome = await acceptDecided(gate, proposal.id);
+      if (outcome.status !== "accepted") throw new Error(`The approved sheet could not be saved (${outcome.status}).`);
+      await this.ports.refreshWorldSnapshot(active.record.worldId);
+      return;
+    }
     // Idempotent across recovery: a sheet that already exists under this name landed (R-34).
     const bundle = store.getBundle();
     if (bundle.sheets.some((sheet) => sheet.type === item.sheetType && sheet.name === entity.name)) {
       return undefined;
     }
+    const neverDepicted = item.sheetType === "character" && "neverDepicted" in entity && entity.neverDepicted === true;
     const seed = entity.line ?? entity.description ?? entity.name;
     const draft = await createSheetFromSentence(store, gate, {
       sheetType: item.sheetType,
@@ -957,13 +1220,30 @@ export class FoundingBuildService {
           scope: draft.scope,
           sheetType: item.sheetType,
           name: entity.name,
-          seed: `${seed}${description}${facts}`,
+          seed: `${seed}${description}${facts}${neverDepicted ? "\nThis character is never depicted. Preserve this rule; do not invent a visible appearance." : ""}`,
         })
         .then(
           () => undefined,
           (err: unknown) =>
-            `authored from its one-line seed — the drafting agent failed (${err instanceof Error ? err.message : String(err)})`,
+            `authored from its one-line seed — the drafting agent failed (${describeCoordinatorError(err)})`,
         );
+    }
+    // The conversation's rule survives even a drafting agent that omits or contradicts it.
+    // Use the gate's recoverable draft edit before acceptance, so no unflagged sheet lands.
+    if (neverDepicted) {
+      const current = await gate.readManifest(draft.proposal.id);
+      const changed = await gate.mergeFormEdit({
+        proposalId: draft.proposal.id,
+        requestId: `never-depicted:${draft.proposal.id}`,
+        path: draft.path,
+        expectedDraftRevision: current.draftRevision,
+        edit(content) {
+          const doc = MarkdownFile.parse(content);
+          doc.setData({ neverDepicted: true });
+          return { content: doc.serialize() };
+        },
+      });
+      if (changed.status !== "updated") throw new Error("the character's depiction rule could not be saved");
     }
     // The gate is pre-authorized, not bypassed (§2.4): the proposal is accepted under the
     // press's authorization. A refusal discards it — nothing may rest in Needs you (R-25).
@@ -991,11 +1271,43 @@ export class FoundingBuildService {
     await openThread(store, gate, { title, question, candidates: [] });
   }
 
+  private async runCanon(active: ActiveBuild, item: BuildItem, store: WorldStore, gate: ProposalManager): Promise<void> {
+    const entry = active.record.blueprint.canon?.find(candidate => candidate.slug === item.subject);
+    if (!entry) throw new Error("The approved canon entry is missing.");
+    const receiptPath = join(store.dir, BUILD_DIR, `canon-${entry.slug}.json`);
+    let receipt = await readFile(toExtendedLength(receiptPath), "utf8")
+      .then(raw => JSON.parse(raw) as { proposalId: string; entryId: string })
+      .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return null; throw err; });
+    if (receipt && store.getBundle().canon.some(candidate => candidate.id === receipt!.entryId)) {
+      await carryGenesisCanonSources(await this.ports.genesisDir(active.record.genesisId), entry.sources ?? [], receipt.entryId, store);
+      return;
+    }
+    if (!receipt) {
+      receipt = await store.gateOp(async () => {
+        const reserved = { proposalId: newId("pr"), entryId: `CANON-${String(store.getBundle().meta.nextCanonId).padStart(3, "0")}` };
+        // Identity allocation and its recovery receipt are one journalled world transaction.
+        await store.commitUnserialised({ kind: "canon-id-allocation", source: "founding", allocateCanonIds: 1,
+          files: [{ path: `${BUILD_DIR}/canon-${entry.slug}.json`, action: "create", baseHash: null, content: JSON.stringify(reserved) + "\n" }] });
+        return reserved;
+      });
+    }
+    await gate.stage({ proposalId: receipt.proposalId, kind: "new-canon", summary: `Approved founding canon: ${entry.title}`,
+      source: "chat:studio", preReservedCanonIds: [receipt.entryId],
+      targets: [{ path: `canon/${receipt.entryId}.md`, content: entryContent({ id: receipt.entryId, type: entry.type,
+        title: entry.title, statement: entry.statement, status: entry.type === "thread" ? "open" : "settled" }) }] });
+    const outcome = await acceptDecided(gate, receipt.proposalId);
+    if (outcome.status !== "accepted") throw new Error(`The approved canon entry could not be saved (${outcome.status}).`);
+    await carryGenesisCanonSources(await this.ports.genesisDir(active.record.genesisId), entry.sources ?? [], receipt.entryId, store);
+    await this.ports.refreshWorldSnapshot(active.record.worldId);
+  }
+
   private async runFinalize(active: ActiveBuild): Promise<void> {
-    // The sandbox goes with the conversation, and the world stands on its own (R-9): what
-    // was carried was carried; abandoning nothing, deleting one directory.
+    const workspace = await this.ports.genesisDir(active.record.genesisId);
+    await atomicWriteFile(join(genesisControlDir(workspace), "completed.json"), JSON.stringify({ worldId: active.record.worldId }) + "\n");
+    // The harness session ends; durable records remain available for replay and resume.
     this.ports.releaseGenesis(active.record.genesisId);
-    await this.ports.discardGenesis(active.record.genesisId).catch(() => {});
+    // Keep the begun marker and transcript until the durable handoff can be rediscovered.
+    // Deleting the marker made a replayed Begin create another world.
     await this.ports.refreshWorldSnapshot(active.record.worldId).catch(() => {});
     await this.ports.refreshWorldList().catch(() => {});
   }
@@ -1004,7 +1316,7 @@ export class FoundingBuildService {
   // Image dispatch and landing (R-19..R-22, R-25..R-28)
   // -------------------------------------------------------------------------
 
-  private async dispatchOne(active: ActiveBuild, item: BuildItem, model: ManifestModel | null): Promise<string | null> {
+  private async dispatchOne(active: ActiveBuild, item: BuildItem, model: ManifestModel | null, pressedUnder?: number): Promise<string | null> {
     const store = this.ports.openStore();
     if (!store || store.worldId !== active.record.worldId) return null;
     const state = this.fold(active);
@@ -1060,13 +1372,23 @@ export class FoundingBuildService {
     let input: EnqueueInput;
     try {
       input = await this.compileDispatch(active, item, store, model);
+      if (state.status === "running" && input.estimatedMicroUsd > item.estimatedMicroUsd)
+        throw new Error("The current image estimate exceeds the approved amount. Review and retry this item in Activity.");
     } catch (err) {
+      // Same as runOne's catch: this resolves normally, so the journal's translated `detail` is
+      // the failure's only trace unless the raw diagnostic is logged here too.
+      this.ports.log({
+        kind: "build.item-failed",
+        worldId: active.record.worldId,
+        key: item.key,
+        message: err instanceof Error ? err.message : String(err),
+      });
       await this.append(active, { kind: "intent", key: item.key, at: this.ports.nowIso() });
       await this.append(active, {
         kind: "terminal",
         key: item.key,
         outcome: item.kind === "sheet-image" && err instanceof AnchorMissing ? "skipped" : "failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
         at: this.ports.nowIso(),
       });
       return null;
@@ -1089,23 +1411,38 @@ export class FoundingBuildService {
     } else {
       const retried = active.entries.some((entry) => entry.kind === "terminal" && entry.key === item.key);
       idempotencyKey = retried ? ulid() : (item.idempotencyKey ?? ulid());
-      await this.append(active, { kind: "intent", key: item.key, idempotencyKey, at: this.ports.nowIso() });
+      const dropped = input.params["droppedReferences"] as Array<{ name: string; reason: string }> | undefined;
+      const detail = dropped?.length
+        ? `Key art will be made without references for: ${dropped.map(({ name, reason }) => `${name} (${reason})`).join("; ")}.`
+        : undefined;
+      await this.append(active, { kind: "intent", key: item.key, idempotencyKey, ...(detail ? { detail } : {}), at: this.ports.nowIso() });
     }
     this.publish(active);
     try {
       const job = await this.ports.enqueue({ ...input, idempotencyKey });
       await this.append(active, { kind: "enqueued", key: item.key, jobId: job.id, at: this.ports.nowIso() });
       // A stop that raced this dispatch still reaches the job (R-35): the sweep in stop()
-      // saw no job id to cancel, so the request is made here instead.
-      if (active.stopped) await this.ports.cancelJob(job.id).catch(() => {});
+      // saw no job id to cancel, so the request is made here instead. For a retry pressed in
+      // Activity that means a stop since the press, not the build's own earlier Stop (issue
+      // 1308): `stopped` stays true for good once a build is stopped, so every retry after it
+      // cancelled its own job the moment it was bought — Retry did nothing, and a test that
+      // waited for the job to run passed only when the queue showed it before the cancel landed.
+      const stoppedSince = pressedUnder !== undefined ? (active.stopGeneration ?? 0) !== pressedUnder : active.stopped;
+      if (stoppedSince) await this.ports.cancelJob(job.id).catch(() => {});
       this.publish(active);
       return job.id;
     } catch (err) {
+      this.ports.log({
+        kind: "build.item-failed",
+        worldId: active.record.worldId,
+        key: item.key,
+        message: err instanceof Error ? err.message : String(err),
+      });
       await this.append(active, {
         kind: "terminal",
         key: item.key,
         outcome: "failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
         at: this.ports.nowIso(),
       });
       return null;
@@ -1127,7 +1464,8 @@ export class FoundingBuildService {
         type === "character"
           ? blueprint.characters.find((c) => c.slug === slug)?.name
           : blueprint.locations.find((l) => l.slug === slug)?.name;
-      const sheet = bundle.sheets.find((candidate) => candidate.type === type && candidate.name === name);
+      const approvedId = blueprint.reviewed ? genesisSheetIds(blueprint).get(`${type}:${slug}`) : undefined;
+      const sheet = bundle.sheets.find((candidate) => approvedId ? candidate.id === approvedId : candidate.type === type && candidate.name === name);
       if (!sheet) throw new Error(`the ${type} sheet for ${name ?? slug} is not in the world`);
       return sheet;
     };
@@ -1225,11 +1563,17 @@ export class FoundingBuildService {
         await this.landItem(active, item, jobId);
         await this.append(active, { kind: "terminal", key: item.key, outcome: "landed", at: this.ports.nowIso() });
       } catch (err) {
+        this.ports.log({
+          kind: "build.item-failed",
+          worldId: active.record.worldId,
+          key: item.key,
+          message: err instanceof Error ? err.message : String(err),
+        });
         await this.append(active, {
           kind: "terminal",
           key: item.key,
           outcome: "failed",
-          detail: err instanceof Error ? err.message : String(err),
+          detail: describeCoordinatorError(err),
           at: this.ports.nowIso(),
         });
       }
@@ -1305,7 +1649,8 @@ export class FoundingBuildService {
         type === "character"
           ? blueprint.characters.find((c) => c.slug === item.subject)?.name
           : blueprint.locations.find((l) => l.slug === item.subject)?.name;
-      const sheet = bundle.sheets.find((candidate) => candidate.type === type && candidate.name === name);
+      const approvedId = blueprint.reviewed ? genesisSheetIds(blueprint).get(`${type}:${item.subject}`) : undefined;
+      const sheet = bundle.sheets.find((candidate) => approvedId ? candidate.id === approvedId : candidate.type === type && candidate.name === name);
       if (!sheet) throw new Error(`the ${type} sheet is not in the world`);
       return sheet;
     };

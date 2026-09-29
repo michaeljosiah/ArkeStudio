@@ -167,6 +167,20 @@ export interface CutEntry {
   label: string;
 }
 
+/**
+ * The part of an entry's file that plays, in seconds of that file: from the trim or the segment's
+ * in-point to its out-point or the end of the shot's slot, whichever comes first — the window the
+ * export conforms each clip to. The branch map's preview and the interactive package both play
+ * it, so neither runs a take's discarded head or tail. `to` is absent when nothing bounds it.
+ */
+export function playbackWindow(entry: Pick<CutEntry, "media" | "durationSec">): { from: number; to?: number } | null {
+  if (!entry.media) return null;
+  const from = entry.media.inSec ?? 0;
+  const slot = entry.durationSec > 0 ? from + entry.durationSec : Infinity;
+  const to = Math.min(entry.media.outSec ?? Infinity, slot);
+  return Number.isFinite(to) ? { from, to } : { from };
+}
+
 export interface DerivedCut {
   entries: CutEntry[];
   covered: number;
@@ -332,14 +346,20 @@ function deriveCutOver(production: ProductionBundle, scenes: readonly Production
 // Export assembly (R-19..R-21, D10, D11): one encode, gaps as labelled slates
 // ---------------------------------------------------------------------------
 
-export const ExportPresetSchema = z.enum(["review-cut", "master", "social-excerpt"]);
+export const ExportPresetSchema = z.enum(["review-cut", "master", "vertical-master", "social-excerpt"]);
 export type ExportPreset = z.infer<typeof ExportPresetSchema>;
 
 export const PRESETS: Record<ExportPreset, { width: number; height: number; fps: FrameRate; crf: number }> = {
   "review-cut": { width: 1280, height: 720, fps: 24, crf: 28 },
   master: { width: 1920, height: 1080, fps: 24, crf: 18 },
+  "vertical-master": { width: 1080, height: 1920, fps: 24, crf: 18 },
   "social-excerpt": { width: 1080, height: 1920, fps: 30, crf: 23 },
 };
+
+/** Issue 1252: portrait productions start with a finishing preset, at their own frame rate. */
+export function defaultExportPreset(production: { aspect?: string }): ExportPreset {
+  return production.aspect === "9:16" ? "vertical-master" : "review-cut";
+}
 
 export type ExportItem =
   | { type: "clip"; path: string; inSec?: number; outSec?: number; durationSec: number; label: string }
@@ -417,9 +437,6 @@ export interface ExportPlan {
  * the canvas did.
  */
 
-/** Room to work in before anything is placed. A canvas of zero cannot be dropped onto. */
-export const MEDIA_CANVAS_MIN_SEC = 60;
-
 /** Space kept past the last clip, so there is always somewhere to drop the next one. */
 export const MEDIA_CANVAS_HEADROOM_SEC = 15;
 
@@ -441,11 +458,6 @@ export function isMediaOnly(cut: DerivedCut): boolean {
  */
 export function placedExtentSec(placed: readonly { endSec: number }[]): number {
   return placed.reduce((furthest, one) => Math.max(furthest, one.endSec), 0);
-}
-
-/** How much timeline to draw: the work, plus somewhere to put the next thing. */
-export function mediaCanvasSec(placed: readonly { endSec: number }[]): number {
-  return Math.max(MEDIA_CANVAS_MIN_SEC, placedExtentSec(placed) + MEDIA_CANVAS_HEADROOM_SEC);
 }
 
 /** Which artifact kinds are picture. A document is not a frame; audio has no picture to lay. */
@@ -559,28 +571,6 @@ export function exportAudioClips(
     resolved.push({ path: artifactPath(artifact), startSec: overlay.startSec, endSec: overlay.endSec, gainDb: 0 });
   }
   return resolved;
-}
-
-/**
- * How long a production with no story runs: everything the export can use, measured to its
- * furthest reach.
- *
- * Resolved rather than counted off the lane records, because no surface may advertise a film the
- * encode will not produce — a document stretched to 60s beside a 5s image is a 5s film.
- *
- * It lives here because several surfaces state this length and they have to state the same one.
- * Two of them resolved the clips and the rail read the derived clock, which is zero for a
- * production that never had a story: the rail and the switcher advertised a `0s` cut for a film
- * the Cut header, the Exports button and the rendered file all agreed ran 28 seconds (issue 508).
- */
-export function placedFilmSec(
-  overlays: readonly CutOverlay[],
-  artifacts: readonly ClipArtifact[],
-): number {
-  return placedExtentSec([
-    ...exportOverlays(overlays, artifacts),
-    ...exportAudioClips(overlays, artifacts),
-  ]);
 }
 
 /** Assemble from the derived cut: accepted material as clips, gaps as slates (D10, D11). */

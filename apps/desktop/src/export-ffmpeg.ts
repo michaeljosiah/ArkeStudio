@@ -11,7 +11,7 @@ const FILTER_OPTIONS = new Set(["-filter_complex", "-vf", "-filter:v"]);
 const GEIST_REGULAR_SHA256 = "85a1c6b18a6b0a06dfe9fd4f6d6a5d4979f74ec861eaef4bc7868b5492b8a117";
 
 /** Only filter option values can require drawtext; input paths and metadata are ordinary argv. */
-function usesDrawtext(args: readonly string[]): boolean {
+export function usesDrawtext(args: readonly string[]): boolean {
   return args.some((arg, index) => {
     const previous = args[index - 1];
     return (

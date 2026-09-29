@@ -15,11 +15,13 @@ export interface ScreenEntry {
 }
 
 export const SCREENS: ScreenEntry[] = [
+  { id: "settings-adapters", samplePath: "/settings/adapters" },
   // Shell
-  { id: "launch", samplePath: "/" },
-  { id: "startup", samplePath: "/starting" },
+
+  { id: "startup", samplePath: "/" },
   { id: "first-run", samplePath: "/first-run" },
   { id: "world-picker", samplePath: "/worlds" },
+  { id: "publications", samplePath: "/publications" },
   { id: "new-world", samplePath: "/worlds/new" },
   { id: "building", samplePath: `/building/${FIXTURE_WORLD_ID}` },
   { id: "settings-providers", samplePath: "/settings/providers" },
@@ -29,13 +31,15 @@ export const SCREENS: ScreenEntry[] = [
   { id: "settings-downloads", samplePath: "/settings/downloads" },
   { id: "settings-harness", samplePath: "/settings/harness" },
   { id: "settings-general", samplePath: "/settings/general" },
+  { id: "settings-remote-access", samplePath: "/settings/remote-access" },
   { id: "settings-sample-world", samplePath: "/settings/sample-world" },
   { id: "settings-diagnostics", samplePath: "/settings/diagnostics" },
   { id: "settings-about", samplePath: "/settings/about" },
-  { id: "activity", samplePath: "/activity" },
 
   // World
   { id: "world-overview", samplePath: W },
+  { id: "production-setup", samplePath: `${W}/productions/setup/cv_01J8F3K2QW9VZX4N7M0RTYB6HC` },
+  { id: "production-narrative", samplePath: `${P}/narrative` },
   { id: "proposals", samplePath: `${W}/proposals` },
   { id: "world-art-direction", samplePath: `${W}/art-direction` },
   { id: "art-direction-proposal", samplePath: `${W}/art-direction/propose` },
@@ -47,11 +51,12 @@ export const SCREENS: ScreenEntry[] = [
   { id: "character-looks", samplePath: `${W}/cast/maren-kest/looks` },
   { id: "replace-main-photo", samplePath: `${W}/cast/maren-kest/main-photo` },
   { id: "model-sheet-generate", samplePath: `${W}/cast/maren-kest/model-sheet` },
-  { id: "voice-picker", samplePath: `${W}/cast/maren-kest/voice` },
+  { id: "character-voice", samplePath: `${W}/cast/maren-kest/voice` },
   { id: "new-character", samplePath: `${W}/cast/new` },
   { id: "locations", samplePath: `${W}/locations` },
   { id: "location-detail", samplePath: `${W}/locations/the-vigil` },
   { id: "location-reference", samplePath: `${W}/locations/the-vigil/reference` },
+  { id: "new-faction", samplePath: `${W}/factions/new` },
   { id: "new-location", samplePath: `${W}/locations/new` },
   { id: "props", samplePath: `${W}/props` },
   { id: "factions", samplePath: `${W}/factions` },
@@ -68,6 +73,8 @@ export const SCREENS: ScreenEntry[] = [
   // Production
   { id: "production-dashboard", samplePath: P },
   { id: "production-cast", samplePath: `${P}/cast` },
+  // The production's own shelf, inside the production (design 134).
+  { id: "production-artifacts", samplePath: `${P}/artifacts` },
   // Talking and looking are two screens (turn 88): the thread, then what it settled.
   { id: "production-chat", samplePath: `${P}/story` },
   { id: "story-overview", samplePath: `${P}/overview` },
@@ -77,9 +84,12 @@ export const SCREENS: ScreenEntry[] = [
   // The chapter, opened (turn 126); the fixture's story production is chapterless, so the sample
   // path renders the opening state and the chrome around it.
   { id: "chapter", samplePath: `${P}/story/chapters/neap` },
+  // The audiobook's door (turn 146): the fixture's story production has no chapters, so the
+  // sample path renders the head, the seg and the empty state under them.
+  { id: "audiobook", samplePath: `${P}/story/audiobook` },
   { id: "scenes", samplePath: `${P}/scenes` },
   { id: "scene-detail", samplePath: `${P}/scenes/sc_04` },
-  { id: "shot-sheet", samplePath: `${P}/scenes/sc_04/shots/sh_12` },
+  { id: "shot", samplePath: `${P}/scenes/sc_04/shots/sh_12` },
   { id: "generate-workspace", samplePath: `${P}/generate` },
   { id: "voice-line-dialog", samplePath: `${P}/generate/voice-line` },
   { id: "cut", samplePath: `${P}/cut` },

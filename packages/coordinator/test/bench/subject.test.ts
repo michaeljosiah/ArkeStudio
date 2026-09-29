@@ -873,6 +873,7 @@ describe("the Stage's handoff to the bench", () => {
         { t: 4, p: [0, 1.55, 1.8], l: [0, 1.25, 0], anchor: "maren-kest", track: "maren-kest" },
       ],
       playblast: {
+        evaluatorVersion: 2,
         artifactId: "ar_01J8G0000000000000000000A1",
         openingFrameArtifactId: "ar_01J8G0000000000000000000A2",
         version: 2,
@@ -908,8 +909,19 @@ describe("the Stage's handoff to the bench", () => {
     assert.match(video.prefill.composer.brief, /Camera move, dolly, blocked out on the stage \(2 keys\)\./);
     // A figure that holds still faces the lens, so a camera out along +Z stands in front of her.
     assert.match(video.prefill.composer.brief, /0\.0s — 3\.0m in front of Maren Kest, 1\.55m high, aimed at Maren Kest/);
-    // No route maps a video reference yet, so the tile shows and says it is not riding.
+    // This test route takes images but no video; the tile remains inactive.
     assert.equal(video.prefill.composer.activeTokens.includes(playblast!.token), false);
+
+    delete shot.staging.playblast!.evaluatorVersion;
+    const legacy = await prepareBenchSubject(world, {
+      productionId: "saltlight", sceneId: "sc_04", subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video", settings: null, manifest: MANIFEST, sources: sourceReader,
+    });
+    assert.ok(legacy.ok);
+    if (!legacy.ok) return;
+    assert.equal(legacy.prefill.references.some(reference => reference.label?.startsWith("Staging")), false,
+      "a playblast from the previous evaluator must be re-exported before Bench admits it (#1128)");
+    shot.staging.playblast!.evaluatorVersion = 2;
 
     const stagedFigure = shot.staging.cast?.[0];
     assert.ok(stagedFigure);
@@ -941,7 +953,7 @@ describe("the Stage's handoff to the bench", () => {
     assert.ok(stale.ok);
     if (!stale.ok) return;
     assert.equal(stale.prefill.references.some((reference) => reference.label?.includes("opening frame")), false);
-    assert.match(stale.prefill.references.find((reference) => reference.kind === "video")?.detail ?? "", /stale/);
+    assert.equal(stale.prefill.references.some((reference) => reference.kind === "video"), false);
 
     // The ordinary handoff is a still, and a still has no move to describe.
     const image = await prepareBenchSubject(world, {

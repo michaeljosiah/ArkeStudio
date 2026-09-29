@@ -27,11 +27,12 @@ import type { WorldStore } from "./store.js";
  */
 
 /** Read `bible.md`, or the empty bible. A world without one is ordinary, not broken. */
-export async function readBible(dir: string): Promise<WorldBible> {
+export async function readBible(dir: string, signal?: AbortSignal): Promise<WorldBible> {
   let raw: string;
   try {
-    raw = await readFile(toExtendedLength(join(dir, fromPortable(BIBLE_PATH))), "utf8");
+    raw = await readFile(toExtendedLength(join(dir, fromPortable(BIBLE_PATH))), { encoding: "utf8", signal });
   } catch {
+    signal?.throwIfAborted();
     // Every world made before the Bible existed is here, and so is every world whose author has not
     // started one. Mirrors SPEC-002 R-1's treatment of a folder with no world.json: absent is
     // ignored, never reported as corrupt.

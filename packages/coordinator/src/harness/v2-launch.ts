@@ -1,6 +1,8 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import type { HarnessEngine, LocalHarnessModel } from "@arke-studio/contracts";
 import {
+  buildProfileConfigV2,
   credentialEnvPatch,
   discoverPreferredHarness,
   meetsV2Gate,
@@ -17,14 +19,21 @@ import {
   makeSdkProbe,
   resolveClaudeHarness,
   sdkQuery,
+  sdkModels,
   type ClaudeDiscoveryOptions,
   type RunProbeTurn,
 } from "@arke-studio/adapter-claude";
+import { CodexAdapter, codexCredentialEnv, discoverCodex, type CodexDiscoveryOptions } from "@arke-studio/adapter-codex";
+import { ArkeAdapter } from "@arke-studio/adapter-arke";
 import { ChildSupervisor, type SupervisorDeps } from "../supervisor.js";
+import { atomicWriteFile } from "../world/atomic.js";
+import { ownedChildHooks } from "./owned-child.js";
+import { localModelPolicy } from "../setup/catalogue.js";
 
-// This package owns shared desktop/dev composition, so both adapters are runtime dependencies.
+// This package owns shared desktop/dev composition, so every adapter is a runtime dependency.
 // Keep concrete adapter imports here; Coordinator itself consumes the HarnessAdapter contract.
 export { describeClaudeAvailability } from "@arke-studio/adapter-claude";
+export { describeCodexAvailability } from "@arke-studio/adapter-codex";
 
 /**
  * Confinement verdicts survive across assemblies, keyed on binary and version, so a user who
@@ -105,9 +114,18 @@ export function harnessProfileDir(appRoot: string): string {
   return join(appRoot, "harness", "profile");
 }
 
+/**
+ * The profile-level config inside that redirected profile, where the local models are listed
+ * (issue 1247). `XDG_CONFIG_HOME` is what v2 resolves `opencode.json` against, and the env
+ * above points it here — so this file is Arke's, never the person's own OpenCode config.
+ */
+export function harnessProfileConfigPath(appRoot: string): string {
+  return join(harnessProfileDir(appRoot), ".config", "opencode", "opencode.json");
+}
+
 /** What Settings names about the wired harness (issue 327 §9, SPEC-005 R-1). */
 export interface AssembledHarnessInfo {
-  generation: "v2" | "v1" | "claude";
+  generation: "v2" | "v1" | "claude" | "codex" | "arke";
   source: "configured" | "path" | "bundled";
   version: string | null;
   beta: boolean;
@@ -127,6 +145,8 @@ export function harnessInfoFrom(harness: DiscoveredHarness): AssembledHarnessInf
 
 export interface AssembleHarnessOptions {
   appRoot: string;
+  /** Authoritative resolved Settings/environment selection. */
+  engine?: HarnessEngine;
   /** Ledger for orphan sweeps; absent in bare test hosts. */
   deps?: SupervisorDeps;
   preferV1?: boolean;
@@ -150,6 +170,13 @@ export interface AssembleHarnessOptions {
      */
     cache?: ConfinementCache;
   };
+  codex?: CodexDiscoveryOptions & { enabled?: boolean };
+  /**
+   * Arke's own local harness (issue 1247). No discovery and no process: it is part of the app
+   * and talks to Ollama on this machine. `maxContextTokens` is the window a session asks for;
+   * `baseUrl` moves it to another loopback port (the adapter refuses anything else).
+   */
+  arke?: { enabled?: boolean; maxContextTokens?: number; baseUrl?: string };
   /** The adapter's trace sink — logs/harness.jsonl at the host's root. */
   onTrace?: (line: Record<string, unknown>) => void;
 }
@@ -157,10 +184,17 @@ export interface AssembleHarnessOptions {
 export interface AssembledHarness {
   harness: DiscoveredHarness | null;
   isV2: boolean;
-  supervisor: ChildSupervisor;
-  adapter: OpenCodeAdapter | OpenCodeV2Adapter | ClaudeAdapter | null;
+  supervisor: ChildSupervisor | null;
+  adapter: OpenCodeAdapter | OpenCodeV2Adapter | ClaudeAdapter | CodexAdapter | ArkeAdapter | null;
   harnessInfo?: AssembledHarnessInfo;
+  unavailableReason?: string;
   relaunchHarness: (credentials: Record<string, string | undefined>) => Promise<void>;
+  /**
+   * Put the local runtime's models in front of the harness (issue 1247). Present only for a
+   * v2 launch, whose redirected profile is Arke's to write; Claude, Codex and a v1 on PATH
+   * read their own configuration, and a writer for them would be writing into the person's.
+   */
+  publishLocalModels?: (models: readonly LocalHarnessModel[]) => Promise<void>;
   /**
    * What happened, in lines the host prints under its own prefix — states and refusals
    * stated once here so desktop and dev can never describe the same discovery differently.
@@ -177,7 +211,73 @@ export interface AssembledHarness {
  * after review found the two copies already drifting in their first week.
  */
 export async function assembleHarness(opts: AssembleHarnessOptions): Promise<AssembledHarness> {
-  let claudeRefusal: string | null = null;
+  const engine = opts.engine ?? (opts.arke?.enabled ? "arke" : opts.codex?.enabled ? "codex" : opts.claude?.enabled ? "claude" : "opencode");
+  if (engine === "arke") {
+    // Nothing to discover, supervise or authenticate: the adapter reaches Ollama on loopback and
+    // says itself, through readiness, whether it is answering. Only a loopback address is ever
+    // used here — a remote runtime would be an explicit setting, and there is none yet.
+    const adapter = new ArkeAdapter({
+      ...(opts.arke?.baseUrl !== undefined ? { baseUrl: opts.arke.baseUrl } : {}),
+      ...(opts.arke?.maxContextTokens !== undefined ? { maxContextTokens: opts.arke.maxContextTokens } : {}),
+      // What the setup catalogue knows about a model Arke installed: its publisher's sampling,
+      // and whether it waits to be chosen by name (issue 1289).
+      modelOptions: (model) => localModelPolicy(model)?.sampling,
+      explicitOnly: (model) => localModelPolicy(model)?.explicitChoiceOnly === true,
+      ...(opts.onTrace ? { onTrace: opts.onTrace } : {}),
+    });
+    return {
+      harness: null, isV2: false, supervisor: null, adapter,
+      harnessInfo: { generation: "arke", source: "bundled", version: null, beta: false },
+      // No credentials anywhere in this lane: a saved key changes nothing it does.
+      relaunchHarness: async () => {},
+      logLines: ["Arke local harness: Ollama on this machine, confined Arke tools"],
+    };
+  }
+  // A selected bring-your-own engine has its own lifecycle. An unrelated OpenCode installation
+  // must neither gate initialization nor be launched as an invisible fallback after failure.
+  if (engine === "claude") {
+    const availability = await resolveClaudeHarness({
+      discovery: opts.claude,
+      cache: opts.claude?.cache ?? claudeVerdicts,
+      runTurn: opts.claude?.runTurn ?? makeSdkProbe(),
+    });
+    if (!availability.available) return {
+      harness: null, isV2: false, supervisor: null, adapter: null,
+      unavailableReason: availability.reason, relaunchHarness: async () => {},
+      logLines: [`Claude Code unavailable — ${availability.reason}`],
+    };
+    return {
+      harness: null, isV2: false, supervisor: null,
+      adapter: new ClaudeAdapter({ command: availability.command, runQuery: sdkQuery, discoverModels: sdkModels,
+        ...(opts.onTrace ? { onTrace: opts.onTrace } : {}),
+      }),
+      harnessInfo: { generation: "claude", source: availability.source, version: availability.version, beta: false },
+      relaunchHarness: async () => {},
+      logLines: [`Claude Code ${availability.version ?? "(unknown version)"}: ${availability.source}, ` +
+        `confinement verified, authenticated by ${credentialSummary(availability.apiKeySource)}`],
+    };
+  }
+  if (engine === "codex") {
+    const discovered = await discoverCodex(opts.codex);
+    if (!discovered.found) {
+      const reason = discovered.reason ?? "Codex was not found on this machine.";
+      return { harness: null, isV2: false, supervisor: null, adapter: null, unavailableReason: reason,
+        relaunchHarness: async () => {}, logLines: [`Codex unavailable — ${reason}`] };
+    }
+    const found = discovered.found;
+    const adapter = new CodexAdapter({ command: found.command, args: found.args, env: codexCredentialEnv({}),
+      ...ownedChildHooks("codex", found.command, opts.deps, opts.onTrace),
+      ...(opts.onTrace ? { onTrace: opts.onTrace } : {}),
+    });
+    return {
+      harness: null, isV2: false, supervisor: null, adapter,
+      harnessInfo: { generation: "codex", source: found.source, version: found.version, beta: false },
+      // This lane uses Codex's own login. The shared environment policy removes inherited
+      // media keys at launch; saving an Arke media key must not change its billing identity.
+      relaunchHarness: async () => {},
+      logLines: [`Codex ${found.version}: ${found.source}, private app-server with confined Arke tools`],
+    };
+  }
   const harness = await discoverPreferredHarness({
     ...(opts.preferV1 !== undefined ? { preferV1: opts.preferV1 } : {}),
     ...(opts.v1 ? { v1: opts.v1 } : {}),
@@ -203,47 +303,6 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     opts.deps ?? {},
   );
 
-  // The bring-your-own lane, taken only when asked for. Discovery above has already run and is
-  // cheap; the supervisor exists but has not spawned, and on this path it never will.
-  if (opts.claude?.enabled) {
-    const availability = await resolveClaudeHarness({
-      discovery: opts.claude,
-      cache: opts.claude.cache ?? claudeVerdicts,
-      runTurn: opts.claude.runTurn ?? makeSdkProbe(),
-    });
-    if (availability.available) {
-      return {
-        harness,
-        isV2,
-        supervisor,
-        adapter: new ClaudeAdapter({
-          command: availability.command,
-          runQuery: sdkQuery,
-          ...(opts.onTrace ? { onTrace: opts.onTrace } : {}),
-        }),
-        harnessInfo: {
-          generation: "claude",
-          source: availability.source,
-          version: availability.version,
-          beta: false,
-        },
-        // Nothing to relaunch and no key to deliver: Claude Code authenticates from the user's
-        // own login, which is the whole reason this lane carries no credential path at all.
-        relaunchHarness: async () => {},
-        // The credential is named because the surprising case is silent: a stray
-        // ANTHROPIC_API_KEY in somebody's environment outranks their subscription and bills
-        // them per token for work they believed was already paid for.
-        logLines: [
-          `Claude Code ${availability.version ?? "(unknown version)"}: ${availability.source}, ` +
-            `confinement verified, authenticated by ${credentialSummary(availability.apiKeySource)}`,
-        ],
-      };
-    }
-    // Asked for and not usable is a statement, not a silence (SPEC-005 R-4). OpenCode continues
-    // below, because falling back to the harness that ships is better than authoring nothing.
-    claudeRefusal = availability.reason;
-  }
-
   const baseUrl = () => `http://127.0.0.1:${supervisor.port ?? 0}`;
   const adapter = harness
     ? isV2
@@ -256,7 +315,6 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     : null;
 
   const logLines: string[] = [];
-  if (claudeRefusal) logLines.push(`Claude Code asked for but not used — ${claudeRefusal}`);
   if (harness) {
     logLines.push(
       `OpenCode ${harness.generation}: ${harness.discovery.source} (${harness.discovery.version ?? "unknown version"})${isV2 ? " [beta]" : ""}`,
@@ -295,6 +353,10 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     // The PATCH form, deliberately: it names every managed variable, so a cleared key is a
     // deletion the merge honours rather than an omission it preserves.
     relaunchHarness: (credentials) => supervisor.updateEnv(credentialEnvPatch(credentials)),
+    ...(isV2 ? {
+      publishLocalModels: (models: readonly LocalHarnessModel[]) =>
+        atomicWriteFile(harnessProfileConfigPath(opts.appRoot), `${JSON.stringify(buildProfileConfigV2(models), null, 2)}\n`),
+    } : {}),
     logLines,
   };
 }

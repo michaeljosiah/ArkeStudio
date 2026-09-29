@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { basePictureTrack, masterAudioBinding, masterPerformanceShotIds, planCharacterAudio, characterAudioInstructions,
+import { basePictureTrack, masterAudioBinding, planCharacterAudio, characterAudioInstructions,
   FrozenMasterAudioSchema, newId, orderedShots, storyTimelineFingerprint, ulid } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -58,9 +58,10 @@ it("master playback freezes physical soundtrack time across picture trims and la
   const review = await prepareMasterAudioReference(store, tools, binding);
   const scene = production().scenes.find(s => orderedShots(s).some(shot => shot.id === shotId))!;
   const model = SHIPPED_MANIFEST.models.find(m => m.id === "seedance-2.0-fast")!;
-  const input = { scene, shots: orderedShots(scene).filter(s => s.id === shotId), sheets: store.getBundle().sheets, kits: [], model, imageCount: 1,
-    requiredMasterShots: masterPerformanceShotIds(production()) };
-  assert.match(planCharacterAudio(input).problems.join(" "), /prepared master slice/);
+  const input = { scene, shots: orderedShots(scene).filter(s => s.id === shotId), sheets: store.getBundle().sheets, kits: [], model, imageCount: 1 };
+  // The clip came from a read, and no slice is supplied: nothing is refused (SPEC-044; codex
+  // round 1). The scene's cast voice rides by default; a slice rides when one is supplied.
+  assert.deepEqual(planCharacterAudio(input).problems, []);
   const masterReferences = await resolveMasterAudioReferences(store, initial.meta.id, scene.id, [{ operationId: review.operationId,
     hash: review.provenance.outputHash, binding, warningCodes: Object.values(review.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code), cloudBasis: "licensed" }], ulid());
   assert.equal(FrozenMasterAudioSchema.safeParse({ ...masterReferences[0], intent: "voice-reference" }).success, false);

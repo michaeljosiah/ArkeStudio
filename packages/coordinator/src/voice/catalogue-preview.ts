@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { join, relative, isAbsolute } from "node:path";
-import { estimateMicroUsd, NARRATOR_PREVIEW_TEXT, VOICE_PREVIEW_SCOPE, supportsVoiceUse,
+import { estimateSpeechMicroUsd, NARRATOR_PREVIEW_TEXT, VOICE_PREVIEW_SCOPE, supportsVoiceUse,
   voiceFormatForModel, voiceTargetKey, type VoiceCandidate, type ModelManifest, type DomainEvent, type Job } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import type { SidecarLike } from "./service.js";
@@ -43,7 +43,7 @@ export class CataloguePreviewService {
         if (approvedVoiceSample(voice.previewUrl)) preview = { kind: "sample", microUsd: 0 };
         else if (voice.provider === "kokoro" && this.deps.sidecar) preview = { kind: "generate", microUsd: 0 };
         else if (model && this.deps.enqueue && model.capability === "voice-tts") {
-          preview = { kind: "generate", microUsd: estimateMicroUsd(model, { characters: NARRATOR_PREVIEW_TEXT.length }) };
+          preview = { kind: "generate", microUsd: estimateSpeechMicroUsd(model, NARRATOR_PREVIEW_TEXT) };
         }
       }
       return { ...voice, preview };
@@ -92,7 +92,7 @@ export class CataloguePreviewService {
         this.result(input.requestId, { status: "ready", file });
         return;
       }
-      const price = sample || voice.provider === "kokoro" ? 0 : model ? estimateMicroUsd(model, { characters: NARRATOR_PREVIEW_TEXT.length }) : Infinity;
+      const price = sample || voice.provider === "kokoro" ? 0 : model ? estimateSpeechMicroUsd(model, NARRATOR_PREVIEW_TEXT) : Infinity;
       if (price > input.maxMicroUsd) throw new Error("The preview price changed. Refresh the catalogue before generating it.");
       if (sample) {
         const response = await (this.deps.fetch ?? fetch)(voice.previewUrl!, {

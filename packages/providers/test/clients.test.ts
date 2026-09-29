@@ -25,6 +25,107 @@ function fakeFetch(routes: Array<{ match: RegExp; status: number; body?: unknown
   };
 }
 
+it("Ollama unload queries actual loaded models and awaits keep_alive=0 for each", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const client = new OllamaClient(async (url, init) => {
+    assert.ok(init?.signal, "handover requests are bounded");
+    if (url.endsWith("/api/ps")) return Response.json({ models: [{ name: "writing-a" }, { name: "writing-b" }] });
+    requests.push(JSON.parse(String(init?.body)));
+    return Response.json({ done: true });
+  });
+  await client.unload();
+  assert.deepEqual(requests, [
+    { model: "writing-a", keep_alive: 0, stream: false },
+    { model: "writing-b", keep_alive: 0, stream: false },
+  ]);
+  await assert.rejects(new OllamaClient(async () => Response.json({})).unload(), /loaded models/);
+});
+
+it("Ollama remembers what it dispatched, and an unload given `only` leaves every other loaded model alone (issue 1289)", async () => {
+  const unloaded: string[] = [];
+  const client = new OllamaClient(async (url, init) => {
+    if (url.endsWith("/api/ps")) return Response.json({ models: [{ name: "gemma4:12b" }, { name: "another-app:7b" }] });
+    const body = JSON.parse(String(init?.body)) as { model: string; keep_alive?: number };
+    if (body.keep_alive === 0) unloaded.push(body.model);
+    return Response.json({ response: "ok", done: true });
+  });
+  await client.submit("", { model: "gemma4:12b", capability: "llm", params: {} } as never);
+  assert.deepEqual([...client.usedModels()], ["gemma4:12b"]);
+  await client.unload(undefined, client.usedModels());
+  assert.deepEqual(unloaded, ["gemma4:12b"], "another application's model stays loaded");
+});
+
+it("Ollama residency retries late reports and distinguishes processor fallback from missing data", async () => {
+  for (const [first, second, expected] of [
+    [0, 100, "gpu"], [0, 0, "cpu"], [undefined, undefined, "unknown"],
+  ] as const) {
+    let reads = 0;
+    let pauses = 0;
+    const client = new OllamaClient(async () => Response.json({ models: [
+      { name: "gemma4:12b", size: 100, size_vram: reads++ === 0 ? first : second },
+    ] }), "http://127.0.0.1:11434", async () => { pauses += 1; });
+    assert.equal((await client.residency())[0]?.state, expected);
+    assert.equal(reads, 2);
+    assert.equal(pauses, 1);
+  }
+  const client = new OllamaClient(async () => Response.json({ models: [{ name: "gemma4:12b", size: 100, size_vram: 40 }] }));
+  assert.equal((await client.residency())[0]?.state, "mixed");
+});
+
+it("Ollama lists what is pulled with what each model can do, and leaves out what cannot complete (issue 1247)", async () => {
+  const shown: Record<string, unknown> = {
+    "gemma4:12b": { capabilities: ["completion", "tools", "vision"], model_info: { "general.architecture": "gemma4", "gemma4.context_length": 131072 } },
+    "nomic-embed-text": { capabilities: ["embedding"], model_info: {} },
+    "old-model": { model_info: { "general.architecture": "llama" } },
+  };
+  const client = new OllamaClient(async (url, init) => {
+    assert.ok(init?.signal, "listing requests are bounded");
+    if (url.endsWith("/api/tags")) return Response.json({ models: Object.keys(shown).map((name) => ({ name })).concat([{ name: "broken" }]) });
+    const { model } = JSON.parse(String(init?.body)) as { model: string };
+    return model === "broken" ? new Response("boom", { status: 500 }) : Response.json(shown[model]);
+  });
+  assert.deepEqual(await client.listModels(), [
+    { id: "gemma4:12b", contextLength: 131072, tools: true, vision: true },
+    // No capabilities stated: listed, tools assumed, nothing about images claimed.
+    { id: "old-model", tools: true, vision: false, assumed: true },
+    // A show that fails still lists the model — hidden is worse than refused.
+    { id: "broken", tools: true, vision: false, assumed: true },
+  ]);
+  await assert.rejects(new OllamaClient(fakeFetch([])).listModels(), "Ollama down is an error: nothing pulled and not yet answering must not read the same");
+  // An answer that is not a model list is not an empty one.
+  for (const body of [{}, null, { models: "none" }]) {
+    await assert.rejects(new OllamaClient(async () => Response.json(body)).listModels(), /did not return a model list/);
+  }
+  assert.deepEqual(await new OllamaClient(async () => Response.json({ models: [] })).listModels(), [], "a model list with nothing in it is nothing pulled");
+});
+
+it("Ollama's listing pass ends at one deadline, listing what the shows never answered for", async () => {
+  const hanging = new OllamaClient(async (url, init) => {
+    if (url.endsWith("/api/tags")) return Response.json({ models: [{ name: "a" }, { name: "b" }, { name: "c" }, { name: "d" }, { name: "e" }, { name: "f" }] });
+    // A show that answers only when the deadline cancels it: the whole pass must still return.
+    await new Promise<void>((resolve) => init?.signal?.addEventListener("abort", () => resolve(), { once: true }));
+    throw new Error("aborted");
+  }, "http://127.0.0.1:11434", async () => {}, 50);
+  const started = Date.now();
+  const listed = await hanging.listModels();
+  assert.ok(Date.now() - started < 2_000, "six hanging shows must not cost six timeouts");
+  assert.deepEqual(listed.map((m) => m.id), ["a", "b", "c", "d", "e", "f"]);
+  assert.ok(listed.every((m) => m.tools && !m.vision && m.contextLength === undefined && m.assumed === true), "cut off by the deadline: listed with assumed capabilities");
+});
+
+it("the provider registry forwards the Ollama listing through the capture wrapper (issue 1247)", async () => {
+  const clients = createProviderClients({
+    fetch: async (url) => {
+      if (String(url).endsWith("/api/tags")) return Response.json({ models: [{ name: "gemma4:12b" }] });
+      return Response.json({ capabilities: ["completion", "tools"], model_info: { "general.architecture": "gemma4", "gemma4.context_length": 131072 } });
+    },
+  });
+  // The wrapper rebuilds the client from a method list; a method left off it is one the
+  // coordinator never sees, which is exactly how this listing first shipped unreachable.
+  assert.deepEqual(await clients.ollama!.listModels!(), [{ id: "gemma4:12b", contextLength: 131072, tools: true, vision: false }]);
+  assert.equal(clients.openai!.listModels, undefined, "only a local runtime lists for the harness");
+});
+
 describe("provider HTTP failures preserve the provider's reason", () => {
   it("reads a 403 JSON detail before raising the provider fault", async () => {
     const detail = "User is locked. Reason: Exhausted balance. Top up at fal.ai/dashboard/billing.";
@@ -723,7 +824,7 @@ describe("fal motion references ride in the field the row names (issue 852)", ()
     // Seedance has a reference route and publishes video seconds, but names no field for the
     // clip — the exact row the budget's field gate exists for.
     await assert.rejects(
-      () => submit({ model: "seedance-2.0", params: { prompt: "x", references: [], durationSec: 5 } }),
+      () => submit({ model: "wan-2.7", params: { prompt: "x", references: [], durationSec: 5 } }),
       /names no field for a video reference/,
     );
     await assert.rejects(
@@ -1762,5 +1863,42 @@ describe("the provider table and the registry cannot drift apart (issue 462)", (
     const artifacts = await clients.higgsfield!.fetchArtifacts("", "job-1");
     assert.equal(artifacts[0]?.contentType, "image/png");
     assert.deepEqual(scopes, [{ provider: "higgsfield", operation: "fetch-artifacts" }]);
+  });
+});
+
+describe("openai names what a 4xx said (issue 906)", () => {
+  // Read from a real founding build: the hub reported "image generation failed (HTTP 400)"
+  // about a safety refusal the author could have recomposed around, had anything said so.
+  const submit = (body: unknown) =>
+    new OpenAiClient(async () => new Response(JSON.stringify(body), { status: 400 })).submit("k", {
+      model: "gpt-image-2",
+      capability: "image",
+      params: { prompt: "x", references: ["references/a.png"] },
+      imageReferences: [{ name: "a.png", contentType: "image/png", data: Uint8Array.from([1]) }],
+    });
+
+  it("reports a moderation refusal as one, with the stage and what to do", async () => {
+    const refusal = {
+      error: {
+        message: "Your request was rejected by the safety system...",
+        type: "image_generation_user_error",
+        code: "moderation_blocked",
+        moderation_details: { moderation_stage: "output", categories: ["other"] },
+      },
+    };
+    await assert.rejects(submit(refusal), (error: Error & { submissionRejected?: boolean }) => {
+      assert.equal(error.submissionRejected, true, "still a witnessed rejection, never retried");
+      assert.match(error.message, /safety system refused the picture it made/);
+      assert.match(error.message, /recompose/);
+      assert.ok(!error.message.includes("HTTP 400"));
+      return true;
+    });
+  });
+
+  it("carries OpenAI's own message for any other rejection", async () => {
+    await assert.rejects(submit({ error: { message: "Unknown parameter: 'references'.", type: "invalid_request_error" } }), {
+      message: "openai: image generation failed (HTTP 400): Unknown parameter: 'references'.",
+    });
+    await assert.rejects(submit({ error: "rejected" }), { message: "openai: image generation failed (HTTP 400)" });
   });
 });

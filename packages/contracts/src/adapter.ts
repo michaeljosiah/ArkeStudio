@@ -5,10 +5,9 @@ import type { VendorIntegration } from "./vendor-auth.js";
 /**
  * The harness adapter interface, adopted from Arke (master spec §1.4, §17).
  *
- * Arke Studio drives one harness — OpenCode v2, headless — but targets this interface so the
- * harness is replaceable and so the mock behind SPEC-001 and the live server behind SPEC-005
- * are indistinguishable to the coordinator. Capabilities are probed from the live server's
- * OpenAPI document at init, never hard-coded to a version.
+ * Arke Studio drives the selected OpenCode, Claude Code or Codex harness through this interface.
+ * Each adapter owns its protocol and confinement; the coordinator consumes the same prepared
+ * session and normalized events regardless of which executable runs the work.
  */
 
 /** Capability flags an adapter advertises. Callers check before invoking gated methods. */
@@ -74,13 +73,21 @@ export interface Readiness {
 }
 
 /** One model in the harness backend's live catalog (capability: models). */
-export interface ModelInfo {
-  id: string;
-  provider: string;
-  displayName?: string;
+export const ModelInfoSchema = z.object({
+  id: z.string().min(1),
+  provider: z.string().min(1),
+  displayName: z.string().optional(),
   /** The model this provider would use if nobody chose — shown first, marked as such. */
-  isDefault?: boolean;
-}
+  isDefault: z.boolean().optional(),
+  /** Exact aliases advertised by this harness, never guessed from display names. */
+  aliases: z.array(z.string().min(1)).optional(),
+  /** Absent means unknown; an explicit text-only model cannot inspect a Stage preview. */
+  inputModalities: z.array(z.enum(["text", "image"])).optional(),
+  inputTokenLimit: z.number().int().positive().optional(),
+  /** Whether the model calls tools, when the harness states it. Absent means unknown, and unknown is offered. */
+  tools: z.boolean().optional(),
+}).strict();
+export type ModelInfo = z.infer<typeof ModelInfoSchema>;
 
 export const PermissionVerb = z.enum(["once", "always", "reject"]);
 export type PermissionVerb = z.infer<typeof PermissionVerb>;
@@ -249,6 +256,8 @@ export interface HarnessAdapter {
   /** Probe the server, derive capabilities, build initial state. Idempotent. */
   init?(): Promise<void>;
   readiness(): Readiness;
+  /** Changes when a process or its catalog metadata is replaced, including recovery between health polls. */
+  lifecycleRevision?(): number;
   /** Stop anything the adapter started. SHALL NOT stop a server it did not start. */
   dispose?(): Promise<void>;
 
@@ -283,21 +292,41 @@ export interface HarnessAdapter {
   // ---- core ----
   createSession(input: CreateSessionInput): Promise<SessionRef>;
   /**
-   * The input-token window of the model this harness answers with, when it can name one (§8.5).
+   * A safe input-token window when the adapter can name one without a selected model (§8.5).
+   * Model-specific limits belong on listModels() entries. This fallback must not return the
+   * last session's window when another model may be selected; unknown limits use a floor.
    *
-   * Optional because an adapter may not know, and a caller that cannot find out budgets from a
-   * floor instead. Studio does not choose the model — the session config carries no `model` key —
-   * so this is the only place the real limit can come from.
+   * Given a session, the window of the model that session was pinned to, where the adapter
+   * knows it (issue 1247): a budget drawn from the default model's window bounds a session
+   * running on a different one wrongly in both directions.
    */
-  knownInputTokenLimit?(): number | null;
+  knownInputTokenLimit?(sessionId?: string): number | null;
+  /**
+   * What a session for `agent` spends of a `window`-token window before the person's message:
+   * the role's instructions, the tool schemas it is sent and the room kept for the reply, in the
+   * adapter's own count (issue 1265). For a harness that owns its prompt and checks the fit
+   * itself — a caller sizing a message by some other rule can be refused before the model is
+   * ever asked. Absent where the harness keeps its own prompt out of sight; callers then fall
+   * back to their own reserve.
+   */
+  promptReserveTokens?(agent: string, window: number): number | undefined;
   /** Synchronous send: resolves when the turn completes. */
   sendMessage(input: SendMessageInput): Promise<SendReceipt>;
   /** Fire-and-watch: must not block while the turn runs. */
   dispatchAsync(input: SendMessageInput): Promise<SendReceipt>;
+  interrupt?(sessionId: string): Promise<void>;
+  usageTokens?(sessionId: string): number;
 
   // ---- gated ----
   /** Async iterator of normalised, schema-validated harness events (capability: events). */
   streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent>;
+  /**
+   * Stop what a session is doing now, from outside its turn (turn 129, codex on PR 907): a Stop
+   * on a derivation, a world closing, or shutdown must reach the model's generation and not only
+   * the listener, or a stopped run goes on spending until the adapter is disposed. Optional,
+   * because a mock has nothing to stop; a caller treats absence as a stop that could not reach.
+   */
+  interrupt?(sessionId: string): Promise<void>;
   listModels?(): Promise<ModelInfo[]>;
   /** Adapter-owned action vocabulary checked against the exact session's captured confinement. */
   assessPermission?(request: PermissionRequest): PermissionAssessment;

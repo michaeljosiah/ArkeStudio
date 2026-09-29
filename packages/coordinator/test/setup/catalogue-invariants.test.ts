@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { COMFYUI_VERSION_FLOOR, compareComfyUiVersions } from "@arke-studio/contracts";
-import { COMFYUI_RECIPES } from "@arke-studio/providers";
+import { COMFYUI_RECIPES, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { COMFYUI_VERSION, SETUP_CATALOGUE } from "../../src/setup/catalogue.js";
 
 /**
@@ -11,6 +11,22 @@ import { COMFYUI_VERSION, SETUP_CATALOGUE } from "../../src/setup/catalogue.js";
  * range no engine satisfies, labelling every usable engine untested.
  */
 describe("catalogue invariants", () => {
+  it("Ollama downloads provide the exact model used by dispatch (SPEC-033 R-39)", () => {
+    for (const entry of SETUP_CATALOGUE) {
+      if (entry.engine !== "ollama" || entry.spec.kind !== "pull") continue;
+      assert.equal(entry.optional, true, `${entry.id} must be an explicit download`);
+      assert.ok(entry.requires?.includes("ollama-runtime"));
+      assert.ok(entry.provides?.length, `${entry.id} must make a manifest model available`);
+      for (const id of entry.provides!) {
+        const model = SHIPPED_MANIFEST.models.find((row) => row.id === id);
+        assert.ok(model, `${entry.id} provides unknown model ${id}`);
+        assert.equal(model.provider, "ollama");
+        assert.deepEqual(entry.spec.args, ["pull", model.providerModelId]);
+        assert.equal(entry.sizeMb, model.requires?.diskMb);
+      }
+    }
+  });
+
   it("the pinned managed runtime is at or above every shipped recipe's floor (R-21)", () => {
     for (const recipe of COMFYUI_RECIPES) {
       assert.equal(

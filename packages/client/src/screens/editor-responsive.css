@@ -1,0 +1,235 @@
+/* Turn 170 keeps the mouse editor intact from 1100; sheets keep their mounted draft. */
+.fy-editor-slot { display: contents; }
+.fy-editor-slot[hidden] { display: none; }
+.fy-editor-sheet-content { display: contents; }
+.fy-cut-export-compact { display: none; }
+.fy-cut-sheet .fy-page-sheet__head { border-bottom: 0; }
+.fy-cut-sheet .fy-page-sheet__foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.fy-cut-sheet .fy-cutside__panel { max-height: none; overflow: visible; }
+.fy-cut-sheet .fy-cutside__panel--arke { display: flex; flex: 1; min-height: 0; }
+.fy-cut-arke-sheet .fy-page-sheet__body { padding: 0; overflow: hidden; }
+.fy-cut-sheet .fy-arke { width: 100%; border: 0; }
+.fy-cut-menu { display: flex; flex-direction: column; }
+.fy-cut-menu__glyph { display: none; }
+.fy-cut-menu > .fy-clipmenu__item { min-height: 52px; border-radius: 0; justify-content: flex-start; font: 400 var(--text-md)/1.3 var(--font-sans); }
+.fy-cut-menu .fy-cut-menu__glyph { display: flex; align-items: center; }
+.fy-cut-menu > [data-action=split] { order: 1; }
+.fy-cut-menu > [data-action=duplicate] { order: 2; }
+.fy-cut-menu > [data-action=earlier] { order: 3; }
+.fy-cut-menu > [data-action=later] { order: 4; }
+.fy-cut-menu > [data-action=extract], .fy-cut-menu > .fy-clipmenu__note { order: 5; }
+.fy-cut-menu > [data-action=delete], .fy-cut-menu > [data-action=ripple] { order: 6; color: var(--destructive); }
+.fy-cut-menu > [role=menuitemcheckbox] { order: 7; }
+.fy-cut-menu > button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 52px; padding: 8px 0; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--foreground); text-align: left; font: var(--type-ui); }
+.fy-cut-menu > button:disabled, .fy-cut-menu > button[aria-disabled=true] { opacity: .4; }
+.fy-cut-lane-sheet .fy-page-sheet__body > button, .fy-cut-lane-sheet label { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; font: var(--type-ui); }
+.fy-cut-lane-sheet input { min-width: 0; min-height: 44px; max-width: 65%; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); }
+.fy-cut-lane-sheet .fy-page-sheet__body > button { padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--foreground); }
+.fy-cut-lane-sheet button[aria-pressed=true] { background: var(--foreground); color: var(--background); }
+
+@media (pointer: coarse) {
+  .fy-pictclip, .fy-typedclip { touch-action: pan-x; }
+  .fy-pictclip[aria-pressed=true], .fy-typedclip[aria-pressed=true] { touch-action: none; border: 0; box-shadow: inset 0 0 0 3px var(--timeline-selection); }
+  .fy-pictclip .fy-pictclip__grip, .fy-typedclip .fy-pictclip__grip { display: none; }
+  .fy-pictclip[aria-pressed=true] .fy-pictclip__grip, .fy-typedclip[aria-pressed=true] .fy-pictclip__grip { display: grid; place-items: center; width: 44px; opacity: 1; background: transparent; touch-action: none; }
+  .fy-pictclip__grip::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 16px; background: var(--timeline-selection); }
+  .fy-pictclip__grip--end::before { left: auto; right: 0; }
+  .fy-pictclip__grip > i { position: absolute; left: 6px; width: 3px; height: 22px; background: var(--media-overlay-bg); opacity: .6; }
+  .fy-pictclip__grip--end > i { left: auto; right: 6px; }
+  .fy-playhead__grab { left: -22px; width: 44px; }
+  .fy-trackbtns button { position: relative; width: 32px; height: 32px; font-size: var(--text-xs); }
+  .fy-trackbtns button::before { content: ""; position: absolute; inset: -6px; }
+  .fy-timeline__canvas { touch-action: pan-y; }
+  .fy-artpanel button, .fy-cutinspect button { min-height: 44px; }
+}
+
+@media (max-width: 1099px) {
+  .fy-production-app[data-cut-route] .fy-prodwrap { padding: 0; }
+  .fy-production-app[data-cut-route] .fy-production-drawer-toggle { top: 14px; left: 24px; min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; }
+  .fy-cutcols { display: grid; grid-template-columns: minmax(0,1fr) 324px 42px; grid-template-rows: 72px minmax(230px, min(42dvh, 378px)) 56px minmax(220px, 1fr) 120px; column-gap: 0; background: var(--background); }
+  .fy-cutmain, .fy-cutside { display: contents; }
+  .fy-cuthead { grid-area: 1 / 1 / 2 / 3; height: 72px; margin: 0 24px 0 0; padding: 0 0 0 140px; flex-wrap: nowrap; }
+  .fy-cuthead h1 { font-size: var(--text-2xl); }
+  .fy-cuthead__title { display: flex; flex-direction: row; align-items: baseline; gap: 8px; }
+  .fy-cuthead .ui-btn { min-height: 44px; font: var(--type-ui); }
+  .fy-cut-import, .fy-editorpane-toggle, .fy-cutside__head, .fy-cutnotice { display: none; }
+  .fy-cutpreview-wrap { grid-area: 2 / 1; padding: 0; margin: 0 20px 0 24px; height: auto; align-self: start; }
+  .fy-cutviewer { width: 100%; height: auto; aspect-ratio: var(--cut-aspect); border: 0; border-radius: 12px; animation: none; }
+  .fy-cutviewer > .fy-playbtn { display: none; }
+  .fy-cutviewer > .fy-viewer__tag { font: var(--type-meta); left: auto; right: 8px; bottom: 8px; height: 22px; display: flex; align-items: center; }
+  .fy-cutside__panel--inspect { grid-area: 2 / 2; max-height: 100%; height: fit-content; margin-right: 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); overflow: auto; }
+  .fy-cutinspect { padding: 14px 14px 10px; }
+  .fy-cutinspect h2 { margin: 0 0 10px; font: 600 var(--text-md)/1.3 var(--font-sans); }
+  .fy-cutinspect--compact > .fy-cutinspect__rows { display: grid; gap: 10px; border: 0; }
+  .fy-cutinspect--compact > .fy-cutinspect__eyebrow, .fy-cutinspect--compact > .fy-cutinspect__note, .fy-cutinspect--compact > .fy-cutinspect__rows:not(:has(.fy-framestep)) { display: none; }
+  .fy-framestep { min-height: 44px; padding: 0; border: 0; gap: 6px; align-items: center; }
+  .fy-framestep > span { width: 64px; font: var(--type-label); }
+  .fy-framestep > strong { display: grid; grid-template-columns: 44px minmax(0,1fr) 44px; gap: 6px; }
+  .fy-framestep .fy-trim__step, .fy-framestep .fy-timecode { width: 100%; min-width: 0; height: 44px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--foreground); font: 500 var(--text-sm)/1 var(--font-mono); }
+  .fy-cut-take-open { display: flex; align-items: center; gap: 10px; min-height: 48px; width: 100%; margin-top: 14px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--background); color: var(--foreground); font: var(--type-ui); text-align: left; }
+  .fy-cut-take-open > span { flex: 1; text-align: right; color: var(--muted-foreground); font: var(--type-meta); }
+  .fy-cutinspect .fy-cut-take-open { min-height: 48px; margin-top: 10px; }
+  .fy-cut-detail-actions { display: flex; gap: 8px; padding: 0 14px 14px; }
+  .fy-cut-detail-actions > button { flex: 1; min-height: 44px; }
+  .fy-cut-clock { grid-area: 3 / 1 / 4 / 3; display: flex; align-items: center; gap: 4px; height: 56px; padding: 0 24px; border-bottom: 1px solid var(--border); }
+  .fy-cut-clock > span { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .fy-cut-clock button { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--foreground); }
+  .fy-cut-clock button.fy-cut-clock__play { width: 52px; height: 52px; border-radius: 50%; background: var(--foreground); color: var(--background); }
+  .fy-cut-clock > code { font: var(--type-ui); font-family: var(--font-mono); }
+  .fy-cut-clock > code:last-child { font: var(--type-meta); color: var(--muted-foreground); }
+  .fy-cutmain > .fy-timeline { grid-area: 4 / 1 / 5 / 3; min-height: 0; margin: 0; border: 0; border-radius: 0; overflow: hidden; }
+  .fy-timeline__toolbar, .fy-cutfoot, .fy-keys { display: none; }
+  .fy-timeline__canvas > * { min-width: 0; }
+  .fy-track__label { width: 146px; padding: 0 6px; gap: 4px; background: var(--card); border-right: 1px solid var(--border); }
+  .fy-track__name { font: 600 12px/1 var(--font-sans); color: var(--foreground); }
+  .fy-track__icon svg { width: 14px; height: 14px; }
+  .fy-track__label--typed .fy-track__icon { margin-right: 0; }
+  .fy-track__label--typed .fy-track__icon svg { width: 10px; }
+  .fy-track__label--typed .fy-track__name { font-size: 11px; }
+  .fy-trackbtns { gap: 0; }
+  .fy-trackbtns button { position: relative; width: 32px; height: 32px; border-radius: 8px; font: 600 var(--text-xs)/1 var(--font-sans); }
+  .fy-trackbtns button::before { content: ""; position: absolute; inset: -6px; }
+  .fy-timeline__ruler { height: 34px; }
+  .fy-timeline__tick .fy-mono { font: var(--type-meta); }
+  .fy-cutcols[data-compact] .fy-track .fy-track__lane { height: 72px; }
+  .fy-cutcols[data-compact] [data-track=picture] .fy-track__lane { height: 132px; }
+  .fy-pictclip { top: 5px; bottom: 5px; height: auto; border-radius: 7px; }
+  .fy-pictclip .fy-cutseg__tag { inset: 5px auto auto 6px; height: 20px; padding: 0 6px; border-radius: 5px; font: var(--type-meta); }
+  .fy-pictclip[aria-pressed=true] .fy-cutseg__tag { left: 20px; }
+  .fy-typedclip { top: 6px; bottom: 6px; border-radius: 7px; font: var(--type-meta); }
+  .fy-track[data-track=dialogue] .fy-typedclip { border-color: var(--timeline-dialogue); background: color-mix(in srgb, var(--timeline-dialogue) 18%, var(--background)); }
+  .fy-track[data-track=ambience] .fy-typedclip { border-color: var(--timeline-ambience); background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--timeline-ambience) 55%, transparent) 0 2px, transparent 2px 5px) center/100% 56% no-repeat, color-mix(in srgb, var(--timeline-ambience) 12%, var(--background)); }
+  .fy-track:has(.fy-scenes) { height: 30px; }
+  .fy-scenes__band > span { display: inline-block; color: var(--foreground); font: var(--type-meta); }
+  .fy-track--new, .fy-track--new .fy-track__lane { height: 44px; }
+  .fy-cut-add-lane { min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--muted-foreground); font: var(--type-ui); white-space: nowrap; }
+  .fy-track--new .fy-track__empty { display: none; }
+  .fy-cut-tools { grid-area: 5 / 1 / 6 / 3; display: flex; align-items: flex-start; gap: 8px; padding: 10px 24px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); }
+  .fy-cut-tools > button { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 44px; height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--secondary); color: var(--foreground); font: var(--type-ui); white-space: nowrap; }
+  .fy-cut-tools > button:disabled { opacity: .4; }
+  .fy-cut-tools > button:nth-last-child(4) { margin-left: auto; }
+  .fy-cut-tools svg { width: 16px; height: 16px; }
+  .fy-cut-arke-rail { grid-area: 1 / 3 / 6 / 4; display: flex; align-items: center; flex-direction: column; gap: 22px; padding: 24px 0; border: 0; border-left: 1px solid var(--border); background: var(--background); color: var(--foreground); }
+  .fy-cut-arke-rail span { writing-mode: vertical-rl; color: var(--muted-foreground); font: var(--type-label); }
+  .fy-artpanel { width: 320px; }
+  .fy-artpanel button { min-height: 44px; }
+  .fy-artpanel__close { width: 44px; }
+  .fy-artpanel__filters { overflow-x: auto; flex-wrap: nowrap; }
+  .fy-artpanel__filters > button { flex: none; }
+  .fy-cut-sheet button, .fy-cut-sheet input, .fy-cut-sheet select { min-height: 44px; }
+  .fy-editordialog:has(.fy-exsheet) button { min-height: 44px; }
+  .fy-editordialog:has(.fy-exsheet) .fy-exsheet__chip { border-radius: 999px; }
+  .fy-cut-sheet .fy-takepick__row { flex-wrap: wrap; gap: 10px; padding: 12px 0; }
+  .fy-cut-export-desktop { display: none; }
+  .fy-cut-export-compact { display: inline; }
+}
+
+@media (max-width: 599px), (max-width: 1099px) and (max-height: 599px) and (orientation: landscape) {
+  .fy-production-app[data-cut-route][data-deep-phone] .fy-prod, .fy-production-app[data-cut-route][data-deep-phone] .fy-prodwrap { min-height: 0; padding: 0; }
+  .fy-cutcols[data-phone] { display: flex; flex-direction: column; gap: 0; height: 100%; }
+  .fy-cutcols[data-phone] .fy-cutmain { display: flex; flex: 1; min-height: 0; flex-direction: column; padding: 0; }
+  .fy-cutcols[data-phone] .fy-cuthead { display: none; }
+  .fy-cut-back { display: flex; align-items: center; gap: 6px; flex: none; height: 52px; padding: 0 12px 0 4px; background: var(--background); }
+  .fy-cut-back > button:first-child { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border: 0; background: transparent; color: var(--foreground); }
+  .fy-cut-back > div { flex: 1; min-width: 0; }
+  .fy-cut-back span, .fy-cut-back b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fy-cut-back > div span { font: var(--type-meta); color: var(--muted-foreground); }
+  .fy-cut-back b { font: 600 var(--text-md)/1.25 var(--font-sans); }
+  .fy-cut-back .ui-btn { min-height: 44px; font: var(--type-ui); }
+  .fy-cutcols[data-phone] .fy-cutpreview-wrap { flex: none; height: auto; width: 100%; padding: 0; margin: 0; }
+  .fy-cutcols[data-phone] .fy-cutviewer { border-radius: 0; width: 100%; }
+  .fy-cut-clock { flex: none; padding: 0 12px; }
+  .fy-cutcols[data-phone] .fy-timeline { flex: 1; min-height: 0; }
+  .fy-cutcols[data-phone] .fy-timeline__canvas { overflow-x: hidden; overflow-y: auto; touch-action: pan-y; }
+  .fy-cutcols[data-phone] .fy-track__label { width: 44px; padding: 0; justify-content: center; }
+  .fy-cutcols[data-phone] .fy-track__label > :not(.fy-cut-lane-open):not(.fy-cut-add-lane) { display: none; }
+  .fy-cut-lane-open { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--muted-foreground); }
+  .fy-cut-lane-open svg { width: 16px; height: 16px; }
+  .fy-cutcols[data-phone] .fy-track__lane, .fy-cutcols[data-phone] .fy-scenes { flex: none; width: calc((100vw - 44px) * var(--cut-zoom)); }
+  .fy-cutcols[data-phone] .fy-track__lane > *, .fy-cutcols[data-phone] .fy-scenes > *, .fy-cutcols[data-phone] .fy-timeline__tick { translate: var(--cut-pan) 0; }
+  .fy-cutcols[data-phone] .fy-track { min-height: 0; }
+  .fy-cutcols[data-phone] .fy-track .fy-track__lane { height: 56px; }
+  .fy-cutcols[data-phone] .fy-track[data-track=picture] .fy-track__lane { height: 96px; }
+  .fy-cutcols[data-phone] .fy-track:has(.fy-scenes) { height: 24px; }
+  .fy-cutcols[data-phone] .fy-scenes__band > span { translate: max(0px, calc(-1 * var(--cut-pan) - (100vw - 44px) * var(--cut-zoom) * var(--cut-band-start))) 0; }
+  .fy-cutcols[data-phone] .fy-timeline__ruler { width: calc(44px + (100vw - 44px) * var(--cut-zoom)); height: 30px; }
+  .fy-cutcols[data-phone] .fy-playhead { top: -30px; width: 2px; }
+  .fy-cutcols[data-phone] .fy-playhead::before { width: 14px; height: 10px; left: -6px; top: 0; border-radius: 0 0 7px 7px; }
+  .fy-cutcols[data-phone] .fy-playhead__grab { pointer-events: none; }
+  .fy-cutcols[data-phone] .fy-track--new, .fy-cutcols[data-phone] .fy-track--new .fy-track__lane { height: 44px; }
+  .fy-cutcols[data-phone] .fy-track--new .fy-track__label { width: 90px; justify-content: flex-start; padding-left: 14px; }
+  .fy-cut-tools { position: relative; flex: none; display: flex; justify-content: space-around; gap: 0; padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); }
+  .fy-cut-tools > button { display: grid; align-content: center; justify-items: center; gap: 4px; min-width: 60px; height: 52px; padding: 0; border: 0; border-radius: 0; background: transparent; font: var(--type-meta); }
+  .fy-cut-tools > button:nth-last-child(4) { margin-left: 0; }
+  .fy-cut-tools svg { width: 20px; height: 20px; }
+  .fy-cut-tools[data-picked] { background: color-mix(in srgb, var(--timeline-selection) 10%, var(--background)); margin-top: 30px; }
+  .fy-cut-tools__selection { position: absolute; left: 0; right: 0; top: -30px; height: 30px; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 8px; background: var(--timeline-selection); color: var(--media-overlay-bg); font: var(--type-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fy-cut-sheet { inset: min(137px, 23dvh) 0 0; }
+  .fy-cut-trim-sheet { top: min(233px, 38dvh); }
+  .fy-cut-trim-sheet .fy-page-sheet__body { padding-top: 0; }
+  .fy-cut-trim-sheet .fy-cutinspect { padding: 0; }
+  .fy-cut-trim-sheet .fy-cutinspect h2 { display: none; }
+  .fy-cut-trim-sheet .fy-cutside__panel--inspect { border: 0; border-radius: 0; height: auto; margin: 0; }
+  .fy-cut-trim-sheet .fy-framestep > span { width: 72px; }
+  .fy-cut-trim-sheet .fy-framestep { gap: 8px; }
+  .fy-cut-trim-sheet .fy-framestep > strong { gap: 8px; }
+  .fy-cut-trim-sheet .fy-cutinspect__rows { gap: 16px; }
+  .fy-cut-trim-sheet .fy-cut-take-open { margin-top: 16px; }
+  .fy-cut-menu-sheet .fy-page-sheet__body { padding-top: 0; }
+  .fy-cut-library-sheet .fy-page-sheet__body { gap: 0; padding-top: 0; }
+  .fy-cut-library-sheet .fy-page-sheet__foot .ui-btn { background: var(--secondary); color: var(--foreground); border: 1px solid var(--border); }
+  .fy-cut-library-sheet .fy-artpanel { position: static; width: 100%; flex: 1; visibility: visible; pointer-events: auto; transform: none; box-shadow: none; border: 0; }
+  .fy-cut-library-sheet .fy-artpanel__head { display: none; }
+  .fy-cut-library-sheet .fy-artpanel__head > :not(.fy-artpanel__add) { display: none; }
+  .fy-cut-library-sheet .fy-artpanel__find { padding: 0; }
+  .fy-cut-library-sheet .fy-artpanel__search { min-height: 44px; }
+  .fy-cut-library-sheet .fy-artpanel__search[hidden], .fy-cut-library-sheet .fy-artpanel__find:not([data-find-open]) select { display: none; }
+  .fy-cut-library-sheet .fy-artpanel__list { padding: 0; }
+  .fy-cut-library-more { display: flex; justify-content: space-between; gap: 8px; padding-top: 8px; }
+  .fy-cut-library-more button { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 10px; border: 0; border-radius: 10px; background: var(--background); color: var(--foreground); font: var(--type-ui); }
+  .fy-cut-library-sheet .fy-artpanel__filters { gap: 8px; padding: 8px 0; }
+  .fy-cut-library-sheet .fy-artpanel__filters { scrollbar-width: none; }
+  .fy-cut-library-sheet .fy-artpanel__filters button { min-height: 44px; padding: 0 12px; border-radius: 999px; font: var(--type-ui); }
+  .fy-cut-library-sheet .fy-artpanel__filters button[aria-pressed=true], .fy-cut-full-sheet .fy-exsheet__chip[aria-pressed=true] { border: 1px solid var(--foreground); background: var(--secondary); color: var(--foreground); }
+  .fy-cut-library-sheet .fy-artrow__pick { min-height: 64px; padding: 8px 0; }
+  .fy-cut-library-sheet .fy-artrow__swatch { width: 72px; height: 44px; border-radius: 8px; }
+  .fy-cut-library-sheet .fy-artrow__name { font: 500 var(--text-sm)/1.3 var(--font-sans); }
+  .fy-cut-library-sheet .fy-artrow__meta { font: var(--type-meta); }
+  .fy-cut-library-sheet .fy-artrow__lane, .fy-cut-library-sheet .fy-artpanel__foot { display: none; }
+  .fy-cut-library-sheet .fy-artrow__actions { gap: 8px; padding: 10px 0 12px; flex-wrap: wrap; }
+  .fy-cut-library-sheet .fy-artrow__actions button { padding: 0 10px; border: 1px solid var(--border); border-radius: 10px; font: var(--type-ui); }
+  .fy-cut-library-import { display: flex; align-items: center; gap: 16px; width: 100%; min-height: 64px; padding: 8px 16px; border: 0; border-bottom: 1px solid var(--border); background: var(--background); color: var(--foreground); text-align: left; font: var(--type-ui); }
+  .fy-cut-library-import:disabled { opacity: .5; }
+  .fy-cut-library-import small { display: block; margin-top: 6px; font: var(--type-meta); }
+  .fy-cut-full-sheet .fy-page-sheet__body { padding: 0 20px; }
+  .fy-cut-full-sheet .fy-exsheet { padding: 0; }
+  .fy-cut-full-sheet .fy-exsheet__row { display: grid; gap: 8px; margin-bottom: 16px; }
+  .fy-cut-full-sheet .fy-exsheet__name { font: var(--type-label); }
+  .fy-cut-full-sheet .fy-exsheet__name { text-transform: none; letter-spacing: 0; }
+  .fy-cut-full-sheet .fy-exsheet__chip { min-height: 44px; padding: 0 14px; border-radius: 999px; font: var(--type-ui); }
+  .fy-cut-full-sheet .fy-exsheet__foot, .fy-cut-full-sheet .fy-libpick__foot { position: sticky; bottom: 0; margin: auto -20px 0; padding: 12px 20px calc(14px + env(safe-area-inset-bottom)); background: var(--background); }
+  .fy-cut-full-sheet .fy-libpick__foot button, .fy-cut-full-sheet .fy-exsheet__foot button { min-height: 44px; font: var(--type-ui); }
+  .fy-cut-full-sheet .fy-libpick { display: block; width: 100%; min-height: 0; }
+  .fy-cut-full-sheet .fy-libpick__col { width: 100%; border: 0; }
+  .fy-cut-full-sheet .fy-libpick__col[hidden] { display: none; }
+  .fy-cut-full-sheet .fy-libpick__row, .fy-cut-full-sheet .fy-libpick__scene { min-height: 64px; }
+  .fy-cut-full-sheet .fy-libpick__scenepick, .fy-cut-full-sheet .fy-libpick__name { font: var(--type-ui); }
+  .fy-cut-pick-steps { display: flex; gap: 8px; }
+  .fy-cut-pick-steps button { flex: 1; min-height: 44px; border: 1px solid var(--border); border-radius: 999px; background: var(--background); color: var(--foreground); }
+  .fy-cut-pick-steps button[aria-current] { background: var(--foreground); color: var(--background); }
+}
+
+@media (min-width: 600px) and (max-width: 1099px) and (max-height: 599px) and (orientation: landscape) {
+  .fy-cutcols[data-phone] { display: grid; grid-template-columns: 48% 52%; grid-template-rows: 52px 56px 112px minmax(0,1fr); }
+  .fy-cutcols[data-phone] .fy-cutmain { display: contents; }
+  .fy-cut-back { grid-area: 1 / 2; }
+  .fy-cutcols[data-phone] .fy-cutpreview-wrap { grid-area: 1 / 1 / 4 / 2; height: 220px; }
+  .fy-cutcols[data-phone] .fy-cutviewer { height: 100%; aspect-ratio: auto; }
+  .fy-cut-clock { grid-area: 2 / 2; }
+  .fy-cut-tools { grid-area: 3 / 2; align-self: stretch; align-items: center; border-top: 0; }
+  .fy-cut-tools[data-picked] { margin-top: 30px; }
+  .fy-cutcols[data-phone] .fy-timeline { grid-area: 4 / 1 / 5 / 3; }
+  .fy-cutcols[data-phone] .fy-track[data-track=picture] .fy-track__lane { height: 56px; }
+  .fy-cutcols[data-phone] .fy-track:has(.fy-scenes), .fy-cutcols[data-phone] .fy-track--new { display: none; }
+  .fy-cut-sheet { inset: 0 0 0 auto; width: min(420px, 60%); border-radius: 22px 0 0 22px; }
+}

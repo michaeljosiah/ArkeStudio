@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SpeechAttemptSchema, SpeechQuoteSchema, SpeechUsageSchema } from "./speech-pricing.js";
 import { JobEngineIdentitySchema, RecipeIdentitySchema } from "./comfyui.js";
 import { GenesisIdSchema, IsoDateTimeSchema, JobIdSchema, ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { CapabilitySchema } from "./provider.js";
@@ -9,7 +10,7 @@ import { CapabilitySchema } from "./provider.js";
  * genesis conversation it was made in. Never a placeholder world. When the conversation
  * becomes a world at Begin, the job is re-associated; a ledger entry keeps the scope the money
  * was actually spent under, joinable to the world through its build record's genesisId.
- * Settings auditions use the explicit app:voice-previews scope (SPEC-011, design 127); they
+ * Settings auditions use the explicit app:voice-previews scope (SPEC-011, design 176); they
  * remain app-owned and are never adopted by a world or a genesis conversation.
  */
 export const JobScopeSchema = z.union([UlidSchema, GenesisIdSchema, z.literal("app:voice-previews")]);
@@ -75,6 +76,7 @@ export const REPLAYABLE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
   "performance-conversion",
   "performance-generation",
   "table-read-cache",
+  "genesis-image",
   ...REFERENCE_FINALIZATION_TARGETS,
   "voice-line",
   "voice-preview",
@@ -122,6 +124,9 @@ export const JobSchema = z
     params: z.record(z.string(), z.unknown()).default({}),
     /** Manifest-derived pre-dispatch estimate in integer micro-dollars (R-PROV-4, SPEC-008 R-14). */
     estimatedMicroUsd: z.number().int().min(0),
+    speechQuote: SpeechQuoteSchema.optional(),
+    speechUsage: SpeechUsageSchema.optional(),
+    speechAttempts: z.array(SpeechAttemptSchema).optional(),
     /**
      * Which recipe, exactly, a local-recipe job was dispatched as (SPEC-021 §2.11, R-15).
      * Frozen at enqueue: a job that outlives an app update executes and is recorded as what it
@@ -138,6 +143,8 @@ export const JobSchema = z
     /** Opaque engine instance explicitly approved for a biometric voice upload. */
     voiceUploadConfirmedFor: z.string().min(1).optional(),
     status: JobStatusSchema,
+    /** Transient local engine contention, never a failed attempt. */
+    waitingFor: z.string().optional(),
     /**
      * What the engine is counting right now (SPEC-021 D16), or null when it counts nothing.
      *
@@ -152,10 +159,14 @@ export const JobSchema = z
       .optional(),
     /** The provider's own job id, recorded before the state moves to running. */
     providerJobId: z.string().nullable().default(null),
+    /** Inline responses cannot be recovered by polling an accepted request id. */
+    providerResultKind: z.enum(["inline", "remote"]).optional(),
     /** Physical submission calls authorized, persisted before provider I/O (SPEC-009 R-9). */
     attempt: z.number().int().min(0).default(0),
     /** The last submit response proved that attempt was rejected, so cancellation cannot imply a charge. */
     submissionRejected: z.boolean().optional(),
+    /** Cancellation ended local work but a provider outcome/charge may remain unresolved. */
+    cancellationUncertain: z.boolean().optional(),
     /** Where artifacts land, world-relative — the caller's meaning, not this spec's (§1.2). */
     landing: z
       .object({
@@ -195,7 +206,7 @@ export function voiceJobFormat(job: Pick<Job, "provider" | "params">): "wav" | "
 
 /** Rebuild the document identity frozen into a durable voice-preview job. */
 export function voiceJobReadIdentity(job: Pick<Job, "params">): {
-  purpose: "candidate-preview" | "sheet-section" | "sheet-page" | "bible-section" | "prose";
+  purpose: "candidate-preview" | "sheet-section" | "sheet-page" | "bible-section" | "prose" | "audiobook";
   sheetId?: string;
 } {
   const rawPurpose = job.params["purpose"];
@@ -203,12 +214,14 @@ export function voiceJobReadIdentity(job: Pick<Job, "params">): {
     rawPurpose === "sheet-section" ||
     rawPurpose === "sheet-page" ||
     rawPurpose === "bible-section" ||
-    rawPurpose === "prose"
+    rawPurpose === "prose" ||
+    rawPurpose === "audiobook"
       ? rawPurpose
       : "candidate-preview";
   // Neither belongs to a sheet: the bible is the world's, and a prose read addresses a canon
   // entry, a production record or a conversation reply (issue 857).
-  if (purpose === "bible-section" || purpose === "prose") return { purpose };
+  // An audiobook take belongs to a chapter block, not a sheet, even when a sheet's voice reads it (turn 146).
+  if (purpose === "bible-section" || purpose === "prose" || purpose === "audiobook") return { purpose };
   const sheetId = job.params["sheetId"];
   return typeof sheetId === "string" && sheetId.length > 0 ? { purpose, sheetId } : { purpose };
 }
@@ -267,7 +280,10 @@ export const LedgerEntrySchema = z
     outcome: z.enum(["succeeded", "failed", "cancelled"]),
     estimatedMicroUsd: z.number().int().min(0),
     actualMicroUsd: z.number().int().min(0).nullable(),
-    actualSource: z.enum(["provider-reported", "manifest-derived", "local-zero"]).optional(),
+    actualSource: z.enum(["provider-reported", "usage-derived", "mixed-measured", "manifest-derived", "local-zero"]).optional(),
+    speechQuote: SpeechQuoteSchema.optional(),
+    speechUsage: SpeechUsageSchema.optional(),
+    speechAttempts: z.array(SpeechAttemptSchema).optional(),
   })
   .strict();
 export type LedgerEntry = z.infer<typeof LedgerEntrySchema>;

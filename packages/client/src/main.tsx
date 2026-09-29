@@ -5,8 +5,6 @@ import "@fontsource/geist-sans/400.css";
 import "@fontsource/geist-sans/500.css";
 import "@fontsource/geist-sans/600.css";
 import "@fontsource/geist-sans/700.css";
-import "@fontsource/geist-mono/400.css";
-import "@fontsource/geist-mono/500.css";
 // The launch screen wordmark only (--font-wordmark). Two weights, because the lockup is two
 // lines: the mark at 200 and the tagline at 300. Nothing else in the app uses this face.
 import "@fontsource/jost/200.css";
@@ -17,6 +15,8 @@ import "./theme/tokens/spacing.css";
 import "./theme/tokens/effects.css";
 import "./theme/tokens/launch.css";
 import "./theme/globals.css";
+import "./screens/production-setup.css";
+import "./screens/publications.css";
 // Component styles are gathered here (not in component modules) so the node test runner can
 // import the component graph without a CSS loader.
 import "./components/ui.css";
@@ -29,8 +29,36 @@ import "./components/editor/editor.css";
 import "./domain/domain.css";
 import "./screens/screens.css";
 import "./screens/fidelity.css";
+import "./screens/launch.css";
+import "./screens/home.css";
+import "./screens/world.css";
+import "./screens/character-pages.css";
+import "./screens/cast.css";
+import "./screens/art-direction.css";
+import "./screens/bible-canon.css";
+import "./screens/chat-artifacts.css";
+import "./screens/productions.css";
+import "./screens/settings-adapters.css";
+import "./screens/scene-workspace/workspace.css";
+import "./screens/scene-workspace/shot-page.css";
+import "./screens/scene-workspace/responsive.css";
+import "./screens/generate-responsive.css";
+import "./screens/editor-responsive.css";
+import "./screens/develop-responsive.css";
+import "./screens/branch-map.css";
+import "./screens/season-responsive.css";
+import "./screens/chapter-responsive.css";
+// After fidelity.css: the panel re-dresses the provider-call inspector with a rule of equal
+// specificity, and the later sheet wins.
+import "./components/activity-panel.css";
+import "./components/account-menu.css";
+import "./components/design-voice-dialog.css";
 import { App } from "./App.js";
 import { initStore } from "./lib/store.js";
+import { isRemoteSession } from "./lib/remote-session.js";
+import { RemoteEntry } from "./components/remote-entry.js";
+import "./screens/remote-access.css";
+import "./screens/settings-responsive.css";
 import { initializeTheme } from "./lib/theme.js";
 
 /*
@@ -46,12 +74,12 @@ import { initializeTheme } from "./lib/theme.js";
  */
 const onLaunchRoute = (): boolean => {
   const route = window.location.hash.replace(/^#/, "");
-  return route === "" || route === "/";
+  return route === "" || route === "/" || route === "/starting";
 };
 window.arke?.chromeOverPlate?.(onLaunchRoute());
 
 initializeTheme();
-initStore();
+if (!isRemoteSession()) initStore();
 
 // Under the desktop shell the native frame is hidden and overlay window controls sit
 // in the top-right — in-app titlebars shift their own right-side content clear of them.
@@ -72,7 +100,7 @@ for (const type of ["dragover", "drop"] as const) {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <HashRouter>
-      <App />
+      {isRemoteSession() ? <RemoteEntry><App /></RemoteEntry> : <App />}
     </HashRouter>
   </StrictMode>,
 );

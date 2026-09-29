@@ -7,6 +7,7 @@ import {
   type ModelEditorRequest,
   type ModelSceneEdit,
   type ModelWorldChatAction,
+  type ProductionSetupUpdate,
   type CandidateChecks,
   type CandidateEvidence,
   type CandidateGroup,
@@ -51,6 +52,9 @@ export interface TurnProblem {
 }
 
 export interface ValidateInput {
+  draftOnly?: boolean;
+  /** The ask was for a reply only (turn 128): nothing structured may come back with it. */
+  replyOnly?: boolean;
   /** The assistant's entire completed message. */
   raw: string;
   conversationId: ConversationId;
@@ -87,6 +91,7 @@ export interface AcceptedTurn {
   sceneEdits: readonly ModelSceneEdit[];
   /** Exact authored operations this turn described, still unprepared. */
   actions: readonly ModelWorldChatAction[];
+  setupUpdate?: ProductionSetupUpdate;
 }
 
 export type ValidationOutcome =
@@ -226,9 +231,25 @@ export function parseTurnResult(raw: string): { ok: true; value: WorldChatTurnRe
  * turn — naming one fault at a time would spend it on the first of several.
  */
 export function validateTurnResult(input: ValidateInput): ValidationOutcome {
+  // Before the shape, for a reply-only ask (issue 1295): a question answered with an invented
+  // action used to fail on the action's shape, and the one corrective turn listed those faults —
+  // so a 12B model repaired the action it should never have sent, into another invalid one, and
+  // the answer was lost twice over. What is wrong is that anything came back but the reply.
+  if (input.replyOnly && structuredChannelsIn(input.raw)) {
+    return { ok: false, problems: [problem("reply-only", REPLY_ONLY_PROBLEM)] };
+  }
   const parsed = parseTurnResult(input.raw);
   if (!parsed.ok) return parsed;
   const result = parsed.value;
+  if (input.draftOnly && (
+    result.candidateOperations.length || result.groupOperations.length || result.actions.length ||
+    result.bibleEdits.length || result.editorRequests.length || result.sceneEdits.length
+  )) return { ok: false, problems: [problem("setup-authority", "Production setup only accepts conversation and setupUpdate. Keep new world entities as openQuestions; return empty action and candidate lists.")] };
+  // Which model spends on this production is the person's choice on the setup card (design turn
+  // 153), not the conversation's: a reply that could pick a model could pick a price.
+  if (result.setupUpdate?.fields?.models !== undefined) {
+    return { ok: false, problems: [problem("setup-authority", "Production setup does not choose models. Leave setupUpdate.fields.models out; the author picks them on the Models card.")] };
+  }
 
   const problems: TurnProblem[] = [];
   const byId = new Map(input.existing.map((c) => [c.id, c]));
@@ -450,6 +471,7 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
       editorRequests: result.editorRequests,
       sceneEdits: result.sceneEdits,
       actions: result.actions,
+      ...(result.setupUpdate ? { setupUpdate: result.setupUpdate } : {}),
     },
   };
 }
@@ -754,8 +776,23 @@ export function correctiveMessage(problems: readonly TurnProblem[]): string {
     "",
     "Return the complete result again, as a single JSON object matching the required shape.",
     'The exact shape, with examples, is under "The result shape, exactly" in your instructions.',
+    // Said every time (issue 1295): listing an invalid action's faults reads as "fix it", and a
+    // question that needed no change is answered best by dropping it.
+    "If the ask needs no change to the world, leave every action and candidate list empty: the reply alone is a complete answer.",
   ].join("\n");
   return truncate(message, MAX_CORRECTIVE_CHARS);
+}
+
+const REPLY_ONLY_PROBLEM = "This ask was for a reply only. Return the reply with every list empty — no actions, candidates, groups, bible edits, scene edits or editor requests. Say in the reply anything you would change.";
+
+/** Whether a result names anything but its reply, read before its shape is checked. */
+function structuredChannelsIn(raw: string): boolean {
+  let json: unknown;
+  try { json = JSON.parse(raw); } catch { return false; }
+  if (json === null || typeof json !== "object") return false;
+  const record = json as Record<string, unknown>;
+  return ["candidateOperations", "groupOperations", "actions", "bibleEdits", "editorRequests", "sceneEdits"]
+    .some((key) => Array.isArray(record[key]) && (record[key] as unknown[]).length > 0);
 }
 
 function truncate(text: string, max: number): string {

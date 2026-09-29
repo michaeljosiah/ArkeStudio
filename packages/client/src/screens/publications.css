@@ -1,0 +1,11 @@
+.fy-publications { width: 100%; max-width: 1000px; margin: 0 auto; padding: 32px; overflow: auto; }
+.fy-publication-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.fy-publication-video { margin: 24px 0; }
+.fy-publication-video video { width: 100%; max-height: 65vh; background: var(--secondary); border-radius: 12px; }
+.fy-publication-field { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; font-size: 13px; }
+.fy-publication-field input, .fy-publication-field select { padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: inherit; }
+.fy-publication-jobs { display: grid; gap: 12px; margin: 20px 0; }
+.fy-publication-job { display: grid; gap: 8px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; overflow-wrap: anywhere; }
+.fy-publication-job > span { font-size: 12px; color: var(--muted-foreground); }
+.fy-publication-form { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 16px; }
+.fy-publication-form fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 12px 0; padding: 12px; }

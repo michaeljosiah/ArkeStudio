@@ -1,5 +1,7 @@
 /** The typed preload bridge (SPEC-001 R-9). Mirrors apps/desktop/src/preload.ts. */
 export interface ArkeBridge {
+  remoteAccess?(input: import("@arke-studio/contracts").RemoteAccessCommand): Promise<import("@arke-studio/contracts").RemoteAccessReply>;
+  publications?: import("@arke-studio/contracts").PublicationBridge;
   stagePerformanceAudio?(input: { name: string; contentType: string; bytes: Uint8Array }): Promise<{ ok: true; spoolId: string } | { ok: false; reason: string }>;
   discardPerformanceAudio?(spoolId: string): Promise<void>;
   appVersion: string;
@@ -15,7 +17,7 @@ export interface ArkeBridge {
   send(json: string): void;
   subscribe(
     onFrame: (frameJson: string) => void,
-    onStatus: (status: "connecting" | "open" | "closed") => void,
+    onStatus: (status: "connecting" | "open" | "closed" | "auth-refused") => void,
   ): void;
   onActivateActivity?(listener: () => void): () => void;
   setHostTheme?(preference: ThemePreference): void;
@@ -57,6 +59,7 @@ export interface ArkeBridge {
     target: Extract<AttachTarget, { kind: "stage-playblast" | "conversation-action-stage-playblast-complete" }>,
     jobId: string,
     openingFrame: Uint8Array,
+    referenceFrames: Array<import("@arke-studio/contracts").StageReferenceFrame & { bytes: Uint8Array }>,
   ): Promise<{ ok: true } | { ok: false; reason: string }>;
   cancelStageExport?(jobId: string): Promise<void>;
   /**

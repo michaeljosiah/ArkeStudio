@@ -1,6 +1,8 @@
 import { DialogueDispatchAssessmentSchema } from "./dialogue-assessment.js";
 import { AudioAssetProvenanceSchema } from "./audio.js";
+import { RecipeIdentitySchema } from "./comfyui.js";
 import { z } from "zod";
+import { normalizeAspect, parseAspect } from "./manifest.js";
 import { PropIdSchema, PropStateIdSchema, PropStateProvenanceSchema } from "./prop.js";
 import {
   IsoDateTimeSchema,
@@ -39,7 +41,7 @@ export type TakeKind = z.infer<typeof TakeKindSchema>;
  * Where an actual cost figure came from (SPEC-008): the provider said so, the manifest priced
  * it, or it ran locally and is recorded at zero as unmetered.
  */
-export const ActualCostSourceSchema = z.enum(["provider-reported", "manifest-derived", "local-zero"]);
+export const ActualCostSourceSchema = z.enum(["provider-reported", "usage-derived", "mixed-measured", "manifest-derived", "local-zero"]);
 export type ActualCostSource = z.infer<typeof ActualCostSourceSchema>;
 
 /** Money is integer micro-dollars, never floating point (SPEC-008 R-14). */
@@ -57,11 +59,20 @@ export const TakeCostSchema = z
   .strict();
 export type TakeCost = z.infer<typeof TakeCostSchema>;
 
+/** Descriptive provenance captured on copy; no foreign identity or live dependency (issue 960). */
+export const BorrowedImageOriginSchema = z.object({
+  worldName: z.string().min(1),
+  imageName: z.string().min(1),
+  copiedAt: z.string().datetime(),
+}).strict();
+export type BorrowedImageOrigin = z.infer<typeof BorrowedImageOriginSchema>;
+
 /** What the world looked like at dispatch — the pair that makes drift computable (§2.4). */
 export const ProvenanceSchema = z
   .object({
     /** Complete local preparation evidence, frozen by audio consumers rather than a cache pointer. */
     audioAssets: z.array(AudioAssetProvenanceSchema).optional(),
+    borrowedImages: z.array(BorrowedImageOriginSchema).optional(),
     dialogueAssessments: z.record(ShotIdSchema, DialogueDispatchAssessmentSchema).optional(),
     canonRevision: z.number().int().min(0),
     sheets: z.record(SlugSchema, z.number().int().min(1)),
@@ -77,6 +88,7 @@ export const ProvenanceSchema = z
      * enqueue, never looked up at arrival.
      */
     recipeVersion: z.number().int().min(1).optional(),
+    recipe: RecipeIdentitySchema.optional(),
     /**
      * The prop states this take dispatched with (design turn 105; issue 534) — one entry per prop
      * the shot cited, each explicit about what resolved and what did not. Absent for every take
@@ -212,10 +224,49 @@ export const TakeSchema = z
   });
 export type Take = z.infer<typeof TakeSchema>;
 
+/** Observations of the selected media, never a rewrite of the immutable take record. */
+export type TakeMediaMeasurements = { durationSec?: number; width?: number; height?: number };
+
+/** A take's labels must survive later changes to the shot and production (#1234). */
+export function takeMediaFacts(take: Pick<Take, "params" | "segment" | "kind">, measured: TakeMediaMeasurements = {}) {
+  const positive = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+  const dimensions = (width: unknown, height: unknown) =>
+    positive(width) !== undefined && positive(height) !== undefined && Number.isSafeInteger(width) && Number.isSafeInteger(height)
+      ? { width: width as number, height: height as number }
+      : undefined;
+  const storedAspect = typeof take.params["aspect"] === "string" ? take.params["aspect"] : undefined;
+  const output = take.params["output"];
+  const savedOutput = typeof output === "object" && output !== null && !Array.isArray(output)
+    ? output as Record<string, unknown> : {};
+  const ratio = storedAspect === undefined ? null : parseAspect(storedAspect);
+  // A segment describes a range of the backing file, not that entire file's measured length.
+  // Stills have no runtime, even when an old record happens to carry a duration parameter.
+  const durationSec = take.kind === "frame" || take.kind === "still" ? undefined
+    : take.segment !== undefined ? positive(take.segment.outSec - take.segment.inSec)
+    : positive(measured.durationSec) ?? positive(take.params["durationSec"]);
+  return {
+    durationSec,
+    dimensions: dimensions(measured.width, measured.height)
+      ?? dimensions(savedOutput["width"], savedOutput["height"])
+      ?? dimensions(take.params["width"], take.params["height"]),
+    aspect: storedAspect !== undefined && ratio !== null && Number.isFinite(ratio) && ratio > 0
+      ? normalizeAspect(storedAspect) ?? undefined : undefined,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Review decisions — reviews.jsonl (§2.3.6). Append-only; later lines win.
 // ---------------------------------------------------------------------------
 
+export const REVIEW_NOTE_MAX = 4000;
+export const ReviewCitationSchema = z.object({
+  sheet: SlugSchema,
+  field: z.string().optional(),
+  note: z.string().max(REVIEW_NOTE_MAX).optional(),
+}).strict();
+
+/** New journal entries are bounded; older rows remain readable without rewriting their bytes. */
 export const ReviewDecisionSchema = z
   .object({
     ts: IsoDateTimeSchema,
@@ -224,14 +275,11 @@ export const ReviewDecisionSchema = z
     decision: z.enum(["accept", "reject"]),
     by: z.string().min(1),
     /** A rejection may cite the sheet field the take drifted from (§10.5). */
-    citation: z
-      .object({
-        sheet: SlugSchema,
-        field: z.string().optional(),
-        note: z.string().optional(),
-      })
-      .strict()
-      .optional(),
+    citation: ReviewCitationSchema.optional(),
   })
   .strict();
 export type ReviewDecision = z.infer<typeof ReviewDecisionSchema>;
+/** Compatibility boundary for scanning and transporting pre-bound review history, never writes. */
+export const HistoricalReviewDecisionSchema = ReviewDecisionSchema.extend({
+  citation: ReviewCitationSchema.extend({ note: z.string().optional() }).optional(),
+});
