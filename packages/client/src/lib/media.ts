@@ -42,6 +42,10 @@ function authorize(url: string): string {
   return typeof window !== "undefined" && window.arke ? url : devMediaUrl(url);
 }
 
+export function voicePreviewMediaUrl(file: string): string {
+  return authorize(`${httpBase()}/voice-preview-media/${encodeURIComponent(file)}`);
+}
+
 /** URL for a world-relative media file, with retry parameters before any dev capability. */
 export function mediaUrl(worldSlug: string, relPath: string, query?: Record<string, string>): string {
   const clean = relPath.replace(/\\/g, "/").replace(/^\/+/, "");

@@ -7,16 +7,18 @@ import { parseHTML } from "linkedom";
 import type { RemoteAccessCommand, RemoteAccessStatus } from "@arke-studio/contracts";
 import { SettingsRemoteAccessScreen } from "../src/screens/settings-remote-access.js";
 import { RemoteEntry } from "../src/components/remote-entry.js";
-import { isRemoteSession, remoteSocketUrl } from "../src/lib/remote-session.js";
+import { isRemoteSession, remoteSocketUrl, remoteSocketProtocols } from "../src/lib/remote-session.js";
 import { mediaUrl } from "../src/lib/media.js";
 import { devSession } from "../src/lib/dev-session.js";
 import { __setBridgeForTest } from "../src/lib/store.js";
+import { prepareTestRemoteBrowser } from "./remote-browser.js";
 
 const dom = parseHTML('<html><head><meta name="arke-remote" content="true"></head><body></body></html>');
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement,
   Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
 Object.defineProperty(window, "location", { configurable: true, value: { origin: "https://studio.example.ts.net" } });
 const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+await prepareTestRemoteBrowser();
 const status: RemoteAccessStatus = { enabled: true, running: true, startOnLogin: false, startupSupported: true,
   pairingDuration: 90,
   url: "https://studio.example.ts.net", reason: null, devices: [], pending: [{ id: "request", name: "Phone", expiresAt: Date.now() + 10000 }] };
@@ -25,6 +27,8 @@ it("hosted media and sockets use the clean page origin without exposing a proces
   delete window.arke;
   assert.equal(isRemoteSession(), true);
   assert.equal(remoteSocketUrl(), "wss://studio.example.ts.net/");
+  assert.deepEqual(remoteSocketProtocols(remoteSocketUrl()!), ["arke-remote", "arke-browser." + "b".repeat(64)]);
+  assert.deepEqual(remoteSocketProtocols("wss://studio.example.ts.net:8443/"), [], "a sibling service never receives the browser key");
   assert.equal(mediaUrl("world", "art.png"), "https://studio.example.ts.net/media/world/art.png");
   assert.equal(devSession(), null);
 });
@@ -82,7 +86,7 @@ it("desktop duration offers all four choices, uses saved replies and labels Neve
 });
 it("desktop shares a local QR and copies through its bridge, showing success only after a successful write", async () => {
   const calls: RemoteAccessCommand[] = []; let fail = false;
-  let current = { ...status };
+  let current: RemoteAccessStatus = { ...status, url: "https://studio.example.ts.net:9443" };
   window.arke = { remoteAccess: async command => {
     calls.push(command);
     if (command.kind === "disable") current = { ...current, running: false, enabled: false, url: null };
@@ -93,6 +97,7 @@ it("desktop shares a local QR and copies through its bridge, showing success onl
   try {
     await act(async () => { root.render(<SettingsRemoteAccessScreen />); await flush(); });
     assert.ok(element.querySelector('svg[aria-label="Scan to open Studio on your phone"] path'));
+    assert.equal(element.querySelector("a")?.href, "https://studio.example.ts.net:9443");
     assert.equal(element.querySelectorAll("img").length, 0, "QR rendering uses no external image service");
     const buttons = () => [...element.querySelectorAll("button")];
     const copy = () => buttons().find(button => button.textContent === "Copy link")!.click();

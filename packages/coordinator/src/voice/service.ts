@@ -54,7 +54,7 @@ export interface SidecarLike {
    * depending on @arke-studio/voice.
    */
   health(): Promise<{ engineStatus: { kokoro: { ready: boolean; reason?: string } } } | null>;
-  listVoices(): Promise<Array<{ id: string; label: string; attributes: string[] }>>;
+  listVoices(): Promise<Array<{ id: string; label: string; language?: string; attributes: string[] }>>;
   synthesize(input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }): Promise<Uint8Array>;
   transcribe(audio: Uint8Array, contentType: string): Promise<string>;
 }
@@ -492,9 +492,10 @@ export class VoiceService {
   async catalogue(
     clonedVoices: readonly ClonedVoice[] = [],
     designedVoices: readonly import("@arke-studio/contracts").WorldDesignedVoice[] = [],
+    errors?: string[],
   ): Promise<VoiceCandidate[]> {
     const keyed = designedVoices.length === 0 || await this.deps.getKey("google") !== null;
-    return [...await this.rawCatalogue(clonedVoices),
+    return [...await this.rawCatalogue(clonedVoices, errors),
       ...designedVoiceCandidates(designedVoices).map(voice => ({ ...voice,
         ...this.deps.readerAvailability?.("google"),
         ...(!keyed ? { unavailableReason: "Connect the Google project that owns this voice. Saved audio still plays." } : {}),
@@ -504,6 +505,7 @@ export class VoiceService {
 
   private async rawCatalogue(
     clonedVoices: readonly ClonedVoice[],
+    errors?: string[],
   ): Promise<VoiceCandidate[]> {
     let local = this.deps.localPresets;
     if (this.deps.sidecar) {
@@ -526,7 +528,7 @@ export class VoiceService {
       const health = await this.deps.sidecar.health().catch(() => null);
       const speechEngine = health === null ? "unknown" : health.engineStatus.kokoro.ready ? "ready" : "down";
       if (speechEngine === "down") {
-        return [...(await this.cloudVoices()), ...(await this.hostedReaderCandidates(clonedVoices))];
+        return [...(await this.cloudVoices(undefined, errors)), ...(await this.hostedReaderCandidates(clonedVoices))];
       }
       const live = await this.deps.sidecar.listVoices().catch(() => []);
       if (live.length > 0) {
@@ -536,12 +538,16 @@ export class VoiceService {
           voiceId: v.id,
           label: v.label,
           attributes: v.attributes,
+          facets: {
+            ...(v.language ? { language: v.language } : {}),
+            ...(v.attributes.find(a => a === "male" || a === "female") ? { gender: v.attributes.find(a => a === "male" || a === "female") } : {}),
+          },
           local: true,
           canClone: false,
         }));
       }
     }
-    return [...(await this.cloudVoices()), ...local, ...(await this.hostedReaderCandidates(clonedVoices))];
+    return [...(await this.cloudVoices(undefined, errors)), ...local, ...(await this.hostedReaderCandidates(clonedVoices))];
   }
 
   /** The library's voices through each keyed hosted reader (SPEC-046 R-10). */
@@ -559,13 +565,14 @@ export class VoiceService {
     return (await this.cloudVoices(provider)).filter(voice => this.deps.modelEnabled?.(voice.model) !== false);
   }
 
-  private async cloudVoices(provider?: string): Promise<VoiceCandidate[]> {
+  private async cloudVoices(provider?: string, errors?: string[]): Promise<VoiceCandidate[]> {
     const cloud: VoiceCandidate[] = [];
     for (const source of this.deps.cloudSources) {
       if (provider !== undefined && source.provider !== provider) continue;
       const key = await this.deps.getKey(source.provider);
       if (key === null) continue; // unkeyed providers simply contribute nothing
-      cloud.push(...(await source.list(key).catch(() => [])));
+      try { cloud.push(...await source.list(key)); }
+      catch { errors?.push(`${source.provider}: voices could not be loaded. Try again.`); }
     }
     return cloud;
   }

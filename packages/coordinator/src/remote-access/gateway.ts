@@ -6,6 +6,7 @@ import { extname, resolve, sep } from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
 import { ClientMessageSchema, isRemoteHostCommand, type RemoteCommandRefusal, type ClientMessage } from "@arke-studio/contracts";
 import { RemoteDevices } from "./devices.js";
+import { openBrowserProof, sealBrowserProof, validBrowserKey } from "./browser-proof.js";
 
 const deviceCookie = "__Host-arke-device";
 const pairingCookie = "__Host-arke-pair";
@@ -42,7 +43,8 @@ export class RemoteGateway {
   private server = createServer((req, res) => { void this.handle(req, res).catch(() => {
     if (!res.headersSent) res.writeHead(500).end("Remote access is temporarily unavailable."); else res.destroy();
   }); });
-  private wss = new WebSocketServer({ noServer: true, maxPayload: frameLimit });
+  private wss = new WebSocketServer({ noServer: true, maxPayload: frameLimit,
+    handleProtocols: protocols => protocols.has("arke-remote") ? "arke-remote" : false });
   private clients = new Map<WebSocket, { proof: string; upstream: WebSocket }>();
   private transfers = new Map<ServerResponse, { proof: string; cancel: () => void }>();
   private sweep: ReturnType<typeof setInterval> | undefined;
@@ -57,7 +59,8 @@ export class RemoteGateway {
     this.server.requestTimeout = 15_000;
     this.server.headersTimeout = 10_000;
     this.server.on("upgrade", (req, socket, head) => {
-      const proof = cookie(req, deviceCookie);
+      const keys = (req.headers["sec-websocket-protocol"] ?? "").split(",").map(part => part.trim()).filter(part => part.startsWith("arke-browser."));
+      const proof = openBrowserProof(cookie(req, deviceCookie), keys.length === 1 ? keys[0]!.slice(13) : undefined, this.origin.origin);
       if (this.closing || req.url !== "/" || !this.accepts(req) || req.headers.origin !== this.origin.origin || !options.devices.authenticate(proof)) {
         socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n"); return;
       }
@@ -87,7 +90,8 @@ export class RemoteGateway {
     if (this.closing || !this.accepts(req)) { res.writeHead(403).end(); return; }
     const url = new URL(req.url ?? "/", this.origin);
     if (url.origin !== this.origin.origin) { res.writeHead(403).end(); return; }
-    const proof = cookie(req, deviceCookie);
+    const browserKey = req.headers["x-arke-browser-key"];
+    const proof = openBrowserProof(cookie(req, deviceCookie), browserKey, this.origin.origin);
     const authenticated = this.options.devices.authenticate(proof);
     if (url.pathname === "/remote/device" && req.method === "GET") {
       if (!authenticated) { res.writeHead(401).end(); return; }
@@ -98,11 +102,11 @@ export class RemoteGateway {
     }
     if (url.pathname === "/remote/session" && req.method === "GET") {
       const seconds = this.options.devices.cookieMaxAge(proof);
-      if (seconds !== null) res.setHeader("Set-Cookie", setCookie(deviceCookie, proof!, seconds));
+      if (seconds !== null) res.setHeader("Set-Cookie", setCookie(deviceCookie, sealBrowserProof(proof!, browserKey as string, this.origin.origin), seconds));
       res.writeHead(seconds !== null ? 204 : 401).end(); return;
     }
     if (url.pathname === "/remote/pair" && req.method === "POST") {
-      if (req.headers.origin !== this.origin.origin || req.headers["content-type"] !== "application/json") { res.writeHead(403).end(); return; }
+      if (req.headers.origin !== this.origin.origin || req.headers["content-type"] !== "application/json" || !validBrowserKey(browserKey)) { res.writeHead(403).end(); return; }
       this.attempts = this.attempts.filter(at => at > Date.now() - 60_000);
       if (this.attempts.length >= 30) { res.writeHead(429).end(); return; }
       this.attempts.push(Date.now());
@@ -113,13 +117,13 @@ export class RemoteGateway {
       if (!input || typeof input.code !== "string" || typeof input.name !== "string" || input.name.length > 60) { res.writeHead(400).end(); return; }
       const pending = this.options.devices.request(input.code, input.name);
       if (!pending) { res.writeHead(403).end("This pairing code is invalid or expired."); return; }
-      res.setHeader("Set-Cookie", setCookie(pairingCookie, pending, 300));
+      res.setHeader("Set-Cookie", setCookie(pairingCookie, sealBrowserProof(pending, browserKey, this.origin.origin), 300));
       res.writeHead(202).end(); return;
     }
     if (url.pathname === "/remote/pair" && req.method === "GET") {
-      const pending = cookie(req, pairingCookie) ?? "";
+      const pending = openBrowserProof(cookie(req, pairingCookie), browserKey, this.origin.origin) ?? "";
       const state = this.options.devices.poll(pending);
-      if (state === "approved") res.setHeader("Set-Cookie", [setCookie(deviceCookie, pending, this.options.devices.cookieMaxAge(pending) ?? 0), setCookie(pairingCookie, "", 0)]);
+      if (state === "approved") res.setHeader("Set-Cookie", [setCookie(deviceCookie, sealBrowserProof(pending, browserKey as string, this.origin.origin), this.options.devices.cookieMaxAge(pending) ?? 0), setCookie(pairingCookie, "", 0)]);
       res.writeHead(state === "approved" ? 204 : state === "pending" ? 202 : 410).end(); return;
     }
     if (/^\/(media|genesis-media)\//.test(url.pathname)) {

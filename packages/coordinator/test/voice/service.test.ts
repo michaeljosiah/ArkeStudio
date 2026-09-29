@@ -519,6 +519,16 @@ describe("the catalogue does not offer a voice the engine cannot speak", () => {
 
 describe("a hosted reader offers the library's voices as its own candidates (SPEC-046 R-10)", () => {
   const harbour = { id: "harbour", name: "Harbour", clip: "voices/harbour.wav", attributes: ["low"] } as never;
+  it("preserves catalogue load errors without inventing a local reader", async () => {
+    for (const sidecar of [null, fakeSidecar("down")]) {
+      const errors: string[] = [];
+      const unavailable = new VoiceService({ sidecar, localPresets: [],
+        cloudSources: [{ provider: "elevenlabs", list: async () => { throw new Error("offline"); } }],
+        getKey: async () => "key", emit: () => {}, clock: CLOCK });
+      assert.deepEqual(await unavailable.catalogue([harbour], [], errors), []);
+      assert.deepEqual(errors, ["elevenlabs: voices could not be loaded. Try again."]);
+    }
+  });
   const service = (keyed: string[]) =>
     new VoiceService({
       sidecar: null,

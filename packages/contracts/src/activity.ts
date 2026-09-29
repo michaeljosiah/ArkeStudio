@@ -6,6 +6,7 @@ import { PROVIDERS } from "./provider.js";
 import { formatMicroUsd } from "./money.js";
 import { unattendedProposalsOf } from "./proposal.js";
 import type { Take } from "./take.js";
+import { VOICE_PREVIEW_SCOPE } from "./voice.js";
 import { orderedShots } from "./scene-flow.js";
 import { PerformanceTargetSchema } from "./performance.js";
 
@@ -140,7 +141,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
         title: `${job.model} output needs attention`,
         detail: job.finalization.error ?? "generation completed, but its result is not ready",
         at: job.finalization.updatedAt,
-        worldId: job.worldId,
+        ...(job.worldId === VOICE_PREVIEW_SCOPE ? {} : { worldId: job.worldId }),
         actions: retryable ? ["retry-finalization"] : [],
         ref: job.id,
       });
@@ -153,7 +154,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
       title: `${job.provider} submission needs your answer`,
       detail: job.error ?? "the outcome was not witnessed",
       at: job.updatedAt,
-      worldId: job.worldId,
+      ...(job.worldId === VOICE_PREVIEW_SCOPE ? {} : { worldId: job.worldId }),
       actions: ["resolve"],
       ref: job.id,
     });
@@ -336,12 +337,12 @@ export function computeRunning(
     const labels = activityJobLabels(state, job);
     entries.push({
       kind: "job",
-      title: labels.target,
+      title: job.worldId === VOICE_PREVIEW_SCOPE ? `Voice preview · ${job.params["voiceLabel"] ?? job.params["voiceId"] ?? "Narrator"}` : labels.target,
       detail: `${labels.model} · ${finalizing ? "generated · preparing result" : job.status}`,
       diagnostic: [job.id, job.target.id, `${job.provider}/${job.model}`].filter(Boolean).join(" · "),
       percent: null,
       ref: job.id,
-      worldId: job.worldId,
+      ...(job.worldId === VOICE_PREVIEW_SCOPE ? {} : { worldId: job.worldId }),
       cancellable: !finalizing,
     });
   }
@@ -463,6 +464,7 @@ const REFERENCE_ORIGINS: Record<string, Omit<JobOrigin, "path"> & { segment: str
  * somewhere wrong.
  */
 export function jobOrigin(job: Job): JobOrigin | null {
+  if (job.worldId === VOICE_PREVIEW_SCOPE) return { path: "/settings/general", label: "Narrator voice", where: "Settings → General" };
   if (job.params["purpose"] === "genesis-voice") return null;
   if (job.target.kind === "voice-preview" && job.params["purpose"] === "bible-section") {
     return { path: `/w/${job.worldId}/bible`, label: "Bible", where: "the bible" };

@@ -67,7 +67,25 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 .dv-theme__now{font:400 9.5px var(--font-mono),monospace;color:var(--dv-ink-faint);padding-right:3px}
 @keyframes fadeUp{from{opacity:0;transform:translateY(26px)}to{opacity:1;transform:none}}
 @keyframes drift{from{transform:translateY(0)}to{transform:translateY(-7px)}}
-@keyframes barFill{from{width:4%}to{width:78%}}@keyframes kenburns{from{transform:scale(1)}to{transform:scale(1.08)}}@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}</style>
+@keyframes barFill{from{width:4%}to{width:78%}}@keyframes kenburns{from{transform:scale(1)}to{transform:scale(1.08)}}@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
+/* Turn 127: settings narrator catalogue. Scoped to these proposed drawings. */
+.v176{width:1360px;height:850px;position:relative;overflow:hidden;background:var(--background);color:var(--foreground);font:400 14px/1.5 var(--font-sans)}
+.v176 *{box-sizing:border-box}.v176 button,.v176 input,.v176 select{font:inherit;color:inherit}.v176 button{cursor:pointer}
+.v176-top{height:44px;border-bottom:1px solid var(--border);padding:10px 24px;display:flex;justify-content:space-between}
+.v176-shell{display:flex;padding:32px;gap:44px;color:var(--muted-foreground)}.v176-shell nav{width:170px;line-height:2.5}.v176-shell h2{color:var(--foreground);margin:0 0 24px;font-size:24px}
+.v176-scrim{position:absolute;inset:44px 0 0;background:color-mix(in srgb,var(--foreground) 12%,transparent);display:flex;align-items:center;justify-content:center;padding:24px}
+.v176-dialog{width:960px;max-width:100%;max-height:100%;display:flex;flex-direction:column;background:var(--background);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-xl);overflow:hidden}
+.v176-head{display:flex;gap:16px;align-items:flex-start;padding:20px 24px 14px}.v176-head h3{font-size:20px;letter-spacing:-.025em;margin:0 0 3px;font-weight:600}.v176-muted{color:var(--muted-foreground);font-size:13px}.v176-close{margin-left:auto;border:0;background:none;font-size:22px!important}
+.v176-tools{padding:0 24px 14px}.v176-tabs{display:flex;gap:6px;margin-bottom:14px}.v176-tabs button{background:none;border:0;border-radius:7px;padding:6px 12px;font-size:13px}.v176-tabs .on{background:var(--foreground);color:var(--background)}
+.v176-search{display:block;width:100%;height:40px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--background);margin-bottom:12px}
+.v176-filters{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.v176-filters label{font-size:12px;color:var(--muted-foreground)}.v176-filters select{display:block;width:100%;height:34px;border:1px solid var(--border);background:var(--background);border-radius:6px;padding:4px 8px;margin-top:4px;font-size:13px;color:var(--foreground)}
+.v176-summary{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:12px;color:var(--muted-foreground)}.v176-link{border:0;background:none;text-decoration:underline;text-underline-offset:3px;font-size:12px!important;padding:0}.v176-summary .v176-link{margin-left:auto}
+.v176-list{border-block:1px solid var(--border);overflow:auto;min-height:0;flex:1}.v176-row{display:grid;grid-template-columns:36px minmax(140px,1.2fr) minmax(200px,1.7fr) 100px 74px;align-items:center;gap:14px;min-height:61px;padding:8px 24px;border-bottom:1px solid var(--border)}.v176-row:last-child{border:0}.v176-row.picked{background:var(--secondary);box-shadow:inset 3px 0 var(--foreground)}
+.v176-play{height:34px;width:34px;border:1px solid var(--border);border-radius:50%;background:var(--background);display:flex;align-items:center;justify-content:center}.v176-play svg{width:13px;height:13px}.v176-name{display:flex;align-items:center;gap:9px;font-weight:500}.v176-name small{font-size:11px;font-weight:400;color:var(--muted-foreground)}.v176-pick{border:1px solid var(--border);background:var(--background);border-radius:6px;padding:5px 8px;font-size:12px!important}
+.v176-player{display:flex;gap:16px;align-items:center;padding:12px 24px;background:var(--secondary);font-size:12px;border-bottom:1px solid var(--border)}.v176-track{height:3px;width:140px;background:var(--border);border-radius:2px}.v176-track i{display:block;height:100%;width:36%;background:var(--foreground)}
+.v176-footer{display:flex;align-items:center;gap:12px;padding:16px 24px}.v176-footer .v176-muted{margin-right:auto}.v176-button{border:1px solid var(--border);background:var(--background);padding:8px 14px;border-radius:7px;font-size:13px!important}.v176-primary{background:var(--foreground);color:var(--background)!important;border-color:var(--foreground)}
+.v176-empty{min-height:315px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}.v176-empty strong{font-weight:500;font-size:16px}.v176-empty p{margin:0;color:var(--muted-foreground);font-size:13px}
+</style>
 </helmet>
 <section class="dv-turn" id="t0" style="padding:36px 44px 28px">
   <div style="max-width:760px;display:flex;flex-direction:column;gap:10px">
@@ -76,6 +94,79 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
     <div style="font:400 13px/1.65 var(--font-sans);color:var(--dv-ink-body)">Design decisions are recorded below in numbered turns, newest first; earlier explorations remain as history. The original sample world is <strong>The Undersong</strong>, a coastal fantasy where a drowned god still sings beneath the harbour. Its image placeholders accept dropped artwork. Approved image references keep their supplied artwork intact. Chrome stays neutral monochrome so the creator's imagery carries the colour.</div>
   </div>
 </section>
+<section class="dv-turn" id="t176">
+<div class="dv-thd"><a class="dv-tid" href="#t176">176</a><span class="dv-tname">Find a voice, then hear it — a catalogue-sized picker for the Settings narrator (extends <a class="dv-oid" href="#70b">70b</a>)</span></div>
+<p class="dv-next">Design, 2026-09-29. The author has more than 350 cloud voices. Local / cloud tabs alone did not make that collection browsable, and the previous Settings picker could not audition a voice. Search, descriptive filters and real playback are the priority. Names, attributes, totals and playback times below are illustrative fixtures, not a live catalogue. These drawings do not play audio.</p>
+<div class="dv-opts" style="margin-top:22px"><div class="dv-opt" id="176a"><div class="dv-olabel"><a class="dv-oid" href="#176a">176a</a>358 cloud voices, narrowed to six — hear a sample before choosing</div>
+  <div class="dv-card" style="width:1360px"><div class="v176" data-screen-label="176a Settings · narrator voice catalogue">
+    <div class="v176-top"><span>Settings</span><strong>Arke <span style="font-weight:400">Studio</span></strong><span>Appearance</span></div>
+    <div class="v176-shell"><nav><h2>Settings</h2>Providers<br>AI models<br>General<br>Harness<br><strong style="color:var(--foreground)">Appearance</strong><br>Notifications<br>Sign-in</nav><main><h2>Appearance</h2><p>Theme</p><p>System</p><hr><p>Narrator voice</p><p>George · ElevenLabs</p></main></div>
+    <div class="v176-scrim"><div class="v176-dialog" role="dialog" aria-modal="true" aria-labelledby="176a-title">
+      <div class="v176-head"><div><h3 id="176a-title">Choose narrator voice</h3><div class="v176-muted">The voice used to read your writing aloud.</div></div><button type="button" class="v176-close" aria-label="Close voice picker">×</button></div>
+      <div class="v176-tools">
+        <div class="v176-tabs" aria-label="Voice source"><button type="button">All <span>412</span></button><button type="button" class="on" aria-pressed="true">Cloud <span>358</span></button><button type="button">On this machine <span>54</span></button></div>
+        <input class="v176-search" type="search" aria-label="Search voices by name or description" placeholder="Search voices by name or description" value="">
+        <div class="v176-filters"><label>Language<select aria-label="Language"><option selected>English</option><option>Any</option></select></label><label>Accent<select aria-label="Accent"><option selected>British</option><option>Any</option></select></label><label>Gender<select aria-label="Gender"><option selected>Male</option><option>Any</option></select></label><label>Style<select aria-label="Style"><option selected>Warm</option><option>Any</option></select></label><label>Provider<select aria-label="Provider"><option selected>Any provider</option><option>ElevenLabs</option></select></label></div>
+        <div class="v176-summary"><span>6 matches of 358 cloud voices</span><span>·</span><span>Name A–Z</span><button type="button" class="v176-link">Clear filters</button></div>
+      </div>
+      <div class="v176-list"><div class="v176-row ">
+    <button type="button" class="v176-play" aria-label="Play George sample"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
+    <div><div class="v176-name">George<small>Current</small></div><div class="v176-muted">Warm, clear</div></div>
+    <span class="v176-muted">English · British · Male</span><span class="v176-muted">ElevenLabs</span>
+    <button type="button" class="v176-pick" aria-pressed="false" aria-label="Select George">Select</button>
+  </div><div class="v176-row picked">
+    <button type="button" class="v176-play" aria-label="Stop Arthur sample"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1"/></svg></button>
+    <div><div class="v176-name">Arthur</div><div class="v176-muted">Warm, measured</div></div>
+    <span class="v176-muted">English · British · Male</span><span class="v176-muted">ElevenLabs</span>
+    <button type="button" class="v176-pick" aria-pressed="true" aria-label="Select Arthur">Selected</button>
+  </div><div class="v176-row ">
+    <button type="button" class="v176-play" aria-label="Play Edward sample"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
+    <div><div class="v176-name">Edward</div><div class="v176-muted">Warm, resonant</div></div>
+    <span class="v176-muted">English · British · Male</span><span class="v176-muted">ElevenLabs</span>
+    <button type="button" class="v176-pick" aria-pressed="false" aria-label="Select Edward">Select</button>
+  </div><div class="v176-row ">
+    <button type="button" class="v176-play" aria-label="Play Hugo sample"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
+    <div><div class="v176-name">Hugo</div><div class="v176-muted">Warm, conversational</div></div>
+    <span class="v176-muted">English · British · Male</span><span class="v176-muted">ElevenLabs</span>
+    <button type="button" class="v176-pick" aria-pressed="false" aria-label="Select Hugo">Select</button>
+  </div><div class="v176-row ">
+    <button type="button" class="v176-play" aria-label="Play Oliver sample"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
+    <div><div class="v176-name">Oliver</div><div class="v176-muted">Warm, gentle</div></div>
+    <span class="v176-muted">English · British · Male</span><span class="v176-muted">ElevenLabs</span>
+    <button type="button" class="v176-pick" aria-pressed="false" aria-label="Select Oliver">Select</button>
+  </div><div class="v176-row ">
+    <button type="button" class="v176-play" aria-label="Play Thomas sample"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
+    <div><div class="v176-name">Thomas</div><div class="v176-muted">Warm, textured</div></div>
+    <span class="v176-muted">English · British · Male</span><span class="v176-muted">ElevenLabs</span>
+    <button type="button" class="v176-pick" aria-pressed="false" aria-label="Select Thomas">Select</button>
+  </div></div>
+      <div class="v176-player"><strong>Playing Arthur</strong><span class="v176-muted">Provider sample · no generation charge</span><span style="flex:1"></span><div class="v176-track"><i></i></div><span>0:04 / 0:11</span><button type="button" class="v176-link">Stop</button></div>
+      <div class="v176-footer"><div class="v176-muted">Selected: <strong style="color:var(--foreground)">Arthur</strong> · ElevenLabs</div><button type="button" class="v176-button">Cancel</button><button type="button" class="v176-button v176-primary">Use Arthur</button></div>
+    </div></div>
+  </div></div></div><div class="dv-opt" id="176b"><div class="dv-olabel"><a class="dv-oid" href="#176b">176b</a>No matches — the filters and pending choice remain visible</div>
+  <div class="dv-card" style="width:1360px"><div class="v176" data-screen-label="176b Settings · narrator voice catalogue">
+    <div class="v176-top"><span>Settings</span><strong>Arke <span style="font-weight:400">Studio</span></strong><span>Appearance</span></div>
+    <div class="v176-shell"><nav><h2>Settings</h2>Providers<br>AI models<br>General<br>Harness<br><strong style="color:var(--foreground)">Appearance</strong><br>Notifications<br>Sign-in</nav><main><h2>Appearance</h2><p>Theme</p><p>System</p><hr><p>Narrator voice</p><p>George · ElevenLabs</p></main></div>
+    <div class="v176-scrim"><div class="v176-dialog" role="dialog" aria-modal="true" aria-labelledby="176b-title">
+      <div class="v176-head"><div><h3 id="176b-title">Choose narrator voice</h3><div class="v176-muted">The voice used to read your writing aloud.</div></div><button type="button" class="v176-close" aria-label="Close voice picker">×</button></div>
+      <div class="v176-tools">
+        <div class="v176-tabs" aria-label="Voice source"><button type="button">All <span>412</span></button><button type="button" class="on" aria-pressed="true">Cloud <span>358</span></button><button type="button">On this machine <span>54</span></button></div>
+        <input class="v176-search" type="search" aria-label="Search voices by name or description" placeholder="Search voices by name or description" value="Maren">
+        <div class="v176-filters"><label>Language<select aria-label="Language"><option selected>English</option><option>Any</option></select></label><label>Accent<select aria-label="Accent"><option selected>British</option><option>Any</option></select></label><label>Gender<select aria-label="Gender"><option selected>Male</option><option>Any</option></select></label><label>Style<select aria-label="Style"><option selected>Warm</option><option>Any</option></select></label><label>Provider<select aria-label="Provider"><option selected>Any provider</option><option>ElevenLabs</option></select></label></div>
+        <div class="v176-summary"><span>0 matches of 358 cloud voices</span><span>·</span><span>Name A–Z</span><button type="button" class="v176-link">Clear filters</button></div>
+      </div>
+      <div class="v176-list"><div class="v176-empty"><strong>No voices match “Maren”</strong><p>Try another name or remove a filter.</p><button type="button" class="v176-button">Clear search</button></div></div>
+
+      <div class="v176-footer"><div class="v176-muted">Selected: <strong style="color:var(--foreground)">Arthur</strong> · ElevenLabs<br>Outside these results</div><button type="button" class="v176-button">Cancel</button><button type="button" class="v176-button v176-primary">Use Arthur</button></div>
+    </div></div>
+  </div></div></div></div>
+<p class="dv-rule"><b>Filtering.</b> Keep a full-width search field above labelled <b>Language, Accent, Gender, Style and Provider</b> filters. Search names and descriptions without case sensitivity; every query term must match. Filters combine with search and source, and use provider-supplied metadata, never guesses from names or audio. Offer only supported facets and known values with result counts; missing metadata remains in unfiltered results and is available through <code>Not specified</code>. Within a facet, choosing another value replaces it. Across facets, choices intersect. <code>Clear filters</code> resets the five facets but preserves the query and source; <code>Clear search</code> clears only the query. Include only voices that support narration. Count matches against the complete narration catalogue for the chosen source, not the rendered rows. Stable name order, a scrollable list, and fixed controls and footer make hundreds of voices manageable. Never silently search only a loaded page.</p>
+<p class="dv-rule"><b>Hearing.</b> Every row has a named, keyboard-operable <b>Play</b> control separate from <b>Select</b>. Prefer the provider's existing sample where supplied; label it <code>Provider sample</code>, since its words may vary. If none exists, offer a short, fixed narrator sentence through <code>Generate preview</code>, with the generation price shown before the press; local generation says <code>Free · on this machine</code>. Do not generate on open, hover, filtering or selection. Cache generated previews by the exact provider, model, voice and sentence; replaying a cached clip incurs no new generation charge. One clip plays at a time. A playing row becomes <code>Stop</code>; changing filters or closing stops playback and ignores late results. Selection alone does not start or stop a clip.</p>
+<p class="dv-rule"><b>Selection.</b> <code>Current</code> marks the saved narrator; the row highlight and <code>Selected</code> mark the pending choice. Filtering never changes either. Keep the selected name and provider in the footer even if filtered out, with <code>Outside these results</code>. Only <code>Use Arthur</code> saves the choice; Cancel, close and Escape discard it. Open with the current voice selected when available. If it is unavailable, show the reason and require an available choice before enabling Use. Settings needs neither a world nor a character; choosing this voice changes only the app narrator.</p>
+<p class="dv-rule"><b>Loading and failure.</b> A sample request shows <code>Loading sample…</code>; a failure names the voice and offers <code>Retry</code> without clearing filters or selection. No provider clip and no synthesis support means <code>No preview available</code>, never a working-looking Play button. Unavailable synthesis has a visible reason beside its disabled action. Catalogue loading, catalogue failure with Retry, an empty source and zero filter matches are separate states. A failed provider must not silently look like a successful empty list. Focus stays on the triggering control, results counts are announced politely, focus is contained within the dialog and restored to Choose voice on close. At narrow widths the dialog fits the viewport, filters wrap, and rows stack their metadata without horizontal scrolling.</p>
+<p class="dv-next">Implementation reference: SPEC-011 §1.4 extends R-6 and R-10 with structured facets, a complete paginated catalogue, provider samples and explicit generated-preview cost/cache. The Settings picker uses <code>catalogue-voice-preview</code> without a world or sheet. Cloud generation retains the ordinary queue and ledger under <code>app:voice-previews</code>; cached audio is served by the authenticated app media route. Character previews retain their own-line behavior.</p>
+</section>
+
 <section class="dv-turn" id="t175">
 <div class="dv-thd"><a class="dv-tid" href="#t175">175</a><span class="dv-tname">Settings, Activity and the account on a phone and a Fold7, and what stays on the PC &#8212; sections first, a section in place, keys and sign-ins On your PC from a paired device, Activity and the account as sheets (extends <a class="dv-oid" href="#150a">150a</a>, <a class="dv-oid" href="#136a">136a</a> and <a class="dv-oid" href="#151a">151a</a> below <code>1100</code>; phase sixteen after <a class="dv-oid" href="#t173">173</a>; numbered after <a class="dv-oid" href="#t174">174</a>)</span></div>
 <p class="dv-next">Asked on 27 September. Design only; the build is its own issue. The desktop is as drawn and is not redrawn. What stays on the PC applies to every paired browser at any width.</p>

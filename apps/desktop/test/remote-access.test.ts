@@ -5,38 +5,42 @@ import { join } from "node:path";
 import { createServer } from "node:net";
 import { request } from "node:http";
 import { it } from "node:test";
+import { RemoteDevices } from "@arke-studio/coordinator";
 import { DesktopRemoteAccess } from "../src/remote-access.js";
 import { ServeCleanupRequired, TailscaleServe, type TailscaleRun } from "../src/tailscale-serve.js";
 
 const origin = "https://studio.example.ts.net";
 function tailscale() {
-  let config: Record<string, unknown> = {};
+  let config: { TCP?: Record<string, unknown>; Web?: Record<string, unknown>; AllowFunnel?: Record<string, boolean> } = {};
   const commands: string[][] = [];
   const execute: TailscaleRun = async args => {
     commands.push(args);
     if (args[0] === "status") return JSON.stringify({ BackendState: "Running", Self: { DNSName: "studio.example.ts.net." },
       CurrentTailnet: { MagicDNSEnabled: true }, CertDomains: ["studio.example.ts.net"] });
     if (args[1] === "status") return JSON.stringify(config);
-    if (args.includes("off")) { config = {}; return ""; }
-    config = { TCP: { "443": { HTTPS: true } }, Web: { "studio.example.ts.net:443": { Handlers: { "/": { Proxy: args.at(-1) } } } } };
+    const port = args.find(arg => arg.startsWith("--https="))!.split("=")[1];
+    const key = `studio.example.ts.net:${port}`;
+    if (args.includes("off")) { delete config.TCP?.[port]; delete config.Web?.[key]; return ""; }
+    config.TCP = { ...config.TCP, [port]: { HTTPS: true } };
+    config.Web = { ...config.Web, [key]: { Handlers: { "/": { Proxy: args.at(-1) } } } };
     return "";
   };
-  return { client: new TailscaleServe(execute), commands, set: (value: Record<string, unknown>) => { config = value; } };
+  return { client: new TailscaleServe(execute), commands, set: (value: typeof config) => { config = value; }, get: () => config };
 }
 it("Serve refuses occupied ports and Funnel, and removes only Studio's exact mapping", async () => {
   const fake = tailscale();
   assert.equal(await fake.client.origin(), origin);
   fake.set({ TCP: { "443": { HTTPS: true } }, Web: { "studio.example.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:5173" } } } } });
-  await assert.rejects(fake.client.enable(origin, 8793, false), /already in use/);
+  await assert.rejects(fake.client.enable(origin, 8793, false), /Another service/);
   await fake.client.disable(origin, 8793);
   await fake.client.disable(null, 8793);
   assert.ok(!fake.commands.some(args => args.includes("off")));
   fake.set({ AllowFunnel: { "studio.example.ts.net:443": true } });
-  await assert.rejects(fake.client.enable(origin, 8793, false), /Funnel/);
+  await assert.rejects(fake.client.enable(origin, 8793, false), /Another service/);
   fake.set({});
   assert.equal(await fake.client.enable(origin, 8793, false), true);
   assert.equal(await fake.client.enable(origin, 8793, true), false);
-  await assert.rejects(fake.client.enable(origin, 8793, false), /already in use/);
+  await assert.rejects(fake.client.enable(origin, 8793, false), /Another service/);
   await fake.client.disable(origin, 8793);
   assert.deepEqual(fake.commands.at(-2), ["serve", "--https=443", "off"]);
   const removed = fake.commands.filter(args => args.includes("off")).length;
@@ -47,6 +51,105 @@ it("Serve refuses occupied ports and Funnel, and removes only Studio's exact map
   await assert.rejects(fake.client.disable(origin, 8793), /still forwards/);
   assert.equal(fake.commands.filter(args => args.includes("off")).length, removed, "a changed mapping is left for its owner, while shutdown fails closed");
   assert.ok(!fake.commands.some(args => args.includes("reset")));
+});
+it("address selection skips TCP, web and Funnel reservations and preserves a saved address", async () => {
+  const fake = tailscale();
+  fake.set({ TCP: { "443": { TCPForward: "127.0.0.1:5173" } },
+    Web: { "studio.example.ts.net:8443": { Handlers: {} } }, AllowFunnel: { "studio.example.ts.net:9443": true } });
+  assert.equal(await fake.client.origin(), origin + ":10443");
+  assert.equal(await fake.client.origin(origin + ":14443"), origin + ":14443");
+  assert.equal(await fake.client.origin(origin), origin + ":10443", "old failed enable settings recover automatically");
+  await assert.rejects(fake.client.origin("https://other.example.ts.net"), /tailnet address changed/);
+  assert.equal(await fake.client.origin("https://other.example.ts.net", true), origin + ":10443", "Disable permits setup under a changed hostname");
+  assert.ok(!fake.commands.some(args => args.includes("--bg") || args.includes("off")));
+  fake.set({ TCP: Object.fromEntries([443, 8443, 9443, 10443, 11443, 12443, 13443, 14443, 15443, 16443, 17443, 18443, 19443]
+    .map(port => [String(port), { HTTPS: true }])) });
+  await assert.rejects(fake.client.origin(), /could not find an available remote address/);
+});
+it("desktop automatically shares an alternate address, copies it, and keeps it across restart", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arke-remote-conflict-"));
+  await writeFile(join(root, "index.html"), "<head></head>");
+  const fake = tailscale();
+  const existing = { TCP: { "443": { HTTPS: true }, "8443": { HTTPS: true } }, Web: {
+    "studio.example.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:5173" } } },
+    "studio.example.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:8791" } } },
+  } };
+  fake.set(structuredClone(existing));
+  const copied: string[] = [];
+  const options = { root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+    startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client, writeClipboard: (text: string) => { copied.push(text); } };
+  let host = new DesktopRemoteAccess(options);
+  try {
+    await host.initialize();
+    const reply = await host.command({ kind: "enable" });
+    assert.equal(reply.status.running, true); assert.equal(reply.status.reason, null);
+    assert.equal(reply.status.url, origin + ":9443");
+    const pageStatus = (host: string) => new Promise<number | undefined>((resolve, reject) => {
+      request({ hostname: "127.0.0.1", port: 8793, path: "/", headers: { Host: host, Origin: origin + ":9443" } }, response => {
+        response.resume(); response.on("end", () => resolve(response.statusCode));
+      }).on("error", reject).end();
+    });
+    assert.equal(await pageStatus("studio.example.ts.net:9443"), 200);
+    assert.equal(await pageStatus("studio.example.ts.net"), 403, "the gateway requires the selected origin including its port");
+    await host.command({ kind: "copy-link" }); assert.deepEqual(copied, [origin + ":9443"]);
+    assert.equal(JSON.parse(await readFile(join(root, "remote/settings.json"), "utf8")).origin, origin + ":9443");
+    await host.stop(); assert.deepEqual(fake.get(), existing);
+    fake.set({}); // Even if the default address becomes free, bookmarks keep working.
+    host = new DesktopRemoteAccess(options); await host.initialize();
+    assert.equal(host.status().running, true); assert.equal(host.status().url, origin + ":9443");
+    await host.command({ kind: "disable" });
+    assert.equal(host.status().enabled, false);
+    assert.ok(fake.commands.filter(args => args.includes("off")).every(args => args.includes("--https=9443")));
+  } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
+});
+it("moving from an occupied saved address revokes every proof before publishing, including after Disable", async () => {
+  for (const enabled of [true, false]) {
+    const root = await mkdtemp(join(tmpdir(), "arke-remote-move-"));
+    await writeFile(join(root, "index.html"), "<head></head>");
+    await mkdir(join(root, "remote"));
+    await writeFile(join(root, "remote/settings.json"), JSON.stringify({ enabled, startOnLogin: false, origin: origin + ":9443" }));
+    const path = join(root, "remote/devices.json");
+    const devices = new RemoteDevices(path); await devices.load();
+    const proof = devices.request(devices.createCode().code, "Old phone")!;
+    await devices.approve(devices.pending()[0]!.id, "never");
+    const fake = tailscale();
+    fake.set({ TCP: { "9443": { HTTPS: true } }, Web: { "studio.example.ts.net:9443": { Handlers: { "/": { Proxy: "http://127.0.0.1:5173" } } } } });
+    const publish = fake.client.enable.bind(fake.client);
+    fake.client.enable = async (...args) => {
+      const restored = new RemoteDevices(path); await restored.load();
+      assert.equal(restored.authenticate(proof), null, "old proofs are durably revoked before the new mapping exists");
+      return publish(...args);
+    };
+    const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+      startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
+    try {
+      await host.initialize(); if (!enabled) await host.command({ kind: "enable" });
+      assert.equal(host.status().running, true); assert.equal(host.status().url, origin);
+      assert.deepEqual(host.status().devices, []); assert.match(host.status().reason!, /Pair your devices again/);
+      await host.command({ kind: "disable" });
+      assert.equal(JSON.parse(await readFile(join(root, "remote/settings.json"), "utf8")).origin, origin, "Disable retains the last address for takeover detection");
+      assert.ok(fake.get().TCP?.["9443"], "the replacement service remains untouched");
+    } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
+  }
+});
+it("recovery discovers alternate mappings and leaves modified or public mappings untouched", async () => {
+  const fake = tailscale();
+  await fake.client.enable(origin + ":9443", 8793, false);
+  await fake.client.disable(null, 8793);
+  assert.ok(fake.commands.some(args => args.includes("--https=9443") && args.includes("off")));
+  for (const config of [
+    { TCP: { "9443": { HTTPS: true } }, Web: { "studio.example.ts.net:9443": { Handlers: {
+      "/": { Proxy: "http://127.0.0.1:8793" }, "/other": { Proxy: "http://127.0.0.1:5173" },
+    } } } },
+    { TCP: { "9443": { HTTPS: true } }, Web: { "studio.example.ts.net:9443": { Handlers: {
+      "/": { Proxy: "http://127.0.0.1:8793" },
+    } } }, AllowFunnel: { "studio.example.ts.net:9443": true } },
+  ]) {
+    fake.set(config);
+    const removals = fake.commands.filter(args => args.includes("off")).length;
+    await assert.rejects(fake.client.disable(null, 8793), /still forwards/);
+    assert.equal(fake.commands.filter(args => args.includes("off")).length, removals);
+  }
 });
 it("a CLI failure after publication rolls back only the verified new mapping", async () => {
   let published = false;
@@ -107,7 +210,7 @@ it("duration migrates to 90, persists while off and across restart, and affects 
       const { pairing } = await host.command({ kind: "pair" });
       await new Promise<void>((resolve, reject) => {
         const req = request({ hostname: "127.0.0.1", port: 8793, path: "/remote/pair", method: "POST",
-          headers: { Host: new URL(origin).host, Origin: origin, "Content-Type": "application/json" } }, res => {
+          headers: { Host: new URL(origin).host, Origin: origin, "Content-Type": "application/json", "x-arke-browser-key": "b".repeat(64) } }, res => {
           res.resume(); res.once("end", () => {
             try { assert.equal(res.statusCode, 202); resolve(); } catch (error) { reject(error); }
           });

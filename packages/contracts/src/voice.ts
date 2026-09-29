@@ -20,6 +20,18 @@ export const VoiceCandidateSchema = z
     label: z.string().min(1),
     /** Provider metadata as descriptive attributes: age, timbre, accent, pace … */
     attributes: z.array(z.string()),
+    description: z.string().optional(),
+    facets: z.object({
+      language: z.string().optional(), accent: z.string().optional(),
+      gender: z.string().optional(), style: z.string().optional(),
+    }).strict().optional(),
+    /** Public provider sample; only the coordinator fetches it, from an approved host. */
+    previewUrl: z.string().url().optional(),
+    preview: z.object({
+      kind: z.enum(["sample", "generate", "unavailable"]),
+      microUsd: z.number().int().nonnegative().optional(),
+      reason: z.string().optional(),
+    }).strict().optional(),
     /** Whether the selected execution target is this machine. */
     local: z.boolean(),
     canClone: z.boolean(),
@@ -31,6 +43,29 @@ export const VoiceCandidateSchema = z
   })
   .strict();
 export type VoiceCandidate = z.infer<typeof VoiceCandidateSchema>;
+
+export const NARRATOR_PREVIEW_TEXT = "The harbour remembers every story. Listen closely, and a new world begins.";
+export const VOICE_PREVIEW_SCOPE = "app:voice-previews" as const;
+export const VOICE_FACETS = ["language", "accent", "gender", "style", "provider"] as const;
+export type VoiceFacet = typeof VOICE_FACETS[number];
+export type VoiceFilters = Partial<Record<VoiceFacet, string>>;
+export const UNSPECIFIED_VOICE_FACET = "__unspecified__";
+const voiceLanguageNames = new Intl.DisplayNames(["en"], { type: "language" });
+export function voiceFacet(voice: VoiceCandidate, facet: VoiceFacet): string {
+  const value = (facet === "provider" ? voice.provider : voice.facets?.[facet])?.trim().toLocaleLowerCase();
+  if (facet === "language" && value && /^[a-z]{2,3}(?:-[a-z0-9]+)*$/.test(value)) {
+    // An explicit language tag says which language, not which accent a person speaks with.
+    return voiceLanguageNames.of(value.split("-")[0]!)?.toLowerCase() ?? value;
+  }
+  return value || UNSPECIFIED_VOICE_FACET;
+}
+export function filterVoices<T extends VoiceCandidate>(voices: readonly T[], query: string, filters: VoiceFilters): T[] {
+  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  return voices.filter(voice => {
+    const text = [voice.label, voice.description, ...voice.attributes, ...Object.values(voice.facets ?? {})].join(" ").toLocaleLowerCase();
+    return terms.every(term => text.includes(term)) && VOICE_FACETS.every(facet => !filters[facet] || voiceFacet(voice, facet) === filters[facet]);
+  }).sort((a, b) => a.label.localeCompare(b.label) || voiceTargetKey(a).localeCompare(voiceTargetKey(b)));
+}
 
 /** Collision-free transient identity for maps and selection state. */
 export function voiceTargetKey(target: Pick<VoiceCandidate, "provider" | "model" | "voiceId">): string {

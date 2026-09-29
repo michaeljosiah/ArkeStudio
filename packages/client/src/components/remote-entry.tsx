@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { initStore } from "../lib/store.js";
+import { prepareRemoteSession } from "../lib/remote-session.js";
 import { CloudWay, LaunchFoot, LaunchFrame, remoteStudio } from "../screens/launch.js";
 import { Laptop, Unplug } from "./icons.js";
 
@@ -11,7 +12,7 @@ import { Laptop, Unplug } from "./icons.js";
  * pairs on the local way, and every other part of the first screen is the one a paired phone
  * sees. The plain "Connect to Studio" card that stood here is retired. */
 
-type Gate = "checking" | "pair" | "pending" | "ready" | "offline";
+type Gate = "checking" | "pair" | "pending" | "ready" | "offline" | "browser";
 
 /** "XXXX-XXXX" as it is typed. The gateway ignores spaces and dashes; the dash is for reading. */
 export function formatPairingCode(raw: string): string {
@@ -66,6 +67,9 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
       const checkedRevision = revision.current;
       const current = () => active && checkedRevision === revision.current;
       try {
+        try { await prepareRemoteSession(); }
+        catch { if (current()) setState("browser"); return; }
+        if (!current()) return;
         const session = await fetch("/remote/session", { signal: controller.signal });
         if (!current()) return;
         if (session.status === 204) { initStore(); setState("ready"); }
@@ -178,6 +182,13 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
       <div className="fy-launch__note" role="status">
         <i className="fy-launch__wait" aria-hidden />
         <div><b>Waiting for your PC</b>Approve {name} there.</div>
+      </div>
+    );
+  } else if (state === "browser") {
+    body = (
+      <div className="fy-launch__note" role="alert">
+        <Unplug size={16} />
+        <div><b>Browser storage is needed</b>Allow site data for Studio, or open this link in another browser.</div>
       </div>
     );
   } else if (state === "offline") {

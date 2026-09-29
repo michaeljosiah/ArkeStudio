@@ -47,9 +47,9 @@ async function setup(view: React.ReactNode, disabled: string[] = []) {
 it("routine reads recommend Lite while the selected ElevenLabs voice stays selected", async () => {
   const { element, sent } = await setup(<VoicePickerDialog open use="narration" chosenId="old" chosenProvider="elevenlabs" chosenModel="eleven-v3" onClose={() => {}} onPick={() => {}} />);
   const rows = [...element.querySelectorAll('.fy-voices__row')];
-  assert.match(rows[0]!.textContent!, /George/);
-  assert.match(rows[1]!.textContent!, /Gemini Flash-Lite · Recommended/);
-  assert.match(rows[2]!.textContent!, /Gemini Flash/);
+  assert.deepEqual(rows.map(row => row.querySelector(".fy-voices__name")!.textContent), ["Charon", "Charon", "Existing voice", "George"]);
+  assert.ok(rows.some(row => /Gemini Flash-Lite · Recommended/.test(row.textContent!)));
+  assert.ok(rows.some(row => /Gemini Flash/.test(row.textContent!)));
   assert.match(element.querySelector('.fy-voices__row--on')!.textContent!, /Existing voice/);
   assert.ok(sent.every(m => m.kind === "voice-catalogue"), "opening does not set a narrator or generate audio");
 });

@@ -8,6 +8,7 @@ import type { RemoteAccessCommand, RemoteAccessStatus } from "@arke-studio/contr
 import { RemoteEntry, formatPairingCode } from "../src/components/remote-entry.js";
 import { PairingPrompt } from "../src/components/pairing-prompt.js";
 import { __setBridgeForTest } from "../src/lib/store.js";
+import { prepareTestRemoteBrowser } from "./remote-browser.js";
 
 /**
  * Pairing a phone on the launch surface, and the PC asked where you are (design turn 158i/j).
@@ -20,6 +21,7 @@ Object.defineProperty(window, "location", { configurable: true, value: { origin:
 __setBridgeForTest({ appVersion: "test", platform: "win32", connect() {}, send() {}, subscribe() {} });
 const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 const previousFetch = globalThis.fetch;
+await prepareTestRemoteBrowser();
 afterEach(() => { globalThis.fetch = previousFetch; delete window.arke; });
 
 let where = "";

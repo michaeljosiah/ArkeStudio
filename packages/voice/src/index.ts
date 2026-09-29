@@ -362,6 +362,7 @@ export function localCandidates(voices: LocalVoice[]): VoiceCandidate[] {
     voiceId: v.id,
     label: v.label,
     attributes: v.attributes,
+    facets: { language: v.language, gender: v.attributes.find(a => a === "male" || a === "female") },
     local: true,
     canClone: false,
   }));

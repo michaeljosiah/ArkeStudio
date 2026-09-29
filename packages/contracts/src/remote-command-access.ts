@@ -35,6 +35,7 @@ export const REMOTE_COMMAND_ACCESS = {
   // payload
   "pick-staged-reference": "payload", "adapter-command": "payload", "stage-voice-clip": "payload",
   // studio
+  "catalogue-voice-preview": "studio", "stop-catalogue-voice-preview": "studio",
   "production-setup": "studio", "save-production-narrative": "studio", "stage-construct": "studio",
   "stage-inspection": "studio", "stage-construct-cancel": "studio", "hello": "studio",
   "open-world": "studio", "create-world": "studio", "read-sheet-section": "studio",

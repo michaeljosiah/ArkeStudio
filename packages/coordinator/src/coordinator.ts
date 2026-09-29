@@ -43,6 +43,8 @@ import { keepPerformanceRecording, performanceConversionRequest, readPerformance
 import { readCharacterAudioInputs, resolveCastVoices, resolveSubjectCastVoices, resolvePerformanceAudioReferences, preparePerformanceAudioRange, prepareMasterAudioReference, resolveMasterAudioReferences } from "./audio/reference-inputs.js";
 import { resumeCharacterSample, prepareCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample, characterSpeakingRequest } from "./audio/character-sample.js";
 import type { AudioMediaTools } from "./audio/media-tools.js";
+import { CataloguePreviewService } from "./voice/catalogue-preview.js";
+import { VOICE_PREVIEW_SCOPE } from "@arke-studio/contracts";
 import { tmpdir } from "node:os";
 import type { SessionInput } from "./harness/session-files.js";
 import { existsSync, mkdirSync } from "node:fs";
@@ -2452,6 +2454,7 @@ export class Coordinator {
   /** In-flight dispatch-scene-planned requestIds (SPEC-024 R-12): the same redelivery guard. */
   private readonly creatingPlans = new Set<string>();
   private readonly activeMessages = new Set<Promise<void>>();
+  private cataloguePreviews: CataloguePreviewService | null = null;
   private readonly backgroundWork = new Set<Promise<unknown>>();
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
   private readonly secrets: SecretRegistry;
@@ -2585,6 +2588,7 @@ export class Coordinator {
               this.credentials ? this.credentials.get(provider as ProviderId) : null,
             emit: (event) => {
               this.emit(event);
+              if (event.type === "job.updated") this.cataloguePreviews?.observeJob(event.job);
               if (event.type === "job.updated" && (event.job.provider === "ollama" || event.job.provider === "comfyui")) {
                 if (event.job.provider === "comfyui" && ["succeeded", "failed", "cancelled"].includes(event.job.status)) this.clearLocalResidency("comfyui");
                 void this.refreshLocalResidency();
@@ -2623,6 +2627,10 @@ export class Coordinator {
             },
             landInWorld: async (worldId, fn) => {
               try {
+                if (worldId === VOICE_PREVIEW_SCOPE && opts.appRoot) {
+                  await fn(join(opts.appRoot, "voice-previews"));
+                  return true;
+                }
                 // A conversation-scoped job (SPEC-031 R-55) lands in its sandbox: there is
                 // no world, no lock and no watcher — the directory is the whole destination.
                 if (!UlidSchema.safeParse(worldId).success) {
@@ -2886,6 +2894,11 @@ export class Coordinator {
           emit: (event) => this.emit(event),
         })
       : null;
+    if (opts.appRoot && opts.voice) this.cataloguePreviews = new CataloguePreviewService({
+      root: join(opts.appRoot, "voice-previews"), sidecar: opts.voice.sidecar, manifest: opts.manifest,
+      ...(this.jobQueue ? { enqueue: input => this.jobQueue!.enqueue(input), cancel: id => this.jobQueue!.cancel(id) } : {}),
+      emit: event => this.emit(event),
+    });
     this.serverApplication = {
       attachTransport: sink => {
         if (this.transportAttached) throw new Error("The coordinator already belongs to a Studio server.");
@@ -2911,6 +2924,7 @@ export class Coordinator {
         if (findings !== undefined) {
           replayed.push({ at: new Date().toISOString(), type: "diagnostics.snapshot", snapshot: findings });
         }
+        replayed.push(...this.cataloguePreviews?.initialEvents() ?? []);
         // A run still going when a renderer connects (turn 129, codex on PR 907): replayed as
         // started, so a reload never hides a paid run from the press that could stop it.
         for (const run of this.derivingContinuity.values()) {
@@ -2986,6 +3000,8 @@ export class Coordinator {
       },
       // GET /media/<world-slug>/<world-relative-file> — read-only renderer media.
       serveFile: async (urlPath) => {
+        const preview = /^\/voice-preview-media\/([a-f0-9]{64}\.(?:wav|mp3|flac))$/.exec(urlPath);
+        if (preview) return this.cataloguePreviews?.serve(preview[1]!) ?? null;
         // GET /genesis-media/<genesis-id>/<sandbox-relative-file> — the look preview, which
         // exists before any world does (SPEC-031 R-50). A distinct prefix, not a magic slug:
         // sandboxes and worlds are different roots and must never shadow each other.
@@ -4760,6 +4776,7 @@ export class Coordinator {
    * surface sees it. Establish candidates just land; the client lists them off the job row.
    */
   private async onJobTerminal(job: Job): Promise<void> {
+    if (job.worldId === VOICE_PREVIEW_SCOPE) { this.cataloguePreviews?.terminal(job); return; }
     if (job.params["purpose"] === "genesis-voice" && job.status === "succeeded") {
       if (!this.opts.provider.genesisDir) throw new Error("Founding voice storage is unavailable.");
       const dir = await this.opts.provider.genesisDir(job.worldId);
@@ -13941,18 +13958,23 @@ export class Coordinator {
         // The plain list, for a voice that is only reading (design 70). `usedBy` comes from the
         // sheets themselves, so the picker can say a character already uses a voice without
         // that meaning anything about the pick.
-        if (!this.voiceService) return;
+        const errors: string[] = [];
+        if (!this.voiceService) {
+          this.emit({ at: new Date().toISOString(), type: "voice.catalogue", voices: [], errors: ["Voice services are unavailable."] });
+          return;
+        }
         const store = this.opts.provider.openStore?.();
         const bundle = store?.getBundle();
         const voices = await this.voiceService
-          .catalogue(bundle?.clonedVoices ?? [], bundle?.designedVoices)
-          .catch(() => []);
+          .catalogue(bundle?.clonedVoices ?? [], bundle?.designedVoices, errors)
+          .catch(() => { errors.push("The voice catalogue could not be loaded. Try again."); return []; });
         const sheets = bundle?.sheets ?? [];
         this.emit({
           at: new Date().toISOString(),
           type: "voice.catalogue",
+          errors,
           ...(msg.worldId !== undefined ? { worldId: msg.worldId } : {}),
-          voices: voices.map((v) => ({
+          voices: (this.cataloguePreviews?.catalogue(voices) ?? voices).map((v) => ({
             ...v,
             usedBy: sheets
               .filter((sheet) => {
@@ -13965,6 +13987,16 @@ export class Coordinator {
               .map((sheet) => sheet.name),
           })),
         });
+        return;
+      }
+      case "catalogue-voice-preview": {
+        if (this.cataloguePreviews) await this.cataloguePreviews.request(msg);
+        else this.emit({ at: new Date().toISOString(), type: "voice.catalogue-preview", requestId: msg.requestId,
+          status: "failed", error: "Voice previews are unavailable in this session." });
+        return;
+      }
+      case "stop-catalogue-voice-preview": {
+        await this.cataloguePreviews?.cancel(msg.requestId);
         return;
       }
       case "voice-line": {
@@ -18628,6 +18660,7 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    this.cataloguePreviews?.close();
     // A keyless command waiting on the catalogue would otherwise hold shutdown open: the
     // reload timer that would have settled it is cleared below, and nothing else fires.
     this.settleHarnessGates();

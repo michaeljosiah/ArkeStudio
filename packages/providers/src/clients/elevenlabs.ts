@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
+import type { CapabilityProbe, ClientDeclarations, VoiceCandidate } from "@arke-studio/contracts";
 import { jsonRequest, tryProbe } from "./http.js";
 import {
   ProviderAuthError,
@@ -151,24 +151,36 @@ export class ElevenLabsClient implements ProviderClient {
   }
 
   /** The cloud voice catalogue (SPEC-011 R-6): labels plus descriptive attributes for matching. */
-  async listVoicesCatalog(key: string): Promise<
-    Array<{ provider: string; model: string; voiceId: string; label: string; attributes: string[]; local: boolean; canClone: boolean }>
-  > {
-    const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/voices`, {
-      headers: this.headers(key),
-    });
-    if (status >= 400) return [];
-    const voices =
-      (body as { voices?: Array<{ voice_id?: string; name?: string; labels?: Record<string, string> }> } | null)
-        ?.voices ?? [];
-    return voices
-      .filter((v) => typeof v.voice_id === "string" && typeof v.name === "string")
-      .map((v) => ({
+  async listVoicesCatalog(key: string): Promise<VoiceCandidate[]> {
+    type Voice = { voice_id?: string; name?: string; labels?: Record<string, string>; description?: string | null; preview_url?: string | null };
+    const voices: Voice[] = [];
+    const tokens = new Set<string>();
+    let token: string | undefined;
+    do {
+      const query = new URLSearchParams({ page_size: "100" });
+      if (token) query.set("next_page_token", token);
+      const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v2/voices?${query}`, { headers: this.headers(key) });
+      const page = body as { voices?: Voice[]; has_more?: boolean; next_page_token?: string } | null;
+      if (status >= 400 || !Array.isArray(page?.voices)) throw new Error("ElevenLabs voice catalogue could not be loaded.");
+      voices.push(...page.voices);
+      if (!page.has_more) break;
+      token = page.next_page_token;
+      if (!token || tokens.has(token) || tokens.size >= 1000) throw new Error("ElevenLabs returned an incomplete voice catalogue.");
+      tokens.add(token);
+    } while (true);
+    const unique = new Map(voices.filter(v => typeof v.voice_id === "string" && typeof v.name === "string").map(v => [v.voice_id!, v]));
+    return [...unique.values()].map((v) => ({
         provider: "elevenlabs",
         model: "eleven_multilingual_v2",
         voiceId: v.voice_id!,
         label: v.name!,
-        attributes: Object.values(v.labels ?? {}).map((s) => s.toLowerCase()),
+        attributes: Object.values(v.labels ?? {}).filter(s => typeof s === "string").map((s) => s.toLowerCase()),
+        ...(v.description ? { description: v.description } : {}),
+        facets: Object.fromEntries(["language", "accent", "gender", "style"].flatMap(facet => {
+          const value = v.labels?.[facet] ?? (facet === "style" ? v.labels?.["use_case"] ?? v.labels?.["descriptive"] : undefined);
+          return typeof value === "string" && value.trim() ? [[facet, value.trim().toLowerCase()]] : [];
+        })),
+        ...(v.preview_url?.startsWith("https://") ? { previewUrl: v.preview_url } : {}),
         local: false,
         canClone: true, // ElevenLabs supports cloning; each engine declares its own capability
       }));
