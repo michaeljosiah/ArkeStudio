@@ -56,18 +56,28 @@ try {
       if (command.kind === "duration") pairingDuration = command.duration;
       if (command.kind === "approve") await devices.approve(command.id, pairingDuration);
       if (command.kind === "revoke") { await devices.revoke(command.id); gateway.recheckDevices(); }
+      if (command.kind === "check-captured-cookie") {
+        for (const key of ["", "c".repeat(64)]) {
+          const replay = await fetch(origin + "/remote/session", { headers: {
+            Cookie: "__Host-arke-device=" + command.cookie, "x-arke-browser-key": key,
+          } });
+          assert.equal(replay.status, 401, "a sibling service cannot replay a captured cookie");
+        }
+      }
       if (command.kind === "restart") {
-        await gateway.stop(); await devices.stop(); await coordinator.stop();
+        console.log("[smoke] restarting gateway");
+        await gateway.stop(); console.log("[smoke] gateway stopped");
+        await devices.stop(); await coordinator.stop(); console.log("[smoke] coordinator stopped");
         const previousToken = session.token;
         coordinator = createCoordinator(); session = await coordinator.start();
         assert.notEqual(session.token, previousToken);
         devices = new RemoteDevices(join(dir, "remote-devices.json")); await devices.load();
         gateway = createGateway(); await gateway.start(gatewayPort);
       }
-      child.send({ id, result: { status: { enabled: true, running: true, startOnLogin: false, startupSupported: false,
+      if (child.connected) child.send({ id, result: { status: { enabled: true, running: true, startOnLogin: false, startupSupported: false,
         pairingDuration, url: origin, reason: null, devices: devices.list(), pending: devices.pending() }, ...(pairing ? { pairing } : {}),
         ...(command.kind === "restart" ? { session } : {}) } });
-    } catch (error) { child.send({ id, error: String(error) }); }
+    } catch (error) { if (child.connected) child.send({ id, error: String(error) }); }
   });
   assert.equal(await new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", resolve); }), 0);
   assert.ok(!String(await readFile(join(dir, "remote-devices.json"))).includes(session.token));
@@ -180,16 +190,22 @@ async function electronMain() {
   await shot(owner, "desktop-duration");
   const cookie = (await phone.webContents.session.cookies.get({ url: config.origin, name: "__Host-arke-device" }))[0];
   assert.ok(cookie && !cookie.session && cookie.httpOnly && cookie.secure);
+  assert.ok(cookie.value.startsWith("v1."), "device proofs are sealed to the browser origin");
+  await rpc({ kind: "check-captured-cookie", cookie: cookie.value });
   assert.ok(cookie.expirationDate > Date.now() / 1000 + 399 * 86400, "Never uses a renewable persistent cookie");
   assert.equal(await js(phone, "document.cookie"), "");
   assert.ok(!(await phone.webContents.getURL()).includes("arke-session"));
   await shot(phone, "phone-worlds");
   const imageStatus = await js(phone, "fetch('/media/the-undersong/world-art.png', { headers: { Range: 'bytes=0-31' } }).then(r => r.status)");
   assert.equal(imageStatus, 206);
+  assert.equal(await js(phone, "new Promise(resolve => { const image = new Image(); const done = result => { clearTimeout(timer); image.remove(); resolve(result); }; const timer = setTimeout(() => done(false), 15000); image.onload = () => done(true); image.onerror = () => done(false); document.body.append(image); image.src = '/media/the-undersong/world-art.png'; })"), true,
+    "native image requests receive the browser key through the worker");
+  console.log("[smoke] native media authenticated");
   await phone.webContents.session.cookies.flushStore();
   phone.destroy(); phone = new BrowserWindow(browserOptions);
   await phone.loadURL(config.origin + "/#/worlds");
   await until(phone, "document.querySelector('[data-screen=world-picker]') !== null");
+  console.log("[smoke] browser reopened");
   Object.assign(config, (await rpc({ kind: "restart" })).session);
   await phone.loadURL(config.origin + "/#/worlds");
   await until(phone, "document.querySelector('[data-screen=world-picker]') !== null");

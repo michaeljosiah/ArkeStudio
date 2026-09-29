@@ -102,8 +102,14 @@ export class DesktopRemoteAccess {
   private async start(): Promise<void> {
     if (this.running) return;
     if (this.gateway) await this.stopGateway();
-    const origin = await this.tailscale().origin();
-    if (this.config.origin && this.config.origin !== origin) throw new Error("The tailnet address changed. Disable remote access before setting up its new address.");
+    const origin = await this.tailscale().origin(this.config.origin, !this.config.enabled);
+    if (this.config.origin !== origin) {
+      // A replacement service at the old origin can read that origin's browser key.
+      // Revoke durably before publishing elsewhere, including recovery without an origin.
+      const hadDevices = this.devices.list().length > 0;
+      await this.devices.revokeAll();
+      if (hadDevices) this.reason = "Studio has a new address. Pair your devices again using the new link.";
+    }
     const gateway = new RemoteGateway({ origin, clientDirectory: this.options.clientDirectory, devices: this.devices, session: this.options.session });
     let published = false;
     try {
@@ -167,7 +173,7 @@ export class DesktopRemoteAccess {
             await this.stopGateway();
             if (this.options.startupSupported) this.options.setStartOnLogin(false);
             await this.devices.stop();
-            if (this.settingsLoaded) await this.save({ ...this.config, enabled: false, startOnLogin: false, origin: null });
+            if (this.settingsLoaded) await this.save({ ...this.config, enabled: false, startOnLogin: false });
             break;
           case "startup":
             if (!this.options.startupSupported || !this.running) throw new Error("Enable remote access in the installed desktop app first.");

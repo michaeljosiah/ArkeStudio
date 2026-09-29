@@ -2,7 +2,7 @@ import { isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefu
 import type { AudiobookReader, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
-import { isRemoteSession, remoteSocketUrl } from "./remote-session.js";
+import { isRemoteSession, remoteSocketUrl, remoteSocketProtocols } from "./remote-session.js";
 import { useSyncExternalStore } from "react";
 import {
   FrameSchema,
@@ -2419,7 +2419,7 @@ export function devBridge(url: string): ArkeBridge {
       if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING))
         return;
       onStatus?.("connecting");
-      socket = new WebSocket(url);
+      socket = new WebSocket(url, remoteSocketProtocols(url));
       socket.addEventListener("open", () => onStatus?.("open"));
       socket.addEventListener("close", (event) => {
         socket = null;
