@@ -14,6 +14,8 @@ import { keepPerformanceRecording, performanceConversionRequest, readPerformance
 import { readCharacterAudioInputs, resolvePerformanceAudioReferences, preparePerformanceAudioRange, prepareMasterAudioReference, resolveMasterAudioReferences } from "./audio/reference-inputs.js";
 import { resumeCharacterSample, prepareCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample, characterSpeakingRequest } from "./audio/character-sample.js";
 import type { AudioMediaTools } from "./audio/media-tools.js";
+import { CataloguePreviewService } from "./voice/catalogue-preview.js";
+import { VOICE_PREVIEW_SCOPE } from "@arke-studio/contracts";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { createPreparedSession, type SessionInput } from "./harness/session-files.js";
@@ -1536,6 +1538,7 @@ export class Coordinator {
   /** In-flight dispatch-scene-planned requestIds (SPEC-024 R-12): the same redelivery guard. */
   private readonly creatingPlans = new Set<string>();
   private readonly activeMessages = new Set<Promise<void>>();
+  private cataloguePreviews: CataloguePreviewService | null = null;
   private readonly backgroundWork = new Set<Promise<unknown>>();
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
   private readonly secrets: SecretRegistry;
@@ -1637,6 +1640,7 @@ export class Coordinator {
               this.credentials ? this.credentials.get(provider as ProviderId) : null,
             emit: (event) => {
               this.emit(event);
+              if (event.type === "job.updated") this.cataloguePreviews?.observeJob(event.job);
               // A plan job settling is what unblocks its dependents (SPEC-024 R-18): advance is
               // a fold plus one durable act, so firing it here costs nothing when nothing moved.
               if (
@@ -1671,6 +1675,10 @@ export class Coordinator {
             },
             landInWorld: async (worldId, fn) => {
               try {
+                if (worldId === VOICE_PREVIEW_SCOPE && opts.appRoot) {
+                  await fn(join(opts.appRoot, "voice-previews"));
+                  return true;
+                }
                 // A conversation-scoped job (SPEC-031 R-55) lands in its sandbox: there is
                 // no world, no lock and no watcher — the directory is the whole destination.
                 if (!UlidSchema.safeParse(worldId).success) {
@@ -1866,6 +1874,11 @@ export class Coordinator {
           emit: (event) => this.emit(event),
         })
       : null;
+    if (opts.appRoot && opts.voice) this.cataloguePreviews = new CataloguePreviewService({
+      root: join(opts.appRoot, "voice-previews"), sidecar: opts.voice.sidecar, manifest: opts.manifest,
+      ...(this.jobQueue ? { enqueue: input => this.jobQueue!.enqueue(input), cancel: id => this.jobQueue!.cancel(id) } : {}),
+      emit: event => this.emit(event),
+    });
     this.transportAuth = opts.transportAuth ?? { token: randomBytes(32).toString("hex"), allowedOrigins: [] };
     this.secrets.register(this.transportAuth.token);
     this.transport = new Transport({
@@ -1886,6 +1899,7 @@ export class Coordinator {
         if (findings !== undefined) {
           replayed.push({ at: new Date().toISOString(), type: "diagnostics.snapshot", snapshot: findings });
         }
+        replayed.push(...this.cataloguePreviews?.initialEvents() ?? []);
         return replayed;
       },
       beforeInitialSnapshot: async () => {
@@ -1922,6 +1936,8 @@ export class Coordinator {
       },
       // GET /media/<world-slug>/<world-relative-file> — read-only renderer media.
       serveFile: async (urlPath) => {
+        const preview = /^\/voice-preview-media\/([a-f0-9]{64}\.(?:wav|mp3|flac))$/.exec(urlPath);
+        if (preview) return this.cataloguePreviews?.serve(preview[1]!) ?? null;
         // GET /genesis-media/<genesis-id>/<sandbox-relative-file> — the look preview, which
         // exists before any world does (SPEC-031 R-50). A distinct prefix, not a magic slug:
         // sandboxes and worlds are different roots and must never shadow each other.
@@ -3018,6 +3034,7 @@ export class Coordinator {
    * surface sees it. Establish candidates just land; the client lists them off the job row.
    */
   private async onJobTerminal(job: Job): Promise<void> {
+    if (job.worldId === VOICE_PREVIEW_SCOPE) { this.cataloguePreviews?.terminal(job); return; }
     // A conversation-scoped job (SPEC-031 R-55) has no world to finalize into: its landing
     // was the sandbox, and looking its scope up as a world would scan every world's meta
     // just to throw. The genesis rail reads the job row itself.
@@ -10271,18 +10288,23 @@ export class Coordinator {
         // The plain list, for a voice that is only reading (design 70). `usedBy` comes from the
         // sheets themselves, so the picker can say a character already uses a voice without
         // that meaning anything about the pick.
-        if (!this.voiceService) return;
+        const errors: string[] = [];
+        if (!this.voiceService) {
+          this.emit({ at: new Date().toISOString(), type: "voice.catalogue", voices: [], errors: ["Voice services are unavailable."] });
+          return;
+        }
         const store = this.opts.provider.openStore?.();
         const bundle = store?.getBundle();
         const voices = await this.voiceService
-          .catalogue(bundle?.clonedVoices ?? [], await this.comfyUiVoiceAvailability())
-          .catch(() => []);
+          .catalogue(bundle?.clonedVoices ?? [], await this.comfyUiVoiceAvailability(), errors)
+          .catch(() => { errors.push("The voice catalogue could not be loaded. Try again."); return []; });
         const sheets = bundle?.sheets ?? [];
         this.emit({
           at: new Date().toISOString(),
           type: "voice.catalogue",
+          errors,
           ...(msg.worldId !== undefined ? { worldId: msg.worldId } : {}),
-          voices: voices.map((v) => ({
+          voices: (this.cataloguePreviews?.catalogue(voices) ?? voices).map((v) => ({
             ...v,
             usedBy: sheets
               .filter((sheet) => {
@@ -10295,6 +10317,16 @@ export class Coordinator {
               .map((sheet) => sheet.name),
           })),
         });
+        return;
+      }
+      case "catalogue-voice-preview": {
+        if (this.cataloguePreviews) await this.cataloguePreviews.request(msg);
+        else this.emit({ at: new Date().toISOString(), type: "voice.catalogue-preview", requestId: msg.requestId,
+          status: "failed", error: "Voice previews are unavailable in this session." });
+        return;
+      }
+      case "stop-catalogue-voice-preview": {
+        await this.cataloguePreviews?.cancel(msg.requestId);
         return;
       }
       case "voice-line": {
@@ -14662,6 +14694,7 @@ export class Coordinator {
   async stop(): Promise<void> {
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    this.cataloguePreviews?.close();
     for (const controller of this.performanceGenerations.values()) controller.abort();
     for (const controller of this.keyArtPromptDrafts.values()) controller.abort();
     this.keyArtPromptReviews.clear();

@@ -5,6 +5,7 @@ import { isReplayableFinalization } from "./job.js";
 import { PROVIDERS } from "./provider.js";
 import { unattendedProposalsOf } from "./proposal.js";
 import type { Take } from "./take.js";
+import { VOICE_PREVIEW_SCOPE } from "./voice.js";
 
 /**
  * The Activity read model (SPEC-014): nothing is added to the needs-you queue — every entry is
@@ -92,7 +93,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
         title: `${job.model} output needs attention`,
         detail: job.finalization.error ?? "generation completed, but its result is not ready",
         at: job.finalization.updatedAt,
-        worldId: job.worldId,
+        ...(job.worldId === VOICE_PREVIEW_SCOPE ? {} : { worldId: job.worldId }),
         actions: retryable ? ["retry-finalization"] : [],
         ref: job.id,
       });
@@ -105,7 +106,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
       title: `${job.provider} submission needs your answer`,
       detail: job.error ?? "the outcome was not witnessed",
       at: job.updatedAt,
-      worldId: job.worldId,
+      ...(job.worldId === VOICE_PREVIEW_SCOPE ? {} : { worldId: job.worldId }),
       actions: ["resolve"],
       ref: job.id,
     });
@@ -268,11 +269,11 @@ export function computeRunning(
     if (!RUNNING_JOB.has(job.status) && !finalizing) continue;
     entries.push({
       kind: "job",
-      title: `${job.model} · ${job.target.kind}${job.target.id !== undefined ? ` ${job.target.id}` : ""}`,
+      title: job.worldId === VOICE_PREVIEW_SCOPE ? `Voice preview · ${job.params["voiceLabel"] ?? job.params["voiceId"] ?? "Narrator"}` : `${job.model} · ${job.target.kind}${job.target.id !== undefined ? ` ${job.target.id}` : ""}`,
       detail: finalizing ? `${job.provider} · generated · preparing result` : `${job.provider} · ${job.status}`,
       percent: null,
       ref: job.id,
-      worldId: job.worldId,
+      ...(job.worldId === VOICE_PREVIEW_SCOPE ? {} : { worldId: job.worldId }),
       cancellable: !finalizing,
     });
   }
@@ -378,6 +379,7 @@ const REFERENCE_ORIGINS: Record<string, Omit<JobOrigin, "path"> & { segment: str
  * somewhere wrong.
  */
 export function jobOrigin(job: Job): JobOrigin | null {
+  if (job.worldId === VOICE_PREVIEW_SCOPE) return { path: "/settings/appearance", label: "Narrator voice", where: "Settings → Appearance" };
   if (job.target.kind === "voice-preview" && job.params["purpose"] === "bible-section") {
     return { path: `/w/${job.worldId}/bible`, label: "Bible", where: "the bible" };
   }

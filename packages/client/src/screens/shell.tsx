@@ -1973,11 +1973,11 @@ export function SettingsAppearanceScreen() {
         open={narratorOpen}
         use="narration"
         {...(worldIdForVoices !== undefined ? { worldId: worldIdForVoices } : {})}
-        chosenId={narrator?.voiceId}
-        chosenProvider={narrator?.provider}
+        chosenId={narrator?.voiceId ?? DEFAULT_NARRATOR.voiceId}
+        chosenProvider={narrator?.provider ?? DEFAULT_NARRATOR.provider}
         chosenModel={
           narrator?.model ??
-          (narrator ? legacyVoiceModel(narrator.provider, narrator.voiceId) ?? undefined : undefined)
+          (narrator ? legacyVoiceModel(narrator.provider, narrator.voiceId) ?? undefined : DEFAULT_NARRATOR.model)
         }
         onClose={() => setNarratorOpen(false)}
         onPick={(voice: ReadingVoice) => {

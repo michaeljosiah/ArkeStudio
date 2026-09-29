@@ -1636,6 +1636,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * dropped, leaving the picker reading a catalogue that never arrived.
    */
   z.object({ kind: z.literal("voice-catalogue"), worldId: UlidSchema.optional() }).strict(),
+  z.object({ kind: z.literal("catalogue-voice-preview"), requestId: UlidSchema,
+    provider: z.string().min(1), model: z.string().min(1), voiceId: z.string().min(1),
+    maxMicroUsd: z.number().int().nonnegative(),
+  }).strict(),
+  z.object({ kind: z.literal("stop-catalogue-voice-preview"), requestId: UlidSchema }).strict(),
   /**
    * Speak a shot's line in its character's own voice (SPEC-011 R-14). The voice is not a
    * parameter: it is the speaker's, read from their sheet at dispatch, so a retake keeps it by

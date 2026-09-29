@@ -167,6 +167,7 @@ Implemented landing directories include:
 | Upload main-photo candidate | Copies to `W\references\<sheet>\candidates\upload-<id>.<ext>`. Choosing it copies it into an immutable reference take, changes `kit.json`, records a review, then deletes the candidate. |
 | Compile classic grid | Legacy angle-tile command path, not offered by the current character-reference screen: creates or replaces `W\references\<sheet>\model-sheet-v<version>-grid.png`, then creates or replaces that sheet's `kit.json`. |
 | Preview voice | Creates or reuses `W\.cache\voice-previews\<hash>.<ext>`. Current model-driven formats include Kokoro WAV, cloud MP3, and ComfyUI cloned-voice FLAC. |
+| Preview Settings narrator | Creates or reuses `R\voice-previews\audio\<hash>.<ext>` without opening a world. Cloud synthesis uses the ordinary job journal and ledger with scope `app:voice-previews`; its queue staging is under `R\voice-previews\.staging\`. Public samples are bounded downloads and local Kokoro samples are unmetered. |
 | Dictate | Returns transcript text and does not persist the captured audio. |
 | Generate world image | Lands `W\incoming\world-image\candidate.png`. Accept copies it to `W\world-art.png` and deletes the candidate; discard deletes only the candidate. |
 

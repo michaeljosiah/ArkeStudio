@@ -6,6 +6,7 @@ import type {
   ProviderId,
   ProviderTransportDiagnostic,
   RecipeIdentity,
+  VoiceCandidate,
 } from "@arke-studio/contracts";
 
 /**
@@ -248,9 +249,7 @@ export interface ProviderCallCapture {
 }
 
 export interface VoiceCatalogueClient extends ProviderClient {
-  listVoicesCatalog(key: string): Promise<
-    Array<{ provider: string; model: string; voiceId: string; label: string; attributes: string[]; local: boolean; canClone: boolean }>
-  >;
+  listVoicesCatalog(key: string): Promise<VoiceCandidate[]>;
 }
 
 export interface ProviderClient {
