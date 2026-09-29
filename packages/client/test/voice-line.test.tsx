@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { parseHTML } from "linkedom";
 import type { ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __applyForTest, __handleFrameForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
@@ -461,7 +462,8 @@ describe("a character's voice", () => {
     assert.match(html, /Harbour/);
     assert.match(html, /Harbour · reader unavailable/);
     assert.doesNotMatch(html, /Cloned voice setup is unavailable in this build/);
-    assert.doesNotMatch(html, /<button[^>]*class="fy-voicerow__pick"/);
+    const pick = parseHTML(html).document.querySelector('.fy-voicerow__pick');
+    assert.ok(pick?.hasAttribute("disabled"), "the saved recording offers no retired reader");
     assert.match(html, /<button[^>]*data-testid="voice-assign"[^>]*disabled=""/);
   });
 });
@@ -555,13 +557,27 @@ describe("a cloned voice's readers on the Voice page (SPEC-046 R-30, R-31, R-34;
     assert.match(html, /voice-reader-mistral/);
   });
 
-  it("keeps a recording without inventing a local reader when no hosted reader is connected", () => {
-    const empty = { [sheetId]: { ...candidates()[sheetId]!, ranked: [] } };
-    const html = render(`${page}?choose=1&tab=mine`, stateWith(undefined), { voiceCandidates: empty });
-    assert.match(html, /Your recordings are saved/);
-    assert.match(html, /Connect a cloned-voice reader in Providers/);
-    assert.doesNotMatch(html, /install a local runtime/);
-    assert.match(html, /data-testid="voice-assign"[^>]*disabled/);
+  it("keeps recordings named, counted and deletable without a connected reader, including while the catalogue loads", () => {
+    for (const ranked of [undefined, [], [reader("comfyui", "comfyui-cloned-voice", true)]]) {
+      const voiceCandidates = ranked === undefined ? {} : { [sheetId]: { ...candidates()[sheetId]!, ranked } };
+      const html = render(`${page}?choose=1&tab=mine`, stateWith(undefined), { voiceCandidates });
+      const catalogue = parseHTML(html).document.querySelector('[data-testid="voice-catalogue"]')!;
+      assert.equal(catalogue.querySelectorAll('.fy-voicerow').length, 1);
+      assert.equal(catalogue.querySelector('.fy-voicerow__name')?.textContent, "Harbour");
+      assert.equal(catalogue.querySelector('[data-testid="voice-tab-mine"]')?.textContent, "Mine 1");
+      assert.equal(catalogue.querySelector('[data-testid="voice-tab-all"]')?.textContent, "All 1");
+      assert.equal(catalogue.querySelector('[data-testid="voice-tab-local"]')?.textContent, "On this machine 0");
+      assert.equal(catalogue.querySelector('[data-testid="voice-tab-cloud"]')?.textContent, "Cloud 0");
+      const remove = catalogue.querySelector('[data-testid="voice-delete"]');
+      assert.ok(remove);
+      assert.equal(remove.hasAttribute("disabled"), false);
+      assert.ok(catalogue.querySelector('.fy-voicerow__pick')?.hasAttribute("disabled"));
+      assert.ok(catalogue.querySelector('[data-testid="voice-assign"]')?.hasAttribute("disabled"));
+      assert.equal(catalogue.querySelector('[data-testid^="voice-reader-"]'), null);
+      assert.equal(catalogue.querySelector('.fy-clipbtn'), null, "no synthetic preview without a reader");
+      assert.match(catalogue.textContent!, /Connect a cloned-voice reader in Providers/);
+      assert.doesNotMatch(catalogue.textContent!, /install a local runtime/);
+    }
   });
 
   it("a hosted vendor's own voices read presets (R-31)", () => {

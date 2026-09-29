@@ -13,6 +13,7 @@ import {
   readerPriceLabel,
   supportsVoiceUse,
   voiceTargetKey,
+  type ClonedVoice,
   type ManifestModel,
   type RankedVoice,
   type ReferenceKit,
@@ -209,7 +210,7 @@ function cloneOf(candidate: VoiceCandidate): string | null {
   return candidate.readsClone ?? null;
 }
 
-function catalogueRows(ranked: readonly RankedVoice[], where: Tab): CatalogueRow[] {
+function catalogueRows(ranked: readonly RankedVoice[], where: Tab, recordings: readonly ClonedVoice[]): CatalogueRow[] {
   const rows: CatalogueRow[] = [];
   const byClone = new Map<string, CatalogueRow>();
   for (const { candidate } of ranked) {
@@ -238,6 +239,16 @@ function catalogueRows(ranked: readonly RankedVoice[], where: Tab): CatalogueRow
       ...(candidate.readsDesigned ? { designed: candidate.readsDesigned } : {}) };
     byClone.set(group, row);
     rows.push(row);
+  }
+  // The world owns recordings even when no reader is connected. Keep their library controls
+  // available without inventing a selectable provider or adding them to either reader shelf.
+  if (where === "all" || where === "mine") {
+    for (const voice of recordings) {
+      const key = `clone:${voice.id}`;
+      if (!byClone.has(key)) {
+        rows.push({ key, label: voice.name, attributes: voice.attributes ?? [], clone: voice.id, readers: [] });
+      }
+    }
   }
   return rows;
 }
@@ -370,7 +381,7 @@ export function CharacterVoiceScreen() {
   // not. The count is the picker's own — voices, a cloned voice's readers folded into one.
   const providers = [...new Set((candidates?.ranked ?? []).filter(({ candidate }) => supportsVoiceUse(candidate, "line")).map(({ candidate }) => candidate.provider))];
   const engines = providers.length > 3 ? [`${providers.length} providers`] : providers;
-  const voiceCount = candidates ? catalogueRows(candidates.ranked, "all").length : 0;
+  const voiceCount = catalogueRows(candidates?.ranked ?? [], "all", world.clonedVoices ?? []).length;
   // Delivery examples live beside the performance they were taken from (design 132). The one
   // case that surface cannot reach is a slot whose production or scene has since gone: nothing
   // resolves this character as a speaker any more, so the panel appears here to be cleared.
@@ -687,9 +698,9 @@ function ChooseVoiceDialog({
     return byKey;
   }, [world.sheets, world.clonedVoices, sheet.id]);
   const ranked = candidates?.ranked ?? [];
-  const rows = catalogueRows(ranked, where);
+  const rows = catalogueRows(ranked, where, world.clonedVoices ?? []);
   // The counts are rows, not candidates: a cloned voice with three readers is one voice.
-  const counts = Object.fromEntries(TABS.map((tab) => [tab, catalogueRows(ranked, tab).length])) as Record<Tab, number>;
+  const counts = Object.fromEntries(TABS.map((tab) => [tab, catalogueRows(ranked, tab, world.clonedVoices ?? []).length])) as Record<Tab, number>;
   const chosen = rows.flatMap((row) => row.readers).find((candidate) => voiceTargetKey(candidate) === pick);
   const startPreview = (candidate: VoiceCandidate, confirmedFor?: string) => {
     const provider = providerIdOf(candidate.provider);
@@ -796,9 +807,7 @@ function ChooseVoiceDialog({
         )}
         {candidates === undefined && <p className="fy-voicesheet__none">Reading the catalogue…</p>}
         {candidates !== undefined && rows.length === 0 && (
-          <p className="fy-voicesheet__none">{where === "mine" && (world.clonedVoices ?? []).length > 0
-            ? "Your recordings are saved. Connect a cloned-voice reader in Providers to use them for speech."
-            : "No voices here — add a key in Providers, or install a local runtime."}</p>
+          <p className="fy-voicesheet__none">No voices here — add a key in Providers, or install a local runtime.</p>
         )}
         {/* The catalogue scrolls in its own pane rather than growing the sheet: fifty cloud
             voices would otherwise push the press that spends money below the fold. */}
@@ -809,8 +818,8 @@ function ChooseVoiceDialog({
             const picked =
               row.readers.find((reader) => voiceTargetKey(reader) === pick) ??
               row.readers.find((reader) => voiceTargetKey(reader) === assignedKey) ??
-              row.readers[0]!;
-            const key = voiceTargetKey(picked);
+              row.readers[0];
+            const key = picked ? voiceTargetKey(picked) : row.key;
             const requestId = requests[key];
             const result = requestId ? voiceAudio[requestId] : undefined;
             const error = result?.error ?? previews[key]?.error;
@@ -820,7 +829,7 @@ function ChooseVoiceDialog({
             const step = requestId
               ? jobs.find((job) => job.params["requestId"] === requestId)?.step
               : undefined;
-            const pickedRow = rowFor(models, picked);
+            const pickedRow = picked ? rowFor(models, picked) : undefined;
             const isPicked = row.readers.some((reader) => voiceTargetKey(reader) === pick);
             const isCurrent = row.readers.some((reader) => voiceTargetKey(reader) === assignedKey);
             const library = row.clone !== null || row.designed !== undefined;
@@ -829,7 +838,7 @@ function ChooseVoiceDialog({
                 key={row.key}
                 className={cx("fy-voicerow", library && "fy-voicerow--readers", isPicked && "fy-voicerow--picked", isCurrent && "fy-voicerow--selected")}
               >
-                <ClipPlayButton
+                {picked ? <ClipPlayButton
                   small
                   busy={picked.unavailableReason === undefined && Boolean(requestId && !result)}
                   label={picked.local ? "Preview · free" : "Preview"}
@@ -844,7 +853,7 @@ function ChooseVoiceDialog({
                       : null
                   }
                   onStart={picked.unavailableReason === undefined ? () => startPreview(picked) : undefined}
-                />
+                /> : <span className="fy-voiceuse__noplay" />}
                 <button
                   type="button"
                   className="fy-voicerow__pick"
@@ -856,7 +865,7 @@ function ChooseVoiceDialog({
                     {row.attributes.length > 0 ? row.attributes.join(", ") : row.clone !== null ? "cloned here" : ""}
                   </span>
                 </button>
-                {!library && (
+                {!library && picked && (
                   <span className="fy-voicerow__where">
                     {picked.local ? <Monitor size={12} /> : <Cloud size={12} />}
                     {/* One expression, so the reader and its price stay one text node: split in
@@ -873,7 +882,7 @@ function ChooseVoiceDialog({
                   </span>
                 )}
                 <span className="fy-mono fy-voicerow__note">
-                  {rowNote({ candidate: picked, error, step, notice, current: isCurrent, shared })}
+                  {picked ? rowNote({ candidate: picked, error, step, notice, current: isCurrent, shared }) : "no reader connected"}
                 </span>
                 {row.clone !== null && where === "mine" && (
                   <Button
@@ -888,7 +897,7 @@ function ChooseVoiceDialog({
                 )}
                 {/* The readers last in the row and on a line of their own beneath the name: beside
                     the name they left it a word a line, and the tab order stays the visual one. */}
-                {library && (
+                {library && row.readers.length > 0 && (
                   <span className="fy-readerchips" role="group" aria-label="Reader">
                     {row.readers.map((reader) => {
                       const readerKey = voiceTargetKey(reader);
@@ -909,6 +918,9 @@ function ChooseVoiceDialog({
                       );
                     })}
                   </span>
+                )}
+                {row.readers.length === 0 && (
+                  <span className="fy-readerchips fy-mono">Connect a cloned-voice reader in Providers to use this recording for speech.</span>
                 )}
               </div>
             );

@@ -15,7 +15,7 @@ Object.assign(globalThis, {
   Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true,
 });
 
-it("saving a recording opens Mine without assigning any reader or changing the character's voice", async t => {
+it("saving a recording keeps it manageable on Mine without assigning any reader or changing the character's voice", async t => {
   const state = structuredClone(FIXTURE_STATE);
   const sheet = state.world!.sheets[0]!;
   const previousVoice = structuredClone(sheet.voice);
@@ -73,7 +73,19 @@ it("saving a recording opens Mine without assigning any reader or changing the c
   assert.equal(container.querySelector('[data-testid="clone-voice"]'), null);
   assert.ok(container.querySelector('[data-testid="voice-catalogue"]'), "the chooser survives the recording dialog's close");
   assert.match(container.querySelector('[data-testid="voice-tab-mine"]')!.className, /active/);
-  assert.match(container.textContent!, /Your recordings are saved/);
+  assert.equal(container.querySelector('.fy-voicerow__name')?.textContent, "Harbour");
+  assert.equal(container.querySelector('[data-testid="voice-tab-mine"]')?.textContent, "Mine 1");
+  assert.ok(container.querySelector('[data-testid="voice-assign"]')?.hasAttribute("disabled"));
+  assert.match(container.textContent!, /Connect a cloned-voice reader in Providers/);
   assert.equal(sent.some(message => message.kind === "assign-voice"), false);
   assert.deepEqual(sheet.voice, previousVoice);
+  await press("voice-delete");
+  assert.equal(sent.some(message => message.kind === "delete-voice"), false, "the first press only asks for confirmation");
+  assert.equal(container.querySelector('[data-testid="voice-delete"]')?.textContent, "Delete for good");
+  await press("voice-delete");
+  const deletes = sent.filter(message => message.kind === "delete-voice");
+  assert.equal(deletes.length, 1);
+  assert.equal(deletes[0]!.worldId, worldId);
+  assert.equal(deletes[0]!.voiceId, "harbour");
+  assert.equal(sent.some(message => message.kind === "voice-preview" || message.kind === "assign-voice"), false);
 });
