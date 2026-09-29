@@ -16,11 +16,15 @@ export class RemoteBrowserError extends Error {}
  * forever. Abort the attempt so its existing polling can discover the host again. */
 export async function remoteFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const controller = new AbortController();
+  // AbortSignal.any is absent on older iPhones; forwarding cancellation needs only the
+  // same AbortController support as fetch itself, including an already-aborted parent.
+  const abort = () => controller.abort(init.signal?.reason);
+  if (init.signal?.aborted) abort();
+  else init.signal?.addEventListener("abort", abort, { once: true });
   const timer = setTimeout(() => controller.abort(), 10_000);
   try {
-    return await fetch(path, { ...init, signal: init.signal
-      ? AbortSignal.any([init.signal, controller.signal]) : controller.signal });
-  } finally { clearTimeout(timer); }
+    return await fetch(path, { ...init, signal: controller.signal });
+  } finally { clearTimeout(timer); init.signal?.removeEventListener("abort", abort); }
 }
 
 /** The worker adds the origin-bound key to HTTP requests, including native media loads.
@@ -62,7 +66,10 @@ export function prepareRemoteSession(): Promise<void> {
     navigator.serviceWorker.addEventListener("controllerchange", send);
     send();
     void Promise.resolve().then(() => navigator.serviceWorker.register("/notification-worker.js"))
-      .then(() => navigator.serviceWorker.ready).then(send, error => finish(error));
+      .then(() => navigator.serviceWorker.ready).then(send, error => {
+        finish(["SecurityError", "NotAllowedError", "NotSupportedError"].includes(error?.name)
+          ? new RemoteBrowserError("This browser does not allow service workers.") : error);
+      });
   }).catch(error => { preparing = null; browserKey = null; throw error; });
   return preparing;
 }

@@ -115,7 +115,9 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
     revision.current++;
     setBusy(true); setError(null);
     try {
-      const response = await remoteFetch("/remote/pair", {
+      // The code is consumed by this POST. Aborting it on our probe deadline could discard
+      // the only response carrying its pairing cookie; leave it to the browser, without replay.
+      const response = await fetch("/remote/pair", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, name: name.trim() || "My phone" }),

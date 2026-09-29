@@ -41,6 +41,19 @@ it("distinguishes unavailable browser storage from an unavailable network", asyn
   }
 });
 
+it("reports service-worker policy refusal as a browser limitation", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "serviceWorker");
+  const workers = Object.assign(new EventTarget(), {
+    register: async () => { throw new DOMException("Disabled by browser policy", "SecurityError"); },
+    ready: new Promise<object>(() => {}), controller: null,
+  });
+  Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: workers });
+  try { await assert.rejects(prepareRemoteSession(), RemoteBrowserError); }
+  finally {
+    if (previous) Object.defineProperty(navigator, "serviceWorker", previous); else Reflect.deleteProperty(navigator, "serviceWorker");
+  }
+});
+
 it("aborts a stalled session request and permits the next check", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const previous = globalThis.fetch;
@@ -53,6 +66,24 @@ it("aborts a stalled session request and permits the next check", async t => {
     await failed;
     globalThis.fetch = async () => new Response(null, { status: 204 });
     assert.equal((await remoteFetch("/remote/session")).status, 204);
+  } finally { globalThis.fetch = previous; }
+});
+
+it("forwards caller cancellation without AbortSignal.any and removes its listener", async t => {
+  const previous = globalThis.fetch;
+  t.mock.method(AbortSignal, "any", () => { throw new Error("Unavailable on this browser"); });
+  globalThis.fetch = (_input, init) => new Promise((_resolve, reject) => {
+    if (init!.signal!.aborted) reject(init!.signal!.reason);
+    else init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true });
+  });
+  try {
+    const controller = new AbortController();
+    const remove = t.mock.method(controller.signal, "removeEventListener");
+    const cancelled = assert.rejects(remoteFetch("/remote/session", { signal: controller.signal }), { name: "AbortError" });
+    controller.abort();
+    await cancelled;
+    assert.equal(remove.mock.callCount(), 1);
+    await assert.rejects(remoteFetch("/remote/session", { signal: controller.signal }), { name: "AbortError" });
   } finally { globalThis.fetch = previous; }
 });
 

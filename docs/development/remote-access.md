@@ -100,6 +100,7 @@ the gateway caches world data, media or credentials for offline use.
 If the PC or Tailscale is offline, an already open page retries. Worker preparation, session
 checks and WebSocket handshakes have ten-second deadlines so a stalled attempt cannot prevent
 retrying indefinitely. Returning to the page or restoring the network also checks the session.
+The one-use pairing submission has no additional deadline and is never automatically replayed.
 An installed app's first load or a new tab may show the browser's
 own network error because no page can be served. Resume the PC and connect Tailscale, then reload.
 If connections time out with another VPN active, test with that VPN disconnected; our Windows

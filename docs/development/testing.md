@@ -120,7 +120,9 @@ catalog refreshes temporarily disable those controls.
 
 Client `test/remote-session.test.ts`, `test/remote-pairing.test.tsx` and `test/dev-session.test.ts`
 cover stalled worker registration/activation, storage refusal, session-request deadlines,
-network restoration and handshake retries without accepting late socket events. The real Serve
+network restoration and handshake retries without accepting late socket events. These tests
+also cover cancellation without `AbortSignal.any`, worker policy refusal and preserving
+the one-use pairing POST beyond the session-probe deadline. The real Serve
 smoke below also loads the built install manifest, favicon and 192/512/180px home-screen icons
 before pairing, and checks that the desktop file page does not advertise web installation.
 On a physical phone, install from the browser menu, verify the home-screen icon and standalone
