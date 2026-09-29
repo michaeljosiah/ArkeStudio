@@ -10,8 +10,11 @@ import { hostOnlyCommandFixtures } from "./remote-host-commands.js";
 import { ClientMessageSchema, REMOTE_HOST_ONLY_COMMANDS, RemoteCommandRefusalSchema, RemoteDeviceInfoSchema, type RemotePairingDuration } from "@arke-studio/contracts";
 import { RemoteDevices } from "../src/remote-access/devices.js";
 import { RemoteGateway, remotePage } from "../src/remote-access/gateway.js";
+import { sealBrowserProof } from "../src/remote-access/browser-proof.js";
 
 const origin = "https://studio.example.ts.net";
+const browserKey = "b".repeat(64);
+const sealed = (proof: string) => proof.startsWith("v1.") ? proof : sealBrowserProof(proof, browserKey, origin);
 const temporary = () => mkdtemp(join(tmpdir(), "arke-remote-"));
 it("independently enumerated valid host payloads cover every refused command name", () => {
   assert.deepEqual([...new Set(hostOnlyCommandFixtures("C:/fixture.png").map(c => c.kind))].sort(), [...REMOTE_HOST_ONLY_COMMANDS].sort());
@@ -123,7 +126,7 @@ it("failed persistence cannot grant access and a damaged registry fails closed",
 function get(port: number, path: string, options: { method?: string; headers?: Record<string, string>; body?: string } = {}) {
   return new Promise<{ status: number; headers: import("node:http").IncomingHttpHeaders; body: string }>((resolve, reject) => {
     const req = request({ hostname: "127.0.0.1", port, path, method: options.method ?? "GET",
-      headers: { Host: new URL(origin).host, ...options.headers } }, res => {
+      headers: { Host: new URL(origin).host, "x-arke-browser-key": browserKey, ...options.headers } }, res => {
       let body = ""; res.on("data", chunk => { body += chunk; });
       res.on("end", () => resolve({ status: res.statusCode!, headers: res.headers, body }));
     });
@@ -131,8 +134,8 @@ function get(port: number, path: string, options: { method?: string; headers?: R
   });
 }
 function connect(port: number, proof?: string, pageOrigin = origin) {
-  return new WebSocket(`ws://127.0.0.1:${port}/`, { origin: pageOrigin,
-    headers: { Host: new URL(origin).host, ...(proof ? { Cookie: "__Host-arke-device=" + proof } : {}) } });
+  return new WebSocket(`ws://127.0.0.1:${port}/`, ["arke-remote", "arke-browser." + browserKey], { origin: pageOrigin,
+    headers: { Host: new URL(origin).host, ...(proof ? { Cookie: "__Host-arke-device=" + sealed(proof) } : {}) } });
 }
 async function closeServer(server: Server) { await new Promise<void>(resolve => server.close(() => resolve())); }
 it("gateway cookies respect fixed approval deadlines and renew Never without restoring revoked access", async () => {
@@ -144,12 +147,12 @@ it("gateway cookies respect fixed approval deadlines and renew Never without res
   try {
     for (const duration of [30, 90, 120, "never"] as const) {
       const { proof, id } = await paired(devices, String(duration), duration);
-      const approved = await get(port, "/remote/pair", { headers: { Cookie: "__Host-arke-pair=" + proof } });
+      const approved = await get(port, "/remote/pair", { headers: { Cookie: "__Host-arke-pair=" + sealed(proof) } });
       assert.equal(approved.status, 204);
       const lifetime = (duration === "never" ? 400 : duration) * 86400;
       assert.match(approved.headers["set-cookie"]![0]!, new RegExp(`Max-Age=${lifetime}$`));
       now += 86400_000;
-      const headers = { Cookie: "__Host-arke-device=" + proof };
+      const headers = { Cookie: "__Host-arke-device=" + sealed(proof) };
       const resumed = await get(port, "/remote/session", { headers });
       assert.equal(resumed.status, 204);
       assert.match(resumed.headers["set-cookie"]![0]!, /Secure; HttpOnly; SameSite=Strict/);
@@ -280,6 +283,30 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     for (const socket of wss.clients) socket.terminate(); wss.close(); await closeServer(upstream);
     await rm(root, { recursive: true, force: true });
   }
+});
+it("cookies captured by another service cannot authenticate without the origin-bound browser key", async () => {
+  const root = await temporary();
+  const devices = new RemoteDevices(join(root, "devices.json")); await devices.load();
+  await writeFile(join(root, "index.html"), "<head></head>");
+  const { proof } = await paired(devices);
+  const captured = sealed(proof);
+  const gateway = new RemoteGateway({ origin, clientDirectory: root, devices, session: { port: 9999, token: "a".repeat(64) } });
+  const port = await gateway.start(0);
+  try {
+    for (const key of ["", "c".repeat(64)]) {
+      for (const path of ["/remote/session", "/remote/device", "/media/world/a.png"]) {
+        assert.equal((await get(port, path, { headers: { Cookie: "__Host-arke-device=" + captured, "x-arke-browser-key": key } })).status, 401);
+      }
+      assert.equal((await get(port, "/remote/pair", { headers: { Cookie: "__Host-arke-pair=" + captured, "x-arke-browser-key": key } })).status, 410);
+      const socket = new WebSocket(`ws://127.0.0.1:${port}/`, key ? ["arke-remote", "arke-browser." + key] : [],
+        { origin, headers: { Host: new URL(origin).host, Cookie: "__Host-arke-device=" + captured } });
+      await new Promise<void>(resolve => socket.once("error", () => resolve()));
+      socket.terminate();
+    }
+    assert.equal((await get(port, "/remote/session", { headers: { Cookie: "__Host-arke-device=" + proof } })).status, 401, "legacy plaintext proofs cannot bypass browser binding");
+    assert.equal((await get(port, "/remote/session", { headers: { Cookie: "__Host-arke-device=" + sealBrowserProof(proof, browserKey, origin + ":9443") } })).status, 401, "the seal is bound to the complete origin");
+    assert.equal((await get(port, "/remote/session", { headers: { Cookie: "__Host-arke-device=" + captured } })).status, 204);
+  } finally { await gateway.stop(); await devices.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("served page CSP names only the hosted origin; the source page is not weakened", () => {
   const html = '<head><meta http-equiv="Content-Security-Policy" content="connect-src ws://localhost:*"></head>';

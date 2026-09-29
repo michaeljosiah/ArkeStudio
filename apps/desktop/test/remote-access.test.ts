@@ -178,7 +178,7 @@ it("duration migrates to 90, persists while off and across restart, and affects 
       const { pairing } = await host.command({ kind: "pair" });
       await new Promise<void>((resolve, reject) => {
         const req = request({ hostname: "127.0.0.1", port: 8793, path: "/remote/pair", method: "POST",
-          headers: { Host: new URL(origin).host, Origin: origin, "Content-Type": "application/json" } }, res => {
+          headers: { Host: new URL(origin).host, Origin: origin, "Content-Type": "application/json", "x-arke-browser-key": "b".repeat(64) } }, res => {
           res.resume(); res.once("end", () => {
             try { assert.equal(res.statusCode, 202); resolve(); } catch (error) { reject(error); }
           });

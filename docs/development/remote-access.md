@@ -37,7 +37,13 @@ Desktop and phone operate the same coordinator and world session. A paired devic
 worlds, choose models and defaults, and read diagnostics. Keys, sign-ins, machine controls,
 diagnostic exports and pairing management stay on the PC. Revoke a device
 in Settings to stop its active connections and future access. The remote gateway uses a secure,
-HttpOnly, same-site cookie; the private process capability never reaches the browser.
+HttpOnly, same-site cookie sealed with a random browser key stored in origin-scoped IndexedDB.
+Cookies are shared across ports, but this key is not: a service on another port cannot replay a
+captured cookie. The service worker attaches the key only to same-origin remote and media
+requests and refuses redirects. WebSockets carry the key in a subprotocol, never in URLs;
+the server echoes only the fixed protocol name. The private process capability never reaches
+the browser. Browser storage and service workers must be available. Browsers paired before
+this protection was added must pair again once; plaintext legacy cookies are refused.
 Copy link uses the desktop's native clipboard. If it fails, the address remains visible for
 manual copying. Scanning opens the browser and does not bypass pairing or PC approval.
 Browsers can remove saved cookies. Never approvals use a persistent cookie renewed on visits;

@@ -56,6 +56,14 @@ try {
       if (command.kind === "duration") pairingDuration = command.duration;
       if (command.kind === "approve") await devices.approve(command.id, pairingDuration);
       if (command.kind === "revoke") { await devices.revoke(command.id); gateway.recheckDevices(); }
+      if (command.kind === "check-captured-cookie") {
+        for (const key of ["", "c".repeat(64)]) {
+          const replay = await fetch(origin + "/remote/session", { headers: {
+            Cookie: "__Host-arke-device=" + command.cookie, "x-arke-browser-key": key,
+          } });
+          assert.equal(replay.status, 401, "a sibling service cannot replay a captured cookie");
+        }
+      }
       if (command.kind === "restart") {
         await gateway.stop(); await devices.stop(); await coordinator.stop();
         const previousToken = session.token;
@@ -180,12 +188,16 @@ async function electronMain() {
   await shot(owner, "desktop-duration");
   const cookie = (await phone.webContents.session.cookies.get({ url: config.origin, name: "__Host-arke-device" }))[0];
   assert.ok(cookie && !cookie.session && cookie.httpOnly && cookie.secure);
+  assert.ok(cookie.value.startsWith("v1."), "device proofs are sealed to the browser origin");
+  await rpc({ kind: "check-captured-cookie", cookie: cookie.value });
   assert.ok(cookie.expirationDate > Date.now() / 1000 + 399 * 86400, "Never uses a renewable persistent cookie");
   assert.equal(await js(phone, "document.cookie"), "");
   assert.ok(!(await phone.webContents.getURL()).includes("arke-session"));
   await shot(phone, "phone-worlds");
   const imageStatus = await js(phone, "fetch('/media/the-undersong/world-art.png', { headers: { Range: 'bytes=0-31' } }).then(r => r.status)");
   assert.equal(imageStatus, 206);
+  assert.equal(await js(phone, "new Promise(resolve => { const image = new Image(); image.onload = () => resolve(true); image.onerror = () => resolve(false); image.src = '/media/the-undersong/world-art.png'; })"), true,
+    "native image requests receive the browser key through the worker");
   await phone.webContents.session.cookies.flushStore();
   phone.destroy(); phone = new BrowserWindow(browserOptions);
   await phone.loadURL(config.origin + "/#/worlds");
