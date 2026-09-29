@@ -99,8 +99,9 @@ export function CloneVoiceDialog({
     answered.current = cloned;
     setSaving(false);
     if (cloned.voiceId) {
-      onCloned?.(cloned.voiceId);
       onClose();
+      // The owner may open the reader chooser after this dialog closes.
+      onCloned?.(cloned.voiceId);
     } else {
       setTrouble(cloned.reason ?? "That clip could not become a voice.");
     }

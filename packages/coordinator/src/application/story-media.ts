@@ -1,5 +1,5 @@
 import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
-import { CLONED_VOICE_MODEL, estimateMicroUsd, imageOutputFor, normalizeSpeechText, productionShape, voiceFormatForModel,
+import { supportsVoiceUse, estimateMicroUsd, imageOutputFor, normalizeSpeechText, productionShape, voiceFormatForModel,
   type ManifestModel, type SizeTier } from "@arke-studio/contracts";
 import type { EngineContext, EngineMutation, EnginePolicy, EngineQueue, EngineResource, EngineWorldRepository } from "./contracts.js";
 import { proseChapterRead, proseId } from "./prose-contracts.js";
@@ -102,7 +102,7 @@ export class StoryMediaApplicationService {
     if (input.model.capability !== "voice-tts") throw new Error("Narration requires a speech model.");
     if (!["perCharacter", "unmetered"].includes(input.model.pricing.kind))
       throw new Error("Narration requires character-based or explicitly unmetered pricing.");
-    if (input.model.id === CLONED_VOICE_MODEL)
+    if (!supportsVoiceUse(input.model, "narration"))
       throw new Error("This narration API requires a stock-voice model without cloned-reference transport.");
     if (!input.voiceId.trim() || input.voiceId.length > 200) throw new Error("A host-resolved stock voice is required.");
     const key = this.operations.key(context, resource, input.operationId);

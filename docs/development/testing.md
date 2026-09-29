@@ -490,3 +490,9 @@ payloads), coordinator `test/remote-access.test.ts`, client `test/settings-respo
 the existing Settings/Activity/account/chrome suites, and desktop transport/preload auth tests
 in the gate. The browser notification preference is device-local and tested separately from
 the PC's background-notification command.
+
+General speech selectors are covered by client `test/settings-general.test.tsx`. The retired
+local speech route must stay absent from recipes, manifest preferences, setup downloads and
+voice candidates; regressions live in provider `test/comfyui.test.ts`, desktop
+`test/comfyui-setup.test.ts`, and coordinator `test/voice/service.test.ts`. Old queued model
+identities must refuse before contacting an engine.

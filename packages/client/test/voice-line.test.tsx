@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { parseHTML } from "linkedom";
 import type { ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __applyForTest, __handleFrameForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
@@ -417,7 +418,7 @@ describe("a character's voice", () => {
     assert.match(html, /up to \$0\.03 preview/);
   });
 
-  it("keeps the current unready clone visible, and refuses to preview or assign it", () => {
+  it("keeps a retired assignment readable without offering it in the picker", () => {
     const baseSheet = FIXTURE_STATE.world!.sheets[0]!;
     const clone = {
       candidate: {
@@ -457,12 +458,12 @@ describe("a character's voice", () => {
     const html = render(`${page}?choose=1`, state, {
       voiceCandidates: { [sheetId]: { ...candidates[sheetId], ranked: [clone] } },
     });
-    // Still listed, still named as the current one: a voice that cannot run today is not a voice
-    // the character has stopped having.
+    // Preserve the assignment's name, with a separate status and no selectable retired row.
     assert.match(html, /Harbour/);
-    assert.match(html, /current/);
-    assert.match(html, /Cloned voice setup is unavailable in this build/);
-    assert.match(html, /<button[^>]*class="fy-voicerow__pick"[^>]*disabled=""/);
+    assert.match(html, /Harbour · reader unavailable/);
+    assert.doesNotMatch(html, /Cloned voice setup is unavailable in this build/);
+    const pick = parseHTML(html).document.querySelector('.fy-voicerow__pick');
+    assert.ok(pick?.hasAttribute("disabled"), "the saved recording offers no retired reader");
     assert.match(html, /<button[^>]*data-testid="voice-assign"[^>]*disabled=""/);
   });
 });
@@ -474,7 +475,6 @@ describe("a cloned voice's readers on the Voice page (SPEC-046 R-30, R-31, R-34;
     id, provider, capability: "voice-tts", displayName, accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { audioFormat: "wav" }, pricing,
   });
   const models = [
-    row("comfyui-cloned-voice", "comfyui", "Local · Cloned Voice", { kind: "unmetered" }),
     row("voxtral-mini-tts", "mistral", "Voxtral TTS", { kind: "perCharacter", microUsdPerCharacter: 16 }),
     row("breeze-tts-2", "breezeblue", "Breeze TTS 2", { kind: "perCharacter", microUsdPerCharacter: 40, unit: "cjk-double" }),
     row("eleven_multilingual_v2", "elevenlabs", "Eleven Multilingual v2", { kind: "perCharacter", microUsdPerCharacter: 100 }),
@@ -490,7 +490,7 @@ describe("a cloned voice's readers on the Voice page (SPEC-046 R-30, R-31, R-34;
     matched: [],
     overlap: 0,
   };
-  const ranked = [reader("comfyui", "comfyui-cloned-voice", true), reader("mistral", "voxtral-mini-tts", false), reader("breezeblue", "breeze-tts-2", false), preset];
+  const ranked = [reader("mistral", "voxtral-mini-tts", false), reader("breezeblue", "breeze-tts-2", false), preset];
   const breezeKey = voiceTargetKey({ provider: "breezeblue", model: "breeze-tts-2", voiceId: "harbour" });
   const candidates = (notices: Record<string, string> = {}) => ({
     [sheetId]: {
@@ -514,23 +514,21 @@ describe("a cloned voice's readers on the Voice page (SPEC-046 R-30, R-31, R-34;
   });
 
   it("the entrance counts voices as the picker does and names every provider, or how many (issues 1169, 1191)", () => {
-    // One clone with three readers and one preset: two voices, as the picker's All says, and
-    // three providers named — not "4 voices" with a subset of the providers.
+    // One clone with two readers and one preset: two voices and two providers.
     const html = render(page, stateWith(undefined), { voiceCandidates: candidates() });
     assert.match(html, /2 voices/);
-    assert.match(html, /comfyui · mistral · breezeblue/);
+    assert.match(html, /mistral · breezeblue/);
     const wide = {
       [sheetId]: { ...candidates()[sheetId]!, ranked: [...ranked, reader("elevenlabs", "eleven_multilingual_v2", false), reader("fishaudio", "fish-s2.1-pro", false)] },
     };
-    const five = render(page, stateWith(undefined), { voiceCandidates: wide });
-    assert.match(five, /2 voices/, "more readers of the same voice are not more voices");
-    assert.match(five, /5 providers/);
-    assert.doesNotMatch(five, /comfyui · mistral · breezeblue/, "never three names of five");
+    const four = render(page, stateWith(undefined), { voiceCandidates: wide });
+    assert.match(four, /2 voices/, "more readers of the same voice are not more voices");
+    assert.match(four, /4 providers/);
+    assert.doesNotMatch(four, /mistral · breezeblue/, "never two names of four");
   });
 
   it("names the reader and its price on Reads lines, in the row's own figures (R-30)", () => {
     assert.match(render(page, stateWith(through("mistral", "voxtral-mini-tts")), { voiceCandidates: candidates() }), /Harbour · Voxtral · \$0\.016 per 1k/);
-    assert.match(render(page, stateWith(through("comfyui", "comfyui-cloned-voice")), { voiceCandidates: candidates() }), /Harbour · IndexTTS · free/);
     // A preset too — the fixture's ElevenLabs voice — priced by its row, not "a line at a time".
     const preset = render(page, stateWith(FIXTURE_STATE.world!.sheets[0]!.voice as never), { voiceCandidates: candidates() });
     assert.match(preset, /Low tide · ElevenLabs · \$0\.10 per 1k/);
@@ -540,16 +538,46 @@ describe("a cloned voice's readers on the Voice page (SPEC-046 R-30, R-31, R-34;
   it("draws a cloned voice once, with a chip per reader, and opens on the shelf the address names", () => {
     const html = render(`${page}?choose=1&tab=mine`, stateWith(through("mistral", "voxtral-mini-tts")), { voiceCandidates: candidates() });
     const sheet = html.slice(html.indexOf('data-testid="voice-catalogue"'));
-    assert.equal((sheet.match(/class="fy-voicerow[ "]/g) ?? []).length, 1, "one voice with three readers is one row, not three");
+    assert.equal((sheet.match(/class="fy-voicerow[ "]/g) ?? []).length, 1, "one voice with two readers is one row");
     assert.match(sheet, /class="fy-seg__item fy-seg__item--active" data-testid="voice-tab-mine"/);
     assert.match(sheet, />Mine 1</);
     assert.match(sheet, />All 2</, "the voice and the preset");
-    for (const [provider, label] of [["comfyui", "IndexTTS · free"], ["mistral", "Voxtral · \\$0\\.016 per 1k"], ["breezeblue", "Breeze · \\$0\\.04 per 1k · CJK ×2"]]) {
+    for (const [provider, label] of [["mistral", "Voxtral · \\$0\\.016 per 1k"], ["breezeblue", "Breeze · \\$0\\.04 per 1k · CJK ×2"]]) {
       assert.match(sheet, new RegExp(`data-testid="voice-reader-${provider}"[^>]*>.*?${label}</button>`), `${provider} chip`);
     }
     // The assigned reader is the pressed chip, and the row is the current one.
     assert.match(sheet, /aria-pressed="true"[^>]*data-testid="voice-reader-mistral"/);
     assert.match(sheet, />current</);
+  });
+
+  it("hides a retired reader even in a stale catalogue", () => {
+    const stale = { [sheetId]: { ...candidates()[sheetId]!, ranked: [...ranked, reader("comfyui", "comfyui-cloned-voice", true)] } };
+    const html = render(`${page}?choose=1&tab=mine`, stateWith(undefined), { voiceCandidates: stale });
+    assert.doesNotMatch(html, /voice-reader-comfyui|IndexTTS/);
+    assert.match(html, /voice-reader-mistral/);
+  });
+
+  it("keeps recordings named, counted and deletable without a connected reader, including while the catalogue loads", () => {
+    for (const ranked of [undefined, [], [reader("comfyui", "comfyui-cloned-voice", true)]]) {
+      const voiceCandidates = ranked === undefined ? {} : { [sheetId]: { ...candidates()[sheetId]!, ranked } };
+      const html = render(`${page}?choose=1&tab=mine`, stateWith(undefined), { voiceCandidates });
+      const catalogue = parseHTML(html).document.querySelector('[data-testid="voice-catalogue"]')!;
+      assert.equal(catalogue.querySelectorAll('.fy-voicerow').length, 1);
+      assert.equal(catalogue.querySelector('.fy-voicerow__name')?.textContent, "Harbour");
+      assert.equal(catalogue.querySelector('[data-testid="voice-tab-mine"]')?.textContent, "Mine 1");
+      assert.equal(catalogue.querySelector('[data-testid="voice-tab-all"]')?.textContent, "All 1");
+      assert.equal(catalogue.querySelector('[data-testid="voice-tab-local"]')?.textContent, "On this machine 0");
+      assert.equal(catalogue.querySelector('[data-testid="voice-tab-cloud"]')?.textContent, "Cloud 0");
+      const remove = catalogue.querySelector('[data-testid="voice-delete"]');
+      assert.ok(remove);
+      assert.equal(remove.hasAttribute("disabled"), false);
+      assert.ok(catalogue.querySelector('.fy-voicerow__pick')?.hasAttribute("disabled"));
+      assert.ok(catalogue.querySelector('[data-testid="voice-assign"]')?.hasAttribute("disabled"));
+      assert.equal(catalogue.querySelector('[data-testid^="voice-reader-"]'), null);
+      assert.equal(catalogue.querySelector('.fy-clipbtn'), null, "no synthetic preview without a reader");
+      assert.match(catalogue.textContent!, /Connect a cloned-voice reader in Providers/);
+      assert.doesNotMatch(catalogue.textContent!, /install a local runtime/);
+    }
   });
 
   it("a hosted vendor's own voices read presets (R-31)", () => {

@@ -45,12 +45,6 @@ it("ComfyUI residency does not mistake an empty GPU reservation for processor in
     assert.equal((await client.residency())[0]?.state, expected);
   }
 });
-const VOICE_REFERENCE = {
-  name: `${"a".repeat(64)}.wav`,
-  contentType: "audio/wav" as const,
-  data: Uint8Array.from([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45]),
-};
-
 interface Recorded {
   url: string;
   method: string;
@@ -258,10 +252,6 @@ describe("the recipe catalogue projects into the manifest like any other model",
   });
 
   it("every dependency a recipe declares is pinned to something verifiable", () => {
-    // D11 said v1 ships zero custom nodes and any future node is vendored. The cloned-voice recipe
-    // (SPEC-022) is that future node arriving: an engine of this class cannot run on core nodes.
-    // So the invariant under test is the one D11 was protecting — nothing unpinned — rather than
-    // the count it happened to state while the count was zero.
     for (const recipe of COMFYUI_RECIPES) {
       for (const node of recipe.requires.customNodes) {
         assert.match(node.pinnedRef, /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/, `${recipe.id}: ${node.id} needs a commit or content pin`);
@@ -388,25 +378,7 @@ describe("the recipe catalogue projects into the manifest like any other model",
     }
   });
 
-  it("the cloned voice stays unavailable until its complete immutable dependency closure is catalogued", () => {
-    const voice = comfyUiRecipeById("comfyui-cloned-voice")!;
-    assert.equal(voice.capability, "voice-tts");
-    assert.equal(voice.requires.customNodes[0]?.id, "TTS-Audio-Suite");
-    // No invented files or hashes: production readiness refuses this recipe, so the node cannot
-    // perform the old undeclared first-generation download.
-    assert.deepEqual(voice.requires.checkpoints, []);
-    assert.match(voice.requires.unavailableReason ?? "", /immutable TTS-Audio-Suite archive/);
-    assert.match(voice.requires.unavailableReason ?? "", /hashed IndexTTS 2\.5 model files/);
-    // 8 GB, not the 6 GB first shipped: the model measured 5.44 GB on a Python harness and the
-    // recipe still could not finish on a 10 GB card, because the engine hosting it costs more and
-    // the machine had 3.36 GB already spoken for. The floor carries that headroom because the
-    // gate compares against TOTAL VRAM (SPEC-022 §2.6).
-    assert.equal(voice.hardware.minVramMb, 8000);
-    assert.match(voice.hardware.floorSource, /measured through ComfyUI/);
-    const row = COMFYUI_MANIFEST_MODELS.find((model) => model.id === voice.id)!;
-    assert.deepEqual(row.limits.deliveries, undefined, "the current graph exposes provider-default delivery only");
-    assert.equal(JSON.stringify(voice.graph).includes("emotionAlpha"), false);
-  });
+
 });
 
 // ---------------------------------------------------------------------------
@@ -532,7 +504,7 @@ describe("the compatibility probe is the API floor (D14)", () => {
   it("no engine → every capability is unavailable with the remedy, not an ENOENT", async () => {
     const client = new ComfyUiClient(engineFake([]).fetch, () => null, OK_PREFLIGHT);
     const probes = await client.validateKey();
-    assert.equal(probes.length, 3);
+    assert.equal(probes.length, 2);
     assert.ok(probes.every((p) => !p.available && /no ComfyUI engine/.test(p.reason ?? "")));
   });
 
@@ -559,7 +531,6 @@ describe("the compatibility probe is the API floor (D14)", () => {
     assert.deepEqual(await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).validateKey(), [
       { capability: "image", available: true },
       { capability: "video", available: true },
-      { capability: "voice-tts", available: true },
     ]);
   });
 
@@ -1384,266 +1355,6 @@ describe("no graph survives capture", () => {
   });
 });
 
-/**
- * Speaking a line in a cloned voice (SPEC-022 T-10).
- *
- * Every one of these failed against the shipped client before the voice path existed, and none
- * of the 2,400 tests noticed: the recipe had only ever been proven by a graph posted by hand,
- * which is precisely the path that skips this file.
- */
-describe("the cloned-voice recipe on the wire", () => {
-  const VOICE_PARAMS = {
-    voiceId: "harbour-glass",
-    text: "The tide turns when it turns.",
-    audioFormat: "flac",
-    voiceReference: true,
-  };
-  const ROUTES = [
-    { match: /\/upload\/image$/, status: 200, body: { name: "harbour-glass.wav", subfolder: "" } },
-    { match: /\/prompt$/, status: 200, body: { prompt_id: "p-v1", node_errors: {} } },
-  ];
-
-  it("uploads the clip and gives LoadAudio the engine's own name for it", async () => {
-    // `LoadAudio.audio` is a dropdown over the engine's input directory, so a path from this
-    // machine means nothing there. Passing one through produced a graph the engine rejected.
-    const { fetch, calls } = engineFake(ROUTES);
-    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
-      model: "comfyui-cloned-voice",
-      capability: "voice-tts",
-      params: VOICE_PARAMS,
-      voiceReference: VOICE_REFERENCE,
-    });
-    assert.equal(calls.some((c) => c.url.endsWith("/upload/image") && c.method === "POST"), true, "clip was never uploaded");
-    assert.equal(calls.find((c) => c.url.endsWith("/upload/image"))?.redirect, "manual");
-    const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
-      prompt: Record<string, { inputs: Record<string, unknown> }>;
-    };
-    assert.equal(posted.prompt["1"]!.inputs["audio"], "harbour-glass.wav");
-    assert.equal(posted.prompt["4"]!.inputs["text"], VOICE_PARAMS.text);
-  });
-
-  it("uploads before it submits, never after", async () => {
-    // The name has to exist on the engine before the graph naming it is queued.
-    const { fetch, calls } = engineFake(ROUTES);
-    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
-      model: "comfyui-cloned-voice",
-      capability: "voice-tts",
-      params: VOICE_PARAMS,
-      voiceReference: VOICE_REFERENCE,
-    });
-    const order = calls.map((c) => c.url);
-    assert.equal(
-      order.findIndex((u) => u.endsWith("/upload/image")) < order.findIndex((u) => u.endsWith("/prompt")),
-      true,
-    );
-  });
-
-  it("keeps a subfolder, because that is part of the name the dropdown shows", async () => {
-    const { fetch, calls } = engineFake([
-      { match: /\/upload\/image$/, status: 200, body: { name: "clip.wav", subfolder: "arke" } },
-      { match: /\/prompt$/, status: 200, body: { prompt_id: "p-v2", node_errors: {} } },
-    ]);
-    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
-      model: "comfyui-cloned-voice",
-      capability: "voice-tts",
-      params: VOICE_PARAMS,
-      voiceReference: VOICE_REFERENCE,
-    });
-    const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
-      prompt: Record<string, { inputs: Record<string, unknown> }>;
-    };
-    assert.equal(posted.prompt["1"]!.inputs["audio"], "arke/clip.wav");
-  });
-
-  it("uploads only the content-addressed name, never a host path", async () => {
-    const { fetch, calls } = engineFake(ROUTES);
-    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
-      model: "comfyui-cloned-voice",
-      capability: "voice-tts",
-      params: VOICE_PARAMS,
-      voiceReference: VOICE_REFERENCE,
-    });
-    const upload = calls.find((c) => c.url.endsWith("/upload/image"))!;
-    assert.equal(upload.filename, VOICE_REFERENCE.name);
-    assert.equal(upload.filename.includes("worlds"), false);
-  });
-
-  it("refuses a non-content-addressed upload name before provider I/O", async () => {
-    const { fetch, calls } = engineFake(ROUTES);
-    await assert.rejects(
-      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
-        model: "comfyui-cloned-voice",
-        capability: "voice-tts",
-        params: VOICE_PARAMS,
-        voiceReference: { ...VOICE_REFERENCE, name: "harbour-glass.wav" },
-      }),
-      /safe content-addressed name/,
-    );
-    assert.equal(calls.length, 0);
-  });
-
-  it("does not replay clip bytes to the target of an HTTP 307", async (t) => {
-    let redirectedRequests = 0;
-    let redirectedBytes = 0;
-    const redirected = createServer((request, response) => {
-      redirectedRequests += 1;
-      request.on("data", (chunk: Buffer) => {
-        redirectedBytes += chunk.byteLength;
-      });
-      request.on("end", () => {
-        response.writeHead(200, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ name: VOICE_REFERENCE.name, subfolder: "" }));
-      });
-    });
-    const redirectedUrl = await listen(redirected);
-    t.after(() => closeServer(redirected));
-
-    let uploadBytes = 0;
-    const engine = createServer((request, response) => {
-      request.on("data", (chunk: Buffer) => {
-        uploadBytes += chunk.byteLength;
-      });
-      request.on("end", () => {
-        response.writeHead(307, { Location: `${redirectedUrl}/stolen-upload` });
-        response.end();
-      });
-    });
-    const engineUrl = await listen(engine);
-    t.after(() => closeServer(engine));
-
-    await assert.rejects(
-      new ComfyUiClient(
-        (url, init) => fetch(url, init),
-        () => engineUrl,
-        OK_PREFLIGHT,
-      ).submit("", {
-        model: "comfyui-cloned-voice",
-        capability: "voice-tts",
-        params: VOICE_PARAMS,
-        voiceReference: VOICE_REFERENCE,
-      }),
-      /redirected the voice recording upload \(HTTP 307\)/,
-    );
-    assert.ok(
-      uploadBytes > VOICE_REFERENCE.data.byteLength,
-      "the first server received the multipart upload",
-    );
-    assert.equal(redirectedRequests, 0, "fetch did not resend the POST to the redirect target");
-    assert.equal(redirectedBytes, 0, "the redirect target received none of the clip bytes");
-  });
-
-  it("does not follow redirects for prompt submission or voice-output downloads", async () => {
-    const promptFake = engineFake([
-      {
-        match: /\/upload\/image$/,
-        status: 200,
-        body: { name: VOICE_REFERENCE.name, subfolder: "" },
-      },
-      { match: /\/prompt$/, status: 307, body: {} },
-    ]);
-    await assert.rejects(
-      new ComfyUiClient(promptFake.fetch, BASE, OK_PREFLIGHT).submit("", {
-        model: "comfyui-cloned-voice",
-        capability: "voice-tts",
-        params: VOICE_PARAMS,
-        voiceReference: VOICE_REFERENCE,
-      }),
-      /redirected prompt submission \(HTTP 307\)/,
-    );
-    assert.equal(promptFake.calls.find((call) => call.url.endsWith("/prompt"))?.redirect, "manual");
-
-    const downloadFake = engineFake([
-      {
-        match: /\/history\/p-v1$/,
-        status: 200,
-        body: {
-          "p-v1": {
-            outputs: {
-              "5": { audio: [{ filename: "voice.flac", subfolder: "", type: "output" }] },
-            },
-          },
-        },
-      },
-      { match: /\/view\?/, status: 307, body: {} },
-    ]);
-    await assert.rejects(
-      new ComfyUiClient(downloadFake.fetch, BASE, OK_PREFLIGHT).fetchArtifacts("", "p-v1", {
-        model: "comfyui-cloned-voice",
-      }),
-      /redirected the download.*HTTP 307/,
-    );
-    assert.equal(downloadFake.calls.find((call) => call.url.includes("/history/"))?.redirect, "manual");
-    assert.equal(downloadFake.calls.find((call) => call.url.includes("/view?"))?.redirect, "manual");
-  });
-
-  it("takes every key a real voice dispatch carries", async () => {
-    /*
-     * Copied verbatim from a job the installed app actually built, not invented here. The
-     * allow-list named none of them, and because it refuses one key at a time each rebuild
-     * surfaced exactly one more: `voiceId`, then `requestId`, then whatever came next. The
-     * whole envelope belongs in one test so the next addition fails here and not on a machine.
-     */
-    const { fetch } = engineFake(ROUTES);
-    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
-      model: "comfyui-cloned-voice",
-      capability: "voice-tts",
-      params: {
-        ...VOICE_PARAMS,
-        seed: 42,
-        requestId: "01M0D1RN20G5MVYTEKNM0Q51GV",
-        purpose: "candidate-preview",
-        sheetId: "aurora-sabato",
-        sheetVersion: 5,
-        characterCount: 174,
-      },
-      voiceReference: VOICE_REFERENCE,
-    });
-  });
-
-  it("asks for a line to speak, not a prompt", async () => {
-    // This recipe has no `prompt` param at all: a line is spoken verbatim, never described.
-    const { fetch } = engineFake(ROUTES);
-    await assert.rejects(
-      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
-        model: "comfyui-cloned-voice",
-        capability: "voice-tts",
-        params: { voiceId: "v", audioFormat: "flac", voiceReference: true },
-        voiceReference: VOICE_REFERENCE,
-      }),
-      /needs a line to speak/,
-    );
-  });
-
-  it("does not put a file on the engine for a job pre-flight refuses", async () => {
-    const { fetch, calls } = engineFake(ROUTES);
-    await assert.rejects(
-      new ComfyUiClient(fetch, BASE, async () => ({ ok: false as const, reason: "pinned node drifted" })).submit(
-        "",
-        { model: "comfyui-cloned-voice", capability: "voice-tts", params: VOICE_PARAMS, voiceReference: VOICE_REFERENCE },
-      ),
-    );
-    assert.equal(calls.some((c) => c.url.endsWith("/upload/image")), false);
-  });
-
-  it("refuses when the queue did not attach confined clip bytes", async () => {
-    const { fetch, calls } = engineFake(ROUTES);
-    await assert.rejects(
-      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
-        model: "comfyui-cloned-voice", capability: "voice-tts", params: VOICE_PARAMS,
-      }),
-      /needs the voice's own recording/,
-    );
-    assert.equal(calls.length, 0);
-  });
-});
-
-/**
- * What the engine says it is doing (SPEC-021 D16).
- *
- * The exclusion this amends was written against queue position, which is not a fraction of the
- * work done. These assert the two things that make the step counter different: it comes from the
- * node's own count, and it never carries the node's id.
- */
 describe("progress from the engine's socket", () => {
   function socketFake(): {
     open: (url: string) => ProgressSocket;
@@ -1679,16 +1390,15 @@ describe("progress from the engine's socket", () => {
     const sock = socketFake();
     const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, sock.open);
     await client.submit("", {
-      model: "comfyui-cloned-voice",
-      capability: "voice-tts",
-      params: { voiceId: "v", text: "A line.", audioFormat: "flac", voiceReference: true },
-      voiceReference: VOICE_REFERENCE,
+      model: "comfyui-draft-video",
+      capability: "video",
+      params: { prompt: "A harbour.", durationSec: 3, aspect: "16:9" },
     });
     await client.poll("", "p-1");
     assert.equal(sock.urls[0], "ws://127.0.0.1:8188/ws?clientId=arke-studio");
     sock.send({ type: "progress", data: { prompt_id: "p-1", value: 20, max: 25, node: "4" } });
     const result = await client.poll("", "p-1");
-    assert.deepEqual(result.step, { stage: "speaking", done: 20, total: 25 });
+    assert.deepEqual(result.step, { stage: "rendering", done: 20, total: 25 });
     assert.equal(result.progress, 0.8);
   });
 
@@ -1786,11 +1496,10 @@ describe("progress from the engine's socket", () => {
  * dispatch, the engine being told to put things down, and the refusal naming both figures.
  */
 describe("making room on the graphics card", () => {
-  const VOICE = {
-    model: "comfyui-cloned-voice" as const,
-    capability: "voice-tts" as const,
-    params: { voiceId: "v", text: "A line.", audioFormat: "flac", voiceReference: true },
-    voiceReference: VOICE_REFERENCE,
+  const VIDEO = {
+    model: "comfyui-draft-video" as const,
+    capability: "video" as const,
+    params: { prompt: "A harbour.", durationSec: 3, aspect: "16:9" },
   };
   const ROUTES = [
     { match: /\/free$/, status: 200, body: {} },
@@ -1810,7 +1519,7 @@ describe("making room on the graphics card", () => {
     // D15: unknown stays unknown and dispatches. A card this build cannot read is not a card it
     // may refuse — that would disable local voice forever on any machine without nvidia-smi.
     const { fetch, calls } = engineFake(ROUTES);
-    await client(async () => null, fetch).submit("", VOICE);
+    await client(async () => null, fetch).submit("", VIDEO);
     assert.equal(calls.some((c) => c.url.endsWith("/free")), false, "nothing to free when nothing is known");
   });
 
@@ -1824,7 +1533,7 @@ describe("making room on the graphics card", () => {
       async () => 1,
       undefined,
       () => "remote",
-    ).submit("", VOICE);
+    ).submit("", VIDEO);
     assert.equal(calls.some((c) => c.url.endsWith("/free")), false);
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true);
   });
@@ -1833,14 +1542,14 @@ describe("making room on the graphics card", () => {
     // `/free` throws away the loaded models, so calling it before every dispatch buys a cold
     // start on every line. It is worth doing only when the card is actually short.
     const { fetch, calls } = engineFake(ROUTES);
-    await client(async () => 12_000, fetch).submit("", VOICE);
+    await client(async () => 12_000, fetch).submit("", VIDEO);
     assert.equal(calls.some((c) => c.url.endsWith("/free")), false);
   });
 
   it("asks the engine to put things down when the card is short, then goes ahead", async () => {
     const { fetch, calls } = engineFake(ROUTES);
     let asked = 0;
-    await client(async () => (++asked === 1 ? 3000 : 9000), fetch).submit("", VOICE);
+    await client(async () => (++asked === 1 ? 3000 : 9000), fetch).submit("", VIDEO);
     assert.equal(calls.some((c) => c.url.endsWith("/free") && c.method === "POST"), true);
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true, "it should proceed once there is room");
   });
@@ -1849,7 +1558,7 @@ describe("making room on the graphics card", () => {
     // The whole point: say so before the wait, not after half an hour of paging to disk.
     const { fetch, calls } = engineFake(ROUTES);
     await assert.rejects(
-      client(async () => 3072, fetch).submit("", VOICE),
+      client(async () => 3072, fetch).submit("", VIDEO),
       (err: Error) => {
         assert.match(err.message, /needs 7\.8 GB of free graphics memory/);
         assert.match(err.message, /this machine has 3\.0 GB free/);
@@ -1874,7 +1583,7 @@ describe("making room on the graphics card", () => {
     const { fetch, calls } = engineFake(ROUTES);
     const readings = [3000, 3000, 3000, 9000];
     const sleeps: number[] = [];
-    await client(async () => readings.shift() ?? 9000, fetch, (ms) => { sleeps.push(ms); }).submit("", VOICE);
+    await client(async () => readings.shift() ?? 9000, fetch, (ms) => { sleeps.push(ms); }).submit("", VIDEO);
     assert.equal(calls.filter((c) => c.url.endsWith("/free")).length, 1, "asked to put things down once, never once per poll");
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true, "dispatched once the card emptied");
     assert.equal(sleeps.length, 2, "one wait per short reading after the engine answered");
@@ -1885,7 +1594,7 @@ describe("making room on the graphics card", () => {
     let asked = 0;
     const sleeps: number[] = [];
     await assert.rejects(
-      client(async () => { asked += 1; return 3072; }, fetch, (ms) => { sleeps.push(ms); }).submit("", VOICE),
+      client(async () => { asked += 1; return 3072; }, fetch, (ms) => { sleeps.push(ms); }).submit("", VIDEO),
       (err: Error) => {
         assert.ok(err instanceof ProviderBusyError, "still the transient it was");
         assert.match(err.message, /needs 7\.8 GB of free graphics memory/);
@@ -1907,7 +1616,7 @@ describe("making room on the graphics card", () => {
     let asked = 0;
     const slowProbe = async (): Promise<number | null> => { asked += 1; now += 1500; return 3072; };
     const slow = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, slowProbe, undefined, undefined, async (ms) => { now += ms; }, () => now);
-    await assert.rejects(slow.submit("", VOICE), (err: Error) => err instanceof ProviderBusyError);
+    await assert.rejects(slow.submit("", VIDEO), (err: Error) => err instanceof ProviderBusyError);
     assert.ok(asked <= 4, `asked ${asked} times: a probe that takes 1.5 s runs the window out in two rounds, not eight`);
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
   });
@@ -1923,7 +1632,7 @@ describe("making room on the graphics card", () => {
     const probe = async (): Promise<number | null> => { asked += 1; return 3072; };
     const sleep = async (ms: number): Promise<void> => { now += ms; controller.abort(); };
     const cancelled = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, probe, undefined, undefined, sleep, () => now);
-    await assert.rejects(cancelled.submit("", { ...VOICE, signal: controller.signal }), (err: Error) => err.name === "AbortError");
+    await assert.rejects(cancelled.submit("", { ...VIDEO, signal: controller.signal }), (err: Error) => err.name === "AbortError");
     assert.equal(asked, 2, "measured before asking and on the answer, then never again");
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
   });
@@ -1931,7 +1640,7 @@ describe("making room on the graphics card", () => {
   it("dispatches when the card stops being measurable mid-window (D15)", async () => {
     const { fetch, calls } = engineFake(ROUTES);
     const readings: Array<number | null> = [3000, 3000, null];
-    await client(async () => readings.shift() ?? null, fetch).submit("", VOICE);
+    await client(async () => readings.shift() ?? null, fetch).submit("", VIDEO);
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true, "the probe failing is not the card filling up");
   });
 });
@@ -1955,9 +1664,8 @@ describe("putting things down when the lane drains", () => {
     assert.deepEqual(freed[0]!.body, { unload_models: true, free_memory: true });
   });
 
-  it("leaves a voice or image recipe's cache alone, and a remote engine's memory to its owner", async () => {
+  it("leaves an image recipe's cache alone, and a remote engine's memory to its owner", async () => {
     const { fetch, calls } = engineFake(ROUTES);
-    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).release("comfyui-cloned-voice");
     await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).release("comfyui-draft-image");
     await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).release("not-a-recipe");
     await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, undefined, undefined, () => "remote").release("comfyui-h3-video");
@@ -1988,4 +1696,70 @@ describe("a job runs on the engine version it was priced against, or not at all 
     const result = await client.submit("", { ...request, recipe: { ...identity, engineVersion: "0.34.0" } });
     assert.equal(result.remoteId, "p-9");
   });
+});
+
+describe("retired local speech", () => {
+  it("does not advertise a speech recipe, manifest row or local preference", () => {
+    assert.equal(comfyUiRecipeById("comfyui-cloned-voice"), null);
+    assert.ok(COMFYUI_RECIPES.every(recipe => recipe.capability !== ("voice-tts" as string)));
+    assert.ok(!SHIPPED_MANIFEST.models.some(model => model.provider === "comfyui" && model.capability === "voice-tts"));
+    assert.deepEqual(SHIPPED_MANIFEST.localPreference?.["voice-tts"], ["kokoro-82m"]);
+  });
+
+  it("refuses an old queued speech recipe before any upload, engine probe or submission", async () => {
+    const { fetch, calls } = engineFake([]);
+    await assert.rejects(new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+      model: "comfyui-cloned-voice", capability: "voice-tts",
+      params: { text: "Old saved line", voiceId: "saved-voice" },
+    }), /not a shipped recipe/);
+    assert.deepEqual(calls, []);
+  });
+
+  it("cannot send a speech request under an image recipe's identity", async () => {
+    const { fetch, calls } = engineFake([]);
+    await assert.rejects(new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+      model: "comfyui-draft-image", capability: "voice-tts", params: { prompt: "A line" },
+    }), /does not support voice-tts/);
+    assert.deepEqual(calls, []);
+  });
+});
+
+it("never follows redirects for reference uploads, prompt submissions or output downloads", async () => {
+  let redirected = 0;
+  const other = createServer((request, response) => {
+    request.resume();
+    redirected += 1;
+    response.end("unexpected destination");
+  });
+  const destination = await listen(other);
+  try {
+    for (const endpoint of ["/upload/image", "/prompt", "/view"]) {
+      const engine = createServer((request, response) => {
+        request.resume();
+        const route = new URL(request.url!, "http://localhost").pathname;
+        if (route === endpoint) {
+          response.writeHead(307, { Location: destination });
+          response.end();
+        } else {
+          response.setHeader("Content-Type", "application/json");
+          response.end(JSON.stringify(route === "/upload/image" ? { name: "face.png", subfolder: "" }
+            : route.startsWith("/history/") ? { "p-1": { outputs: { "9": { images: [{ filename: "out.png", subfolder: "", type: "output" }] } } } }
+              : { prompt_id: "p-1", node_errors: {} }));
+        }
+      });
+      const origin = await listen(engine);
+      const client = new ComfyUiClient((url, init) => fetch(url, init), () => origin, OK_PREFLIGHT);
+      try {
+        await assert.rejects(endpoint === "/view" ? client.fetchArtifacts("", "p-1", { model: "comfyui-draft-image" }) : client.submit("", {
+          model: "comfyui-h3-video", capability: "video",
+          params: { prompt: "A harbour", durationSec: 5, aspect: "16:9" },
+          imageReferences: [{ name: "face.png", contentType: "image/png", data: new Uint8Array([137, 80, 78, 71]) }],
+        }), /redirect/i);
+      } finally {
+        client.dispose();
+        await closeServer(engine);
+      }
+    }
+    assert.equal(redirected, 0);
+  } finally { await closeServer(other); }
 });

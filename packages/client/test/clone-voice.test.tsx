@@ -153,7 +153,7 @@ describe("voice picker identity", () => {
       voiceCatalogue: [
         { provider: "elevenlabs", model: "eleven-v2", voiceId: "same", label: "Cloud v2", attributes: [], local: false, canClone: false, usedBy: [] },
         { provider: "elevenlabs", model: "eleven-v3", voiceId: "same", label: "Cloud v3", attributes: [], local: false, canClone: false, usedBy: [] },
-        { provider: "comfyui", model: "comfyui-cloned-voice", voiceId: "same", label: "Clone", attributes: [], local: true, canClone: false, usedBy: [] },
+        { provider: "kokoro", model: "kokoro-82m", voiceId: "same", label: "Local preset", attributes: [], local: true, canClone: false, usedBy: [] },
       ],
     });
     const markup = renderToString(
@@ -169,7 +169,7 @@ describe("voice picker identity", () => {
     assert.equal((markup.match(/fy-voices__row--on/g) ?? []).length, 1);
     assert.match(markup, /Cloud v2/);
     assert.match(markup, /Cloud v3/);
-    assert.match(markup, /Clone/);
+    assert.match(markup, /Local preset/);
     assert.match(markup, /fy-voices__picked">Cloud v3/);
   });
 

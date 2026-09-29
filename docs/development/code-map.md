@@ -377,3 +377,7 @@ Chapter touch layouts (turn 173, #1369) live in client `screens/chapter-responsi
 panel measures the centre's width. `TouchPassageAsk` observes native selection and places its
 composer at the phone's foot or below the paragraph. `audiobookSelection` captures both raw and
 normalised offsets before a block sheet takes focus, for speaker assignment and cadence markers.
+
+Speech choices: contracts `src/voice.ts`, coordinator `src/voice/service.ts`, client
+`src/screens/character-voice.tsx` and `src/screens/shell.tsx`. ComfyUI offers image/video
+recipes only. Saved recording libraries are independent of reader availability.

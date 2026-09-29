@@ -502,27 +502,34 @@ describe("the catalogue does not offer a voice the engine cannot speak", () => {
     assert.deepEqual(voices.map((v) => v.voiceId), ["af_bella"]);
   });
 
-  it("still offers cloned voices when the local engine is down, since they are not its to speak", async () => {
+  it("does not invent a local reader for recordings when no hosted reader is connected", async () => {
     const voices = await service(fakeSidecar("down")).catalogue([
       { id: "cv_1", label: "Timi", provider: "elevenlabs", voiceId: "v_timi" } as never,
     ]);
-    assert.equal(voices.length, 1, "a cloud-cloned voice does not depend on the local runtime");
+    assert.equal(voices.length, 0);
   });
 
-  it("keeps an unready cloned voice visible with its shared readiness reason", async () => {
+  it("keeps presets without reintroducing the retired cloned-voice recipe", async () => {
     const voices = await service(fakeSidecar("ready")).catalogue(
       [{ id: "cv_1", name: "Timi", clip: "voices/timi.wav", attributes: [] } as never],
-      { local: false, unavailableReason: "the cloned voice recipe is hard-disabled" },
     );
-    const clone = voices.find((voice) => voice.voiceId === "cv_1");
-    assert.ok(clone);
-    assert.equal(clone.local, false);
-    assert.equal(clone.unavailableReason, "the cloned voice recipe is hard-disabled");
+    assert.ok(voices.some(voice => voice.provider === "kokoro"));
+    assert.ok(!voices.some(voice => voice.voiceId === "cv_1" || voice.provider === "comfyui"));
   });
 });
 
 describe("a hosted reader offers the library's voices as its own candidates (SPEC-046 R-10)", () => {
   const harbour = { id: "harbour", name: "Harbour", clip: "voices/harbour.wav", attributes: ["low"] } as never;
+  it("preserves catalogue load errors without inventing a local reader", async () => {
+    for (const sidecar of [null, fakeSidecar("down")]) {
+      const errors: string[] = [];
+      const unavailable = new VoiceService({ sidecar, localPresets: [],
+        cloudSources: [{ provider: "elevenlabs", list: async () => { throw new Error("offline"); } }],
+        getKey: async () => "key", emit: () => {}, clock: CLOCK });
+      assert.deepEqual(await unavailable.catalogue([harbour], [], errors), []);
+      assert.deepEqual(errors, ["elevenlabs: voices could not be loaded. Try again."]);
+    }
+  });
   const service = (keyed: string[]) =>
     new VoiceService({
       sidecar: null,
@@ -534,12 +541,11 @@ describe("a hosted reader offers the library's voices as its own candidates (SPE
       clock: CLOCK,
     });
 
-  it("one voice, three readers: the recipe's candidate and one per keyed vendor, all naming the same voice", async () => {
+  it("one voice has one candidate per keyed hosted reader", async () => {
     const voices = await service(["mistral", "breezeblue"]).catalogue([harbour]);
     assert.deepEqual(
       voices.map((v) => [v.provider, v.model, v.voiceId, v.readsClone, v.local]),
       [
-        ["comfyui", "comfyui-cloned-voice", "harbour", "harbour", true],
         ["mistral", "voxtral-mini-tts", "harbour", "harbour", false],
         ["breezeblue", "breeze-tts-2", "harbour", "harbour", false],
       ],
@@ -548,8 +554,8 @@ describe("a hosted reader offers the library's voices as its own candidates (SPE
 
   it("an unkeyed reader offers nothing, like an unkeyed cloud catalogue", async () => {
     const voices = await service(["mistral"]).catalogue([harbour]);
-    assert.deepEqual(voices.map((v) => v.provider), ["comfyui", "mistral"]);
-    assert.deepEqual((await service([]).catalogue([harbour])).map((v) => v.provider), ["comfyui"]);
+    assert.deepEqual(voices.map((v) => v.provider), ["mistral"]);
+    assert.deepEqual((await service([]).catalogue([harbour])).map((v) => v.provider), []);
   });
 
   it("a keyed reader whose key the vendor rejected still lists its voice, marked with the reason (codex on PR 1153)", async () => {
@@ -567,7 +573,6 @@ describe("a hosted reader offers the library's voices as its own candidates (SPE
     });
     const voices = await marked.catalogue([harbour]);
     assert.deepEqual(voices.map((v) => [v.provider, v.unavailableReason]), [
-      ["comfyui", undefined],
       ["mistral", "Mistral rejected this key"],
       ["breezeblue", undefined],
     ]);
@@ -1143,13 +1148,11 @@ describe("cloned voices join the catalogue", () => {
     },
   ];
 
-  it("offers them beside the presets, local and not themselves cloneable", async () => {
+  it("preserves the recording without offering a retired local reader", async () => {
     const catalogue = await service().catalogue(CLONED);
     const cloned = catalogue.find((c) => c.voiceId === "harbour-glass");
-    assert.ok(cloned, "a cloned voice is a candidate like any other");
-    assert.equal(cloned.provider, "comfyui");
-    assert.equal(cloned.local, true);
-    assert.equal(cloned.canClone, false);
+    assert.equal(cloned, undefined);
+    assert.equal(CLONED[0]!.clip, "voices/harbour-glass.wav");
     assert.ok(catalogue.some((c) => c.provider === "kokoro"), "the presets are still there");
   });
 

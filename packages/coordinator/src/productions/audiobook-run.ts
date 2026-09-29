@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  CLONED_VOICE_PROVIDER,
   audiobookTakeDirectionHash,
   performanceNote,
   audiobookTextHash,
@@ -380,18 +379,13 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     }
     misses.push(block);
   }
-  // A cloned voice's recording leaving the machine is asked about before the price (R-17):
-  // once per voice and vendor for a hosted reader, whose answer is written onto the voice, and
-  // per request for the engine. One question at a time — the run returns at the first
-  // unanswered and the window's next press brings the answer — the hosted readers' first,
-  // since theirs persist, the engine's last, so the token the window holds at the end is the
-  // one the price's answer must carry (codex on PR 1180: without the voice on the question,
-  // a hosted reader's line was refused at dispatch and flagged without ever being asked).
+  // Ask before the price when a recording first leaves for a hosted reader (R-17). The answer
+  // persists per voice and vendor; one question at a time keeps each consent tied to its voice.
   const cloneMap = new Map<string, { provider: string; voice: ClonedVoice }>();
   for (const block of misses) {
     if (block.clone !== null) cloneMap.set(`${block.reader.provider}\n${block.clone.id}`, { provider: block.reader.provider, voice: block.clone });
   }
-  const clones = [...cloneMap.values()].sort((a, b) => Number(a.provider === CLONED_VOICE_PROVIDER) - Number(b.provider === CLONED_VOICE_PROVIDER));
+  const clones = [...cloneMap.values()];
   // Priced by the character as the row bills it (SPEC-046 R-8): bytes, or doubled CJK, for the
   // readers that count so — `text.length` alone understates a Fish or Breeze block by up to 3×
   // (codex on PR 1180). The counts the card and the job show stay the prose's, as the page

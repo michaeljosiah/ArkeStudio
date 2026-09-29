@@ -253,15 +253,17 @@ it("refuses stale, hidden, unauthorized and oversized sources before queue admis
   assert.equal(h.queue.listJobs().length, 0);
 });
 
-it("refuses known cloned-reference narration models before reserving or enqueueing", async t => {
+it("refuses a host-supplied retired narration model before reserving or enqueueing", async t => {
   const h = await harness(t);
   let reservations = 0; h.state.onReserve = async () => {reservations++;};
-  for (const model of SHIPPED_MANIFEST.models.filter(m => m.id === "comfyui-cloned-voice")) {
-    await assert.rejects(h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
-      {operationId: model.id, model, voiceId: "stock", baseHash: h.chapter.hash}), /stock-voice model/);
-  }
+  // Hosts may retain a model after it leaves the bundled manifest; exercise that old input.
+  const model = {...speech, id: "comfyui-cloned-voice", provider: "comfyui" as const};
+  assert.equal(SHIPPED_MANIFEST.models.some(m => m.id === model.id), false);
+  await assert.rejects(h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+    {operationId: model.id, model, voiceId: "stock", baseHash: h.chapter.hash}), /stock-voice model/);
   assert.equal(reservations, 0);
   assert.equal(h.queue.listJobs().length, 0);
+  assert.equal(h.fake.submitCount, 0);
 });
 
 it("allows a dual-mode provider's stock voice while refusing unsupported image tiers", async t => {

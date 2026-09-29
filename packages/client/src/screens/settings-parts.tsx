@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import {
-  CLONED_VOICE_MODEL,
   ENGINE_PROVIDERS,
   PROVIDERS,
   type Capability,
@@ -17,16 +16,10 @@ import { StatusDot, cx, type StatusDotTone } from "../components/ui.js";
 
 /**
  * One capability row: the label a creator reads, and what it draws.
- *
- * `claims` names models the row takes out of another row's capability. It exists for exactly one
- * model and is a *display* claim, never a capability claim — SPEC-022's cloned voice dispatches
- * as `voice-tts` on purpose, so that no capability probe implies an engine can perform a clone,
- * and that reasoning is about probes rather than about which heading a person looks under.
  */
 export interface CapabilityRow {
   label: string;
   capabilities: readonly Capability[];
-  claims?: readonly string[];
   /**
    * No local plane at all — nothing in the local half of the manifest can serve this, and nothing
    * is being fetched that would. The word is still needed, because Cloud AI routes the capability
@@ -50,7 +43,7 @@ export const CAPABILITY_ROWS: readonly CapabilityRow[] = [
   { label: "Video", capabilities: ["video"] },
   { label: "Speech-to-Text", capabilities: ["voice-stt"] },
   { label: "Text-to-Speech", capabilities: ["voice-tts"] },
-  { label: "Voice clone", capabilities: ["voice-clone"], claims: [CLONED_VOICE_MODEL] },
+  { label: "Voice clone", capabilities: ["voice-clone"], cloudOnly: true },
   // No local engine makes music, and none is coming — so Local AI does not draw it and Cloud AI,
   // which routes it, still has its word. The guard against forgetting this row when that changes
   // is the R-47 test: a capability a local provider declares must land in exactly one drawn row,
@@ -176,17 +169,9 @@ export function HealthDot({ label, health }: { label: string; health: ComponentH
   );
 }
 
-/**
- * The kind a model is drawn under (SPEC-042 R-8, R-12): the row that claims it by id, else the
- * row that owns its capability. The claim comes first because it exists for exactly one model —
- * the cloned voice dispatches as `voice-tts` and is drawn under Voice clone — and asking the
- * capability first would file it under the heading it was moved away from.
- */
+/** The kind a model is drawn under follows its declared capability (SPEC-042 R-8, R-12). */
 export function kindOf(model: { id: string; capability: Capability }): CapabilityRow {
-  return (
-    CAPABILITY_ROWS.find((row) => row.claims?.includes(model.id)) ??
-    CAPABILITY_ROWS.find((row) => row.capabilities.includes(model.capability))!
-  );
+  return CAPABILITY_ROWS.find((row) => row.capabilities.includes(model.capability))!;
 }
 
 /** A kind's address in the URL (SPEC-042 R-11): its first capability, which is unique per row. */

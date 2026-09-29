@@ -40,7 +40,7 @@ const manifest = {
   models: [
     { id: "gpt-image-2", provider: "fal", displayName: "GPT Image 2" },
     { id: "seedance-2.0", provider: "fal", displayName: "Seedance 2.0" },
-    { id: "indextts-2-5", provider: "comfyui", displayName: "IndexTTS 2.5" },
+    { id: "kokoro-82m", provider: "kokoro", displayName: "Kokoro 82M" },
     { id: "h3-reference-video", provider: "comfyui", displayName: "Local · H3 Reference Video" },
   ],
 } as unknown as ModelManifest;
@@ -97,9 +97,9 @@ describe("queue notification", () => {
   });
 
   it("says local where the figure would be, because there is nothing to spend", () => {
-    const local = job({ provider: "comfyui", model: "indextts-2-5", estimatedMicroUsd: 0, target: { kind: "voice-line", id: "sh_12" } });
+    const local = job({ provider: "kokoro", model: "kokoro-82m", estimatedMicroUsd: 0, target: { kind: "voice-line", id: "sh_12" } });
     const note = enqueueNote(result({ command: "dispatch-scene" }), [local], manifest);
-    assert.equal(note?.meta, "IndexTTS 2.5 · local");
+    assert.equal(note?.meta, "Kokoro 82M · local");
     assert.doesNotMatch(note!.meta, /\$/);
   });
 

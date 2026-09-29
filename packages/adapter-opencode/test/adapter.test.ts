@@ -29,6 +29,7 @@ it("v2 skill configuration requires prepared guidance and injects the selected v
 });
 import { discoverOpenCode } from "../src/discovery.js";
 import { StubOpenCode } from "./helpers/stub-server.js";
+import { until } from "./wait.js";
 
 describe("normalisation (R-14, R-15)", () => {
   it("unwraps the ≥1.17 payload envelope and maps text parts to deltas", () => {
@@ -272,12 +273,17 @@ describe("the live adapter over the stub server", () => {
       }
     })();
 
-    await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: "draft it" }] });
-    await new Promise((r) => setTimeout(r, 300));
-    stub.emitTurn("ses_foreign_1", "not ours"); // a user's own unrelated activity — must not surface
-    stub.emitTurn(session.sessionId, "the draft text");
-    await pump;
-    abort.abort();
+    try {
+      // A fixed delay can emit before SSE connects on a loaded runner, losing the only turn.
+      await until(() => stub.streamCount === 1, "the scripted turn's event stream", 30_000);
+      await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: "draft it" }] });
+      stub.emitTurn("ses_foreign_1", "not ours"); // a user's own unrelated activity — must not surface
+      stub.emitTurn(session.sessionId, "the draft text");
+      await until(() => seen.some(event => event.type === "message.completed"), "the scripted turn to complete", 30_000);
+    } finally {
+      abort.abort();
+      await pump;
+    }
 
     const types = seen.map((e) => e.type);
     assert.ok(types.includes("tool.activity"), `expected tool.activity in ${types.join(",")}`);

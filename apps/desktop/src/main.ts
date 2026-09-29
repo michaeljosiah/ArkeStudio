@@ -12,6 +12,7 @@ import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { createComfyUiFetch } from "./comfyui-transport.js";
 import { ComfyUiDigestCache } from "./comfyui-digest-cache.js";
 import { cudaFreeMemoryArgs, detectQwenCudaDevice, qwenEngineProfile } from "./comfyui-profiles.js";
+import { comfyUiWeightCatalogue } from "./comfyui-setup.js";
 import { CloudProviderTransport } from "./provider-transport.js";
 import { appendFileSync, existsSync } from "node:fs";
 import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
@@ -42,7 +43,6 @@ import {
   sweepSpool,
   registerExitBackstop,
   VOXA_SETUP_COMPONENT_IDS,
-  type CatalogueEntry,
   type Cipher,
   type DatabaseCtor,
 } from "@arke-studio/coordinator";
@@ -91,7 +91,6 @@ import {
 import {
   agentForPurpose,
   effectiveHarnessEngine,
-  comfyUiWeightsComponentId,
   ROSTER,
   skillFor,
   type ProviderId,
@@ -853,23 +852,7 @@ async function initialize(): Promise<{ port: number }> {
   // Per-recipe weight entries for setup (SPEC-021 §2.4): derived from the provider layer's
   // recipe facts so the digests live in exactly one place, landing in the engine's own models
   // folder through the coordinator's external-dir resolver.
-  const comfyUiWeightEntries: CatalogueEntry[] = COMFYUI_RECIPES.filter(
-    (recipe) => recipe.requires.checkpoints.length > 0 && recipe.requires.unavailableReason === undefined,
-  ).map((recipe) => ({
-    id: comfyUiWeightsComponentId(recipe.id),
-    displayName: `${recipe.displayName} · weights`,
-    purpose: `Model files for ${recipe.displayName} — landed in the selected engine's mapped models folder`,
-    sizeMb: recipe.requires.checkpoints.reduce((sum, c) => sum + c.sizeMb, 0),
-    optional: true,
-    requires: ["comfyui-runtime"],
-    engine: "comfyui",
-    spec: {
-      kind: "files",
-      dir: "",
-      externalRoot: "comfyui-models",
-      files: recipe.requires.checkpoints.map((c) => ({ url: c.url, file: c.file, sizeMb: c.sizeMb, sha256: c.sha256 })),
-    },
-  }));
+  const comfyUiWeightEntries = comfyUiWeightCatalogue(COMFYUI_RECIPES);
   const providerClients = createProviderClients({
     fetch: (url, init) => fetch(url, init),
     transport: providerTransport,

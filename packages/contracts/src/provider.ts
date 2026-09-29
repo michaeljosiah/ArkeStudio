@@ -183,11 +183,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   comfyui: {
     mapsReferenceKinds: ["image", "video", "audio"],
     displayName: "ComfyUI",
-    // voice-tts from SPEC-022: a cloned voice runs as a recipe here rather than in a runtime of our
-    // own. Deliberately NOT voice-clone — cloning is something the app does to a recording (minting
-    // a library entry), not something it asks an engine for, so no capability probe should imply an
-    // engine can perform it.
-    capabilities: ["image", "video", "voice-tts"],
+    capabilities: ["image", "video"],
     local: true,
     credential: "none",
   },

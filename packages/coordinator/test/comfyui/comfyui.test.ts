@@ -656,7 +656,6 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     await service.applySettings({ enginePath: null, engineUrl: url, modelsDir: null });
     assert.equal(service.engineStatus().locality, "local");
     assert.equal(service.engineIdentity()?.locality, "local");
-    assert.equal(service.voiceUploadDestination(), null);
   });
 
   it("trusts only exact loopback hosts", () => {
@@ -686,15 +685,15 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     }
   });
 
-  it("names a remote voice destination without exposing URL credentials or request data", async () => {
+  it("identifies a remote engine without exposing URL credentials or request data", async () => {
     const world = fakeWorld();
     const url = "https://voice-user:voice-secret@127.attacker.example:8443/private?token=request-secret";
     world.urls.set("https://voice-user:voice-secret@127.attacker.example:8443", { version: "0.33.1" });
     const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
     await service.applySettings({ enginePath: null, engineUrl: url, modelsDir: null });
-    const destination = service.voiceUploadDestination();
-    assert.equal(destination?.label, "127.attacker.example:8443");
-    assert.equal(destination?.token, service.instanceId());
+    const destination = service.engineIdentity();
+    assert.equal(destination?.locality, "remote");
+    assert.equal(destination?.instanceId, service.instanceId());
     assert.equal(JSON.stringify(destination).includes("voice-secret"), false);
     assert.equal(JSON.stringify(destination).includes("request-secret"), false);
     assert.equal(JSON.stringify(destination).includes("/private"), false);

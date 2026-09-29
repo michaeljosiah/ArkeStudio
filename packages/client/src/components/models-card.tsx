@@ -55,9 +55,8 @@ export function modelFacts(state: State) {
     return status.validation === "testing" ? "testing" : "not tested";
   };
   /**
-   * Why a stranded model cannot run, in the state cell's three words. `strandReason` keeps the
-   * sentence for the option list, where a row has room to say whose key is missing; here the
-   * control already names the provider, so the state names only what is wrong with it.
+   * Why a stranded model cannot run, in the state cell's three words. Detailed diagnostics live
+   * on AI models and Providers; the control names the model without appending failure text.
    */
   const strandState = (model: ManifestModel): string => {
     if ((state?.app.models.disabled ?? []).includes(model.id)) return "turned off";
