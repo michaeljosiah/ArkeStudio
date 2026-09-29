@@ -34,3 +34,12 @@ focus, restores focus on close, announces result counts, and wraps controls on n
 
 
 Settings previews use the durable app:voice-previews job and ledger scope. They do not require an open world and are never adopted into one.
+
+Gemini catalogue rows come from every page of Google's `GET /v1beta/voices?type=prebuilt`
+library, limited to models available on the active key. The provider's language, accent,
+gender and persona populate the filters; context, pitch and description remain searchable.
+Missing metadata stays unspecified. Search also matches provider and model names, so “Gemini”
+finds Google voices. Extended presets are verified against the live library before synthesis;
+custom project voices still require their separate verified binding.
+
+Protocol reference: https://ai.google.dev/api/voices (checked 2026-09-29).

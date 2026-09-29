@@ -1,4 +1,4 @@
-import type { CapabilityProbe, ClientDeclarations, SpeechUsage } from "@arke-studio/contracts";
+import type { CapabilityProbe, ClientDeclarations, SpeechUsage, VoiceCandidate } from "@arke-studio/contracts";
 import { randomUUID } from "node:crypto";
 import { speechInputFits } from "@arke-studio/contracts";
 import { GEMINI_SPEECH_INPUT_BYTES, geminiSpeechModel } from "../gemini-tts-models.js";
@@ -146,11 +146,49 @@ export class GoogleClient implements VoiceCatalogueClient, VoiceDesignClient {
     }
   }
 
-  async listVoicesCatalog(key: string) {
+  /** The live library owns its metadata; never infer accent or gender from a preset name. */
+  private async prebuiltVoices(key: string, signal?: AbortSignal): Promise<Omit<VoiceCandidate, "model">[]> {
+    const voices = new Map<string, Omit<VoiceCandidate, "model">>();
+    const seen = new Set<string>();
+    let page = "";
+    const text = (value: unknown) => typeof value === "string" ? value.trim() : "";
+    for (let i = 0; i < 1000; i++) {
+      const query = new URLSearchParams({ type: "prebuilt", page_size: "1000" });
+      if (page) query.set("page_token", page);
+      const response = await this.fetchImpl(
+        `${this.baseUrl}/v1beta/voices?${query}`, { headers: this.headers(key), redirect: "error", signal });
+      await this.checkStatus(response);
+      const body = record(await response.json());
+      if (body.voices !== undefined && !Array.isArray(body.voices)) throw new Error("Google returned an invalid voice catalogue");
+      for (const item of (body.voices ?? []) as unknown[]) {
+        const row = record(item);
+        if (row.type !== "prebuilt") throw new Error("Google returned a non-prebuilt voice in the preset catalogue");
+        const id = text(row.id);
+        if (!id || id.startsWith("voice_") || id.startsWith("voicekey_")) throw new Error("Google returned an invalid preset identity");
+        const trait = GEMINI_PRESETS.find(([name]) => name === id)?.[1];
+        const language = text(row.language_code), accent = text(row.accent), gender = text(row.gender);
+        const style = text(row.persona) || trait || text(row.context);
+        voices.set(id, { provider: this.id, voiceId: id, label: text(row.display_name) || id,
+          description: text(row.description),
+          attributes: [...new Set([language, accent, gender, style, text(row.context), text(row.pitch), trait ?? ""].filter(Boolean))],
+          facets: { ...(language ? { language } : {}), ...(accent ? { accent } : {}),
+            ...(gender ? { gender } : {}), ...(style ? { style } : {}) },
+          local: false, canClone: false });
+      }
+      const next = body.next_page_token;
+      if (next === undefined || next === "") return [...voices.values()];
+      if (typeof next !== "string" || !next.trim() || next.length > 4096 || seen.has(next)) throw new Error("Google repeated or invalidated its voice catalogue page");
+      seen.add(next); page = next;
+    }
+    throw new Error("Google voice catalogue exceeded the page limit");
+  }
+
+  async listVoicesCatalog(key: string): Promise<VoiceCandidate[]> {
     const models = await this.models(key);
-    return GEMINI_TTS_MODELS.filter(model => models.has(model)).flatMap(model => GEMINI_PRESETS.map(([voiceId, trait]) => ({
-      provider: this.id, model, voiceId, label: voiceId, attributes: [trait], local: false, canClone: false,
-    })));
+    const enabled = GEMINI_TTS_MODELS.filter(model => models.has(model));
+    if (!enabled.length) return [];
+    const voices = await this.prebuiltVoices(key);
+    return enabled.flatMap(model => voices.map(voice => ({ ...voice, model })));
   }
 
   private async checkStatus(response: Response): Promise<void> {
@@ -194,13 +232,17 @@ export class GoogleClient implements VoiceCatalogueClient, VoiceDesignClient {
     if (delivery !== undefined && (typeof delivery !== "string" || !Object.hasOwn(mappings, delivery))) throw new ProviderRequestRejectedError("Google: unsupported speech delivery");
     const instructions = request.params.instructions ?? (typeof delivery === "string" ? mappings[delivery]?.instruction : undefined);
     if (typeof text !== "string" || text.trim() === "") throw new ProviderRequestRejectedError("Google: no words to read");
-    if (typeof voice !== "string" || (!request.designedVoice && !GEMINI_PRESETS.some(([id]) => id === voice))) throw new ProviderRequestRejectedError("Google: choose a supported preset voice; saved project voices need a verified binding");
+    if (typeof voice !== "string" || (!request.designedVoice && (voice.startsWith("voice_") || voice.startsWith("voicekey_") || voice.startsWith("designed:") || voice.startsWith("clone:") || !voice.trim()))) throw new ProviderRequestRejectedError("Google: choose a supported preset voice; saved project voices need a verified binding");
     if (request.voiceReference !== undefined) throw new ProviderRequestRejectedError("Google: a reference recording requires a separately authorised replication operation");
     if (instructions !== undefined && typeof instructions !== "string") throw new ProviderRequestRejectedError("Google: invalid speech direction");
     if (request.params.voiceSettings !== undefined && Object.keys(record(request.params.voiceSettings)).length > 0) throw new ProviderRequestRejectedError("Google: numeric voice settings are unsupported; use structured speech direction");
     // This is a byte budget, not a claim about Google's tokenizer. It deliberately leaves room
     // for metadata; a counted-token compiler can later pack requests closer to the service cap.
     if (!speechInputFits(text, { maxSpeechUtf8Bytes: GEMINI_SPEECH_INPUT_BYTES }, instructions as string | undefined)) throw new ProviderRequestRejectedError("Google: this read needs smaller parts including its direction");
+    if (!request.designedVoice && !GEMINI_PRESETS.some(([id]) => id === voice)) {
+      const library = await this.prebuiltVoices(key, request.signal);
+      if (!library.some(candidate => candidate.voiceId === voice)) throw new ProviderRequestRejectedError("Google: this preset is no longer in the voice catalogue");
+    }
     const response = await this.fetchImpl(`${this.baseUrl}/v1beta/interactions`, {
       method: "POST", headers: this.headers(key), signal: request.signal, redirect: "error",
       body: JSON.stringify({ model: request.model, store: false,

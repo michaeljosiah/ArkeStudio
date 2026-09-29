@@ -127,13 +127,14 @@ it("models and presets are read-only, paginate, and offer only models the accoun
     urls.push(url);
     assert.equal(init?.method, undefined);
     assert.equal(init?.redirect, "error");
+    if (url.includes("/voices?")) return Response.json({ voices: [{ id: "Kore", type: "prebuilt", persona: "Firm" }] });
     return Response.json(url.includes("pageToken=") ? { models: [{ name: `models/${GEMINI_TTS_MODELS[1]}` }] }
       : { models: [{ name: "models/another-model" }], nextPageToken: "next page" });
   });
   const voices = await client.listVoicesCatalog("test");
-  assert.equal(voices.length, 30);
+  assert.equal(voices.length, 1);
   assert.ok(voices.every(voice => voice.model === GEMINI_TTS_MODELS[1]));
-  assert.equal(urls.length, 2);
+  assert.equal(urls.length, 3);
   assert.ok(urls[1]!.includes("pageToken=next%20page"));
   const missing = await new GoogleClient(async () => Response.json({ models: [] })).validateKey("test");
   assert.equal(missing[0]!.available, false);
@@ -167,4 +168,19 @@ it("does not turn missing usage into zero or WAV duration into token usage", () 
   const incompatible = wav(); incompatible.writeUInt32LE(44100, 24);
   assert.equal(geminiWav(incompatible), false);
   assert.equal(geminiWav(wav()), true);
+});
+
+it("synthesizes a discovered extended preset but refuses a removed voice before a paid request", async () => {
+  const requests: string[] = [];
+  const client = new GoogleClient(async (url, init) => {
+    requests.push(url);
+    if (url.includes("/voices?")) return Response.json({ voices: [{ id: "ExtendedNarrator", type: "prebuilt", gender: "female" }] });
+    assert.equal(JSON.parse(String(init?.body)).generation_config.speech_config[0].voice, "ExtendedNarrator");
+    return Response.json(responseBody());
+  });
+  const result = await client.submit("test", { ...request, params: { ...request.params, voiceId: "ExtendedNarrator" } });
+  assert.equal(result.artifacts?.[0]?.contentType, "audio/wav");
+  assert.equal(requests.filter(url => url.endsWith("/interactions")).length, 1);
+  await assert.rejects(client.submit("test", { ...request, params: { ...request.params, voiceId: "RemovedNarrator" } }), /no longer/);
+  assert.equal(requests.filter(url => url.endsWith("/interactions")).length, 1);
 });
