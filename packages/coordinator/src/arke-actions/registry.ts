@@ -1188,6 +1188,19 @@ function schemaType(schema: z.ZodTypeAny, depth = 0): string {
   return "value";
 }
 
+/** The payload fields a model sends, read off the schema the coordinator validates. */
+export function modelActionFields(schema: z.ZodTypeAny): readonly ModelActionField[] {
+  return fieldsFor(schema);
+}
+
+/** The prepared-action descriptor behind one model action kind, keyed as the model sends it. */
+export function worldChatActionDescriptor(modelKind: string) {
+  const key = `world-chat-${modelKind}`;
+  return Object.prototype.hasOwnProperty.call(WORLD_CHAT_ACTION_REGISTRY, key)
+    ? WORLD_CHAT_ACTION_REGISTRY[key as keyof typeof WORLD_CHAT_ACTION_REGISTRY]
+    : undefined;
+}
+
 function fieldsFor(schema: z.ZodTypeAny): readonly ModelActionField[] {
   const object = unwrap(schema);
   if (zodTypeName(object) !== "ZodObject") return [];

@@ -509,6 +509,18 @@ describe("what the studio is told", () => {
     // Nothing withdrawn yet, so the section is simply absent rather than empty and confusing.
     assert.ok(!prompts[0]!.includes("Withdrawn"));
   });
+
+  it("tells a world thread the actions it can prepare, generated rather than written (issue 1404)", async () => {
+    const prompts: string[] = [];
+    const { runner, store, conversationId } = await setup(fakeAdapter(["not json", "not json"], { prompts }));
+    await runner.send(store, conversationId, "file the treatment and pull the cast out of it");
+    const prompt = prompts[0]!;
+    assert.match(prompt, /## Actions you can prepare/);
+    // The two the handwritten guide never mentioned, which this request needs.
+    assert.match(prompt, /^- artifact-import · host-action/m);
+    assert.match(prompt, /^- artifact-extraction · /m);
+    assert.doesNotMatch(prompt, /^- production-scene-command · /m, "a world thread is told world actions");
+  });
 });
 
 describe("a turn that never answers", () => {

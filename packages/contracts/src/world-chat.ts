@@ -365,6 +365,11 @@ export const CheckToolSchema = z.enum([
   "get-production",
   /** A typed complete-target read; `target` below identifies the concrete authority. */
   "target-read",
+  /**
+   * An action's fields and example, when the turn's guide could only list it (SPEC-050 R-5).
+   * It reads no world state, so its receipt is never shown to the person as a check.
+   */
+  "describe-action",
 ]);
 
 /** One coordinator-owned observation. The model never writes these; it only cites them. */
@@ -2664,6 +2669,87 @@ const exampleWorldActions = {
     artifactId: `ar_${EXAMPLE_ULID}`, replace: false, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
 } satisfies Record<ModelWorldChatAction["kind"], ModelWorldChatAction>;
 
+/**
+ * What each action does, one line apiece, printed beside its fields and example (SPEC-050 R-2).
+ *
+ * The guide used to be a handwritten list covering world metadata, Canon, sheets and art
+ * direction, and nothing else. Artifacts, kits, props, voices, Bench, exports and every
+ * production action parsed, prepared and executed, and the model was never told they existed —
+ * so a person asking for any of them got an apology instead of a card. Keyed by the schema's own
+ * kinds so a new action cannot compile without a line here, and the line says what the card will
+ * do rather than what we hope it will one day do.
+ */
+export const WORLD_ACTION_DESCRIPTIONS = {
+  "world-metadata": "Change the world's name, logline, tone or genre.",
+  canon: "Create a Canon entry, amend one, open or settle a thread, change an entry's status, or set a thread's considered entries.",
+  "canon-retire": "Retire a Canon entry; its history is kept.",
+  "canon-restore": "Restore a Canon entry to an earlier version.",
+  sheet: "Create, edit, rename, lock or unlock (set-status), duplicate or promote a guest character, location or faction sheet, or change a relationship between sheets. Sections are {heading, body} under the sheet's fixed headings.",
+  "sheet-retire": "Retire a sheet; its history is kept.",
+  "sheet-restore": "Restore a sheet to an earlier version.",
+  "art-direction": "Change the world's look: description, whether to keep or clear the master look, audio policy, failure modes and the key-art intent. Never invent a file.",
+  "art-direction-restore": "Restore the art direction to an earlier version.",
+  "artifact-import": "Import files or a folder onto the artifact shelf. Approve opens the person's file picker; you never name a path.",
+  "artifact-metadata": "Link a filed artifact to world entities, or give it to one production.",
+  "artifact-extraction": "Read a filed artifact for Canon and sheet material the person then reviews.",
+  "artifact-extraction-stop": "Stop an extraction that is running.",
+  "artifact-extraction-review": "Accept or reject one extracted candidate by its hash.",
+  "artifact-reference": "Stage a filed artifact image as a named reference, such as a character's main photo.",
+  "reference-import": "Import an image the person picks for a character's main photo or character sheet, or a location view candidate. Approve opens the picker.",
+  "reference-result-use": "Use a generated or imported result in a kit: choose an anchor, accept a location view, character sheet or look.",
+  "reference-review": "Reject a reference take, naming the field it fails.",
+  "reference-change": "Promote a look, attach a look to a production or scene, or designate a compiled sheet.",
+  "reference-tile-lock": "Lock a kit tile at one angle.",
+  "reference-compile": "Compile a character's tiles into a grid.",
+  "reference-style": "Set the style override a character's kit is generated in.",
+  "reference-generation": "Generate kit images: establish a look, main photo, character sheet, looks, missing or regenerated tiles, location views.",
+  "reference-image-import": "Import an image the person picks as a world image, master look or staged reference. Approve opens the picker.",
+  "reference-world-image-result-use": "Use a pending world-image candidate as the world's key art.",
+  "reference-master-look-result-use": "Use a pending master-look candidate as the world's master look.",
+  "reference-image-discard": "Discard a pending world-image or master-look candidate, or a staged reference.",
+  "voice-assignment": "Assign a voice to a sheet, or clear it with null. Name only a voice you have read through list_voices.",
+  "voice-audition": "Hear a character's line in a voice before assigning it.",
+  "voice-clone": "Clone a voice from a recording the person makes. Approve opens the recorder; the recording is theirs.",
+  "voice-clip-review": "Accept or reject a voice take for a shot; a rejection cites the sheet field it fails.",
+  "world-archive": "Archive this world.",
+  "world-export": "Export this world.",
+  "production-create": "Create a production with its medium, kind, series, aspect, frame rate and defaults. The plan on the card is exactly what is created; it is never replanned after Approve.",
+  "production-metadata": "Change a production's title, medium, kind, series, status, aspect or frame rate.",
+  "production-model": "Set the model a production uses for one capability.",
+  "production-series": "Create or edit the Series record: title, engine, continuity and seasons. Recurring cast stays in world sheets.",
+  "production-overview": "Change the story overview: question, ending, logline, spine, acts and target length.",
+  "production-season": "Change the season's question, ending, direction, arcs and episode defaults.",
+  "production-episode": "Create or edit an episode: title, order, promise, scenes, links and release details.",
+  "production-chapter": "Outline chapters, create one, or edit a chapter's text, plan or a passage.",
+  "production-scene": "Create a scene with its script, edit its title, synopsis, inherited place and defaults, or replace its script. Keep an existing block's id when only its text changes.",
+  "production-episode-order": "Put episodes in a new order; name every episode once.",
+  "production-chapter-order": "Put chapters in a new order; name every chapter once.",
+  "production-scene-order": "Put scenes in a new order; name every scene once.",
+  "production-scene-delete": "Delete a scene. Its history is kept and it can be restored.",
+  "production-scene-restore": "Restore a scene to an earlier version.",
+  "production-style": "Set the style this production's images and video are made in.",
+  "production-prose-style": "Set the story's point of view, tense, voice and samples.",
+  "production-scene-command": "One change to a scene: edit its cast and place, insert, edit, move, duplicate or delete a shot, set a shot's staging or prompt override, or change its boards.",
+  "production-board-compile": "Compile a scene's storyboard from its shots and frames.",
+  "production-board-export": "Export a scene's storyboard to a file the person chooses.",
+  "production-take-import": "Import a take for a shot from a file the person picks.",
+  "production-take-generation": "Open a prefilled image or video generation for a shot or board in Bench. Nothing runs and nothing is spent until the person generates there.",
+  "production-take-review": "Accept a take for a shot, which selects it, or reject one citing the sheet field it fails.",
+  "production-take-trim": "Set where a take starts in its shot.",
+  "production-stage-playblast": "Record a shot's Stage blocking as a playblast video. Needs the Stage open.",
+  "production-stage-construct": "Build a shot's Stage blockout from its script. The person keeps or discards the draft.",
+  "audio-spine-command": "Change the production's audio spine: its track, markers and each shot's anchor.",
+  "production-routing": "Edit an interactive production's branch map: start, choices, endings, and which scenes are in play.",
+  "production-routing-traversal": "Record a walk through one choice of the branch map.",
+  "production-branch-canon": "Propose Canon that holds only on one route through the branch map.",
+  "production-interactive-export": "Export the interactive production as a playable file.",
+  "production-cut-export": "Export the cut of the production or one episode with a preset and subtitles.",
+  "production-export-cancel": "Cancel an export that is running.",
+  "bench-generation": "Generate image, video, speech or music in an existing Bench session, at the quote shown on the card. Needs the session's id and a provider and model the person has enabled.",
+  "prop-authoring": "Create a prop, add a state to it, or rename a prop or state.",
+  "prop-reference": "Use a filed artifact image as a prop state's reference; say replace only when the person asked to replace one.",
+} as const satisfies Record<ModelWorldChatAction["kind"], string>;
+
 /** Shaped exactly as the coordinator accepts it; the guide prints this object (issue 684). */
 const exampleEditorRequest = {
   summary: "Swap the two harbour shots and tighten the bell close-up by half a second",
@@ -2913,7 +2999,7 @@ Each classification below shows one complete example, then every field its draft
 - ${draftPayloadLine("sheet.create")}
   fields: ${draftFieldCatalogue("sheet.create")}
 - ${draftPayloadLine("sheet.edit")}
-  target names the sheet; the draft carries only what changes. A sheet's version, status, retirement and voice are deliberately absent — those have their own workflows and cannot be reached from here.
+  target names the sheet; the draft carries only what changes. A sheet's version, status, retirement and voice are not part of this proposition: locking, retiring and assigning a voice are actions (sheet set-status, sheet-retire, voice-assignment).
   fields: ${draftFieldCatalogue("sheet.edit")}
 ${sheetSectionRule()}
 - ${draftPayloadLine("relationship.change")}
@@ -2938,7 +3024,7 @@ ${sheetSectionRule()}
   blocks is the whole ordered script as it should now read; block ids are stable and shots cite them, so keep an existing block's id when only its text changes. First page get_scene_script through arke-world to complete=true and put the final checkReceiptId in checkReceiptIds. Never replace a script from a partial page.
   fields: ${draftFieldCatalogue("development.scene-script")}
 - ${draftPayloadLine("development.shot")}
-  One shot inside a scene. target.shotId present amends that shot; absent adds a shot at the end of the scene. Carry only the fields that change — an amendment is not a rewrite, and a field you omit is left exactly as it is. The shot's id and its number are not yours to set: identity is minted once and the storyboard's drag is what reorders. Write description with @mentions for every character and location it shows, camera as a complete value naming a fixture the location supports and what the camera faces before the size and movement, and audio as an object, never a sentence.
+  One shot inside a scene. target.shotId present amends that shot; absent adds a shot at the end of the scene. Carry only the fields that change — an amendment is not a rewrite, and a field you omit is left exactly as it is. The shot's id and its number are not yours to set: identity is minted once, and moving a shot is a production-scene-command move-shot action, not this proposition. Write description with @mentions for every character and location it shows, camera as a complete value naming a fixture the location supports and what the camera faces before the size and movement, and audio as an object, never a sentence.
   fields: ${draftFieldCatalogue("development.shot")}
 - ${draftPayloadLine("development.series")}
   The thin Series record: engine and continuity only. Recurring cast stays in world sheets — a Series that describes characters is a second world.
@@ -2985,15 +3071,13 @@ Where the bible and Canon disagree, Canon is what the world has decided. Say so 
 
 ### World actions
 
-Actions wait for Approve and cite final complete reads.
+actions holds operations on the world or a production that the person decides on a card. The actions you can prepare this turn, with their fields and an example of each, are listed in this turn's context under "Actions you can prepare"; when an entry there is only a line, call describe_action through arke-world for its fields before you prepare it. Never send an action that is not listed there.
 
-- world-metadata changes name, logline, tone or genre.
-- canon: create(entryType,title,statement,links); amend(entryId,changes); open-thread(title,question,consideredEntryIds); settle-thread(entryId,resolvedType,statement); set-status(entryId,change); set-considered-entries(entryId,consideredEntryIds). Types: rule|lore|location|faction|timeline|tone.
-- canon-retire uses entryId: string; canon-restore also uses version: integer >= 1.
-- sheet: create/edit/relationship/rename/set-status/duplicate/promote-guest. sheetType is character|location|faction; existing sheets need sheetId. Fields: name/role/billing/region/canonRules/links/sections. Relationships add typed to, add|remove and proseEdits; duplicate adds newName; status is sketch|locked. Sections use {heading: string, body: string}.
-- sheet-retire/restore: sheetType, sheetId, plus version >= 1 for restore.
-- art-direction: {description: string?, masterLook: "keep"|"clear"?, audio: object?, failureModes: string[]?, keyArtIntent: object|null?}; restore version >= 1. Never invent a file.
-- production-* never replans creation; prose uses proposals; order and script ids stay stable.
+- Every action waits for Approve. Nothing you write in reply makes it happen, so never say it has happened.
+- checkReceiptIds carries the final complete receipts of the reads the action names; a partial or earlier-turn read is refused.
+- Name only ids you have read. Never invent a file, a path, a take or a voice.
+- An action marked unavailable is refused whatever you send; say why instead of preparing it.
+- production-create never replans after Approve; prose changes use proposals; order and script ids stay stable.
 
 ### Editor requests
 

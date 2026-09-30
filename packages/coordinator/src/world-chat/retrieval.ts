@@ -22,6 +22,7 @@ import { isTargetReadTool, TARGET_READ_TOOL_NAMES } from "./target-tool-catalog.
 import { WorldChatTargetReads, type TargetReadDeps } from "./target-reads.js";
 import type { ResolveWebHost, WebRequest } from "./safe-web.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
+import { describeAction } from "./action-guide.js";
 
 /**
  * The read-only surface a World Chat run may reach, and the record of what it read
@@ -54,6 +55,7 @@ const TOOL_BY_NAME: Record<string, RetrievalTool> = {
   get_attachment_text: "get-attachment-text",
   fetch_url: "fetch-url",
   get_production: "get-production",
+  describe_action: "describe-action",
   ...Object.fromEntries(TARGET_READ_TOOL_NAMES.map((name) => [name, "target-read" as const])),
 };
 
@@ -202,6 +204,14 @@ export class WorldChatRetrieval {
     }
 
     switch (toolName) {
+      case "describe_action": {
+        const kind = String(args["kind"] ?? "");
+        const described = describeAction(kind);
+        return described
+          ? { result: described, receipt: receipt("complete", { querySummary: summarise(kind) }) }
+          : { result: { found: false, kind }, receipt: receipt("empty", { querySummary: summarise(kind) }) };
+      }
+
       case "search_canon": {
         if (!index) throw new RetrievalError("unavailable", "the index is unavailable");
         const query = String(args["query"] ?? "");
