@@ -8,8 +8,13 @@
  * tile's own model, reached through fal: the fal rows by their own route, and the other rows by
  * the fal route serving the same weights — GPT Image 2 for the OpenAI row, SDXL base for the
  * local draft image, Wan 2.2 TI2V 5B for the local draft video, Krea 2 Turbo for the local Krea
- * tile, MiniMax H3 for the three local H3 tiles. A model fal does not serve has no row and keeps
- * its plain plate: Qwen Image 2.1 (fal serves 2 and 3, not 2.1) and Higgsfield Soul 2.0.
+ * tile, MiniMax H3 for the three local H3 tiles. A model fal does not serve has no row here.
+ * Higgsfield Soul 2.0's poster came from Higgsfield's own CLI, the route the app dispatches it by:
+ *
+ *   higgsfield generate create text2image_soul_v2 --prompt "..." --aspect_ratio 16:9 --quality 1.5k --wait --json
+ *
+ * then the same ffmpeg step as below on its result_url. Qwen Image 2.1 has no hosted route at all
+ * (fal serves 2 and 3, not 2.1) and keeps its plain plate.
  *
  * A video tile's poster is the first frame of a clip the model made, as R-17 has it, so a clip
  * can be added later without the poster changing. Clips are made at the shortest length and the

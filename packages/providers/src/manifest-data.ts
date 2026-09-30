@@ -27,6 +27,7 @@ const MODEL_SAMPLES: ReadonlySet<string> = new Set([
   "kling-3-pro", "kling-3-standard",
   "comfyui-krea2-image", "comfyui-draft-image", "comfyui-draft-video",
   "comfyui-h3-video", "comfyui-h3-video-768", "comfyui-h3-reference-video",
+  "text2image_soul_v2",
 ]);
 
 function withSamples<T extends { id: string }>(models: T[]): T[] {
