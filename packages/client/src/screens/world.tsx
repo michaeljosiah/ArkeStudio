@@ -2581,7 +2581,7 @@ export function CharacterEditScreen() {
                     disabled={
                       !harnessReady || !sheet || !worldId || instruction.trim().length === 0 || chatRunning
                     }
-                    title={harnessReady ? undefined : "Authoring needs OpenCode running"}
+                    title={harnessReady ? undefined : "Authoring needs the harness running"}
                     onClick={sendToStudio}
                   >
                     {chatRunning ? "Drafting…" : chatProposal ? "Send" : "Draft with the studio"}
@@ -2922,7 +2922,7 @@ function NewSheetScreen({
             <span className="fy-mono" style={{ display: "block", marginTop: 6 }}>
               {harnessReady
                 ? "the studio drafts look, sound and customs from this, against canon and tone"
-                : "without OpenCode running, the sentence seeds the sheet as-is — still a sketch through the gate"}
+                : "without the harness running, the sentence seeds the sheet as-is — still a sketch through the gate"}
             </span>
           </div>
           {contextPills}
@@ -3281,7 +3281,7 @@ export function CanonScreen() {
             variant="primary"
             onClick={ask}
             disabled={!harnessReady || query.trim().length === 0}
-            title={harnessReady ? undefined : "Asking needs OpenCode running; search still works"}
+            title={harnessReady ? undefined : "Asking needs the harness running; search still works"}
           >
             Ask
           </Button>
@@ -3663,6 +3663,9 @@ export function CanonThreadScreen() {
   const phone = useMediaQuery("(max-width: 599px)");
   const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
   const [settleOpen, setSettleOpen] = useState(false);
+  // The entry's whole text opened the thread as one card (issue 1403): on a Fold, CANON-044 was
+  // about 1,100px of it, and the composer came after. Below desktop it opens clamped.
+  const [contextOpen, setContextOpen] = useState(false);
   useEffect(() => { if (!phone) setSettleOpen(false); }, [phone]);
   const { state } = useStore();
   const [resolvedType, setResolvedType] = useState<(typeof SETTLE_TYPES)[number]>("lore");
@@ -3807,6 +3810,54 @@ export function CanonThreadScreen() {
       <SingleActFeedback result={settlement.result} undoLabel="Reopen thread" onUndo={settlement.undo} />
     </div>
   );
+  const composerBar = (
+    <HeldBar className="fy-thread-composer">
+      {phone && <button type="button" className="fy-thread-peek" onClick={() => setSettleOpen(true)} aria-haspopup="dialog">
+        <span><b>Proposed entry{entry ? ` · ${entry.id}` : ""}</b><span>{resolvedType} · draft · {candidates.checked ? `${candidates.candidates.length} contradiction candidates` : "not yet checked"}</span></span><ChevronRight size={18} />
+      </button>}
+      <Composer
+        value={message}
+        onChange={setMessage}
+        onSubmit={sendToStudio}
+        placeholder="Keep shaping the entry…"
+        agentLabel="canon author"
+        busy={chatRunning}
+        busyLabel="drafting against the canon…"
+        onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
+        {...(worldId === undefined ? {} : { onAttach: () => attachFiles(worldId) })}
+        {...(worldId !== undefined && hostCanAttach()
+          ? {
+              onAttachFiles: (files: readonly File[]) =>
+                // Dropped on the world's own shelf, so it says so — same statement the
+                // "Copy it anyway" button makes, and the one dedup needs to re-home a
+                // scoped artifact rather than silently leave it scoped (SPEC-020 §2.5).
+                attachHostFiles({ kind: "file-artifact", worldId, production: null }, files),
+              onAttachText: (text: string) =>
+                attachHostText({ kind: "file-artifact", worldId }, text, "pasted-note.txt"),
+            }
+          : {})}
+        attachments={attached}
+        refusals={refusals}
+        onRemoveAttachment={(id) => setDismissed((prev) => [...prev, id])}
+        {...(harnessReady
+          ? {}
+          : { disabledReason: "Chat needs the harness running — the form still settles it." })}
+      />
+      {offer && worldId !== undefined && (
+        <ExtractionOffer
+          file={offer.file}
+          {...(offer.state !== undefined ? { state: offer.state } : {})}
+          found={offer.found}
+          dropped={offer.dropped}
+          {...(offer.reason !== undefined ? { reason: offer.reason } : {})}
+          onRead={() => extractArtifact(worldId, offer.id)}
+          onStop={() => stopExtraction(worldId, offer.id)}
+          onReview={() => navigate(`/w/${worldId}/artifacts`)}
+          onDismiss={() => setOfferDone((prev) => [...prev, offer.id])}
+        />
+      )}
+    </HeldBar>
+  );
   return (
     <div className="fy-gate" data-screen="canon-thread">
       <div className="fy-gate__main">
@@ -3822,7 +3873,14 @@ export function CanonThreadScreen() {
           </div>
         </div>
         <div className="fy-gate__body" style={{ gap: 14 }}>
-          {context && <div className="fy-bubble--gate">{context}</div>}
+          {context && (phone || fold ? (
+            <div className={cx("fy-bubble--gate", "fy-thread-context", contextOpen && "fy-thread-context--open")}>
+              <div className="fy-thread-context__text">{context}</div>
+              <button type="button" className="fy-thread-context__more" aria-expanded={contextOpen} onClick={() => setContextOpen((open) => !open)}>
+                {contextOpen ? "Show less" : "Show all"}
+              </button>
+            </div>
+          ) : <div className="fy-bubble--gate">{context}</div>)}
           {transcript.length === 0 && (
             <div className="fy-bubble--gate">
               Talk it through — the studio drafts the answer on a proposal over this entry, checked against
@@ -3850,54 +3908,12 @@ export function CanonThreadScreen() {
             </div>
           )}
           {chatProposal && <ConnectedProposalPanel key={chatProposal.proposal.id} staged={chatProposal} />}
-          <HeldBar className="fy-thread-composer">
-            {phone && <button type="button" className="fy-thread-peek" onClick={() => setSettleOpen(true)} aria-haspopup="dialog">
-              <span><b>Proposed entry{entry ? ` · ${entry.id}` : ""}</b><span>{resolvedType} · draft · {candidates.checked ? `${candidates.candidates.length} contradiction candidates` : "not yet checked"}</span></span><ChevronRight size={18} />
-            </button>}
-            <Composer
-              value={message}
-              onChange={setMessage}
-              onSubmit={sendToStudio}
-              placeholder="Keep shaping the entry…"
-              agentLabel="canon author"
-              busy={chatRunning}
-              busyLabel="drafting against the canon…"
-              onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
-              {...(worldId === undefined ? {} : { onAttach: () => attachFiles(worldId) })}
-              {...(worldId !== undefined && hostCanAttach()
-                ? {
-                    onAttachFiles: (files: readonly File[]) =>
-                      // Dropped on the world's own shelf, so it says so — same statement the
-                      // "Copy it anyway" button makes, and the one dedup needs to re-home a
-                      // scoped artifact rather than silently leave it scoped (SPEC-020 §2.5).
-                      attachHostFiles({ kind: "file-artifact", worldId, production: null }, files),
-                    onAttachText: (text: string) =>
-                      attachHostText({ kind: "file-artifact", worldId }, text, "pasted-note.txt"),
-                  }
-                : {})}
-              attachments={attached}
-              refusals={refusals}
-              onRemoveAttachment={(id) => setDismissed((prev) => [...prev, id])}
-              {...(harnessReady
-                ? {}
-                : { disabledReason: "Chat needs OpenCode running — the form below still settles it." })}
-            />
-            {offer && worldId !== undefined && (
-              <ExtractionOffer
-                file={offer.file}
-                {...(offer.state !== undefined ? { state: offer.state } : {})}
-                found={offer.found}
-                dropped={offer.dropped}
-                {...(offer.reason !== undefined ? { reason: offer.reason } : {})}
-                onRead={() => extractArtifact(worldId, offer.id)}
-                onStop={() => stopExtraction(worldId, offer.id)}
-                onReview={() => navigate(`/w/${worldId}/artifacts`)}
-                onDismiss={() => setOfferDone((prev) => [...prev, offer.id])}
-              />
-            )}
-          </HeldBar>
+          {!fold && composerBar}
           {!phone && !fold && settlementFields}
         </div>
+        {/* On a Fold the composer is the column's foot, not the scroll's end (issue 1403): inside
+            the body it came after the whole entry and the transcript, off the bottom of the screen. */}
+        {fold && composerBar}
       </div>
       {!phone && <div className="fy-gate__side">
         {proposalPreview}

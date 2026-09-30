@@ -78,8 +78,12 @@
   :is([data-screen="canon-thread"], [data-screen="new-canon"]) > .fy-gate__side { width: min(340px, 50%); padding: 22px 26px; }
   :is([data-screen="canon-thread"], [data-screen="new-canon"]) .fy-gate__head { padding-inline: 32px; }
   :is([data-screen="canon-thread"], [data-screen="new-canon"]) .fy-gate__body { padding-inline: 32px; }
-  [data-screen="canon-thread"].fy-gate { margin: 40px 48px 0; border-top: 1px solid var(--border); height: calc(100dvh - 240px); min-height: 460px; flex: none; }
-  [data-screen="canon-thread"] .fy-thread-composer { margin-top: auto; }
+  /* The thread fills the column and ends at the system's gutter (issue 1403). A fixed
+     100dvh - 240px left a band under the frame, and a 460px floor pushed the composer under the
+     keyboard; the composer is now the main column's foot, outside the scroll, so it stays in view
+     however long the entry or the conversation gets. */
+  [data-screen="canon-thread"].fy-gate { margin: 24px 48px calc(16px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border); flex: 1; height: auto; min-height: 0; }
+  [data-screen="canon-thread"] .fy-gate__main > .fy-held-anchor { flex: none; padding: 10px 32px 14px; border-top: 1px solid var(--border); }
   [data-screen="canon-thread"] .fy-story__h1 { font: 650 var(--text-2xl)/1.1 var(--font-sans); }
   [data-screen="canon-thread"] .fy-thread-preview { display: grid; gap: 14px; }
   .fy-thread-edit { margin-top: 12px; }
@@ -237,3 +241,9 @@
   .fy-thread-composer :is(.fy-cx__attach, .fy-cx__send, .fy-cx__mic) { min-width: 44px; min-height: 44px; }
 }
 
+
+/* The entry a thread is about, clamped below desktop (issue 1403): the conversation opens first,
+   and the whole text is one press away rather than a page to scroll past. */
+.fy-thread-context__text { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
+.fy-thread-context--open .fy-thread-context__text { display: block; -webkit-line-clamp: unset; }
+.fy-thread-context__more { min-height: 44px; margin-top: 4px; padding: 0; border: 0; background: none; font: var(--type-ui); color: var(--foreground); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }

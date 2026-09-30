@@ -177,7 +177,7 @@ describe("arriving at World Chat", () => {
     assert.match(html, /New conversation/);
     assert.match(
       html,
-      /needs OpenCode running/,
+      /needs the harness running/,
       "it says what is missing rather than presenting a button that does nothing",
     );
   });
