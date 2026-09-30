@@ -126,6 +126,15 @@ function referenceReviewPath(worldId: string, sheetId: string, kind: Take["kind"
   }
 }
 
+/** A shot as the person knows it: its number and title, or its id when it is gone. */
+function shotLabel(scenes: readonly Parameters<typeof orderedShots>[0][], shotId: string): string {
+  for (const scene of scenes) {
+    const shot = orderedShots(scene).find((candidate) => candidate.id === shotId);
+    if (shot) return `shot ${shot.number} · ${shot.title}`;
+  }
+  return shotId;
+}
+
 export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
   const entries: NeedsYouEntry[] = [];
 
@@ -215,7 +224,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
         urgency: 4,
         kind: "unreviewed-take",
         title: "reference take awaiting review",
-        detail: `${take.kind} for ${take.reference?.sheetId ?? "reference set"}`,
+        detail: `${take.kind.replace(/-/g, " ")} for ${(world.sheets ?? []).find((sheet) => sheet.id === take.reference?.sheetId)?.name ?? take.reference?.sheetId ?? "reference set"}`,
         at: take.completedAt ?? take.dispatchedAt,
         worldId: world.meta.worldId,
         actions: ["review"],
@@ -233,7 +242,9 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
           urgency: 4,
           kind: "unreviewed-take",
           title: `take awaiting review · ${production.meta.title}`,
-          detail: `${take.kind} for ${take.coversShots.join(", ")}`,
+          // Shots by number and title, not id (issue 1403): "voice for sh_12" was the take's
+          // storage key read aloud to the person who has to decide on it.
+          detail: `${take.kind.replace(/-/g, " ")} for ${take.coversShots.map((shotId) => shotLabel(production.scenes ?? [], shotId)).join(", ")}`,
           at: take.completedAt ?? take.dispatchedAt,
           worldId: world.meta.worldId,
           actions: ["review"],
