@@ -40,8 +40,15 @@ export const HEARMEMAN_ADAPTERS = [
       },
       {
         "recipeId": "comfyui-h3-video-768",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 768p at strength 0.2–1 for testing (2026-09-30). Generation not run.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-30T16:00:00.000Z",
+          "generation": "not-run"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 0.2,
+        "maxStrength": 1
       },
       {
         "recipeId": "comfyui-h3-reference-video",
@@ -325,8 +332,16 @@ export const HEARMEMAN_ADAPTERS = [
       },
       {
         "recipeId": "comfyui-h3-video-768",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 768p at strength 0.2–1 for testing (2026-09-30). Generation not run.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-30T16:00:00.000Z",
+          "generation": "not-run"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 0.2,
+        "maxStrength": 1,
+        "recommendedStrength": 0.7
       },
       {
         "recipeId": "comfyui-h3-reference-video",
@@ -606,8 +621,16 @@ export const HEARMEMAN_ADAPTERS = [
       },
       {
         "recipeId": "comfyui-h3-video-768",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 768p at strength 0.2–1 for testing (2026-09-30). Generation not run.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-30T16:00:00.000Z",
+          "generation": "not-run"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 0.2,
+        "maxStrength": 1,
+        "recommendedStrength": 1
       },
       {
         "recipeId": "comfyui-h3-reference-video",

@@ -5,24 +5,47 @@ import { AdapterBundleSchema, type AdapterBundle } from "@arke-studio/contracts"
 export const H3_ADAPTER_BUNDLES: readonly AdapterBundle[] = [AdapterBundleSchema.parse({
   // The publisher's own recipe (Hearmeman/minimax-h3-loras README @ de4c3bc6): "Pick one HMNSFW,
   // one HMBreasts and one HMPussy stills file", anatomy underneath and the video-trained action
-  // adapter on top. Added after the all-fourteen bundle washed H3 out to a flat field.
+  // adapter on top. Added after the all-fourteen bundle washed H3 out to a flat field. It starts
+  // at 0.5 / 0.4 / 0.8 because 0.7 each distorted bodies (the stills-trained anatomy adapters
+  // overpower the motion one) and the owner locked these values in after take 18 (2026-09-30).
   id: "minimax-h3-motion-anatomy-v1", displayName: "Motion + anatomy", recipeId: "comfyui-h3-video",
-  status: "experimental", description: "HMPussy and HMBreasts, then HMNSFW-AIO V2.5 on top. Starts at 0.7 each.",
+  status: "experimental", description: "HMPussy and HMBreasts, then HMNSFW-AIO V2.5 on top.",
   selections: [
   {
     "releaseId": "hearmeman-hmpussy-v6-epoch30-3080f4fbcbba4fc06bd09240c7eedb6a5128eb0e19feb001cdf97a7a0941a6ee",
     "sha256": "3080f4fbcbba4fc06bd09240c7eedb6a5128eb0e19feb001cdf97a7a0941a6ee",
-    "strength": 0.7
+    "strength": 0.5
   },
   {
     "releaseId": "hearmeman-hmbreastsv2-d260653bdf10775380a44c8f1486bcc4690bd57085cb034002a8fb878f1ad36f",
     "sha256": "d260653bdf10775380a44c8f1486bcc4690bd57085cb034002a8fb878f1ad36f",
-    "strength": 0.7
+    "strength": 0.4
   },
   {
     "releaseId": "hearmeman-hmnsfw-aio-v2.5-a07732a84fd733085eb5d910f602f918fa7a3658117116927e4329f5951a9d2d",
     "sha256": "a07732a84fd733085eb5d910f602f918fa7a3658117116927e4329f5951a9d2d",
-    "strength": 0.7
+    "strength": 0.8
+  }
+],
+}), AdapterBundleSchema.parse({
+  // The same three for 768p, owner-approved for testing on 2026-09-30 before any 768p run.
+  id: "minimax-h3-motion-anatomy-768-v1", displayName: "Motion + anatomy", recipeId: "comfyui-h3-video-768",
+  status: "experimental", description: "HMPussy and HMBreasts, then HMNSFW-AIO V2.5 on top.",
+  selections: [
+  {
+    "releaseId": "hearmeman-hmpussy-v6-epoch30-3080f4fbcbba4fc06bd09240c7eedb6a5128eb0e19feb001cdf97a7a0941a6ee",
+    "sha256": "3080f4fbcbba4fc06bd09240c7eedb6a5128eb0e19feb001cdf97a7a0941a6ee",
+    "strength": 0.5
+  },
+  {
+    "releaseId": "hearmeman-hmbreastsv2-d260653bdf10775380a44c8f1486bcc4690bd57085cb034002a8fb878f1ad36f",
+    "sha256": "d260653bdf10775380a44c8f1486bcc4690bd57085cb034002a8fb878f1ad36f",
+    "strength": 0.4
+  },
+  {
+    "releaseId": "hearmeman-hmnsfw-aio-v2.5-a07732a84fd733085eb5d910f602f918fa7a3658117116927e4329f5951a9d2d",
+    "sha256": "a07732a84fd733085eb5d910f602f918fa7a3658117116927e4329f5951a9d2d",
+    "strength": 0.8
   }
 ],
 }), AdapterBundleSchema.parse({
