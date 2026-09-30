@@ -131,23 +131,42 @@ test("all fourteen owner approvals preserve actual coverage and the base recipe 
     assert.throws(() => recipeWithAdapters(base, [{ ...selected[0]!, strength: 0.1 }]), /strength/);
     assert.throws(() => recipeWithAdapters(base, [{ ...selected[0]!, strength: 1.2 }]), /strength/);
     if (pair.recommendedStrength !== undefined) assert.ok(pair.recommendedStrength >= pair.minStrength! && pair.recommendedStrength <= pair.maxStrength!);
-    assert.throws(() => recipeWithAdapters(comfyUiRecipeById("comfyui-h3-video-768")!, selected), /validation/);
+    // 768p is owner-approved only for the Motion + anatomy members (2026-09-30); the rest wait.
+    const at768 = comfyUiRecipeById("comfyui-h3-video-768")!;
+    if (MOTION_ANATOMY.includes(release.displayName)) {
+      const pair768 = release.compatibility.find(row => row.recipeId === at768.id)!;
+      assert.equal(pair768.state, "owner-approved");
+      assert.equal(pair768.ownerApproval!.generation, "not-run");
+      assert.deepEqual(recipeWithAdapters(at768, selected).hardware, at768.hardware);
+    } else {
+      assert.throws(() => recipeWithAdapters(at768, selected), /validation/);
+    }
     assert.throws(() => recipeWithAdapters(comfyUiRecipeById("comfyui-h3-reference-video")!, selected), /validation/);
   }
   assert.deepEqual(outcomes, { completed: 10, "memory-blocked": 2, "not-run": 2 });
 });
 
-test("the motion + anatomy bundle chains the publisher's three, anatomy underneath, at 0.7 each", () => {
-  const base = comfyUiRecipeById("comfyui-h3-video")!;
-  const bundle = H3_ADAPTER_BUNDLES.find(row => row.id === "minimax-h3-motion-anatomy-v1")!;
-  const names = bundle.selections.map(row => HEARMEMAN_ADAPTERS.find(release => release.id === row.releaseId)!.displayName);
-  assert.deepEqual(names, ["hmpussy_v6_epoch30", "HMBreastsV2", "HMNSFW-AIO-V2.5"]);
-  const composed = recipeWithAdapters(base, bundle.selections);
-  bundle.selections.forEach((row, i) => assert.equal(composed.graph[`arke_adapter_${i}`]!.inputs.strength_model, row.strength));
-  assert.deepEqual(bundle.selections.map(row => row.strength), [0.7, 0.7, 0.7]);
-  assert.deepEqual(composed.graph["3"]!.inputs.model, ["arke_adapter_2", 0]);
-  assert.throws(() => recipeWithAdapters(base, [...bundle.selections].reverse()), /bundle/);
-  assert.throws(() => recipeWithAdapters(base, bundle.selections.slice(0, 2)), /bundle/);
+const MOTION_ANATOMY = ["hmpussy_v6_epoch30", "HMBreastsV2", "HMNSFW-AIO-V2.5"];
+
+test("the motion + anatomy bundle chains the publisher's three, anatomy underneath, at the owner's 0.5 / 0.4 / 0.8, on 480p and 768p", () => {
+  for (const [id, recipeId] of [["minimax-h3-motion-anatomy-v1", "comfyui-h3-video"], ["minimax-h3-motion-anatomy-768-v1", "comfyui-h3-video-768"]] as const) {
+    const base = comfyUiRecipeById(recipeId)!;
+    const bundle = H3_ADAPTER_BUNDLES.find(row => row.id === id)!;
+    assert.equal(bundle.recipeId, recipeId);
+    const names = bundle.selections.map(row => HEARMEMAN_ADAPTERS.find(release => release.id === row.releaseId)!.displayName);
+    assert.deepEqual(names, MOTION_ANATOMY);
+    const composed = recipeWithAdapters(base, bundle.selections);
+    bundle.selections.forEach((row, i) => assert.equal(composed.graph[`arke_adapter_${i}`]!.inputs.strength_model, row.strength));
+    assert.deepEqual(bundle.selections.map(row => row.strength), [0.5, 0.4, 0.8]);
+    assert.deepEqual(composed.graph[base.adapterSlot![0]]!.inputs.model, ["arke_adapter_2", 0]);
+    assert.throws(() => recipeWithAdapters(base, [...bundle.selections].reverse()), /bundle/);
+    assert.throws(() => recipeWithAdapters(base, bundle.selections.slice(0, 2)), /bundle/);
+  }
+  // Each recipe declares its own bundle; the same three selections match the 768p one, so a saved
+  // 480p choice carries over when the model changes.
+  const at480 = H3_ADAPTER_BUNDLES.find(row => row.id === "minimax-h3-motion-anatomy-v1")!;
+  assert.equal(H3_ADAPTER_BUNDLES.filter(row => row.recipeId === "comfyui-h3-video-768").length, 1);
+  assert.ok(recipeWithAdapters(comfyUiRecipeById("comfyui-h3-video-768")!, at480.selections));
 });
 
 test("adapter transport follows the engine's filename spelling and rejects missing or unrelated paths", async () => {

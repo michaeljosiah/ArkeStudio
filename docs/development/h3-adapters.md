@@ -15,8 +15,10 @@ guidance is a range (HMNSFW-AIO V2.5 at 0.5–0.9, V2 at 0.5 or below) and a pin
 combination below unusable. Where the publisher states a starting strength, the pairing records it
 as `recommendedStrength` and a new choice starts there; otherwise it starts at 1. Ten generated
 neutral videos whose outputs the owner accepted; two were blocked by free GPU memory and two
-were not run. Those outcomes remain distinct from complete GPU verification. The 768p and
-reference-video pairings remain unverified. See the [acceptance and evidence record](h3-adapter-validation.md).
+were not run. Those outcomes remain distinct from complete GPU verification. On 30 September
+2026 the owner also approved the three Motion + anatomy members for 768p (0.2–1, not yet run) so
+768p could be tested; the other eleven 768p pairings and every reference-video pairing remain
+unverified. See the [acceptance and evidence record](h3-adapter-validation.md).
 Other Hearmeman repositories, H3's existing acceleration adapters and Gemma remain separate.
 
 **There is no compliance assessment.** An earlier build gated every adapter on a verdict from a
@@ -128,9 +130,11 @@ chain of model-only loaders — one UI preset, not a merged weight file. Expand 
 and strengths** to see and tune the members; choose **None** to clear the whole bundle.
 
 - **Motion + anatomy** — hmpussy_v6_epoch30 and HMBreastsV2 underneath, HMNSFW-AIO-V2.5 on top,
-  0.7 each to start. This is the publisher's own recipe: "Pick one HMNSFW, one HMBreasts and one
-  HMPussy stills file", anatomy (stills-trained) underneath and the video-trained action adapter
-  on top. Use this one.
+  starting at 0.5 / 0.4 / 0.8. This is the publisher's own recipe: "Pick one HMNSFW, one HMBreasts
+  and one HMPussy stills file", anatomy (stills-trained) underneath and the video-trained action
+  adapter on top. At 0.7 each the anatomy adapters distorted bodies; the owner locked in
+  0.5 / 0.4 / 0.8 after a 480p take at those values (2026-09-30). Declared for 480p and, for
+  testing, 768p. Use this one.
 - **All MiniMax adult adapters** — all fourteen, starting at 1 each. At 1 each it washed H3 out
   to a flat grey-purple field on 30 September 2026 (frame colour spread ~3 on a 0–255 scale by
   mid-clip, against ~40–60 for real footage). It stays for experiments at lower strengths.
