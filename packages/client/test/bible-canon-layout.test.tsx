@@ -14,9 +14,10 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 const listeners = new Set<() => void>();
 let phone = true;
+let fold = false;
 Object.assign(dom.window, {
   innerWidth: 390, innerHeight: 797,
-  matchMedia: (query: string) => ({ matches: query.includes("max-width") && phone, addEventListener: (_: string, fn: () => void) => listeners.add(fn), removeEventListener: (_: string, fn: () => void) => listeners.delete(fn) }),
+  matchMedia: (query: string) => ({ matches: query.includes("min-width: 600px") ? fold : query.includes("max-width") && phone, addEventListener: (_: string, fn: () => void) => listeners.add(fn), removeEventListener: (_: string, fn: () => void) => listeners.delete(fn) }),
   getComputedStyle: () => ({ direction: "ltr" }),
 });
 Object.assign(dom.HTMLElement.prototype, { focus() {}, scrollIntoView() {}, showModal(this: HTMLElement) { this.setAttribute("open", ""); }, close(this: HTMLElement) { this.removeAttribute("open"); } });
@@ -31,6 +32,7 @@ afterEach(async () => {
   __setStateForTest(FIXTURE_STATE);
   sent.length = 0;
   phone = true;
+  fold = false;
 });
 
 async function mount(route: string) {
@@ -79,6 +81,22 @@ it("keeps the thread's settlement in its sheet and retains the draft across clos
   assert.equal(dom.document.querySelectorAll("textarea").length, 1);
   await act(async () => button("Settle thread").click());
   assert.equal(sent.filter(message => message.kind === "settle-thread" && message.statement === "Odile taught the Chorister.").length, 2);
+});
+
+it("keeps a Fold thread's composer at the column's foot and opens the entry clamped (issue 1403)", async () => {
+  phone = false;
+  fold = true;
+  const entry = FIXTURE_STATE.world!.canon.find(entry => entry.status === "open")!;
+  await mount(`canon/${entry.id}/thread`);
+  const composer = dom.document.querySelector(".fy-thread-composer")!;
+  assert.ok(composer, "the composer is there");
+  assert.equal(composer.closest(".fy-gate__body"), null, "outside the scroll, so the entry cannot push it off the screen");
+  assert.ok(composer.closest(".fy-gate__main"), "and still in the conversation's column");
+  const more = button("Show all");
+  assert.equal(more.getAttribute("aria-expanded"), "false");
+  await act(async () => more.click());
+  assert.ok(dom.document.querySelector(".fy-thread-context--open"), "the whole entry is one press away");
+  assert.equal(button("Show less").getAttribute("aria-expanded"), "true");
 });
 
 it("restores Bible versions and confirms read-aloud inside the contents sheet", async () => {

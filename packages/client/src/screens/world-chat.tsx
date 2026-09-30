@@ -1099,7 +1099,7 @@ function groupBySubject<P extends { id: string; kind: string; subject: string; s
 function composerReason(state: ReturnType<typeof useStore>["state"]): string | undefined {
   if (!state) return "Still connecting.";
   if (state.app.health.harness.status !== "healthy") {
-    return "Chat needs OpenCode running. Everything already understood is still here.";
+    return "Chat needs the harness running. Everything already understood is still here.";
   }
   return undefined;
 }
