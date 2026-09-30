@@ -4,6 +4,7 @@ import type { VoiceDesignClient } from "@arke-studio/providers";
 import { saveDesignedVoice } from "./voice/designed-library.js";
 import { ProductionCreationService } from "./application/production-creation.js";
 import { AdapterLibrary, adapterSetupEntries } from "./local-ai/adapter-library.js";
+import { withLocalSeed } from "./queue/local-seed.js";
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity } from "@arke-studio/providers";
 import { ConversationActionService } from "./application/conversation-actions.js";
@@ -5446,6 +5447,7 @@ export class Coordinator {
   }
 
   private freezeLocalIdentity(input: EnqueueInput): EnqueueInput {
+    input = withLocalSeed(input);
     const store = this.opts.provider.openStore?.();
     const references = input.params.references;
     if (store?.worldId === input.worldId && Array.isArray(references)) {
