@@ -65,6 +65,11 @@
 @media (max-width: 1099px) and (pointer: coarse) {
   .fy-settings__tab, .fy-kind, .fy-settings .fy-set__link, .fy-settings .fy-fact__link, .fy-settings .fy-act, .fy-settings .ui-btn, .fy-settings .ui-iconbtn, .fy-settings .ui-select__control { min-height: 44px; }
   .fy-settings__close { width: 44px; height: 44px; }
+  /* The rest of the 44 (issue 1403, measured on a Fold7): Harness's model menus were 26px tall,
+     Brief 24 wide, the harness rail 32, a key field 29, Measure 25. (Switches already reach 44
+     through the ::before below.) */
+  .fy-settings select.fy-set__pill, .fy-settings .fy-rt__railitem, .fy-settings .fy-fact__input, .fy-settings .fy-diag__go { min-height: 44px; }
+  .fy-settings .fy-set__link { min-width: 44px; }
   :is(.fy-settings, .fy-settings-phone) .fy-set__link[aria-expanded], :is(.fy-settings, .fy-settings-phone) .fy-play { min-width: 44px; min-height: 44px; }
   .fy-settings .fy-prov__switch, .fy-settings-phone .fy-prov__switch { position: relative; width: 44px; height: 26px; border-radius: 13px; flex: none; padding: 3px; }
   .fy-settings .fy-prov__switch > span, .fy-settings-phone .fy-prov__switch > span { width: 20px; height: 20px; top: 3px; left: 3px; }
