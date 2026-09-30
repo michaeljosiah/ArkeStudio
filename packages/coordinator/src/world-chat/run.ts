@@ -29,13 +29,14 @@ import { assembleContext, budgetFor, type ContextAttachment } from "./context.js
 import type { CurrentLook } from "./look.js";
 import { THINKING_LABEL, workingLabel, WRITING_LABEL } from "./project.js";
 import { deriveChecks, planFor } from "./check-plan.js";
-import { correctiveMessage, validateTurnResult, type TurnProblem } from "./turn-result.js";
+import { correctiveMessage, personLine, validateTurnResult, type TurnProblem } from "./turn-result.js";
 import type { EvidenceSources } from "./evidence.js";
 import { foldConversation } from "./fold.js";
 import { WorldChatStore } from "./store.js";
 import type { PreparedWorldChatAction, WorldChatActionTurn } from "./actions.js";
 import { refreshConversationSummary, type ConversationSummariser } from "./summarisation.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
+import { actionGuideScopes, renderActionGuide } from "./action-guide.js";
 
 /**
  * One turn: a message goes out, a reply and its propositions come back (#70 §8).
@@ -424,7 +425,15 @@ export class WorldChatRunner {
       .reverse()
       .map(({ event }) => (event.type === "turn.constraints" ? event.constraints : undefined))
       .find((held) => held?.turnId === turnId);
-    return this.runTurn(store, conversationId, original.text, original.attachmentIds, turnId, constraints?.subject, previousModel, constraints?.replyOnly === true);
+    // The model is asked for again only where one can be chosen (issue 1403). Everywhere else
+    // the run's model was the default — an agent override or the local default — and handing it
+    // back as a request made the retry a choice a world conversation may not make: every retry
+    // after a failed turn was refused in milliseconds with "A language model can only be chosen
+    // inside a production". Resolving it afresh also picks up a model chosen in Settings after
+    // the failure, which is the usual reason to press Try again.
+    const context = view.entryContext;
+    const choosable = context !== undefined && ("productionId" in context || context.kind === "production-setup");
+    return this.runTurn(store, conversationId, original.text, original.attachmentIds, turnId, constraints?.subject, choosable ? previousModel : undefined, constraints?.replyOnly === true);
   }
 
   /**
@@ -577,8 +586,14 @@ export class WorldChatRunner {
     const chapterSubject = subject?.kind === "chapter" || subject?.kind === "passage" ? subject : undefined;
     const briefBudget = chapterSubject && this.deps.chapterBrief ? Math.min(60_000, Math.floor(budgetChars / 2)) : 0;
     const setupBudget = view.entryContext?.kind === "production-setup" ? Math.floor(budgetChars * 0.65) : 0;
+    // A reply-only ask refuses every action it returns, so it is told of none.
+    const actionGuide = renderActionGuide(
+      replyOnly ? [] : actionGuideScopes(view.entryContext),
+      budgetChars - briefBudget - setupBudget,
+    );
     const assembled = assembleContext({
       budgetChars: budgetChars - briefBudget - setupBudget,
+      ...(actionGuide.text ? { actionGuide: actionGuide.text } : {}),
       ...(view.entryContext && this.deps.describeEntry
         ? {
             entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}${subjectNarration(subject)}${replyOnly ? REPLY_ONLY_NARRATION : ""}`,
@@ -791,12 +806,9 @@ export class WorldChatRunner {
          * something about it. "The answer could not be used" tells them a turn failed and
          * leaves them pressing retry against a rejection that will repeat.
          */
-        await this.finish(
-          store,
-          run,
-          "failed",
-          `rejected: ${outcome.problems.map((p) => p.safeMessage || p.code).join(" · ")}`,
-        );
+        // Worded for the person, not the model (issue 1403): the corrective text above went to the
+        // model and every word of it is in the log line; the screen gets what it means.
+        await this.finish(store, run, "failed", `rejected: ${personLine(outcome.problems)}`);
         return { status: "failed", reason: "the answer could not be used", problems: outcome.problems };
       }
       return { status: "completed", reply: outcome.reply };
@@ -1292,6 +1304,9 @@ function renderPrompt(assembled: ReturnType<typeof assembleContext>): string {
   // First, because it frames everything after it.
   if (assembled.entryContext) sections.push(`## What this is about
 ${assembled.entryContext}`);
+  // Second, because what they ask for next is read against what can be done about it.
+  if (assembled.actionGuide) sections.push(`## Actions you can prepare
+${assembled.actionGuide}`);
   if (assembled.summary) sections.push(`## The conversation so far\n${assembled.summary}`);
   if (assembled.registry) sections.push(`## What you have already understood\n${assembled.registry}`);
   if (assembled.tombstones) {

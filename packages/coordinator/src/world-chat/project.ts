@@ -136,6 +136,7 @@ const WORKING_LABELS: Record<string, string> = {
   get_attachment_text: "Reading what you attached",
   fetch_url: "Reading a page online",
   get_production: "Reading the production",
+  describe_action: "Checking what it can prepare",
   /*
    * Going online, which is the one thing here a person opted into and the one thing the screen
    * has to be honest about (2026-08-23).
@@ -408,7 +409,8 @@ export function projectWorkspace(
       turnId: m.turnId,
       role: m.role,
       text: m.text,
-      receipts: (receiptsByMessage.get(m.id) ?? []).map(wordReceipt),
+      // Not a look at the world, so not a check the person is shown beside the reply.
+      receipts: (receiptsByMessage.get(m.id) ?? []).filter((r) => r.tool !== "describe-action").map(wordReceipt),
       refusals: wordRefusals(loaded.refusals[m.id] ?? []),
       ...(loaded.bibleEdits[m.id] ? { bibleEdit: loaded.bibleEdits[m.id]! } : {}),
       ...(loaded.benchOutcomes[m.id] ? { benchOutcome: loaded.benchOutcomes[m.id]! } : {}),

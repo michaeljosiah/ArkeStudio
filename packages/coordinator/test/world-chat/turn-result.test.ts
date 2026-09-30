@@ -148,6 +148,33 @@ describe("parsing a turn result", () => {
     assert.equal(parsed.ok === false && parsed.problems[0]!.code, "not-json");
   });
 
+  it("reads a result wrapped in a markdown fence or a line of prose (issue 1403)", () => {
+    const result = turn({ reply: "Maren is a tide-caller." });
+    for (const wrapped of [
+      "```json\n" + result + "\n```",
+      "```\n" + result + "\n```",
+      "Here is the result:\n" + result,
+      result + "\n\nLet me know if you want more.",
+      "﻿" + result,
+    ]) {
+      const parsed = parseTurnResult(wrapped);
+      assert.equal(parsed.ok, true, wrapped.slice(0, 20));
+      assert.equal(parsed.ok && parsed.value.reply, "Maren is a tide-caller.");
+    }
+  });
+
+  it("finds the object's own end past braces inside its strings", () => {
+    const parsed = parseTurnResult(`Sure. ${turn({ reply: "She said {not a brace} and \"}\" too." })} Done {`);
+    assert.equal(parsed.ok && parsed.value.reply, "She said {not a brace} and \"}\" too.");
+  });
+
+  it("still refuses prose with no object in it, fenced or not", () => {
+    for (const prose of ["```\nI've noted that for you!\n```", "Noted — see {the ledger}."]) {
+      const parsed = parseTurnResult(prose);
+      assert.equal(parsed.ok === false && parsed.problems[0]!.code, "not-json", prose);
+    }
+  });
+
   it("refuses unrecognised fields rather than ignoring them", () => {
     const parsed = parseTurnResult(
       JSON.stringify({ reply: "hi", candidateOperations: [], groupOperations: [], extra: true }),
@@ -777,6 +804,13 @@ describe("a question asked for its answer (issue 1295)", () => {
     if (outcome.ok) return;
     assert.deepEqual(outcome.problems.map((p) => p.code), ["reply-only"], "not the action's shape: the model was told to fix what it should drop");
     assert.match(outcome.problems[0]!.safeMessage, /reply only.*every list empty/);
+  });
+
+  it("sees the invented action through a fence too (issue 1403)", async () => {
+    const input = await baseInput({ replyOnly: true });
+    const fenced = "```json\n" + JSON.stringify({ reply: "It draws on the ledger.", actions: [{ op: "edit" }] }) + "\n```";
+    const outcome = validateTurnResult({ ...input, raw: fenced });
+    assert.equal(outcome.ok === false && outcome.problems[0]!.code, "reply-only");
   });
 
   it("accepts the reply alone, and holds an open ask to the shape as before", async () => {

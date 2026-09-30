@@ -84,7 +84,10 @@
   .fy-sheet__badges .ui-badge { height: 24px; padding: 0 9px; font: var(--type-meta); letter-spacing: normal; }
   .fy-sheet__lead { font: 400 var(--text-md)/1.6 var(--font-sans); color: var(--foreground); max-width: none; }
   .fy-sheet .fy-texthost { position: relative; }
-  .fy-sheet .fy-textactions { position: absolute; right: 0; bottom: 0; margin: 0; background: var(--background); max-width: 100%; }
+  /* Under the text, not over it (issue 1403). Laid over the block's last line on an opaque
+     ground, the two 44px presses hid the words they sit on — "…listening for a note" read as
+     "…listening" on a Fold, where touch keeps them showing. The canon entry does the same. */
+  .fy-sheet .fy-textactions { position: static; display: flex; justify-content: flex-end; margin: 4px 0 0; max-width: 100%; }
   .fy-sheet__actions { gap: 4px; }
   .fy-sheet__actions > .ui-btn:first-child { min-height: 44px; }
   .fy-sheet .fy-sheet__icon-action, .fy-sheet__actions > .ui-iconbtn { width: 44px; height: 44px; padding: 0; border: 1px solid var(--border); border-radius: 10px; }

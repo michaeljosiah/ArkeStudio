@@ -396,7 +396,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     try {
       await untilAsync(async () => {
         assert.equal(await only.chat(), undefined, "no session goes to it unasked");
-        return /Uncensored Balanced · HauhauCS runs only where you choose it/.test(only.coordinator.getState().worldChat?.lastFailure?.detail ?? "");
+        return /Uncensored Balanced · HauhauCS runs only where you choose it\. Choose it for World Chat \(world-builder\)/.test(only.coordinator.getState().worldChat?.lastFailure?.detail ?? "");
         // Each poll creates and sends a conversation: under a full coordinator run that is
         // seconds apiece, and the default ten failed it twice where it passes alone.
       }, "the refusal naming the model and where to choose it", 30_000);

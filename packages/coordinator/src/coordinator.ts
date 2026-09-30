@@ -1069,6 +1069,8 @@ export class Coordinator {
   private lastLocalRuntimeStatuses = "";
   /** The last gate result on the wire, so an unchanged re-gate stays off it. */
   private lastRuntimeStatus = "";
+  /** A hardware probe in flight, shared so a burst of adapter dispatches measures once. */
+  private runtimeMeasurement: Promise<RuntimeProbes | null> | null = null;
   /** An older readiness walk must not overwrite the result of a newer hardware measurement. */
   private comfyUiRefreshRevision = 0;
   /** A local-runtime pass already in flight. A probe that stalls must not stack up behind itself. */
@@ -2390,7 +2392,7 @@ export class Coordinator {
     }
     const local = this.localHarnessDefault(agent === "stage-designer");
     if (local !== undefined) return this.validateLanguageModel(local, agent === "stage-designer", signal);
-    const refusal = this.keylessSessionRefusal(agent === "stage-designer");
+    const refusal = this.keylessSessionRefusal(agent === "stage-designer", agent);
     return refusal === null ? {} : { reason: refusal };
   }
   /** Per-agent model and brief overrides, as last read from settings. */
@@ -4522,7 +4524,7 @@ export class Coordinator {
     if (local === undefined) {
       // A session whose model was chosen — by the dispatch, validated before this — runs on
       // that model; the refusal is for a session that would otherwise run on nothing chosen.
-      const refusal = chosen ? null : this.keylessSessionRefusal();
+      const refusal = chosen ? null : this.keylessSessionRefusal(false, agent);
       if (refusal !== null) throw new Error(refusal);
       return this.agentOverrides ? { agents: this.agentOverrides } : {};
     }
@@ -4600,7 +4602,7 @@ export class Coordinator {
     return this.vendorAuth.current().available && !this.vendorAuth.readOk;
   }
 
-  private keylessSessionRefusal(needsImages = false): string | null {
+  private keylessSessionRefusal(needsImages = false, agent?: string): string | null {
     if (this.cloudCredentialAvailable()) return null;
     // On Arke's own lane a stored key is not missing, only unusable, so the refusal must not tell
     // the person to add one; what it can say is about Ollama and its models.
@@ -4636,7 +4638,10 @@ export class Coordinator {
     // model that calls tools" would send them to replace a model that already does (issue 1289).
     const waiting = this.readModel.getState().app.harnessModels.filter((model) => model.provider === "ollama" && localModelPolicy(model.id)?.explicitChoiceOnly === true);
     if (offered && waiting.length > 0) {
-      return `${localModelPolicy(waiting[0]!.id)!.displayName} runs only where you choose it. Choose it for this agent in Settings → Harness → Advanced, or install Gemma 4 12B.`;
+      // Named for the agent it would run (issue 1403): "this agent" sent the person to a list of
+      // thirteen agents with nothing to say which one World Chat is.
+      const which = agent === "world-builder" ? "World Chat (world-builder)" : agent ?? "this agent";
+      return `${localModelPolicy(waiting[0]!.id)!.displayName} runs only where you choose it. Choose it for ${which} in Settings → Harness → Advanced, or install Gemma 4 12B.`;
     }
     if (!needsImages && offered) {
       if (localLane) return "None of the local models can write here: each is switched off or cannot call tools. Pull a model that calls tools, or switch one on under AI models.";
@@ -5435,11 +5440,47 @@ export class Coordinator {
       const base = comfyUiRecipeById(model);
       if (!base) throw new Error("Unknown adapter recipe.");
       const recipe = recipeWithAdapters(base, selections);
-      const probes = this.readModel.getState().app.runtime?.probes;
-      const vram = probes?.vramMbByAccelerator?.cuda ?? probes?.vramMb;
-      if (vram == null || probes?.memMb == null) throw new Error("Measure local graphics and system memory before using adapters.");
+      const vramOf = (probes: RuntimeProbes | null | undefined) => probes?.vramMbByAccelerator?.cuda ?? probes?.vramMb;
+      let probes = this.readModel.getState().app.runtime?.probes;
+      // Only Settings used to measure, and a launch starts unmeasured (#1013), so the first
+      // adapter dispatch after every launch was refused until someone happened to open the
+      // ComfyUI panel. Measure here instead; only a probe that actually fails still refuses.
+      if (vramOf(probes) == null || probes?.memMb == null) {
+        const measured = await this.measureRuntime();
+        // Same reason detect-runtimes refreshes (#687): the published recipe rows would go on
+        // saying VRAM could not be measured. Admission reads the figures itself, so it need not wait.
+        if (measured) this.trackBackground(this.refreshComfyUi().catch(() => {}));
+        probes = measured ?? probes;
+      }
+      const vram = vramOf(probes);
+      if (vram == null || probes?.memMb == null) throw new Error("Could not measure graphics and system memory, which adapters need.");
       if (vram < recipe.hardware.minVramMb || probes.memMb < (recipe.hardware.minMemMb ?? 0)) throw new Error("This adapter pairing needs more graphics or system memory than this device has.");
     }
+  }
+
+  /**
+   * Probe this machine and publish the gate result: Settings' detect-runtimes and the adapter
+   * guard take the same path, so a dispatch that measures leaves the panel showing the figures
+   * it was judged on. Detection failure means unknown, not unavailable (D12) — the answer is
+   * null, nothing is emitted over the last known figures, and nothing gets disabled by a broken
+   * probe.
+   */
+  private measureRuntime(): Promise<RuntimeProbes | null> {
+    const probe = this.opts.probeRuntime;
+    if (!probe) return Promise.resolve(null);
+    if (this.runtimeMeasurement) return this.runtimeMeasurement;
+    const work = (async () => {
+      try {
+        const probes = await probe();
+        this.emitLocalRuntimeStatus({ probes, detectedAt: new Date().toISOString() });
+        return probes;
+      } catch {
+        return null;
+      }
+    })();
+    this.runtimeMeasurement = work;
+    void work.finally(() => { if (this.runtimeMeasurement === work) this.runtimeMeasurement = null; });
+    return work;
   }
 
   private visibleAdapterSetup(setup: import("@arke-studio/contracts").SetupStatus): import("@arke-studio/contracts").SetupStatus {
@@ -16915,14 +16956,7 @@ export class Coordinator {
       }
       case "detect-runtimes": {
         if (!this.opts.manifest || !this.opts.probeRuntime) return;
-        try {
-          const probes = await this.opts.probeRuntime();
-          this.emitLocalRuntimeStatus({ probes, detectedAt: new Date().toISOString() });
-        } catch {
-          // Detection failure means unknown, not unavailable (D12) — nothing is emitted over
-          // the last known figures, and nothing gets disabled by a broken probe.
-          return;
-        }
+        if (!(await this.measureRuntime())) return;
         // The recipe walk reads these same figures, but its answer is a published snapshot
         // rather than a live read: it is computed when the engine publishes, which for an
         // already-running URL engine is once, at startup, before anything has been measured.

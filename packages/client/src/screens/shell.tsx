@@ -1098,7 +1098,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 className={cx("fy-seg__item", genMode === "chat" && "fy-seg__item--active")}
                 disabled={!canViewChat}
                 style={canViewChat ? undefined : { cursor: "not-allowed", opacity: 0.55 }}
-                title={canViewChat ? undefined : "Chat needs OpenCode running — the form drafts the same world"}
+                title={canViewChat ? undefined : "Chat needs the harness running — the form drafts the same world"}
                 onClick={() => {
                   modeTouchedRef.current = true;
                   setGenMode("chat");
@@ -2424,7 +2424,7 @@ export function SettingsGeneralScreen() {
           </>
         }
       >
-        {phone ? <button type="button" className="fy-narrator-default" onClick={() => setNarratorOpen(true)}><span>{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)} · {narrator?.provider ?? "Kokoro"}</span><ChevronDown size={14} /></button> : <span data-testid="narrator-name">{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)}</span>}
+        {phone ? <button type="button" className="fy-narrator-default" onClick={() => setNarratorOpen(true)}><span>{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)} · {narrator ? (PROVIDER_TABLE[narrator.provider as keyof typeof PROVIDER_TABLE]?.displayName ?? narrator.provider) : "Kokoro"}</span><ChevronDown size={14} /></button> : <span data-testid="narrator-name">{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)}</span>}
         <span className="fy-fact__state">{readerChip}</span>
       </FactRow>
       {phone && <FactRow what={CAPABILITY_LABEL.llm}>

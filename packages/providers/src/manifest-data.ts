@@ -14,6 +14,26 @@ import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.g
  *
  * Prices are integer micro-dollars (R-14).
  */
+/**
+ * The models whose tile has a poster in the client's bundled `samples/` (SPEC-042 R-17), each
+ * made by that model — scripts/generate-model-samples.mjs makes them. Kept beside the rows rather
+ * than on them because the fal rows are regenerated from fal's catalogue, which would drop a
+ * field written onto them. An id with no file behind it draws a broken image, so an id joins
+ * this list only with its poster.
+ */
+const MODEL_SAMPLES: ReadonlySet<string> = new Set([
+  "flux-2-pro", "nano-banana-2", "nano-banana-pro", "gpt-image-2-fal", "gpt-image-2",
+  "seedance-2.0", "seedance-2.0-fast", "seedance-2.5", "veo-3.1", "veo-3.1-fast", "minimax-h3", "wan-2.7",
+  "kling-3-pro", "kling-3-standard",
+  "comfyui-krea2-image", "comfyui-draft-image", "comfyui-draft-video",
+  "comfyui-h3-video", "comfyui-h3-video-768", "comfyui-h3-reference-video",
+  "text2image_soul_v2",
+]);
+
+function withSamples<T extends { id: string }>(models: T[]): T[] {
+  return models.map((model) => (MODEL_SAMPLES.has(model.id) ? { ...model, sample: { poster: `${model.id}.webp` } } : model));
+}
+
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
   manifestVersion: 29,
   dialogueGuidance: [],
@@ -41,7 +61,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     // images and holds a 256K context, and reference images are half the work.
     llm: ["gemma4-26b", "gemma4-12b", "llama3.3-70b", "llama3.1-8b", "gemma4-e2b-it-qat"],
   },
-  models: [
+  models: withSamples([
     // ---- fal: generated from the live catalogue ---------------------------
     ...FAL_MODELS.map((model) => ({
       ...model,
@@ -330,7 +350,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       pricing: { kind: "unmetered" },
       requires: { memMb: 1000, diskMb: 141 },
     },
-  ],
+  ]),
 });
 
 /** Manifest lookup that refuses the unknown (R-12, D4): a reason, never an attempt. */

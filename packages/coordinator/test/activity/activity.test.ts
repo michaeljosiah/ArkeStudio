@@ -162,6 +162,15 @@ describe("needs-you is derived, never appended to (R-3, D1, §3.2)", () => {
     assert.ok(!after.some((e) => e.kind === "unreviewed-take"), "reviewed elsewhere → gone, by derivation");
   });
 
+  it("names a take's shot by number and title, not by its id (issue 1403)", () => {
+    const world = worldWithTake(false) as { productions: Array<Record<string, unknown>> };
+    world.productions[0]!.scenes = [{ id: "sc_04", shots: [{ id: "sh_12", number: 12, title: "Maren at the rail" }] }];
+    const entry = computeNeedsYou(baseState({}, world as never)).find((e) => e.kind === "unreviewed-take");
+    assert.equal(entry?.detail, "frame for shot 12 · Maren at the rail");
+    const bare = computeNeedsYou(baseState({}, worldWithTake(false))).find((e) => e.kind === "unreviewed-take");
+    assert.equal(bare?.detail, "frame for sh_12", "a shot that is gone keeps its id rather than vanishing");
+  });
+
   it("a resolved reconciliation and an accepted proposal leave the same way", () => {
     const held = computeNeedsYou(baseState({ jobs: [job({ status: "needs-reconciliation", error: "unwitnessed" })] }));
     assert.ok(held.some((e) => e.kind === "job-needs-reconciliation"));
