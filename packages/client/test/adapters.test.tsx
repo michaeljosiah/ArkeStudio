@@ -35,7 +35,8 @@ test("one experimental bundle displays all members and becomes unavailable when 
   assert.match(render(), /14 adapters · Experimental/);
   assert.match(render(), /Combination not GPU-tested/);
   assert.equal((render().match(/<li>/g) ?? []).length, 14);
-  assert.match(render(), /Member 14 · Strength 1/);
+  // Each member's strength is its own field, bounded by that member's pairing range.
+  assert.match(render(), /aria-label="Strength for Member 14"[^>]*min="1"[^>]*max="1"[^>]*value="1"/);
   assert.doesNotMatch(render(), /aria-label="Adapter strength"/);
   set({ ...available, entries: entries.map((row, i) => i === 13 ? { ...row, reason: "Disabled by the user." } : row) });
   assert.match(render(), /<option[^>]*value="bundle:fixture-bundle"[^>]*disabled/);

@@ -1,9 +1,33 @@
 import { AdapterBundleSchema, type AdapterBundle } from "@arke-studio/contracts";
 
-// Frozen membership: publisher refreshes must not silently change a saved experiment.
+// Frozen membership: publisher refreshes must not silently change a saved experiment. Strengths
+// are starting values; each member can be tuned inside its own pairing's range.
 export const H3_ADAPTER_BUNDLES: readonly AdapterBundle[] = [AdapterBundleSchema.parse({
+  // The publisher's own recipe (Hearmeman/minimax-h3-loras README @ de4c3bc6): "Pick one HMNSFW,
+  // one HMBreasts and one HMPussy stills file", anatomy underneath and the video-trained action
+  // adapter on top. Added after the all-fourteen bundle washed H3 out to a flat field.
+  id: "minimax-h3-motion-anatomy-v1", displayName: "Motion + anatomy", recipeId: "comfyui-h3-video",
+  status: "experimental", description: "HMPussy and HMBreasts, then HMNSFW-AIO V2.5 on top. Starts at 0.7 each.",
+  selections: [
+  {
+    "releaseId": "hearmeman-hmpussy-v6-epoch30-3080f4fbcbba4fc06bd09240c7eedb6a5128eb0e19feb001cdf97a7a0941a6ee",
+    "sha256": "3080f4fbcbba4fc06bd09240c7eedb6a5128eb0e19feb001cdf97a7a0941a6ee",
+    "strength": 0.7
+  },
+  {
+    "releaseId": "hearmeman-hmbreastsv2-d260653bdf10775380a44c8f1486bcc4690bd57085cb034002a8fb878f1ad36f",
+    "sha256": "d260653bdf10775380a44c8f1486bcc4690bd57085cb034002a8fb878f1ad36f",
+    "strength": 0.7
+  },
+  {
+    "releaseId": "hearmeman-hmnsfw-aio-v2.5-a07732a84fd733085eb5d910f602f918fa7a3658117116927e4329f5951a9d2d",
+    "sha256": "a07732a84fd733085eb5d910f602f918fa7a3658117116927e4329f5951a9d2d",
+    "strength": 0.7
+  }
+],
+}), AdapterBundleSchema.parse({
   id: "minimax-h3-all-adult-v1", displayName: "All MiniMax adult adapters", recipeId: "comfyui-h3-video",
-  status: "experimental", description: "Applies all 14 adapters together at strength 1 each. This combination has not been GPU-tested; quality and memory use are unknown.",
+  status: "experimental", description: "All 14 at once. At 1 each the video washes out to flat purple; lower the strengths.",
   selections: [
   {
     "releaseId": "hearmeman-hmbreastsv2-d260653bdf10775380a44c8f1486bcc4690bd57085cb034002a8fb878f1ad36f",

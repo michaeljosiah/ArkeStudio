@@ -308,6 +308,7 @@ const CLIENT_COMMAND_METADATA = {
   "set-routing-default": globalOnly(GLOBAL_OPERATION),
   "set-model-enabled": globalOnly(GLOBAL_OPERATION),
   "set-research-web": globalOnly(GLOBAL_OPERATION),
+  "set-local-sampling": globalOnly(GLOBAL_OPERATION),
   "set-agent-config": globalOnly(GLOBAL_OPERATION),
   "list-harness-models": readOnly(QUERY),
   "set-spend-threshold": globalOnly(GLOBAL_OPERATION),

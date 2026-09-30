@@ -21,6 +21,7 @@ import {
 import { Button, cx } from "../components/ui.js";
 import { Cloud, Monitor, RefreshCw } from "../components/icons.js";
 import { OnYourPC } from "../components/on-your-pc.js";
+import { SamplingLine, hasSampling } from "../components/local-sampling.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import {
@@ -386,6 +387,9 @@ function recipeTileFacts(
 
 /** A local model as a tile: name, size, state, the controls its row had, and its one clause (R-13, R-16). */
 function LocalTile({ facts, externalEngine }: { facts: LocalFacts; externalEngine: boolean }) {
+  // Generate's "Edit in Settings" lands here with the model and `sampling` named (design 177c).
+  const [params] = useSearchParams();
+  const askedSampling = params.get("model") === facts.model.id && params.get("sampling") === "1";
   return (
     <div
       className={cx("fy-mtile", facts.dim && "fy-mtile--out")}
@@ -416,6 +420,7 @@ function LocalTile({ facts, externalEngine }: { facts: LocalFacts; externalEngin
             )}
           </>
         )}
+        {facts.recipe && hasSampling(facts.model) && <SamplingLine model={facts.model} openOnMount={askedSampling} />}
         <div className="fy-mtile__does">{facts.controls}</div>
         {((facts.model.accepts.referenceVideos ?? 0) > 0 || (facts.model.accepts.referenceAudio ?? 0) > 0) && (
           <div className="fy-mtile__meta">{modelCapabilityCopy(facts.model)}</div>

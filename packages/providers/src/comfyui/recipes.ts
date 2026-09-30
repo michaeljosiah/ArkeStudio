@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ManifestModel, RecipeIdentity, AdapterSelection } from "@arke-studio/contracts";
+import type { ManifestModel, ModelSampling, RecipeIdentity, AdapterSelection } from "@arke-studio/contracts";
 import { KREA2_IMAGE, KREA2_BUCKETS } from "./krea2-recipe.js";
 import { QWEN21_IMAGE, QWEN21_BUCKETS } from "./qwen21-recipe.js";
 import { H3_REFERENCE, H3_REFERENCE_MODEL } from "./h3-reference-recipe.js";
@@ -39,12 +39,14 @@ export type RecipeGraph = Record<string, RecipeGraphNode>;
  * from callers.
  */
 export interface RecipeParamSpec {
-  kind: "string" | "int" | "number-enum" | "string-enum";
+  kind: "string" | "int" | "number" | "number-enum" | "string-enum";
   required?: boolean;
   internal?: boolean;
   maxChars?: number;
   min?: number;
   max?: number;
+  /** For `number`: the value must be a whole multiple of this (the speed adapter's 0.05). */
+  step?: number;
   values?: readonly (string | number)[];
   bind: ReadonlyArray<readonly [nodeId: string, inputKey: string]>;
 }
@@ -79,6 +81,15 @@ export interface ComfyUiRecipe {
   engine: { minVersion: string; exercisedThroughVersion: string };
   params: Record<string, RecipeParamSpec>;
   graph: RecipeGraph;
+  /**
+   * The sampling this recipe lets a person choose (design turn 177): three presets and the Custom
+   * allow-lists, projected unchanged onto its manifest row. Declaring it requires the five
+   * internal params in `SAMPLING_PARAMS`, bound to the slots each value belongs in, and a `fast`
+   * preset equal to the graph's own values — the tests hold both — so a job that froze Fast sends
+   * the graph exactly as it was sent before sampling existed. Absent means no choice is offered,
+   * and a job carrying sampling anyway is refused rather than silently sent without it.
+   */
+  sampling?: ModelSampling;
   /**
    * The optional first frame, where a recipe's graph can run with one or without (issue 863).
    *
@@ -362,6 +373,31 @@ export const H3_FRAMES_BY_SECONDS: Record<string, number> = {
 };
 
 /**
+ * The five values sampling reaches, as recipe params: `internal`, so no caller can send one
+ * directly — they arrive only as a job's frozen `sampling`, which the client unpacks into these —
+ * and bound like every other value, so R-2's "only declared leaf slots" holds for them too.
+ */
+export const SAMPLING_PARAMS = ["steps", "speedAdapter", "shift", "sampler", "scheduler"] as const;
+
+/**
+ * H3's sampling (design turn 177). Fast is the shipped distillation contract — 8 steps, the turbo
+ * adapter at full strength, shift 12, euler over simple — and Quality is the publisher-style
+ * setting 2026-09-30's adapter testing ran against it on the reference 3080: softer, and 13
+ * minutes against 8 for the same 10 s clip and seed. Balanced is the midpoint, illustrative until
+ * measured. The allow-lists are what the design offers Custom; the engine narrows them further.
+ */
+const H3_SAMPLING: ModelSampling = {
+  presets: [
+    { id: "fast", values: { steps: 8, speedAdapter: 1, shift: 12, sampler: "euler", scheduler: "simple" } },
+    { id: "balanced", values: { steps: 10, speedAdapter: 0.75, shift: 9, sampler: "euler", scheduler: "simple" } },
+    { id: "quality", values: { steps: 12, speedAdapter: 0.5, shift: 6, sampler: "euler", scheduler: "simple" } },
+  ],
+  samplers: ["euler", "dpmpp_2m", "ddim"],
+  schedulers: ["simple", "beta", "ddim_uniform"],
+  clipSec: 10,
+};
+
+/**
  * Local · H3 Video — MiniMax H3 FL2VA (open-sourced 2026-08-03) with Alibaba-lineage 8-step turbo
  * distillation, on core nodes alone (D11 holds: the PDD variant of the acceleration LoRA needs a
  * custom node, so this recipe ships the Comfy-Org repackaged turbo LoRA that core loaders take).
@@ -428,7 +464,23 @@ const H3_VIDEO: ComfyUiRecipe = {
     // The uploaded photo's filename on the engine, resolved at dispatch exactly as `speakerFile`
     // is. Not required: absent is the text-to-video graph, and the client drops the nodes with it.
     referenceFile: { kind: "string", internal: true, maxChars: 260, bind: [["14", "image"]] },
+    // Sampling (design turn 177). The speed adapter is the turbo LoRA's strength in node 2 — the
+    // distillation that makes 8 steps enough — not any adapter a person adds after it.
+    steps: { kind: "int", internal: true, min: 4, max: 30, bind: [["9", "steps"]] },
+    speedAdapter: { kind: "number", internal: true, min: 0, max: 1, step: 0.05, bind: [["2", "strength_model"]] },
+    shift: { kind: "number", internal: true, min: 1, max: 15, bind: [["3", "shift_video"]] },
+    sampler: { kind: "string-enum", internal: true, values: H3_SAMPLING.samplers, bind: [["9", "sampler_name"]] },
+    scheduler: { kind: "string-enum", internal: true, values: H3_SAMPLING.schedulers, bind: [["9", "scheduler"]] },
   },
+  /*
+   * No recipe version bump for sampling. The graph, its digest and every existing binding are
+   * untouched, and a job that froze Fast substitutes the graph's own values back into it, so the
+   * bytes v2 sends by default are the bytes it always sent. A job on another preset differs and
+   * says so: its frozen sampling is part of its recipe identity (RecipeIdentity.sampling), which
+   * is what R-15 asks the version to guarantee. A bump would instead have stranded every queued
+   * and recoverable H3 job, and refused "Run it again" on every existing take, for no change.
+   */
+  sampling: H3_SAMPLING,
   graph: {
     "1": {
       class_type: "UNETLoader",
@@ -570,6 +622,8 @@ const H3_VIDEO_768: ComfyUiRecipe = {
     // The one length watched finish at this size (H3_768_FRAMES_BY_SECONDS).
     durationSec: { ...H3_VIDEO.params["durationSec"]!, values: [5] },
   },
+  // The same presets; its times are stated for the one length this row can make.
+  sampling: { ...H3_SAMPLING, clipSec: 5 },
   hardware: {
     minVramMb: 10000,
     // Measured the way the 480p floor was: the second run in floorSource started with 3.8 GB of
@@ -684,6 +738,16 @@ function checkValue(recipe: ComfyUiRecipe, name: string, spec: RecipeParamSpec, 
       if (typeof value !== "number" || !Number.isInteger(value)) fail("must be an integer");
       if (spec.min !== undefined && (value as number) < spec.min) fail(`is under ${spec.min}`);
       if (spec.max !== undefined && (value as number) > spec.max) fail(`is over ${spec.max}`);
+      return;
+    }
+    case "number": {
+      if (typeof value !== "number" || !Number.isFinite(value)) fail("must be a number");
+      if (spec.min !== undefined && (value as number) < spec.min) fail(`is under ${spec.min}`);
+      if (spec.max !== undefined && (value as number) > spec.max) fail(`is over ${spec.max}`);
+      if (spec.step !== undefined) {
+        const scaled = (value as number) / spec.step;
+        if (Math.abs(scaled - Math.round(scaled)) > 1e-6) fail(`must move in steps of ${spec.step}`);
+      }
       return;
     }
     case "number-enum":
@@ -941,6 +1005,7 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     // but nobody has yet watched H3 say a written line, so the speaking-sample picker offers it
     // marked untested rather than withholding it (issue 858).
     speechVideo: "untested",
+    sampling: H3_VIDEO.sampling!,
     // Free is the price; this is the cost (issue 868). The four cold 480p runs of 2026-09-06
     // (H3_FRAMES_BY_SECONDS) took 9m56s to 11m17s for 4 to 8 seconds of picture, so the row
     // states the middle of them beside its price rather than "minutes" against a cloud row's
@@ -987,6 +1052,7 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     speechVideo: "untested",
     // The 768p run of 2026-09-06: 12m48s for five seconds (H3_768_FRAMES_BY_SECONDS).
     pricing: { kind: "unmetered", typicalRunSec: 768 },
+    sampling: H3_VIDEO_768.sampling!,
     requires: {
       vramMb: H3_VIDEO_768.hardware.minVramMb,
       recommendedVramMb: H3_VIDEO_768.hardware.recommendedVramMb,

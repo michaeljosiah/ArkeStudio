@@ -3440,6 +3440,10 @@ export function setWorldModel(worldId: string, capability: Capability, modelId: 
 export function setResearchWeb(enabled: boolean): void {
   send({ kind: "set-research-web", enabled });
 }
+/** One local recipe's sampling on this device (design turn 177); null returns it to Fast. */
+export function setLocalSampling(recipeId: string, sampling: import("@arke-studio/contracts").SamplingSetting | null): void {
+  send({ kind: "set-local-sampling", recipeId, sampling });
+}
 export function adapterCommand(command: import("@arke-studio/contracts").AdapterAction): void {
   send({ kind: "adapter-command", command });
 }

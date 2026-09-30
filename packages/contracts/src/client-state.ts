@@ -26,6 +26,7 @@ import { ArtDirectionRecordSchema, ResolvedArtDirectionSchema } from "./art-dire
 import { EMPTY_BIBLE, WorldBibleSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
+import { LocalSamplingSettingsSchema } from "./local-sampling.js";
 import { FoundingBuildStateSchema } from "./founding-build.js";
 import { FrameRunStateSchema } from "./frame-run.js";
 import { HealthStatusSchema } from "./events.js";
@@ -513,6 +514,8 @@ export const ClientStateSchema = valueSchema(z
         harness: HarnessStatusSchema.nullable().default(null),
         /** The ComfyUI engine and its recipes (SPEC-021 §2.12) — one result, read everywhere. */
         comfyui: ComfyUiStatusSchema.nullable().default(null),
+        /** Sampling per local recipe and its measured times (design turn 177); absent before the host seeds it. */
+        localSampling: LocalSamplingSettingsSchema.optional(),
         adapters: AdapterLibraryStateSchema.nullable().optional(),
         voiceRuntime: VoiceRuntimeStatusSchema.nullable().default(null),
         drift: z.array(ManifestDriftSchema).default([]),

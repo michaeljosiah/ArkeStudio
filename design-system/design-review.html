@@ -64,6 +64,63 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 @keyframes drift{from{transform:translateY(0)}to{transform:translateY(-7px)}}
 @keyframes barFill{from{width:4%}to{width:78%}}@keyframes kenburns{from{transform:scale(1)}to{transform:scale(1.08)}}@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
 /* Turn 127: settings narrator catalogue. Scoped to these proposed drawings. */
+/* t177 */
+.v177{width:1360px;height:850px;position:relative;overflow:hidden;background:var(--background);color:var(--foreground);font:var(--type-body)}
+.v177 *{box-sizing:border-box}.v177 button,.v177 input,.v177 select{font:inherit;color:inherit}.v177 button{cursor:pointer}
+.v177-top{height:44px;border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;justify-content:space-between;font:var(--type-ui);color:var(--muted-foreground)}
+.v177-top strong{color:var(--foreground);font:var(--type-h3)}.v177-top strong span{font-weight:400;color:var(--muted-foreground);font-size:var(--text-xs)}
+.v177-body{display:flex;height:806px}
+.v177-nav{width:200px;flex:none;border-right:1px solid var(--border);padding:30px 18px 18px 30px;color:var(--muted-foreground);font-size:var(--text-sm)}
+.v177-nav h2{margin:0 0 20px;color:var(--foreground);font:var(--type-h2)}.v177-nav div{padding:6px 0}.v177-nav .on{color:var(--foreground);font-weight:500;box-shadow:inset 2px 0 0 var(--foreground);margin-left:-12px;padding-left:12px}
+.v177-kinds{width:206px;flex:none;border-right:1px solid var(--border);padding:30px 14px 18px 18px;font-size:var(--text-sm);color:var(--muted-foreground)}
+.v177-kinds b{display:block;padding:0 10px 10px;font:var(--type-ui);color:var(--foreground)}.v177-kinds b.gap{margin-top:22px;padding-top:18px;border-top:1px solid var(--border)}
+.v177-kinds div{display:flex;padding:7px 10px 7px 22px;border-radius:8px}.v177-kinds div span:first-child{flex:1}.v177-kinds div.on{background:var(--secondary);color:var(--foreground);font-weight:500}
+.v177-main{flex:1;min-width:0;padding:30px 34px 0}
+.v177-h1{display:flex;align-items:baseline;gap:14px}.v177-h1 h1{margin:0;font:var(--type-title);letter-spacing:var(--tracking-tighter)}.v177-h1 span{color:var(--muted-foreground);font-size:var(--text-sm)}.v177-h1 span.grow{flex:1}
+.v177-engine{display:flex;align-items:center;gap:10px;margin-top:28px;padding-bottom:12px;font:var(--type-ui)}.v177-engine span.grow{flex:1}.v177-engine span.muted{font-weight:400;color:var(--muted-foreground)}
+.v177-tiles{display:flex;gap:20px}
+.v177-tile{width:282px;flex:none;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.v177-tile .pic{height:158px;border-bottom:1px solid var(--border);background:linear-gradient(135deg,var(--neutral-300),var(--neutral-500))}
+.v177-tile .pic.b{background:linear-gradient(135deg,var(--neutral-400),var(--neutral-700))}.v177-tile .pic.c{background:linear-gradient(135deg,var(--neutral-200),var(--neutral-400));opacity:.5}
+.v177-tile .pad{padding:12px 14px 13px}.v177-tile .name{font:var(--type-ui);font-size:var(--text-base)}
+.v177-tile .meta{display:flex;gap:10px;padding-top:6px;font-size:var(--text-sm);color:var(--muted-foreground)}.v177-tile .meta .grow{flex:1}
+.v177-tile .samp{display:flex;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:var(--text-sm);color:var(--muted-foreground)}.v177-tile .samp .grow{flex:1}.v177-tile .samp strong{color:var(--foreground);font-weight:500}
+.v177-link{text-decoration:underline;text-underline-offset:3px;color:var(--foreground);background:none;border:0;padding:0;font-size:var(--text-sm)}
+.v177-scrim{position:absolute;inset:44px 0 0;background:color-mix(in srgb,var(--foreground) 12%,transparent);display:flex;align-items:center;justify-content:center}
+.v177-dialog{width:560px;background:var(--background);border:1px solid var(--border);border-radius:14px;box-shadow:0 24px 70px color-mix(in srgb,var(--foreground) 18%,transparent);overflow:hidden}
+.v177-dhead{display:flex;align-items:center;gap:12px;padding:20px 22px 14px}.v177-dhead h3{margin:0;font:var(--type-h3);flex:1}.v177-dhead span{color:var(--muted-foreground);font-size:var(--text-sm)}
+.v177-close{width:28px;height:28px;border:1px solid var(--border);border-radius:8px;background:none;color:var(--muted-foreground)}
+.v177-colhead{display:flex;padding:0 24px 6px 58px;font:var(--type-label);letter-spacing:var(--tracking-label);text-transform:uppercase;color:var(--muted-foreground)}.v177-colhead span:first-child{flex:1}
+.v177-opts{padding:0 14px 6px}
+.v177-opt{display:flex;align-items:center;gap:12px;padding:11px 10px;border-radius:10px;border:1px solid transparent}
+.v177-opt.on{border-color:var(--foreground);background:var(--card)}
+.v177-radio{width:16px;height:16px;flex:none;border-radius:50%;border:1.5px solid var(--neutral-400)}.v177-opt.on .v177-radio{border:5px solid var(--foreground)}
+.v177-opt .what{flex:1;min-width:0}.v177-opt .what b{display:block;font:var(--type-ui)}.v177-opt .what span{font:var(--type-mono);font-size:var(--text-xs);color:var(--muted-foreground)}
+.v177-opt .time{font:var(--type-mono);font-size:var(--text-sm);color:var(--muted-foreground);white-space:nowrap}.v177-opt.on .time{color:var(--foreground)}
+.v177-tag{font:var(--type-label);color:var(--muted-foreground);border:1px solid var(--border);border-radius:999px;padding:2px 8px;margin-left:6px}
+.v177-fields{margin:2px 24px 10px 50px;display:grid;grid-template-columns:1fr 1fr;gap:12px 18px}
+.v177-field label{display:block;font:var(--type-label);color:var(--muted-foreground);margin-bottom:5px}
+.v177-field input,.v177-field select{width:100%;height:34px;border:1px solid var(--border);border-radius:8px;background:var(--background);padding:0 10px;font:var(--type-mono);font-size:var(--text-sm)}
+.v177-field .range{font:var(--type-meta);color:var(--muted-foreground);margin-top:4px}
+.v177-field.bad input{border-color:var(--destructive)}.v177-field.bad .range{color:var(--destructive)}
+.v177-dfoot{display:flex;align-items:center;gap:10px;padding:14px 22px 18px;border-top:1px solid var(--border)}.v177-dfoot .grow{flex:1}.v177-dfoot span.muted{font:var(--type-mono);font-size:var(--text-sm);color:var(--muted-foreground)}
+.v177-btn{height:34px;padding:0 14px;border-radius:8px;border:1px solid var(--border);background:var(--background);font:var(--type-ui)}.v177-btn.primary{background:var(--foreground);color:var(--background);border-color:var(--foreground)}.v177-btn.off{opacity:.4;cursor:not-allowed}
+.v177-bench{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+.v177-bnav{width:64px;flex:none;border-right:1px solid var(--border)}
+.v177-comp{margin:26px 34px 0;border:1px solid var(--border);border-radius:14px;background:var(--card)}
+.v177-modes{display:flex;gap:4px;padding:12px 14px 0}.v177-modes span{padding:5px 12px;border-radius:999px;font:var(--type-ui);color:var(--muted-foreground)}.v177-modes span.on{background:var(--secondary);color:var(--foreground)}
+.v177-brief{margin:10px 14px;min-height:96px;border:1px solid var(--border);border-radius:10px;padding:12px 14px;color:var(--muted-foreground);font-size:var(--text-sm)}
+.v177-bar{display:flex;align-items:center;gap:10px;padding:0 14px 14px}
+.v177-chip{height:30px;display:inline-flex;align-items:center;gap:6px;padding:0 11px;border:1px solid var(--border);border-radius:8px;font:var(--type-ui);white-space:nowrap;background:var(--background)}.v177-chip small{font:var(--type-meta);color:var(--muted-foreground)}
+.v177-bar .grow{flex:1}.v177-bar .est{font:var(--type-mono);font-size:var(--text-sm);color:var(--muted-foreground)}
+.v177-wall{margin:22px 34px 0;flex:1;min-height:0}
+.v177-sent{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);font:var(--type-mono);font-size:var(--text-sm);color:var(--muted-foreground)}.v177-sent b{color:var(--foreground);font-weight:500}.v177-sent .grow{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.v177-takes{display:flex;gap:16px;padding-top:16px}.v177-take{width:300px;height:169px;border-radius:10px;background:linear-gradient(135deg,var(--neutral-500),var(--neutral-800));position:relative}.v177-take.sel{outline:2px solid var(--foreground);outline-offset:2px}
+.v177-take span{position:absolute;left:10px;bottom:8px;font:var(--type-meta);color:var(--neutral-50)}
+.v177-pop{position:absolute;width:300px;background:var(--background);border:1px solid var(--border);border-radius:12px;box-shadow:0 18px 50px color-mix(in srgb,var(--foreground) 16%,transparent);padding:8px;z-index:2}
+.v177-pop div{display:flex;gap:10px;padding:8px 10px;border-radius:8px;font:var(--type-ui)}.v177-pop div.on{background:var(--secondary)}.v177-pop div span{flex:1}.v177-pop div small{font:var(--type-mono);font-size:var(--text-xs);color:var(--muted-foreground)}
+.v177-pop .foot{border-top:1px solid var(--border);margin-top:6px;padding-top:10px;font-weight:400}
+/* /t177 */
 .v176{width:1360px;height:850px;position:relative;overflow:hidden;background:var(--background);color:var(--foreground);font:400 14px/1.5 var(--font-sans)}
 .v176 *{box-sizing:border-box}.v176 button,.v176 input,.v176 select{font:inherit;color:inherit}.v176 button{cursor:pointer}
 .v176-top{height:44px;border-bottom:1px solid var(--border);padding:10px 24px;display:flex;justify-content:space-between}
@@ -238,7 +295,7 @@ x-import[hint-size^="100%"] { width: 100%; }
   <main class="main">
     <div class="top">
       <h1>Arke Studio · design review</h1>
-      <p>Generated 2026-09-29 from <code>Arke Studio.dc.html</code> by <code>npm run design:review</code>; this page never edits the master. Each screen is its latest frame, copied verbatim, then what shipped, then the turn's binding rules. A screen the master has deliberately not drawn says so. The build refuses a missing frame, a bitmap in place of a drawing, and a frame that does not carry a control the build shipped.</p>
+      <p>Generated 2026-09-30 from <code>Arke Studio.dc.html</code> by <code>npm run design:review</code>; this page never edits the master. Each screen is its latest frame, copied verbatim, then what shipped, then the turn's binding rules. A screen the master has deliberately not drawn says so. The build refuses a missing frame, a bitmap in place of a drawing, and a frame that does not carry a control the build shipped.</p>
     </div>
     <div class="legend"><span><i class="dot dot--built"></i> built</span><span><i class="dot dot--drifted"></i> built · drifted from the drawing</span><span><i class="dot dot--drawn"></i> drawn · not built</span></div>
     

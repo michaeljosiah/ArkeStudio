@@ -18,9 +18,11 @@ test("pinned inventory accounts for all 14 artifacts without claiming GPU verifi
   }
 });
 
+const allFourteen = () => H3_ADAPTER_BUNDLES.find(bundle => bundle.id === "minimax-h3-all-adult-v1")!;
+
 test("the experimental bundle chains all fourteen pinned adapters and freezes every dependency", () => {
   const base = comfyUiRecipeById("comfyui-h3-video")!, before = structuredClone(base);
-  const bundle = H3_ADAPTER_BUNDLES[0]!, selected = bundle.selections;
+  const bundle = allFourteen(), selected = bundle.selections;
   assert.equal(selected.length, 14);
   assert.deepEqual(selected.map(row => row.releaseId), HEARMEMAN_ADAPTERS.map(row => row.id));
   const composed = recipeWithAdapters(base, selected);
@@ -39,6 +41,10 @@ test("the experimental bundle chains all fourteen pinned adapters and freezes ev
   assert.throws(() => recipeWithAdapters(base, selected.slice(1)), /bundle/);
   assert.throws(() => recipeWithAdapters(base, [...selected].reverse()), /bundle/);
   assert.throws(() => recipeWithAdapters(comfyUiRecipeById("comfyui-h3-video-768")!, selected), /validation/);
+  // Tuning a member inside its pairing's range keeps the bundle; leaving the range does not.
+  const tuned = selected.map((row, i) => i === 6 ? { ...row, strength: 0.4 } : row);
+  assert.equal(recipeWithAdapters(base, tuned).graph["arke_adapter_6"]!.inputs.strength_model, 0.4);
+  assert.throws(() => recipeWithAdapters(base, selected.map((row, i) => i === 6 ? { ...row, strength: 0.1 } : row)), /strength/);
   const altered = structuredClone(HEARMEMAN_ADAPTERS);
   altered[13]!.compatibility[0]!.state = "unverified";
   altered[13]!.compatibility[0]!.reason = "Fixture validation pending";
@@ -46,7 +52,7 @@ test("the experimental bundle chains all fourteen pinned adapters and freezes ev
 });
 
 test("bundle submission resolves every engine filename and retains all frozen choices", async () => {
-  const base = comfyUiRecipeById("comfyui-h3-video")!, selected = H3_ADAPTER_BUNDLES[0]!.selections;
+  const base = comfyUiRecipeById("comfyui-h3-video")!, selected = allFourteen().selections;
   const composed = recipeWithAdapters(base, selected), identity = comfyUiRecipeIdentity(composed);
   let submitted: Record<string, { inputs: Record<string, unknown> }> | undefined, guarded = 0;
   const names = selected.map((row, i) => `arke${i % 2 ? "\\" : "/"}${row.sha256}.safetensors`);
@@ -120,11 +126,28 @@ test("all fourteen owner approvals preserve actual coverage and the base recipe 
     const composed = recipeWithAdapters(base, selected);
     assert.deepEqual(composed.hardware, base.hardware);
     assert.deepEqual(composed.engine, base.engine);
-    assert.throws(() => recipeWithAdapters(base, [{ ...selected[0], strength: 0.5 }]), /strength/);
+    // The owner widened every 480p pairing to 0.2–1 (2026-09-30); outside it is still refused.
+    assert.equal(recipeWithAdapters(base, [{ ...selected[0]!, strength: 0.5 }]).graph["arke_adapter_0"]!.inputs.strength_model, 0.5);
+    assert.throws(() => recipeWithAdapters(base, [{ ...selected[0]!, strength: 0.1 }]), /strength/);
+    assert.throws(() => recipeWithAdapters(base, [{ ...selected[0]!, strength: 1.2 }]), /strength/);
+    if (pair.recommendedStrength !== undefined) assert.ok(pair.recommendedStrength >= pair.minStrength! && pair.recommendedStrength <= pair.maxStrength!);
     assert.throws(() => recipeWithAdapters(comfyUiRecipeById("comfyui-h3-video-768")!, selected), /validation/);
     assert.throws(() => recipeWithAdapters(comfyUiRecipeById("comfyui-h3-reference-video")!, selected), /validation/);
   }
   assert.deepEqual(outcomes, { completed: 10, "memory-blocked": 2, "not-run": 2 });
+});
+
+test("the motion + anatomy bundle chains the publisher's three, anatomy underneath, at 0.7 each", () => {
+  const base = comfyUiRecipeById("comfyui-h3-video")!;
+  const bundle = H3_ADAPTER_BUNDLES.find(row => row.id === "minimax-h3-motion-anatomy-v1")!;
+  const names = bundle.selections.map(row => HEARMEMAN_ADAPTERS.find(release => release.id === row.releaseId)!.displayName);
+  assert.deepEqual(names, ["hmpussy_v6_epoch30", "HMBreastsV2", "HMNSFW-AIO-V2.5"]);
+  const composed = recipeWithAdapters(base, bundle.selections);
+  bundle.selections.forEach((row, i) => assert.equal(composed.graph[`arke_adapter_${i}`]!.inputs.strength_model, row.strength));
+  assert.deepEqual(bundle.selections.map(row => row.strength), [0.7, 0.7, 0.7]);
+  assert.deepEqual(composed.graph["3"]!.inputs.model, ["arke_adapter_2", 0]);
+  assert.throws(() => recipeWithAdapters(base, [...bundle.selections].reverse()), /bundle/);
+  assert.throws(() => recipeWithAdapters(base, bundle.selections.slice(0, 2)), /bundle/);
 });
 
 test("adapter transport follows the engine's filename spelling and rejects missing or unrelated paths", async () => {

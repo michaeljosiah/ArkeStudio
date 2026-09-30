@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AdultAcknowledgementSchema, AdapterSelectionsSchema, AdapterReleaseSchema, AdapterBundleSchema, AdapterDecisionSchema, AdapterActionSchema, AdapterLibraryStateSchema, adapterCombinationProblem, adapterPolicyProblem, adapterCompatibilityProblem } from "../src/adapters.js";
+import { AdultAcknowledgementSchema, AdapterSelectionsSchema, AdapterReleaseSchema, AdapterBundleSchema, AdapterDecisionSchema, AdapterActionSchema, AdapterLibraryStateSchema, adapterCombinationProblem, adapterPolicyProblem, adapterCompatibilityProblem, adapterStartingStrength } from "../src/adapters.js";
 
 const sha = "a".repeat(64);
 const release = AdapterReleaseSchema.parse({ id: "fixture", adapterId: "fixture", publisher: "Test", displayName: "Test adapter",
@@ -8,12 +8,13 @@ const release = AdapterReleaseSchema.parse({ id: "fixture", adapterId: "fixture"
   license: { name: "Test", url: "https://example.com/license" }, classification: "adult", baseFamily: "minimax-h3", supersedes: [],
   assessedAt: "2026-09-24T00:00:00.000Z", compatibility: [{ recipeId: "recipe", state: "unverified", reason: "Needs validation" }] });
 
-test("bundles require exact ordered members, hashes, strengths and recipe from a trusted catalogue", () => {
+test("bundles require exact ordered members, hashes and recipe from a trusted catalogue; strengths are tunable", () => {
   const selections = Array.from({ length: 14 }, (_, i) => ({ releaseId: `fixture-${i}`, sha256: i.toString(16).padStart(64, "0"), strength: 1 }));
   const bundle = AdapterBundleSchema.parse({ id: "test-bundle", displayName: "Test", recipeId: "recipe", status: "experimental", description: "Untested", selections });
   assert.equal(adapterCombinationProblem(selections, "recipe", [bundle]), null);
-  for (const changed of [selections.slice(1), [...selections].reverse(), selections.map((row, i) => i ? row : { ...row, strength: 0.5 }),
-    selections.map((row, i) => i ? row : { ...row, sha256: "f".repeat(64) })]) {
+  // A tuned strength is still the bundle; each member's own pairing range bounds it elsewhere.
+  assert.equal(adapterCombinationProblem(selections.map((row, i) => i ? row : { ...row, strength: 0.5 }), "recipe", [bundle]), null);
+  for (const changed of [selections.slice(1), [...selections].reverse(), selections.map((row, i) => i ? row : { ...row, sha256: "f".repeat(64) })]) {
     assert.match(adapterCombinationProblem(changed, "recipe", [bundle])!, /catalogue/);
   }
   assert.match(adapterCombinationProblem(selections, "other", [bundle])!, /catalogue/);
@@ -73,5 +74,20 @@ test("owner acceptance records actual coverage, bounds execution and leaves poli
     const on = { enabled: true, acknowledgedAt: "2026-09-24T00:00:00.000Z", acknowledgementVersion: 1 as const };
     assert.equal(adapterPolicyProblem(approved, on, null, false), null);
     assert.match(adapterPolicyProblem(approved, { ...on, enabled: false }, null, false)!, /off/);
+  }
+});
+
+test("a recommended strength starts a new choice and must sit inside the pairing's range", () => {
+  const pair = { recipeId: "recipe", state: "owner-approved" as const, reason: "Owner accepted a range", evidence: "Acceptance record",
+    minStrength: 0.2, maxStrength: 1, ownerApproval: { approvedAt: "2026-09-30T00:00:00.000Z", generation: "completed" as const } };
+  const ranged = AdapterReleaseSchema.parse({ ...release, compatibility: [{ ...pair, recommendedStrength: 0.7 }] });
+  assert.equal(adapterStartingStrength(ranged, "recipe"), 0.7);
+  assert.equal(adapterCompatibilityProblem(ranged, "recipe", 0.2), null);
+  assert.equal(adapterCompatibilityProblem(ranged, "recipe", 1), null);
+  assert.match(adapterCompatibilityProblem(ranged, "recipe", 0.1)!, /between 0.2 and 1/);
+  assert.equal(adapterStartingStrength(AdapterReleaseSchema.parse({ ...release, compatibility: [pair] }), "recipe"), 1);
+  assert.equal(adapterStartingStrength(AdapterReleaseSchema.parse({ ...release, compatibility: [{ ...pair, maxStrength: 0.5 }] }), "recipe"), 0.5);
+  for (const outside of [0.1, 1.2]) {
+    assert.equal(AdapterReleaseSchema.safeParse({ ...release, compatibility: [{ ...pair, recommendedStrength: outside }] }).success, false);
   }
 });

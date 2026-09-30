@@ -4,7 +4,9 @@ The catalogue owner reviewed the ten completed neutral geometry videos, accepted
 and explicitly approved all fourteen pinned adapters while waiving further GPU runs. This is
 recorded as **owner-approved**, not as fourteen passed GPU tests. The approval applies only to
 `comfyui-h3-video` (864×480, 24 fps) at adapter strength **1**. Other recipe pairings remain
-unverified; combinations and other strengths are not approved.
+unverified. On 30 September 2026 the owner widened the approval to strengths 0.2–1 and approved
+two bundles for experiment (see the [library guide](h3-adapters.md#bundles)); only strength 1 was
+exercised here, and the all-fourteen bundle at 1 each produced a washed-out, unusable video.
 
 The [machine-readable evidence](h3-adapter-validation.json) records exact release/weight hashes,
 generated-output hashes, timings and available memory samples. Tests used seed 9123 and requested

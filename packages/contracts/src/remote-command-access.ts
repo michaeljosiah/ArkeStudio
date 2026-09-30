@@ -71,7 +71,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "set-sheet-status": "studio", "rename-world": "studio", "rename-sheet": "studio",
   "assign-voice": "studio", "sheet-refs": "studio", "validate-provider": "studio",
   "refresh-provider-tool": "studio", "refresh-vendor-auth": "studio", "set-routing-default": "studio",
-  "set-model-enabled": "studio", "set-research-web": "studio", "set-agent-config": "studio",
+  "set-model-enabled": "studio", "set-research-web": "studio", "set-local-sampling": "studio", "set-agent-config": "studio",
   "list-harness-models": "studio", "set-spend-threshold": "studio", "detect-runtimes": "studio",
   "detect-harnesses": "studio", "comfyui-refresh": "studio", "comfyui-verify-recipe": "studio",
   "test-local-voice": "studio", "mark-inbox-seen": "studio", "mark-whats-new-seen": "studio",
