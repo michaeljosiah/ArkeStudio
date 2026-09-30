@@ -54,7 +54,15 @@
   .fy-cuthead .ui-btn { min-height: 44px; font: var(--type-ui); }
   .fy-cut-import, .fy-editorpane-toggle, .fy-cutside__head, .fy-cutnotice { display: none; }
   .fy-cutpreview-wrap { grid-area: 2 / 1; padding: 0; margin: 0 20px 0 24px; height: auto; align-self: start; }
-  .fy-cutviewer { width: 100%; height: auto; aspect-ratio: var(--cut-aspect); border: 0; border-radius: 12px; animation: none; }
+  /* Held to the row it sits in (issues 1393, 1403). Sized from its width alone, a 9:16 picture
+     grew to about 1,000px tall on a Fold — past the screen, over the timeline and behind the tool
+     bar, which it hid (Library with it). The box keeps the row's height and the picture
+     letterboxes inside it, as a vertical frame does on any horizontal screen. */
+  .fy-cutviewer { width: 100%; height: auto; max-height: min(42dvh, 378px); aspect-ratio: var(--cut-aspect); border: 0; border-radius: 12px; animation: none; }
+  /* The production's name gives way to the title rather than covering it: the head leaves this
+     toggle 140px, and "☰ Proving Rounds" was wider, so only "…ıt" of "Cut" showed. */
+  .fy-production-app[data-cut-route] .fy-production-drawer-toggle { max-width: 108px; }
+  .fy-production-app[data-cut-route] .fy-production-drawer-toggle > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fy-cutviewer > .fy-playbtn { display: none; }
   .fy-cutviewer > .fy-viewer__tag { font: var(--type-meta); left: auto; right: 8px; bottom: 8px; height: 22px; display: flex; align-items: center; }
   .fy-cutside__panel--inspect { grid-area: 2 / 2; max-height: 100%; height: fit-content; margin-right: 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); overflow: auto; }
@@ -137,7 +145,9 @@
   .fy-cut-back b { font: 600 var(--text-md)/1.25 var(--font-sans); }
   .fy-cut-back .ui-btn { min-height: 44px; font: var(--type-ui); }
   .fy-cutcols[data-phone] .fy-cutpreview-wrap { flex: none; height: auto; width: 100%; padding: 0; margin: 0; }
-  .fy-cutcols[data-phone] .fy-cutviewer { border-radius: 0; width: 100%; }
+  /* A vertical production's picture was 676px of an 844px phone, and the timeline got 0 (issue
+     1393 §1): the lanes are what the page is for, so the picture yields its height to them. */
+  .fy-cutcols[data-phone] .fy-cutviewer { border-radius: 0; width: 100%; max-height: 40dvh; }
   .fy-cut-clock { flex: none; padding: 0 12px; }
   .fy-cutcols[data-phone] .fy-timeline { flex: 1; min-height: 0; }
   .fy-cutcols[data-phone] .fy-timeline__canvas { overflow-x: hidden; overflow-y: auto; touch-action: pan-y; }
@@ -224,7 +234,7 @@
   .fy-cutcols[data-phone] .fy-cutmain { display: contents; }
   .fy-cut-back { grid-area: 1 / 2; }
   .fy-cutcols[data-phone] .fy-cutpreview-wrap { grid-area: 1 / 1 / 4 / 2; height: 220px; }
-  .fy-cutcols[data-phone] .fy-cutviewer { height: 100%; aspect-ratio: auto; }
+  .fy-cutcols[data-phone] .fy-cutviewer { height: 100%; max-height: none; aspect-ratio: auto; }
   .fy-cut-clock { grid-area: 2 / 2; }
   .fy-cut-tools { grid-area: 3 / 2; align-self: stretch; align-items: center; border-top: 0; }
   .fy-cut-tools[data-picked] { margin-top: 30px; }
