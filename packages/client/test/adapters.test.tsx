@@ -14,7 +14,7 @@ const release = AdapterReleaseSchema.parse({ id: "test-release", adapterId: "tes
   license: { name: "Test", url: "https://example.com/license" }, classification: "adult", baseFamily: "minimax-h3", supersedes: [],
   assessedAt: "2026-09-24T00:00:00.000Z", compatibility: [{ recipeId: "test-recipe", state: "unverified", reason: "GPU validation pending" }] });
 const library: AdapterLibraryState = { revision: 1, adultContent: { enabled: true, acknowledgedAt: "2026-09-24T00:00:00.000Z", acknowledgementVersion: 1 },
-  scannerAvailable: false, error: null, entries: [{ release, decision: null, removed: false, owned: false, installed: false, reason: "Awaiting compliance assessment." }] };
+  error: null, entries: [{ release, decision: null, removed: false, owned: false, installed: false, reason: null }] };
 function set(adapters: AdapterLibraryState) { __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, adapters } }); }
 
 test("one experimental bundle displays all members and becomes unavailable when any member is blocked", () => {
@@ -23,8 +23,7 @@ test("one experimental bundle displays all members and becomes unavailable when 
       source: { ...release.source, sha256: i.toString(16).padStart(64, "0") }, compatibility: [{ recipeId: "test-recipe", state: "owner-approved",
         reason: "Owner accepted", evidence: "Fixture", minStrength: 1, maxStrength: 1,
         ownerApproval: { approvedAt: "2026-09-25T00:00:00.000Z", generation: "not-run" } }] });
-    return { release: approved, installed: true, owned: false, removed: false, reason: null,
-      decision: { sha256: approved.source.sha256, decision: "allowed" as const, reason: "Fixture", policyRevision: "fixture", assessedAt: "2026-09-24T00:00:00.000Z" } };
+    return { release: approved, installed: true, owned: false, removed: false, reason: null as string | null, decision: null };
   });
   const selections = entries.map(({ release: member }) => ({ releaseId: member.id, sha256: member.source.sha256, strength: 1 }));
   const bundle: AdapterBundle = { id: "fixture-bundle", displayName: "All adapters", recipeId: "test-recipe", status: "experimental", description: "Combination not GPU-tested", selections };
@@ -38,9 +37,11 @@ test("one experimental bundle displays all members and becomes unavailable when 
   assert.equal((render().match(/<li>/g) ?? []).length, 14);
   assert.match(render(), /Member 14 · Strength 1/);
   assert.doesNotMatch(render(), /aria-label="Adapter strength"/);
-  set({ ...available, entries: entries.map((row, i) => i === 13 ? { ...row, decision: null } : row) });
+  set({ ...available, entries: entries.map((row, i) => i === 13 ? { ...row, reason: "Disabled by the user." } : row) });
   assert.match(render(), /<option[^>]*value="bundle:fixture-bundle"[^>]*disabled/);
-  assert.match(render(), /Member 14: Awaiting compliance/);
+  assert.match(render(), /Member 14: Disabled by the user/);
+  set({ ...available, entries: entries.map((row, i) => i === 13 ? { ...row, installed: false } : row) });
+  assert.match(render(), /Member 14: Not installed/);
   set({ ...available, entries: entries.slice(0, 13) });
   assert.match(render(), /<option[^>]*value="bundle:fixture-bundle"[^>]*disabled/);
   assert.match(render("another-model"), /Saved adapter unavailable/);
@@ -66,7 +67,7 @@ test("turning access off changes a loaded take's media URL without rewriting its
   assert.deepEqual(take.params.adapters, [{ releaseId: release.id, sha256: release.source.sha256, strength: 0.5 }]);
 });
 
-test("settings hide the catalogue when off and state pending review when on", () => {
+test("settings hide the catalogue when off and show it installable when on, with no assessment step", () => {
   set({ ...library, adultContent: { ...library.adultContent, enabled: false } });
   const off = renderToString(<MemoryRouter><SettingsAdaptersScreen /></MemoryRouter>);
   assert.doesNotMatch(off, /Fixture adapter/);
@@ -75,7 +76,14 @@ test("settings hide the catalogue when off and state pending review when on", ()
   const on = renderToString(<MemoryRouter><SettingsAdaptersScreen /></MemoryRouter>);
   assert.match(on, /Fixture adapter/);
   assert.match(on, /GPU validation pending/);
-  assert.match(on, /No compliance agent/);
+  assert.doesNotMatch(on, /[Cc]ompliance/);
+  assert.match(on, /Available/);
+  assert.doesNotMatch(on.replaceAll("<!-- -->", ""), /<button[^>]*disabled=""[^>]*>Install<\/button>/);
+  set({ ...library, entries: [{ ...library.entries[0]!, reason: "Disabled by the user." }] });
+  const disabled = renderToString(<MemoryRouter><SettingsAdaptersScreen /></MemoryRouter>);
+  assert.match(disabled, /Disabled by the user/);
+  assert.match(disabled, /Request fresh review/);
+  assert.match(disabled.replaceAll("<!-- -->", ""), /<button[^>]*disabled=""[^>]*>Install<\/button>/);
 });
 
 test("picker never advertises an unverified entry as selectable and retains a removable hidden saved choice", () => {
@@ -101,12 +109,11 @@ test("picker follows the selected model and keeps an incompatible saved selectio
   assert.doesNotMatch(stale, /Adapter strength/);
 });
 
-test("picker identifies owner approval and its untested status without overriding compliance", () => {
+test("picker identifies owner approval and its untested status without overriding a user block", () => {
   const approved = AdapterReleaseSchema.parse({ ...release, compatibility: [{ recipeId: "test-recipe", state: "owner-approved",
     reason: "Owner approved; generation not run.", evidence: "Owner acceptance record", minStrength: 1, maxStrength: 1,
     ownerApproval: { approvedAt: "2026-09-25T00:00:00.000Z", generation: "not-run" } }] });
-  const entry = { ...library.entries[0]!, release: approved, installed: true, reason: null,
-    decision: { sha256: approved.source.sha256, decision: "allowed" as const, reason: "Fixture approval", policyRevision: "fixture", assessedAt: "2026-09-24T00:00:00.000Z" } };
+  const entry = { ...library.entries[0]!, release: approved, installed: true, reason: null };
   const selected = [{ releaseId: approved.id, sha256: approved.source.sha256, strength: 1 }];
   const render = () => renderToString(<MemoryRouter><AdapterPicker recipeId="test-recipe" selected={selected} onChange={() => {}} /></MemoryRouter>);
   set({ ...library, entries: [entry] });
@@ -114,7 +121,8 @@ test("picker identifies owner approval and its untested status without overridin
   assert.match(available.replaceAll("<!-- -->", ""), /Fixture adapter · Owner approved/);
   assert.match(available, /Owner approved; generation not run/);
   assert.doesNotMatch(available, /<option[^>]*value="test-release"[^>]*disabled/);
-  set({ ...library, entries: [{ ...entry, decision: null }] });
+  set({ ...library, entries: [{ ...entry, decision: { sha256: approved.source.sha256, decision: "disabled" as const, reason: "Disabled by the user.",
+    policyRevision: "user", assessedAt: "2026-09-24T00:00:00.000Z" } }] });
   assert.match(render(), /<option[^>]*value="test-release"[^>]*disabled/);
-  assert.match(render(), /Awaiting compliance/);
+  assert.match(render(), /Disabled by the user/);
 });

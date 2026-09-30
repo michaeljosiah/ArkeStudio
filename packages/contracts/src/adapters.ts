@@ -64,6 +64,13 @@ export const AdultAcknowledgementSchema = z.object({ adultAge: z.literal(true), 
 export const AdultContentSchema = z.object({ enabled: z.boolean(), acknowledgedAt: z.string().datetime().nullable(), acknowledgementVersion: z.literal(1) }).strict();
 export const ADULT_CONTENT_OFF = { enabled: false, acknowledgedAt: null, acknowledgementVersion: 1 } as const;
 
+/**
+ * A per-byte decision. Only "disabled" and "removal-requested" still mean anything: the user's
+ * Disable and Remove write them, and they block. The compliance assessment that produced
+ * "allowed" verdicts, with their policy revisions and expiries, was removed at the owner's
+ * direction (2026-09-30). The fields stay parseable because existing decisions.jsonl journals
+ * hold those records, and an unparseable line fails the whole journal closed.
+ */
 export const AdapterDecisionSchema = z.object({
   sha256: Digest, decision: z.enum(["allowed", "disabled", "removal-requested"]), reason: z.string().min(1).max(1000),
   policyRevision: z.string().min(1).max(200), assessedAt: z.string().datetime(), expiresAt: z.string().datetime().optional(),
@@ -73,7 +80,7 @@ export const AdapterDecisionSchema = z.object({
 export type AdapterDecision = z.infer<typeof AdapterDecisionSchema>;
 
 export const AdapterLibraryStateSchema = z.object({
-  revision: z.number().int().nonnegative(), adultContent: AdultContentSchema, scannerAvailable: z.boolean(),
+  revision: z.number().int().nonnegative(), adultContent: AdultContentSchema,
   entries: z.array(z.object({ release: AdapterReleaseSchema, decision: AdapterDecisionSchema.nullable(),
     removed: z.boolean(), installed: z.boolean(), owned: z.boolean(), reason: z.string().nullable(),
   }).strict()), bundles: z.array(AdapterBundleSchema).optional(), error: z.string().nullable(),
@@ -84,7 +91,6 @@ export const AdapterActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("refresh") }).strict(),
   z.object({ action: z.literal("enable"), acknowledgement: AdultAcknowledgementSchema }).strict(),
   z.object({ action: z.literal("disable-content") }).strict(),
-  z.object({ action: z.literal("scan") }).strict(),
   z.object({ action: z.literal("install"), releaseIds: z.array(Id).min(1).max(100) }).strict(),
   z.object({ action: z.literal("disable"), releaseId: Id }).strict(),
   z.object({ action: z.literal("restore"), releaseId: Id }).strict(),
@@ -92,15 +98,15 @@ export const AdapterActionSchema = z.discriminatedUnion("action", [
 ]);
 export type AdapterAction = z.infer<typeof AdapterActionSchema>;
 
+/** Usable once adult content is acknowledged, unless withdrawn or the user blocked these exact bytes. */
 export function adapterPolicyProblem(release: AdapterRelease, content: z.infer<typeof AdultContentSchema>, decision: AdapterDecision | null,
-  removed: boolean, now: string): string | null {
+  removed: boolean): string | null {
   if (removed) return "Removed from this studio.";
   if (release.availability === "withdrawn") return "This release is no longer in the reviewed publisher inventory.";
   if (release.classification === "adult" && (!content.enabled || !content.acknowledgedAt)) return "Adult content is off.";
-  if (!decision) return "Awaiting compliance assessment.";
-  if (decision.sha256 !== release.source.sha256) return "The assessment belongs to different bytes.";
-  if (decision.assessedAt > now || (decision.expiresAt && decision.expiresAt <= now)) return "Compliance assessment needs renewal.";
-  return decision.decision === "allowed" ? null : decision.reason;
+  // A retired "allowed" verdict grants nothing now; a blocking decision still holds for its bytes.
+  if (decision && decision.sha256 === release.source.sha256 && decision.decision !== "allowed") return decision.reason;
+  return null;
 }
 
 export function adapterCompatibilityProblem(release: AdapterRelease, recipeId: string, strength: number): string | null {

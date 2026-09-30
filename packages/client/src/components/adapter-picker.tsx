@@ -17,7 +17,7 @@ export function AdapterPicker({ recipeId, selected, onChange }: {
   const selectionProblem = (selection: AdapterSelection): string | null => {
     const row = rows.find(item => item.release.id === selection.releaseId && item.release.source.sha256 === selection.sha256);
     if (!row) return "A bundle member is unavailable for this model.";
-    const problem = row.reason ?? adapterPolicyProblem(row.release, library.adultContent, row.decision, row.removed, new Date().toISOString()) ??
+    const problem = row.reason ?? adapterPolicyProblem(row.release, library.adultContent, row.decision, row.removed) ??
       (!row.installed ? "Not installed" : adapterCompatibilityProblem(row.release, recipeId, selection.strength));
     return problem ? `${row.release.displayName}: ${problem}` : null;
   };
@@ -38,7 +38,7 @@ export function AdapterPicker({ recipeId, selected, onChange }: {
     })}
     {rows.map(row => {
       const pair = row.release.compatibility.find(item => item.recipeId === recipeId)!;
-      const problem = row.reason ?? adapterPolicyProblem(row.release, library.adultContent, row.decision, row.removed, new Date().toISOString()) ??
+      const problem = row.reason ?? adapterPolicyProblem(row.release, library.adultContent, row.decision, row.removed) ??
         (!row.installed ? "Not installed" : adapterCompatibilityProblem(row.release, recipeId, pair.minStrength ?? 0));
       return <option key={row.release.id} value={row.release.id} disabled={!!problem}>{row.release.displayName}{pair.state === "owner-approved" ? " · Owner approved" : ""}{problem ? ` · ${problem}` : ""}</option>;
     })}

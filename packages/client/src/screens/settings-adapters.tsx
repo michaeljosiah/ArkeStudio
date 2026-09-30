@@ -33,9 +33,7 @@ export function SettingsAdaptersScreen() {
       <RuntimeSection label="Local H3 adapters" />
       <p>Install an adapter here, then select it in Generate for a verified or owner-approved recipe pairing.</p>
       <p><Link to="/settings/downloads">Download progress and disk usage</Link></p>
-      <Button disabled={!connected || !library?.scannerAvailable} onClick={() => adapterCommand({ action: "scan" })}>Run compliance assessment</Button>
       <Button disabled={!connected} onClick={() => adapterCommand({ action: "refresh" })}>Refresh status</Button>
-      {!library?.scannerAvailable && <p>No compliance agent is connected. Assessments remain pending.</p>}
       {isRemoteSession() ? <OnYourPC>adapter installation and files</OnYourPC> : <Button disabled={!connected || !installable.length} onClick={() => adapterCommand({ action: "install", releaseIds: installable.map(row => row.release.id) })}>
         Install selected · {Math.ceil(bytes / 1_000_000).toLocaleString()} MB
       </Button>}
@@ -43,7 +41,7 @@ export function SettingsAdaptersScreen() {
         <label><input type="checkbox" hidden={isRemoteSession()} checked={selected.includes(row.release.id)} disabled={!!row.reason || row.installed}
           onChange={event => setSelected(current => event.target.checked ? [...current, row.release.id] : current.filter(id => id !== row.release.id))} /> {row.release.displayName}</label>
         <p>{row.release.publisher} · {Math.ceil(row.release.source.bytes / 1_000_000).toLocaleString()} MB · {row.installed ? "On disk" : "Not installed"}</p>
-        <p>{row.reason ?? "Compliance approved"}</p>
+        <p>{row.reason ?? "Available"}</p>
         <details><summary>Compatibility and source</summary>
           {row.release.compatibility.map(pair => <p key={pair.recipeId}>{pair.recipeId}: {pair.reason}</p>)}
           <p>Source revision: <code>{row.release.source.revision}</code></p>

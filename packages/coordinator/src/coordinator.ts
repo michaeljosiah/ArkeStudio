@@ -3,7 +3,7 @@ import { isDesignedVoiceTarget, resolveDesignedVoice, VoiceDesignDraftSchema, qu
 import type { VoiceDesignClient } from "@arke-studio/providers";
 import { saveDesignedVoice } from "./voice/designed-library.js";
 import { ProductionCreationService } from "./application/production-creation.js";
-import { AdapterLibrary, adapterSetupEntries, type AdapterComplianceClient } from "./local-ai/adapter-library.js";
+import { AdapterLibrary, adapterSetupEntries } from "./local-ai/adapter-library.js";
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity } from "@arke-studio/providers";
 import { ConversationActionService } from "./application/conversation-actions.js";
@@ -696,7 +696,6 @@ async function landUploadedImage(
 }
 
 export interface CoordinatorOptions {
-  adapterCompliance?: AdapterComplianceClient;
   /** Explicit local infrastructure, normally supplied by desktop/dev composition. */
   storage?: StudioStorage;
   /** Host-minted session capability. Omission creates a fresh capability, never an open socket. */
@@ -3195,7 +3194,7 @@ export class Coordinator {
           })
         : null;
     this.adapterLibrary = opts.appRoot ? new AdapterLibrary({
-      appRoot: opts.appRoot, releases: HEARMEMAN_ADAPTERS, bundles: H3_ADAPTER_BUNDLES, scanner: opts.adapterCompliance,
+      appRoot: opts.appRoot, releases: HEARMEMAN_ADAPTERS, bundles: H3_ADAPTER_BUNDLES,
       modelsDir: () => opts.comfyui?.service.modelsDir() ?? null,
       local: () => opts.comfyui?.service.engineIdentity()?.locality === "local",
       install: async (ids) => {
