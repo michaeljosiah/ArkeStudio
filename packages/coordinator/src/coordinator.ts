@@ -1068,6 +1068,8 @@ export class Coordinator {
   private lastLocalRuntimeStatuses = "";
   /** The last gate result on the wire, so an unchanged re-gate stays off it. */
   private lastRuntimeStatus = "";
+  /** A hardware probe in flight, shared so a burst of adapter dispatches measures once. */
+  private runtimeMeasurement: Promise<RuntimeProbes | null> | null = null;
   /** An older readiness walk must not overwrite the result of a newer hardware measurement. */
   private comfyUiRefreshRevision = 0;
   /** A local-runtime pass already in flight. A probe that stalls must not stack up behind itself. */
@@ -5418,11 +5420,47 @@ export class Coordinator {
       const base = comfyUiRecipeById(model);
       if (!base) throw new Error("Unknown adapter recipe.");
       const recipe = recipeWithAdapters(base, selections);
-      const probes = this.readModel.getState().app.runtime?.probes;
-      const vram = probes?.vramMbByAccelerator?.cuda ?? probes?.vramMb;
-      if (vram == null || probes?.memMb == null) throw new Error("Measure local graphics and system memory before using adapters.");
+      const vramOf = (probes: RuntimeProbes | null | undefined) => probes?.vramMbByAccelerator?.cuda ?? probes?.vramMb;
+      let probes = this.readModel.getState().app.runtime?.probes;
+      // Only Settings used to measure, and a launch starts unmeasured (#1013), so the first
+      // adapter dispatch after every launch was refused until someone happened to open the
+      // ComfyUI panel. Measure here instead; only a probe that actually fails still refuses.
+      if (vramOf(probes) == null || probes?.memMb == null) {
+        const measured = await this.measureRuntime();
+        // Same reason detect-runtimes refreshes (#687): the published recipe rows would go on
+        // saying VRAM could not be measured. Admission reads the figures itself, so it need not wait.
+        if (measured) this.trackBackground(this.refreshComfyUi().catch(() => {}));
+        probes = measured ?? probes;
+      }
+      const vram = vramOf(probes);
+      if (vram == null || probes?.memMb == null) throw new Error("Could not measure graphics and system memory, which adapters need.");
       if (vram < recipe.hardware.minVramMb || probes.memMb < (recipe.hardware.minMemMb ?? 0)) throw new Error("This adapter pairing needs more graphics or system memory than this device has.");
     }
+  }
+
+  /**
+   * Probe this machine and publish the gate result: Settings' detect-runtimes and the adapter
+   * guard take the same path, so a dispatch that measures leaves the panel showing the figures
+   * it was judged on. Detection failure means unknown, not unavailable (D12) — the answer is
+   * null, nothing is emitted over the last known figures, and nothing gets disabled by a broken
+   * probe.
+   */
+  private measureRuntime(): Promise<RuntimeProbes | null> {
+    const probe = this.opts.probeRuntime;
+    if (!probe) return Promise.resolve(null);
+    if (this.runtimeMeasurement) return this.runtimeMeasurement;
+    const work = (async () => {
+      try {
+        const probes = await probe();
+        this.emitLocalRuntimeStatus({ probes, detectedAt: new Date().toISOString() });
+        return probes;
+      } catch {
+        return null;
+      }
+    })();
+    this.runtimeMeasurement = work;
+    void work.finally(() => { if (this.runtimeMeasurement === work) this.runtimeMeasurement = null; });
+    return work;
   }
 
   private visibleAdapterSetup(setup: import("@arke-studio/contracts").SetupStatus): import("@arke-studio/contracts").SetupStatus {
@@ -16863,14 +16901,7 @@ export class Coordinator {
       }
       case "detect-runtimes": {
         if (!this.opts.manifest || !this.opts.probeRuntime) return;
-        try {
-          const probes = await this.opts.probeRuntime();
-          this.emitLocalRuntimeStatus({ probes, detectedAt: new Date().toISOString() });
-        } catch {
-          // Detection failure means unknown, not unavailable (D12) — nothing is emitted over
-          // the last known figures, and nothing gets disabled by a broken probe.
-          return;
-        }
+        if (!(await this.measureRuntime())) return;
         // The recipe walk reads these same figures, but its answer is a published snapshot
         // rather than a live read: it is computed when the engine publishes, which for an
         // already-running URL engine is once, at startup, before anything has been measured.
