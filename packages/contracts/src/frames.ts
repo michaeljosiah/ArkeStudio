@@ -1,4 +1,5 @@
 import { valueSchema } from "./value-schema.js";
+import { SamplingSettingSchema } from "./local-sampling.js";
 import { ReviewCitationSchema } from "./take.js";
 import { VoiceDesignDraftSchema } from "./designed-voice.js";
 import { GenesisDraftSchema } from "./genesis.js";
@@ -1296,6 +1297,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("set-research-web"),
       enabled: z.boolean(),
+    })
+    .strict(),
+  /**
+   * Sampling for one local recipe on this device (design turn 177). Null returns the recipe to
+   * Fast, its shipped values. New jobs only: nothing queued or taken changes.
+   */
+  z
+    .object({
+      kind: z.literal("set-local-sampling"),
+      recipeId: z.string().min(1).max(200),
+      sampling: SamplingSettingSchema.nullable(),
     })
     .strict(),
   /**

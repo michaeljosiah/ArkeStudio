@@ -6,6 +6,7 @@ import { IsoDateSchema } from "./ids.js";
 import { formatMicroUsd } from "./money.js";
 import { CapabilitySchema, ProviderIdSchema, type Capability } from "./provider.js";
 import type { RoutingDefaults } from "./settings.js";
+import { ModelSamplingSchema } from "./local-sampling.js";
 
 /**
  * The model manifest (SPEC-008 §2.5): hand-maintained, shipped with the app, the one file the
@@ -384,6 +385,11 @@ export const ManifestModelSchema = z
      * only costs a surprise.
      */
     speechVideo: z.enum(["verified", "untested"]).optional(),
+    /**
+     * A local recipe's sampling presets and Custom allow-lists (design turn 177), projected from
+     * the recipe that owns the graph. Absent means the recipe offers no sampling choice.
+     */
+    sampling: ModelSamplingSchema.optional(),
     /**
      * A shipped sample of what this model makes (SPEC-042 R-17): a poster, and optionally a
      * clip whose first frame the poster is. Paths into the bundled samples directory, keyed by

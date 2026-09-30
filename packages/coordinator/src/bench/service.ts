@@ -656,6 +656,16 @@ export function planBenchDispatch(
      */
     recipeVersionOf?: (modelId: string) => number | undefined;
     adapterRecipeFor?: (modelId: string, selections: unknown) => import("@arke-studio/contracts").RecipeIdentity;
+    /**
+     * A local take's seed and sampling, frozen here rather than at enqueue so the take can say
+     * what was sent (design turn 177): the job keeps both, because the enqueue freeze leaves a
+     * caller's values alone. A re-run passes the take it repeats, whose sampling it keeps; the
+     * seed is always fresh. Injected for the same reason `recipeVersionOf` is.
+     */
+    localFreeze?: (
+      modelId: string,
+      rerunOf?: { sampling?: import("@arke-studio/contracts").JobSampling },
+    ) => { seed?: number; sampling?: import("@arke-studio/contracts").JobSampling };
   },
 ): BenchDispatchPlan {
   const composer = options.fromTake
@@ -1011,8 +1021,17 @@ export function planBenchDispatch(
   for (let index = 0; index < count; index++) {
     const takeId = newId("tk");
     const n = session.nextTake + index;
+    const local = model.provider === "comfyui" && (params.kind === "image" || params.kind === "video")
+      ? options.localFreeze?.(model.id, options.fromTake ? (options.fromTake.request.sampling ? { sampling: options.fromTake.request.sampling } : {}) : undefined) ?? {}
+      : {};
+    const localParams = {
+      ...(local.seed !== undefined ? { seed: local.seed } : {}),
+      ...(local.sampling !== undefined ? { sampling: local.sampling } : {}),
+    };
     const snapshot: BenchRequestSnapshot = {
       ...snapshotBase,
+      ...(local.seed !== undefined ? { requestedSeed: local.seed } : {}),
+      ...(local.sampling !== undefined ? { sampling: local.sampling } : {}),
       params: params.kind === "video" ? { ...params } : { ...params, count: 1 },
       ...(filingPlan?.ok
         ? { filing: filingPlan.make(videoDuration?.kind === "asked" ? videoDuration.seconds : undefined) }
@@ -1042,6 +1061,7 @@ export function planBenchDispatch(
           prompt: wirePrompt,
           output,
           ...(referencePaths.length > 0 ? { references: referencePaths } : {}),
+          ...localParams,
         },
         estimatedMicroUsd: estimateMicroUsd(model, {
           images: 1,
@@ -1107,6 +1127,7 @@ export function planBenchDispatch(
           // audio switch — and putting a field on the wire that the route never declared is how
           // a job gets accepted, billed, and refused on its result.
           ...(params.sound !== undefined && model.limits.soundChoice === true ? { sound: params.sound } : {}),
+          ...localParams,
         },
         estimatedMicroUsd: estimateMicroUsd(model, {
           // Priced at the length that will actually be asked for, on the route it will be asked

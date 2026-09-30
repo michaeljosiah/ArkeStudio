@@ -595,6 +595,26 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     assert.equal(service.baseUrl(), null, "an incompatible engine is not dispatched to");
   });
 
+  it("publishes the samplers the engine's KSampler advertises, from the same object_info read (design turn 177)", async () => {
+    const world = fakeWorld();
+    world.urls.set("http://127.0.0.1:8188", { version: "0.33.1" });
+    const deps = engineDeps(world, "C:/app");
+    const plain = deps.fetch;
+    let answer: unknown = {
+      KSampler: { input: { required: { sampler_name: [["euler", "ddim", "lcm"], {}], scheduler: [["simple", "karras"], {}] } } },
+      SaveImage: {},
+    };
+    deps.fetch = async (url, init) => (url.endsWith("/object_info") ? new Response(JSON.stringify(answer), { status: 200 }) : plain(url, init));
+    const service = new ComfyUiEngineService(deps);
+    await service.applySettings({ enginePath: null, engineUrl: "http://127.0.0.1:8188", modelsDir: null });
+    const status = await service.status(PROBES);
+    assert.deepEqual(status.engine.samplerOptions, { samplers: ["euler", "ddim", "lcm"], schedulers: ["simple", "karras"] });
+    // An answer without the combo reads as not advertised, never as advertising nothing.
+    answer = { KSampler: {}, SaveImage: {} };
+    await service.reverify();
+    assert.equal((await service.status(PROBES)).engine.samplerOptions, undefined);
+  });
+
   it("Check now reconnects a URL that became available after its first probe", async () => {
     const world = fakeWorld();
     const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));

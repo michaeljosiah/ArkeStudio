@@ -91,6 +91,7 @@ export class ReadModel {
         | "research"
         | "appearance"
         | "narrator"
+        | "localSampling"
         | "runtime"
         | "drift"
         | "harnessInfo"

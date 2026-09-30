@@ -8,6 +8,7 @@ import {
   MUSIC_DURATION_SEC,
   newId,
   type BenchTake,
+  type JobSampling,
   type ManifestModel,
   type ModelManifest,
   type SessionId,
@@ -17,6 +18,7 @@ import { WorldStore } from "../../src/world/store.js";
 import { fileGeneratedArtifact } from "../../src/artifacts/filing.js";
 import { BenchStore, sessionDir, sessionMediaDir } from "../../src/bench/store.js";
 import { lyricistBrief } from "../../src/bench/lyricist.js";
+import { localTakeFreeze } from "../../src/queue/local-sampling.js";
 import {
   addBenchReference,
   discoverBenchSessions,
@@ -69,6 +71,35 @@ it("adapter quotes and re-runs retain the same recipe identity and refuse change
     adapterRecipeFor: () => ({ ...recipe, templateDigest: "d".repeat(64) }) });
   assert.equal(rerun.ok, false);
   if (!rerun.ok) assert.match(rerun.reason, /recipe has changed/);
+});
+
+it("a local H3 take records its sampling and seed, and a re-run keeps the sampling with a new seed (design turn 177)", async () => {
+  const { dir, store } = await open();
+  const model = SHIPPED_MANIFEST.models.find(row => row.id === "comfyui-h3-video")!;
+  const opened = await openBenchSession(dir, CLOCK, { fresh: true, defaultModel: { provider: "comfyui", model: model.id } });
+  assert.ok(opened);
+  await opened.store.append({ type: "composer-set", mode: "video", provider: "comfyui", model: model.id,
+    params: { kind: "video", durationSec: 5, aspect: "16:9", resolution: "480p" }, brief: "A red cube moves." }, { at: CLOCK() });
+  const quality = { preset: "quality" as const, ...model.sampling!.presets[2]!.values };
+  let setting: { preset: "quality" | "balanced" } = { preset: "quality" };
+  const seeds = [101, 202];
+  const options = { worldId: store.worldId, requestId: "sampled", at: CLOCK(),
+    localFreeze: (modelId: string, rerunOf?: { sampling?: JobSampling }) => localTakeFreeze(modelId, rerunOf, () => setting, () => seeds.shift()!) };
+  const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST, options);
+  assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+  if (!plan.ok) return;
+  assert.deepEqual(plan.reserved[0]!.request.sampling, quality);
+  assert.equal(plan.reserved[0]!.request.requestedSeed, 101);
+  assert.deepEqual(plan.inputs[0]!.params.sampling, quality);
+  assert.equal(plan.inputs[0]!.params.seed, 101);
+  setting = { preset: "balanced" };
+  const take = { ...plan.reserved[0]!, status: "succeeded", disposition: "open", createdAt: CLOCK() } as BenchTake;
+  const rerun = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST, { ...options, fromTake: take });
+  assert.ok(rerun.ok, rerun.ok ? undefined : rerun.reason);
+  if (!rerun.ok) return;
+  assert.deepEqual(rerun.inputs[0]!.params.sampling, quality, "the take's own sampling, not today's setting");
+  assert.equal(rerun.inputs[0]!.params.seed, 202);
+  assert.equal(rerun.reserved[0]!.request.requestedSeed, 202);
 });
 
 it("local H3 bench references freeze multimedia identities and use native ordered tags", async () => {

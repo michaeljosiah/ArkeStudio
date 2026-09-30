@@ -27,6 +27,7 @@ export {
   recipeDependencyDigest,
   recipeNodeClasses,
   recipeTemplateDigest,
+  SAMPLING_PARAMS,
   SDXL_BUCKETS,
   substituteRecipeParams,
   VIDEO_DERIVATIONS,

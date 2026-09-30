@@ -8584,3 +8584,35 @@ button.fy-abdoor__voice:hover { background: var(--accent); border-color: var(--n
 
 /* Session recovery stays visible on any route without unmounting an unsaved editor. */
 .fy-session-refusal { position: fixed; top: 48px; right: 24px; max-width: min(480px, calc(100vw - 48px)); z-index: 1000; }
+
+/* Sampling for a local recipe (design turn 177): the tile's line, its dialog, and Generate's chip. */
+.fy-samp__line { display: flex; align-items: baseline; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); font: 400 12.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-samp__line strong { color: var(--foreground); font-weight: 500; }
+.fy-samp__opts { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px 8px; overflow: auto; }
+.fy-samp__opt { display: flex; align-items: center; gap: 12px; padding: 10px; border: 1px solid transparent; border-radius: 10px; cursor: pointer; }
+.fy-samp__opt.is-on { border-color: var(--foreground); background: var(--card); }
+.fy-samp__opt input[type="radio"] { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--foreground); }
+.fy-samp__what { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fy-samp__what b { font: 500 13px var(--font-sans); color: var(--foreground); }
+.fy-samp__what span { font: 400 11px var(--font-mono); color: var(--muted-foreground); }
+.fy-samp__what .fy-samp__tag { margin-left: 6px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; font: 500 10px var(--font-sans); color: var(--muted-foreground); }
+.fy-samp__time { flex: none; font: 400 12px var(--font-mono); color: var(--muted-foreground); white-space: nowrap; }
+.fy-samp__opt.is-on .fy-samp__time { color: var(--foreground); }
+.fy-samp__fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px; margin: 2px 10px 8px 38px; }
+.fy-samp__field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.fy-samp__field label { font: 500 10.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-samp__field input, .fy-samp__field select { width: 100%; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: 400 12px var(--font-mono); }
+.fy-samp__range { font: 400 10.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-samp__field.is-bad input, .fy-samp__field.is-bad select { border-color: var(--destructive); }
+.fy-samp__field.is-bad .fy-samp__range { color: var(--destructive); }
+.fy-samp__foot { display: flex; align-items: center; gap: 10px; padding: 12px 16px 14px; border-top: 1px solid var(--border); }
+.fy-samp__chipwrap { position: relative; display: inline-flex; flex: none; }
+.fy-samp__chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: 500 12px var(--font-sans); white-space: nowrap; cursor: pointer; }
+.fy-samp__chip small { font: 400 10.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-samp__menu { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 20; display: flex; flex-direction: column; width: 240px; padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--background); box-shadow: var(--shadow-xl); }
+.fy-samp__item { display: flex; align-items: baseline; gap: 10px; padding: 8px 10px; border: 0; border-radius: 8px; background: none; color: var(--foreground); font: 500 12.5px var(--font-sans); text-align: left; cursor: pointer; }
+.fy-samp__item span { flex: 1; }
+.fy-samp__item small { font: 400 11px var(--font-mono); color: var(--muted-foreground); }
+.fy-samp__item.is-on, .fy-samp__item:hover { background: var(--secondary); }
+.fy-samp__item--foot { margin-top: 4px; border-top: 1px solid var(--border); border-radius: 0 0 8px 8px; font-weight: 400; color: var(--muted-foreground); }
+@media (max-width: 640px) { .fy-samp__fields { grid-template-columns: 1fr; margin-left: 10px; } }

@@ -26,6 +26,21 @@ assessment" and nothing could be installed or dispatched. The owner removed the 
 installed and its recipe pairing is verified or owner-approved. Withdrawn releases and the
 user's own Disable and Remove still block.
 
+## Sampling beside the adapters
+
+Design turn 177 lets a person choose how H3 samples, separately from which adapters ride. The
+480p and 768p FL2VA recipes declare three presets in their catalogue entry — **Fast** (the shipped
+8 steps, turbo adapter at 1, shift 12), **Balanced** (10, 0.75, 9) and **Quality** (12, 0.5, 6,
+the publisher-style setting the adapter tests ran against Fast) — and a bounded **Custom**. The
+"speed adapter" is the turbo distillation LoRA in node 2, not one of the adapters above.
+
+The choice is a device setting per recipe (AI models → the tile's `Sampling` line, or the chip
+beside the adapter in Generate). Enqueue freezes the effective values into the job's params and
+recipe identity beside the seed, so retries and recoveries repeat them and a take's "what was
+sent" line names them. Fast sends the graph byte for byte as before, which is why the recipe
+version did not move. The time beside each preset is measured from this machine's completed runs
+and reads `—` until one finishes. Reference-video and the image recipes offer no sampling yet.
+
 ## Inventory and immutable identity
 
 `node scripts/sync-hearmeman-adapters.mjs --check` compares the pinned publisher tree.

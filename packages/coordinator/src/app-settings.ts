@@ -13,7 +13,10 @@ import {
   type RoutingFault,
   type ThemePreference,
   type NarratorSettings,
+  type SamplingSetting,
+  type SamplingTimingSample,
   type VoxaSettings,
+  SAMPLING_TIMING_RUNS,
   laterVersion,
 } from "@arke-studio/contracts";
 import { atomicWriteFile, serializeFileMutation } from "./world/atomic.js";
@@ -275,6 +278,33 @@ export class AppSettingsFile {
   async setComfyUi(patch: Partial<ComfyUiSettings>): Promise<AppSettings> {
     return this.mutate((current) => {
       const settings: AppSettings = { ...current, comfyui: { ...current.comfyui, ...patch } };
+      return { settings, value: settings };
+    });
+  }
+
+  /**
+   * One local recipe's sampling on this device (design turn 177). Null — and Fast, which is the
+   * same thing — removes the entry, so "as shipped" is the absence of a record and a later
+   * correction to the shipped values reaches this machine too.
+   */
+  async setLocalSampling(recipeId: string, sampling: SamplingSetting | null): Promise<AppSettings> {
+    return this.mutate((current) => {
+      const choices = { ...current.localSampling.choices };
+      if (sampling === null || sampling.preset === "fast") delete choices[recipeId];
+      else choices[recipeId] = sampling;
+      const settings: AppSettings = { ...current, localSampling: { ...current.localSampling, choices } };
+      return { settings, value: settings };
+    });
+  }
+
+  /** One completed run's measurement, keeping the last few per recipe (design turn 177). */
+  async recordSamplingTiming(recipeId: string, sample: SamplingTimingSample): Promise<AppSettings> {
+    return this.mutate((current) => {
+      const kept = [...(current.localSampling.timings[recipeId] ?? []), sample].slice(-SAMPLING_TIMING_RUNS);
+      const settings: AppSettings = {
+        ...current,
+        localSampling: { ...current.localSampling, timings: { ...current.localSampling.timings, [recipeId]: kept } },
+      };
       return { settings, value: settings };
     });
   }

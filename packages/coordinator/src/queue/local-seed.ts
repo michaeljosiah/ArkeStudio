@@ -9,7 +9,11 @@ import type { EnqueueInput } from "./dispatcher.js";
  * seed before the job is journalled means a retry or resubmission repeats the same sample and the
  * job records how to reproduce it. A caller's own seed stands; recipes without a seed are untouched.
  */
-export function withLocalSeed(input: EnqueueInput, pick: () => number = () => randomInt(0, 2 ** 31 - 1)): EnqueueInput {
+export function randomLocalSeed(): number {
+  return randomInt(0, 2 ** 31 - 1);
+}
+
+export function withLocalSeed(input: EnqueueInput, pick: () => number = randomLocalSeed): EnqueueInput {
   if (input.provider !== "comfyui" || input.params.seed !== undefined || !comfyUiRecipeById(input.model)?.params.seed) return input;
   return { ...input, params: { ...input.params, seed: pick() } };
 }

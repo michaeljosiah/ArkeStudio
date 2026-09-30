@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { recipeWithAdapters } from "../comfyui/adapters.js";
 import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
-import { COMFYUI_VERSION_FLOOR, compareComfyUiVersions, meetsComfyUiVersion } from "@arke-studio/contracts";
+import { COMFYUI_VERSION_FLOOR, JobSamplingSchema, compareComfyUiVersions, meetsComfyUiVersion } from "@arke-studio/contracts";
 import {
   callerParamNames,
   comfyUiRecipeById,
   comfyUiRecipeIdentity,
   IMAGE_DIMENSIONS,
+  SAMPLING_PARAMS,
   substituteRecipeParams,
   VIDEO_DERIVATIONS,
   type ComfyUiRecipe,
@@ -172,6 +173,8 @@ const INTERNAL_PARAMS = new Set([
   "seed",
   "prompt",
   "text",
+  /** The job's frozen sampling (design turn 177); unpacked into the recipe's own params in valuesFor. */
+  "sampling",
 ]);
 
 interface QueueEntryish {
@@ -457,6 +460,25 @@ export class ComfyUiClient implements ProviderClient {
     return capabilities.map((capability) => ({ capability, available: true }));
   }
 
+  /**
+   * A job's frozen sampling → the recipe's sampling params (design turn 177). Absent sends the
+   * graph's own values, which is how every job journalled before sampling existed still runs. A
+   * value outside the bounds, or sampling sent to a recipe that declares none, refuses: dropping
+   * it would render something other than what the job and its take record.
+   */
+  private samplingValues(recipe: ComfyUiRecipe, raw: unknown): RecipeParamValues {
+    if (raw === undefined) return {};
+    if (recipe.sampling === undefined) throw new Error(`comfyui: ${recipe.displayName} does not take sampling`);
+    const parsed = JobSamplingSchema.safeParse(raw);
+    if (!parsed.success) throw new Error(`comfyui: the sampling for ${recipe.displayName} is out of bounds`);
+    const { steps, speedAdapter, shift, sampler, scheduler } = parsed.data;
+    const values: RecipeParamValues = { steps, speedAdapter, shift, sampler, scheduler };
+    for (const name of SAMPLING_PARAMS) {
+      if (recipe.params[name]?.internal !== true) throw new Error(`comfyui: ${recipe.displayName} declares sampling without binding "${name}"`);
+    }
+    return values;
+  }
+
   /** Neutral params → this recipe's own values, refusing anything the recipe does not declare. */
   private valuesFor(recipe: ComfyUiRecipe, request: SubmitRequest): RecipeParamValues {
     const params = request.params;
@@ -474,7 +496,7 @@ export class ComfyUiClient implements ProviderClient {
     if (prompt === undefined || prompt.length === 0) {
       throw new Error(`comfyui: ${recipe.displayName} needs a prompt`);
     }
-    const values: RecipeParamValues = { prompt, ...seedValue };
+    const values: RecipeParamValues = { prompt, ...seedValue, ...this.samplingValues(recipe, params["sampling"]) };
     if (recipe.capability === "image") {
       // The output spec's shape selects one of this recipe's authored canvases. SDXL keeps
       // its training buckets; Krea's dimensions follow the quality tier its manifest offers.
@@ -765,6 +787,14 @@ export class ComfyUiClient implements ProviderClient {
         throw new ProviderRequestRejectedError(
           `comfyui: this job was made with ${recipe.displayName} v${frozen.version}, and this build ships v${current.version} — it was refused rather than run against a different graph`,
         );
+      }
+      // The identity names the sampling the job froze (design turn 177); params that disagree
+      // with it would render one thing and record another.
+      // Compared field by field: the journal's schema parse reorders the identity's keys.
+      const sent = request.params["sampling"] as Record<string, unknown> | undefined;
+      if (frozen.sampling !== undefined && (sent === undefined ||
+        (Object.keys(frozen.sampling) as Array<keyof typeof frozen.sampling>).some((key) => sent[key] !== frozen.sampling![key]))) {
+        throw new ProviderRequestRejectedError("comfyui: this job's sampling does not match the sampling recorded with it");
       }
     }
     /*

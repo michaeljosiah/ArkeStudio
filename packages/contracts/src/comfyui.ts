@@ -2,6 +2,7 @@ import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
 import { CapabilitySchema } from "./provider.js";
 import { AdapterSelectionsSchema } from "./adapters.js";
+import { EngineSamplerOptionsSchema, JobSamplingSchema } from "./local-sampling.js";
 
 /**
  * The ComfyUI engine and its recipes (SPEC-021). Deliberately not `ProviderToolStatus`: that is
@@ -64,6 +65,12 @@ export const ComfyUiEngineStatusSchema = z
     detail: z.string().min(1).nullable(),
     /** Installs detection found, for Settings to offer. Empty once one is chosen. */
     detected: z.array(ComfyUiDetectedInstallSchema),
+    /**
+     * The samplers and schedulers the engine's KSampler advertises, read from the same
+     * `/object_info` answer the node probe reads (design turn 177). Absent until it has answered;
+     * Custom sampling offers the recipe's allow-list narrowed to these.
+     */
+    samplerOptions: EngineSamplerOptionsSchema.optional(),
   })
   .strict();
 export type ComfyUiEngineStatus = z.infer<typeof ComfyUiEngineStatusSchema>;
@@ -96,6 +103,11 @@ export const RecipeIdentitySchema = z
     engineVersion: z.string().min(1).optional(),
     /** Ordered immutable adapter choices, preserved with the recipe and resulting take. */
     adapters: AdapterSelectionsSchema.optional(),
+    /**
+     * The sampling the job froze (design turn 177). Part of the identity because it changes the
+     * bytes sent under an unchanged template: two jobs of one recipe version differ exactly here.
+     */
+    sampling: JobSamplingSchema.optional(),
   })
   .strict();
 export type RecipeIdentity = z.infer<typeof RecipeIdentitySchema>;

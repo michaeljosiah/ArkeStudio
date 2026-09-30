@@ -5,6 +5,7 @@ import type {
   ComfyUiEngineStatus,
   ComfyUiSettings,
   ComfyUiStatus,
+  EngineSamplerOptions,
   JobEngineIdentity,
   RecipeIdentity,
   RecipeReadiness,
@@ -321,6 +322,12 @@ export class ComfyUiEngineService {
   private urlProbeGeneration = 0;
   /** class_type → present, from /object_info, per engine instance. */
   private nodeClasses: Set<string> | null = null;
+  /**
+   * The KSampler's advertised samplers and schedulers, from the same `/object_info` read, and
+   * the engine it came from (design turn 177). Published only while that read's classes are in
+   * force for that same engine, so it is cleared everywhere `nodeClasses` is without being named.
+   */
+  private samplerOptions: { base: string; options: EngineSamplerOptions } | null = null;
   /** The last pre-flight verdict per recipe (§2.5): a mismatch disables until re-verified. */
   private readonly verification = new Map<string, { ok: boolean; reason?: string; reasonKind?: RecipeReasonKind }>();
   private verificationGeneration = 0;
@@ -507,7 +514,10 @@ export class ComfyUiEngineService {
       });
       if (!res.ok) return null;
       const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-      return body === null ? null : new Set(Object.keys(body));
+      if (body === null) return null;
+      const options = ksamplerOptions(body["KSampler"]);
+      this.samplerOptions = options === null ? null : { base, options };
+      return new Set(Object.keys(body));
     } catch {
       return null;
     }
@@ -963,6 +973,9 @@ export class ComfyUiEngineService {
       instanceId: this.instanceId(),
       detail,
       detected: this.detected,
+      ...(this.nodeClasses !== null && this.samplerOptions !== null && this.samplerOptions.base === this.baseUrl()
+        ? { samplerOptions: this.samplerOptions.options }
+        : {}),
     };
   }
 
@@ -1223,12 +1236,14 @@ export class ComfyUiEngineService {
       const settled = attempt >= STATUS_RECOMPUTE_LIMIT;
       const generation = this.verificationGeneration;
       const reclaimGeneration = this.reclaimableVramGeneration;
-      const engine = this.engineStatus();
+      let engine = this.engineStatus();
       const base = this.baseUrl();
       if (engine.state === "ready" && base !== null && this.nodeClasses === null) {
         const nodeClasses = await this.loadNodeClasses(base);
         if (!settled && (generation !== this.verificationGeneration || base !== this.baseUrl())) continue;
         this.nodeClasses = nodeClasses;
+        // Read again so this answer carries the sampler options the same read just brought.
+        if (nodeClasses !== null) engine = this.engineStatus();
       }
       const reclaimableVramMb = engine.locality === "remote" ? null : this.probed.reclaimableVramMb;
       let freeVramReading: Promise<number | null> | null = null;
@@ -1565,4 +1580,21 @@ export class ComfyUiEngineService {
     })();
     return this.disposePromise;
   }
+}
+
+/**
+ * `KSampler.input.required.sampler_name[0]` and its scheduler twin: ComfyUI declares a combo
+ * input as `[options, config]`. Anything else is an engine that said something unexpected, and
+ * reads as not advertised rather than as advertising nothing.
+ */
+function ksamplerOptions(node: unknown): EngineSamplerOptions | null {
+  const required = (node as { input?: { required?: Record<string, unknown> } } | undefined)?.input?.required;
+  const combo = (name: string): string[] | null => {
+    const slot = required?.[name];
+    const options = Array.isArray(slot) ? slot[0] : null;
+    return Array.isArray(options) && options.every((option) => typeof option === "string") ? (options as string[]) : null;
+  };
+  const samplers = combo("sampler_name");
+  const schedulers = combo("scheduler");
+  return samplers === null || schedulers === null ? null : { samplers, schedulers };
 }

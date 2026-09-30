@@ -1,6 +1,7 @@
 import { CharacterAudioPlanSchema } from "./audio-reference.js";
 import { AdapterSelectionsSchema } from "./adapters.js";
 import { RecipeIdentitySchema } from "./comfyui.js";
+import { JobSamplingSchema } from "./local-sampling.js";
 import { valueSchema } from "./value-schema.js";
 import { z } from "zod";
 import {
@@ -412,6 +413,11 @@ export const BenchRequestSnapshotSchema = z
     keyframes: z.array(BenchReferenceTokenSchema).default([]),
     /** Recorded only when one was asked for; providers do not universally return one. */
     requestedSeed: z.number().int().optional(),
+    /**
+     * The sampling a local take was sent with (design turn 177), frozen at reservation beside its
+     * seed. "Run it again" sends this again with a fresh seed, whatever Settings holds by then.
+     */
+    sampling: JobSamplingSchema.optional(),
     /** The production values frozen when this paid request was authorized. */
     productionProvenance: ProvenanceSchema.optional(),
     /** Fixed filing identities and segment boundaries for a subject-bound take. */

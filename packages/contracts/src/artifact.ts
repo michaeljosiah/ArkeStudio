@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { RecipeIdentitySchema } from "./comfyui.js";
+import { JobSamplingSchema } from "./local-sampling.js";
 import { BenchParamsSchema, BenchReferenceTokenSchema } from "./bench.js";
 import { MediaInfoSchema } from "./media.js";
 import { ActualCostSourceSchema, ProvenanceSchema } from "./take.js";
@@ -85,6 +86,8 @@ export const ArtifactBenchGenerationSchema = z
     recipe: RecipeIdentitySchema.optional(),
     params: BenchParamsSchema,
     requestedSeed: z.number().int().optional(),
+    /** The local sampling the take was made with (design turn 177). */
+    sampling: JobSamplingSchema.optional(),
     /** From the matching ledger entry; null when the ledger had no actual figure. */
     costMicroUsd: z.number().int().min(0).nullable(),
   })

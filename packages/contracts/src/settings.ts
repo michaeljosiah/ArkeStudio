@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { BenchPresetSchema } from "./bench.js";
 import { IsoDateTimeSchema } from "./ids.js";
+import { LocalSamplingSettingsSchema } from "./local-sampling.js";
 import { HarnessEngineSchema } from "./harness.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 
@@ -255,6 +256,17 @@ const AppSettingsObjectSchema = z
         NarratorSettingsSchema,
       )
       .default(null),
+    /**
+     * Sampling per local recipe, and this machine's measured times for it (design turn 177). A
+     * device setting: it lives here beside the engine, never in a world. Guarded like voxa, so a
+     * malformed block costs the choices, never the settings file.
+     */
+    localSampling: z
+      .preprocess(
+        (value) => (LocalSamplingSettingsSchema.safeParse(value).success ? value : {}),
+        LocalSamplingSettingsSchema,
+      )
+      .default({ choices: {}, timings: {} }),
     /**
      * Which engine runs authoring work. Guarded and defaulted: a settings file written before
      * there was a choice has no `harness` key at all, and a strict parse that threw over it

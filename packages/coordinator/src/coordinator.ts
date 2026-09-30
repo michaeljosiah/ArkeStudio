@@ -1,10 +1,11 @@
-import { estimateSpeechMicroUsd, speechInputFits } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, samplingProblems, speechInputFits } from "@arke-studio/contracts";
 import { isDesignedVoiceTarget, resolveDesignedVoice, VoiceDesignDraftSchema, quoteVoiceDesign } from "@arke-studio/contracts";
 import type { VoiceDesignClient } from "@arke-studio/providers";
 import { saveDesignedVoice } from "./voice/designed-library.js";
 import { ProductionCreationService } from "./application/production-creation.js";
 import { AdapterLibrary, adapterSetupEntries } from "./local-ai/adapter-library.js";
-import { withLocalSeed } from "./queue/local-seed.js";
+import { randomLocalSeed, withLocalSeed } from "./queue/local-seed.js";
+import { SamplingClock, jobSampling, localTakeFreeze, withLocalSampling } from "./queue/local-sampling.js";
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity } from "@arke-studio/providers";
 import { ConversationActionService } from "./application/conversation-actions.js";
@@ -2429,6 +2430,23 @@ export class Coordinator {
    */
   private researchWeb = false;
   /**
+   * Measures local sampling runs as they complete (design turn 177). Each measurement is written
+   * to the settings file and the snapshot, so the time beside a preset follows this machine.
+   */
+  private readonly samplingClock = new SamplingClock((recipeId, sample) => {
+    const settings = this.appSettings;
+    if (!settings) return;
+    void settings
+      .recordSamplingTiming(recipeId, sample)
+      .then((next) => {
+        this.readModel.seedAppConfig({ localSampling: next.localSampling });
+        this.transport.broadcastSnapshot();
+      })
+      .catch(() => {
+        /* a lost measurement costs one figure beside a preset, never the run it measured */
+      });
+  });
+  /**
    * Whether the threshold was over on the last evaluation that actually read the ledger — the
    * latch behind "alert once per crossing" (R-19). Deliberately not `app.spend.alerted`, which
    * an unreadable read publishes as false: the latch would clear on an outage and the next
@@ -2589,6 +2607,7 @@ export class Coordinator {
             emit: (event) => {
               this.emit(event);
               if (event.type === "job.updated") this.cataloguePreviews?.observeJob(event.job);
+              if (event.type === "job.updated") this.samplingClock.observe(event.job);
               if (event.type === "job.updated" && (event.job.provider === "ollama" || event.job.provider === "comfyui")) {
                 if (event.job.provider === "comfyui" && ["succeeded", "failed", "cancelled"].includes(event.job.status)) this.clearLocalResidency("comfyui");
                 void this.refreshLocalResidency();
@@ -4731,6 +4750,7 @@ export class Coordinator {
       // Without this the narrator was correct on disk and absent from every snapshot, so a
       // restart showed the shipped local voice while a cloud one was actually stored.
       ...(settings ? { narrator: settings.narrator } : {}),
+      ...(settings ? { localSampling: settings.localSampling } : {}),
       // `null` is a read that failed, and it is left out rather than seeded: the read model
       // keeps its [] — same state, but nothing pretends it was derived (SPEC-032 R-21). The
       // spend panel's ledger caveat is what tells the reader the record is unreadable.
@@ -5448,6 +5468,23 @@ export class Coordinator {
 
   private freezeLocalIdentity(input: EnqueueInput): EnqueueInput {
     input = withLocalSeed(input);
+    // Sampling freezes beside the seed (design turn 177): what this device's setting says now,
+    // unless the caller — a re-run, a retry — already carries the sampling it was made with.
+    input = withLocalSampling(input, (recipeId) => this.readModel.getState().app.localSampling?.choices[recipeId]);
+    const frozen = this.freezeRecipeIdentity(input);
+    const sampling = jobSampling(frozen.params);
+    if (sampling === undefined || frozen.recipe === undefined) return frozen;
+    if (frozen.recipe.sampling !== undefined) {
+      const recorded = frozen.recipe.sampling;
+      if ((Object.keys(recorded) as Array<keyof typeof recorded>).some((key) => recorded[key] !== sampling[key])) {
+        throw new Error("The saved recipe's sampling no longer matches this request. Review the request before dispatching again.");
+      }
+      return frozen;
+    }
+    return { ...frozen, recipe: { ...frozen.recipe, sampling } };
+  }
+
+  private freezeRecipeIdentity(input: EnqueueInput): EnqueueInput {
     const store = this.opts.provider.openStore?.();
     const references = input.params.references;
     if (store?.worldId === input.worldId && Array.isArray(references)) {
@@ -8655,6 +8692,20 @@ export class Coordinator {
         // already had once. The MCP tool asks settings per call and needs no equivalent.
         this.researchWeb = settings.research.web;
         this.readModel.seedAppConfig({ research: settings.research });
+        this.transport.broadcastSnapshot();
+        return;
+      }
+      case "set-local-sampling": {
+        if (!this.appSettings) return;
+        // The catalogue is the authority, as it is for every recipe value: a recipe that offers
+        // no sampling, or Custom values outside its bounds and allow-lists, is not stored. The
+        // dialog disables Save on the same test (samplingProblems), so this is the guard only.
+        const catalogue = comfyUiRecipeById(msg.recipeId)?.sampling;
+        if (catalogue === undefined) return;
+        const engine = this.readModel.getState().app.comfyui?.engine.samplerOptions;
+        if (msg.sampling?.preset === "custom" && samplingProblems(msg.sampling.values!, catalogue, engine).length > 0) return;
+        const settings = await this.appSettings.setLocalSampling(msg.recipeId, msg.sampling);
+        this.readModel.seedAppConfig({ localSampling: settings.localSampling });
         this.transport.broadcastSnapshot();
         return;
       }
@@ -11886,6 +11937,8 @@ export class Coordinator {
           // filed-artifact sidecar inherits it from this same snapshot.
           recipeVersionOf: (modelId) => this.opts.comfyui?.service.identityFor(modelId)?.recipe.version,
           adapterRecipeFor: (modelId, selections) => this.adapterRecipeIdentity(modelId, selections),
+          localFreeze: (modelId, rerunOf) =>
+            localTakeFreeze(modelId, rerunOf, (recipeId) => this.readModel.getState().app.localSampling?.choices[recipeId], randomLocalSeed),
         });
         if (!plan.ok) {
           this.rejectEnqueue(msg.requestId, msg.kind, plan.reason);
@@ -12008,6 +12061,7 @@ export class Coordinator {
           ...(take.request.recipeVersion !== undefined ? { recipeVersion: take.request.recipeVersion } : {}),
           ...(take.request.recipe ? { recipe: take.request.recipe } : {}),
           ...(take.request.requestedSeed !== undefined ? { requestedSeed: take.request.requestedSeed } : {}),
+          ...(take.request.sampling !== undefined ? { sampling: take.request.sampling } : {}),
           costMicroUsd: take.cost?.actualMicroUsd ?? null,
         };
         const sourcePath = join(store.dir, ".sessions", bench.session.id, "media", take.id, take.media.file);

@@ -1,6 +1,7 @@
-import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, SAMPLING_CHOICE_NAMES, samplingSummary } from "@arke-studio/contracts";
 import { castVoiceSummary, planSubjectCharacterAudio } from "@arke-studio/contracts";
 import { AdapterPicker } from "../components/adapter-picker.js";
+import { SamplingChip, hasSampling } from "../components/local-sampling.js";
 import { hasAdultAdapter } from "@arke-studio/contracts";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
@@ -808,6 +809,20 @@ function BenchWorkspace({
     const mode = job?.params.taskMode;
     return typeof route === "string" ? `${name} · ${route.split("/").at(-1)}`
       : typeof mode === "string" && mode !== "generate" ? `${name} · ${mode}` : name;
+  };
+  /**
+   * What a local take was sent with (design 177c): the preset, its values and the seed, from the
+   * take's own snapshot — never today's setting, which may have moved since.
+   */
+  const takeSamplingLine = (take: BenchTake): string | null => {
+    const sampling = take.request.sampling;
+    if (sampling === undefined) return null;
+    const fast = manifest?.models.find((m) => m.provider === take.request.provider && m.id === take.request.model)?.sampling?.presets[0]?.values;
+    return [
+      SAMPLING_CHOICE_NAMES[sampling.preset],
+      samplingSummary(sampling, fast),
+      take.request.requestedSeed !== undefined ? `seed ${take.request.requestedSeed}` : null,
+    ].filter(Boolean).join(" · ");
   };
   /** The queue's own vocabulary, live — the durable log only records terminal states. */
   const liveStatus = (take: BenchTake): BenchTake["status"] => {
@@ -2280,6 +2295,8 @@ function BenchWorkspace({
 
             {videoParams && <AdapterPicker recipeId={model?.provider === "comfyui" ? model.id : ""} selected={videoParams.adapters ?? []}
               onChange={adapters => compose({ ...draft, params: { ...videoParams, adapters } })} />}
+            {/* Beside the adapter (design 177c): a preset for new takes, written to Settings. */}
+            {hasSampling(model) && <SamplingChip model={model} />}
             </div>
 
             {estimateCopy !== null && (
@@ -2361,7 +2378,7 @@ function BenchWorkspace({
           {selected && (
             <div className="fy-bench__briefrow">
               <span className="fy-bench__briefline">
-                {`${takeRouteName(selected)} · ${selected.request.brief}`}
+                {[takeRouteName(selected), takeSamplingLine(selected), selected.request.brief].filter(Boolean).join(" · ")}
               </span>
               {/* The line's four marks (design 142a): run it again, what was sent, not this,
                   clear the wall. "What was sent" puts the snapshot back in the composer — the
