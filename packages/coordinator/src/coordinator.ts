@@ -2389,7 +2389,7 @@ export class Coordinator {
     }
     const local = this.localHarnessDefault(agent === "stage-designer");
     if (local !== undefined) return this.validateLanguageModel(local, agent === "stage-designer", signal);
-    const refusal = this.keylessSessionRefusal(agent === "stage-designer");
+    const refusal = this.keylessSessionRefusal(agent === "stage-designer", agent);
     return refusal === null ? {} : { reason: refusal };
   }
   /** Per-agent model and brief overrides, as last read from settings. */
@@ -4503,7 +4503,7 @@ export class Coordinator {
     if (local === undefined) {
       // A session whose model was chosen — by the dispatch, validated before this — runs on
       // that model; the refusal is for a session that would otherwise run on nothing chosen.
-      const refusal = chosen ? null : this.keylessSessionRefusal();
+      const refusal = chosen ? null : this.keylessSessionRefusal(false, agent);
       if (refusal !== null) throw new Error(refusal);
       return this.agentOverrides ? { agents: this.agentOverrides } : {};
     }
@@ -4581,7 +4581,7 @@ export class Coordinator {
     return this.vendorAuth.current().available && !this.vendorAuth.readOk;
   }
 
-  private keylessSessionRefusal(needsImages = false): string | null {
+  private keylessSessionRefusal(needsImages = false, agent?: string): string | null {
     if (this.cloudCredentialAvailable()) return null;
     // On Arke's own lane a stored key is not missing, only unusable, so the refusal must not tell
     // the person to add one; what it can say is about Ollama and its models.
@@ -4617,7 +4617,10 @@ export class Coordinator {
     // model that calls tools" would send them to replace a model that already does (issue 1289).
     const waiting = this.readModel.getState().app.harnessModels.filter((model) => model.provider === "ollama" && localModelPolicy(model.id)?.explicitChoiceOnly === true);
     if (offered && waiting.length > 0) {
-      return `${localModelPolicy(waiting[0]!.id)!.displayName} runs only where you choose it. Choose it for this agent in Settings → Harness → Advanced, or install Gemma 4 12B.`;
+      // Named for the agent it would run (issue 1403): "this agent" sent the person to a list of
+      // thirteen agents with nothing to say which one World Chat is.
+      const which = agent === "world-builder" ? "World Chat (world-builder)" : agent ?? "this agent";
+      return `${localModelPolicy(waiting[0]!.id)!.displayName} runs only where you choose it. Choose it for ${which} in Settings → Harness → Advanced, or install Gemma 4 12B.`;
     }
     if (!needsImages && offered) {
       if (localLane) return "None of the local models can write here: each is switched off or cannot call tools. Pull a model that calls tools, or switch one on under AI models.";

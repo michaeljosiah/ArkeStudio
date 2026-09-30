@@ -44,6 +44,12 @@ describe("a turn that produced nothing says which kind of nothing", () => {
     assert.match(line, /asking a different way/, "the remedy that actually works");
   });
 
+  it("ends a refusal on one full stop, whatever the detail ended on (issue 1403)", () => {
+    const line = failureLine({ status: "failed", detail: "rejected: the reply came back in a form the studio could not read." });
+    assert.match(line, /could not read\. Your message/);
+    assert.doesNotMatch(line, /\.\./);
+  });
+
   it("a detail that is not a refusal does not masquerade as one", () => {
     const line = failureLine({ status: "failed", detail: "socket closed" });
     assert.match(line, /did not go through/);

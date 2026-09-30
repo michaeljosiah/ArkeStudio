@@ -98,6 +98,27 @@ export type ValidationOutcome =
   | { ok: true; turn: AcceptedTurn }
   | { ok: false; problems: TurnProblem[] };
 
+/**
+ * What a refused answer tells the person, where the corrective message tells the model.
+ *
+ * The two used to be the same string, so a failed turn showed the author the instruction meant for
+ * the model — "Return the complete result again as one JSON object — no prose around it, no
+ * markdown fences." — or a validator path such as `candidateOperations.1.candidate.target is
+ * required` (issues 1384, 1403). The log keeps every word of those; the screen says what went
+ * wrong in terms the person can act on. Problems about the world itself — a quotation that is not
+ * in its source, an entity that does not exist — are already written for a reader and pass through.
+ */
+export function personLine(problems: readonly TurnProblem[]): string {
+  const lines = problems.map((p) =>
+    p.code === "not-json"
+      ? "the reply came back in a form the studio could not read"
+      : p.code === "schema"
+        ? "the reply was not in the shape the studio needs"
+        : p.safeMessage.replace(/[.!?\s]+$/, "") || p.code,
+  );
+  return [...new Set(lines)].join(" · ");
+}
+
 function problem(code: string, safeMessage: string): TurnProblem {
   return { code, safeMessage };
 }
@@ -184,16 +205,58 @@ function schemaIssueLine(issue: z.ZodIssue): string {
 }
 
 /**
+ * The one JSON object in a model's message, or undefined when there is none.
+ *
+ * Local models wrap the object they were told to return bare: in a ```json fence, or after a line
+ * such as "Here is the result:" (issue 1403). The strict parse refused all of those as "not
+ * valid JSON", and on the Local harness that was most answers — so World Chat failed turn after
+ * turn with the corrective turn failing the same way. The object is taken whole and then held to
+ * the schema exactly as before; only the wrapping around it is forgiven. A message with no object
+ * in it is still not a result: prose that claims to have done something is exactly what the
+ * contract exists to refuse.
+ */
+export function turnResultJson(raw: string): unknown {
+  const text = raw.replace(/^\uFEFF/, "").trim();
+  try { return JSON.parse(text); } catch { /* look for the object inside it */ }
+  const fenced = /^```[a-zA-Z]*[ \t]*\r?\n([\s\S]*?)\r?\n?```\s*$/.exec(text);
+  if (fenced) {
+    try { return JSON.parse(fenced[1]!); } catch { /* fall through to the object scan */ }
+  }
+  const start = text.indexOf("{");
+  if (start < 0) return undefined;
+  // The object's own extent, found by balancing braces outside strings, so a brace in the prose
+  // after it — or inside one of its string values — cannot cut it short or run it on.
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!;
+    if (inString) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) {
+      let found: unknown;
+      try { found = JSON.parse(text.slice(start, i + 1)); } catch { return undefined; }
+      // One object or none. Two — an example in the prose, then the answer — would leave the
+      // parser choosing which one the model meant, and the first is not reliably the answer.
+      return turnResultJson(text.slice(i + 1)) === undefined ? found : undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Parse the model's message as the strict turn-result schema.
  *
  * Separate from the rest so a malformed message fails before anything else is attempted — there
  * is nothing useful to say about the evidence in a result that is not a result.
  */
 export function parseTurnResult(raw: string): { ok: true; value: WorldChatTurnResult } | { ok: false; problems: TurnProblem[] } {
-  let json: unknown;
-  try {
-    json = JSON.parse(raw);
-  } catch {
+  const json = turnResultJson(raw);
+  if (json === undefined) {
     return {
       ok: false,
       problems: [
@@ -787,8 +850,7 @@ const REPLY_ONLY_PROBLEM = "This ask was for a reply only. Return the reply with
 
 /** Whether a result names anything but its reply, read before its shape is checked. */
 function structuredChannelsIn(raw: string): boolean {
-  let json: unknown;
-  try { json = JSON.parse(raw); } catch { return false; }
+  const json = turnResultJson(raw);
   if (json === null || typeof json !== "object") return false;
   const record = json as Record<string, unknown>;
   return ["candidateOperations", "groupOperations", "actions", "bibleEdits", "editorRequests", "sceneEdits"]
