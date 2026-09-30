@@ -196,6 +196,14 @@ export interface ContextInput {
    * what they were looking at is the toll the entry points exist to remove.
    */
   entryContext?: string;
+  /**
+   * The actions this thread may prepare, already sized to the turn (SPEC-050 R-1, R-5).
+   *
+   * Fixed rather than trimmed: `renderActionGuide` collapses it to one line per kind when it would
+   * take more than its share, and cutting it further here would drop kinds from the end of the
+   * list — the silent omission it exists to end.
+   */
+  actionGuide?: string;
   summary?: string;
   candidates: readonly WorldChangeCandidate[];
   /** Live groups, so an operation on one can name it. Empty when nothing has been grouped. */
@@ -227,6 +235,7 @@ export interface ContextInput {
 
 export interface AssembledContext {
   entryContext: string;
+  actionGuide: string;
   summary: string;
   /** Live propositions, so the model can correct rather than repeat them. */
   registry: string;
@@ -463,7 +472,11 @@ export function assembleContext(input: ContextInput): AssembledContext {
   const bible = renderBible(input.bible ?? "");
   const tombstones = renderTombstones(input.tombstones);
   const fixed =
-    bible.length + tombstones.length + input.currentUserMessage.length + (input.entryContext ?? "").length;
+    bible.length +
+    tombstones.length +
+    input.currentUserMessage.length +
+    (input.entryContext ?? "").length +
+    (input.actionGuide ?? "").length;
 
   const spent = () => Object.values(sections).reduce((n, text) => n + text.length, 0);
   /*
@@ -488,6 +501,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
   return {
     // Never trimmed: it is one short line, and it is the frame for everything else.
     entryContext: input.entryContext ?? "",
+    actionGuide: input.actionGuide ?? "",
     summary: sections.summary,
     registry: sections.registry,
     recentTurns: sections.recentTurns,
@@ -500,6 +514,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
     currentUserMessageId: input.currentUserMessageId,
     digest: contentHash({
       entryContext: input.entryContext ?? "",
+      actionGuide: input.actionGuide ?? "",
       summary: sections.summary,
       registry: sections.registry,
       recentTurns: sections.recentTurns,

@@ -83,6 +83,9 @@ export const LEASED_OPERATIONS = [
   "fetch_url",
   // The production read (round 3, 2026-08-22): a read like the others — no write it could reach.
   "get_production",
+  // An action's fields and example when the turn's guide only lists it (SPEC-050 R-5). It reads
+  // nothing in the world, and is leased only because it is served on the same surface.
+  "describe_action",
   ...TARGET_READ_TOOL_NAMES,
 ] as const;
 

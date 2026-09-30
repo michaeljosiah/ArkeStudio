@@ -173,6 +173,17 @@ const WORLD_CHAT_TOOLS = [
     },
   },
   {
+    name: "describe_action",
+    description:
+      "The fields and one valid example of an action you may prepare, by its kind. Use it when this turn's list of actions names a kind without its fields. It reads nothing in the world.",
+    inputSchema: {
+      type: "object",
+      properties: { kind: { type: "string", description: "The action kind, exactly as listed" } },
+      required: ["kind"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "get_attachment_text",
     description:
       "Read a bounded range of text from a document attached to this conversation. Only attachments explicitly linked to this turn are readable, and only if they are text. Images, audio and video cannot be read.",

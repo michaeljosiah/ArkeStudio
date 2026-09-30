@@ -114,6 +114,19 @@ describe("leased retrieval", () => {
     h.index?.close();
   });
 
+  it("describes an action through the lease, with a receipt that is not a world check", async () => {
+    const h = await harness();
+    const { result, receipt } = await h.retrieval.call(h.mint().token, "describe_action", { kind: "prop-authoring" });
+    assert.equal(receipt.tool, "describe-action");
+    assert.equal(receipt.status, "complete");
+    assert.equal(receipt.consulted.length, 0, "it read nothing in the world");
+    assert.equal((result as { example: { kind: string } }).example.kind, "prop-authoring");
+
+    const unknown = await h.retrieval.call(h.mint().token, "describe_action", { kind: "delete-everything" });
+    assert.equal(unknown.receipt.status, "empty");
+    h.index?.close();
+  });
+
   it("a production that is not there is an honest empty, not a failure", async () => {
     const h = await harness();
     const { result, receipt } = await h.retrieval.call(h.mint().token, "get_production", { id: "nope" });
@@ -500,7 +513,9 @@ describe("the served surface", () => {
     const ambientNames = (ambient.body as { result: { tools: Array<{ name: string }> } }).result.tools.map(
       (t) => t.name,
     );
+    assert.ok(names.includes("describe_action"), "a collapsed action guide can be expanded (SPEC-050 R-5)");
     assert.ok(!ambientNames.includes("get_attachment_text"), "attachment reads stay leased-only");
+    assert.ok(!ambientNames.includes("describe_action"), "drafting agents prepare no world-chat actions");
     assert.ok(ambientNames.includes("get_production"), "drafting agents can read the production too");
     assert.equal(ambientNames.length, 6, "the ambient surface: the original five plus the production read");
 
