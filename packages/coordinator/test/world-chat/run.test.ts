@@ -313,6 +313,7 @@ describe("taking a turn", () => {
     const chosen: Array<string | undefined> = [];
     const resolved = await setup(fakeAdapter(["bad", "bad", "bad", "bad"]), {
       createdModels,
+      entryContext: { kind: "production", productionId: "saltlight" },
       resolveLanguageModel: async ({ modelId }) => {
         chosen.push(modelId);
         return {
@@ -344,6 +345,26 @@ describe("taking a turn", () => {
       (await refused.view()).lastFailedRun?.safeDetail,
       "unavailable: This production still names retired-model, which is no longer available.",
     );
+  });
+
+  it("asks for the default again when a world conversation's turn is retried (issue 1403)", async () => {
+    // Outside a production no model can be chosen, so the model a failed run used was the
+    // default. Retrying used to hand it back as a request, which the coordinator refuses there —
+    // so Try again failed in milliseconds, every time, whatever had gone wrong the first time.
+    const chosen: Array<string | undefined> = [];
+    const h = await setup(fakeAdapter(["bad", "bad", JSON.stringify({ reply: "Maren is a tide-caller.", candidateOperations: [], groupOperations: [] })]), {
+      resolveLanguageModel: async ({ modelId }) => {
+        chosen.push(modelId);
+        if (modelId !== undefined) return { modelId, reason: "A language model can only be chosen inside a production." };
+        return { modelId: "ollama/gemma4:12b", sessionModel: "ollama/gemma4:12b", inputTokenLimit: 256_000 };
+      },
+    });
+    const first = await h.runner.send(h.store, h.conversationId, "Who is Maren Kest?");
+    assert.equal(first.status, "failed");
+    const turnId = (await h.view()).messages.find((m) => m.role === "user")!.turnId!;
+    const again = await h.runner.retry(h.store, h.conversationId, turnId);
+    assert.deepEqual(chosen, [undefined, undefined], "the retry asks for the default, not for the model the failed run recorded");
+    assert.equal(again.status, "completed");
   });
 });
 
@@ -680,6 +701,18 @@ describe("a turn that never answers", () => {
     const finalDetail = (finished as { run?: { safeDetail?: string } }).run?.safeDetail ?? "";
     assert.match(finalDetail, /^rejected: /, "the person is told it was rejected, and why");
     assert.ok(finalDetail.length > "rejected: ".length, `and the why is present: ${finalDetail}`);
+    assert.doesNotMatch(finalDetail, /\w+\.\d+\.\w+/, "a validator path is for the log, not the screen");
+  });
+
+  it("tells the person what an unreadable reply means, and the model what to do about it (issue 1403)", async () => {
+    const prompts: string[] = [];
+    const { runner, store, conversationId } = await setup(fakeAdapter(["I think Maren is a tide-caller.", "Still prose."], { prompts }));
+    const outcome = await runner.send(store, conversationId, "Who is Maren Kest?");
+    assert.equal(outcome.status, "failed");
+    assert.match(prompts[1] ?? "", /one JSON object/, "the corrective turn still instructs the model");
+    const finished = (await store.read()).events.map((e) => e.event).findLast((e) => e.type === "run.finished");
+    const detail = (finished as { run?: { safeDetail?: string } }).run?.safeDetail ?? "";
+    assert.equal(detail, "rejected: the reply came back in a form the studio could not read");
   });
 });
 

@@ -28,7 +28,14 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; media-src 'self' http://127.0.0.1:* http://localhost:*; object-src 'self' http://127.0.0.1:* http://localhost:*; frame-src 'self' http://127.0.0.1:* http://localhost:*; font-src 'self' data:; connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*"
     />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!--
+      resizes-content: the on-screen keyboard shrinks the page rather than covering it (issue 1403).
+      Android Chrome's default only pans a covered page, so full-height screens — World Chat, a
+      canon thread — kept their composer under the keyboard and gave the conversation what was
+      left between the chrome and the keys. Held bars measure the keyboard themselves
+      (useKeyboardInset); with the page resized that measure reads zero, so they are not moved twice.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#141619" />
     <meta name="apple-mobile-web-app-title" content="Arke Studio" />
     <link rel="icon" href="/favicon.ico" sizes="any" />

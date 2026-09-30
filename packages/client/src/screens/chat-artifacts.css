@@ -19,7 +19,12 @@
 .fy-artview__detailactions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
 
 @media (min-width: 600px) and (max-width: 1099px) {
-  .fy-content--fill > .fy-chat__wrap { flex: 1; height: auto; min-height: 0; margin: 14px 48px 92px; }
+  /* The foot gutter is the system's, not a band of our own (issue 1403). 92px copied the home
+     indicator drawn under frame 164c into the page, where it sat empty under the composer at
+     every height and took a third of what was left once the keyboard came up. */
+  .fy-content--fill > .fy-chat__wrap { flex: 1; height: auto; min-height: 0; margin: 14px 48px calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .fy-chat__failed { flex-wrap: wrap; }
+  .fy-chat__retry { min-height: 44px; display: inline-flex; align-items: center; }
   .fy-content--fill > .fy-chat__wrap > .fy-gate { position: relative; display: flex; flex-direction: row; flex: 1; height: 100%; min-height: 0; border-top: 1px solid var(--border); }
   .fy-chat__wrap .fy-chatnav { width: 236px; position: absolute; z-index: 35; inset: 0 auto 0 0; flex-direction: column; flex-wrap: nowrap; align-items: stretch; padding: 14px 6px; border: 0; border-right: 1px solid var(--border); background: var(--background); animation: none; }
   .fy-chat__wrap .fy-chatnav--shut { position: relative; width: 48px; padding-inline: 2px; align-items: center; }
@@ -246,4 +251,30 @@
   .fy-chat__composer .fy-cx__attach svg, .fy-chat__composer .fy-cx__mic svg { width: 20px; height: 20px; }
   .fy-chat__composer .fy-cx__attachplus { display: none; }
   .fy-chat__composer .fy-cx__attachclip { display: block; }
+}
+
+/* The link a refusal carries to the setting it names looks like the retry beside it. */
+a.fy-chat__retry { text-decoration: none; }
+
+/*
+ * With the keyboard up on a Fold or a tablet, the conversation keeps the height (issue 1403).
+ *
+ * Measured at 984 wide with the keyboard showing (about 560 tall): the app bar, the world's tab
+ * strip, the WORLD CHAT eyebrow and a two-line title stayed pinned above a 92px empty band, and
+ * the conversation between them got 175px — a failure card and its Try again were clipped. While
+ * the page is this short the person is typing into this conversation, not choosing a tab, so the
+ * strip and the eyebrow step aside and the title keeps one line. The tabs are back the moment the
+ * keyboard goes.
+ */
+@media (min-width: 600px) and (max-width: 1099px) and (max-height: 700px) {
+  .fy-content--fill:has(> .fy-chat__wrap) > .fy-worldnav { display: none; }
+  .fy-content--fill > .fy-chat__wrap { margin-top: 8px; }
+  .fy-chat__wrap .fy-gate__head { padding-top: 10px; }
+  .fy-chat__wrap .fy-gate__head .fy-eyebrow-sm { display: none; }
+  .fy-chat__wrap .fy-story__h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-lg); }
+}
+
+/* Stop's key hint is for a keyboard; a touch screen has no Esc to press. */
+@media (hover: none) and (pointer: coarse) {
+  .fy-working__key { display: none; }
 }

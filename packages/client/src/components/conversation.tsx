@@ -250,6 +250,11 @@ export function ConversationTranscript({
       {failure && !running && (
         <div className="fy-chat__failed" role="status">
           <div className="fy-chat__failedtext">{failureLine(failure)}</div>
+          {/* A refusal that names a setting takes you to it (issue 1403): on a phone or a Fold the
+              words "Settings → Harness → Advanced" were a route to memorise, not a way there. */}
+          {failure.detail?.includes("Settings → Harness") && (
+            <a className="fy-chat__retry" href="#/settings/harness">Open Harness settings</a>
+          )}
           {canRetry && onRetry && (
             <button type="button" className="fy-chat__retry" onClick={() => onRetry(failure.turnId)}>
               Try that again
@@ -672,7 +677,9 @@ export function failureLine(failure: { status: string; detail?: string }): strin
   }
   const rejected = failure.detail?.startsWith("rejected: ") === true;
   if (rejected) {
-    return `The studio answered and the answer was refused — ${failure.detail!.slice("rejected: ".length)}. Your message is still here; asking a different way usually gets past it.`;
+    // The detail may end on its own full stop (issue 1403 found "fences.." on screen).
+    const why = failure.detail!.slice("rejected: ".length).trim().replace(/[.!?]+$/, "");
+    return `The studio answered and the answer was refused — ${why}. Your message is still here; asking a different way usually gets past it.`;
   }
   const opening =
     failure.status === "timeout"
