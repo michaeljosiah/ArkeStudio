@@ -2424,7 +2424,7 @@ export function SettingsGeneralScreen() {
           </>
         }
       >
-        {phone ? <button type="button" className="fy-narrator-default" onClick={() => setNarratorOpen(true)}><span>{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)} · {narrator?.provider ?? "Kokoro"}</span><ChevronDown size={14} /></button> : <span data-testid="narrator-name">{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)}</span>}
+        {phone ? <button type="button" className="fy-narrator-default" onClick={() => setNarratorOpen(true)}><span>{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)} · {narrator ? (PROVIDER_TABLE[narrator.provider as keyof typeof PROVIDER_TABLE]?.displayName ?? narrator.provider) : "Kokoro"}</span><ChevronDown size={14} /></button> : <span data-testid="narrator-name">{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)}</span>}
         <span className="fy-fact__state">{readerChip}</span>
       </FactRow>
       {phone && <FactRow what={CAPABILITY_LABEL.llm}>
