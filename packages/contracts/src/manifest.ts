@@ -389,7 +389,7 @@ export const ManifestModelSchema = z
      * clip whose first frame the poster is. Paths into the bundled samples directory, keyed by
      * model id. Optional on purpose — a tile with none draws a plain plate and loses nothing
      * else, so a model ships the day it is routed and a sample is an asset task rather than a
-     * code change. No shipped row carries one yet.
+     * code change. The shipped rows' posters are listed in the providers' MODEL_SAMPLES.
      */
     sample: z.object({ poster: z.string().min(1), clip: z.string().min(1).optional() }).strict().optional(),
     /**
