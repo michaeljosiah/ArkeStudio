@@ -619,8 +619,8 @@ const H3_VIDEO_768: ComfyUiRecipe = {
   recipeVersion: 1,
   params: {
     ...H3_VIDEO.params,
-    // The one length watched finish at this size (H3_768_FRAMES_BY_SECONDS).
-    durationSec: { ...H3_VIDEO.params["durationSec"]!, values: [5] },
+    // The lengths watched finish at this size (H3_768_FRAMES_BY_SECONDS).
+    durationSec: { ...H3_VIDEO.params["durationSec"]!, values: [5, 7] },
   },
   // The same presets; its times are stated for the one length this row can make.
   sampling: { ...H3_SAMPLING, clipSec: 5 },
@@ -871,9 +871,19 @@ export const H3_768_DIMENSIONS: Record<string, { width: number; height: number }
  * free-VRAM floor's measurement — the card held at 305 MiB free for the whole of the sampling
  * and the run took no longer for it — and its RAM low-water mark of nothing at all is the page
  * cache filling what the machine had (issue 848's finding), not a run that paged to a halt.
- * Longer clips at this size are unrun and are not offered.
+ *
+ * Seven seconds, 2026-09-30, same card and engine, the engine freed first (card 0.4–0.8 GB used,
+ * ~18.5 GB RAM free at dispatch):
+ *
+ *   175 frames → 7.292 s   744 MB RAM to spare, 9,508 MiB VRAM  —  19m06s  (Motion + anatomy, 0.5 / 0.4 / 0.8)
+ *   175 frames → 7.292 s    27 MB RAM to spare, 9,942 MiB VRAM  —  18m24s  (no adapters)
+ *
+ * Longer does not fit this card, and it is the card, not the adapters: 192 frames (8 s) and
+ * 243 frames (10 s) both stopped in the sampler asking for one more 3.11 GiB and 3.93 GiB block
+ * with the card full, after 5.0 and 8.5 minutes. The block grows with pixels × frames, so a
+ * bigger card is what would add 8 s and 10 s here; they are not offered.
  */
-export const H3_768_FRAMES_BY_SECONDS: Record<string, number> = { "5": 124 };
+export const H3_768_FRAMES_BY_SECONDS: Record<string, number> = { "5": 124, "7": 175 };
 
 /**
  * Which tables derive a video recipe's internal params (frames, pixels) from the caller's chosen
@@ -1043,8 +1053,8 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     limits: {
       maxPromptChars: 2000,
       alwaysSound: true,
-      maxDurationSec: 5,
-      durations: { "5": "5" },
+      maxDurationSec: 7,
+      durations: { "5": "5", "7": "7" },
       durationWire: "number",
       resolutions: ["768p"],
       aspects: Object.keys(H3_768_DIMENSIONS),

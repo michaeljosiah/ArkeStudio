@@ -662,14 +662,26 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
     assert.equal(posted.prompt["7"]!.inputs["width"], 1344);
     assert.equal(posted.prompt["7"]!.inputs["height"], 768);
     assert.equal(posted.prompt["15"], undefined, "text-to-video drops the frame carriers here too");
-    // A length the 480p row offers is still refused here until it has been run at this size.
-    await assert.rejects(
-      client.submit("", { model: "comfyui-h3-video-768", capability: "video", params: { prompt: "x", durationSec: 10 } }),
-      /cannot be asked for 10s — it offers 5s/,
-    );
-    // The row says the same: one length, one size, no frame mode and no reference budget.
+    // Seven seconds was watched finish at this size too (2026-09-30): 175 frames.
+    await client.submit("", {
+      model: "comfyui-h3-video-768",
+      capability: "video",
+      params: { prompt: "harbour at dawn, gulls crying", durationSec: 7, aspect: "16:9" },
+    });
+    const seven = calls.filter((c) => c.url.endsWith("/prompt")).at(-1)!.body as {
+      prompt: Record<string, { inputs: Record<string, unknown> }>;
+    };
+    assert.equal(seven.prompt["7"]!.inputs["length"], 175);
+    // Eight and ten seconds ran out of this card's memory at this size, so they stay refused.
+    for (const seconds of [8, 10]) {
+      await assert.rejects(
+        client.submit("", { model: "comfyui-h3-video-768", capability: "video", params: { prompt: "x", durationSec: seconds } }),
+        new RegExp(`cannot be asked for ${seconds}s — it offers 5, 7s`),
+      );
+    }
+    // The row says the same: two lengths, one size, no frame mode and no reference budget.
     const row = SHIPPED_MANIFEST.models.find((m) => m.id === "comfyui-h3-video-768")!;
-    assert.deepEqual(durationOptions(row), [5]);
+    assert.deepEqual(durationOptions(row), [5, 7]);
     assert.deepEqual(row.limits.resolutions, ["768p"]);
     // Free is the price; the measured run is the cost, stated beside it (issue 868).
     assert.equal(row.pricing.kind === "unmetered" ? row.pricing.typicalRunSec : null, 768);
