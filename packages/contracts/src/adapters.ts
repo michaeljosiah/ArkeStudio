@@ -11,7 +11,12 @@ export const AdapterSelectionsSchema = z.array(AdapterSelectionSchema).max(14).s
 });
 export type AdapterSelection = z.infer<typeof AdapterSelectionSchema>;
 
-/** A trusted catalogue preset expands to frozen, ordered choices; it grants no member permission. */
+/**
+ * A trusted catalogue preset expands to frozen, ordered members; it grants no member permission.
+ * Its strengths are the starting values only. Each member may be tuned within its own pairing's
+ * range, because the publisher's guidance is a range and a combination is where tuning matters
+ * most: fourteen members pinned at 1 each washed H3 out to a flat field (2026-09-30).
+ */
 export const AdapterBundleSchema = z.object({
   id: Id, displayName: z.string().min(1), recipeId: Id, status: z.literal("experimental"),
   description: z.string().min(1), selections: AdapterSelectionsSchema.refine(rows => rows.length > 1),
@@ -20,7 +25,7 @@ export type AdapterBundle = z.infer<typeof AdapterBundleSchema>;
 
 export function matchingAdapterBundle(selected: readonly AdapterSelection[], recipeId: string, bundles: readonly AdapterBundle[]): AdapterBundle | undefined {
   return bundles.find(bundle => bundle.recipeId === recipeId && bundle.selections.length === selected.length &&
-    bundle.selections.every((row, index) => row.releaseId === selected[index]?.releaseId && row.sha256 === selected[index]?.sha256 && row.strength === selected[index]?.strength));
+    bundle.selections.every((row, index) => row.releaseId === selected[index]?.releaseId && row.sha256 === selected[index]?.sha256));
 }
 
 export function adapterCombinationProblem(selected: readonly AdapterSelection[], recipeId: string, bundles: readonly AdapterBundle[]): string | null {
@@ -44,6 +49,8 @@ export const AdapterReleaseSchema = z.object({
     recipeId: Id, state: z.enum(["unverified", "verified", "owner-approved", "incompatible"]), reason: z.string().min(1),
     ownerApproval: z.object({ approvedAt: z.string().datetime(), generation: z.enum(["completed", "memory-blocked", "not-run"]) }).strict().optional(),
     evidence: z.string().min(1).optional(), minStrength: z.number().min(0).max(2).optional(), maxStrength: z.number().min(0).max(2).optional(),
+    /** The publisher's suggested starting strength, where it states one; always inside the range. */
+    recommendedStrength: z.number().min(0).max(2).optional(),
     minEngineVersion: z.string().optional(), exercisedThroughVersion: z.string().optional(),
     hardware: z.object({ minVramMb: z.number().int().positive(), minFreeVramMb: z.number().int().positive(),
       minMemMb: z.number().int().positive(), minFreeMemMb: z.number().int().positive() }).strict().optional(),
@@ -51,6 +58,10 @@ export const AdapterReleaseSchema = z.object({
     for (const row of rows) if (row.state === "owner-approved" && (!row.ownerApproval || !row.evidence ||
       row.minStrength === undefined || row.maxStrength === undefined || row.minStrength > row.maxStrength)) {
       ctx.addIssue({ code: "custom", message: "Owner approval needs its date, actual generation outcome, evidence and bounded strength." });
+    }
+    for (const row of rows) if (row.recommendedStrength !== undefined && (row.minStrength === undefined || row.maxStrength === undefined ||
+      row.recommendedStrength < row.minStrength || row.recommendedStrength > row.maxStrength)) {
+      ctx.addIssue({ code: "custom", message: "A recommended strength must sit inside the pairing's strength range." });
     }
     for (const row of rows) if (row.state === "verified" && (!row.evidence || row.minStrength === undefined || row.maxStrength === undefined ||
       row.minStrength > row.maxStrength || !row.minEngineVersion || !row.exercisedThroughVersion || !row.hardware)) {
@@ -107,6 +118,12 @@ export function adapterPolicyProblem(release: AdapterRelease, content: z.infer<t
   // A retired "allowed" verdict grants nothing now; a blocking decision still holds for its bytes.
   if (decision && decision.sha256 === release.source.sha256 && decision.decision !== "allowed") return decision.reason;
   return null;
+}
+
+/** Where a new choice of this adapter starts: the publisher's suggestion, else 1 held inside the range. */
+export function adapterStartingStrength(release: AdapterRelease, recipeId: string): number {
+  const row = release.compatibility.find(item => item.recipeId === recipeId);
+  return row?.recommendedStrength ?? Math.min(row?.maxStrength ?? 1, Math.max(row?.minStrength ?? 0, 1));
 }
 
 export function adapterCompatibilityProblem(release: AdapterRelease, recipeId: string, strength: number): string | null {

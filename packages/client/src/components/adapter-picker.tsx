@@ -1,4 +1,4 @@
-import { adapterCompatibilityProblem, adapterPolicyProblem, matchingAdapterBundle, type AdapterSelection } from "@arke-studio/contracts";
+import { adapterCompatibilityProblem, adapterPolicyProblem, adapterStartingStrength, matchingAdapterBundle, type AdapterSelection } from "@arke-studio/contracts";
 import { Link } from "react-router";
 import { useStore } from "../lib/store.js";
 
@@ -26,9 +26,7 @@ export function AdapterPicker({ recipeId, selected, onChange }: {
     const bundle = bundles.find(item => `bundle:${item.id}` === event.target.value);
     if (bundle) { onChange(bundle.selections.map(row => ({ ...row }))); return; }
     const row = rows.find(item => item.release.id === event.target.value);
-    const pair = row?.release.compatibility.find(item => item.recipeId === recipeId);
-    onChange(row ? [{ releaseId: row.release.id, sha256: row.release.source.sha256,
-      strength: Math.min(pair?.maxStrength ?? 1, Math.max(pair?.minStrength ?? 0, 1)) }] : []);
+    onChange(row ? [{ releaseId: row.release.id, sha256: row.release.source.sha256, strength: adapterStartingStrength(row.release, recipeId) }] : []);
   }}>
     <option value="">None · use model only</option>
     {value && !selectedBundle && !selectedRow && <option value={value} disabled>Saved adapter unavailable</option>}
@@ -46,10 +44,18 @@ export function AdapterPicker({ recipeId, selected, onChange }: {
   {value && !selectedRow && !selectedBundle && <span>This saved adapter is unavailable for the selected model. Choose None to clear it.</span>}
   {selectedBundle && <>
     <span>{selectedBundle.description}</span>
-    <details><summary>View {selected.length} adapters and strengths</summary><ol>{selected.map(row => <li key={row.sha256}>
-      {rows.find(item => item.release.id === row.releaseId)?.release.displayName ?? "Unavailable adapter"} · Strength {row.strength}
-      {selectionProblem(row) && <span> · {selectionProblem(row)}</span>}
-    </li>)}</ol></details>
+    <details><summary>View {selected.length} adapters and strengths</summary><ol>{selected.map((row, index) => {
+      const release = rows.find(item => item.release.id === row.releaseId)?.release;
+      const pair = release?.compatibility.find(item => item.recipeId === recipeId);
+      const name = release?.displayName ?? "Unavailable adapter";
+      return <li key={row.sha256}>
+        {pair ? <label>{name} <input aria-label={`Strength for ${name}`} type="number" min={pair.minStrength ?? 0} max={pair.maxStrength ?? 2} step="0.05" value={row.strength}
+          onChange={event => { const strength = Number(event.target.value);
+            if (Number.isFinite(strength)) onChange(selected.map((item, i) => i === index ? { ...item, strength } : { ...item })); }} /></label>
+          : <>{name} · Strength {row.strength}</>}
+        {selectionProblem(row) && <span> · {selectionProblem(row)}</span>}
+      </li>;
+    })}</ol></details>
   </>}
   {selectedPair?.state === "owner-approved" && <span>{selectedPair.reason}</span>}
   {selected[0] && selectedPair && <label>Strength <input aria-label="Adapter strength" type="number" min={selectedPair.minStrength ?? 0} max={selectedPair.maxStrength ?? 2} step="0.05" value={selected[0].strength}

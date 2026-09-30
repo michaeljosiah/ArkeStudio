@@ -29,13 +29,13 @@ export const HEARMEMAN_ADAPTERS = [
       {
         "recipeId": "comfyui-h3-video",
         "state": "owner-approved",
-        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "reason": "Owner approved for 480p at strength 0.2–1 (owner widened the range from 1, 2026-09-30). Generation completed; output accepted by owner.",
         "ownerApproval": {
           "approvedAt": "2026-09-25T10:02:59.432Z",
           "generation": "completed"
         },
         "evidence": "docs/development/h3-adapter-validation.md",
-        "minStrength": 1,
+        "minStrength": 0.2,
         "maxStrength": 1
       },
       {
@@ -75,14 +75,15 @@ export const HEARMEMAN_ADAPTERS = [
       {
         "recipeId": "comfyui-h3-video",
         "state": "owner-approved",
-        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "reason": "Owner approved for 480p at strength 0.2–1 (owner widened the range from 1, 2026-09-30). Generation completed; output accepted by owner.",
         "ownerApproval": {
           "approvedAt": "2026-09-25T10:02:59.432Z",
           "generation": "completed"
         },
         "evidence": "docs/development/h3-adapter-validation.md",
-        "minStrength": 1,
-        "maxStrength": 1
+        "minStrength": 0.2,
+        "maxStrength": 1,
+        "recommendedStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -121,14 +122,15 @@ export const HEARMEMAN_ADAPTERS = [
       {
         "recipeId": "comfyui-h3-video",
         "state": "owner-approved",
-        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "reason": "Owner approved for 480p at strength 0.2–1 (owner widened the range from 1, 2026-09-30). Generation completed; output accepted by owner.",
         "ownerApproval": {
           "approvedAt": "2026-09-25T10:02:59.432Z",
           "generation": "completed"
         },
         "evidence": "docs/development/h3-adapter-validation.md",
-        "minStrength": 1,
-        "maxStrength": 1
+        "minStrength": 0.2,
+        "maxStrength": 1,
+        "recommendedStrength": 0.9
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -169,14 +171,15 @@ export const HEARMEMAN_ADAPTERS = [
       {
         "recipeId": "comfyui-h3-video",
         "state": "owner-approved",
-        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "reason": "Owner approved for 480p at strength 0.2–1 (owner widened the range from 1, 2026-09-30). Generation completed; output accepted by owner.",
         "ownerApproval": {
           "approvedAt": "2026-09-25T10:02:59.432Z",
           "generation": "completed"
         },
         "evidence": "docs/development/h3-adapter-validation.md",
-        "minStrength": 1,
-        "maxStrength": 1
+        "minStrength": 0.2,
+        "maxStrength": 1,
+        "recommendedStrength": 0.9
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -215,14 +218,15 @@ export const HEARMEMAN_ADAPTERS = [
       {
         "recipeId": "comfyui-h3-video",
         "state": "owner-approved",
-        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "reason": "Owner approved for 480p at strength 0.2–1 (owner widened the range from 1, 2026-09-30). Generation completed; output accepted by owner.",
         "ownerApproval": {
           "approvedAt": "2026-09-25T10:02:59.432Z",
           "generation": "completed"
         },
         "evidence": "docs/development/h3-adapter-validation.md",
-        "minStrength": 1,
-        "maxStrength": 1
+        "minStrength": 0.2,
+        "maxStrength": 1,
+        "recommendedStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -261,13 +265,13 @@ export const HEARMEMAN_ADAPTERS = [
       {
         "recipeId": "comfyui-h3-video",
         "state": "owner-approved",
-        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "reason": "Owner approved for 480p at strength 0.2–1 (owner widened the range from 1, 2026-09-30). Generation completed; output accepted by owner.",
         "ownerApproval": {
           "approvedAt": "2026-09-25T10:02:59.432Z",
           "generation": "completed"
         },
         "evidence": "docs/development/h3-adapter-validation.md",
-        "minStrength": 1,
+        "minStrength": 0.2,
         "maxStrength": 1
       },
       {
@@ -309,14 +313,15 @@ export const HEARMEMAN_ADAPTERS = [
       {
         "recipeId": "comfyui-h3-video",
         "state": "owner-approved",
-        "reason": "Owner approved for 480p at strength 1. Generation was blocked by free GPU memory; further testing waived by owner.",
+        "reason": "Owner approved for 480p at strength 0.2–1 (owner widened the range from 1, 2026-09-30). Generation was blocked by free GPU memory; further testing waived by owner.",
         "ownerApproval": {
           "approvedAt": "2026-09-25T10:02:59.432Z",
           "generation": "memory-blocked"
         },
         "evidence": "docs/development/h3-adapter-validation.md",
-        "minStrength": 1,
-        "maxStrength": 1
+        "minStrength": 0.2,
+        "maxStrength": 1,
+        "recommendedStrength": 0.7
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -355,14 +360,15 @@ export const HEARMEMAN_ADAPTERS = [
       {
         "recipeId": "comfyui-h3-video",
         "state": "owner-approved",
-        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "reason": "Owner approved for 480p at strength 0.2–1 (owner widened the range from 1, 2026-09-30). Generation completed; output accepted by owner.",
         "ownerApproval": {
           "approvedAt": "2026-09-25T10:02:59.432Z",
           "generation": "completed"
         },
         "evidence": "docs/development/h3-adapter-validation.md",
-        "minStrength": 1,
-        "maxStrength": 1
+        "minStrength": 0.2,
+        "maxStrength": 1,
+        "recommendedStrength": 0.5
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -401,14 +407,15 @@ export const HEARMEMAN_ADAPTERS = [
       {
         "recipeId": "comfyui-h3-video",
         "state": "owner-approved",
-        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "reason": "Owner approved for 480p at strength 0.2–1 (owner widened the range from 1, 2026-09-30). Generation completed; output accepted by owner.",
         "ownerApproval": {
           "approvedAt": "2026-09-25T10:02:59.432Z",
           "generation": "completed"
         },
         "evidence": "docs/development/h3-adapter-validation.md",
-        "minStrength": 1,
-        "maxStrength": 1
+        "minStrength": 0.2,
+        "maxStrength": 1,
+        "recommendedStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -447,14 +454,15 @@ export const HEARMEMAN_ADAPTERS = [
       {
         "recipeId": "comfyui-h3-video",
         "state": "owner-approved",
-        "reason": "Owner approved for 480p at strength 1. Generation was blocked by free GPU memory; further testing waived by owner.",
+        "reason": "Owner approved for 480p at strength 0.2–1 (owner widened the range from 1, 2026-09-30). Generation was blocked by free GPU memory; further testing waived by owner.",
         "ownerApproval": {
           "approvedAt": "2026-09-25T10:02:59.432Z",
           "generation": "memory-blocked"
         },
         "evidence": "docs/development/h3-adapter-validation.md",
-        "minStrength": 1,
-        "maxStrength": 1
+        "minStrength": 0.2,
+        "maxStrength": 1,
+        "recommendedStrength": 0.5
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -493,14 +501,15 @@ export const HEARMEMAN_ADAPTERS = [
       {
         "recipeId": "comfyui-h3-video",
         "state": "owner-approved",
-        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "reason": "Owner approved for 480p at strength 0.2–1 (owner widened the range from 1, 2026-09-30). Generation completed; output accepted by owner.",
         "ownerApproval": {
           "approvedAt": "2026-09-25T10:02:59.432Z",
           "generation": "completed"
         },
         "evidence": "docs/development/h3-adapter-validation.md",
-        "minStrength": 1,
-        "maxStrength": 1
+        "minStrength": 0.2,
+        "maxStrength": 1,
+        "recommendedStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -539,13 +548,13 @@ export const HEARMEMAN_ADAPTERS = [
       {
         "recipeId": "comfyui-h3-video",
         "state": "owner-approved",
-        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "reason": "Owner approved for 480p at strength 0.2–1 (owner widened the range from 1, 2026-09-30). Generation completed; output accepted by owner.",
         "ownerApproval": {
           "approvedAt": "2026-09-25T10:02:59.432Z",
           "generation": "completed"
         },
         "evidence": "docs/development/h3-adapter-validation.md",
-        "minStrength": 1,
+        "minStrength": 0.2,
         "maxStrength": 1
       },
       {
@@ -585,14 +594,15 @@ export const HEARMEMAN_ADAPTERS = [
       {
         "recipeId": "comfyui-h3-video",
         "state": "owner-approved",
-        "reason": "Owner approved for 480p at strength 1. Generation not run; further testing waived by owner.",
+        "reason": "Owner approved for 480p at strength 0.2–1 (owner widened the range from 1, 2026-09-30). Generation not run; further testing waived by owner.",
         "ownerApproval": {
           "approvedAt": "2026-09-25T10:02:59.432Z",
           "generation": "not-run"
         },
         "evidence": "docs/development/h3-adapter-validation.md",
-        "minStrength": 1,
-        "maxStrength": 1
+        "minStrength": 0.2,
+        "maxStrength": 1,
+        "recommendedStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -631,13 +641,13 @@ export const HEARMEMAN_ADAPTERS = [
       {
         "recipeId": "comfyui-h3-video",
         "state": "owner-approved",
-        "reason": "Owner approved for 480p at strength 1. Generation not run; further testing waived by owner.",
+        "reason": "Owner approved for 480p at strength 0.2–1 (owner widened the range from 1, 2026-09-30). Generation not run; further testing waived by owner.",
         "ownerApproval": {
           "approvedAt": "2026-09-25T10:02:59.432Z",
           "generation": "not-run"
         },
         "evidence": "docs/development/h3-adapter-validation.md",
-        "minStrength": 1,
+        "minStrength": 0.2,
         "maxStrength": 1
       },
       {

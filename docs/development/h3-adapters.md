@@ -9,7 +9,11 @@ releases installable; it installs no weights by itself. The setting is stored ou
 
 The inventory covers all **14 safetensors artifacts (4,061,177,176 bytes)** in
 `Hearmeman/minimax-h3-loras` at `de4c3bc6122e68b88407c03dfecf521c803f098d`.
-All fourteen have **owner approval** for `comfyui-h3-video` at strength **1**. Ten generated
+All fourteen have **owner approval** for `comfyui-h3-video` at strength **0.2–1**. The approval was
+first given at exactly 1; the owner widened it on 30 September 2026, because the publisher's own
+guidance is a range (HMNSFW-AIO V2.5 at 0.5–0.9, V2 at 0.5 or below) and a pinned 1 made the
+combination below unusable. Where the publisher states a starting strength, the pairing records it
+as `recommendedStrength` and a new choice starts there; otherwise it starts at 1. Ten generated
 neutral videos whose outputs the owner accepted; two were blocked by free GPU memory and two
 were not run. Those outcomes remain distinct from complete GPU verification. The 768p and
 reference-video pairings remain unverified. See the [acceptance and evidence record](h3-adapter-validation.md).
@@ -102,17 +106,24 @@ decoded output, observed RAM/VRAM, strength bounds, reference transport where ap
 cancellation evidence for each pairing. Keep untested/incompatible pairings visible with a
 reason. Windows packaged startup and Linux CI are separate from source-level unit tests.
 
-### Manual bundle experiment
+### Bundles
 
-Choose **All MiniMax adult adapters · 14 adapters · Experimental** under the H3 480p model.
-It applies the fourteen pinned releases in catalogue order, at strength **1 each**, as a chain
-of model-only loaders. This is one UI preset, not a merged weight file. Expand **View 14 adapters
-and strengths** to inspect its contents; choose **None** to clear the entire bundle.
+Two presets sit under the H3 480p model. Each applies its pinned releases in catalogue order as a
+chain of model-only loaders — one UI preset, not a merged weight file. Expand **View N adapters
+and strengths** to see and tune the members; choose **None** to clear the whole bundle.
 
-The combination has not been GPU-tested. Individual owner approvals do not establish combined
-quality or memory fit. Its member order, hashes and strengths are frozen in the provider bundle
-catalogue. Missing members, different order/strength, additional adapters and other recipes are
-refused. Refreshing publisher inventory never silently changes bundle membership.
+- **Motion + anatomy** — hmpussy_v6_epoch30 and HMBreastsV2 underneath, HMNSFW-AIO-V2.5 on top,
+  0.7 each to start. This is the publisher's own recipe: "Pick one HMNSFW, one HMBreasts and one
+  HMPussy stills file", anatomy (stills-trained) underneath and the video-trained action adapter
+  on top. Use this one.
+- **All MiniMax adult adapters** — all fourteen, starting at 1 each. At 1 each it washed H3 out
+  to a flat grey-purple field on 30 September 2026 (frame colour spread ~3 on a 0–255 scale by
+  mid-clip, against ~40–60 for real footage). It stays for experiments at lower strengths.
+
+A bundle's members, their order and their hashes are frozen in the provider bundle catalogue;
+missing members, a different order, additional adapters and other recipes are refused, and a
+publisher refresh never silently changes membership. Its strengths are only the starting values:
+each member can be tuned within its own pairing's range, which admission checks per member.
 
 Every member must be installed and retain an eligible pairing, and adult mode must be on.
 Disabling or removing any member blocks the whole combination; the host rechecks all members and
