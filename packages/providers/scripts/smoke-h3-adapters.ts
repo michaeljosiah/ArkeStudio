@@ -95,7 +95,7 @@ for (const release of releases) {
     await verify(target, release!.source.sha256);
   };
   // The candidate injection is confined to this maintainer process. Neither the shipped
-  // catalogue nor the user's acknowledgement/compliance journal is changed by a test.
+  // catalogue nor the user's adapter decision journal is changed by a test.
   const client = new ComfyUiClient(boundedFetch, () => endpoint, async () => ({ ok: true }),
     undefined, gpu, async () => freemem() / 2 ** 20, () => "local", undefined, undefined, undefined, undefined,
     guard, adapterValidationCandidate);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AdultAcknowledgementSchema, AdapterSelectionsSchema, AdapterReleaseSchema, AdapterBundleSchema, adapterCombinationProblem, adapterPolicyProblem, adapterCompatibilityProblem } from "../src/adapters.js";
+import { AdultAcknowledgementSchema, AdapterSelectionsSchema, AdapterReleaseSchema, AdapterBundleSchema, AdapterDecisionSchema, AdapterActionSchema, AdapterLibraryStateSchema, adapterCombinationProblem, adapterPolicyProblem, adapterCompatibilityProblem } from "../src/adapters.js";
 
 const sha = "a".repeat(64);
 const release = AdapterReleaseSchema.parse({ id: "fixture", adapterId: "fixture", publisher: "Test", displayName: "Test adapter",
@@ -31,15 +31,30 @@ test("acknowledgement needs every explicit choice; callers cannot inject a verdi
   assert.equal(AdapterSelectionsSchema.safeParse([{ ...selected, strength: Infinity }]).success, false);
 });
 
-test("verified pairings require measured evidence; compatibility and compliance are independent", () => {
+test("verified pairings require measured evidence; compatibility and permission are independent", () => {
   assert.equal(AdapterReleaseSchema.safeParse({ ...release, compatibility: [{ recipeId: "recipe", state: "verified", reason: "Works" }] }).success, false);
   const on = { enabled: true, acknowledgedAt: "2026-09-24T00:00:00.000Z", acknowledgementVersion: 1 as const };
-  const allowed = { sha256: sha, decision: "allowed" as const, reason: "Reviewed", policyRevision: "1", assessedAt: on.acknowledgedAt };
-  assert.equal(adapterPolicyProblem(release, on, allowed, false, "2026-09-24T01:00:00.000Z"), null);
+  assert.equal(adapterPolicyProblem(release, on, null, false), null, "no assessment is awaited once adult content is on");
   assert.equal(adapterCompatibilityProblem(release, "recipe", 1), "Needs validation");
-  assert.match(adapterPolicyProblem(release, on, allowed, true, "2026-09-24T01:00:00.000Z")!, /Removed/);
-  assert.match(adapterPolicyProblem(release, { ...on, enabled: false }, allowed, false, "2026-09-24T01:00:00.000Z")!, /off/);
-  assert.match(adapterPolicyProblem(release, on, { ...allowed, expiresAt: "2026-09-24T00:30:00.000Z" }, false, "2026-09-24T01:00:00.000Z")!, /renewal/);
+  assert.match(adapterPolicyProblem(release, on, null, true)!, /Removed/);
+  assert.match(adapterPolicyProblem(release, { ...on, enabled: false }, null, false)!, /off/);
+  assert.match(adapterPolicyProblem(release, { ...on, acknowledgedAt: null }, null, false)!, /off/);
+  assert.match(adapterPolicyProblem({ ...release, availability: "withdrawn" }, on, null, false)!, /no longer/);
+  const user = { sha256: sha, decision: "disabled" as const, reason: "Disabled by the user.", policyRevision: "user", assessedAt: on.acknowledgedAt };
+  assert.match(adapterPolicyProblem(release, on, user, false)!, /Disabled by the user/);
+  assert.equal(adapterPolicyProblem(release, on, { ...user, decision: "removal-requested", reason: "Removal requested" }, false), "Removal requested");
+  assert.equal(adapterPolicyProblem(release, on, { ...user, sha256: "c".repeat(64) }, false), null, "a decision about other bytes neither blocks nor grants");
+});
+
+test("journal records from the retired compliance assessment still parse and grant nothing", () => {
+  const on = { enabled: true, acknowledgedAt: "2026-09-24T00:00:00.000Z", acknowledgementVersion: 1 as const };
+  const old = AdapterDecisionSchema.parse({ sha256: sha, decision: "allowed", reason: "Compliance assessment", policyRevision: "2026-09",
+    assessedAt: "2026-09-24T00:00:00.000Z", expiresAt: "2026-09-25T00:00:00.000Z" });
+  assert.equal(adapterPolicyProblem(release, on, old, false), null, "an expired allow is not a renewal problem any more");
+  assert.match(adapterPolicyProblem(release, { ...on, enabled: false }, old, false)!, /off/, "an old allow never overrides the acknowledgement");
+  assert.equal(AdapterActionSchema.safeParse({ action: "scan" }).success, false);
+  assert.equal(AdapterLibraryStateSchema.safeParse({ revision: 0, adultContent: { ...on, enabled: false, acknowledgedAt: null },
+    scannerAvailable: false, entries: [], error: null }).success, false);
 });
 
 test("owner acceptance records actual coverage, bounds execution and leaves policy checks independent", () => {
@@ -56,7 +71,7 @@ test("owner acceptance records actual coverage, bounds execution and leaves poli
       assert.equal(AdapterReleaseSchema.safeParse({ ...release, compatibility: [{ ...pair, [missing]: undefined }] }).success, false);
     }
     const on = { enabled: true, acknowledgedAt: "2026-09-24T00:00:00.000Z", acknowledgementVersion: 1 as const };
-    assert.match(adapterPolicyProblem(approved, on, null, false, "2026-09-25T01:00:00.000Z")!, /Awaiting compliance/);
-    assert.match(adapterPolicyProblem(approved, { ...on, enabled: false }, null, false, "2026-09-25T01:00:00.000Z")!, /off/);
+    assert.equal(adapterPolicyProblem(approved, on, null, false), null);
+    assert.match(adapterPolicyProblem(approved, { ...on, enabled: false }, null, false)!, /off/);
   }
 });

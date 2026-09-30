@@ -6,7 +6,7 @@ import { z } from "zod";
 import {
   ADULT_CONTENT_OFF, AdultAcknowledgementSchema, AdultContentSchema, AdapterDecisionSchema,
   AdapterSelectionsSchema, adapterCombinationProblem, adapterCompatibilityProblem, adapterPolicyProblem,
-  type AdapterAction, type AdapterBundle, type AdapterDecision, type AdapterLibraryState, type AdapterRelease,
+  type AdapterAction, type AdapterBundle, type AdapterLibraryState, type AdapterRelease,
 } from "@arke-studio/contracts";
 import { appendFlushed } from "../flushed-append.js";
 import { serializeFileMutation } from "../world/atomic.js";
@@ -21,23 +21,12 @@ const RecordSchema = z.object({
 type RecordState = z.infer<typeof RecordSchema>;
 const initial = (): RecordState => ({ revision: 0, adultContent: { ...ADULT_CONTENT_OFF }, decisions: {}, removed: [], disabled: [], owned: {}, reason: "Initial state" });
 
-export interface AdapterComplianceClient {
-  assess(releases: readonly AdapterRelease[], signal: AbortSignal): Promise<readonly AdapterDecision[]>;
-}
-async function assessWithSignal(client: AdapterComplianceClient, releases: readonly AdapterRelease[], signal: AbortSignal): Promise<readonly AdapterDecision[]> {
-  signal.throwIfAborted();
-  let onAbort: () => void = () => {};
-  const interrupted = new Promise<never>((_, reject) => { onAbort = () => reject(new Error("Compliance assessment was interrupted.")); signal.addEventListener("abort", onAbort, { once: true }); });
-  try { return await Promise.race([client.assess(releases, signal), interrupted]); }
-  finally { signal.removeEventListener("abort", onAbort); }
-}
 export interface AdapterLibraryOptions {
   appRoot: string;
   releases: readonly AdapterRelease[];
   bundles?: readonly AdapterBundle[];
   modelsDir(): string | null;
   local(): boolean;
-  scanner?: AdapterComplianceClient;
   install(componentIds: string[]): Promise<void>;
   active(sha256: string): boolean;
   shared?(sha256: string): boolean;
@@ -58,7 +47,13 @@ export function adapterSetupEntries(releases: readonly AdapterRelease[]): Catalo
   }));
 }
 
-/** App/device authority and audit live outside worlds. No renderer can supply a verdict. */
+/**
+ * App/device authority and audit live outside worlds. No renderer can supply a verdict. There is
+ * no compliance assessment (removed at the owner's direction, 2026-09-30): the adult
+ * acknowledgement, the exact bytes, the recipe pairing and the user's own Disable and Remove
+ * decide. A journal written while assessments existed still reads; its "allowed" rows grant
+ * nothing and its blocking rows still block.
+ */
 export class AdapterLibrary {
   private readonly journal: string;
   private readonly closed = new AbortController();
@@ -109,7 +104,7 @@ export class AdapterLibrary {
     if (state.removed.includes(release.source.sha256)) return "Removed from this studio.";
     if (state.disabled.includes(release.source.sha256)) return "Disabled by the user.";
     return adapterPolicyProblem(release, state.adultContent, state.decisions[release.source.sha256] ?? null,
-      state.removed.includes(release.source.sha256), new Date().toISOString());
+      state.removed.includes(release.source.sha256));
   }
   async snapshot(): Promise<AdapterLibraryState> {
     try {
@@ -119,9 +114,9 @@ export class AdapterLibrary {
         installed: await this.present(release), owned: await this.owns(release, state), reason: this.policy(release, state),
       })));
       const bundles = state.adultContent.enabled ? structuredClone([...(this.opts.bundles ?? [])]) : [];
-      return { revision: state.revision, adultContent: state.adultContent, scannerAvailable: !!this.opts.scanner, entries, bundles, error: this.error };
+      return { revision: state.revision, adultContent: state.adultContent, entries, bundles, error: this.error };
     } catch {
-      return { revision: 0, adultContent: { ...ADULT_CONTENT_OFF }, scannerAvailable: !!this.opts.scanner, entries: [], error: "Adapter history could not be read. Access is disabled until it is repaired." };
+      return { revision: 0, adultContent: { ...ADULT_CONTENT_OFF }, entries: [], error: "Adapter history could not be read. Access is disabled until it is repaired." };
     }
   }
   private fileOrNull(release: AdapterRelease): string | null { try { return this.file(release); } catch { return null; } }
@@ -154,29 +149,6 @@ export class AdapterLibrary {
       } else if (action.action === "disable-content") {
         await this.mutate("Adult access disabled", state => { state.adultContent.enabled = false; });
         await this.opts.revoke();
-      } else if (action.action === "scan") {
-        // Retire old approvals before asking the agent. Timeout, malformed output or a
-        // missing response cannot leave a previous allow decision silently authoritative.
-        await this.mutate("Compliance assessment pending", state => { state.decisions = {}; });
-        const assessmentRevision = (await this.read()).revision;
-        await this.opts.revoke();
-        await this.refresh();
-        if (!this.opts.scanner) throw new Error("No compliance agent is connected.");
-        const signal = AbortSignal.any([this.closed.signal, AbortSignal.timeout(30_000)]);
-        const decisions = z.array(AdapterDecisionSchema).parse(await assessWithSignal(this.opts.scanner, this.opts.releases, signal));
-        signal.throwIfAborted();
-        const known = new Set(this.opts.releases.map(row => row.source.sha256));
-        if (new Set(decisions.map(row => row.sha256)).size !== decisions.length || decisions.some(row => !known.has(row.sha256) || row.assessedAt > new Date().toISOString())) throw new Error("The compliance agent returned invalid artifact decisions.");
-        await this.mutate("Compliance assessment", state => {
-          if (state.revision !== assessmentRevision) throw new Error("Adapter settings changed during assessment. Run assessment again.");
-          state.decisions = Object.fromEntries(decisions.map(row => [row.sha256, row]));
-          for (const row of decisions) if (row.decision === "removal-requested" && !state.removed.includes(row.sha256)) state.removed.push(row.sha256);
-        });
-        const state = await this.read();
-        for (const release of this.opts.releases) if (this.policy(release, state)) await this.opts.revoke(release.source.sha256);
-        for (const release of this.opts.releases) if (state.decisions[release.source.sha256]?.decision === "removal-requested" && state.owned[release.source.sha256]) {
-          await this.removeOwned(release).catch(() => { this.error = "An adapter was disabled but its file could not be safely removed. It was kept."; });
-        }
       } else if (action.action === "install") {
         const state = await this.read();
         const releases = [...new Set(action.releaseIds)].map(id => this.release(id));

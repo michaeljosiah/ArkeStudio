@@ -2,8 +2,8 @@
 
 Issue #1248 adds the catalogue and control boundary from SPEC-021 and SPEC-033.
 Settings → Content & safety owns the device's explicit adult-content acknowledgement.
-Its three required choices default to off. Enabling access reveals the catalogue; it neither
-approves an artifact nor installs weights. The setting is stored outside worlds.
+Its three required choices default to off. Enabling access reveals the catalogue and makes its
+releases installable; it installs no weights by itself. The setting is stored outside worlds.
 
 ## Current status
 
@@ -15,10 +15,12 @@ were not run. Those outcomes remain distinct from complete GPU verification. The
 reference-video pairings remain unverified. See the [acceptance and evidence record](h3-adapter-validation.md).
 Other Hearmeman repositories, H3's existing acceleration adapters and Gemma remain separate.
 
-**The default desktop composition has no connected compliance agent.** Supply the user's real
-interface through `CoordinatorOptions.adapterCompliance`. Until then assessments remain pending
-and installation/dispatch are refused. Catalogue-owner approval satisfies only compatibility;
-it does not grant a compliance verdict, enable adult content, or install files.
+**There is no compliance assessment.** An earlier build gated every adapter on a verdict from a
+host-supplied compliance agent. No host ever supplied one, so every row read "Awaiting compliance
+assessment" and nothing could be installed or dispatched. The owner removed the gate on
+2026-09-30. An adapter is usable once adult content is acknowledged, its exact bytes are
+installed and its recipe pairing is verified or owner-approved. Withdrawn releases and the
+user's own Disable and Remove still block.
 
 ## Inventory and immutable identity
 
@@ -33,29 +35,21 @@ and supersession links. Saved choices are never replaced. Decisions and removal 
 keyed by digest, so renaming a file cannot evade them. The pinned README is the recorded license
 source; its label is not a legal or compatibility approval.
 
-## Compliance interface and persistence
+## User decisions and persistence
 
-The coordinator exports `AdapterComplianceClient`, implemented by the trusted host:
+The flushed, append-only `<appRoot>/adapters/decisions.jsonl` records full revisioned states:
+acknowledgements, user decisions, removal tombstones and ownership receipts. Disable and Remove
+write a `disabled` decision keyed by digest, revoke queued and active work, and block install and
+dispatch; Remove also leaves a tombstone. Request fresh review clears both for that digest.
+Renderer commands cannot submit verdicts, paths, URLs or nodes. A damaged journal fails closed
+without being overwritten.
 
-```ts
-interface AdapterComplianceClient {
-  assess(releases: readonly AdapterRelease[], signal: AbortSignal): Promise<readonly AdapterDecision[]>;
-}
-```
+Journals written while the assessment existed still read, because a line that fails to parse
+fails the whole journal closed. The decision schema therefore keeps `allowed`, `policyRevision`
+and `expiresAt`. An old `allowed` row grants nothing and an expired one blocks nothing; an old
+`disabled` or `removal-requested` row still blocks until the user requests a fresh review.
 
-Each decision supplies `sha256`, `decision` (`allowed`, `disabled`, `removal-requested`), `reason`,
-`policyRevision`, `assessedAt`, and optional `expiresAt`. Return at most one decision per known
-digest. Duplicates, unknown hashes, future assessments and invalid expiry windows fail validation;
-missing entries stay pending. Renderer commands cannot submit verdicts, paths, URLs or nodes.
-
-A scan retires approvals before contacting the agent, has a 30-second deadline, and cannot
-overwrite a concurrent user decision. Failure never restores an old approval. The flushed,
-append-only `<appRoot>/adapters/decisions.jsonl` records full revisioned states: acknowledgements,
-decisions, user overrides, removal tombstones and ownership receipts. A damaged journal fails
-closed without being overwritten. Refresh/scan never undo a user override; Request fresh review
-explicitly clears it and leaves assessment pending again.
-
-Removal verdicts revoke work and attempt to delete only owned, idle, unchanged files. Ownership
+Remove can attempt to delete only owned, idle, unchanged files. Ownership
 requires a successful verified setup transfer and matching filesystem identity, not discovery.
 User files, active files and files outside the selected model folder are kept, with a reason.
 
@@ -120,11 +114,10 @@ quality or memory fit. Its member order, hashes and strengths are frozen in the 
 catalogue. Missing members, different order/strength, additional adapters and other recipes are
 refused. Refreshing publisher inventory never silently changes bundle membership.
 
-Every member must be installed, retain an eligible pairing and have a current allowed compliance
-decision. Adult mode must be on. Disabling or revoking any member blocks the whole combination;
-the host rechecks all members and exact files before submission. The default host's pending
-compliance connection therefore still blocks dispatch. No GPU jobs are started by selecting a
-bundle, and this change does not resume the stopped GPU batch or the deferred speed comparison.
+Every member must be installed and retain an eligible pairing, and adult mode must be on.
+Disabling or removing any member blocks the whole combination; the host rechecks all members and
+exact files before submission. No GPU jobs are started by selecting a bundle, and this change
+does not resume the stopped GPU batch or the deferred speed comparison.
 
 ### Maintainer GPU checks
 
@@ -157,8 +150,8 @@ Production hosts retain `recipeWithAdapters`, which refuses unverified pairings 
 explicitly recorded owner approvals only within their declared scope. The candidate
 builder shares the same catalogue-bound graph construction; the smoke's host guard verifies its
 exact release/hash choice. It never edits the shipped catalogue, content acknowledgement or
-compliance journal. Candidate execution therefore creates evidence without first fabricating a
-verified catalogue record or a compliance-agent verdict.
+decision journal. Candidate execution therefore creates evidence without first fabricating a
+verified catalogue record.
 
 Pinned base hashes are cached in the smoke's report directory against file identity, size and
 mtime for repeated tests; remove `verified-files.json` to force rehashing. The smoke places a

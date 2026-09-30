@@ -32,9 +32,10 @@ performance, reference-video compatibility or superiority over base H3. Owner ac
 further testing for the stated catalogue scope; it does not fabricate those measurements.
 
 Owner-approved pairings retain the base recipe's hardware and engine guards. Adult-mode
-acknowledgements, exact-byte checks, installation state, compliance decisions and revocation
-remain independent. The default host still has no connected compliance agent, so catalogue
-approval alone does not make installation or dispatch available.
+acknowledgement, exact-byte checks, installation state, the user's Disable and Remove, and
+revocation remain independent. The compliance assessment that once also gated them was removed
+at the owner's direction on 2026-09-30; with adult content on, an owner-approved pairing is
+installable and dispatchable.
 
 The local review gallery is `.dev/h3-adapter-validation/review/index.html`; its media and raw
 reports are local artifacts, not repository contents. The checked-in hashes identify the outputs

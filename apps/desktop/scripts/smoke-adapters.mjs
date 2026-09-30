@@ -82,8 +82,10 @@ async function electronMain() {
   await until("document.querySelectorAll('article.fy-fact').length === 14");
   assert.equal(await js("document.querySelector('[data-screen=settings-adapters]').scrollWidth <= document.querySelector('[data-screen=settings-adapters]').clientWidth + 2"), true, "catalogue fits the settings pane");
   assert.ok(await js("document.querySelector('article.fy-fact').getBoundingClientRect().width > 300"), "rows use the pane width");
-  assert.ok(await js("document.body.innerText.includes('No compliance agent is connected')"));
-  assert.equal(await js("[...document.querySelectorAll('article.fy-fact button')].filter(b => b.textContent === 'Install').every(b => b.disabled)"), true);
+  // No compliance assessment gates a row: acknowledgement alone makes the catalogue installable.
+  // The buttons are only read, never pressed -- this smoke must not download.
+  assert.equal(await js("document.body.innerText.includes('compliance')"), false);
+  assert.equal(await js("[...document.querySelectorAll('article.fy-fact button')].filter(b => b.textContent === 'Install').every(b => !b.disabled)"), true);
   await shot("catalogue");
   window.webContents.reload();
   await until("document.querySelectorAll('article.fy-fact').length === 14");

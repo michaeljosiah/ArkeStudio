@@ -144,7 +144,7 @@ export const REMOTE_COMMAND_ACCESS = {
 
 export type RemoteHostCommand = { [K in keyof typeof REMOTE_COMMAND_ACCESS]: typeof REMOTE_COMMAND_ACCESS[K] extends "host" | "payload" ? K : never }[keyof typeof REMOTE_COMMAND_ACCESS];
 
-const adapterAccess = { refresh: "studio", enable: "studio", "disable-content": "studio", scan: "studio",
+const adapterAccess = { refresh: "studio", enable: "studio", "disable-content": "studio",
   install: "host", disable: "studio", restore: "studio", remove: "payload" } as const satisfies Record<AdapterAction["action"], "host" | "payload" | "studio">;
 
 /** Recorded bytes and existing world references never open the PC file chooser. */
