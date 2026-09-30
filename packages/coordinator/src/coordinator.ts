@@ -1070,6 +1070,10 @@ export class Coordinator {
   private lastRuntimeStatus = "";
   /** An older readiness walk must not overwrite the result of a newer hardware measurement. */
   private comfyUiRefreshRevision = 0;
+  /** The engine locality and model folder the adapter rows were last read against. Null: never. */
+  private adapterEngineKey: string | null = null;
+  /** Adapter re-reads run in order, so a slow read against the old engine cannot land last. */
+  private adapterEngineRefresh: Promise<void> = Promise.resolve();
   /** A local-runtime pass already in flight. A probe that stalls must not stack up behind itself. */
   private localRuntimeProbeInFlight = false;
   /** The local models last handed to the harness, so an unchanged poll rewrites nothing (issue 1247). Null: never published. */
@@ -5366,6 +5370,24 @@ export class Coordinator {
     // together (R-13). Nothing is re-probed — a machine that was never measured has no verdict
     // to correct, and `emitLocalRuntimeStatus` returns without emitting.
     this.emitLocalRuntimeStatus();
+    await this.refreshAdaptersForEngine();
+  }
+
+  /**
+   * Whether an adapter file counts as installed turns on the engine being local and on its model
+   * folder, and neither is known when start() first reads the library: detection lands later, in
+   * the background. Without this every adapter reads "Not installed" until someone presses
+   * Refresh status. Keyed on those two facts so an ordinary engine publish costs nothing.
+   */
+  private refreshAdaptersForEngine(): Promise<void> {
+    const service = this.opts.comfyui?.service;
+    if (!this.adapterLibrary || !service) return Promise.resolve();
+    const key = JSON.stringify([service.engineIdentity()?.locality === "local", service.modelsDir()]);
+    if (key === this.adapterEngineKey) return this.adapterEngineRefresh;
+    this.adapterEngineKey = key;
+    const library = this.adapterLibrary;
+    this.adapterEngineRefresh = this.adapterEngineRefresh.then(() => library.refresh()).catch(() => {});
+    return this.adapterEngineRefresh;
   }
 
   private retireAndReleaseComfyUi(): Promise<void> {
