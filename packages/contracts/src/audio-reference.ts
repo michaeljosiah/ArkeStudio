@@ -109,7 +109,7 @@ export function characterAudioRoute(model: { provider: string; id: string }, tas
   if (!(["generate", "keyframe-sequence"].includes(taskMode)) || (!local && (model.provider !== "fal" ||
     !["seedance-2.0", "seedance-2.0-fast"].includes(model.id)))) return null;
   return { endpoint: local ? model.id : model.id === "seedance-2.0-fast" ? "bytedance/seedance-2.0/fast/reference-to-video" : "bytedance/seedance-2.0/reference-to-video", field: local ? "ref_audios" : "audio_urls", maxFiles: 3,
-    local, requiresImages: !local, supportsPerformanceSync: !local, maxFileDurationSec: local ? 5.2 : 15,
+    local, requiresImages: !local, supportsPerformanceSync: !local, maxFileDurationSec: 15,
     maxBytesPerFile: 15_000_000, maxTotalDurationSec: 15, maxImages: 9, maxVideos: 3, maxCombinedReferences: local ? 15 : 12,
     formats: ["audio/wav", "audio/mpeg"], incrementalInputMicroUsd: 0, providerDurationMode: "requested",
     effects: { wording: "prompt-guided", timing: "not-preserved", identity: "guidance", cadence: "guidance",
