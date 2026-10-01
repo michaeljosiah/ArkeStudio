@@ -5922,9 +5922,10 @@ export class Coordinator {
     if (!genesisDecisionHeld && (msg.kind === "genesis-propose-world" || msg.kind === "genesis-import-resolve" || msg.kind === "genesis-voice-generate" || msg.kind === "genesis-voice-decide" || msg.kind === "genesis-image-generate" || msg.kind === "genesis-image-decide" || msg.kind === "generate-look-preview" || msg.kind === "genesis-discard" || msg.kind === "genesis-chat" || msg.kind === "genesis-decide" || msg.kind === "genesis-review" || msg.kind === "begin-founding-build" || msg.kind === "genesis-attach" || msg.kind === "genesis-attach-files" || msg.kind === "create-world") && msg.genesisId) {
       return serializeFileMutation(`founding-decisions:${msg.genesisId}`, () => this.handleClientMessage(msg, false, false, true));
     }
-    // Delete joins Accept and Not this on one key per take, so a filing and a delete pressed
-    // together cannot both act on the same files (design turn 180).
-    if (!benchTakeActionHeld && (msg.kind === "bench-accept" || msg.kind === "bench-discard" || msg.kind === "bench-delete")) {
+    // Delete joins Accept, Keep and Not this on one key per take, so a filing and a delete
+    // pressed together cannot both act on the same files (design turn 180): Keep copying from a
+    // folder Delete is removing would file an artifact whose take is gone.
+    if (!benchTakeActionHeld && (msg.kind === "bench-accept" || msg.kind === "bench-keep" || msg.kind === "bench-discard" || msg.kind === "bench-delete")) {
       const key = `${msg.worldId}/${msg.sessionId}/${msg.takeId}`;
       return this.serialiseBenchTakeAction(key, () => this.handleClientMessage(msg, true));
     }
@@ -12300,7 +12301,12 @@ export class Coordinator {
           answer([], refusal.reason);
           return;
         }
-        answer(await benchTakeFiles(store.dir, bench.session.id, take.id, take.media?.file));
+        // Always answered: a confirm left waiting holds Delete disabled until another take is chosen.
+        try {
+          answer(await benchTakeFiles(store.dir, bench.session.id, take.id, take.media?.file));
+        } catch (error) {
+          answer([], describeCoordinatorError(error));
+        }
         return;
       }
       case "bench-delete": {

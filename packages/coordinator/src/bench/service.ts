@@ -1315,7 +1315,11 @@ export async function deleteBenchTake(
   const refusal = benchDeleteRefusal(take);
   if (refusal !== null) return { deleted: false, reason: refusal.reason };
   await opened.store.append({ type: "take-deleted", takeId: take.id }, { at: options.at, requestId: options.requestId });
-  await removeBenchTakeMedia(worldDir, opened.session.id, take.id);
+  // Once the record has landed the take IS deleted, whatever the disk says next. A folder Windows
+  // will not let go of yet — the player still streaming the clip — is finished by the sweep on
+  // the next open, rather than reported as a delete that did not happen while the take has
+  // already left the wall.
+  await removeBenchTakeMedia(worldDir, opened.session.id, take.id).catch(() => {});
   return { deleted: true };
 }
 
