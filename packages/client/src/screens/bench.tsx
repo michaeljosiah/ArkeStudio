@@ -2453,7 +2453,7 @@ function BenchWorkspace({
                 }
                 upscale={
                   // The world bench only: a production session files a take onto its shot, and an
-                  // upscale has no filing of its own yet (design 178; see SPEC-021 R-33).
+                  // upscale has no filing of its own yet (SPEC-021 R-31).
                   subject === undefined && upscaler !== null && benchUpscalePlan(selected) !== null ? (
                     <UpscaleTool worldId={worldId} sessionId={session.id} take={selected} model={upscaler} />
                   ) : undefined

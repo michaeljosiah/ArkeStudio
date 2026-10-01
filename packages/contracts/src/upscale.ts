@@ -3,7 +3,7 @@ import { IsoDateTimeSchema } from "./ids.js";
 import type { ManifestModel } from "./manifest.js";
 
 /**
- * Upscale a finished video take to 1080p (design turn 178).
+ * Upscale a finished video take to 1080p (design turn 178; SPEC-021 R-31..R-35).
  *
  * On the reference RTX 3080, H3 makes 480p up to 15 s and 768p up to 7 s, and asking it for 1080p
  * directly ran past seventy minutes without finishing. A SeedVR2 pass over a finished take made a

@@ -145,7 +145,7 @@ function clipScale(job: Job): number | null {
 }
 
 /**
- * The measured rate beside Upscale (design turn 178): seconds of run per second of video made,
+ * The measured rate beside Upscale (design turn 178; SPEC-021 R-35): seconds of run per second of video made,
  * from this machine's own completed upscales, the way the sampling clock measures a preset.
  *
  * One figure rather than steps and a remainder, because an upscale has one sampler step and its

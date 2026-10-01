@@ -13,7 +13,7 @@ const SOURCE = "https://huggingface.co/Comfy-Org/SeedVR2/resolve/df48879708206a4
 const OUTPUT_PREFIX = "arke-upscale";
 
 /**
- * Local · SeedVR2 — a finished video take made into 1080p (design turn 178).
+ * Local · SeedVR2 — a finished video take made into 1080p (design turn 178; SPEC-021 R-33).
  *
  * SeedVR2 3B (Apache-2.0) is a one-step diffusion restorer: the source is scaled to cover the
  * frame and centre-cropped (node 3, the same `ImageScale` H3 uses to fit a photo to its bucket),
