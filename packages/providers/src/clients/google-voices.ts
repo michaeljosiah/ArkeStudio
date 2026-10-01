@@ -1,6 +1,6 @@
 import type { DesignedVoice, VoiceDesignInput, VoiceDesignResult } from "../types.js";
 import { ProviderRequestRejectedError } from "../types.js";
-import { GEMINI_TTS_MODELS, geminiSpeechUsage, geminiWav } from "./google.js";
+import { GEMINI_TTS_MODELS, bareModel, geminiSpeechUsage, geminiWav } from "./google.js";
 
 // SPEC-049 R-14/R-19. Reviewed 2026-09-28 against /api/voices and /docs/voice-design.
 // Uses published model rates as an explicitly labelled estimate (SPEC-049 R-19).
@@ -35,7 +35,8 @@ export function googleVoiceDesignBody(input: VoiceDesignInput): object {
 }
 
 function metadata(value: unknown): DesignedVoice | undefined {
-  const voice = record(value);
+  const raw = record(value);
+  const voice: Record<string, unknown> = { ...raw, model: bareModel(raw.model) };
   if (!isGoogleVoiceId(voice.id) || voice.type !== "prompted" || voice.key !== undefined
     || !GEMINI_TTS_MODELS.some(model => model === voice.model)
     || !text(voice.display_name, 1000) || !text(record(voice.prompted).input, 16_000)

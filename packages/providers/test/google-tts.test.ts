@@ -93,6 +93,17 @@ it("accepts witnessed stateless interactions without a server id and keeps their
   await assert.rejects(new GoogleClient(async () => Response.json({ ...body, object: "unexpected" })).submit("test", request), /outcome is uncertain/);
 });
 
+it("reads a models/ resource name as the pinned model, and nothing else", async () => {
+  const named = await new GoogleClient(async () => Response.json({ ...responseBody(), model: `models/${request.model}` })).submit("test", request);
+  assert.equal(named.error, undefined);
+  assert.deepEqual(named.artifacts?.[0]?.data, wav());
+  for (const model of [`tunedModels/${request.model}`, "models/gemini-invented-tts"]) {
+    const other = await new GoogleClient(async () => Response.json({ ...responseBody(), model })).submit("test", request);
+    assert.ok(other.error, model);
+    assert.equal(other.artifacts, undefined, model);
+  }
+});
+
 it("keeps reported usage on incomplete, missing, duplicate and malformed audio without returning an artifact", async () => {
   const complete = responseBody();
   for (const body of [
