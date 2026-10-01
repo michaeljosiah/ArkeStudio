@@ -146,6 +146,36 @@ it("recovers from a stalled session probe without refreshing the page", async t 
   } finally { await act(async () => root.unmount()); element.remove(); }
 });
 
+it("once in, a failed check keeps the app; only a revocation takes it out", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  let answer: "in" | "gone" | "error" | "revoked" = "in";
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (answer === "gone") throw new TypeError("Failed to fetch");
+    if (answer === "error") return new Response(null, { status: 502 });
+    if (answer === "in") return new Response(null, { status: 204 });
+    return new Response(null, { status: String(input) === "/remote/session" ? 401 : 410 });
+  }) as typeof fetch;
+  const element = document.createElement("div"); document.body.append(element);
+  const root = createRoot(element);
+  try {
+    await act(async () => { root.render(<MemoryRouter><RemoteEntry><div>Private world</div></RemoteEntry></MemoryRouter>); });
+    assert.ok(element.textContent?.includes("Private world"));
+    // Folding the phone hides and shows the page; the check on its return meets no network.
+    answer = "gone";
+    await act(async () => { document.dispatchEvent(new window.Event("visibilitychange")); });
+    await act(async () => { t.mock.timers.tick(3000); });
+    assert.ok(element.textContent?.includes("Private world"), "a check that cannot reach the studio leaves the app up");
+    assert.ok(!element.textContent?.includes("Not answering"));
+    answer = "error";
+    await act(async () => { t.mock.timers.tick(3000); });
+    assert.ok(element.textContent?.includes("Private world"), "nor does a proxy error");
+    answer = "revoked";
+    await act(async () => { t.mock.timers.tick(3000); });
+    assert.ok(element.textContent?.includes("Pair this device"), "a revoked device is taken back to pairing");
+    assert.ok(!element.textContent?.includes("Private world"));
+  } finally { await act(async () => root.unmount()); element.remove(); }
+});
+
 it("keeps a one-use pairing submission alive beyond the session probe deadline", async t => {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   let submitted: RequestInit | undefined;

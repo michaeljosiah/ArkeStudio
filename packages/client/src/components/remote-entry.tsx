@@ -54,6 +54,12 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
   const asked = useRef(false);
   const posting = useRef(false);
   const revision = useRef(0);
+  // Once in, the check keeps running to renew the cookie and to notice a revocation, but a probe
+  // that fails is not news: folding a Fold hides and shows the page, the check on its return met
+  // the network mid-change, and the gate swapped the whole app for "Not answering". The app's own
+  // socket says when the studio is really gone; only an answer that this device is no longer
+  // paired takes it back out.
+  const entered = useRef(false);
 
   useEffect(() => { void deviceModel().then(model => { if (model) setName(model); }); }, []);
 
@@ -66,17 +72,23 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
       checking = true;
       const checkedRevision = revision.current;
       const current = () => active && checkedRevision === revision.current;
+      const unanswered = () => { if (current() && !entered.current) setState("offline"); };
       try {
         try { await prepareRemoteSession(); }
-        catch (error) { if (current()) setState(error instanceof RemoteBrowserError ? "browser" : "offline"); return; }
+        catch (error) {
+          if (error instanceof RemoteBrowserError) { if (current() && !entered.current) setState("browser"); }
+          else unanswered();
+          return;
+        }
         if (!current()) return;
         const session = await remoteFetch("/remote/session", { signal: controller.signal });
         if (!current()) return;
-        if (session.status === 204) { initStore(); setState("ready"); }
+        if (session.status === 204) { entered.current = true; initStore(); setState("ready"); }
         else if (session.status === 401) {
           const pairing = await remoteFetch("/remote/pair", { signal: controller.signal });
           if (!current()) return;
           if (pairing.status === 204) {
+            entered.current = true;
             initStore();
             setState("ready");
             // Just approved: they did the work, so this once they go straight in (158i).
@@ -86,13 +98,14 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
             asked.current = true;
             setState("pending");
           }
-          else {
+          else if (pairing.status === 410) {
             if (asked.current) setError({ title: "Not approved", line: "Get a new code on your PC." });
             asked.current = false;
+            entered.current = false;
             setState("pair");
-          }
-        } else setState("offline");
-      } catch { if (current()) setState("offline"); }
+          } else unanswered();
+        } else unanswered();
+      } catch { unanswered(); }
       finally { checking = false; }
     };
     void check();
