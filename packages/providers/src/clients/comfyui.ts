@@ -6,6 +6,7 @@ import {
   callerParamNames,
   comfyUiRecipeById,
   comfyUiRecipeIdentity,
+  comfyUiRouteRecipe,
   IMAGE_DIMENSIONS,
   SAMPLING_PARAMS,
   substituteRecipeParams,
@@ -175,6 +176,10 @@ const INTERNAL_PARAMS = new Set([
   "text",
   /** The job's frozen sampling (design turn 177); unpacked into the recipe's own params in valuesFor. */
   "sampling",
+  /** Which graph of the recipe runs (design turn 179); read in submit, before anything else. */
+  "recipeRoute",
+  /** The bytes each reference picture was when the take was reviewed; checked before upload. */
+  "referenceHashes",
 ]);
 
 interface QueueEntryish {
@@ -479,6 +484,31 @@ export class ComfyUiClient implements ProviderClient {
     return values;
   }
 
+  /**
+   * What a reference take must carry before a byte leaves (design turn 179): at least one
+   * picture, no keyframe beside it, and each picture still the bytes it was when reviewed.
+   *
+   * The hash check is the reason a re-run can be trusted. The take records the hash each picture
+   * had; a file replaced under the same name since then would otherwise generate a different
+   * person under the old take's prompt, and nothing on screen would say so. Prefix-compared,
+   * because older artifact sidecars record sixteen hex digits rather than sixty-four.
+   */
+  private checkReferenceRoute(recipe: ComfyUiRecipe, request: SubmitRequest, prepared: NonNullable<SubmitRequest["imageReferences"]>): void {
+    const fail = (why: string): never => { throw new ProviderRequestRejectedError(`comfyui: ${recipe.displayName} ${why}`); };
+    const mode = request.params["taskMode"];
+    if (mode !== undefined && mode !== "generate") fail("cannot take a keyframe and reference pictures in one take");
+    if (prepared.length === 0) fail("reference route needs at least one picture");
+    const hashes = request.params["referenceHashes"];
+    if (!Array.isArray(hashes) || hashes.length !== prepared.length) fail("was not told what its reference pictures were reviewed as");
+    for (const [index, picture] of prepared.entries()) {
+      const recorded = String((hashes as unknown[])[index] ?? "").replace(/^sha256:/, "");
+      const actual = createHash("sha256").update(picture.data).digest("hex");
+      if (!/^[0-9a-f]{8,64}$/.test(recorded) || !actual.startsWith(recorded)) {
+        fail(`reference picture ${index + 1} has changed since it was reviewed`);
+      }
+    }
+  }
+
   /** Neutral params → this recipe's own values, refusing anything the recipe does not declare. */
   private valuesFor(recipe: ComfyUiRecipe, request: SubmitRequest): RecipeParamValues {
     const params = request.params;
@@ -758,8 +788,16 @@ export class ComfyUiClient implements ProviderClient {
     if (request.capability !== baseRecipe.capability) {
       throw new ProviderRequestRejectedError(`comfyui: ${baseRecipe.displayName} does not support ${request.capability}`);
     }
-    const recipe = this.composeAdapterRecipe(baseRecipe, request.params.adapters);
-    if (recipe !== baseRecipe) {
+    // The route first, then adapters on top of it: a reference take's adapters chain onto the
+    // reference graph's node 3, exactly where they chain on the text-to-video graph.
+    let routedRecipe: ComfyUiRecipe;
+    try {
+      routedRecipe = comfyUiRouteRecipe(baseRecipe, request.params.recipeRoute);
+    } catch (error) {
+      throw new ProviderRequestRejectedError(error instanceof Error ? error.message : "comfyui: unknown recipe route");
+    }
+    const recipe = this.composeAdapterRecipe(routedRecipe, request.params.adapters);
+    if (recipe !== routedRecipe) {
       if (!this.adapterGuard) throw new ProviderRequestRejectedError("Adapter authorization is unavailable in this host.");
       await this.adapterGuard(recipe.id, request.params.adapters);
     }
@@ -782,7 +820,8 @@ export class ComfyUiClient implements ProviderClient {
       if (
         frozen.id !== current.id || frozen.version !== current.version ||
         frozen.templateDigest !== current.templateDigest ||
-        frozen.dependencyDigest !== current.dependencyDigest
+        frozen.dependencyDigest !== current.dependencyDigest ||
+        frozen.route !== current.route
       ) {
         throw new ProviderRequestRejectedError(
           `comfyui: this job was made with ${recipe.displayName} v${frozen.version}, and this build ships v${current.version} — it was refused rather than run against a different graph`,
@@ -847,6 +886,7 @@ export class ComfyUiClient implements ProviderClient {
         `comfyui: ${recipe.displayName} was asked to carry a reference image that never arrived`,
       );
     }
+    if (recipe.route === "reference") this.checkReferenceRoute(recipe, request, prepared);
     const media = multimediaInputs(recipe, request, this.engineLocality());
     const values = this.valuesFor(recipe, request);
     // Validate scalar bounds before uploading any reference bytes. Filenames are optional
@@ -904,7 +944,7 @@ export class ComfyUiClient implements ProviderClient {
     }
     const graph = dropUnusedReferences(recipe, substituteRecipeParams(recipe, values), prepared.length, media.videos.length, media.audio.length);
     for (const [index, name] of adapterNames.entries()) graph[`arke_adapter_${index}`]!.inputs.lora_name = name;
-    if (recipe !== baseRecipe) await this.adapterGuard!(recipe.id, request.params.adapters);
+    if (recipe !== routedRecipe) await this.adapterGuard!(recipe.id, request.params.adapters);
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/prompt`, {
       method: "POST",
       redirect: "manual",

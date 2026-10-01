@@ -21,6 +21,7 @@ export {
   COMFYUI_MANIFEST_MODELS,
   COMFYUI_RECIPES,
   comfyUiRecipeById,
+  comfyUiRouteRecipe,
   comfyUiRecipeIdentity,
   H3_DIMENSIONS,
   h3FramesForSeconds,

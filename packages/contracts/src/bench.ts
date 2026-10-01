@@ -93,6 +93,13 @@ export const BenchVideoParamsSchema = z
     /** Present only where the model declares the control; absent is "the control does not exist". */
     sound: z.boolean().optional(),
     audioReferencesDisabled: z.boolean().optional(),
+    /**
+     * Who each reference picture is, by token, where the author typed it (design turn 179). A
+     * picture from the Cast is its character and is never looked up here. Empty is allowed while
+     * someone is retyping; dispatch reads empty as the default. The token pattern is spelled out
+     * rather than BENCH_TOKEN because that constant is declared further down this module.
+     */
+    who: z.record(z.string().regex(/^Image [1-9][0-9]*$/), z.string().max(80)).optional(),
   })
   .strict();
 export type BenchVideoParams = z.infer<typeof BenchVideoParamsSchema>;
@@ -418,6 +425,32 @@ export const BenchRequestSnapshotSchema = z
      * seed. "Run it again" sends this again with a fresh seed, whatever Settings holds by then.
      */
     sampling: JobSamplingSchema.optional(),
+    /**
+     * What a take on a reference route was sent (design turn 179): the prompt as composed — the
+     * subject lines Arke wrote, then the brief with its citations translated — and each picture
+     * with the bytes it was and who it was said to be. Kept whole rather than recomputed, because
+     * a character can be renamed after the take and the take must still say what went.
+     */
+    referenceRoute: z
+      .object({
+        route: z.literal("reference"),
+        prompt: z.string(),
+        pictures: z
+          .array(
+            z
+              .object({
+                token: z.string().regex(BENCH_TOKEN),
+                file: z.string().min(1),
+                hash: Sha256Schema,
+                who: z.string().min(1).max(80),
+              })
+              .strict(),
+          )
+          .min(1)
+          .max(9),
+      })
+      .strict()
+      .optional(),
     /** The production values frozen when this paid request was authorized. */
     productionProvenance: ProvenanceSchema.optional(),
     /** Fixed filing identities and segment boundaries for a subject-bound take. */

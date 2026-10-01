@@ -1,6 +1,7 @@
 import { quoteSpeech, speechInputFits } from "@arke-studio/contracts";
 import { stageArtifactProblem } from "../productions/stage-playblast.js";
 import { planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem, type FrozenPerformanceAudio } from "@arke-studio/contracts";
+import { castNameFor, referenceRouteModel, referenceRouteRefusal, referenceSubjectLines, whoFor, REFERENCE_ROUTE } from "@arke-studio/contracts";
 import { readdir } from "node:fs/promises";
 import {
   DEFAULT_SHOT_SEC,
@@ -414,7 +415,9 @@ export async function addBenchReference(
     }
   } else {
     const carried = activeReferenceItems(session, bundle).filter((item) => item.token !== input.replace);
-    const verdict = admitReference({ kind: resolved.kind, durationSec: resolved.durationSec }, carried, model);
+    // The Reference lane of a row with a reference route admits against that route's budget
+    // (design turn 179), not the row's one first frame.
+    const verdict = admitReference({ kind: resolved.kind, durationSec: resolved.durationSec }, carried, referenceRouteModel(model));
     if (!verdict.ok) {
       // At the image ceiling the caller may name which active token gives way; with a valid
       // `replace` the swap is one atomic event, so the set is never over the ceiling.
@@ -654,8 +657,9 @@ export function planBenchDispatch(
      * does not depend on — the coordinator resolves it from the engine service and hands it in.
      * A re-run keeps the version the take was made with rather than taking today's.
      */
-    recipeVersionOf?: (modelId: string) => number | undefined;
-    adapterRecipeFor?: (modelId: string, selections: unknown) => import("@arke-studio/contracts").RecipeIdentity;
+    recipeVersionOf?: (modelId: string, route?: "reference") => number | undefined;
+    /** The identity of the graph that will run: the route's when one rides, adapters on top. */
+    adapterRecipeFor?: (modelId: string, selections: unknown, route?: "reference") => import("@arke-studio/contracts").RecipeIdentity;
     /**
      * A local take's seed and sampling, frozen here rather than at enqueue so the take can say
      * what was sent (design turn 177): the job keeps both, because the enqueue freeze leaves a
@@ -748,9 +752,17 @@ export function planBenchDispatch(
     if ("refused" in resolved) return { ok: false, reason: `${entry.token}: ${resolved.refused}` };
     resolvedRefs.push({ entry, resolved });
   }
+  // The Reference lane's pictures on a row with a reference route travel that route (design turn
+  // 179), and are budgeted, cited and checked as the route reads them. A row without one says so
+  // in one clause rather than taking the picture as something else.
+  const pictureCount = resolvedRefs.filter(({ resolved }) => resolved.kind === "image").length;
+  const routeRefusal = composer.mode === "video" ? referenceRouteRefusal(model, pictureCount) : null;
+  if (routeRefusal !== null) return { ok: false, reason: routeRefusal };
+  const onReferenceRoute = composer.mode === "video" && model.referenceRoute !== undefined && pictureCount > 0;
+  const laneModel = onReferenceRoute ? referenceRouteModel(model) : model;
   const verdict = validateReferences(
     resolvedRefs.map(({ resolved }) => ({ kind: resolved.kind, durationSec: resolved.durationSec })),
-    model,
+    laneModel,
   );
   if (!verdict.ok) {
     const offending = resolvedRefs[verdict.index]?.entry.token ?? "a reference";
@@ -768,7 +780,7 @@ export function planBenchDispatch(
   // be refused at dispatch as a picture that is not one.
   const referencePaths = resolvedRefs.filter(({ resolved }) => resolved.kind === "image").map(({ resolved }) => resolved.path);
   const videoPaths = resolvedRefs.filter(({ resolved }) => resolved.kind === "video").map(({ resolved }) => resolved.path);
-  const mediaReferences = (model.limits.referenceSyntax === "minimax-h3" || model.limits.referenceSyntax === "seedance") ? resolvedRefs.filter(({ resolved }) => resolved.kind !== "image").map(({ resolved }) => ({
+  const mediaReferences = !onReferenceRoute && (model.limits.referenceSyntax === "minimax-h3" || model.limits.referenceSyntax === "seedance") ? resolvedRefs.filter(({ resolved }) => resolved.kind !== "image").map(({ resolved }) => ({
     kind: resolved.kind, file: resolved.path, hash: resolved.source.hash, durationSec: resolved.durationSec,
   })) : [];
   const standaloneAudioCount = mediaReferences.filter(ref => ref.kind === "audio").length;
@@ -855,7 +867,34 @@ export function planBenchDispatch(
       sameSubjectAs: first?.index ?? null,
     });
   }
-  const preamble = session.subject === undefined || frame !== null ? null : bindingPreamble(bound);
+  // Who each picture is, and the bytes it was (design turn 179). A Cast picture is its character;
+  // any other says what the author typed, or the default. A re-run says what the take said — a
+  // character renamed since does not rename the person in an old take — and sends the hashes the
+  // take recorded, which the client holds the bytes to before anything is uploaded.
+  let referenceRoute: BenchRequestSnapshot["referenceRoute"];
+  if (onReferenceRoute) {
+    const recorded = options.fromTake?.request.referenceRoute;
+    if (options.fromTake !== undefined && recorded === undefined) {
+      return { ok: false, reason: `This take was made with another version of ${model.displayName}. Generate a current take instead.` };
+    }
+    const pictures: NonNullable<BenchRequestSnapshot["referenceRoute"]>["pictures"] = [];
+    for (const { entry, resolved } of resolvedRefs) {
+      if (resolved.kind !== "image") continue;
+      if (resolved.source.hash !== entry.source.hash) {
+        return {
+          ok: false,
+          reason: options.fromTake
+            ? `${entry.token} has changed since this take. Generate a current take instead.`
+            : `${entry.token} has changed since it was attached. Attach it again.`,
+        };
+      }
+      const typed = params.kind === "video" ? params.who?.[entry.token] : undefined;
+      const who = recorded?.pictures.find((picture) => picture.token === entry.token)?.who ?? whoFor(castNameFor(entry, bundle), typed);
+      pictures.push({ token: entry.token, file: resolved.path.split("/").pop() ?? resolved.path, hash: entry.source.hash, who });
+    }
+    referenceRoute = { route: REFERENCE_ROUTE, prompt: "", pictures };
+  }
+  const preamble = session.subject === undefined || frame !== null || onReferenceRoute ? null : bindingPreamble(bound);
   const resolvedAudio = params.kind === "video" && session.subject ? (options.fromTake ? options.fromTake.request.audioReferences : planSubjectCharacterAudio({
     world: bundle, subject: session.subject, model, imageCount: frame?.paths.length ?? referencePaths.length, videoCount: videoPaths.length,
     taskMode, disabled: params.audioReferencesDisabled,
@@ -866,9 +905,14 @@ export function planBenchDispatch(
   if (referenceProblem) return { ok: false, reason: referenceProblem };
   const motionBindings = model.limits.referenceSyntax === "seedance"
     ? videoPaths.map((_, index) => `Use @Video${index + 1} as a motion reference.`).join("\n") : "";
-  const wirePrompt = [motionBindings || null, preamble ? referencePrompt(preamble, model, videoPaths.length, 0, true) : null,
-    referencePrompt(body, model, videoPaths.length),
-    audioReferences ? referencePrompt(characterAudioInstructions(audioReferences), model, videoPaths.length, standaloneAudioCount) : null].filter(Boolean).join("\n\n");
+  // On the reference route Arke writes one subject line per picture and translates the brief's
+  // citations; nothing else in the brief is rewritten (design turn 179).
+  const wirePrompt = referenceRoute !== undefined
+    ? [...referenceSubjectLines(referenceRoute.pictures.map((picture) => picture.who)), referencePrompt(body, laneModel)].join("\n")
+    : [motionBindings || null, preamble ? referencePrompt(preamble, model, videoPaths.length, 0, true) : null,
+      referencePrompt(body, model, videoPaths.length),
+      audioReferences ? referencePrompt(characterAudioInstructions(audioReferences), model, videoPaths.length, standaloneAudioCount) : null].filter(Boolean).join("\n\n");
+  if (referenceRoute !== undefined) referenceRoute.prompt = wirePrompt;
   // The cap was held against the brief, which is what the author can shorten; the words that
   // travel can be longer, because naming a reference the way this model reads it grows the
   // mention ("@Image 1" becomes "Picture 1", or H3's "<Picture 1>") and a subject's preamble
@@ -887,7 +931,8 @@ export function planBenchDispatch(
   // today's recipe and file the take under the old number, the provenance lie R-13 exists to
   // prevent (raised on review, issue 1083 — Krea 2's picture labels changed what the recipe
   // sends without touching its graph). Refused by name, the way older timing is below.
-  const current = options.recipeVersionOf?.(model.id);
+  const route = referenceRoute !== undefined ? REFERENCE_ROUTE : undefined;
+  const current = options.recipeVersionOf?.(model.id, route);
   const frozen = options.fromTake?.request.recipeVersion;
   if (frozen !== undefined && current !== undefined && current !== frozen) {
     return {
@@ -897,13 +942,16 @@ export function planBenchDispatch(
   }
   const recipeVersion = frozen ?? current;
   let adapterRecipe: import("@arke-studio/contracts").RecipeIdentity | undefined;
-  if (params.kind === "video" && params.adapters?.length) {
+  // A route alone is frozen again at enqueue from the catalogue, so a caller without the seam —
+  // a quote, a test — still gets the right identity on the job. Adapters need it here.
+  if (params.kind === "video" && (params.adapters?.length || (route !== undefined && options.adapterRecipeFor))) {
     try {
       if (model.provider !== "comfyui" || !options.adapterRecipeFor) throw new Error("Adapter recipes are unavailable for this provider.");
-      const currentRecipe = options.adapterRecipeFor(model.id, params.adapters);
+      const currentRecipe = options.adapterRecipeFor(model.id, params.adapters ?? [], route);
       const savedRecipe = options.fromTake?.request.recipe;
       if (savedRecipe && (savedRecipe.templateDigest !== currentRecipe.templateDigest || savedRecipe.dependencyDigest !== currentRecipe.dependencyDigest ||
-        savedRecipe.version !== currentRecipe.version || JSON.stringify(savedRecipe.adapters) !== JSON.stringify(currentRecipe.adapters))) {
+        savedRecipe.version !== currentRecipe.version || savedRecipe.route !== currentRecipe.route ||
+        JSON.stringify(savedRecipe.adapters) !== JSON.stringify(currentRecipe.adapters))) {
         throw new Error("This take's adapter recipe has changed. Review a new request before dispatching.");
       }
       adapterRecipe = savedRecipe ?? currentRecipe;
@@ -919,6 +967,7 @@ export function planBenchDispatch(
     model: model.id,
     ...(recipeVersion !== undefined ? { recipeVersion } : {}),
     ...(adapterRecipe ? { recipe: adapterRecipe } : {}),
+    ...(referenceRoute !== undefined ? { referenceRoute } : {}),
     ...(session.subject !== undefined
       ? {
           productionProvenance: productionProvenanceFor(
@@ -1121,6 +1170,9 @@ export function planBenchDispatch(
                   : {}),
                 ...(referencePaths.length > 0 ? { references: referencePaths } : {}),
                 ...(videoPaths.length > 0 ? { videoReferences: videoPaths } : {}),
+                ...(referenceRoute !== undefined
+                  ? { recipeRoute: referenceRoute.route, referenceHashes: referenceRoute.pictures.map((picture) => picture.hash) }
+                  : {}),
               }),
           // Only where the route publishes the choice. A preset carries the params it was saved
           // with, so a silent shot saved against seedance can be applied to a model that has no

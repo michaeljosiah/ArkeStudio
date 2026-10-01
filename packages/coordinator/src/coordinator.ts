@@ -7,7 +7,7 @@ import { AdapterLibrary, adapterSetupEntries } from "./local-ai/adapter-library.
 import { randomLocalSeed, withLocalSeed } from "./queue/local-seed.js";
 import { SamplingClock, jobSampling, localTakeFreeze, withLocalSampling } from "./queue/local-sampling.js";
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
-import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity } from "@arke-studio/providers";
+import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe } from "@arke-studio/providers";
 import { ConversationActionService } from "./application/conversation-actions.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
 import { ConversationAuthoringService } from "./application/conversation-authoring.js";
@@ -5499,12 +5499,22 @@ export class Coordinator {
    * the catalogue does not carry passes through too — admission refuses it with the reason,
    * which beats inventing identity for work that cannot run.
    */
-  private adapterRecipeIdentity(model: string, selections: unknown): import("@arke-studio/contracts").RecipeIdentity {
+  private adapterRecipeIdentity(model: string, selections: unknown, route?: "reference"): import("@arke-studio/contracts").RecipeIdentity {
     const base = comfyUiRecipeById(model);
     if (!base) throw new Error("Unknown adapter recipe.");
-    const recipe = comfyUiRecipeIdentity(recipeWithAdapters(base, selections));
+    const recipe = comfyUiRecipeIdentity(recipeWithAdapters(comfyUiRouteRecipe(base, route), selections));
     const engineVersion = this.opts.comfyui?.service.identityFor(model)?.recipe.engineVersion;
     return { ...recipe, ...(engineVersion ? { engineVersion } : {}) };
+  }
+
+  /**
+   * The version a bench take of this model records (R-13): a route's own, since its graph is not
+   * the recipe's (design turn 179), and otherwise what the engine service holds for the recipe.
+   */
+  private recipeVersionOf(modelId: string, route?: "reference"): number | undefined {
+    if (route === undefined) return this.opts.comfyui?.service.identityFor(modelId)?.recipe.version;
+    const base = comfyUiRecipeById(modelId);
+    return base?.routes?.reference?.recipeVersion;
   }
 
   private freezeLocalIdentity(input: EnqueueInput): EnqueueInput {
@@ -5534,13 +5544,18 @@ export class Coordinator {
       if (borrowedImages.length) input = { ...input, params: { ...input.params,
         provenance: { ...(input.params.provenance as object), borrowedImages } } };
     }
-    if (input.provider === "comfyui" && Array.isArray(input.params.adapters) && input.params.adapters.length) {
+    // A route is frozen here exactly as adapters are (design turn 179): the engine service knows
+    // each recipe's own graph only, so the identity of the graph that will actually run is
+    // computed from the catalogue, and a caller's frozen identity has to agree with it.
+    const route = input.params.recipeRoute;
+    if (input.provider === "comfyui" && ((Array.isArray(input.params.adapters) && input.params.adapters.length) || route !== undefined)) {
       const base = comfyUiRecipeById(input.model);
       if (!base) throw new Error("Unknown adapter recipe.");
-      const recipe = comfyUiRecipeIdentity(recipeWithAdapters(base, input.params.adapters));
+      const recipe = comfyUiRecipeIdentity(recipeWithAdapters(comfyUiRouteRecipe(base, route), input.params.adapters));
       if (input.recipe !== undefined) {
         if (input.recipe.id !== recipe.id || input.recipe.version !== recipe.version ||
           input.recipe.templateDigest !== recipe.templateDigest || input.recipe.dependencyDigest !== recipe.dependencyDigest ||
+          input.recipe.route !== recipe.route ||
           JSON.stringify(input.recipe.adapters) !== JSON.stringify(recipe.adapters)) {
           throw new Error("The saved adapter recipe no longer matches this build. Review the request before dispatching again.");
         }
@@ -11976,8 +11991,8 @@ export class Coordinator {
           fromTake,
           // A bench take of a local recipe records which version made it (R-13), and the
           // filed-artifact sidecar inherits it from this same snapshot.
-          recipeVersionOf: (modelId) => this.opts.comfyui?.service.identityFor(modelId)?.recipe.version,
-          adapterRecipeFor: (modelId, selections) => this.adapterRecipeIdentity(modelId, selections),
+          recipeVersionOf: (modelId, route) => this.recipeVersionOf(modelId, route),
+          adapterRecipeFor: (modelId, selections, route) => this.adapterRecipeIdentity(modelId, selections, route),
           localFreeze: (modelId, rerunOf) =>
             localTakeFreeze(modelId, rerunOf, (recipeId) => this.readModel.getState().app.localSampling?.choices[recipeId], randomLocalSeed),
         });
@@ -18015,8 +18030,8 @@ export class Coordinator {
       worldId: store.worldId,
       requestId: `quote-${createdAt}`,
       at: createdAt,
-      recipeVersionOf: (modelId) => this.opts.comfyui?.service.identityFor(modelId)?.recipe.version,
-      adapterRecipeFor: (modelId, selections) => this.adapterRecipeIdentity(modelId, selections),
+      recipeVersionOf: (modelId, route) => this.recipeVersionOf(modelId, route),
+      adapterRecipeFor: (modelId, selections, route) => this.adapterRecipeIdentity(modelId, selections, route),
     });
     if (!plan.ok) throw new Error(plan.reason);
     await this.requireSpeechInputsAvailable(plan.inputs);

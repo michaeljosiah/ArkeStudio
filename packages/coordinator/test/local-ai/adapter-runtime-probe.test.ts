@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { join } from "node:path";
-import { H3_ADAPTER_BUNDLES } from "@arke-studio/providers";
+import { H3_ADAPTER_BUNDLES, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe, recipeWithAdapters } from "@arke-studio/providers";
 import type { RuntimeProbes } from "@arke-studio/contracts";
 import type { ComfyUiEngineService } from "../../src/comfyui/engine.js";
 import { Coordinator } from "../../src/coordinator.js";
@@ -59,14 +59,15 @@ async function harness(probeRuntime: () => Promise<RuntimeProbes>) {
   // hardware floor that follows it.
   (coordinator as unknown as { adapterLibrary: { guard(): Promise<void> } }).adapterLibrary.guard = async () => {};
   await coordinator.start();
-  const dispatch = () => coordinator.enqueueJob({
+  const dispatch = (extra: Record<string, unknown> = {}, recipe?: import("@arke-studio/contracts").RecipeIdentity) => coordinator.enqueueJob({
     worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
     target: { kind: "shot", id: "sh_12" },
     capability: "video",
     provider: "comfyui",
     model: MODEL,
-    params: { kind: "video", durationSec: 5, aspect: "16:9", resolution: "480p", adapters: H3_ADAPTER_BUNDLES[0]!.selections },
+    params: { kind: "video", durationSec: 5, aspect: "16:9", resolution: "480p", adapters: H3_ADAPTER_BUNDLES[0]!.selections, ...extra },
     estimatedMicroUsd: 0,
+    ...(recipe ? { recipe } : {}),
   });
   return { coordinator, asked, dispatch, close: async () => { await coordinator.stop(); await provider.close(); } };
 }
@@ -109,5 +110,22 @@ it("a probe that fails still refuses, and publishes nothing over the unknown (D1
     // A failed probe is not remembered as an answer: the next dispatch asks again.
     await assert.rejects(h.dispatch(), /Could not measure/);
     assert.equal(probes, 2);
+  } finally { await h.close(); }
+});
+
+it("a reference-route job freezes the reference graph's identity, adapters on top (design turn 179)", async () => {
+  const h = await harness(async () => PROBES);
+  try {
+    const job = await h.dispatch({ recipeRoute: "reference" });
+    assert.equal(job.recipe?.route, "reference");
+    const route = comfyUiRouteRecipe(comfyUiRecipeById(MODEL)!, "reference");
+    assert.equal(job.recipe?.templateDigest, comfyUiRecipeIdentity(recipeWithAdapters(route, H3_ADAPTER_BUNDLES[0]!.selections)).templateDigest);
+    assert.deepEqual(job.recipe?.adapters, H3_ADAPTER_BUNDLES[0]!.selections);
+    const plain = await h.dispatch({ recipeRoute: "reference", adapters: undefined });
+    assert.equal(plain.recipe?.route, "reference");
+    assert.equal(plain.recipe?.templateDigest, comfyUiRecipeIdentity(route).templateDigest);
+    // A caller holding the text-to-video identity is not let through onto the reference graph.
+    await assert.rejects(h.dispatch({ recipeRoute: "reference", adapters: undefined }, comfyUiRecipeIdentity(comfyUiRecipeById(MODEL)!)), /no longer matches/);
+    await assert.rejects(h.dispatch({ recipeRoute: "sideways" }), /not a recipe route/);
   } finally { await h.close(); }
 });

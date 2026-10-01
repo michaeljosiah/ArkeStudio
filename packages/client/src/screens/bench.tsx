@@ -1,8 +1,9 @@
 import { estimateSpeechMicroUsd, SAMPLING_CHOICE_NAMES, samplingSummary } from "@arke-studio/contracts";
 import { castVoiceSummary, planSubjectCharacterAudio } from "@arke-studio/contracts";
+import { castNameFor, DEFAULT_REFERENCE_WHO, referenceRouteModel, referenceRouteRefusal } from "@arke-studio/contracts";
 import { AdapterPicker } from "../components/adapter-picker.js";
 import { SamplingChip, hasSampling } from "../components/local-sampling.js";
-import { hasAdultAdapter } from "@arke-studio/contracts";
+import { hasAdultAdapter, matchingAdapterBundle } from "@arke-studio/contracts";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
@@ -546,6 +547,20 @@ function BenchWorkspace({
   useEffect(() => {
     if (!laneTabs && lane === "keyframe") setLane("reference");
   }, [laneTabs, lane]);
+  /**
+   * The Reference lane on a row with a reference route (design turn 179): its pictures go in as
+   * who is in the clip, each with a name. A row without the route keeps the picture and holds
+   * Generate with the gate's own clause, so the screen cannot promise what dispatch refuses.
+   */
+  const referenceRoute = draft.mode === "video" ? (model?.referenceRoute ?? null) : null;
+  const ridingPictures = session.composer.activeTokens.filter(
+    (token) => session.tokenRegistry.find((entry) => entry.token === token)?.kind === "image",
+  ).length;
+  const routeRefusal = draft.mode === "video" && model !== null ? referenceRouteRefusal(model, ridingPictures) : null;
+  const castName = (entry: BenchReferenceToken): string | undefined =>
+    world ? castNameFor(entry, { sheets: world.sheets, artifacts: world.artifacts }) : undefined;
+  /** Which take's "What was sent" is open — the take it was opened for, so selection closes it. */
+  const [sentOpen, setSentOpen] = useState<string | null>(null);
 
   // ---- the breadcrumb's session switcher + the brief's expanded editor ----
   const [sessionsOpen, setSessionsOpen] = useState(false);
@@ -807,6 +822,8 @@ function BenchWorkspace({
     const name = modelName(take.request.provider, take.request.model);
     const route = job?.params.route;
     const mode = job?.params.taskMode;
+    const pictures = take.request.referenceRoute?.pictures.length;
+    if (pictures !== undefined) return `${name} · ${pictures} ${pictures === 1 ? "reference" : "references"}`;
     return typeof route === "string" ? `${name} · ${route.split("/").at(-1)}`
       : typeof mode === "string" && mode !== "generate" ? `${name} · ${mode}` : name;
   };
@@ -1580,7 +1597,24 @@ function BenchWorkspace({
                     )}
                   </div>
                 );
-                return refColumn(token, riding, tile, refName(entry, source, riding));
+                const cast = entry !== undefined && referenceRoute !== null ? castName(entry) : undefined;
+                const who =
+                  referenceRoute === null || videoParams === null || !riding || entry?.kind !== "image" ? null : cast !== undefined ? (
+                    <span className="fy-bench__who" data-testid="reference-who">{cast}</span>
+                  ) : (
+                    <input
+                      className="fy-bench__who"
+                      data-testid="reference-who"
+                      aria-label={`Who ${token} is`}
+                      placeholder={DEFAULT_REFERENCE_WHO}
+                      maxLength={80}
+                      value={videoParams.who?.[token] ?? DEFAULT_REFERENCE_WHO}
+                      onChange={(event) =>
+                        compose({ ...draft, params: { ...videoParams, who: { ...videoParams.who, [token]: event.target.value } } })
+                      }
+                    />
+                  );
+                return refColumn(token, riding, tile, <>{refName(entry, source, riding)}{who}</>);
               })}
               <button
                 type="button"
@@ -2319,6 +2353,7 @@ function BenchWorkspace({
                 // authority — but a Generate that is pressable and always refuses is a lie the
                 // button tells, and the missing half is right there on screen.
                 (musicParams !== null && musicParams.lyrics.trim().length === 0) ||
+                routeRefusal !== null ||
                 overCap ||
                 pendingDispatch.current !== null
               }
@@ -2331,6 +2366,11 @@ function BenchWorkspace({
               {draft.params.kind === "image" && draft.params.count > 1 ? `Generate ${draft.params.count}` : "Generate"}
             </Button>
           </div>
+          {routeRefusal !== null && (
+            <p role="alert" className="fy-bench__refusal" data-testid="bench-route-refusal">
+              {routeRefusal}
+            </p>
+          )}
           {refusal !== null && (
             <p role="alert" className="fy-bench__refusal">
               {refusal.reason}
@@ -2402,7 +2442,11 @@ function BenchWorkspace({
                 className="fy-bench__rowicon"
                 title="What was sent — this take's brief and settings back in the composer"
                 aria-label="What was sent"
-                onClick={() => restore(selected)}
+                {...(selected.request.referenceRoute !== undefined ? { "aria-expanded": sentOpen === selected.id } : {})}
+                onClick={() => {
+                  restore(selected);
+                  if (selected.request.referenceRoute !== undefined) setSentOpen(sentOpen === selected.id ? null : selected.id);
+                }}
               >
                 <FileText size={14} />
               </button>
@@ -2430,6 +2474,19 @@ function BenchWorkspace({
                 <Trash size={14} />
               </button>
             </div>
+          )}
+
+          {selected?.request.referenceRoute !== undefined && sentOpen === selected.id && (
+            <BenchSentBox
+              take={selected}
+              routeName={modelName(selected.request.provider, selected.request.model)}
+              bundleName={
+                selected.request.params.kind === "video" && selected.request.params.adapters?.length
+                  ? matchingAdapterBundle(selected.request.params.adapters, selected.request.model, state?.app.adapters?.bundles ?? [])?.displayName
+                  : undefined
+              }
+              sampling={takeSamplingLine(selected)}
+            />
           )}
 
           {selected && hasAdultAdapter(selected.request.params) && !state?.app.adapters?.adultContent.enabled ? <div className="fy-bench__empty">Adult preview hidden · enable adult content in Settings to view this take.</div> : selected && selected.media ? (
@@ -2732,7 +2789,7 @@ function BenchWorkspace({
             open={pickerOpen}
             mode="bench"
             worldSlug={worldSlug}
-            model={model}
+            model={model === null ? null : referenceRouteModel(model)}
             carried={carried}
             world={worldSources}
             characters={characterSources}
@@ -2962,6 +3019,63 @@ function takeMeta(take: BenchTake): string {
  * when the chosen model stops short, so the ceiling is visible rather than merely missing —
  * the same reason the bench shows a refusal instead of hiding a control.
  */
+/** `<Subject 1>` and `<Picture 1>` drawn as the tags they are, the rest as the words they are. */
+function tagged(line: string): ReactNode[] {
+  return line.split(/(<(?:Subject|Picture|Video|Audio) [0-9]+>)/).map((part, index) =>
+    index % 2 === 1 ? <code key={index}>{part}</code> : part,
+  );
+}
+
+/** "sha256:3f9c…a41e" — enough of the hash to compare by eye, never the whole of it. */
+function shortHash(hash: string): string {
+  const hex = hash.replace(/^sha256:/, "");
+  return hex.length <= 8 ? hash : `sha256:${hex.slice(0, 4)}…${hex.slice(-4)}`;
+}
+
+/**
+ * What a reference take was sent (design 179b): the subject lines Arke wrote, the brief as it
+ * went, each picture by file and hash, and the route with its settings. Read from the take's
+ * own record, never recomposed — a renamed character must not rewrite an old take.
+ */
+export function BenchSentBox({ take, routeName, bundleName, sampling }: {
+  take: BenchTake;
+  routeName: string;
+  bundleName: string | undefined;
+  sampling: string | null;
+}) {
+  const record = take.request.referenceRoute!;
+  const lines = record.prompt.split("\n");
+  const subjects = record.pictures.length;
+  const params = take.request.params.kind === "video" ? take.request.params : null;
+  const strengths = params?.adapters?.map((adapter) => String(adapter.strength)).join(" / ");
+  return (
+    <div className="fy-bench__sentbox" data-testid="bench-sent">
+      <h4>What was sent</h4>
+      {lines.map((line, index) => (
+        <p key={index} className={index < subjects ? undefined : "fy-bench__sentdim"}>
+          {tagged(line)}
+        </p>
+      ))}
+      {record.pictures.map((picture, index) => (
+        <p key={picture.token} className="fy-bench__sentdim">
+          {`Picture ${index + 1} · ${picture.file} · ${shortHash(picture.hash)}`}
+        </p>
+      ))}
+      <p className="fy-bench__sentdim">
+        {[
+          routeName.replace(/^Local · /, ""),
+          record.route,
+          strengths ? `${bundleName ?? "Adapters"} ${strengths}` : null,
+          sampling,
+          params?.durationSec !== undefined ? `${params.durationSec} s` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </p>
+    </div>
+  );
+}
+
 function taskModeForKeyframes(model: ManifestModel, count: number): TaskMode {
   if (count === 0) return "generate";
   const plan = keyframePlan(model, count);

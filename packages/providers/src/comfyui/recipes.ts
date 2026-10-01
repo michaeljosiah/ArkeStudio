@@ -123,6 +123,14 @@ export interface ComfyUiRecipe {
     slot: readonly [nodeId: string, inputKey: string];
     textOnly: readonly [nodeId: string, output: number];
   };
+  /**
+   * Which graph of its recipe this is, when it is not the recipe's own (design turn 179). A
+   * route shares its parent's id — it is the same model to the queue, the price and the take —
+   * and carries its own version, graph and digest, so its identity is never the parent's.
+   */
+  route?: "reference";
+  /** The other graphs this recipe can run, chosen by a dispatch's `recipeRoute`. */
+  routes?: { reference?: ComfyUiRecipe };
   /** The one node whose outputs are fetched (§2.6) — never every image the history names. */
   outputNode: string;
   requires: {
@@ -640,7 +648,105 @@ const H3_VIDEO_768: ComfyUiRecipe = {
   },
 };
 
-export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([KREA2_IMAGE, QWEN21_IMAGE, DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO, H3_VIDEO_768, H3_REFERENCE]);
+/**
+ * How many pictures H3 Video's reference graph carries (design turn 179). The design draws up to
+ * three; three carriers are authored so that offering the second and third later is a manifest
+ * change and not a new graph. What the Reference lane OFFERS is the row's `referenceRoute`.
+ */
+const H3_VIDEO_REFERENCE_CARRIERS = 3;
+
+/**
+ * Local · H3 Video, reference route (design turn 179) — the text-to-video checkpoint (fl2va, the
+ * 8-step turbo LoRA at 1) through H3's reference node instead of its image-to-video node.
+ *
+ * Why this and not H3 Reference Video (ref2va). On 2026-10-01 one AI-generated picture of a
+ * woman, the Motion + anatomy bundle and a 15 s 480p clip were run four ways on the reference
+ * 3080. On ref2va the bundle fused the two bodies of a couple into one; without it the bodies
+ * were separate, but then no adapter applies. The same picture through `MiniMaxH3ReferenceToVideo`
+ * on fl2va kept her face, kept the bodies apart and took the bundle — the Hearmeman adapters were
+ * trained on fl2va, so this is the checkpoint they belong on, and their 480p pairings apply here
+ * unchanged because the route shares the parent's recipe id.
+ *
+ * Everything but node 7 is H3 Video's graph: the same loaders, the same sigma shift, the same
+ * sampler and its sampling params, and the same adapter slot on node 3's model. Node 7 takes the
+ * prompt with the clip, both VAEs (the audio VAE is an input of this node, not of the
+ * image-to-video one) and the pictures through `ref_images.ref_image_N`, each from its own
+ * `LoadImage` (nodes 20–22, the numbering H3 Reference Video uses). `ref_image_size: "match"` is
+ * the node's own resize to the canvas, which is why there is no `ImageScale` in front: unlike
+ * `first_frame` it does not stretch. No first-frame carrier — a keyframe and references do not
+ * ride one take.
+ *
+ * Measured through ComfyUI 0.38.1 on the reference machine (RTX 3080 10 GB, 31.9 GB RAM), one
+ * reference picture, Motion + anatomy at 0.5 / 0.4 / 0.8, Fast, 864×480, 362 frames (15.083 s):
+ *
+ *   18.8 min   peak 9,525–9,563 MiB on the card   RAM low-water 665–855 MB
+ *   18.0 min   (second run, same settings)
+ *
+ * — the text-to-video run's cost at the same length (~20 min, H3_FRAMES_BY_SECONDS), so the floors
+ * are the parent's. Two and three pictures are unmeasured, which is why the row offers one.
+ * The node exists from ComfyUI 0.33.1; 0.38.1 is the newest engine this graph has run on.
+ */
+const H3_VIDEO_REFERENCE: ComfyUiRecipe = (() => {
+  const params: Record<string, RecipeParamSpec> = {};
+  for (const [name, spec] of Object.entries(H3_VIDEO.params)) {
+    // The first frame's carrier is not in this graph, and the bucket reaches the canvas alone.
+    if (name === "referenceFile") continue;
+    params[name] = name === "width" || name === "height" ? { ...spec, bind: [["7", name]] } : spec;
+  }
+  const graph: RecipeGraph = {};
+  for (const [id, node] of Object.entries(H3_VIDEO.graph)) {
+    if (id !== "7" && id !== "14" && id !== "15") graph[id] = structuredClone(node);
+  }
+  graph["7"] = {
+    class_type: "MiniMaxH3ReferenceToVideo",
+    inputs: { clip: ["4", 0], vae: ["5", 0], audio_vae: ["6", 0], prompt: "", width: 864, height: 480, length: 124, ref_image_size: "match" },
+  };
+  const images: Array<NonNullable<ComfyUiRecipe["referenceFrame"]>> = [];
+  for (let i = 0; i < H3_VIDEO_REFERENCE_CARRIERS; i++) {
+    const node = String(20 + i), param = `referenceImage${i}`, slot = `ref_images.ref_image_${i}`;
+    params[param] = { kind: "string", internal: true, maxChars: 260, bind: [[node, "image"]] };
+    graph[node] = { class_type: "LoadImage", inputs: { image: "" } };
+    graph["7"]!.inputs[slot] = [node, 0];
+    images.push({ param, nodes: [node], slot: ["7", slot] });
+  }
+  const recipe: ComfyUiRecipe = {
+    ...H3_VIDEO,
+    route: "reference",
+    recipeVersion: 1,
+    engine: { minVersion: "0.33.1", exercisedThroughVersion: "0.38.1" },
+    params,
+    graph,
+    referenceImages: images,
+    hardware: {
+      ...H3_VIDEO.hardware,
+      floorSource:
+        "measured through ComfyUI 0.38.1 on Arke reference hardware 2026-10-01: RTX 3080 10 GB, 31.9 GB RAM, one " +
+        "reference picture with the Motion + anatomy bundle at 0.5/0.4/0.8, 864×480×362 frames at 8 steps completed " +
+        "in 18.8 and 18.0 min with peak card usage 9,525–9,563 MiB and system RAM bottoming at 665–855 MB free",
+    },
+  };
+  // The first frame's carrier is the parent's; this graph has none to drop.
+  delete recipe.referenceFrame;
+  return recipe;
+})();
+
+/** H3 Video with its reference route attached; the 768p row spreads H3_VIDEO and has none. */
+const H3_VIDEO_WITH_ROUTES: ComfyUiRecipe = { ...H3_VIDEO, routes: { reference: H3_VIDEO_REFERENCE } };
+
+export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([KREA2_IMAGE, QWEN21_IMAGE, DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO_WITH_ROUTES, H3_VIDEO_768, H3_REFERENCE]);
+
+/**
+ * The graph a dispatch runs: the recipe itself, or the route it names. A route the recipe does not
+ * have is refused in the words the bench uses (design 179c), never quietly run as the recipe's
+ * own graph — that would send a reference picture in as a first frame.
+ */
+export function comfyUiRouteRecipe(base: ComfyUiRecipe, route: unknown): ComfyUiRecipe {
+  if (route === undefined) return base;
+  if (route !== "reference") throw new Error(`comfyui: "${String(route)}" is not a recipe route`);
+  const routed = base.routes?.reference;
+  if (routed === undefined) throw new Error(`${base.displayName.replace(/^Local · /, "")} takes no reference pictures yet`);
+  return routed;
+}
 
 export function comfyUiRecipeById(modelId: string): ComfyUiRecipe | null {
   return COMFYUI_RECIPES.find((recipe) => recipe.id === modelId) ?? null;
@@ -708,6 +814,7 @@ export function comfyUiRecipeIdentity(recipe: ComfyUiRecipe): RecipeIdentity {
     templateDigest: recipeTemplateDigest(recipe),
     dependencyDigest: recipeDependencyDigest(recipe),
     ...(recipe.adapters?.length ? { adapters: recipe.adapters } : {}),
+    ...(recipe.route !== undefined ? { route: recipe.route } : {}),
   };
 }
 
@@ -979,9 +1086,10 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
      * reads this number, so a scene pass now binds one character reference to H3 where it bound
      * none, and H3 opens the shot on it. That is identity conditioning for a draft-quality local
      * route, which is what the budget is for — but it is a keyframe, so the opening frame is
-     * whatever the reference planner bound. The route that would take a picture as a *reference*
-     * rather than as frame zero is H3's other node, `MiniMaxH3ReferenceToVideo`, and it is a
-     * second recipe rather than a flag on this one.
+     * whatever the reference planner bound. The route that takes a picture as a *reference*
+     * rather than as frame zero is H3's other node, `MiniMaxH3ReferenceToVideo`: a second graph of
+     * this recipe (design turn 179), declared below as `referenceRoute` and reached only from the
+     * bench's Reference lane, so this budget keeps meaning the first frame everywhere else.
      */
     accepts: { referenceImages: 1, startFrame: false, endFrame: false },
     /*
@@ -1016,6 +1124,12 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     // marked untested rather than withholding it (issue 858).
     speechVideo: "untested",
     sampling: H3_VIDEO.sampling!,
+    /*
+     * The reference route (design turn 179): the bench's Reference lane sends here, the Keyframe
+     * lane to the first frame above. One picture, because one picture at 15 s is what has been
+     * measured; the graph carries three, and the second and third are offered once they have run.
+     */
+    referenceRoute: { maxImages: 1, referenceSyntax: "minimax-h3" },
     // Free is the price; this is the cost (issue 868). The four cold 480p runs of 2026-09-06
     // (H3_FRAMES_BY_SECONDS) took 9m56s to 11m17s for 4 to 8 seconds of picture, so the row
     // states the middle of them beside its price rather than "minutes" against a cloud row's

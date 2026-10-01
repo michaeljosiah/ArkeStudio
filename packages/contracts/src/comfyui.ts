@@ -108,6 +108,12 @@ export const RecipeIdentitySchema = z
      * bytes sent under an unchanged template: two jobs of one recipe version differ exactly here.
      */
     sampling: JobSamplingSchema.optional(),
+    /**
+     * Which graph of the recipe ran, where it has more than one (design turn 179). The template
+     * digest already differs between them; the name is here so a refusal, a take and a reader of
+     * the journal can say "reference" without recomputing anything. Absent is the recipe's own.
+     */
+    route: z.enum(["reference"]).optional(),
   })
   .strict();
 export type RecipeIdentity = z.infer<typeof RecipeIdentitySchema>;
