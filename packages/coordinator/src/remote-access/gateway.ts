@@ -78,17 +78,24 @@ export class RemoteGateway {
     if (!address || typeof address === "string") throw new Error("Remote access did not start.");
     return address.port;
   }
-  private accepts(req: IncomingMessage): boolean {
+  private accepts(req: IncomingMessage, shellVisit = false): boolean {
     return req.headers.host === this.origin.host && (!req.headers.origin || req.headers.origin === this.origin.origin)
-      && req.headers["sec-fetch-site"] !== "cross-site";
+      && (req.headers["sec-fetch-site"] !== "cross-site" || shellVisit);
   }
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
-    if (this.closing || !this.accepts(req)) { res.writeHead(403).end(); return; }
     const url = new URL(req.url ?? "/", this.origin);
+    // Android Chrome marks every launch from another app as cross-site: a home-screen shortcut,
+    // a scanned QR code, a link in a message. A reload repeats the original verdict, so refusing
+    // those left the phone on a bare 403 until the address was typed in again. A top-level visit
+    // to the app shell is safe to admit: the shell is public and unframeable, the SameSite=Strict
+    // cookies do not ride on the cross-site visit, and everything the page does next is same-origin.
+    const shellVisit = (req.method === "GET" || req.method === "HEAD") && req.headers["sec-fetch-mode"] === "navigate"
+      && req.headers["sec-fetch-dest"] === "document" && !/^\/(remote|media|genesis-media)\//.test(url.pathname);
+    if (this.closing || !this.accepts(req, shellVisit)) { res.writeHead(403).end(); return; }
     if (url.origin !== this.origin.origin) { res.writeHead(403).end(); return; }
     const browserKey = req.headers["x-arke-browser-key"];
     const proof = openBrowserProof(cookie(req, deviceCookie), browserKey, this.origin.origin);

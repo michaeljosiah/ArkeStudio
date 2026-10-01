@@ -225,6 +225,18 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     assert.equal((await get(port, "/remote/session")).status, 401);
     assert.equal((await get(port, "/media/world/a.png")).status, 401);
     assert.equal((await get(port, "/", { headers: { Host: "evil.example" } })).status, 403);
+    // Android Chrome sends a home-screen or QR launch, and every reload of it, as cross-site.
+    const launch = { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" };
+    const launched = await get(port, "/", { headers: launch });
+    assert.equal(launched.status, 200, "a launch from another app opens the shell");
+    assert.ok(launched.body.includes('name="arke-remote"'));
+    assert.equal((await get(port, "/", { headers: { ...launch, Host: "evil.example" } })).status, 403);
+    assert.equal((await get(port, "/manifest.webmanifest", { headers: { ...launch, "Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Dest": "manifest" } })).status, 403,
+      "only a top-level visit is admitted cross-site");
+    for (const path of ["/remote/session", "/remote/device", "/media/world/a.png"]) {
+      assert.equal((await get(port, path, { headers: launch })).status, 403, path + " stays same-site only");
+    }
+    assert.equal((await get(port, "/", { method: "POST", headers: launch })).status, 403);
     const { code } = devices.createCode();
     const body = JSON.stringify({ code, name: "Phone" });
     const headers = { Origin: origin, "Content-Type": "application/json" };
