@@ -3564,6 +3564,31 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       takeId: TakeIdSchema,
     })
     .strict(),
+  /**
+   * What Delete would remove (design turn 180): each file in the take's media folder and its
+   * size, answered by `bench.take-files`. A question rather than a field on the take, because the
+   * folder holds more than the one file the take records — a video's poster sits beside it — and
+   * the confirm has to name everything that goes.
+   */
+  z
+    .object({
+      kind: z.literal("bench-take-files"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      takeId: TakeIdSchema,
+    })
+    .strict(),
+  /** Remove a take from the session and its files from disk. Answered by `bench.take-deleted`. */
+  z
+    .object({
+      kind: z.literal("bench-delete"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      takeId: TakeIdSchema,
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("bench-clear-view"),

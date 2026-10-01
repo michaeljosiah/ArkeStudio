@@ -672,6 +672,20 @@ export function subscribeBenchSubjectAccepted(listener: (answer: BenchSubjectAcc
   return () => benchSubjectAcceptedListeners.delete(listener);
 }
 
+/** What a take's Delete would remove, and the answer to the Delete itself (design turn 180). */
+export type BenchTakeFiles = Extract<DomainEvent, { type: "bench.take-files" }>;
+const benchTakeFilesListeners = new Set<(answer: BenchTakeFiles) => void>();
+export function subscribeBenchTakeFiles(listener: (answer: BenchTakeFiles) => void): () => void {
+  benchTakeFilesListeners.add(listener);
+  return () => benchTakeFilesListeners.delete(listener);
+}
+export type BenchTakeDeleted = Extract<DomainEvent, { type: "bench.take-deleted" }>;
+const benchTakeDeletedListeners = new Set<(answer: BenchTakeDeleted) => void>();
+export function subscribeBenchTakeDeleted(listener: (answer: BenchTakeDeleted) => void): () => void {
+  benchTakeDeletedListeners.add(listener);
+  return () => benchTakeDeletedListeners.delete(listener);
+}
+
 export type ReferenceImagesResult = Extract<DomainEvent, { type: "reference.images" }>;
 const referenceImageListeners = new Set<(result: ReferenceImagesResult) => void>();
 export function subscribeReferenceImages(listener: (result: ReferenceImagesResult) => void): () => void {
@@ -1554,6 +1568,12 @@ function handleFrame(json: string): void {
     }
     if (event.type === "bench.subject-accepted") {
       for (const listener of benchSubjectAcceptedListeners) listener(event);
+    }
+    if (event.type === "bench.take-files") {
+      for (const listener of benchTakeFilesListeners) listener(event);
+    }
+    if (event.type === "bench.take-deleted") {
+      for (const listener of benchTakeDeletedListeners) listener(event);
     }
     if (event.type === "reference.images") {
       for (const listener of referenceImageListeners) listener(event);
@@ -6099,6 +6119,17 @@ export function sendBenchAccept(worldId: string, sessionId: string, takeId: stri
 
 export function sendBenchDiscard(worldId: string, sessionId: string, takeId: string): void {
   send({ kind: "bench-discard", worldId, sessionId, requestId: ulid(), takeId } as ClientMessage);
+}
+
+/** Ask what Delete would remove; null when the message could not be sent. */
+export function sendBenchTakeFiles(worldId: string, sessionId: string, takeId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "bench-take-files", worldId, sessionId, requestId, takeId } as ClientMessage) ? requestId : null;
+}
+
+export function sendBenchDelete(worldId: string, sessionId: string, takeId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "bench-delete", worldId, sessionId, requestId, takeId } as ClientMessage) ? requestId : null;
 }
 
 export function sendBenchClearView(worldId: string, sessionId: string, takeId: string): void {

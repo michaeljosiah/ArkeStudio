@@ -727,6 +727,12 @@ export const BenchSessionSchema = z
     nextTake: z.number().int().min(1),
     selectedTakeId: TakeIdSchema.optional(),
     takes: z.array(BenchTakeSchema),
+    /**
+     * Takes deleted from this session (design turn 180): gone from `takes`, files and all, but
+     * remembered by id and number. A late or replayed finalization for one must not record a
+     * completion against a take nobody can see, and an upscale made from one still names it.
+     */
+    deletedTakes: z.array(z.object({ id: TakeIdSchema, n: z.number().int().min(1) }).strict()).optional(),
     createdAt: IsoDateTimeSchema,
     updatedAt: IsoDateTimeSchema,
   })
@@ -966,6 +972,12 @@ export const BenchEventSchema = z.discriminatedUnion("type", [
     .strict(),
   z.object({ type: z.literal("take-discarded"), takeId: TakeIdSchema }).strict(),
   z.object({ type: z.literal("take-cleared"), takeId: TakeIdSchema }).strict(),
+  /**
+   * The take leaves the session and its files leave the disk (design turn 180). Appended BEFORE
+   * the files go: a crash between the two leaves a deleted take whose directory the next open
+   * removes, where the other order would leave a take on the wall whose bytes are gone.
+   */
+  z.object({ type: z.literal("take-deleted"), takeId: TakeIdSchema }).strict(),
   z.object({ type: z.literal("take-selected"), takeId: TakeIdSchema }).strict(),
 ]);
 export type BenchEvent = z.infer<typeof BenchEventSchema>;
@@ -1211,12 +1223,61 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
         if (take) take.clearedFromView = true;
         break;
       }
+      case "take-deleted": {
+        const take = takesById.get(event.takeId);
+        if (!take) break;
+        takesById.delete(take.id);
+        session.takes = session.takes.filter((candidate) => candidate.id !== take.id);
+        // The number stays spent — nextTake never goes back — so "Take 19" names one take for
+        // the session's whole life, deleted or not.
+        (session.deletedTakes ??= []).push({ id: take.id, n: take.n });
+        if (session.selectedTakeId === take.id) {
+          const newest = session.takes.at(-1);
+          if (newest) session.selectedTakeId = newest.id;
+          else delete session.selectedTakeId;
+        }
+        // A reference cut from this take's bytes has nothing left to send. It stays in the
+        // registry, so its name is never reused, but it stops riding: a lane holding it would
+        // refuse every request over a picture nobody can see any more.
+        const gone = new Set(
+          session.tokenRegistry
+            .filter((entry) => entry.source.source === "take" && entry.source.takeId === take.id)
+            .map((entry) => entry.token),
+        );
+        if (gone.size > 0) {
+          session.composer.activeTokens = session.composer.activeTokens.filter((token) => !gone.has(token));
+          session.composer.keyframeTokens = session.composer.keyframeTokens.filter((token) => !gone.has(token));
+          session.subjectTokens = session.subjectTokens.filter((token) => !gone.has(token));
+        }
+        break;
+      }
       case "take-selected":
         if (takesById.has(event.takeId)) session.selectedTakeId = event.takeId;
         break;
     }
   }
   return session;
+}
+
+/** The one clause a filed take's Delete answers with (design turn 180). */
+export const BENCH_DELETE_FILED = "Filed — delete it from Artifacts";
+
+/**
+ * Whether Delete applies to a take (design turn 180; SPEC-021 R-37): null when it may go, or why not.
+ *
+ * Two different answers, read two different ways. A take still out — queued, running, or a
+ * provider outcome nobody can yet vouch for — is not offered Delete at all: its files are still
+ * arriving and a charge may follow, so the tool is absent. A filed take is offered it and refused
+ * with BENCH_DELETE_FILED, because the bytes now belong to the world's Artifacts and deleting the
+ * bench copy would quietly orphan the record of how they were made. One function for both, so the
+ * screen that hides the icon and the coordinator that refuses the command cannot disagree.
+ */
+export function benchDeleteRefusal(take: Pick<BenchTake, "status" | "disposition">): { absent: boolean; reason: string } | null {
+  if (take.status !== "succeeded" && take.status !== "failed" && take.status !== "cancelled") {
+    return { absent: true, reason: "Still generating" };
+  }
+  if (take.disposition === "filed") return { absent: false, reason: BENCH_DELETE_FILED };
+  return null;
 }
 
 /** The summary a world bundle carries, derived the one way everywhere. */
