@@ -183,7 +183,7 @@ const DRAFT_IMAGE: ComfyUiRecipe = {
   capability: "image",
   displayName: "Local · Draft Image",
   recipeVersion: 1,
-  engine: { minVersion: "0.3.45", exercisedThroughVersion: "0.33.1" },
+  engine: { minVersion: "0.3.45", exercisedThroughVersion: "0.38.1" },
   params: {
     prompt: { kind: "string", required: true, maxChars: 2000, bind: [["6", "text"]] },
     seed: { kind: "int", min: 0, max: 2 ** 31 - 1, bind: [["3", "seed"]] },
@@ -450,7 +450,7 @@ const H3_VIDEO: ComfyUiRecipe = {
   capability: "video",
   displayName: "Local · H3 Video",
   recipeVersion: 2,
-  engine: { minVersion: "0.3.45", exercisedThroughVersion: "0.33.1" },
+  engine: { minVersion: "0.3.45", exercisedThroughVersion: "0.38.1" },
   params: {
     prompt: { kind: "string", required: true, maxChars: 2000, bind: [["7", "prompt"]] },
     seed: { kind: "int", min: 0, max: 2 ** 31 - 1, bind: [["9", "seed"]] },

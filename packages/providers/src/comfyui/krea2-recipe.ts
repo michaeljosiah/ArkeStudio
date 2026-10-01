@@ -24,7 +24,7 @@ export const KREA2_IMAGE: ComfyUiRecipe = {
   // rebalance node as the "Picture N" it labels the picture with. The graph is unchanged; what the
   // recipe sends is not, and a take's provenance must keep meaning what it meant (SPEC-021 R-13).
   recipeVersion: 2,
-  engine: { minVersion: "0.33.1", exercisedThroughVersion: "0.33.1" },
+  engine: { minVersion: "0.33.1", exercisedThroughVersion: "0.38.1" },
   params: {
     prompt: { kind: "string", required: true, maxChars: 2000, bind: [["6", "text"], ["16", "text"]] },
     seed: { kind: "int", min: 0, max: 2 ** 31 - 1, bind: [["3", "seed"]] },
