@@ -25,7 +25,7 @@ export async function prepareReferenceVideo(input: ReferenceMedia, tools: { ffmp
   try {
     await writeFile(source, input.data);
     const info = await tools.probe.info(source, { signal: bounded });
-    if (!info || info.durationSec < 2 || info.durationSec > 5.2) throw new Error("H3 reference videos must be 2–5 seconds. Trim and review the clip first.");
+    if (!info || info.durationSec < 2 || info.durationSec > 15) throw new Error("H3 reference videos must be 2–15 seconds. Trim and review the clip first.");
     await tools.ffmpeg.run(["-nostdin", "-y", "-protocol_whitelist", "file,pipe", "-i", source,
       ...(!info.hasAudio ? ["-f", "lavfi", "-i", "anullsrc=r=32000:cl=stereo"] : []),
       "-map", "0:v:0", "-map", info.hasAudio ? "0:a:0" : "1:a:0", "-vf", "fps=24,scale=864:480:force_original_aspect_ratio=decrease:force_divisible_by=32",
@@ -40,7 +40,7 @@ export async function prepareReferenceVideo(input: ReferenceMedia, tools: { ffmp
 
 export function referenceHash(data: Uint8Array): string { return `sha256:${createHash("sha256").update(data).digest("hex")}`; }
 
-export async function measureReferenceAudio(input: ReferenceMedia, probe: MediaProbe | undefined, signal: AbortSignal, limits = { min: 0, max: 5.2 }): Promise<number> {
+export async function measureReferenceAudio(input: ReferenceMedia, probe: MediaProbe | undefined, signal: AbortSignal, limits = { min: 0, max: 15 }): Promise<number> {
   if (!probe?.info) throw new Error("Audio references need the local media tools.");
   const dir = await mkdtemp(join(tmpdir(), "arke-h3-audio-"));
   try {

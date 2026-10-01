@@ -26,7 +26,7 @@ export function multimediaInputs(recipe: ComfyUiRecipe, request: SubmitRequest, 
   if (request.params.taskMode !== undefined && !["generate", "keyframe-sequence"].includes(String(request.params.taskMode))) fail("reference guidance is not a frame or continuation route");
   if (!(request.imageReferences?.length || videos.length || standalone.length || voices.length)) fail("reference-to-video needs at least one reference");
   if (request.params.sound === false || request.params.generate_audio === false) fail("this recipe always generates audio");
-  if (videos.some(video => video.referenceVideo24fps !== true || video.contentType !== "video/mp4" || !Number.isFinite(video.durationSec) || video.durationSec! < 2 || video.durationSec! > 5.2)) fail("video references need verified 24 fps preparation and 2–5 second clips");
+  if (videos.some(video => video.referenceVideo24fps !== true || video.contentType !== "video/mp4" || !Number.isFinite(video.durationSec) || video.durationSec! < 2 || video.durationSec! > 15)) fail("video references need verified 24 fps preparation and 2–15 second clips");
   if (videos.reduce((sum, video) => sum + video.durationSec!, 0) > 15) fail("video references exceed fifteen seconds");
   const bindings = ReferenceMediaBindingsSchema.safeParse(request.params.referenceMedia ?? []);
   if (!bindings.success) fail("invalid reviewed media bindings");
@@ -45,7 +45,7 @@ export function multimediaInputs(recipe: ComfyUiRecipe, request: SubmitRequest, 
     }
   }
   const audio = [...standalone, ...voices.map((clip, index) => ({ ...clip, durationSec: referenceAudioAsset(plan!.references[index]!).provenance.outputTechnical.durationSec ?? Infinity }))];
-  if (audio.some(clip => !["audio/wav", "audio/mpeg"].includes(clip.contentType) || !clip.data.length || clip.data.length > 15_000_000 || !Number.isFinite(clip.durationSec) || clip.durationSec <= 0 || clip.durationSec > 5.2)) fail("audio references must be WAV or MP3, at most 15 MB and five seconds each");
+  if (audio.some(clip => !["audio/wav", "audio/mpeg"].includes(clip.contentType) || !clip.data.length || clip.data.length > 15_000_000 || !Number.isFinite(clip.durationSec) || clip.durationSec <= 0 || clip.durationSec > 15)) fail("audio references must be WAV or MP3, at most 15 MB and fifteen seconds each");
   if (audio.reduce((sum, clip) => sum + clip.durationSec, 0) > 15) fail("audio references exceed fifteen seconds");
   return { videos, audio };
 }

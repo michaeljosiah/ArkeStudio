@@ -104,7 +104,11 @@ test("invalid, missing, changed and remotely directed references fail before upl
 test("file counts and per-file duration constrain admission, including unknown measurements", () => {
   const model = H3_REFERENCE_MODEL;
   assert.equal(validateReferences(Array.from({ length: 4 }, () => ({ kind: "video" as const, durationSec: 2 })), model).ok, false);
-  assert.equal(validateReferences([{ kind: "video", durationSec: 6 }], model).ok, false);
+  // The node's own clip range (2–15 s), not the first run's 5.2 s.
+  assert.equal(validateReferences([{ kind: "video", durationSec: 16 }], model).ok, false);
+  assert.equal(validateReferences([{ kind: "video", durationSec: 15 }], model).ok, true);
+  assert.equal(validateReferences([{ kind: "audio", durationSec: 15 }], model).ok, true);
+  assert.equal(validateReferences([{ kind: "audio", durationSec: 16 }], model).ok, false);
   assert.equal(validateReferences([{ kind: "audio", durationSec: NaN }], model).ok, false);
   assert.equal(validateReferences([{ kind: "audio", durationSec: 2 }, { kind: "video", durationSec: 2 }], model).ok, true);
 });
@@ -122,4 +126,16 @@ test("soundtrack attachment changes invalidate frozen recipe identity", () => {
   const changed = structuredClone(H3_REFERENCE);
   changed.referenceVideos = changed.referenceVideos!.map((ref, index) => index ? ref : { ...ref, extraSlots: [] });
   assert.notEqual(recipeTemplateDigest(changed), recipeTemplateDigest(H3_REFERENCE));
+});
+
+test("H3 Reference Video offers H3 Video's 480p lengths, each to its own frame count", async () => {
+  assert.deepEqual(Object.keys(H3_REFERENCE_MODEL.limits.durations!), ["4", "5", "6", "7", "8", "10", "15"]);
+  assert.equal(H3_REFERENCE_MODEL.limits.maxDurationSec, 15);
+  for (const [seconds, frames] of [[5, 124], [15, 362]] as const) {
+    const { client, graphs } = engine(), input = request();
+    input.params.durationSec = seconds;
+    await client.submit("", input);
+    assert.equal(graphs[0]!["7"]!.inputs["length"], frames, `${seconds}s`);
+    client.dispose();
+  }
 });

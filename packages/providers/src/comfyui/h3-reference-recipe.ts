@@ -5,11 +5,13 @@ const source = "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/a98869194787
 const params: Record<string, RecipeParamSpec> = {
   prompt: { kind: "string", required: true, maxChars: 8000, bind: [["7", "prompt"]] },
   seed: { kind: "int", min: 0, max: 2 ** 31 - 1, bind: [["9", "seed"]] },
-  durationSec: { kind: "number-enum", values: [5], bind: [] },
+  // H3 Video's 480p lengths: the node's trained range is ~124–362 frames, and 15 s runs here took
+  // 11.0–12.5 min against H3 Video's 18–19 (2026-10-01). 5 s was what the first run measured.
+  durationSec: { kind: "number-enum", values: [4, 5, 6, 7, 8, 10, 15], bind: [] },
   aspect: { kind: "string-enum", values: ["16:9", "9:16"], bind: [] },
   width: { kind: "int", required: true, internal: true, min: 480, max: 864, bind: [["7", "width"]] },
   height: { kind: "int", required: true, internal: true, min: 480, max: 864, bind: [["7", "height"]] },
-  length: { kind: "int", required: true, internal: true, min: 124, max: 124, bind: [["7", "length"]] },
+  length: { kind: "int", required: true, internal: true, min: 107, max: 362, bind: [["7", "length"]] },
 };
 const graph: RecipeGraph = {
   "1": { class_type: "UNETLoader", inputs: { unet_name: "minimax_h3_ref2va_pruned_int8_convrot.safetensors", weight_dtype: "default" } },
@@ -61,7 +63,9 @@ export const H3_REFERENCE: ComfyUiRecipe = {
    * adapters is H3 Video's reference route (design turn 179), and this row keeps its 5 s.
    */
   adapterSlot: ["3", "model"],
-  id: "comfyui-h3-reference-video", displayName: "Local · H3 Reference Video", capability: "video", recipeVersion: 1,
+  id: "comfyui-h3-reference-video", displayName: "Local · H3 Reference Video", capability: "video",
+  // 2: four to fifteen seconds and fifteen-second clips where 1 offered five seconds and 5.2 s clips.
+  recipeVersion: 2,
   engine: { minVersion: "0.33.1", exercisedThroughVersion: "0.33.1" },
   params, graph, referenceImages: images, referenceVideos: videos, referenceAudio: audio, outputNode: "13",
   requires: { customNodes: [], checkpoints: [
@@ -80,9 +84,9 @@ export const H3_REFERENCE_MODEL: ManifestModel = {
   family: "minimax-h3",
   accepts: { referenceImages: 9, referenceVideos: 3, referenceAudio: 3, referenceRoles: false, startFrame: false, endFrame: false },
   limits: { referenceSyntax: "minimax-h3", maxPromptChars: 8000, alwaysSound: true,
-    maxDurationSec: 5, durations: { "5": "5" }, durationWire: "number", resolutions: ["480p"], aspects: ["16:9", "9:16"],
-    maxReferenceVideoSec: 15, minReferenceVideoFileSec: 2, maxReferenceVideoFileSec: 5.2,
-    maxReferenceAudioSec: 15, maxReferenceAudioFileSec: 5.2, maxCombinedReferences: 15 },
+    maxDurationSec: 15, durations: { "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "10": "10", "15": "15" }, durationWire: "number", resolutions: ["480p"], aspects: ["16:9", "9:16"],
+    maxReferenceVideoSec: 15, minReferenceVideoFileSec: 2, maxReferenceVideoFileSec: 15,
+    maxReferenceAudioSec: 15, maxReferenceAudioFileSec: 15, maxCombinedReferences: 15 },
   speechVideo: "untested", pricing: { kind: "unmetered", typicalRunSec: 657 },
   requires: { vramMb: 10000, recommendedVramMb: 24000, memMb: 30720, diskMb: 42371, accelerator: ["cuda"] },
 };

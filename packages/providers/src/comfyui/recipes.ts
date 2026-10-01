@@ -1008,7 +1008,7 @@ export const VIDEO_DERIVATIONS: Record<
   [DRAFT_VIDEO.id]: { dimensions: WAN_DIMENSIONS, framesBySeconds: WAN_FRAMES_BY_SECONDS },
   [H3_VIDEO.id]: { dimensions: H3_DIMENSIONS, framesBySeconds: H3_FRAMES_BY_SECONDS },
   [H3_VIDEO_768.id]: { dimensions: H3_768_DIMENSIONS, framesBySeconds: H3_768_FRAMES_BY_SECONDS },
-  [H3_REFERENCE.id]: { dimensions: H3_DIMENSIONS, framesBySeconds: { "5": 124 } },
+  [H3_REFERENCE.id]: { dimensions: H3_DIMENSIONS, framesBySeconds: H3_FRAMES_BY_SECONDS },
 };
 
 export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
