@@ -1126,10 +1126,12 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     sampling: H3_VIDEO.sampling!,
     /*
      * The reference route (design turn 179): the bench's Reference lane sends here, the Keyframe
-     * lane to the first frame above. One picture, because one picture at 15 s is what has been
-     * measured; the graph carries three, and the second and third are offered once they have run.
+     * lane to the first frame above. Two pictures, because one and two at 15 s are what have been
+     * measured: on 2026-10-01 two AI-generated Cast portraits (a woman and a man) with the Motion +
+     * anatomy bundle took 18.9 min at a 9,583 MiB card peak and 754 MB RAM low-water, within a
+     * minute and 40 MiB of one picture. The graph carries three; the third is offered once it has run.
      */
-    referenceRoute: { maxImages: 1, referenceSyntax: "minimax-h3" },
+    referenceRoute: { maxImages: 2, referenceSyntax: "minimax-h3" },
     // Free is the price; this is the cost (issue 868). The four cold 480p runs of 2026-09-06
     // (H3_FRAMES_BY_SECONDS) took 9m56s to 11m17s for 4 to 8 seconds of picture, so the row
     // states the middle of them beside its price rather than "minutes" against a cloud row's

@@ -137,18 +137,29 @@ describe("H3 Video's Reference lane (design turn 179)", () => {
     assert.equal(plan.reserved[0]!.request.referenceRoute!.pictures[0]!.who, sheet.name);
   });
 
-  it("the lane admits what the route offers — one picture — not the first frame's budget or ref2va's", async () => {
+  it("the lane admits what the route offers — two pictures — not the first frame's budget or ref2va's", async () => {
     const { dir, store } = await world();
     const first = await filePicture(dir, store, "one.png");
     const second = await filePicture(dir, store, "two.png");
+    const third = await filePicture(dir, store, "three.png");
     const opened = await bench(dir);
     assert.equal((await attach(opened, store, first.id)).outcome, "added");
-    assert.equal((await attach(opened, store, second.id)).outcome, "refused");
-    // Two carried in from a row that takes nine are refused at the gate, not dropped.
+    assert.equal((await attach(opened, store, second.id)).outcome, "added");
+    assert.equal((await attach(opened, store, third.id)).outcome, "refused");
+    // Two pictures write two subject lines, in tray order, ahead of the brief.
+    await compose(opened.store, H3.id, undefined, "Two people.");
+    const two = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST, { worldId: store.worldId, requestId: "pair", at: CLOCK() });
+    assert.ok(two.ok, two.ok ? undefined : two.reason);
+    if (two.ok) {
+      assert.match(String(two.inputs[0]!.params.prompt), /^<Subject 1> is .+, shown in <Picture 1>\.\n<Subject 2> is .+, shown in <Picture 2>\.\n/);
+      assert.equal(two.reserved[0]!.request.referenceRoute!.pictures.length, 2);
+    }
+    // Three carried in from a row that takes nine are refused at the gate, not dropped.
     const wide = await bench(dir, R2V.id);
     await attach(wide, store, first.id, R2V);
     await attach(wide, store, second.id, R2V);
-    await compose(wide.store, H3.id, undefined, "Two people.");
+    await attach(wide, store, third.id, R2V);
+    await compose(wide.store, H3.id, undefined, "Three people.");
     const plan = planBenchDispatch((await wide.store.fold())!, store.getBundle(), SHIPPED_MANIFEST, { worldId: store.worldId, requestId: "two", at: CLOCK() });
     assert.equal(plan.ok, false);
   });
