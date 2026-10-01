@@ -13,7 +13,7 @@ import {
 } from "../lib/store.js";
 
 /**
- * A generated take's tools (design turn 180): Run it again · Upscale · Download, then What was
+ * A generated take's tools (design turn 180; SPEC-021 R-36, R-37): Run it again · Upscale · Download, then What was
  * sent, then Not this · Delete — each a glyph whose hint names it and nothing beneath it. A tool
  * that does not apply is absent rather than disabled, so the row only ever offers what it can do.
  *

@@ -1294,7 +1294,7 @@ export async function benchTakeFiles(
 export type DeleteBenchTakeOutcome = { deleted: true } | { deleted: false; reason: string };
 
 /**
- * Delete one take (design turn 180). The refusal rules are `benchDeleteRefusal`'s, asked again
+ * Delete one take (design turn 180; SPEC-021 R-37). The refusal rules are `benchDeleteRefusal`'s, asked again
  * here whatever the screen showed. The `take-deleted` record is appended (fsynced) before any file
  * goes, so the only crash window leaves a deleted take with files still on disk — which
  * `sweepDeletedBenchMedia` finishes on the next open — and never a take whose bytes are missing.

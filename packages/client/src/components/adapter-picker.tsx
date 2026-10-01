@@ -5,7 +5,7 @@ import { useStore } from "../lib/store.js";
 import { cx } from "./ui.js";
 
 /**
- * The adapter, as one chip in the composer row (design turn 180c), the way Sampling is a chip.
+ * The adapter, as one chip in the composer row (design turn 180c; SPEC-021 R-38), the way Sampling is a chip.
  *
  * It replaced a label, a select whose option text ran past its column, a description sentence, a
  * disclosure and a link — the same choices, now in one popover: None, Bundles (the chosen one

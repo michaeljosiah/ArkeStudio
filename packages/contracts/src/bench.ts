@@ -1263,7 +1263,7 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
 export const BENCH_DELETE_FILED = "Filed — delete it from Artifacts";
 
 /**
- * Whether Delete applies to a take (design turn 180): null when it may go, or why not.
+ * Whether Delete applies to a take (design turn 180; SPEC-021 R-37): null when it may go, or why not.
  *
  * Two different answers, read two different ways. A take still out — queued, running, or a
  * provider outcome nobody can yet vouch for — is not offered Delete at all: its files are still
