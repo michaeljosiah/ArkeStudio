@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import {
   benchSourceKey,
@@ -25,6 +25,9 @@ import {
   openBenchSession,
   planBenchDispatch,
   recoverBenchSession,
+  benchTakeFiles,
+  deleteBenchTake,
+  sweepDeletedBenchMedia,
 } from "../../src/bench/service.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -898,6 +901,71 @@ describe("recovery (issue 305 §6)", () => {
     assert.equal(session?.takes[0]?.error, "provider said no");
   });
 
+});
+
+describe("deleting a take (design turn 180)", () => {
+  const REQUEST = { mode: "image" as const, brief: "x", references: [], keyframes: [], provider: "fal", model: "test-image", params: { kind: "image" as const, count: 1 } };
+  const exists = (path: string) => access(path).then(() => true, () => false);
+
+  /** A session holding take 1 (landed, with a poster beside it) and take 2 (still running). */
+  async function twoTakes() {
+    const { dir } = await open();
+    const opened = await freshBench(dir);
+    const done = newId("tk"), out = newId("tk");
+    await opened.store.append({ type: "takes-reserved", takes: [
+      { id: done as never, n: 1, requestId: "r1", request: REQUEST, createdAt: CLOCK() },
+      { id: out as never, n: 2, requestId: "r1/1", request: REQUEST, createdAt: CLOCK() },
+    ] }, { at: CLOCK() });
+    await opened.store.append({ type: "take-status", takeId: out as never, status: "running" }, { at: CLOCK() });
+    const media = join(dir, sessionMediaDir(opened.session.id, done));
+    await mkdir(media, { recursive: true });
+    await writeFile(join(media, "output-1.png"), "x".repeat(2048));
+    await writeFile(join(media, "output-1.poster.png"), "p".repeat(512));
+    await opened.store.append({ type: "take-completed", takeId: done as never, media: { file: "output-1.png", hash: "sha256:00000000000000aa" as never }, completedAt: CLOCK() }, { at: CLOCK() });
+    return { dir, opened, done, out, media };
+  }
+
+  it("names every file the confirm will list, the take's own first", async () => {
+    const { dir, opened, done } = await twoTakes();
+    assert.deepEqual(await benchTakeFiles(dir, opened.session.id, done, "output-1.png"), [
+      { name: "output-1.png", bytes: 2048 },
+      { name: "output-1.poster.png", bytes: 512 },
+    ]);
+    // A take that never landed anything has an empty list, not an error.
+    assert.deepEqual(await benchTakeFiles(dir, opened.session.id, newId("tk")), []);
+  });
+
+  it("removes the take and its folder, keeps its number spent, and is idempotent by request", async () => {
+    const { dir, opened, done, media } = await twoTakes();
+    const outcome = await deleteBenchTake((await refolded(opened))!, dir, done, { requestId: "del-1", at: CLOCK() });
+    assert.deepEqual(outcome, { deleted: true });
+    assert.equal(await exists(media), false);
+    const session = (await opened.store.fold())!;
+    assert.deepEqual(session.takes.map((take) => take.n), [2]);
+    assert.deepEqual(session.deletedTakes, [{ id: done, n: 1 }]);
+    assert.equal(session.nextTake, 3, "the number is never handed out again");
+    const again = await deleteBenchTake((await refolded(opened))!, dir, done, { requestId: "del-1", at: CLOCK() });
+    assert.deepEqual(again, { deleted: true });
+    const raw = await readFile(join(sessionDir(dir, opened.session.id), "events.jsonl"), "utf8");
+    assert.equal(raw.split(/\r?\n/).filter((line) => line.includes("take-deleted")).length, 1);
+  });
+
+  it("refuses a take still out, and a filed take with its one clause, touching nothing", async () => {
+    const { dir, opened, done, out, media } = await twoTakes();
+    assert.deepEqual(await deleteBenchTake((await refolded(opened))!, dir, out, { requestId: "del-2", at: CLOCK() }), { deleted: false, reason: "Still generating" });
+    await opened.store.append({ type: "take-filed", takeId: done as never, artifactId: newId("ar") as never }, { at: CLOCK() });
+    assert.deepEqual(await deleteBenchTake((await refolded(opened))!, dir, done, { requestId: "del-3", at: CLOCK() }), { deleted: false, reason: "Filed — delete it from Artifacts" });
+    assert.equal(await exists(media), true);
+    assert.equal((await opened.store.fold())!.takes.length, 2);
+  });
+
+  it("finishes a delete a crash interrupted: the record landed, the folder did not go", async () => {
+    const { dir, opened, done, media } = await twoTakes();
+    await opened.store.append({ type: "take-deleted", takeId: done as never }, { at: CLOCK() });
+    assert.equal(await exists(media), true);
+    await sweepDeletedBenchMedia(dir, (await opened.store.fold())!);
+    assert.equal(await exists(media), false);
+  });
 });
 
 describe("keeping (issue 305 §7)", () => {

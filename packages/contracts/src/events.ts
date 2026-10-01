@@ -1698,6 +1698,32 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       reason: z.string().optional(),
     })
     .strict(),
+  /** What a take's Delete would remove, by name and size; `reason` instead when it cannot go. */
+  z
+    .object({
+      ...base,
+      type: z.literal("bench.take-files"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      takeId: TakeIdSchema,
+      requestId: UlidSchema,
+      files: z.array(z.object({ name: z.string().min(1), bytes: z.number().int().nonnegative() }).strict()),
+      reason: z.string().optional(),
+    })
+    .strict(),
+  /** Correlated result of deleting a take; a refusal carries its one clause. */
+  z
+    .object({
+      ...base,
+      type: z.literal("bench.take-deleted"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      takeId: TakeIdSchema,
+      requestId: UlidSchema,
+      deleted: z.boolean(),
+      reason: z.string().optional(),
+    })
+    .strict(),
   /** The enhancer's answer: the rewritten prompt, or null with why not (never silence). */
   z
     .object({

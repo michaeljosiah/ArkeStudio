@@ -5159,6 +5159,15 @@ span.fy-bench__who { border-bottom: 0; }
 /* The download in the bar wears the row mark, not the picture's floating disc — and takes the
    pointer, which the disc only takes while its picture is hovered. */
 .fy-bench__rowicon--bar { width: 26px; height: 26px; position: static; opacity: 1; pointer-events: auto; }
+/* The take's tools as one group of glyphs, split by hairlines into make · read · judge (180a). */
+.fy-bench__tools { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.fy-bench__tools .fy-bench__rowicon--bar { width: 24px; height: 24px; }
+.fy-bench__toolsep { width: 1px; height: 14px; margin: 0 4px; background: var(--border); flex: none; }
+.fy-bench__toolrefusal { flex: none; font: 400 var(--text-xs)/1.4 var(--font-sans); color: var(--destructive); }
+/* The one confirm (180b): each file named with its size, then Cancel and Delete. */
+.fy-bench__deletefiles { list-style: none; margin: 0; padding: 4px 18px 0; display: grid; gap: 4px; font: 400 12px var(--font-mono); color: var(--muted-foreground); }
+.fy-bench__deletefoot { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 18px 18px; }
+.fy-bench__delete .fy-bench__refusal { margin: 10px 18px 0; }
 .fy-bench__media {
   flex: 1; min-height: 0; margin: 0 14px; border: 1px solid var(--border); border-radius: 12px;
   overflow: hidden; background: var(--neutral-950); position: relative;

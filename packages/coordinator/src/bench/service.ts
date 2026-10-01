@@ -2,11 +2,13 @@ import { quoteSpeech, speechInputFits } from "@arke-studio/contracts";
 import { stageArtifactProblem } from "../productions/stage-playblast.js";
 import { planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem, type FrozenPerformanceAudio } from "@arke-studio/contracts";
 import { castNameFor, referenceRouteModel, referenceRouteRefusal, referenceSubjectLines, whoFor, REFERENCE_ROUTE } from "@arke-studio/contracts";
-import { readdir } from "node:fs/promises";
+import { readdir, rm, stat } from "node:fs/promises";
+import { join } from "node:path";
 import {
   DEFAULT_SHOT_SEC,
   admitReference,
   aspectSupport,
+  benchDeleteRefusal,
   benchSessionSummary,
   deliveryParams,
   benchSourceKey,
@@ -254,6 +256,7 @@ export function resolveArtifactSource(artifact: ArtifactSidecar): ResolvedSource
 /** A session take as a reference: its landed media, by take id. */
 export function resolveTakeSource(session: BenchSession, takeId: string): ResolvedSource | BenchRefusal {
   const take = session.takes.find((t) => t.id === takeId);
+  if (!take && (session.deletedTakes ?? []).some((gone) => gone.id === takeId)) return { refused: "that take was deleted" };
   if (!take || !take.media) return { refused: "that take has no media yet" };
   // What the take actually IS, by the mode that made it. Read as "video or else image" this
   // sent a spoken take to a picture model as though it were a still.
@@ -1255,6 +1258,83 @@ export function planBenchDispatch(
     }
   }
   return { ok: true, reserved, inputs: adapterRecipe ? inputs.map(input => ({ ...input, recipe: adapterRecipe })) : inputs };
+}
+
+// ---------------------------------------------------------------------------
+// Delete (design turn 180) — the take leaves the session, its files leave the disk
+// ---------------------------------------------------------------------------
+
+/** Every file under a take's media folder, by its path within the folder, with its size. */
+export async function benchTakeFiles(
+  worldDir: string,
+  sessionId: SessionId,
+  takeId: string,
+  /** The take's own file, listed first because it is the one the confirm is about. */
+  first?: string,
+): Promise<Array<{ name: string; bytes: number }>> {
+  const root = join(worldDir, sessionMediaDir(sessionId, takeId));
+  const found: Array<{ name: string; bytes: number }> = [];
+  const walk = async (dir: string, prefix: string): Promise<void> => {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await readdir(toExtendedLength(dir), { withFileTypes: true });
+    } catch {
+      return; // a failed take may never have had a folder
+    }
+    for (const entry of entries) {
+      const name = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) await walk(join(dir, entry.name), name);
+      else if (entry.isFile()) found.push({ name, bytes: (await stat(toExtendedLength(join(dir, entry.name)))).size });
+    }
+  };
+  await walk(root, "");
+  return found.sort((a, b) => Number(b.name === first) - Number(a.name === first) || a.name.localeCompare(b.name));
+}
+
+export type DeleteBenchTakeOutcome = { deleted: true } | { deleted: false; reason: string };
+
+/**
+ * Delete one take (design turn 180). The refusal rules are `benchDeleteRefusal`'s, asked again
+ * here whatever the screen showed. The `take-deleted` record is appended (fsynced) before any file
+ * goes, so the only crash window leaves a deleted take with files still on disk — which
+ * `sweepDeletedBenchMedia` finishes on the next open — and never a take whose bytes are missing.
+ */
+export async function deleteBenchTake(
+  opened: OpenedBench,
+  worldDir: string,
+  takeId: string,
+  options: { requestId: string; at: string },
+): Promise<DeleteBenchTakeOutcome> {
+  const take = opened.session.takes.find((candidate) => candidate.id === takeId);
+  if (take === undefined) {
+    // A resent command after its first press landed: the take is already gone, which is success.
+    return (opened.session.deletedTakes ?? []).some((gone) => gone.id === takeId)
+      ? { deleted: true }
+      : { deleted: false, reason: "That take is no longer in this session" };
+  }
+  const refusal = benchDeleteRefusal(take);
+  if (refusal !== null) return { deleted: false, reason: refusal.reason };
+  await opened.store.append({ type: "take-deleted", takeId: take.id }, { at: options.at, requestId: options.requestId });
+  await removeBenchTakeMedia(worldDir, opened.session.id, take.id);
+  return { deleted: true };
+}
+
+async function removeBenchTakeMedia(worldDir: string, sessionId: SessionId, takeId: string): Promise<void> {
+  await rm(toExtendedLength(join(worldDir, sessionMediaDir(sessionId, takeId))), {
+    recursive: true,
+    force: true,
+    maxRetries: 3,
+  });
+}
+
+/**
+ * Finish any delete a crash interrupted: a take the log says is deleted keeps no folder. Cheap
+ * when there is nothing to do — `force` makes a missing folder a no-op — so it runs on every open.
+ */
+export async function sweepDeletedBenchMedia(worldDir: string, session: BenchSession): Promise<void> {
+  for (const gone of session.deletedTakes ?? []) {
+    await removeBenchTakeMedia(worldDir, session.id, gone.id).catch(() => {});
+  }
 }
 
 // ---------------------------------------------------------------------------

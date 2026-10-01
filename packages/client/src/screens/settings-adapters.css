@@ -23,12 +23,22 @@
 .fy-adapters .fy-editordialog__panel input { margin-top: 3px; }
 @media (max-width: 800px) { .fy-adapters { padding: 20px 16px 32px; } }
 
-.fy-bench__modelcontrols { display: grid; gap: 8px; flex: 1 1 120px; min-width: 0; }
-.fy-adapter-picker { display: grid; gap: 6px; min-width: 0; font: 400 var(--text-2xs)/1.4 var(--font-sans); color: var(--muted-foreground); }
-.fy-adapter-picker label { display: grid; gap: 4px; min-width: 0; }
-.fy-adapter-picker select, .fy-adapter-picker input {
-  min-width: 0; max-width: 100%; border: 1px solid var(--border); border-radius: 8px;
-  background: var(--background); color: var(--foreground); font: inherit; padding: 6px 8px;
+/* The model, the adapter chip and the sampling chip share one row and wrap when narrow (180c). */
+.fy-bench__modelcontrols { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1 1 120px; min-width: 0; }
+.fy-adapter-off { font: 400 var(--text-2xs)/1.4 var(--font-sans); color: var(--muted-foreground); }
+.fy-adapter-chip--bad { color: var(--muted-foreground); border-style: dashed; }
+/* The adapter popover: Sampling's menu, wider for the strength fields and scrolled when long. */
+.fy-adapter-pop { width: 280px; max-height: min(420px, 70vh); overflow-y: auto; }
+.fy-adapter-pop__group { padding: 8px 10px 2px; font: 500 10.5px var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-foreground); }
+.fy-adapter-pop__block { display: flex; flex-direction: column; }
+.fy-adapter-pop__block .fy-samp__item:disabled { color: var(--muted-foreground); cursor: default; background: none; }
+.fy-adapter-pop__why, .fy-adapter-pop__row small { padding: 0 10px 6px; font: 400 11px/1.35 var(--font-sans); color: var(--muted-foreground); }
+.fy-adapter-pop__row { display: flex; flex-direction: column; padding: 8px 10px 0; font: 500 12.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-adapter-pop__row small { padding: 2px 0 6px; }
+.fy-adapter-pop__member { display: flex; align-items: center; gap: 10px; padding: 3px 10px 3px 22px; font: 400 12px var(--font-sans); color: var(--foreground); }
+.fy-adapter-pop__member > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-adapter-pop__member input {
+  width: 64px; border: 1px solid var(--border); border-radius: 6px; background: var(--background);
+  color: var(--foreground); font: 400 11.5px var(--font-mono); padding: 3px 6px;
 }
-.fy-adapter-picker input { width: 80px; }
-.fy-adapter-picker a { width: fit-content; }
+.fy-adapter-pop a.fy-samp__item { text-decoration: none; }

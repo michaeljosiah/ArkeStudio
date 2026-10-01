@@ -161,6 +161,8 @@ import {
   orderedShots,
   characterAudioRoute,
   meetsLocalModelMinimum,
+  BENCH_DELETE_FILED,
+  benchDeleteRefusal,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
 import {
@@ -171,6 +173,9 @@ import {
   addBenchReference,
   type WorldFileReader,
   recoverBenchSession,
+  benchTakeFiles,
+  deleteBenchTake,
+  sweepDeletedBenchMedia,
   type BenchRecoveryJobFacts,
   type OpenedBench,
 } from "./bench/service.js";
@@ -4899,8 +4904,10 @@ export class Coordinator {
         const session = await benchStore.fold();
         if (!session) throw new Error("the bench session's log is unavailable");
         const take = session.takes.find((t) => t.id === benchTakeId);
-        // Replay-safe: a completion already recorded is not recorded again (§6).
+        // Replay-safe: a completion already recorded is not recorded again (§6). A deleted take
+        // has nothing to complete — its files went with it (design turn 180).
         if (take?.media !== undefined) return;
+        if (take === undefined && (session.deletedTakes ?? []).some((gone) => gone.id === benchTakeId)) return;
         const bytes = await readFile(toExtendedLength(join(store.dir, landed)));
         const hash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
         // Drawn before the take is recorded, so the strip never renders a completed video take
@@ -5915,7 +5922,9 @@ export class Coordinator {
     if (!genesisDecisionHeld && (msg.kind === "genesis-propose-world" || msg.kind === "genesis-import-resolve" || msg.kind === "genesis-voice-generate" || msg.kind === "genesis-voice-decide" || msg.kind === "genesis-image-generate" || msg.kind === "genesis-image-decide" || msg.kind === "generate-look-preview" || msg.kind === "genesis-discard" || msg.kind === "genesis-chat" || msg.kind === "genesis-decide" || msg.kind === "genesis-review" || msg.kind === "begin-founding-build" || msg.kind === "genesis-attach" || msg.kind === "genesis-attach-files" || msg.kind === "create-world") && msg.genesisId) {
       return serializeFileMutation(`founding-decisions:${msg.genesisId}`, () => this.handleClientMessage(msg, false, false, true));
     }
-    if (!benchTakeActionHeld && (msg.kind === "bench-accept" || msg.kind === "bench-discard")) {
+    // Delete joins Accept and Not this on one key per take, so a filing and a delete pressed
+    // together cannot both act on the same files (design turn 180).
+    if (!benchTakeActionHeld && (msg.kind === "bench-accept" || msg.kind === "bench-discard" || msg.kind === "bench-delete")) {
       const key = `${msg.worldId}/${msg.sessionId}/${msg.takeId}`;
       return this.serialiseBenchTakeAction(key, () => this.handleClientMessage(msg, true));
     }
@@ -12267,6 +12276,93 @@ export class Coordinator {
         await this.refreshBench(msg.worldId, msg.sessionId);
         return;
       }
+      case "bench-take-files": {
+        const answer = (files: Array<{ name: string; bytes: number }>, reason?: string) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "bench.take-files",
+            worldId: msg.worldId,
+            sessionId: msg.sessionId,
+            takeId: msg.takeId,
+            requestId: msg.requestId,
+            files,
+            ...(reason !== undefined ? { reason } : {}),
+          });
+        const store = this.opts.provider.openStore?.();
+        const bench = await this.benchFor(msg.worldId, msg.sessionId);
+        const take = bench?.session.takes.find((candidate) => candidate.id === msg.takeId);
+        if (!store || !bench || !take) {
+          answer([], "That take is no longer in this session");
+          return;
+        }
+        const refusal = benchDeleteRefusal(take);
+        if (refusal !== null) {
+          answer([], refusal.reason);
+          return;
+        }
+        answer(await benchTakeFiles(store.dir, bench.session.id, take.id, take.media?.file));
+        return;
+      }
+      case "bench-delete": {
+        const answer = (deleted: boolean, reason?: string) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "bench.take-deleted",
+            worldId: msg.worldId,
+            sessionId: msg.sessionId,
+            takeId: msg.takeId,
+            requestId: msg.requestId,
+            deleted,
+            ...(reason !== undefined ? { reason } : {}),
+          });
+        const store = this.opts.provider.openStore?.();
+        const bench = await this.benchFor(msg.worldId, msg.sessionId);
+        if (!store || !bench) {
+          answer(false, "That session is no longer available");
+          return;
+        }
+        const take = bench.session.takes.find((candidate) => candidate.id === msg.takeId);
+        // A subject take whose production filing landed but whose session record did not is
+        // filed, whatever the log says yet; the record is repaired first, exactly as Not this
+        // does, and the delete is then refused like any filed take.
+        const filed = take?.disposition === "open" ? existingBenchSubjectFiling(store, bench.session, take) : null;
+        if (take !== undefined && filed !== null) {
+          await bench.store.append(
+            {
+              type: "take-subject-filed",
+              takeId: take.id,
+              productionTakeIds: filed.productionTakeIds as never,
+              ...(filed.artifactId !== undefined ? { artifactId: filed.artifactId as never } : {}),
+            },
+            { at: this.nowIso(), requestId: `subject-filing-recovered:${bench.session.id}/${take.id}` },
+          );
+          await recordBenchOutcome(store, bench.session, take, filed).catch(() => {});
+          await this.refreshBench(msg.worldId, msg.sessionId);
+          answer(false, BENCH_DELETE_FILED);
+          return;
+        }
+        try {
+          const outcome = await deleteBenchTake(bench, store.dir, msg.takeId, { requestId: msg.requestId, at: this.nowIso() });
+          void this.appLog?.append({
+            kind: outcome.deleted ? "bench.take-deleted" : "bench.take-delete-refused",
+            worldId: msg.worldId,
+            takeId: msg.takeId,
+            ...(outcome.deleted ? {} : { reason: outcome.reason }),
+          });
+          await this.refreshBench(msg.worldId, msg.sessionId);
+          answer(outcome.deleted, outcome.deleted ? undefined : outcome.reason);
+        } catch (error) {
+          void this.appLog?.append({
+            kind: "bench.take-delete-failed",
+            worldId: msg.worldId,
+            takeId: msg.takeId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          await this.refreshBench(msg.worldId, msg.sessionId);
+          answer(false, describeCoordinatorError(error));
+        }
+        return;
+      }
       case "bench-clear-view": {
         const bench = await this.benchFor(msg.worldId, msg.sessionId);
         if (!bench) return;
@@ -17415,6 +17511,7 @@ export class Coordinator {
     ).catch(() => false);
     const filingTouched = await this.recoverBenchSubjectFilings(store, opened).catch(() => false);
     const session = touched || filingTouched ? ((await opened.store.fold()) ?? opened.session) : opened.session;
+    await sweepDeletedBenchMedia(store.dir, session);
     await this.backfillBenchPosters(store, session);
     await store.ownedWrite(async () => {
       for (const take of session.takes) {
