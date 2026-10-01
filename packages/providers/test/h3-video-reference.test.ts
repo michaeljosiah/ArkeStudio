@@ -119,7 +119,7 @@ test("only H3 Video has the route, and the row offers what was measured", () => 
   assert.throws(() => comfyUiRouteRecipe(base, "sideways"), /not a recipe route/);
   assert.equal(comfyUiRouteRecipe(base, undefined), base);
   const row = COMFYUI_MANIFEST_MODELS.find((model) => model.id === base.id)!;
-  assert.deepEqual(row.referenceRoute, { maxImages: 1, referenceSyntax: "minimax-h3" });
+  assert.deepEqual(row.referenceRoute, { maxImages: 2, referenceSyntax: "minimax-h3" });
   assert.equal(row.accepts.referenceImages, 1, "the first frame keeps its own budget");
   assert.ok(row.referenceRoute!.maxImages <= route.referenceImages!.length);
   for (const other of COMFYUI_MANIFEST_MODELS.filter((model) => model.id !== base.id)) assert.equal(other.referenceRoute, undefined, other.id);
