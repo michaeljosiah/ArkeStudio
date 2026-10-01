@@ -649,11 +649,12 @@ const H3_VIDEO_768: ComfyUiRecipe = {
 };
 
 /**
- * How many pictures H3 Video's reference graph carries (design turn 179). The design draws up to
- * three; three carriers are authored so that offering the second and third later is a manifest
- * change and not a new graph. What the Reference lane OFFERS is the row's `referenceRoute`.
+ * How many pictures H3 Video's reference graph carries: nine, the `ref_images` maximum that
+ * `MiniMaxH3ReferenceToVideo` declares (ComfyUI 0.38.1 object_info) and what H3 Reference Video
+ * carries. A model's own limit is the only limit the Reference lane should impose. Version 1 of
+ * this route carried three. What the lane OFFERS is the row's `referenceRoute`.
  */
-const H3_VIDEO_REFERENCE_CARRIERS = 3;
+const H3_VIDEO_REFERENCE_CARRIERS = 9;
 
 /**
  * Local · H3 Video, reference route (design turn 179) — the text-to-video checkpoint (fl2va, the
@@ -671,7 +672,7 @@ const H3_VIDEO_REFERENCE_CARRIERS = 3;
  * sampler and its sampling params, and the same adapter slot on node 3's model. Node 7 takes the
  * prompt with the clip, both VAEs (the audio VAE is an input of this node, not of the
  * image-to-video one) and the pictures through `ref_images.ref_image_N`, each from its own
- * `LoadImage` (nodes 20–22, the numbering H3 Reference Video uses). `ref_image_size: "match"` is
+ * `LoadImage` (nodes 20–28, the numbering H3 Reference Video uses). `ref_image_size: "match"` is
  * the node's own resize to the canvas, which is why there is no `ImageScale` in front: unlike
  * `first_frame` it does not stretch. No first-frame carrier — a keyframe and references do not
  * ride one take.
@@ -683,8 +684,10 @@ const H3_VIDEO_REFERENCE_CARRIERS = 3;
  *   18.0 min   (second run, same settings)
  *
  * — the text-to-video run's cost at the same length (~20 min, H3_FRAMES_BY_SECONDS), so the floors
- * are the parent's. Two and three pictures are unmeasured, which is why the row offers one.
- * The node exists from ComfyUI 0.33.1; 0.38.1 is the newest engine this graph has run on.
+ * are the parent's. More pictures did not cost more card: two Cast portraits took 18.9 min at a
+ * 9,583 MiB peak, three took 15.8 min at 9,532 MiB. Three bottomed at 79 MB of RAM, but from
+ * 20.5 GB free at dispatch against two's 13.9 GB (754 MB low-water) — the engine fills what RAM it
+ * is given — so that is not read as a per-picture cost. The node exists from ComfyUI 0.33.1; 0.38.1 is the newest engine this graph has run on.
  */
 const H3_VIDEO_REFERENCE: ComfyUiRecipe = (() => {
   const params: Record<string, RecipeParamSpec> = {};
@@ -712,7 +715,8 @@ const H3_VIDEO_REFERENCE: ComfyUiRecipe = (() => {
   const recipe: ComfyUiRecipe = {
     ...H3_VIDEO,
     route: "reference",
-    recipeVersion: 1,
+    // 2: nine picture carriers where 1 had three — a changed graph is a new version (§2.3).
+    recipeVersion: 2,
     engine: { minVersion: "0.33.1", exercisedThroughVersion: "0.38.1" },
     params,
     graph,
@@ -1126,12 +1130,11 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     sampling: H3_VIDEO.sampling!,
     /*
      * The reference route (design turn 179): the bench's Reference lane sends here, the Keyframe
-     * lane to the first frame above. Two pictures, because one and two at 15 s are what have been
-     * measured: on 2026-10-01 two AI-generated Cast portraits (a woman and a man) with the Motion +
-     * anatomy bundle took 18.9 min at a 9,583 MiB card peak and 754 MB RAM low-water, within a
-     * minute and 40 MiB of one picture. The graph carries three; the third is offered once it has run.
+     * lane to the first frame above. As many pictures as the node takes: one, two and three at
+     * 15 s with the Motion + anatomy bundle ran on the reference 3080 on 2026-10-01 without the
+     * card peak moving (9,525–9,583 MiB), so the row does not ration below the model's limit.
      */
-    referenceRoute: { maxImages: 2, referenceSyntax: "minimax-h3" },
+    referenceRoute: { maxImages: H3_VIDEO_REFERENCE_CARRIERS, referenceSyntax: "minimax-h3" },
     // Free is the price; this is the cost (issue 868). The four cold 480p runs of 2026-09-06
     // (H3_FRAMES_BY_SECONDS) took 9m56s to 11m17s for 4 to 8 seconds of picture, so the row
     // states the middle of them beside its price rather than "minutes" against a cloud row's
