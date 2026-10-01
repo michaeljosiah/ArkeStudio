@@ -6106,6 +6106,13 @@ export function sendBenchRerun(
   return requestId;
 }
 
+/** Upscale a finished video take to 1080p (design turn 178); answered like a dispatch. */
+export function sendBenchUpscale(worldId: string, sessionId: string, takeId: string): string {
+  const requestId = queueRequest("bench-upscale");
+  send({ kind: "bench-upscale", worldId, sessionId, requestId, takeId } as ClientMessage);
+  return requestId;
+}
+
 export function sendBenchKeep(worldId: string, sessionId: string, takeId: string): void {
   send({ kind: "bench-keep", worldId, sessionId, requestId: ulid(), takeId } as ClientMessage);
 }

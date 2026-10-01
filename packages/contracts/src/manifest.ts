@@ -400,6 +400,23 @@ export const ManifestModelSchema = z
      * `maxImages` is what the lane admits; `referenceSyntax` is how the brief cites them. Absent
      * means the row has no reference route, and the bench says so rather than sending a keyframe.
      */
+    /**
+     * An upscaler (design turn 178): a row that takes a finished take and makes it bigger rather
+     * than making anything from a brief. It keeps its capability — what it makes is video — but it
+     * is offered as a tool on a take and never in a model picker, routing default or fallback,
+     * where it would be chosen to generate and could not.
+     */
+    upscale: z
+      .object({
+        size: z.literal("1080p"),
+        /**
+         * The engine floor of the recipe behind the row, projected so the tile and the take can
+         * say `Needs ComfyUI 0.38` in the same words the coordinator refuses with.
+         */
+        minEngineVersion: z.string().regex(/^\d+\.\d+(\.\d+)?$/),
+      })
+      .strict()
+      .optional(),
     referenceRoute: z
       .object({
         maxImages: z.number().int().min(1).max(9),
@@ -499,12 +516,14 @@ export function modelForCapability(
   routing: RoutingDefaults | null | undefined,
   capability: Capability,
 ): ManifestModel | null {
+  // An upscaler is video by what it makes and never a generator (design turn 178), so neither a
+  // routed default nor the fallback may land on one.
   const routed = routing?.[capability];
   if (routed !== undefined) {
-    const model = manifest.models.find((candidate) => candidate.id === routed && candidate.capability === capability);
+    const model = manifest.models.find((candidate) => candidate.id === routed && candidate.capability === capability && candidate.upscale === undefined);
     if (model) return model;
   }
-  return manifest.models.find((candidate) => candidate.capability === capability) ?? null;
+  return manifest.models.find((candidate) => candidate.capability === capability && candidate.upscale === undefined) ?? null;
 }
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import {
   type JobSampling,
   type SamplingSetting,
   type SamplingTimingSample,
+  type UpscaleRateSample,
 } from "@arke-studio/contracts";
 import { VIDEO_DERIVATIONS, comfyUiRecipeById } from "@arke-studio/providers";
 import type { EnqueueInput } from "./dispatcher.js";
@@ -141,4 +142,41 @@ function clipScale(job: Job): number | null {
   const ran = derivation.framesBySeconds[String(seconds)];
   const reference = derivation.framesBySeconds[String(recipe.sampling.clipSec)];
   return ran === undefined || reference === undefined ? null : reference / ran;
+}
+
+/**
+ * The measured rate beside Upscale (design turn 178; SPEC-021 R-35): seconds of run per second of video made,
+ * from this machine's own completed upscales, the way the sampling clock measures a preset.
+ *
+ * One figure rather than steps and a remainder, because an upscale has one sampler step and its
+ * time is all chunks, encoding and decoding — work that grows with the frames, so per second of
+ * output is the honest unit. Watched from its first running sighting only, like the sampling
+ * clock: a job met mid-run after a restart would report its remainder as the whole. A source
+ * whose length was not measured records nothing rather than a rate divided by a guess.
+ */
+export class UpscaleClock {
+  private readonly watching = new Map<string, number>();
+
+  constructor(
+    private readonly record: (recipeId: string, sample: UpscaleRateSample) => void,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  observe(job: Job): void {
+    if (job.provider !== "comfyui" || comfyUiRecipeById(job.model)?.videoInput === undefined) return;
+    const at = this.now();
+    if (job.status === "running") {
+      if (!this.watching.has(job.id) && (job.step == null || job.step.done === 0)) this.watching.set(job.id, at);
+      return;
+    }
+    const started = this.watching.get(job.id);
+    if (started === undefined) return;
+    if (job.status === "queued" || job.status === "submitting") return;
+    this.watching.delete(job.id);
+    if (job.status !== "succeeded") return;
+    const outputSec = Number(job.params["sourceDurationSec"]);
+    const secPerOutputSec = (at - started) / 1000 / outputSec;
+    if (!(outputSec > 0) || !(secPerOutputSec > 0)) return;
+    this.record(job.model, { secPerOutputSec, at: new Date(at).toISOString() });
+  }
 }

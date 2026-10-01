@@ -3,7 +3,7 @@ import { castVoiceSummary, planSubjectCharacterAudio } from "@arke-studio/contra
 import { castNameFor, DEFAULT_REFERENCE_WHO, referenceRouteModel, referenceRouteRefusal } from "@arke-studio/contracts";
 import { AdapterPicker } from "../components/adapter-picker.js";
 import { SamplingChip, hasSampling } from "../components/local-sampling.js";
-import { hasAdultAdapter, matchingAdapterBundle } from "@arke-studio/contracts";
+import { benchUpscalePlan, hasAdultAdapter, matchingAdapterBundle, upscaleFrameCopy } from "@arke-studio/contracts";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
@@ -57,6 +57,7 @@ import {
   sendBenchRemoveReference,
   sendBenchRerun,
   sendBenchSelectTake,
+  sendBenchUpscale,
   sendBenchDraftLyrics,
   sendBenchTitle,
   sendBenchUploadReferences,
@@ -104,6 +105,7 @@ import {
 import { Portrait } from "../components/portrait.js";
 import { BenchBrief } from "../components/bench-brief.js";
 import { BenchTakeTools } from "../components/bench-take-tools.js";
+import { UpscaleTool, upscalerFor } from "../components/bench-upscale.js";
 import { BenchPlayer } from "../components/bench-player.js";
 import { PromptCapabilityNotices } from "../components/prompt-review.js";
 import { droppedMentions, mentionOptions } from "../lib/bench-mention.js";
@@ -784,6 +786,11 @@ function BenchWorkspace({
   // ---- selection ----
   const latest = session.takes[session.takes.length - 1] ?? null;
   const selected: BenchTake | null = session.takes.find((t) => t.id === session.selectedTakeId) ?? latest;
+  /** The installed upscaler, and the take an upscale on the wall was made from (design 178). */
+  const upscaler = upscalerFor(manifest);
+  const upscaleSource: BenchTake | null = selected?.request.upscale !== undefined
+    ? (session.takes.find((t) => t.id === selected.request.upscale!.sourceTakeId) ?? null)
+    : null;
   const rerunNeedsPrice = selected?.request.params.kind === "voice" && state?.app.manifest?.models.some(
     (model) => model.provider === selected.request.provider && model.id === selected.request.model && model.pricing.kind === "perToken",
   ) === true;
@@ -816,6 +823,12 @@ function BenchWorkspace({
   const takeRouteName = (take: BenchTake): string => {
     const job = take.jobId ? jobs.get(take.jobId) : undefined;
     const name = modelName(take.request.provider, take.request.model);
+    // An upscale names its source (design 178b), and says so when the source is gone (180).
+    const upscale = take.request.upscale;
+    if (upscale !== undefined) {
+      const gone = !session.takes.some((candidate) => candidate.id === upscale.sourceTakeId);
+      return [name, upscale.size, `from Take ${upscale.sourceN}${gone ? " · deleted" : ""}`, upscaleFrameCopy(upscale)].join(" · ");
+    }
     const route = job?.params.route;
     const mode = job?.params.taskMode;
     const pictures = take.request.referenceRoute?.pictures.length;
@@ -2414,17 +2427,41 @@ function BenchWorkspace({
                 worldSlug={worldSlug}
                 sessionId={session.id}
                 take={selected}
-                rerunNeedsPrice={rerunNeedsPrice}
-                onRerun={() => {
-                  if (!rerunNeedsPrice) { rerunBench(selected.id); return; }
-                  restore(selected);
-                  composerRef.current?.scrollIntoView({ block: "start" });
-                  composerRef.current?.focus({ preventScroll: true });
-                }}
-                onSent={() => {
-                  restore(selected);
-                  if (selected.request.referenceRoute !== undefined) setSentOpen(sentOpen === selected.id ? null : selected.id);
-                }}
+                rerunNeedsPrice={rerunNeedsPrice && selected.request.upscale === undefined}
+                onRerun={
+                  // An upscale is made again from its source, through Upscale's own command; with
+                  // the source deleted there is nothing to make it from (design turns 178, 180).
+                  selected.request.upscale !== undefined
+                    ? upscaleSource !== null && benchUpscalePlan(upscaleSource) !== null
+                      ? () => {
+                          // Correlated like any dispatch, so a refusal ("Needs ComfyUI 0.38") is said.
+                          pendingDispatchAction.current = null;
+                          pendingDispatch.current = sendBenchUpscale(worldId, session.id, upscaleSource.id);
+                        }
+                      : null
+                    : () => {
+                        if (!rerunNeedsPrice) { rerunBench(selected.id); return; }
+                        restore(selected);
+                        composerRef.current?.scrollIntoView({ block: "start" });
+                        composerRef.current?.focus({ preventScroll: true });
+                      }
+                }
+                onSent={
+                  // An upscale was sent a take, not a brief: its line already says which.
+                  selected.request.upscale !== undefined
+                    ? null
+                    : () => {
+                        restore(selected);
+                        if (selected.request.referenceRoute !== undefined) setSentOpen(sentOpen === selected.id ? null : selected.id);
+                      }
+                }
+                upscale={
+                  // The world bench only: a production session files a take onto its shot, and an
+                  // upscale has no filing of its own yet (SPEC-021 R-31).
+                  subject === undefined && upscaler !== null && benchUpscalePlan(selected) !== null ? (
+                    <UpscaleTool worldId={worldId} sessionId={session.id} take={selected} model={upscaler} />
+                  ) : undefined
+                }
                 sentExpanded={selected.request.referenceRoute !== undefined ? sentOpen === selected.id : undefined}
                 discardHeld={pendingAccept?.takeId === selected.id}
               />

@@ -2349,7 +2349,7 @@ export function SettingsGeneralScreen() {
     <div data-screen="settings-general" className="fy-set fy-set--general">
       <h1 className="fy-pane__name">General</h1>
       {ROUTED_CAPABILITIES.map((capability) => {
-        const candidates = (manifest?.models ?? []).filter((m) => m.capability === capability);
+        const candidates = (manifest?.models ?? []).filter((m) => m.capability === capability && m.upscale === undefined);
         const usable = (m: (typeof candidates)[number]) =>
           (capability !== "voice-tts" || supportsVoiceUse(m, "preview")) && modelEligible(m, eligibility);
         // Speech setup failures belong on AI models, where the full reason and repair live.

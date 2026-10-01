@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { recipeWithAdapters } from "../comfyui/adapters.js";
 import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
-import { COMFYUI_VERSION_FLOOR, JobSamplingSchema, compareComfyUiVersions, meetsComfyUiVersion } from "@arke-studio/contracts";
+import { COMFYUI_VERSION_FLOOR, JobSamplingSchema, UPSCALE_DIMENSIONS, compareComfyUiVersions, meetsComfyUiVersion } from "@arke-studio/contracts";
 import {
   callerParamNames,
   comfyUiRecipeById,
@@ -127,6 +127,13 @@ export function meetsVersionFloor(version: string, floor: string = COMFYUI_VERSI
  * becomes a terminal failure for work the picker openly offered.
  */
 const INTERNAL_PARAMS = new Set([
+  /*
+   * An upscale's audit trail (design turn 178): the hash the source take recorded, checked against
+   * the bytes before they are sent, and the source's length, which the measured rate divides by.
+   * Neither touches the graph.
+   */
+  "sourceHash",
+  "sourceDurationSec",
   "adapters",
   "references",
   "videoReferences",
@@ -509,6 +516,31 @@ export class ComfyUiClient implements ProviderClient {
     }
   }
 
+  /**
+   * The one clip an upscale is made from (design turn 178), checked before a byte leaves: exactly
+   * one prepared MP4, with no picture, keyframe or reference media beside it, whose bytes are
+   * still the ones its take recorded. A source replaced since the press would otherwise be
+   * upscaled under the old take's name, and nothing on screen would say so. Prefix-compared,
+   * because a take records sixteen hex digits of its hash.
+   */
+  private checkVideoInput(recipe: ComfyUiRecipe, request: SubmitRequest): NonNullable<SubmitRequest["videoReferences"]>[number] {
+    const fail = (why: string): never => { throw new ProviderRequestRejectedError(`comfyui: ${recipe.displayName} ${why}`); };
+    if (request.videoSource !== undefined) fail("does not extend video");
+    if ((request.imageReferences?.length ?? 0) > 0 || (request.audioReferences?.length ?? 0) > 0 || (request.mediaAudioReferences?.length ?? 0) > 0) {
+      fail("takes one video and nothing else");
+    }
+    const paths = request.params["videoReferences"];
+    const clips = request.videoReferences ?? [];
+    if (!Array.isArray(paths) || paths.length !== 1 || clips.length !== 1) fail("needs exactly one source video");
+    const clip = clips[0]!;
+    if (clip.contentType !== "video/mp4") fail("needs an MP4 source");
+    const recorded = String(request.params["sourceHash"] ?? "").replace(/^sha256:/, "");
+    const actual = createHash("sha256").update(clip.data).digest("hex");
+    if (!/^[0-9a-f]{8,64}$/.test(recorded) || !actual.startsWith(recorded)) fail("source has changed since the take was made");
+    if (this.engineLocality() !== "local") fail("runs on a local engine only");
+    return clip;
+  }
+
   /** Neutral params → this recipe's own values, refusing anything the recipe does not declare. */
   private valuesFor(recipe: ComfyUiRecipe, request: SubmitRequest): RecipeParamValues {
     const params = request.params;
@@ -522,6 +554,17 @@ export class ComfyUiClient implements ProviderClient {
     const seedParam = params["seed"];
     const seedValue: RecipeParamValues =
       typeof seedParam === "number" && Number.isInteger(seedParam) ? { seed: seedParam } : {};
+    if (recipe.videoInput !== undefined) {
+      // An upscale has no prompt: what it makes is decided by the source and the size. The frame
+      // follows the source's orientation, which the plan read off the file and sent as `aspect`.
+      const aspect = params["aspect"];
+      const size = params["size"];
+      if (params["prompt"] !== undefined) throw new Error(`comfyui: ${recipe.displayName} takes no prompt`);
+      if (size !== "1080p") throw new Error(`comfyui: ${recipe.displayName} makes 1080p only`);
+      const frame = typeof aspect === "string" ? UPSCALE_DIMENSIONS[aspect as keyof typeof UPSCALE_DIMENSIONS] : undefined;
+      if (frame === undefined) throw new Error(`comfyui: ${recipe.displayName} needs a 16:9 or 9:16 source`);
+      return { ...seedValue, size, aspect: aspect as string, width: frame.width, height: frame.height };
+    }
     const prompt = typeof params["prompt"] === "string" ? params["prompt"] : undefined;
     if (prompt === undefined || prompt.length === 0) {
       throw new Error(`comfyui: ${recipe.displayName} needs a prompt`);
@@ -887,7 +930,8 @@ export class ComfyUiClient implements ProviderClient {
       );
     }
     if (recipe.route === "reference") this.checkReferenceRoute(recipe, request, prepared);
-    const media = multimediaInputs(recipe, request, this.engineLocality());
+    const source = recipe.videoInput !== undefined ? this.checkVideoInput(recipe, request) : null;
+    const media = source !== null ? { videos: [], audio: [] } : multimediaInputs(recipe, request, this.engineLocality());
     const values = this.valuesFor(recipe, request);
     // Validate scalar bounds before uploading any reference bytes. Filenames are optional
     // internal bindings and will be filled only after the engine accepts the corresponding file.
@@ -932,6 +976,14 @@ export class ComfyUiClient implements ProviderClient {
         request.signal,
       );
     }
+    if (source !== null) {
+      values[recipe.videoInput!.param] = await this.uploadInput(
+        base,
+        { ...source, name: contentAddressedName(source.data, source.contentType) },
+        "source video",
+        request.signal,
+      );
+    }
     // Substitute first, then drop: the size params bind into the scaler as well as the canvas,
     // and a graph pruned before substitution would refuse its own bindings.
     for (const [index, video] of media.videos.entries()) {
@@ -971,7 +1023,7 @@ export class ComfyUiClient implements ProviderClient {
     // What this prompt is doing, in the recipe's own words. Recorded here because `poll` knows
     // only a prompt id, and the alternative — the node id the socket sends — is exactly what R-1
     // keeps away from a user.
-    this.stages.set(promptId, STAGE_WORDS[recipe.capability]);
+    this.stages.set(promptId, recipe.stage ?? STAGE_WORDS[recipe.capability]);
     return { remoteId: promptId, acceptedAt: new Date().toISOString() };
   }
 
@@ -1064,6 +1116,9 @@ export class ComfyUiClient implements ProviderClient {
           typeof (item as { filename?: unknown }).filename === "string"
         ) {
           const file = item as { filename: string; subfolder?: string; type?: string };
+          // Where the node can also list its input's preview, only what it saved under the
+          // recipe's own prefix is this run's result (design turn 178).
+          if (recipe.outputPrefix !== undefined && !file.filename.split(/[\\/]/).pop()!.startsWith(recipe.outputPrefix)) continue;
           files.push({ filename: file.filename, subfolder: file.subfolder ?? "", type: file.type ?? "output" });
         }
       }

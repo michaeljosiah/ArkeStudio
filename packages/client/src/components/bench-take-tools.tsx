@@ -24,11 +24,12 @@ import {
  */
 
 /** Which tools a take carries, in order — pure so the rule can be asserted without a screen. */
-export function benchTakeTools(take: BenchTake, extra: { upscale?: boolean } = {}): string[] {
-  const tools = ["rerun"];
+export function benchTakeTools(take: BenchTake, extra: { upscale?: boolean; rerun?: boolean; sent?: boolean } = {}): string[] {
+  const tools: string[] = [];
+  if (extra.rerun !== false) tools.push("rerun");
   if (extra.upscale === true) tools.push("upscale");
   if (take.media !== undefined) tools.push("download");
-  tools.push("sent");
+  if (extra.sent !== false) tools.push("sent");
   if (take.disposition === "open" && take.media !== undefined) tools.push("not-this");
   if (benchDeleteRefusal(take)?.absent !== true) tools.push("delete");
   return tools;
@@ -99,8 +100,10 @@ export function BenchTakeTools({
   sessionId: string;
   take: BenchTake;
   rerunNeedsPrice: boolean;
-  onRerun: () => void;
-  onSent: () => void;
+  /** Null where the take cannot be made again — an upscale whose source is gone. */
+  onRerun: (() => void) | null;
+  /** Null where there is no request to restore — an upscale was sent a take, not a brief. */
+  onSent: (() => void) | null;
   /** Present only where What was sent opens a box rather than restoring the composer. */
   sentExpanded?: boolean | undefined;
   /** Not this waits while an Accept for the same take is out. */
@@ -142,7 +145,7 @@ export function BenchTakeTools({
     [],
   );
 
-  const tools = benchTakeTools(take, { upscale: upscale !== undefined && upscale !== null });
+  const tools = benchTakeTools(take, { upscale: upscale !== undefined && upscale !== null, rerun: onRerun !== null, sent: onSent !== null });
   const press = () => {
     setRefusal(null);
     const why = benchDeleteRefusal(take);
@@ -170,7 +173,8 @@ export function BenchTakeTools({
   return (
     <>
       <span className="fy-bench__tools" role="toolbar" aria-label="Take tools">
-        {mark(rerunNeedsPrice ? "Review price to run again" : "Run it again", onRerun, <RefreshCw size={14} />)}
+        {tools.includes("rerun") && onRerun !== null &&
+          mark(rerunNeedsPrice ? "Review price to run again" : "Run it again", onRerun, <RefreshCw size={14} />)}
         {tools.includes("upscale") && upscale}
         {tools.includes("download") && take.media !== undefined && (
           <ImageDownload
@@ -181,8 +185,12 @@ export function BenchTakeTools({
           />
         )}
         <span className="fy-bench__toolsep" aria-hidden="true" />
-        {mark("What was sent", onSent, <Lines size={14} />, sentExpanded !== undefined ? { expanded: sentExpanded } : {})}
-        <span className="fy-bench__toolsep" aria-hidden="true" />
+        {tools.includes("sent") && onSent !== null && (
+          <>
+            {mark("What was sent", onSent, <Lines size={14} />, sentExpanded !== undefined ? { expanded: sentExpanded } : {})}
+            <span className="fy-bench__toolsep" aria-hidden="true" />
+          </>
+        )}
         {tools.includes("not-this") &&
           mark("Not this", () => sendBenchDiscard(worldId, sessionId, take.id), <X size={14} />, { disabled: discardHeld })}
         {tools.includes("delete") &&

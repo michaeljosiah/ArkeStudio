@@ -3,6 +3,7 @@ import type { ManifestModel, ModelSampling, RecipeIdentity, AdapterSelection } f
 import { KREA2_IMAGE, KREA2_BUCKETS } from "./krea2-recipe.js";
 import { QWEN21_IMAGE, QWEN21_BUCKETS } from "./qwen21-recipe.js";
 import { H3_REFERENCE, H3_REFERENCE_MODEL } from "./h3-reference-recipe.js";
+import { SEEDVR2_UPSCALE, SEEDVR2_UPSCALE_MODEL } from "./seedvr2-recipe.js";
 
 /**
  * The recipe catalogue (SPEC-021 §2.3): hand-authored, shipped, versioned — never fetched,
@@ -131,8 +132,23 @@ export interface ComfyUiRecipe {
   route?: "reference";
   /** The other graphs this recipe can run, chosen by a dispatch's `recipeRoute`. */
   routes?: { reference?: ComfyUiRecipe };
+  /**
+   * A recipe whose input is a finished video rather than a prompt (design turn 178): the internal
+   * param the uploaded source's engine-side name lands in. Such a recipe takes no prompt, no
+   * pictures and no reference media; the one clip arrives as the dispatch's single
+   * `videoReferences` entry and is checked against the hash its take recorded before it is sent.
+   */
+  videoInput?: { param: string };
   /** The one node whose outputs are fetched (§2.6) — never every image the history names. */
   outputNode: string;
+  /**
+   * The output node's `filename_prefix`, where the history can list more than this run's result
+   * under it: a `SaveVideo` fed by `LoadVideo` also reports the input's preview, and fetching that
+   * would land the source as the take. Absent means every file the node names is the output.
+   */
+  outputPrefix?: string;
+  /** What the run is doing, in words, where the capability's own word would be wrong. */
+  stage?: string;
   requires: {
     checkpoints: readonly RecipeCheckpoint[];
     customNodes: readonly RecipeCustomNode[];
@@ -737,7 +753,7 @@ const H3_VIDEO_REFERENCE: ComfyUiRecipe = (() => {
 /** H3 Video with its reference route attached; the 768p row spreads H3_VIDEO and has none. */
 const H3_VIDEO_WITH_ROUTES: ComfyUiRecipe = { ...H3_VIDEO, routes: { reference: H3_VIDEO_REFERENCE } };
 
-export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([KREA2_IMAGE, QWEN21_IMAGE, DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO_WITH_ROUTES, H3_VIDEO_768, H3_REFERENCE]);
+export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([KREA2_IMAGE, QWEN21_IMAGE, DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO_WITH_ROUTES, H3_VIDEO_768, H3_REFERENCE, SEEDVR2_UPSCALE]);
 
 /**
  * The graph a dispatch runs: the recipe itself, or the route it names. A route the recipe does not
@@ -1190,6 +1206,9 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
       accelerator: ["cuda"],
     },
   },
+  // Last, so no "first video row" fallback anywhere can land on it; Settings draws it under its
+  // own kind whatever its place (design 178c).
+  SEEDVR2_UPSCALE_MODEL,
 ];
 
 // ---------------------------------------------------------------------------

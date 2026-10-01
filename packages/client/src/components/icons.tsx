@@ -363,6 +363,14 @@ export const Upload = icon(
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
   </>,
 );
+/** A small frame with an arrow out of its corner: make this take bigger (design 178a, 180a). */
+export const Upscale = icon(
+  <>
+    <rect x="3" y="11" width="10" height="10" rx="1.5" />
+    <path d="M13 3h8v8" />
+    <path d="M21 3l-8 8" />
+  </>,
+);
 /**
  * Save this picture somewhere of your own (issue 478). Upload's glyph turned around, because the
  * two are the same journey in opposite directions and the tray is the part that says "a file".

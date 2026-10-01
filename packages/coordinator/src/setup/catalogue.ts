@@ -146,7 +146,13 @@ const GZIP_MAGIC = [0x1f, 0x8b] as const;
 /** 7-Zip's signature — the System32 bsdtar this service already resolves reads the format. */
 const SEVENZ_MAGIC = [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c] as const;
 
-export const COMFYUI_VERSION = "0.37.0";
+/**
+ * 0.38.0 because the upscaler's SeedVR2 nodes arrived there (design turn 178), and D18 holds the
+ * pinned runtime at or above every shipped recipe's floor: a managed install below it would show
+ * Upscale only to refuse it. 0.38.1 is what the recipes were exercised on, but it was tagged
+ * without a portable release asset, so 0.38.0 is the newest build with a published digest.
+ */
+export const COMFYUI_VERSION = "0.38.0";
 
 /** Canonical setup identities for the two model directories Voxa reads at launch. */
 export const VOXA_SETUP_COMPONENT_IDS = {
@@ -272,7 +278,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     engine: "comfyui",
     displayName: "ComfyUI",
     purpose: "Runs image and video recipes",
-    sizeMb: 1926,
+    sizeMb: 1995,
     // ~6 GB extracted, and the archive is still on disk while it extracts, so the peak is both
     // at once. Almost none of it is ComfyUI: the tree is an embedded Python plus torch and the
     // CUDA libraries, which is the cost §2.1 says every alternative runtime pays too.
@@ -288,10 +294,10 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
       file: {
         url: `https://github.com/Comfy-Org/ComfyUI/releases/download/v${COMFYUI_VERSION}/ComfyUI_windows_portable_nvidia.7z`,
         file: "ComfyUI_windows_portable_nvidia.7z",
-        sizeMb: 1926,
+        sizeMb: 1995,
         magic: SEVENZ_MAGIC,
-        // Published GitHub release-asset digest, checked 2026-09-22 (1,925,204,508 bytes).
-        sha256: "7805f634fab51f63a238aaf0cfe2a9833bb7c86ddfc8400a60919f44460d7d65",
+        // Published GitHub release-asset digest, checked 2026-10-01 (1,994,326,521 bytes).
+        sha256: "8f137eac345707fd7e42bcf8e29377415243011ca15522a86aed6c77331fbd56",
       },
     },
   },

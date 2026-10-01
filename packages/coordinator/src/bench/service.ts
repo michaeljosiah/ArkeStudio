@@ -10,6 +10,8 @@ import {
   aspectSupport,
   benchDeleteRefusal,
   benchSessionSummary,
+  benchUpscalePlan,
+  UPSCALE_SIZE,
   deliveryParams,
   benchSourceKey,
   benchTokenFor,
@@ -687,6 +689,9 @@ export function planBenchDispatch(
     : session.composer;
   const model = manifest?.models.find((m) => m.id === composer.model && m.provider === composer.provider) ?? null;
   if (!model) return { ok: false, reason: "No model is chosen, or the chosen model is no longer in the manifest." };
+  // An upscaler makes a take bigger and nothing from a brief (design turn 178); a re-run of an
+  // upscale goes back through Upscale, never through here.
+  if (model.upscale !== undefined) return { ok: false, reason: `${model.displayName} upscales a take — choose it from the take's tools.` };
   const params = composer.params;
   // Through the map, not compared: `voice` dispatches against `voice-tts` (design 70).
   if (model.capability !== modeCapability(composer.mode)) {
@@ -1258,6 +1263,99 @@ export function planBenchDispatch(
     }
   }
   return { ok: true, reserved, inputs: adapterRecipe ? inputs.map(input => ({ ...input, recipe: adapterRecipe })) : inputs };
+}
+
+// ---------------------------------------------------------------------------
+// Upscale (design turn 178) — a new take beside its source, never an edit of it
+// ---------------------------------------------------------------------------
+
+/**
+ * Plan one upscale of a finished video take: the reservation and the one job it authorizes, or
+ * the clause that refuses it. The caller has already asked whether the engine can run it (the
+ * recipe's readiness), because that is the engine's fact, not the session's.
+ *
+ * The source is sent by its world-relative path with the hash its take recorded, and the client
+ * refuses bytes that no longer match. The frame comes from the file's own measurement through
+ * `benchUpscalePlan`, the same function that decided to offer Upscale at all, so a take the
+ * screen offered is a take this admits. Local only, by construction: the only upscaler is a
+ * local recipe, and no cloud route is offered for any take, adult-classified or not.
+ */
+export function planBenchUpscale(
+  session: BenchSession,
+  manifest: ModelManifest | null,
+  options: {
+    worldId: string;
+    requestId: string;
+    takeId: string;
+    at: string;
+    recipeVersionOf?: (modelId: string) => number | undefined;
+    seed?: number | undefined;
+  },
+): BenchDispatchPlan {
+  // A production session files a take onto its shot or board, and an upscale has no filing of
+  // its own yet: offered there, it would make a take Accept can never file.
+  if (session.subject !== undefined) return { ok: false, reason: "Upscale from the world bench" };
+  const source = session.takes.find((take) => take.id === options.takeId);
+  if (source === undefined) return { ok: false, reason: "That take is no longer in this session" };
+  const plan = benchUpscalePlan(source);
+  if (plan === null || source.media === undefined) return { ok: false, reason: "This take is not a video below 1080p" };
+  const model = manifest?.models.find((candidate) => candidate.upscale !== undefined && candidate.provider === "comfyui") ?? null;
+  if (model === null) return { ok: false, reason: "No upscaler is installed" };
+  const takeId = newId("tk");
+  const recipeVersion = options.recipeVersionOf?.(model.id);
+  const snapshot: BenchRequestSnapshot = {
+    mode: "video",
+    brief: "",
+    references: [],
+    keyframes: [],
+    provider: model.provider,
+    model: model.id,
+    ...(recipeVersion !== undefined ? { recipeVersion } : {}),
+    // The source's adapters ride on the record, not the job: whether a take may be shown with
+    // adult content off is read from its params, and a 1080p copy of an adapter take is that
+    // take. The upscaler itself takes no adapter.
+    params: {
+      kind: "video",
+      aspect: plan.aspect,
+      resolution: UPSCALE_SIZE,
+      ...(source.request.params.kind === "video" && source.request.params.adapters?.length ? { adapters: source.request.params.adapters } : {}),
+    },
+    ...(options.seed !== undefined ? { requestedSeed: options.seed } : {}),
+    upscale: {
+      sourceTakeId: source.id,
+      sourceN: source.n,
+      sourceHash: source.media.hash,
+      size: UPSCALE_SIZE,
+      aspect: plan.aspect,
+      from: plan.from,
+      to: plan.to,
+      crop: plan.crop,
+    },
+  };
+  return {
+    ok: true,
+    reserved: [{ id: takeId as BenchReservedTake["id"], n: session.nextTake, requestId: options.requestId, request: snapshot, createdAt: options.at }],
+    inputs: [
+      {
+        worldId: options.worldId,
+        target: { kind: "bench-take", id: `${session.id}/${takeId}` },
+        capability: "video",
+        provider: model.provider,
+        model: model.id,
+        params: {
+          size: UPSCALE_SIZE,
+          aspect: plan.aspect,
+          videoReferences: [`${sessionMediaDir(session.id, source.id)}/${source.media.file}`],
+          sourceHash: source.media.hash,
+          ...(source.media.info?.durationSec !== undefined ? { sourceDurationSec: source.media.info.durationSec } : {}),
+          ...(options.seed !== undefined ? { seed: options.seed } : {}),
+        },
+        // Free is the price; the measured rate is the cost, stated beside the press.
+        estimatedMicroUsd: 0,
+        landing: { dir: sessionMediaDir(session.id, takeId) },
+      },
+    ],
+  };
 }
 
 // ---------------------------------------------------------------------------

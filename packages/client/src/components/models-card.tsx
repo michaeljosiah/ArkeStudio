@@ -156,7 +156,7 @@ export function ModelsCard({
         </IconButton>
       </div>
       {capabilities.map((capability) => {
-        const all = (manifest?.models ?? []).filter((m) => m.capability === capability);
+        const all = (manifest?.models ?? []).filter((m) => m.capability === capability && m.upscale === undefined);
         const usable = (m: ManifestModel) => modelEligible(m, eligibility);
         const defaultId = defaults[capability];
         const defaultModel = all.find((m) => m.id === defaultId);

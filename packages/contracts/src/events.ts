@@ -126,6 +126,7 @@ export const QueueCommandSchema = z.enum([
   "regenerate-tile",
   "bench-dispatch",
   "bench-rerun",
+  "bench-upscale",
   "bench-upload-references",
   "upload-artifacts",
   "borrow-artifacts",

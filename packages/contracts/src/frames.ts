@@ -3579,6 +3579,19 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       takeId: TakeIdSchema,
     })
     .strict(),
+  /**
+   * Upscale a finished video take to 1080p (design turn 178): a new take beside its source, made
+   * by the local upscaler. Answered like a dispatch, by `queue.enqueue-result` under this requestId.
+   */
+  z
+    .object({
+      kind: z.literal("bench-upscale"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      takeId: TakeIdSchema,
+    })
+    .strict(),
   /** Remove a take from the session and its files from disk. Answered by `bench.take-deleted`. */
   z
     .object({

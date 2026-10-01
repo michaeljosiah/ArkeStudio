@@ -24,6 +24,7 @@ import { PROVIDERS, type Capability } from "./provider.js";
 import { ReferenceKindSchema, type ReferenceKind } from "./reference-budget.js";
 import { ProvenanceSchema, TakeCostSchema } from "./take.js";
 import { DeliverySchema } from "./voice.js";
+import { upscalePlan, type UpscalePlan } from "./upscale.js";
 
 /**
  * The bench (issue 305; design turns 68–69): one picture or one shot made with no production
@@ -451,6 +452,26 @@ export const BenchRequestSnapshotSchema = z
       })
       .strict()
       .optional(),
+    /**
+     * An upscale (design turn 178): this take is another take made bigger, never a generation.
+     * The source is named by id, number and the hash its media had, so the new take keeps saying
+     * where it came from after the source is deleted ("from Take 19 · deleted"), and the job
+     * refuses a source file that changed since the press. The frame and crop are what the
+     * popover stated before the press.
+     */
+    upscale: z
+      .object({
+        sourceTakeId: TakeIdSchema,
+        sourceN: z.number().int().min(1),
+        sourceHash: Sha256Schema,
+        size: z.literal("1080p"),
+        aspect: z.enum(["16:9", "9:16"]),
+        from: z.object({ width: z.number().int().positive(), height: z.number().int().positive() }).strict(),
+        to: z.object({ width: z.number().int().positive(), height: z.number().int().positive() }).strict(),
+        crop: z.object({ edge: z.enum(["top and bottom", "each side"]).nullable(), percent: z.number().int().min(0).max(100) }).strict(),
+      })
+      .strict()
+      .optional(),
     /** The production values frozen when this paid request was authorized. */
     productionProvenance: ProvenanceSchema.optional(),
     /** Fixed filing identities and segment boundaries for a subject-bound take. */
@@ -533,6 +554,9 @@ export const BenchRequestSnapshotSchema = z
     // dropped at dispatch, so a reference can never be attached, priced and silently ignored.
     if (request.references.length > 0 && request.mode === "music") {
       ctx.addIssue({ code: "custom", message: "a song takes no references" });
+    }
+    if (request.upscale !== undefined && (request.mode !== "video" || request.filing !== undefined)) {
+      ctx.addIssue({ code: "custom", message: "an upscale is a video take of the world bench" });
     }
   });
 export type BenchRequestSnapshot = z.infer<typeof BenchRequestSnapshotSchema>;
@@ -1259,6 +1283,20 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
   return session;
 }
 
+/**
+ * What Upscale would do to this take (design turn 178), or null where it is not offered: a
+ * finished video take whose measured frame is below 1080p. The frame comes from the file's own
+ * measurement, never from the request — a provider that returned another size than it was asked
+ * for is upscaled from what it actually made.
+ */
+export function benchUpscalePlan(take: Pick<BenchTake, "status" | "request" | "media">): UpscalePlan | null {
+  if (take.request.mode !== "video" || take.status !== "succeeded") return null;
+  const width = take.media?.info?.width;
+  const height = take.media?.info?.height;
+  if (width === undefined || height === undefined || take.media?.info?.hasVideo === false) return null;
+  return upscalePlan({ width, height });
+}
+
 /** The one clause a filed take's Delete answers with (design turn 180). */
 export const BENCH_DELETE_FILED = "Filed — delete it from Artifacts";
 
@@ -1396,7 +1434,7 @@ export function presetFault(
 ): PresetFault {
   const model = manifest?.models.find((m) => m.id === preset.model && m.provider === preset.provider);
   if (!model) return { ok: false, reason: `"${preset.model}" is no longer in the manifest` };
-  if (model.capability !== modeCapability(preset.mode)) {
+  if (model.capability !== modeCapability(preset.mode) || model.upscale !== undefined) {
     return { ok: false, reason: `${model.displayName} is a ${model.capability} model, not ${preset.mode}` };
   }
   if (disabled.includes(preset.model)) {
