@@ -391,6 +391,23 @@ export const ManifestModelSchema = z
      */
     sampling: ModelSamplingSchema.optional(),
     /**
+     * A second graph of the same local recipe that takes pictures as *references* rather than as
+     * frame zero (design turn 179). H3 Video's own picture budget (`accepts.referenceImages`) is
+     * its one first frame, and every surface that budgets references — the scene pass, the
+     * storyboard — still reads it that way. The bench's Reference lane reads this instead, so the
+     * two meanings of "a picture for H3" cannot leak into each other.
+     *
+     * `maxImages` is what the lane admits; `referenceSyntax` is how the brief cites them. Absent
+     * means the row has no reference route, and the bench says so rather than sending a keyframe.
+     */
+    referenceRoute: z
+      .object({
+        maxImages: z.number().int().min(1).max(9),
+        referenceSyntax: z.enum(["minimax-h3"]),
+      })
+      .strict()
+      .optional(),
+    /**
      * A shipped sample of what this model makes (SPEC-042 R-17): a poster, and optionally a
      * clip whose first frame the poster is. Paths into the bundled samples directory, keyed by
      * model id. Optional on purpose — a tile with none draws a plain plate and loses nothing

@@ -53,6 +53,13 @@ for (let i = 0; i < 3; i++) {
 /** Native R2V is a separate checkpoint from FL2VA. Bindings are included in recipe identity,
  * including soundtrack slots; dropping an unused video must drop both of its consumers. */
 export const H3_REFERENCE: ComfyUiRecipe = {
+  /*
+   * The slot exists for the maintainer harness, and production refuses every adapter here: each
+   * catalogue pairing for this recipe stays unverified and no bundle names it. That is a finding,
+   * not a gap — on 2026-10-01 the Motion + anatomy bundle on this checkpoint fused two
+   * bodies into one in a 15 s run. The adapters were trained on fl2va; pictures-as-references with
+   * adapters is H3 Video's reference route (design turn 179), and this row keeps its 5 s.
+   */
   adapterSlot: ["3", "model"],
   id: "comfyui-h3-reference-video", displayName: "Local · H3 Reference Video", capability: "video", recipeVersion: 1,
   engine: { minVersion: "0.33.1", exercisedThroughVersion: "0.33.1" },

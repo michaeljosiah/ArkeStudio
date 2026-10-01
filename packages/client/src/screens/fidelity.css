@@ -4892,6 +4892,23 @@ select.fy-set__pill { padding-right: 26px; }
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 .fy-bench__ref[data-riding="false"] .fy-bench__refname { color: var(--neutral-400); }
+/* Who a reference picture is (design 179a): a Cast name as text, any other an underlined field. */
+.fy-bench__who {
+  min-width: 0; padding: 0; border: 0; border-bottom: 1px dashed var(--border); background: none;
+  font: var(--type-meta); color: var(--foreground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+span.fy-bench__who { border-bottom: 0; }
+.fy-bench__who:focus { outline: none; border-bottom-color: var(--ring); }
+/* What a reference take was sent (design 179b): the composed prompt, each picture, the route. */
+.fy-bench__sentbox {
+  margin: 0 14px 10px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); flex: none;
+}
+.fy-bench__sentbox h4 {
+  margin: 0 0 8px; font: var(--type-label); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--muted-foreground);
+}
+.fy-bench__sentbox p { margin: 0 0 6px; font: var(--type-mono); color: var(--foreground); overflow-wrap: anywhere; }
+.fy-bench__sentbox p.fy-bench__sentdim { color: var(--muted-foreground); }
+.fy-bench__sentbox code { background: var(--secondary); border-radius: 4px; padding: 0 4px; font: inherit; }
 .fy-bench__reftile { position: relative; height: 66px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .fy-bench__reftile--add {
   appearance: none; height: 66px; border: 1.5px dashed var(--neutral-300); border-radius: 8px; background: transparent;

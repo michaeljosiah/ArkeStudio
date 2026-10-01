@@ -19,6 +19,11 @@ were not run. Those outcomes remain distinct from complete GPU verification. On 
 2026 the owner also approved the three Motion + anatomy members for 768p (0.2–1, not yet run) so
 768p could be tested; the other eleven 768p pairings and every reference-video pairing remain
 unverified. See the [acceptance and evidence record](h3-adapter-validation.md).
+
+H3 Video's reference route (design turn 179) uses the same 480p pairings and bundles, because it
+is the same fl2va checkpoint with the same adapter slot. H3 Reference Video (ref2va) stays
+blocked. On 2026-10-01 the Motion + anatomy bundle fused two bodies into one there. See
+[Local H3 reference video](h3-reference-video.md).
 Other Hearmeman repositories, H3's existing acceleration adapters and Gemma remain separate.
 
 **There is no compliance assessment.** An earlier build gated every adapter on a verdict from a

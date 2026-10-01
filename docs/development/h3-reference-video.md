@@ -5,6 +5,41 @@ FL2VA text/first-frame recipes. Its `ref2va` checkpoint conditions on images, mo
 audio; it does not pin the first image to frame zero. Select it explicitly in the video model
 picker. The existing automatic local-video preference order is unchanged.
 
+## H3 Video's reference route (design turn 179)
+
+There are two ways to give H3 a picture as a reference. This recipe (ref2va) is one. The other
+is a second graph of **Local · H3 Video**: the same fl2va checkpoint, turbo LoRA, sampling and
+adapter slot, with node 7 changed to `MiniMaxH3ReferenceToVideo` and the pictures fed into
+`ref_images.ref_image_N` (nodes 20–22). The bench's **Reference** lane on H3 Video uses this
+graph. The **Keyframe** lane still sends the picture as the first frame. One take cannot use both.
+
+Prefer the H3 Video route when adapters are involved. On 2026-10-01 the Motion + anatomy
+bundle was run on the same picture both ways. On ref2va it fused two bodies into one. On fl2va
+the bodies stayed separate and the face held. The adapters were trained on fl2va, so their 480p
+pairings apply to the route unchanged. This recipe still has no verified adapter pairing and no
+bundle.
+
+What the route does:
+
+- Each picture has a **who**. A picture from a Cast character uses the character's name.
+  Anything else uses a typed label, or `the person` when none is given. Arke puts one line
+  per picture before the brief: `<Subject N> is {who}, shown in <Picture N>.` `@Image N` in the
+  brief becomes `<Picture N>`. Nothing else in the brief changes.
+- The take records the composed prompt, each picture's file and hash, and the route. The
+  bench's *What was sent* shows them. A re-run uses that record. The client checks the bytes of
+  each picture against the recorded hash before uploading. A changed file is refused.
+- The route has its own recipe identity: the parent's id with `route: "reference"`, version 1
+  and a different template digest. Jobs and takes made before the route are not affected.
+- H3 Video 768p has no route yet. A picture stays in the tray and Generate is disabled with
+  `H3 Video 768p takes no reference pictures yet`.
+
+The route is measured with **one** picture: 15 s at 864×480 (362 frames), Motion + anatomy at
+0.5 / 0.4 / 0.8, Fast, ComfyUI 0.38.1, RTX 3080 10 GB with 31.9 GB RAM. Two runs took 18.8 and
+18.0 minutes, with peak card use of 9,525–9,563 MiB and a RAM low-water mark of 665–855 MB. The
+graph has carriers for three pictures, but the manifest row offers one
+(`referenceRoute.maxImages`) until two and three are measured. The node is in ComfyUI 0.33.1
+and later.
+
 ## Setup and declared limits
 
 Use ComfyUI 0.33.1 or later and the recipe's pinned weights. Settings derives the download and
@@ -67,7 +102,7 @@ speaker identity accuracy or verbatim dialogue. Automatic video recommendation i
 Run the focused provider tests from `packages/providers`:
 
 ```powershell
-node --import tsx --test test/comfyui.test.ts test/h3-reference.test.ts
+node --import tsx --test test/comfyui.test.ts test/h3-reference.test.ts test/h3-video-reference.test.ts
 ```
 
 Run the coordinator boundaries from `packages/coordinator`:
