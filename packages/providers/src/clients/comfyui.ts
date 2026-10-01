@@ -219,6 +219,17 @@ interface QueueEntryish {
 const UNLOAD_POLL_MS = 250;
 const UNLOAD_WINDOW_MS = 2000;
 
+/**
+ * How long the queue keeps re-checking a card or RAM that is still short after that window
+ * (found in the installed app, 2026-10-01). The two seconds above cover an idle engine answering
+ * `/free`; they do not cover an engine still putting down the last run's video model, or another
+ * program giving back what it briefly held — both seen clearing over tens of seconds, after the
+ * queue's ordinary four attempts had already spent theirs in about twelve. The wait happens on
+ * the queued side, between dispatches, so the job is never held in `submitting` for it, and a
+ * machine that is still short after two minutes is refused with the same words as before.
+ */
+export const ROOM_PATIENCE_MS = 120_000;
+
 export class ComfyUiClient implements ProviderClient {
   readonly id = "comfyui" as const;
   readonly declarations: ClientDeclarations = {
@@ -752,6 +763,8 @@ export class ComfyUiClient implements ProviderClient {
    * same job goes through once the room is there. It is thrown as the transient it is, so the
    * queue backs off and tries again while the engine finishes putting things down, and a user
    * told to close other programs "then try again" has a Retry to press when it gives up (#692).
+   * It carries ROOM_PATIENCE_MS, because the queue's attempt bound is seconds and a release is
+   * not: the queue re-checks for that long before giving up, with nothing sent in between.
    */
   private async ensureRoom(base: string, recipe: ComfyUiRecipe, signal?: AbortSignal): Promise<void> {
     if (this.engineLocality() === "remote") return;
@@ -799,6 +812,7 @@ export class ComfyUiClient implements ProviderClient {
       `comfyui: ${recipe.displayName} ` +
         short.map((room) => `needs ${gb(room.need)} of free ${room.what} and this machine has ${gb(room.free!)} free`).join(", and ") +
         `. The engine has already put down what it was holding — close other programs${card ? " using the graphics card" : ""}, then try again.`,
+      { patienceMs: ROOM_PATIENCE_MS },
     );
   }
 

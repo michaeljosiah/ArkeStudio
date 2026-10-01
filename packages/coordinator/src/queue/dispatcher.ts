@@ -239,6 +239,8 @@ export interface JobQueueOptions {
     artifact: DispatchArtifact,
   ) => { ok: true; artifact: DispatchArtifact } | { ok: false; reason: string };
   clock?: () => string;
+  /** Milliseconds, for measuring how long a provider's declared busy condition has lasted. */
+  now?: () => number;
   rng?: () => number;
   maxAttempts?: number;
   backoffBaseMs?: number;
@@ -307,6 +309,23 @@ const FOLLOW_ON_TARGETS = new Set([
 ]);
 const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation"]);
 
+/** Attempts that count against the retry bound: refusals waited out as busy never reached the engine. */
+function spentAttempts(job: Job): number {
+  return Math.max(0, job.attempt - (job.busyRefusals ?? 0));
+}
+
+/** How long a provider said its busy condition may take to clear, or null where it said nothing. */
+function declaredPatience(err: unknown): number | null {
+  if (typeof err !== "object" || err === null) return null;
+  const patience = (err as { patienceMs?: unknown }).patienceMs;
+  return typeof patience === "number" && Number.isFinite(patience) && patience > 0 ? patience : null;
+}
+
+function describeWait(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  return seconds < 90 ? `${seconds} s` : `${Math.round(seconds / 60)} min`;
+}
+
 function providerParams(params: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(params).filter(([key]) => !COORDINATOR_ONLY_PARAMS.has(key) && (key !== "audioReferences" || (Array.isArray((params.audioReferences as { references?: unknown })?.references) && ((params.audioReferences as { references: unknown[] }).references.length > 0)))));
 }
@@ -356,6 +375,7 @@ export class JobQueue {
   private readonly acceptedSubmissions = new Map<string, Job>();
   private readonly lanes = new Map<string, Lane>();
   private readonly clock: () => string;
+  private readonly now: () => number;
   private readonly rng: () => number;
   private readonly maxAttempts: number;
   private readonly backoffBaseMs: number;
@@ -390,12 +410,18 @@ export class JobQueue {
    * the error path needs, and the status is only a lagging record of it.
    */
   private readonly cancelling = new Set<string>();
+  /**
+   * When each job's current run of patient refusals began (`ProviderBusyError.patienceMs`).
+   * Memory only: a restart is a new wait, and the window starts again from the next refusal.
+   */
+  private readonly busySince = new Map<string, number>();
   /** Old spawned-engine runs fenced off before their durable requeue is awaited. */
   private readonly retiredEngineRuns = new Set<string>();
 
   constructor(private readonly opts: JobQueueOptions) {
     this.journal = opts.journal ?? new JobJournal(opts.journalPath);
     this.clock = opts.clock ?? (() => new Date().toISOString());
+    this.now = opts.now ?? Date.now;
     this.rng = opts.rng ?? Math.random;
     this.maxAttempts = opts.maxAttempts ?? 4;
     this.backoffBaseMs = opts.backoffBaseMs ?? 1000;
@@ -1258,8 +1284,9 @@ export class JobQueue {
         return;
       }
       case "offline": {
-        if (job.attempt >= this.maxAttempts) {
-          await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`, undefined, klass);
+        this.busySince.delete(job.id);
+        if (spentAttempts(job) >= this.maxAttempts) {
+          await this.terminalize(job, "failed", `gave up after ${spentAttempts(job)} attempts: ${message}`, undefined, klass);
           return;
         }
         await this.transition({
@@ -1275,11 +1302,17 @@ export class JobQueue {
         return;
       }
       case "transient": {
-        if (job.attempt >= this.maxAttempts) {
+        const patience = local ? declaredPatience(err) : null;
+        if (patience !== null) {
+          await this.waitOutBusy(job, klass, message, submissionRejected, patience);
+          return;
+        }
+        this.busySince.delete(job.id);
+        if (spentAttempts(job) >= this.maxAttempts) {
           // The class the queue retried on is the class the failed row keeps: an exhausted
           // transient reads `came back dark · Retry` (SPEC-036 R-18), and re-reading the wrapped
           // message would lose a class that was only ever declared on the error object (#692).
-          await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`, undefined, klass);
+          await this.terminalize(job, "failed", `gave up after ${spentAttempts(job)} attempts: ${message}`, undefined, klass);
           return;
         }
         await this.transition({
@@ -1306,6 +1339,60 @@ export class JobQueue {
         return;
       }
     }
+  }
+
+  /**
+   * A local engine refused for want of room and said the condition clears by itself: re-check
+   * on backoff until its patience runs out, rather than for the attempt bound.
+   *
+   * The bound is four attempts on a one-second backoff — about twelve seconds, each attempt
+   * including the client's own two-second wait after `/free`. On 2026-10-01 that was not long
+   * enough three ways: an engine still putting the last run's models down (free graphics memory
+   * climbing from 1.1 to 6.3 GB across the four attempts, just short), an H3 job queued straight
+   * after a direct engine run, and another program briefly holding RAM. Each would have gone
+   * through tens of seconds later.
+   *
+   * The wait is spent queued, with the job's own gate, so the lane and the card are free in
+   * between and a crash leaves a queued job rather than one in `submitting`. Only a local
+   * provider's declaration is believed: the refusal happened before `/prompt`, so nothing was
+   * sent, and a cloud request that may have been taken must never be retried for minutes. The
+   * refusals are recorded on the job (`busyRefusals`) so they never spend the attempts an
+   * ordinary transient is bounded by, and a machine still short when the window ends fails
+   * with the client's own words, Retry still live.
+   */
+  private async waitOutBusy(job: Job, klass: FailureClass, message: string, submissionRejected: boolean, patience: number): Promise<void> {
+    const now = this.now();
+    const since = this.busySince.get(job.id) ?? now;
+    const refusals = (job.busyRefusals ?? 0) + 1;
+    const waited = now - since;
+    if (waited >= patience) {
+      await this.terminalize({ ...job, busyRefusals: refusals }, "failed", `gave up after waiting ${describeWait(waited)}: ${message}`, undefined, klass);
+      return;
+    }
+    this.busySince.set(job.id, since);
+    const queued: Job = {
+      ...job,
+      status: "queued",
+      busyRefusals: refusals,
+      failureClass: klass,
+      submissionRejected,
+      error: message,
+      updatedAt: this.clock(),
+    };
+    if (!(await this.transition(queued)) || this.disposed) return;
+    // The last check lands on the window's end rather than past it: the backoff grows towards
+    // its cap, and a machine that frees up at the deadline should not be refused a cap early.
+    const wait = Math.max(0, Math.min(backoffMs(refusals, this.backoffBaseMs, this.backoffCapMs, this.rng), patience - waited));
+    const lane = this.lane(job.provider);
+    lane.notBefore.set(job.id, Date.now() + wait);
+    lane.fifo.push(job.id);
+    // Said on the row, which is otherwise a silent queued job for up to the whole window.
+    // Memory only, like the graphics-card wait: the next transition clears it.
+    const current = this.jobs.get(job.id);
+    if (current?.status !== "queued") return;
+    const waiting: Job = { ...current, waitingFor: "Waiting for free memory" };
+    this.jobs.set(job.id, waiting);
+    this.opts.emit({ at: this.clock(), type: "job.updated", job: waiting });
   }
 
   private async pollToTerminal(job: Job, client: DispatchClient, key: string, reserved = false): Promise<void> {
@@ -1648,6 +1735,7 @@ export class JobQueue {
     failureClass?: FailureClass,
   ): Promise<void> {
     if (this.retiredEngineRuns.has(this.engineRunKey(job))) return;
+    this.busySince.delete(job.id);
     // Every failed row carries the decision the retry surfaces consume. Centralising it here
     // covers provider verdicts, local preparation, recovery, verification and exhausted retries;
     // a caller cannot add a new terminal failure path and accidentally leave the class transient.
@@ -2466,6 +2554,7 @@ export class JobQueue {
     this.sleepTimers.clear();
     for (const timer of this.retryTimers) clearTimeout(timer);
     this.retryTimers.clear();
+    this.busySince.clear();
   }
 
   async waitForIdle(): Promise<void> {

@@ -165,6 +165,12 @@ export const JobSchema = z
     attempt: z.number().int().min(0).default(0),
     /** The last submit response proved that attempt was rejected, so cancellation cannot imply a charge. */
     submissionRejected: z.boolean().optional(),
+    /**
+     * Of `attempt`, the submissions a provider refused before anything was sent, on a condition
+     * it declared would clear by itself — a local card still short of room. They are waited out
+     * over a window rather than counted against the retry bound.
+     */
+    busyRefusals: z.number().int().min(0).optional(),
     /** Cancellation ended local work but a provider outcome/charge may remain unresolved. */
     cancellationUncertain: z.boolean().optional(),
     /** Where artifacts land, world-relative — the caller's meaning, not this spec's (§1.2). */

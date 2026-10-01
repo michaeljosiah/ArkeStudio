@@ -60,6 +60,7 @@ async function makeHarness(
     backoffBaseMs?: number;
     backoffCapMs?: number;
     rng?: () => number;
+    now?: () => number;
     baseIntervalMs?: number;
   } = {},
 ): Promise<Harness> {
@@ -89,6 +90,7 @@ function build(
     backoffBaseMs?: number;
     backoffCapMs?: number;
     rng?: () => number;
+    now?: () => number;
     baseIntervalMs?: number;
   },
 ): Harness {
@@ -143,6 +145,7 @@ function build(
     ...(opts.backoffBaseMs !== undefined ? { backoffBaseMs: opts.backoffBaseMs } : {}),
     ...(opts.backoffCapMs !== undefined ? { backoffCapMs: opts.backoffCapMs } : {}),
     ...(opts.rng !== undefined ? { rng: opts.rng } : {}),
+    ...(opts.now !== undefined ? { now: opts.now } : {}),
     ...(opts.baseIntervalMs !== undefined ? { baseIntervalMs: opts.baseIntervalMs } : {}),
   });
   const harness: Harness = {
@@ -687,6 +690,107 @@ describe("putting the engine's models down when the lane drains (issue 846)", ()
     assert.equal(foldedJob(h, second.id)?.status, "succeeded", foldedJob(h, second.id)?.error ?? undefined);
     assert.deepEqual(order, [first.id, second.id, "release:comfyui-draft-video"], "one ask, after the second job, not between them");
     h.queue.dispose();
+  });
+});
+
+describe("a local engine short of room is waited for, not given up on in seconds", () => {
+  // 2026-10-01, the installed app: right after an engine run, free graphics memory climbed from
+  // 1.1 to 6.3 GB across the four attempts the ordinary one-second backoff spent in about twelve
+  // seconds, and the job gave up just short of the floor. The client now says how long the
+  // condition can take to clear; these drive that window with an injected clock, so no test
+  // waits it out for real.
+  const box = (tag: string): number[] => [0, 0, 0, 8, ...tag.split("").map((c) => c.charCodeAt(0))];
+  const clip = { name: "clip.mp4", contentType: "video/mp4", data: Uint8Array.from([...box("ftyp"), ...box("moov"), ...box("mdat")]) };
+  const local = { source: "managed" as const, instanceId: "e-1", locality: "local" as const };
+  const SHORT = "comfyui: Draft Video needs 7.8 GB of free graphics memory and this machine has 6.3 GB free. " +
+    "The engine has already put down what it was holding — close other programs using the graphics card, then try again.";
+  const busy = (): Error => Object.assign(new Error(SHORT), { name: "ProviderBusyError", failureClass: "transient", patienceMs: 120_000 });
+
+  /** A local engine whose every submit moves the injected clock on by `stepMs`. */
+  const engine = (stepMs: number, script: Array<Error | null>) => {
+    const clock = { now: 1_000_000 };
+    const fake = new FakeProvider({});
+    fake.artifacts = [clip];
+    const submit = fake.submit.bind(fake);
+    fake.submit = async (key, request) => {
+      clock.now += stepMs;
+      const next = script.shift();
+      if (next) {
+        fake.submitCount += 1;
+        await Promise.resolve();
+        throw next;
+      }
+      return submit(key, request);
+    };
+    return { clock, fake };
+  };
+
+  it("keeps re-checking past the attempt bound, and goes through once the room is there", async () => {
+    // Five refusals against a bound of three, twenty seconds apart: inside the two-minute window.
+    const { clock, fake } = engine(20_000, [busy(), busy(), busy(), busy(), busy()]);
+    const h = await makeHarness({ comfyui: fake }, { providerConcurrency: { comfyui: 1 }, now: () => clock.now });
+    try {
+      await h.queue.start();
+      const job = await h.queue.enqueue({ ...INPUT, provider: "comfyui", model: "comfyui-draft-video", engine: local });
+      await until(() => ["succeeded", "failed"].includes(foldedJob(h, job.id)?.status ?? ""), "the waited-for job to settle", FOLD_MS);
+      const done = foldedJob(h, job.id)!;
+      assert.equal(done.status, "succeeded", done.error ?? undefined);
+      assert.equal(fake.submitCount, 6, "five refusals waited out, then the run");
+      assert.equal(done.busyRefusals, 5, "the refusals are on the record, apart from the attempts");
+      assert.equal(done.attempt, 6);
+      const said = h.events.flatMap((event) => (event.type === "job.updated" && event.job.id === job.id ? [event.job.waitingFor] : []));
+      assert.ok(said.includes("Waiting for free memory"), "the queued row says what it is waiting for");
+    } finally { h.queue.dispose(); }
+  });
+
+  it("refuses with the engine's own words once the window runs out", async () => {
+    const { clock, fake } = engine(30_000, Array.from({ length: 50 }, busy));
+    const h = await makeHarness({ comfyui: fake }, { providerConcurrency: { comfyui: 1 }, now: () => clock.now });
+    try {
+      await h.queue.start();
+      const job = await h.queue.enqueue({ ...INPUT, provider: "comfyui", model: "comfyui-draft-video", engine: local });
+      await until(() => foldedJob(h, job.id)?.status === "failed", "the job to give up", FOLD_MS);
+      const failed = foldedJob(h, job.id)!;
+      // Measured from the first refusal: 0, 30, 60, 90 s still inside, the fifth at 120 s is not.
+      assert.equal(fake.submitCount, 5, "bounded by the window, not by attempts and not forever");
+      assert.equal(failed.failureClass, "transient", "Retry stays live (SPEC-036 R-18)");
+      assert.equal(failed.error, `gave up after waiting 2 min: ${SHORT}`);
+    } finally { h.queue.dispose(); }
+  });
+
+  it("does not let the refusals spend the attempts an ordinary failure is bounded by", async () => {
+    // Four refusals, then two ordinary transients. Counted together that is six attempts against
+    // a bound of three, and the job would fail on the first 503.
+    const unavailable = (): Error => new Error("comfyui: the engine answered HTTP 503");
+    const { clock, fake } = engine(1_000, [busy(), busy(), busy(), busy(), unavailable(), unavailable()]);
+    const h = await makeHarness({ comfyui: fake }, { providerConcurrency: { comfyui: 1 }, now: () => clock.now });
+    try {
+      await h.queue.start();
+      const job = await h.queue.enqueue({ ...INPUT, provider: "comfyui", model: "comfyui-draft-video", engine: local });
+      await until(() => ["succeeded", "failed"].includes(foldedJob(h, job.id)?.status ?? ""), "the job to settle", FOLD_MS);
+      const done = foldedJob(h, job.id)!;
+      assert.equal(done.status, "succeeded", done.error ?? undefined);
+      assert.equal(done.attempt, 7);
+      assert.equal(done.busyRefusals, 4);
+    } finally { h.queue.dispose(); }
+  });
+
+  it("believes the patience only from a local engine", async () => {
+    // The refusal is safe to wait out because the engine is on this machine and was measured
+    // before `/prompt`. A cloud client claiming the same is held to the ordinary bound — minutes
+    // of resubmission against a request that may have been taken is the retry SPEC-009 forbids.
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.submitError = busy();
+    let clock = 0;
+    const h = await makeHarness({ fake }, { now: () => clock++ });
+    try {
+      await h.queue.start();
+      const job = await h.queue.enqueue(INPUT);
+      await until(() => foldedJob(h, job.id)?.status === "failed", "the job to give up", FOLD_MS);
+      assert.equal(fake.submitCount, 3);
+      assert.equal(foldedJob(h, job.id)?.busyRefusals, undefined);
+      assert.match(foldedJob(h, job.id)?.error ?? "", /^gave up after 3 attempts: comfyui: Draft Video needs/);
+    } finally { h.queue.dispose(); }
   });
 });
 
