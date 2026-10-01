@@ -64,6 +64,21 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 @keyframes drift{from{transform:translateY(0)}to{transform:translateY(-7px)}}
 @keyframes barFill{from{width:4%}to{width:78%}}@keyframes kenburns{from{transform:scale(1)}to{transform:scale(1.08)}}@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
 /* Turn 127: settings narrator catalogue. Scoped to these proposed drawings. */
+/* t178 */
+.v178-pop{position:absolute;width:340px;background:var(--background);border:1px solid var(--border);border-radius:12px;box-shadow:0 18px 50px color-mix(in srgb,var(--foreground) 16%,transparent);padding:14px;z-index:2}
+.v178-pop h4{margin:0 0 10px;font:var(--type-ui)}
+.v178-row{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:var(--text-sm);color:var(--muted-foreground)}.v178-row .grow{flex:1}.v178-row b{font:var(--type-mono);font-size:var(--text-sm);color:var(--foreground);font-weight:400}
+.v178-seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}.v178-seg span{padding:4px 10px;font:var(--type-ui);color:var(--muted-foreground)}.v178-seg span.on{background:var(--secondary);color:var(--foreground)}
+.v178-go{display:flex;gap:8px;margin-top:12px;justify-content:flex-end}
+.v178-take{width:300px;height:169px;border-radius:10px;position:relative;background:linear-gradient(135deg,var(--neutral-500),var(--neutral-800))}
+.v178-take.sel{outline:2px solid var(--foreground);outline-offset:2px}
+.v178-take.busy{background:repeating-linear-gradient(135deg,var(--neutral-200) 0 10px,var(--neutral-300) 10px 20px)}
+.v178-take span{position:absolute;left:10px;bottom:8px;font:var(--type-meta);color:var(--neutral-50)}.v178-take.busy span{color:var(--foreground)}
+.v178-take i{position:absolute;right:10px;top:8px;font:var(--type-label);font-style:normal;padding:2px 7px;border-radius:999px;background:color-mix(in srgb,var(--background) 85%,transparent);color:var(--foreground)}
+.v178-spin{position:absolute;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;border:2px solid var(--neutral-400);border-top-color:var(--foreground)}
+.v178-actions{display:flex;gap:8px;align-items:center}
+.v178-warn{color:var(--warning)}
+/* /t178 */
 /* t177 */
 .v177{width:1360px;height:850px;position:relative;overflow:hidden;background:var(--background);color:var(--foreground);font:var(--type-body)}
 .v177 *{box-sizing:border-box}.v177 button,.v177 input,.v177 select{font:inherit;color:inherit}.v177 button{cursor:pointer}
@@ -295,7 +310,7 @@ x-import[hint-size^="100%"] { width: 100%; }
   <main class="main">
     <div class="top">
       <h1>Arke Studio · design review</h1>
-      <p>Generated 2026-09-30 from <code>Arke Studio.dc.html</code> by <code>npm run design:review</code>; this page never edits the master. Each screen is its latest frame, copied verbatim, then what shipped, then the turn's binding rules. A screen the master has deliberately not drawn says so. The build refuses a missing frame, a bitmap in place of a drawing, and a frame that does not carry a control the build shipped.</p>
+      <p>Generated 2026-10-01 from <code>Arke Studio.dc.html</code> by <code>npm run design:review</code>; this page never edits the master. Each screen is its latest frame, copied verbatim, then what shipped, then the turn's binding rules. A screen the master has deliberately not drawn says so. The build refuses a missing frame, a bitmap in place of a drawing, and a frame that does not carry a control the build shipped.</p>
     </div>
     <div class="legend"><span><i class="dot dot--built"></i> built</span><span><i class="dot dot--drifted"></i> built · drifted from the drawing</span><span><i class="dot dot--drawn"></i> drawn · not built</span></div>
     
