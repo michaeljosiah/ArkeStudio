@@ -184,3 +184,11 @@ test("only what SaveVideo saved under the recipe's prefix is fetched, never the 
   assert.equal(calls.filter((url) => url.includes("/view?")).length, 1);
   assert.ok(calls.some((url) => url.includes("arke-upscale_00001_.mp4")));
 });
+
+test("the free-memory floor is what the job adds, so the card it was measured on can dispatch it", () => {
+  // 1,387 MiB in use at dispatch, 7,220 MiB at peak: the job itself took ~5.8 GB. A floor set to
+  // the peak refused every dispatch on that 10 GB card, where the desktop holds 1.5–3.5 GB.
+  const floor = comfyUiRecipeById("comfyui-seedvr2-upscale")!.hardware.minFreeVramMb!;
+  assert.ok(floor >= 7220 - 1387, String(floor));
+  assert.ok(floor <= 10240 - 3500, String(floor));
+});

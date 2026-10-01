@@ -137,8 +137,10 @@ export const SEEDVR2_UPSCALE: ComfyUiRecipe = {
     accelerator: "cuda",
     // The card class the runs were made on. Smaller cards were not tried, so none is claimed.
     minVramMb: 10000,
-    // The 768p run's peak was 7.2 GB, and it is the larger of the two: that much must be free.
-    minFreeVramMb: 7400,
+    // What the job adds to the card, not the card's peak: the 768p run peaked at 7,220 MiB from
+    // 1,387 MiB already in use, so it needed ~5.8 GB. The first floor (7.4 GB, the peak) refused
+    // every dispatch on the 10 GB card it was measured on, where the desktop alone holds 1.5–3.5 GB.
+    minFreeVramMb: 6000,
     recommendedVramMb: 12000,
     // System RAM is what ran out first — 3 MB to spare at the 7 s run's low-water mark on a
     // 32 GB machine — so the 32 GB class is part of this floor, exactly as it is for H3.
