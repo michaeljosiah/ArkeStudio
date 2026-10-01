@@ -1311,7 +1311,15 @@ export function planBenchUpscale(
     provider: model.provider,
     model: model.id,
     ...(recipeVersion !== undefined ? { recipeVersion } : {}),
-    params: { kind: "video", aspect: plan.aspect, resolution: UPSCALE_SIZE },
+    // The source's adapters ride on the record, not the job: whether a take may be shown with
+    // adult content off is read from its params, and a 1080p copy of an adapter take is that
+    // take. The upscaler itself takes no adapter.
+    params: {
+      kind: "video",
+      aspect: plan.aspect,
+      resolution: UPSCALE_SIZE,
+      ...(source.request.params.kind === "video" && source.request.params.adapters?.length ? { adapters: source.request.params.adapters } : {}),
+    },
     ...(options.seed !== undefined ? { requestedSeed: options.seed } : {}),
     upscale: {
       sourceTakeId: source.id,

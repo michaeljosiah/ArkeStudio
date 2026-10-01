@@ -30,7 +30,9 @@ export function upscalerFor(manifest: { models: readonly ManifestModel[] } | nul
 }
 
 /** Why the engine cannot run the upscaler now, in one clause, or null when nothing says so. */
-export function upscaleHeld(model: ManifestModel, readiness: RecipeReadiness | undefined): string | null {
+export function upscaleHeld(model: ManifestModel, readiness: RecipeReadiness | undefined, switchedOff = false): string | null {
+  // Off in AI models is off here too: the tile says so, and the coordinator refuses it the same way.
+  if (switchedOff) return "Turned off in AI models";
   if (readiness === undefined || readiness.state !== "disabled") return null;
   if (readiness.reasonKind === "engine" && model.upscale !== undefined) return engineFloorClause(model.upscale.minEngineVersion);
   return readiness.reason ?? "Not ready on this machine";
@@ -108,7 +110,7 @@ export function UpscaleTool({
   const rows = upscaleRows(take, model, state?.app.localSampling?.rates);
   if (rows === null) return null;
   const readiness = state?.app.comfyui?.recipes.find((recipe) => recipe.recipeId === model.id);
-  const held = upscaleHeld(model, readiness);
+  const held = upscaleHeld(model, readiness, state?.app.models.disabled.includes(model.id) === true);
   const clause = held ?? refusal;
   return (
     <span className="fy-upscale" ref={root}>

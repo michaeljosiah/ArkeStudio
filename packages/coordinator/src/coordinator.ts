@@ -12129,6 +12129,10 @@ export class Coordinator {
         const upscaler = this.opts.manifest?.models.find((model) => model.upscale !== undefined) ?? null;
         // The engine's answer first, in the clause the tile shows: an engine below the floor is
         // refused as `Needs ComfyUI 0.38`, never with a sentence the screen does not use.
+        if (upscaler !== null && this.readModel.getState().app.models.disabled.includes(upscaler.id)) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Turned off in AI models");
+          return;
+        }
         const readiness = upscaler === null ? undefined : this.readModel.getState().app.comfyui?.recipes.find((recipe) => recipe.recipeId === upscaler.id);
         if (upscaler !== null && readiness !== undefined && readiness.state === "disabled") {
           this.rejectEnqueue(

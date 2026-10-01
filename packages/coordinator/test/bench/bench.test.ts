@@ -1030,6 +1030,19 @@ describe("upscaling a take (design turn 178)", () => {
       { ok: false, reason: "No upscaler is installed" });
   });
 
+  it("an adapter take's upscale keeps the adapters on its record, never on the job", async () => {
+    const { store, opened, takeId } = await videoTake(864, 480);
+    const session = (await opened.store.fold())!;
+    const adapters = [{ releaseId: "neutral-fixture", sha256: "a".repeat(64), strength: 0.5 }];
+    const source = { ...session.takes[0]!, request: { ...session.takes[0]!.request, params: { kind: "video" as const, aspect: "16:9", durationSec: 7, adapters } } };
+    const plan = planBenchUpscale({ ...session, takes: [source] }, SHIPPED_MANIFEST, { worldId: store.worldId, requestId: "up-7", takeId, at: CLOCK() });
+    assert.ok(plan.ok);
+    if (!plan.ok) return;
+    // Adult-content visibility reads a take's params; a 1080p copy of an adapter take is that take.
+    assert.deepEqual(plan.reserved[0]!.request.params, { kind: "video", aspect: "16:9", resolution: "1080p", adapters });
+    assert.equal(plan.inputs[0]!.params["adapters"], undefined);
+  });
+
   it("the upscaler is never a composer's model", async () => {
     const { dir, store } = await open();
     const opened = await freshBench(dir);

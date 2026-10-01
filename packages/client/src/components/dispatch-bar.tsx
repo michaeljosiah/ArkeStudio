@@ -93,7 +93,8 @@ export function disabledRecipes(
   if (!manifest) return [];
   const out: Array<{ model: ManifestModel; reason: string }> = [];
   for (const model of manifest.models) {
-    if (model.capability !== capability || model.provider !== "comfyui") continue;
+    // An upscaler is never a pick, ready or not (design turn 178).
+    if (model.capability !== capability || model.provider !== "comfyui" || model.upscale !== undefined) continue;
     const readiness = recipeReadinessFor(state, model.id);
     const unreadyVoice =
       capability === "voice-tts" &&

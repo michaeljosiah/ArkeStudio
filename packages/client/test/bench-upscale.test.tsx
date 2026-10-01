@@ -213,6 +213,7 @@ describe("the measured time and the engine floor, as words", () => {
     assert.equal(upscaleHeld(UPSCALER, readiness("disabled", "engine")), "Needs ComfyUI 0.38");
     assert.equal(upscaleHeld(UPSCALER, readiness("ready")), null);
     assert.equal(upscaleHeld(UPSCALER, undefined), null);
+    assert.equal(upscaleHeld(UPSCALER, readiness("ready"), true), "Turned off in AI models");
   });
 });
 

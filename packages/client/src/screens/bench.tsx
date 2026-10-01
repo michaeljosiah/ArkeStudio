@@ -2433,7 +2433,11 @@ function BenchWorkspace({
                   // the source deleted there is nothing to make it from (design turns 178, 180).
                   selected.request.upscale !== undefined
                     ? upscaleSource !== null && benchUpscalePlan(upscaleSource) !== null
-                      ? () => { sendBenchUpscale(worldId, session.id, upscaleSource.id); }
+                      ? () => {
+                          // Correlated like any dispatch, so a refusal ("Needs ComfyUI 0.38") is said.
+                          pendingDispatchAction.current = null;
+                          pendingDispatch.current = sendBenchUpscale(worldId, session.id, upscaleSource.id);
+                        }
                       : null
                     : () => {
                         if (!rerunNeedsPrice) { rerunBench(selected.id); return; }
