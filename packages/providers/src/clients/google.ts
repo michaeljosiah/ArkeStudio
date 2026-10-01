@@ -24,6 +24,16 @@ export const GEMINI_PRESETS = [
 const record = (value: unknown): Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const count = (value: unknown): number | undefined => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 
+/**
+ * The live service can name a model as a resource, `models/gemini-3.8-flash-tts`, while requests
+ * send the bare id. On 2026-10-01 a voice creation Google completed and billed was refused as
+ * "mismatched metadata" for exactly that spelling. Only this one prefix reads as the same model;
+ * anything else still has to match the pinned id.
+ */
+export function bareModel(value: unknown): unknown {
+  return typeof value === "string" ? value.replace(/^models\//, "") : value;
+}
+
 /** Prefer modality counts; totals are usable only because this client sends text and asks for audio alone. */
 export function geminiSpeechUsage(value: unknown): SpeechUsage {
   const usage = record(value);
@@ -260,7 +270,7 @@ export class GoogleClient implements VoiceCatalogueClient, VoiceDesignClient {
       : body.id === undefined && body.object === "interaction" ? `google-inline:${randomUUID()}` : null;
     if (remoteId === null) throw new Error("Google returned no interaction identity; the outcome is uncertain");
     const result = { remoteId, acceptedAt: new Date().toISOString(), speechUsage: geminiSpeechUsage(body.usage) };
-    if (body.model !== request.model) return { ...result, error: "Google returned a different or unidentified model; this read was not kept" };
+    if (bareModel(body.model) !== request.model) return { ...result, error: "Google returned a different or unidentified model; this read was not kept" };
     if (body.status !== "completed") return { ...result, error: "Google did not complete this read; partial audio was not kept" };
     const audio = (Array.isArray(body.steps) ? body.steps : []).flatMap(step => {
       const row = record(step);
