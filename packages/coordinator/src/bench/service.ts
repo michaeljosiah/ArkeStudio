@@ -1,7 +1,7 @@
 import { quoteSpeech, speechInputFits } from "@arke-studio/contracts";
 import { stageArtifactProblem } from "../productions/stage-playblast.js";
-import { planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem, type FrozenPerformanceAudio } from "@arke-studio/contracts";
-import { castNameFor, referenceRouteModel, referenceRouteRefusal, referenceSubjectLines, whoFor, REFERENCE_ROUTE } from "@arke-studio/contracts";
+import { planCastCharacterAudio, planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem, type FrozenPerformanceAudio } from "@arke-studio/contracts";
+import { castNameFor, referenceRouteModel, referenceSheetId, referenceRouteRefusal, referenceSubjectLines, whoFor, REFERENCE_ROUTE } from "@arke-studio/contracts";
 import { readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -903,10 +903,21 @@ export function planBenchDispatch(
     referenceRoute = { route: REFERENCE_ROUTE, prompt: "", pictures };
   }
   const preamble = session.subject === undefined || frame !== null || onReferenceRoute ? null : bindingPreamble(bound);
-  const resolvedAudio = params.kind === "video" && session.subject ? (options.fromTake ? options.fromTake.request.audioReferences : planSubjectCharacterAudio({
-    world: bundle, subject: session.subject, model, imageCount: frame?.paths.length ?? referencePaths.length, videoCount: videoPaths.length,
-    taskMode, disabled: params.audioReferencesDisabled,
-    ...(options.performanceReferences?.length ? { performanceReferences: options.performanceReferences } : {}) })) : undefined;
+  // A scene or shot Bench voices the subject's speakers; a world Bench voices the characters its
+  // Cast pictures are (planCastCharacterAudio). A re-run sends what its take sent either way.
+  const imageCount = frame?.paths.length ?? referencePaths.length;
+  const castSheetIds = resolvedRefs.flatMap(({ entry, resolved }) => {
+    const sheetId = resolved.kind === "image" ? referenceSheetId(entry, bundle.artifacts) : undefined;
+    return sheetId === undefined ? [] : [sheetId];
+  });
+  const resolvedAudio = params.kind !== "video" ? undefined
+    : options.fromTake ? options.fromTake.request.audioReferences
+    : session.subject ? planSubjectCharacterAudio({
+      world: bundle, subject: session.subject, model, imageCount, videoCount: videoPaths.length,
+      taskMode, disabled: params.audioReferencesDisabled,
+      ...(options.performanceReferences?.length ? { performanceReferences: options.performanceReferences } : {}) })
+    : planCastCharacterAudio({ sheetIds: castSheetIds, sheets: bundle.sheets, kits: bundle.referenceKits, model, imageCount,
+      videoCount: videoPaths.length, taskMode, disabled: params.audioReferencesDisabled });
   const audioReferences = resolvedAudio && (resolvedAudio.disabled || resolvedAudio.references.length || resolvedAudio.problems.length) ? resolvedAudio : undefined;
   if (audioReferences?.problems.length) return { ok: false, reason: audioReferences.problems.join(" ") };
   const referenceProblem = referenceInputProblem(model, { references: referencePaths, videoReferences: videoPaths, referenceMedia: mediaReferences, audioReferences });

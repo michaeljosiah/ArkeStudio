@@ -1,6 +1,6 @@
 import { estimateSpeechMicroUsd, SAMPLING_CHOICE_NAMES, samplingSummary } from "@arke-studio/contracts";
-import { castVoiceSummary, planSubjectCharacterAudio } from "@arke-studio/contracts";
-import { castNameFor, DEFAULT_REFERENCE_WHO, referenceRouteModel, referenceRouteRefusal } from "@arke-studio/contracts";
+import { castVoiceSummary, planCastCharacterAudio, planSubjectCharacterAudio } from "@arke-studio/contracts";
+import { castNameFor, DEFAULT_REFERENCE_WHO, referenceRouteModel, referenceRouteRefusal, referenceSheetId } from "@arke-studio/contracts";
 import { AdapterPicker } from "../components/adapter-picker.js";
 import { SamplingChip, hasSampling } from "../components/local-sampling.js";
 import { benchUpscalePlan, hasAdultAdapter, matchingAdapterBundle, upscaleFrameCopy } from "@arke-studio/contracts";
@@ -1019,14 +1019,24 @@ function BenchWorkspace({
   // join the Bench's own plan as previews, so the list below is one list, and the coordinator
   // freezes the real thing at dispatch.
   const castVoices = world && subject ? castVoiceSummary(world, subject) : [];
-  const planAudio = (disabled: boolean) =>
-    world && model && subject && videoParams !== null
-      ? planSubjectCharacterAudio({
-          world, subject, model, imageCount: session.composer.keyframeTokens.length || carried.filter(ref => ref.kind === "image").length,
-          videoCount: carried.filter(ref => ref.kind === "video").length,
-          taskMode, disabled,
+  // Without a subject, who is in the take is who its Cast pictures are — the coordinator plans
+  // the same list at dispatch, so the chip and the take cannot disagree.
+  const castSheetIds = world
+    ? session.composer.activeTokens.flatMap((token) => {
+        const entry = session.tokenRegistry.find((candidate) => candidate.token === token);
+        const sheetId = entry?.kind === "image" ? referenceSheetId(entry, world.artifacts) : undefined;
+        return sheetId === undefined ? [] : [sheetId];
+      })
+    : [];
+  const planAudio = (disabled: boolean) => {
+    if (!world || !model || videoParams === null) return null;
+    const imageCount = session.composer.keyframeTokens.length || carried.filter(ref => ref.kind === "image").length;
+    const videoCount = carried.filter(ref => ref.kind === "video").length;
+    return subject
+      ? planSubjectCharacterAudio({ world, subject, model, imageCount, videoCount, taskMode, disabled,
           performanceReferences: castVoices.flatMap(v => v.preview ? [v.preview] : []) })
-      : null;
+      : planCastCharacterAudio({ sheetIds: castSheetIds, sheets: world.sheets, kits: world.referenceKits, model, imageCount, videoCount, taskMode, disabled });
+  };
   const characterAudio = planAudio(videoParams?.audioReferencesDisabled === true);
   /**
    * What would ride with the switch on. A disabled plan comes back empty, and a chip that

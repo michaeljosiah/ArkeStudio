@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
-import { newId, type BenchTake, type RecipeIdentity } from "@arke-studio/contracts";
+import { newId, type BenchTake, type RecipeIdentity, type WorldBundle } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { WorldStore } from "../../src/world/store.js";
 import type { BenchStore } from "../../src/bench/store.js";
 import { addBenchReference, openBenchSession, planBenchDispatch } from "../../src/bench/service.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
+import { analyzePcmWav, audioHash } from "../../src/audio/qc.js";
+import { wav } from "../audio/helpers.js";
 
 /*
  * H3 Video's Reference lane (design turn 179): the pictures travel the reference route, each
@@ -236,5 +238,61 @@ describe("H3 Video's Reference lane (design turn 179)", () => {
     const rerun = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST, { worldId: store.worldId, requestId: "old", at: CLOCK(), fromTake: take });
     assert.equal(rerun.ok, false);
     if (!rerun.ok) assert.match(rerun.reason, /another version of Local · H3 Video/);
+  });
+});
+
+/*
+ * A world Bench voices the characters its Cast pictures are (owner, 2026-10-01): a character with
+ * an On screen voice rides as voice guidance on a route that takes audio, and stays home — without
+ * refusing — on one that does not.
+ */
+describe("a Cast picture brings its character's On screen voice to a world Bench", () => {
+  const R2V = SHIPPED_MANIFEST.models.find((row) => row.id === "comfyui-h3-reference-video")!;
+  const voiced = (bundle: WorldBundle, sheetId: string): WorldBundle => {
+    const next = structuredClone(bundle);
+    let kit = next.referenceKits.find((candidate) => candidate.sheetId === sheetId);
+    if (kit === undefined) {
+      kit = { sheetId, tiles: [], compilations: [] } as unknown as (typeof next.referenceKits)[number];
+      next.referenceKits.push(kit);
+    }
+    // A prepared sample as the voice page leaves one: one second of tone, measured by the real QC.
+    const pcm = wav(Array.from({ length: 48_000 }, (_, i) => Math.round(Math.sin(i / 10) * 8000)));
+    const report = analyzePcmWav(pcm, CLOCK()), outputHash = audioHash(pcm);
+    kit.designatedVoiceSample = { schemaVersion: 1, file: `voice/${outputHash.replace(":", "-")}.wav`, operationId: randomUUID(), designatedAt: CLOCK(),
+      warningCodes: [], attestations: [],
+      provenance: { schemaVersion: 1, source: { kind: "legacy-character-sample", sheetId, sourceFile: "voice/clone.wav", legacySource: "cloning-recording",
+        legacyDesignatedAt: CLOCK(), sourceMediaHash: outputHash }, sourceTechnical: report.technical, outputHash, outputTechnical: report.technical,
+        preparation: [], qualityReport: report, createdAt: CLOCK() } } as never;
+    return next;
+  };
+
+  it("rides H3 Reference Video as @Audio guidance, and stays out of H3 Video without refusing", async () => {
+    const { dir, store } = await world();
+    const sheet = store.getBundle().sheets.find((candidate) => candidate.type === "character")!;
+    const path = `references/${sheet.id}/identity.png`;
+    await store.ownedWrite(async () => {
+      await mkdir(join(dir, "references", sheet.id), { recursive: true });
+      await writeFile(join(dir, path), "a face");
+    });
+    const bundle = voiced(store.getBundle(), sheet.id);
+    for (const [row, rides] of [[R2V, true], [H3, false]] as const) {
+      const opened = await bench(dir, row.id);
+      const outcome = await addBenchReference({ store: opened.store, session: (await opened.store.fold())! }, bundle, row,
+        { source: { source: "world-file", path }, worldFile: reader(dir), requestId: `cast-${row.id}`, at: CLOCK() });
+      assert.equal(outcome.outcome, "added", JSON.stringify(outcome));
+      await compose(opened.store, row.id, undefined, "She says: \"You think money fixes everything?\"");
+      const plan = planBenchDispatch((await opened.store.fold())!, bundle, SHIPPED_MANIFEST, { worldId: store.worldId, requestId: `voice-${row.id}`, at: CLOCK() });
+      assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+      if (!plan.ok) continue;
+      const audio = plan.reserved[0]!.request.audioReferences;
+      if (rides) {
+        assert.deepEqual(audio?.references.map((ref) => [ref.characterName, ref.label]), [[sheet.name, "@Audio1"]]);
+        assert.ok(String(plan.inputs[0]!.params.prompt).includes(
+          `${sheet.name} uses <Audio 1> as voice guidance. Speak the scene's authored dialogue; do not repeat the audio reference's words.`));
+      } else {
+        assert.equal(audio, undefined, "H3 Video takes no audio, so the voice stays home");
+        assert.doesNotMatch(String(plan.inputs[0]!.params.prompt), /voice guidance/);
+      }
+    }
   });
 });

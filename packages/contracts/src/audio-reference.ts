@@ -237,6 +237,12 @@ export function planCharacterAudio(input: { scene: SceneRecord; shots: readonly 
     plan.references.push({ intent: "voice-reference", sheetId: id, characterName: sheet.name, label: `@Audio${plan.references.length + 1}`, sample });
   }
   if (new Set(plan.references.map(ref => ref.intent)).size > 1) plan.problems.push("A dispatch cannot mix voice guidance and performance synchronization. Disable assigned samples or use one intent throughout the pass.");
+  checkPlanAgainstRoute(plan, route, input.imageCount, input.videoCount ?? 0);
+  return plan;
+}
+
+/** The route's limits, held against whatever a plan ended up carrying. */
+function checkPlanAgainstRoute(plan: CharacterAudioPlan, route: ReturnType<typeof characterAudioRoute>, imageCount: number, videoCount: number): void {
   if (plan.references.length && route) {
     if (!route.supportsPerformanceSync && plan.references.some(ref => ref.intent === "performance-sync")) plan.problems.push("This route provides voice guidance, not performance synchronization.");
     plan.effects = { ...route.effects, generatedAudio: plan.references[0]!.intent !== "performance-sync" };
@@ -244,10 +250,35 @@ export function planCharacterAudio(input: { scene: SceneRecord; shots: readonly 
       if (referenceAudioAsset(ref).provenance.outputTechnical.sizeBytes > route.maxBytesPerFile) plan.problems.push(`${ref.characterName}: audio exceeds the route's 15 MB file limit.`);
       if ((referenceAudioAsset(ref).provenance.outputTechnical.durationSec ?? Infinity) > route.maxFileDurationSec) plan.problems.push(`${ref.characterName}: audio exceeds the route's ${route.maxFileDurationSec} second file limit.`);
     }
-    const visualProblem = characterAudioReferenceProblem(route, input.imageCount, input.videoCount ?? 0, plan.references.length);
+    const visualProblem = characterAudioReferenceProblem(route, imageCount, videoCount, plan.references.length);
     if (visualProblem) plan.problems.push(visualProblem);
     if (plan.references.reduce((n, r) => n + (referenceAudioAsset(r).provenance.outputTechnical.durationSec ?? Infinity), 0) > 15) plan.problems.push("Voice samples exceed the route's combined 15 second limit. Review shorter samples or explicitly disable references.");
   }
+}
+
+/**
+ * A world Bench has no scene, so no speakers: who is in the take is who its Cast pictures are,
+ * and a character with an On screen voice rides as voice guidance (owner, 2026-10-01 — before
+ * this, a world Bench carried no character voice at all and the clip had to be attached by hand).
+ *
+ * A picture is not a speaking line, so it never demands a voice the way a scene's speaker does.
+ * A route that carries no audio (H3 Video), a legacy sample, or a local-only sample on a cloud
+ * route leaves that voice out instead of refusing the take: refusing would stop every take that
+ * shows a voiced character on a model that cannot hear one. What does ride is held to the
+ * route's limits like any other plan.
+ */
+export function planCastCharacterAudio(input: { sheetIds: readonly string[]; sheets: readonly Sheet[]; kits: readonly ReferenceKit[];
+  model: ManifestModel; imageCount: number; videoCount?: number; taskMode?: string; disabled?: boolean }): CharacterAudioPlan {
+  const route = characterAudioRoute(input.model, input.taskMode);
+  const plan: CharacterAudioPlan = { version: 1, disabled: input.disabled === true, route: route?.endpoint ?? null, references: [], problems: [] };
+  if (plan.disabled || input.model.capability !== "video" || !route) return plan;
+  for (const id of new Set(input.sheetIds)) {
+    const sheet = input.sheets.find(s => s.id === id && s.type === "character");
+    const sample = sheet ? input.kits.find(k => k.sheetId === id)?.designatedVoiceSample : undefined;
+    if (!sheet || !sample || !("schemaVersion" in sample) || (!route.local && !sample.acknowledgementId)) continue;
+    plan.references.push({ intent: "voice-reference", sheetId: id, characterName: sheet.name, label: `@Audio${plan.references.length + 1}`, sample });
+  }
+  checkPlanAgainstRoute(plan, route, input.imageCount, input.videoCount ?? 0);
   return plan;
 }
 
