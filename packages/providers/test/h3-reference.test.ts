@@ -101,6 +101,23 @@ test("invalid, missing, changed and remotely directed references fail before upl
   assert.deepEqual(calls, []); client.dispose();
 });
 
+test("standalone audio recorded by its sixteen-digit prefix is held to that prefix", async () => {
+  // A bench take records `sha256:<16 hex>`; the binding schema allows it, so dispatch must too.
+  const prefix = `sha256:${hash.slice("sha256:".length, "sha256:".length + 16)}`;
+  const withPrefix = request();
+  withPrefix.params.referenceMedia = [{ kind: "audio", file: "tone.wav", hash: prefix, durationSec: 2 }];
+  const ok = engine();
+  await ok.client.submit("", withPrefix);
+  assert.equal(ok.graphs.length, 1);
+  ok.client.dispose();
+  const wrong = request();
+  wrong.params.referenceMedia = [{ kind: "audio", file: "tone.wav", hash: "sha256:0000000000000000", durationSec: 2 }];
+  const refused = engine();
+  await assert.rejects(refused.client.submit("", wrong), /standalone audio changed since review/);
+  assert.deepEqual(refused.calls, []);
+  refused.client.dispose();
+});
+
 test("file counts and per-file duration constrain admission, including unknown measurements", () => {
   const model = H3_REFERENCE_MODEL;
   assert.equal(validateReferences(Array.from({ length: 4 }, () => ({ kind: "video" as const, durationSec: 2 })), model).ok, false);
