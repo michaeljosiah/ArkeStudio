@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import type { Sheet } from "../src/world.js";
-import { AudioUseRequestSchema, castVoiceRequests, characterAudioRoute, planCharacterAudio, type FrozenPerformanceAudio } from "../src/audio-reference.js";
+import { AudioUseRequestSchema, castVoiceRequests, characterAudioRoute, planCastCharacterAudio, planCharacterAudio, type FrozenPerformanceAudio } from "../src/audio-reference.js";
 import type { ManifestModel, ProductionBundle, SceneRecord } from "../src/index.js";
 
 it("voice guidance and performance sync enforce distinct source authorities", () => {
@@ -86,4 +86,33 @@ it("the cast authority says why a read will not be asked for, in the card's word
   // Narrowed to a subject's shots (codex round 2): asked for where the member speaks, silent elsewhere.
   assert.equal(castVoiceRequests(SHEETS, production(), castScene(chosen), ["sh_1"]).requests.length, 1);
   assert.deepEqual(castVoiceRequests(SHEETS, production(), castScene(chosen), ["sh_2"]), { requests: [], notSent: [] });
+});
+
+/* A world Bench voices the characters its Cast pictures are (owner, 2026-10-01). A picture is not a
+   speaking line: where the voice cannot go it stays home, rather than refusing the take. */
+it("a Cast picture's On screen voice rides a world Bench take, and stays home where it cannot go", () => {
+  const sample = (extra: Record<string, unknown> = {}, durationSec = 11.9) => ({ schemaVersion: 1, file: "voice/ife.wav",
+    provenance: { outputTechnical: { sizeBytes: 1_000_000, durationSec } }, ...extra });
+  const kits = (s: unknown) => [{ sheetId: "maren-kest", designatedVoiceSample: s }] as never;
+  const local = { id: "comfyui-h3-reference-video", provider: "comfyui", capability: "video" } as unknown as ManifestModel;
+  const plan = (m: ManifestModel, s: unknown, sheetIds = ["maren-kest", "maren-kest", "nobody"], disabled = false) =>
+    planCastCharacterAudio({ sheetIds, sheets: SHEETS, kits: kits(s), model: m, imageCount: 2, disabled });
+
+  const rides = plan(local, sample());
+  assert.deepEqual(rides.problems, []);
+  assert.deepEqual(rides.references.map(r => [r.characterName, r.label, r.intent]), [["Maren Kest", "@Audio1", "voice-reference"]], "once, however many of their pictures ride");
+  assert.equal(rides.effects?.generatedAudio, true);
+
+  for (const [what, result] of [
+    ["H3 Video carries no audio", plan({ id: "comfyui-h3-video", provider: "comfyui", capability: "video" } as never, sample())],
+    ["a legacy sample", plan(local, { file: "voice.wav", source: "cloning-recording", designatedAt: "2026-08-09T00:00:00.000Z" })],
+    ["a local-only sample on a cloud route", plan(model("seedance-2.0"), sample())],
+    ["no Cast picture", plan(local, sample(), ["nobody"])],
+    ["switched off", plan(local, sample(), undefined, true)],
+  ] as const) {
+    assert.deepEqual(result.references, [], what);
+    assert.deepEqual(result.problems, [], `${what}: left out, not refused`);
+  }
+  assert.equal(plan(model("seedance-2.0"), sample({ acknowledgementId: "ack" })).references.length, 1, "cleared for cloud reuse, it rides Seedance");
+  assert.match(plan(local, sample({}, 16)).problems.join(" "), /15 second file limit/, "what rides is held to the route's limits");
 });
