@@ -102,6 +102,22 @@ it("retains identity and usage when creation succeeds but the audition is unusab
   }
 });
 
+it("reads the live service's models/ resource name as the pinned model it was asked for", async () => {
+  // The shape Google returned on 2026-10-01 for a voice it had created and billed.
+  for (const model of GEMINI_TTS_MODELS) {
+    const result = await new GoogleClient(async () => Response.json({ ...voice(), model: `models/${model}` }))
+      .createDesignedVoice("key", { ...input, model });
+    assert.equal(result.problem, undefined);
+    assert.equal(result.voice?.model, model);
+    assert.deepEqual(result.sample?.data, wav());
+  }
+  for (const model of ["models/invented", "tunedModels/gemini-3.8-flash-tts", "models/models/gemini-3.8-flash-tts"]) {
+    const result = await new GoogleClient(async () => Response.json({ ...voice(), model })).createDesignedVoice("key", input);
+    assert.ok(result.problem, model);
+    assert.equal(result.voice, undefined, model);
+  }
+});
+
 it("keeps witnessed evidence without making invalid metadata into a usable binding", async () => {
   for (const patch of [{ model: "unknown" }, { type: "replicated" }, { expire_time: undefined }, { key: "voicekey_secret" }]) {
     const result = await new GoogleClient(async () => Response.json({ ...voice(), ...patch })).createDesignedVoice("key", input);

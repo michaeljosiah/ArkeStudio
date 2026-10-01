@@ -20,7 +20,6 @@ import { closeOnCleanup } from "../tmp.js";
 const CLOCK = () => "2026-10-01T12:00:00.000Z";
 const H3 = SHIPPED_MANIFEST.models.find((row) => row.id === "comfyui-h3-video")!;
 const H3_768 = SHIPPED_MANIFEST.models.find((row) => row.id === "comfyui-h3-video-768")!;
-const R2V = SHIPPED_MANIFEST.models.find((row) => row.id === "comfyui-h3-reference-video")!;
 const BRIEF = "The woman is @Image 1. Dimly lit luxurious bedroom at night, a couple, slow camera move.";
 
 const hex = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
@@ -137,31 +136,23 @@ describe("H3 Video's Reference lane (design turn 179)", () => {
     assert.equal(plan.reserved[0]!.request.referenceRoute!.pictures[0]!.who, sheet.name);
   });
 
-  it("the lane admits what the route offers — two pictures — not the first frame's budget or ref2va's", async () => {
+  it("the lane admits what the node takes — nine pictures — not the first frame's budget", async () => {
     const { dir, store } = await world();
-    const first = await filePicture(dir, store, "one.png");
-    const second = await filePicture(dir, store, "two.png");
-    const third = await filePicture(dir, store, "three.png");
+    const files: Array<Awaited<ReturnType<typeof filePicture>>> = [];
+    for (let i = 1; i <= 10; i++) files.push(await filePicture(dir, store, `picture-${i}.png`));
     const opened = await bench(dir);
-    assert.equal((await attach(opened, store, first.id)).outcome, "added");
-    assert.equal((await attach(opened, store, second.id)).outcome, "added");
-    assert.equal((await attach(opened, store, third.id)).outcome, "refused");
-    // Two pictures write two subject lines, in tray order, ahead of the brief.
-    await compose(opened.store, H3.id, undefined, "Two people.");
-    const two = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST, { worldId: store.worldId, requestId: "pair", at: CLOCK() });
-    assert.ok(two.ok, two.ok ? undefined : two.reason);
-    if (two.ok) {
-      assert.match(String(two.inputs[0]!.params.prompt), /^<Subject 1> is .+, shown in <Picture 1>\.\n<Subject 2> is .+, shown in <Picture 2>\.\n/);
-      assert.equal(two.reserved[0]!.request.referenceRoute!.pictures.length, 2);
+    for (const file of files.slice(0, 9)) assert.equal((await attach(opened, store, file.id)).outcome, "added", file.file);
+    assert.equal((await attach(opened, store, files[9]!.id)).outcome, "refused", "a tenth picture is past the node's limit");
+    // Nine pictures write nine subject lines, in tray order, ahead of the brief.
+    await compose(opened.store, H3.id, undefined, "Nine people.");
+    const nine = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST, { worldId: store.worldId, requestId: "nine", at: CLOCK() });
+    assert.ok(nine.ok, nine.ok ? undefined : nine.reason);
+    if (nine.ok) {
+      const lines = String(nine.inputs[0]!.params.prompt).split("\n");
+      for (let n = 1; n <= 9; n++) assert.match(lines[n - 1]!, new RegExp(`^<Subject ${n}> is .+, shown in <Picture ${n}>\\.$`));
+      assert.equal(lines[9], "Nine people.");
+      assert.equal(nine.reserved[0]!.request.referenceRoute!.pictures.length, 9);
     }
-    // Three carried in from a row that takes nine are refused at the gate, not dropped.
-    const wide = await bench(dir, R2V.id);
-    await attach(wide, store, first.id, R2V);
-    await attach(wide, store, second.id, R2V);
-    await attach(wide, store, third.id, R2V);
-    await compose(wide.store, H3.id, undefined, "Three people.");
-    const plan = planBenchDispatch((await wide.store.fold())!, store.getBundle(), SHIPPED_MANIFEST, { worldId: store.worldId, requestId: "two", at: CLOCK() });
-    assert.equal(plan.ok, false);
   });
 
   it("H3 Video 768p keeps the picture and refuses in one clause", async () => {

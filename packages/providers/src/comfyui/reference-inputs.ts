@@ -34,7 +34,11 @@ export function multimediaInputs(recipe: ComfyUiRecipe, request: SubmitRequest, 
   if (standalone.length !== audioBindings.length) fail("a reviewed standalone audio reference did not arrive");
   for (const [index, clip] of standalone.entries()) {
     const hash = createHash("sha256").update(clip.data).digest("hex");
-    if (typeof audioBindings[index]?.hash !== "string" || audioBindings[index]!.hash.replace(/^sha256:/, "") !== hash) fail("standalone audio changed since review");
+    // A bench take and an artifact sidecar record the 16-digit prefix the binding schema allows;
+    // held to the full digest, every such clip read as changed and the take failed at once
+    // (a bench voice read used as @Audio 1, 2026-10-01). The prefix is held to the prefix.
+    const recorded = typeof audioBindings[index]?.hash === "string" ? audioBindings[index]!.hash.replace(/^sha256:/, "") : "";
+    if (!(recorded === hash || (recorded.length === 16 && hash.startsWith(recorded)))) fail("standalone audio changed since review");
   }
   if (voices.length) {
     const route = characterAudioRoute({ provider: "comfyui", id: recipe.id });
