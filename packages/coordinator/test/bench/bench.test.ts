@@ -27,6 +27,7 @@ import {
   recoverBenchSession,
   benchTakeFiles,
   deleteBenchTake,
+  planBenchUpscale,
   sweepDeletedBenchMedia,
 } from "../../src/bench/service.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -965,6 +966,77 @@ describe("deleting a take (design turn 180)", () => {
     assert.equal(await exists(media), true);
     await sweepDeletedBenchMedia(dir, (await opened.store.fold())!);
     assert.equal(await exists(media), false);
+  });
+});
+
+describe("upscaling a take (design turn 178)", () => {
+  const VIDEO_REQUEST = { mode: "video" as const, brief: "a couple, slow camera move", references: [], keyframes: [], provider: "comfyui", model: "comfyui-h3-video-768", params: { kind: "video" as const, aspect: "16:9", durationSec: 7 } };
+
+  async function videoTake(width: number, height: number) {
+    const { dir, store } = await open();
+    const opened = await freshBench(dir);
+    const takeId = newId("tk");
+    await opened.store.append({ type: "takes-reserved", takes: [{ id: takeId as never, n: 1, requestId: "r1", request: VIDEO_REQUEST, createdAt: CLOCK() }] }, { at: CLOCK() });
+    await opened.store.append({ type: "take-completed", takeId: takeId as never, completedAt: CLOCK(),
+      media: { file: "output-1.mp4", hash: "sha256:00000000000000aa" as never, info: { durationSec: 7.292, hasAudio: true, hasVideo: true, width, height, frameRate: 24 } } }, { at: CLOCK() });
+    return { dir, store, opened, takeId };
+  }
+
+  it("reserves a new take naming its source, and one local job made from the source's file", async () => {
+    const { store, opened, takeId } = await videoTake(1344, 768);
+    const session = (await opened.store.fold())!;
+    const plan = planBenchUpscale(session, SHIPPED_MANIFEST, { worldId: store.worldId, requestId: "up-1", takeId, at: CLOCK(), recipeVersionOf: () => 1, seed: 42 });
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    if (!plan.ok) return;
+    const [reserved] = plan.reserved;
+    assert.equal(reserved!.n, 2, "the source keeps its number; the upscale takes the next");
+    assert.notEqual(reserved!.id, takeId);
+    assert.deepEqual(reserved!.request.upscale, {
+      sourceTakeId: takeId, sourceN: 1, sourceHash: "sha256:00000000000000aa", size: "1080p", aspect: "16:9",
+      from: { width: 1344, height: 768 }, to: { width: 1920, height: 1080 }, crop: { edge: "top and bottom", percent: 2 },
+    });
+    assert.equal(reserved!.request.model, "comfyui-seedvr2-upscale");
+    assert.equal(reserved!.request.recipeVersion, 1);
+    assert.equal(reserved!.request.requestedSeed, 42);
+    const [input] = plan.inputs;
+    assert.equal(input!.provider, "comfyui");
+    assert.equal(input!.estimatedMicroUsd, 0);
+    assert.deepEqual(input!.params, {
+      size: "1080p", aspect: "16:9", seed: 42,
+      videoReferences: [`${sessionMediaDir(session.id, takeId)}/output-1.mp4`],
+      sourceHash: "sha256:00000000000000aa", sourceDurationSec: 7.292,
+    });
+    assert.equal(input!.landing.dir, sessionMediaDir(session.id, reserved!.id));
+    // The reservation folds into a take that says where it came from, beside an untouched source.
+    await opened.store.append({ type: "takes-reserved", takes: plan.reserved }, { at: CLOCK() });
+    const after = (await opened.store.fold())!;
+    assert.equal(after.takes.length, 2);
+    assert.equal(after.takes[0]!.media?.file, "output-1.mp4");
+  });
+
+  it("refuses a take already at the size, a still, a take still out and a production session", async () => {
+    const big = await videoTake(1920, 1080);
+    const refused = planBenchUpscale((await big.opened.store.fold())!, SHIPPED_MANIFEST, { worldId: big.store.worldId, requestId: "up-2", takeId: big.takeId, at: CLOCK() });
+    assert.deepEqual(refused, { ok: false, reason: "This take is not a video below 1080p" });
+    const small = await videoTake(864, 480);
+    const session = (await small.opened.store.fold())!;
+    assert.deepEqual(planBenchUpscale(session, SHIPPED_MANIFEST, { worldId: small.store.worldId, requestId: "up-3", takeId: newId("tk"), at: CLOCK() }),
+      { ok: false, reason: "That take is no longer in this session" });
+    const subject = { ...session, subject: { kind: "shot" } } as never;
+    assert.deepEqual(planBenchUpscale(subject, SHIPPED_MANIFEST, { worldId: small.store.worldId, requestId: "up-4", takeId: small.takeId, at: CLOCK() }),
+      { ok: false, reason: "Upscale from the world bench" });
+    const noUpscaler = { ...SHIPPED_MANIFEST, models: SHIPPED_MANIFEST.models.filter((model) => model.upscale === undefined) };
+    assert.deepEqual(planBenchUpscale(session, noUpscaler, { worldId: small.store.worldId, requestId: "up-5", takeId: small.takeId, at: CLOCK() }),
+      { ok: false, reason: "No upscaler is installed" });
+  });
+
+  it("the upscaler is never a composer's model", async () => {
+    const { dir, store } = await open();
+    const opened = await freshBench(dir);
+    await opened.store.append({ type: "composer-set", mode: "video", provider: "comfyui", model: "comfyui-seedvr2-upscale", params: { kind: "video" }, brief: "sharper" }, { at: CLOCK() });
+    const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST, { worldId: store.worldId, requestId: "up-6", at: CLOCK() });
+    assert.equal(plan.ok, false);
+    if (!plan.ok) assert.match(plan.reason, /upscales a take/);
   });
 });
 

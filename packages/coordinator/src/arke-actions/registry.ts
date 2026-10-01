@@ -570,6 +570,7 @@ const CLIENT_COMMAND_METADATA = {
   "bench-discard": action("world", "destructive", "bench", "destructive-change", ["bench", "takes"]),
   "bench-clear-view": action("world", "destructive", "bench", "destructive-change", ["bench", "takes"]),
   "bench-take-files": readOnly(QUERY),
+  "bench-upscale": action("world", "generation", "bench", "spend-and-compute", ["bench", "takes", "jobs"], { preparation: GENERATION_QUOTE }),
   // Deleting removes files from disk after the person's one confirm (design turn 180); nothing
   // can be restored from the session afterwards, so the confirm is the person's, not Arke's.
   "bench-delete": humanOnly("Deleting a take's files is confirmed by the person who sees the file list."),

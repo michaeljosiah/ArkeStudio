@@ -8,7 +8,7 @@ import { AppSettingsFile } from "../../src/app-settings.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
-import { SamplingClock, localTakeFreeze, withLocalSampling } from "../../src/queue/local-sampling.js";
+import { SamplingClock, UpscaleClock, localTakeFreeze, withLocalSampling } from "../../src/queue/local-sampling.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { FakeProvider } from "./fake-provider.js";
@@ -183,5 +183,62 @@ describe("through the coordinator", () => {
     } finally {
       await coordinator.stop();
     }
+  });
+});
+
+describe("the upscaler's measured rate (design turn 178)", () => {
+  const UPSCALE = "comfyui-seedvr2-upscale";
+  const run = (status: Job["status"], extra: Partial<Job> = {}): Job => ({
+    id: "jb_up", provider: "comfyui", model: UPSCALE, status,
+    params: { size: "1080p", aspect: "16:9", sourceDurationSec: 7.3 },
+    ...extra,
+  }) as unknown as Job;
+
+  it("records seconds of run per second of output, from the first running sighting", () => {
+    let now = 0;
+    const recorded: Array<[string, number]> = [];
+    const clock = new UpscaleClock((recipe, sample) => recorded.push([recipe, sample.secPerOutputSec]), () => now);
+    clock.observe(run("running"));
+    now = 400_000;
+    clock.observe(run("running", { step: { stage: "upscaling", done: 1, total: 1 } } as Partial<Job>));
+    now = 858_000; // 14.3 minutes
+    clock.observe(run("succeeded"));
+    assert.deepEqual(recorded.map(([recipe]) => recipe), [UPSCALE]);
+    assert.ok(Math.abs(recorded[0]![1] - 858 / 7.3) < 1e-9);
+  });
+
+  it("records nothing for a failed run, one met mid-way, one with no source length, or another recipe", () => {
+    let now = 0;
+    const recorded: unknown[] = [];
+    const clock = new UpscaleClock((...args) => recorded.push(args), () => now);
+    clock.observe(run("running"));
+    now = 1000;
+    clock.observe(run("failed"));
+    clock.observe(run("running", { id: "jb_mid", step: { stage: "upscaling", done: 1, total: 1 } } as Partial<Job>));
+    clock.observe(run("succeeded", { id: "jb_mid" }));
+    clock.observe(run("running", { id: "jb_nolength", params: { size: "1080p", aspect: "16:9" } } as Partial<Job>));
+    clock.observe(run("succeeded", { id: "jb_nolength", params: { size: "1080p", aspect: "16:9" } } as Partial<Job>));
+    clock.observe(run("running", { id: "jb_h3", model: H3 }));
+    clock.observe(run("succeeded", { id: "jb_h3", model: H3 }));
+    assert.deepEqual(recorded, []);
+  });
+
+  it("keeps the last five rates per recipe in the settings file", async () => {
+    const { root } = await makeTempRoot();
+    const file = new AppSettingsFile(join(root, "settings.json"));
+    for (const rate of [100, 110, 120, 130, 140, 150]) {
+      await file.recordUpscaleRate(UPSCALE, { secPerOutputSec: rate, at: "2026-10-01T12:00:00.000Z" });
+    }
+    const onDisk = JSON.parse(await readFile(join(root, "settings.json"), "utf8"));
+    assert.deepEqual(onDisk.localSampling.rates[UPSCALE].map((sample: { secPerOutputSec: number }) => sample.secPerOutputSec), [110, 120, 130, 140, 150]);
+  });
+
+  it("an upscaler can never be a routing default", async () => {
+    const { root } = await makeTempRoot();
+    const file = new AppSettingsFile(join(root, "settings.json"));
+    const manifest = { models: COMFYUI_MANIFEST_MODELS } as never;
+    const refused = await file.setRoutingDefault("video", UPSCALE, manifest, true);
+    assert.equal(refused.ok, false);
+    if (!refused.ok) assert.match(refused.reason, /upscales a take/);
   });
 });

@@ -5164,6 +5164,20 @@ span.fy-bench__who { border-bottom: 0; }
 .fy-bench__tools .fy-bench__rowicon--bar { width: 24px; height: 24px; }
 .fy-bench__toolsep { width: 1px; height: 14px; margin: 0 4px; background: var(--border); flex: none; }
 .fy-bench__toolrefusal { flex: none; font: 400 var(--text-xs)/1.4 var(--font-sans); color: var(--destructive); }
+/* Upscale's popover (178a): what the press will do, as label · value rows, opened under the glyph. */
+.fy-upscale { position: relative; display: inline-flex; flex: none; }
+.fy-upscale__pop {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; display: flex; flex-direction: column; gap: 10px;
+  width: 300px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--background); box-shadow: var(--shadow-xl);
+}
+.fy-upscale__title { font: 600 13px var(--font-sans); color: var(--foreground); }
+.fy-upscale__rows { display: grid; gap: 6px; }
+.fy-upscale__row { display: flex; gap: 12px; font: 400 12px var(--font-sans); color: var(--muted-foreground); }
+.fy-upscale__row > span:first-child { width: 52px; flex: none; }
+.fy-upscale__row > span:last-child { color: var(--foreground); }
+.fy-upscale__mono { font-family: var(--font-mono); }
+.fy-upscale__why { font: 400 var(--text-xs)/1.4 var(--font-sans); color: var(--destructive); }
+.fy-upscale__foot { display: flex; justify-content: flex-end; gap: 8px; }
 /* The one confirm (180b): each file named with its size, then Cancel and Delete. */
 .fy-bench__deletefiles { list-style: none; margin: 0; padding: 4px 18px 0; display: grid; gap: 4px; font: 400 12px var(--font-mono); color: var(--muted-foreground); }
 .fy-bench__deletefoot { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 18px 18px; }

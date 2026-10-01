@@ -139,7 +139,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "bible-helper-run": "studio", "bench-draft-lyrics": "studio", "bench-preset-save": "studio",
   "bench-preset-delete": "studio", "bench-dispatch": "studio", "bench-rerun": "studio",
   "bench-keep": "studio", "bench-accept": "studio", "bench-discard": "studio",
-  "bench-clear-view": "studio", "bench-take-files": "studio", "bench-delete": "studio", "bench-select-take": "studio", "stage-artifact-reference": "studio",
+  "bench-clear-view": "studio", "bench-take-files": "studio", "bench-delete": "studio", "bench-upscale": "studio", "bench-select-take": "studio", "stage-artifact-reference": "studio",
 } as const satisfies Record<ClientMessage["kind"], "host" | "payload" | "resolved" | "studio">;
 
 export type RemoteHostCommand = { [K in keyof typeof REMOTE_COMMAND_ACCESS]: typeof REMOTE_COMMAND_ACCESS[K] extends "host" | "payload" ? K : never }[keyof typeof REMOTE_COMMAND_ACCESS];

@@ -5,7 +5,7 @@ import { saveDesignedVoice } from "./voice/designed-library.js";
 import { ProductionCreationService } from "./application/production-creation.js";
 import { AdapterLibrary, adapterSetupEntries } from "./local-ai/adapter-library.js";
 import { randomLocalSeed, withLocalSeed } from "./queue/local-seed.js";
-import { SamplingClock, jobSampling, localTakeFreeze, withLocalSampling } from "./queue/local-sampling.js";
+import { SamplingClock, UpscaleClock, jobSampling, localTakeFreeze, withLocalSampling } from "./queue/local-sampling.js";
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe } from "@arke-studio/providers";
 import { ConversationActionService } from "./application/conversation-actions.js";
@@ -163,6 +163,7 @@ import {
   meetsLocalModelMinimum,
   BENCH_DELETE_FILED,
   benchDeleteRefusal,
+  engineFloorClause,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
 import {
@@ -173,6 +174,7 @@ import {
   addBenchReference,
   type WorldFileReader,
   recoverBenchSession,
+  planBenchUpscale,
   benchTakeFiles,
   deleteBenchTake,
   sweepDeletedBenchMedia,
@@ -2453,6 +2455,20 @@ export class Coordinator {
         /* a lost measurement costs one figure beside a preset, never the run it measured */
       });
   });
+  /** The upscaler's measured rate (design turn 178), kept and published the same way. */
+  private readonly upscaleClock = new UpscaleClock((recipeId, sample) => {
+    const settings = this.appSettings;
+    if (!settings) return;
+    void settings
+      .recordUpscaleRate(recipeId, sample)
+      .then((next) => {
+        this.readModel.seedAppConfig({ localSampling: next.localSampling });
+        this.transport.broadcastSnapshot();
+      })
+      .catch(() => {
+        /* a lost measurement costs the figure beside Upscale, never the take it measured */
+      });
+  });
   /**
    * Whether the threshold was over on the last evaluation that actually read the ledger — the
    * latch behind "alert once per crossing" (R-19). Deliberately not `app.spend.alerted`, which
@@ -2615,6 +2631,7 @@ export class Coordinator {
               this.emit(event);
               if (event.type === "job.updated") this.cataloguePreviews?.observeJob(event.job);
               if (event.type === "job.updated") this.samplingClock.observe(event.job);
+              if (event.type === "job.updated") this.upscaleClock.observe(event.job);
               if (event.type === "job.updated" && (event.job.provider === "ollama" || event.job.provider === "comfyui")) {
                 if (event.job.provider === "comfyui" && ["succeeded", "failed", "cancelled"].includes(event.job.status)) this.clearLocalResidency("comfyui");
                 void this.refreshLocalResidency();
@@ -5929,7 +5946,7 @@ export class Coordinator {
       const key = `${msg.worldId}/${msg.sessionId}/${msg.takeId}`;
       return this.serialiseBenchTakeAction(key, () => this.handleClientMessage(msg, true));
     }
-    if (!benchDispatchHeld && (msg.kind === "bench-dispatch" || msg.kind === "bench-rerun")) {
+    if (!benchDispatchHeld && (msg.kind === "bench-dispatch" || msg.kind === "bench-rerun" || msg.kind === "bench-upscale")) {
       const key = `${msg.worldId}/${msg.sessionId}`;
       return this.serialiseBenchDispatch(key, () => this.handleClientMessage(msg, false, true));
     }
@@ -12097,6 +12114,69 @@ export class Coordinator {
           outcome.acceptedJobIds,
           outcome.failures,
         );
+        await this.refreshBench(msg.worldId, msg.sessionId);
+        return;
+      }
+      case "bench-upscale": {
+        // An upscale reserves a take number like any dispatch, so it holds the same per-session
+        // key: two presses racing one session cannot both claim the next number (design 178).
+        const store = this.opts.provider.openStore?.();
+        const bench = await this.benchFor(msg.worldId, msg.sessionId);
+        if (!store || !bench) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "The bench is unavailable. Reopen the world and try again.");
+          return;
+        }
+        const upscaler = this.opts.manifest?.models.find((model) => model.upscale !== undefined) ?? null;
+        // The engine's answer first, in the clause the tile shows: an engine below the floor is
+        // refused as `Needs ComfyUI 0.38`, never with a sentence the screen does not use.
+        const readiness = upscaler === null ? undefined : this.readModel.getState().app.comfyui?.recipes.find((recipe) => recipe.recipeId === upscaler.id);
+        if (upscaler !== null && readiness !== undefined && readiness.state === "disabled") {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            readiness.reasonKind === "engine" && upscaler.upscale !== undefined
+              ? engineFloorClause(upscaler.upscale.minEngineVersion)
+              : (readiness.reason ?? "The upscaler is not ready on this machine"),
+          );
+          return;
+        }
+        const freeze = upscaler === null ? {} : localTakeFreeze(upscaler.id, undefined, () => undefined, randomLocalSeed);
+        const plan = planBenchUpscale(bench.session, this.opts.manifest ?? null, {
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          takeId: msg.takeId,
+          at: this.nowIso(),
+          recipeVersionOf: (modelId) => this.recipeVersionOf(modelId),
+          seed: freeze.seed,
+        });
+        if (!plan.ok) {
+          this.rejectEnqueue(msg.requestId, msg.kind, plan.reason);
+          return;
+        }
+        const reservation = await bench.store.append(
+          { type: "takes-reserved", takes: plan.reserved },
+          { at: this.nowIso(), requestId: msg.requestId },
+        );
+        if (reservation.deduplicated) {
+          this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+          await this.refreshBench(msg.worldId, msg.sessionId);
+          return;
+        }
+        const outcome = await enqueueInputs(plan.inputs, async (input) => {
+          if (!this.jobQueue) throw new Error("the job queue is unavailable");
+          return this.jobQueue.enqueue(this.freezeLocalIdentity(input));
+        });
+        const reserved = plan.reserved[0]!;
+        const failure = outcome.failures[0];
+        if (failure !== undefined) {
+          await bench.store.append(
+            { type: "take-status", takeId: reserved.id, status: "failed", error: failure.reason },
+            { at: this.nowIso() },
+          );
+        } else if (outcome.acceptedJobIds[0] !== undefined) {
+          await bench.store.append({ type: "take-job", takeId: reserved.id, jobId: outcome.acceptedJobIds[0] }, { at: this.nowIso() });
+        }
+        this.emitEnqueueResult(msg.requestId, msg.kind, outcome.requestedCount, outcome.acceptedJobIds, outcome.failures);
         await this.refreshBench(msg.worldId, msg.sessionId);
         return;
       }

@@ -5,6 +5,8 @@ import {
   ENGINE_PROVIDERS,
   PROVIDERS as PROVIDER_TABLE,
   comfyUiWeightsComponentId,
+  engineFloorClause,
+  upscaleRateCopy,
   credentialFaulted,
   deriveCapabilityAvailability,
   engineOfProvider,
@@ -12,7 +14,6 @@ import {
   modelEligible,
   modelCapabilityCopy,
   residencyNote,
-  type Capability,
   type EngineId,
   type ManifestModel,
   type ProviderId,
@@ -91,11 +92,30 @@ interface Kind {
   models: ManifestModel[];
 }
 
+/**
+ * Upscale, its own kind under On this machine (design 178c). An upscaler's capability is video —
+ * that is what it makes — but it is not a video model anyone generates with, so it is drawn under
+ * a kind of its own right after Video rather than as a fourth Video tile. Local to this screen:
+ * the capability rows stay one per capability, which is what every other surface reads.
+ */
+const UPSCALE_ROW: CapabilityRow = { label: "Upscale", capabilities: ["video"] };
+
+/** The kind a model is drawn under here: Upscale for an upscaler, its capability's row otherwise. */
+function rowOf(model: ManifestModel): CapabilityRow {
+  return model.upscale !== undefined ? UPSCALE_ROW : kindOf(model);
+}
+
+/** A kind's address in the URL: its capability, or `upscale` for the one kind that shares one. */
+function kindKey(row: CapabilityRow): string {
+  return row === UPSCALE_ROW ? "upscale" : kindId(row);
+}
+
 /** The kinds a half draws, in R-8's order, and only where a model exists in that half. */
 function kindsFor(models: readonly ManifestModel[], half: Half): Kind[] {
-  return CAPABILITY_ROWS.map((row) => ({
+  const rows = CAPABILITY_ROWS.flatMap((row) => (row.capabilities.includes("video") ? [row, UPSCALE_ROW] : [row]));
+  return rows.map((row) => ({
     row,
-    models: models.filter((m) => halfOf(m) === half && kindOf(m) === row),
+    models: models.filter((m) => halfOf(m) === half && rowOf(m) === row),
   })).filter((k) => k.models.length > 0);
 }
 
@@ -369,13 +389,17 @@ function recipeTileFacts(
       </button>
     </>
   );
+  // An engine below the upscaler's floor is said in the clause Upscale is refused with (178d).
+  const floor = model.upscale !== undefined && recipe.state === "disabled" && recipe.reasonKind === "engine"
+    ? engineFloorClause(model.upscale.minEngineVersion)
+    : null;
   return {
     model,
     at: weights !== undefined ? sizeMb(weights.sizeMb) : undefined,
-    word: facts.word,
+    word: floor ?? facts.word,
     tone: facts.tone,
     bar: facts.moving || facts.paused ? facts.pct : undefined,
-    reason: facts.reason,
+    reason: floor !== null ? undefined : facts.reason,
     note: [disabled ? "turned off in AI models" : recipe.state === "unknown" && eligible ? "Generation is allowed." : undefined, residency].filter(Boolean).join(" ") || undefined,
     recommended,
     dim: facts.dim,
@@ -389,6 +413,7 @@ function recipeTileFacts(
 function LocalTile({ facts, externalEngine }: { facts: LocalFacts; externalEngine: boolean }) {
   // Generate's "Edit in Settings" lands here with the model and `sampling` named (design 177c).
   const [params] = useSearchParams();
+  const { state } = useStore();
   const askedSampling = params.get("model") === facts.model.id && params.get("sampling") === "1";
   return (
     <div
@@ -421,6 +446,14 @@ function LocalTile({ facts, externalEngine }: { facts: LocalFacts; externalEngin
           </>
         )}
         {facts.recipe && hasSampling(facts.model) && <SamplingLine model={facts.model} openOnMount={askedSampling} />}
+        {/* What an upscaler does and its rate on this machine, measured, or a dash (178c). */}
+        {facts.model.upscale !== undefined && (
+          <div className="fy-mtile__meta" data-testid="upscale-rate">
+            <span>{`Video to ${facts.model.upscale.size}`}</span>
+            <span style={{ flex: 1 }} />
+            <span>{upscaleRateCopy(state?.app.localSampling?.rates?.[facts.model.id])}</span>
+          </div>
+        )}
         <div className="fy-mtile__does">{facts.controls}</div>
         {((facts.model.accepts.referenceVideos ?? 0) > 0 || (facts.model.accepts.referenceAudio ?? 0) > 0) && (
           <div className="fy-mtile__meta">{modelCapabilityCopy(facts.model)}</div>
@@ -592,12 +625,12 @@ export function SettingsModelsScreen() {
   const asked = params.get("model");
   const target = asked === null ? undefined : models.find((m) => m.id === asked);
   const half: Half = target !== undefined ? halfOf(target) : params.get("half") === "local" ? "local" : "cloud";
-  const kind: Capability | null = target !== undefined ? kindId(kindOf(target)) : (params.get("kind") as Capability | null);
+  const kind: string | null = target !== undefined ? kindKey(rowOf(target)) : params.get("kind");
   const kinds = half === "local" ? local : cloud;
   const current =
-    kinds.find((k) => kindId(k.row) === kind) ?? kinds[0] ?? (half === "cloud" ? local[0] : cloud[0]) ?? null;
+    kinds.find((k) => kindKey(k.row) === kind) ?? kinds[0] ?? (half === "cloud" ? local[0] : cloud[0]) ?? null;
   const currentHalf: Half = current === null ? half : kinds.includes(current) ? half : half === "cloud" ? "local" : "cloud";
-  const select = (h: Half, k: Kind) => setParams({ half: h, kind: kindId(k.row) }, { replace: true });
+  const select = (h: Half, k: Kind) => setParams({ half: h, kind: kindKey(k.row) }, { replace: true });
 
   const column = (h: Half, list: Kind[]) =>
     list.map((k) => {
@@ -605,7 +638,7 @@ export function SettingsModelsScreen() {
       return (
         <button
           type="button"
-          key={`${h}-${kindId(k.row)}`}
+          key={`${h}-${kindKey(k.row)}`}
           role="tab"
           aria-selected={here}
           className={cx("fy-kind", here && "is-current")}

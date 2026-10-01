@@ -98,7 +98,7 @@ export function GenerateScreen() {
     (state?.app.manifest?.models ?? []).find(
       (m) => m.id === (productionModel(state, prodId, "video") ?? state?.app.routing.defaults["video"]),
     ) ??
-    (state?.app.manifest?.models ?? []).find((m) => m.capability === "video") ??
+    (state?.app.manifest?.models ?? []).find((m) => m.capability === "video" && m.upscale === undefined) ??
     null;
 
   useEffect(

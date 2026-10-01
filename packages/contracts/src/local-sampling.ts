@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
+import { UPSCALE_RATE_RUNS, UpscaleRateSampleSchema } from "./upscale.js";
 
 /**
  * Sampling for a local recipe (design turn 177): how many steps the sampler takes, how hard the
@@ -135,6 +136,12 @@ export const LocalSamplingSettingsSchema = z
     timings: z
       .record(z.string().min(1), z.array(SamplingTimingSampleSchema).max(SAMPLING_TIMING_RUNS))
       .default({}),
+    /**
+     * An upscaler's measured rate per recipe (design turn 178): seconds of run per second of
+     * output, the last few completed runs. Beside the sampling timings because it is the same
+     * kind of fact — this machine's own measurement, kept with the engine's device settings.
+     */
+    rates: z.record(z.string().min(1), z.array(UpscaleRateSampleSchema).max(UPSCALE_RATE_RUNS)).optional(),
   })
   .strict();
 export type LocalSamplingSettings = z.infer<typeof LocalSamplingSettingsSchema>;

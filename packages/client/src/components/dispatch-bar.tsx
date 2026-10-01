@@ -118,7 +118,9 @@ export function usableModels(
   // same one (SPEC-034 R-15a). A picker deriving it separately from the write that stores what
   // the picker chose is how the two come to disagree about one model.
   const inputs = eligibilityInputs(state);
-  return manifest.models.filter((model) => model.capability === capability && modelEligible(model, inputs));
+  // An upscaler is video by what it makes and a tool on a take by what it is for (design 178):
+  // never something a picker offers to generate with.
+  return manifest.models.filter((model) => model.capability === capability && model.upscale === undefined && modelEligible(model, inputs));
 }
 
 /** The app state `modelEligible` reads, gathered once. */

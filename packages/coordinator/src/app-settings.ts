@@ -17,6 +17,8 @@ import {
   type SamplingTimingSample,
   type VoxaSettings,
   SAMPLING_TIMING_RUNS,
+  UPSCALE_RATE_RUNS,
+  type UpscaleRateSample,
   laterVersion,
 } from "@arke-studio/contracts";
 import { atomicWriteFile, serializeFileMutation } from "./world/atomic.js";
@@ -123,6 +125,10 @@ export class AppSettingsFile {
     if (!model) return { ok: false, reason: `"${modelId}" is not in the model manifest` };
     if (model.capability !== capability) {
       return { ok: false, reason: `${model.displayName} is a ${model.capability} model, not ${capability}` };
+    }
+    // An upscaler makes a take bigger, never anything from a brief (design turn 178).
+    if (model.upscale !== undefined) {
+      return { ok: false, reason: `${model.displayName} upscales a take — it cannot be the default` };
     }
     if (!eligible) {
       return { ok: false, reason: `${model.displayName} cannot run right now — it cannot be the default` };
@@ -309,6 +315,19 @@ export class AppSettingsFile {
     });
   }
 
+  /** One completed upscale's rate, keeping the last few per recipe (design turn 178). */
+  async recordUpscaleRate(recipeId: string, sample: UpscaleRateSample): Promise<AppSettings> {
+    return this.mutate((current) => {
+      const rates = current.localSampling.rates ?? {};
+      const kept = [...(rates[recipeId] ?? []), sample].slice(-UPSCALE_RATE_RUNS);
+      const settings: AppSettings = {
+        ...current,
+        localSampling: { ...current.localSampling, rates: { ...rates, [recipeId]: kept } },
+      };
+      return { settings, value: settings };
+    });
+  }
+
   /**
    * Save a bench setup (issue 305 §3): validated against the manifest the way a routing
    * default is — the model must exist and match the mode. Saving under an existing name
@@ -324,6 +343,9 @@ export class AppSettingsFile {
     if (!model) return { ok: false, reason: `"${input.model}" is not in the model manifest` };
     if (model.capability !== input.mode) {
       return { ok: false, reason: `${model.displayName} is a ${model.capability} model, not ${input.mode}` };
+    }
+    if (model.upscale !== undefined) {
+      return { ok: false, reason: `${model.displayName} upscales a take — it is not a preset's model` };
     }
     if (input.params.kind !== input.mode) {
       return { ok: false, reason: "the preset's controls do not match its mode" };
