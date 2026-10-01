@@ -10,6 +10,8 @@ import {
   BenchSubjectSchema,
   benchSubjectTitle,
   benchSessionSummary,
+  benchDeleteRefusal,
+  BENCH_DELETE_FILED,
   BenchReferenceSourceSchema,
   benchSourceKey,
   benchTokenFor,
@@ -701,6 +703,48 @@ describe("the summary", () => {
       benchSessionSummary(foldBenchSession(META, [...completed, env(3, { type: "take-discarded", takeId: TK as never })])).waitingCount,
       0,
     );
+  });
+});
+
+describe("deleting a take (design turn 180)", () => {
+  const reserved = env(1, {
+    type: "takes-reserved" as const,
+    takes: [
+      { id: TK as never, n: 1, requestId: "r1", request: SNAPSHOT, createdAt: "2026-08-16T10:00:01.000Z" },
+      { id: TK2 as never, n: 2, requestId: "r1/1", request: SNAPSHOT, createdAt: "2026-08-16T10:00:01.000Z" },
+    ],
+  });
+  const cited = {
+    token: "Image 1",
+    kind: "image" as const,
+    source: { source: "take" as const, takeId: TK2 as never, hash: "sha256:beefbeef" as never },
+  };
+
+  it("removes the take, keeps its number spent, moves the selection, and stops riding its bytes", () => {
+    const session = foldBenchSession(META, [
+      reserved,
+      env(2, { type: "reference-added", entry: cited }),
+      env(3, { type: "take-deleted", takeId: TK2 as never }),
+    ]);
+    assert.deepEqual(session.takes.map((take) => take.n), [1]);
+    assert.deepEqual(session.deletedTakes, [{ id: TK2, n: 2 }]);
+    assert.equal(session.nextTake, 3);
+    assert.equal(session.selectedTakeId, TK, "the newest remaining take is selected");
+    assert.deepEqual(session.composer.activeTokens, [], "a reference cut from the deleted take stops riding");
+    assert.equal(session.tokenRegistry[0]?.token, "Image 1", "its name stays allocated");
+    assert.equal(BenchSessionSchema.safeParse(session).success, true);
+    const empty = foldBenchSession(META, [reserved, env(2, { type: "take-deleted", takeId: TK as never }), env(3, { type: "take-deleted", takeId: TK2 as never })]);
+    assert.equal(empty.selectedTakeId, undefined);
+    assert.equal(BenchSessionSchema.safeParse(empty).success, true);
+  });
+
+  it("is absent while a take is out and refused with one clause once it is filed", () => {
+    assert.deepEqual(benchDeleteRefusal({ status: "running", disposition: "open" }), { absent: true, reason: "Still generating" });
+    assert.deepEqual(benchDeleteRefusal({ status: "needs-reconciliation", disposition: "open" }), { absent: true, reason: "Still generating" });
+    assert.deepEqual(benchDeleteRefusal({ status: "succeeded", disposition: "filed" }), { absent: false, reason: BENCH_DELETE_FILED });
+    assert.equal(BENCH_DELETE_FILED, "Filed — delete it from Artifacts");
+    assert.equal(benchDeleteRefusal({ status: "succeeded", disposition: "discarded" }), null);
+    assert.equal(benchDeleteRefusal({ status: "failed", disposition: "open" }), null);
   });
 });
 

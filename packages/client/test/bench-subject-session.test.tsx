@@ -524,18 +524,63 @@ describe("the wall and the strip (R-24; design 142a)", () => {
     assert.equal(q(bench, '[data-testid="bench-accept"]').textContent, "Accept · file onto 2 shots");
   });
 
-  it("the session line carries its four marks for the selected take", async () => {
+  it("the take carries its tools as icons, in the design's order (design 180a)", async () => {
     const bench = await openBench(boardSession());
-    const marks = all(bench, ".fy-bench__briefrow .fy-bench__rowicon").map((node) => node.getAttribute("aria-label"));
-    assert.deepEqual(marks, ["Run it again", "What was sent", "Not this", "Clear the wall"]);
-    assert.ok(q(bench, '.fy-bench__wallbar [aria-label^="Download"]'), "a download in the bar");
+    const marks = all(bench, ".fy-bench__briefrow .fy-bench__rowicon").map((node) => {
+      const label = node.getAttribute("aria-label") ?? "";
+      return label.startsWith("Download") ? "Download" : label;
+    });
+    assert.deepEqual(marks, ["Run it again", "Download", "What was sent", "Not this", "Delete"]);
+    assert.equal(bench.container.querySelector(".fy-bench__wallbar [aria-label^=\"Download\"]"), null, "download moved onto the take");
+    // Each glyph's hint names it, and nothing sits beneath it.
+    for (const node of all(bench, ".fy-bench__tools .fy-tip")) {
+      assert.equal(node.getAttribute("data-tip"), node.getAttribute("aria-label"));
+    }
   });
 
-  it("offers no Not this while the take is still out", async () => {
+  it("offers no Not this, Download or Delete while the take is still out", async () => {
     const session = shotSession();
     const bench = await openBench({ ...session, takes: [take("image", "running", false)] } as BenchSession);
     const marks = all(bench, ".fy-bench__briefrow .fy-bench__rowicon").map((node) => node.getAttribute("aria-label"));
-    assert.deepEqual(marks, ["Run it again", "What was sent", "Clear the wall"]);
+    assert.deepEqual(marks, ["Run it again", "What was sent"]);
+  });
+
+  it("Delete asks once, naming each file and its size, then sends the delete (design 180b)", async () => {
+    const bench = await openBench(boardSession());
+    await act(async () => q(bench, '[aria-label="Delete"]').click());
+    const ask = bench.sent.at(-1) as unknown as { kind: string; requestId: string; takeId: string };
+    assert.equal(ask.kind, "bench-take-files");
+    assert.equal(ask.takeId, TAKE_ID);
+    assert.equal(bench.container.querySelector('[data-testid="bench-delete-files"]'), null, "nothing confirms before the list arrives");
+    await apply({
+      at: "2026-10-01T00:00:00.000Z", type: "bench.take-files", worldId: FIXTURE_WORLD_ID, sessionId: SESSION_ID, takeId: TAKE_ID,
+      requestId: ask.requestId, files: [{ name: "output-1.mp4", bytes: 2_300_000 }, { name: "output-1.poster.png", bytes: 310_000 }],
+    } as DomainEvent);
+    const dialog = q(bench, '[role="dialog"]');
+    assert.match(dialog.textContent ?? "", /Delete Take 1\?/);
+    assert.deepEqual(all(bench, '[data-testid="bench-delete-files"] li').map((node) => node.textContent), ["output-1.mp4 · 2.3 MB", "output-1.poster.png · 0.3 MB"]);
+    await act(async () => q(bench, '[data-testid="bench-delete-confirm"]').click());
+    const del = bench.sent.at(-1) as unknown as { kind: string; requestId: string; takeId: string };
+    assert.equal(del.kind, "bench-delete");
+    assert.equal(del.takeId, TAKE_ID);
+    // A refusal from the coordinator keeps the confirm open and says why, in its one clause.
+    await apply({
+      at: "2026-10-01T00:00:00.000Z", type: "bench.take-deleted", worldId: FIXTURE_WORLD_ID, sessionId: SESSION_ID, takeId: TAKE_ID,
+      requestId: del.requestId, deleted: false, reason: "Filed — delete it from Artifacts",
+    } as DomainEvent);
+    assert.match(q(bench, '[role="dialog"] [role="alert"]').textContent ?? "", /Filed — delete it from Artifacts/);
+  });
+
+  it("a filed take's Delete is refused with one clause and sends nothing", async () => {
+    const session = boardSession();
+    const filed = { ...take("video"), disposition: "filed", filedTakeIds: [
+      "tk_01J8F3K2QW9VZX4N7M0RTYB6HJ", "tk_01J8F3K2QW9VZX4N7M0RTYB6HK", "tk_01J8F3K2QW9VZX4N7M0RTYB6HM",
+    ] };
+    const bench = await openBench({ ...session, takes: [filed] } as unknown as BenchSession);
+    const before = bench.sent.length;
+    await act(async () => q(bench, '[aria-label="Delete"]').click());
+    assert.equal(q(bench, '[data-testid="bench-delete-refusal"]').textContent, "Filed — delete it from Artifacts");
+    assert.equal(bench.sent.slice(before).some((message) => message.kind === "bench-take-files" || message.kind === "bench-delete"), false);
   });
 
   it("a clip on the wall wears the design's transport, not the browser's", async () => {

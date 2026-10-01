@@ -43,7 +43,6 @@ import {
 import {
   sendBenchAddReference,
   sendBenchAccept,
-  sendBenchClearView,
   sendBenchCompose,
   sendBenchDiscard,
   sendBenchDispatch,
@@ -82,7 +81,6 @@ import {
   ChevronDown,
   Clapper,
   Expand,
-  FileText,
   Film,
   Folder,
   Home,
@@ -90,12 +88,10 @@ import {
   Message,
   PlaySolid,
   Plus,
-  RefreshCw,
   Scroll,
   Speaker,
   Timer,
   MusicMark,
-  ThumbsDown,
   Trash,
   Waveform,
   SpeakerOff,
@@ -106,8 +102,8 @@ import {
   X,
 } from "../components/icons.js";
 import { Portrait } from "../components/portrait.js";
-import { ImageDownload } from "../components/image-actions.js";
 import { BenchBrief } from "../components/bench-brief.js";
+import { BenchTakeTools } from "../components/bench-take-tools.js";
 import { BenchPlayer } from "../components/bench-player.js";
 import { PromptCapabilityNotices } from "../components/prompt-review.js";
 import { droppedMentions, mentionOptions } from "../lib/bench-mention.js";
@@ -2400,17 +2396,7 @@ function BenchWorkspace({
                 {f === "all" ? "All" : f === "filed" ? "Filed" : f === "discarded" ? "Discarded" : "4K"}
               </button>
             ))}
-            <span style={{ flex: 1 }} />
-            {/* The one bar action the build has a function behind: save a copy of the selected
-                take (design 142a draws four; a filter and the two lenses have nothing to open yet). */}
-            {selected?.media !== undefined && (
-              <ImageDownload
-                worldSlug={worldSlug}
-                path={`.sessions/${session.id}/media/${selected.id}/${selected.media.file}`}
-                name={`Take ${selected.n}`}
-                className="fy-bench__rowicon fy-bench__rowicon--bar"
-              />
-            )}
+            {/* Download moved onto the take's own tools (design turn 180). */}
           </div>
 
           {/* The selected take's request, said back (design 68b): model · brief, then its
@@ -2420,59 +2406,28 @@ function BenchWorkspace({
               <span className="fy-bench__briefline">
                 {[takeRouteName(selected), takeSamplingLine(selected), selected.request.brief].filter(Boolean).join(" · ")}
               </span>
-              {/* The line's four marks (design 142a): run it again, what was sent, not this,
-                  clear the wall. "What was sent" puts the snapshot back in the composer — the
-                  brief and its settings as they went — which is the one way to read it. */}
-              <button
-                type="button"
-                className="fy-bench__rowicon"
-                title={rerunNeedsPrice ? "Review the current price in the composer, then Generate" : "Run it again — a new take from this snapshot"}
-                aria-label={rerunNeedsPrice ? "Review price to run again" : "Run it again"}
-                onClick={() => {
+              {/* The take's tools (design turn 180): run it again, download, what was sent, not
+                  this, delete. "What was sent" puts the snapshot back in the composer — the brief
+                  and its settings as they went — which is the one way to read it. */}
+              <BenchTakeTools
+                worldId={worldId}
+                worldSlug={worldSlug}
+                sessionId={session.id}
+                take={selected}
+                rerunNeedsPrice={rerunNeedsPrice}
+                onRerun={() => {
                   if (!rerunNeedsPrice) { rerunBench(selected.id); return; }
                   restore(selected);
                   composerRef.current?.scrollIntoView({ block: "start" });
                   composerRef.current?.focus({ preventScroll: true });
                 }}
-              >
-                <RefreshCw size={14} />
-              </button>
-              <button
-                type="button"
-                className="fy-bench__rowicon"
-                title="What was sent — this take's brief and settings back in the composer"
-                aria-label="What was sent"
-                {...(selected.request.referenceRoute !== undefined ? { "aria-expanded": sentOpen === selected.id } : {})}
-                onClick={() => {
+                onSent={() => {
                   restore(selected);
                   if (selected.request.referenceRoute !== undefined) setSentOpen(sentOpen === selected.id ? null : selected.id);
                 }}
-              >
-                <FileText size={14} />
-              </button>
-              {/* Only once there is something to judge: a take still out cannot be discarded
-                  into a charge that arrives anyway (codex, PR 1202). */}
-              {selected.disposition === "open" && selected.media !== undefined && (
-                <button
-                  type="button"
-                  className="fy-bench__rowicon"
-                  title="Not this — discard the take"
-                  aria-label="Not this"
-                  disabled={pendingAccept?.takeId === selected.id}
-                  onClick={() => sendBenchDiscard(worldId, session.id, selected.id)}
-                >
-                  <ThumbsDown size={14} />
-                </button>
-              )}
-              <button
-                type="button"
-                className="fy-bench__rowicon"
-                title="Clear the wall — the take keeps its number"
-                aria-label="Clear the wall"
-                onClick={() => sendBenchClearView(worldId, session.id, selected.id)}
-              >
-                <Trash size={14} />
-              </button>
+                sentExpanded={selected.request.referenceRoute !== undefined ? sentOpen === selected.id : undefined}
+                discardHeld={pendingAccept?.takeId === selected.id}
+              />
             </div>
           )}
 

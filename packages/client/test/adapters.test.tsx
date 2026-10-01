@@ -17,7 +17,7 @@ const library: AdapterLibraryState = { revision: 1, adultContent: { enabled: tru
   error: null, entries: [{ release, decision: null, removed: false, owned: false, installed: false, reason: null }] };
 function set(adapters: AdapterLibraryState) { __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, adapters } }); }
 
-test("one experimental bundle displays all members and becomes unavailable when any member is blocked", () => {
+test("one bundle is one chip; its members' strengths open in the popover and a blocked member names itself", () => {
   const entries = Array.from({ length: 14 }, (_, i) => {
     const approved = AdapterReleaseSchema.parse({ ...release, id: `fixture-${i}`, displayName: `Member ${i + 1}`,
       source: { ...release.source, sha256: i.toString(16).padStart(64, "0") }, compatibility: [{ recipeId: "test-recipe", state: "owner-approved",
@@ -27,24 +27,28 @@ test("one experimental bundle displays all members and becomes unavailable when 
   });
   const selections = entries.map(({ release: member }) => ({ releaseId: member.id, sha256: member.source.sha256, strength: 1 }));
   const bundle: AdapterBundle = { id: "fixture-bundle", displayName: "All adapters", recipeId: "test-recipe", status: "experimental", description: "Combination not GPU-tested", selections };
-  const render = (recipeId = "test-recipe") => renderToString(<MemoryRouter><AdapterPicker recipeId={recipeId} selected={selections} onChange={() => {}} /></MemoryRouter>).replaceAll("<!-- -->", "");
+  const render = (recipeId = "test-recipe", open = true) => renderToString(<MemoryRouter><AdapterPicker recipeId={recipeId} selected={selections} onChange={() => {}} initialOpen={open} /></MemoryRouter>).replaceAll("<!-- -->", "");
   const available = { ...library, entries, bundles: [bundle] };
   set(available);
-  assert.match(render(), /<option[^>]*value="bundle:fixture-bundle"[^>]*selected/);
-  assert.doesNotMatch(render(), /<option[^>]*value="bundle:fixture-bundle"[^>]*disabled/);
-  assert.match(render(), /14 adapters · Experimental/);
-  assert.match(render(), /Combination not GPU-tested/);
-  assert.equal((render().match(/<li>/g) ?? []).length, 14);
+  // Closed, the composer row holds one chip: the bundle's name and its member count (180c).
+  const closed = render("test-recipe", false);
+  assert.match(closed, /aria-label="Adapter: All adapters"[^>]*>All adapters<small>14<\/small>/);
+  assert.doesNotMatch(closed, /<select|Strength for|Manage adapters/);
+  assert.match(render(), /aria-pressed="true"[^>]*data-value="bundle:fixture-bundle"/);
+  assert.doesNotMatch(render(), /disabled=""[^>]*data-value="bundle:fixture-bundle"/);
+  // Names only: no status suffix and no description sentence on the composer.
+  assert.doesNotMatch(render(), /Experimental|Combination not GPU-tested|Owner/);
+  assert.equal((render().match(/aria-label="Strength for Member/g) ?? []).length, 14);
   // Each member's strength is its own field, bounded by that member's pairing range.
   assert.match(render(), /aria-label="Strength for Member 14"[^>]*min="1"[^>]*max="1"[^>]*value="1"/);
   assert.doesNotMatch(render(), /aria-label="Adapter strength"/);
+  assert.match(render(), /href="\/settings\/adapters"[^>]*>Manage adapters/);
   set({ ...available, entries: entries.map((row, i) => i === 13 ? { ...row, reason: "Disabled by the user." } : row) });
-  assert.match(render(), /<option[^>]*value="bundle:fixture-bundle"[^>]*disabled/);
   assert.match(render(), /Member 14: Disabled by the user/);
   set({ ...available, entries: entries.map((row, i) => i === 13 ? { ...row, installed: false } : row) });
   assert.match(render(), /Member 14: Not installed/);
   set({ ...available, entries: entries.slice(0, 13) });
-  assert.match(render(), /<option[^>]*value="bundle:fixture-bundle"[^>]*disabled/);
+  assert.match(render(), /A bundle member is unavailable for this model/);
   assert.match(render("another-model"), /Saved adapter unavailable/);
   set({ ...available, adultContent: { ...library.adultContent, enabled: false } });
   assert.doesNotMatch(render(), /Member|All adapters|Experimental/);
@@ -89,41 +93,48 @@ test("settings hide the catalogue when off and show it installable when on, with
 
 test("picker never advertises an unverified entry as selectable and retains a removable hidden saved choice", () => {
   set(library);
-  const picker = renderToString(<MemoryRouter><AdapterPicker recipeId="test-recipe" selected={[]} onChange={() => {}} /></MemoryRouter>);
-  assert.match(picker, /<option[^>]*value="test-release"[^>]*disabled=""/);
+  const picker = renderToString(<MemoryRouter><AdapterPicker recipeId="test-recipe" selected={[]} onChange={() => {}} initialOpen /></MemoryRouter>);
+  assert.match(picker, /disabled=""[^>]*data-value="test-release"/);
+  assert.match(picker, /fy-adapter-pop__why">Not installed/);
   set({ ...library, adultContent: { ...library.adultContent, enabled: false } });
-  const off = renderToString(<MemoryRouter><AdapterPicker recipeId="test-recipe" selected={[{ releaseId: release.id, sha256: release.source.sha256, strength: 1 }]} onChange={() => {}} /></MemoryRouter>);
+  const off = renderToString(<MemoryRouter><AdapterPicker recipeId="test-recipe" selected={[{ releaseId: release.id, sha256: release.source.sha256, strength: 1 }]} onChange={() => {}} initialOpen /></MemoryRouter>);
   assert.doesNotMatch(off, /Fixture adapter/);
   assert.match(off, /Clear selection/);
 });
 
 test("picker follows the selected model and keeps an incompatible saved selection clearable", () => {
   set(library);
-  const render = (recipeId: string, selected: { releaseId: string; sha256: string; strength: number }[] = []) =>
-    renderToString(<MemoryRouter><AdapterPicker recipeId={recipeId} selected={selected} onChange={() => {}} /></MemoryRouter>);
+  const render = (recipeId: string, selected: { releaseId: string; sha256: string; strength: number }[] = [], open = true) =>
+    renderToString(<MemoryRouter><AdapterPicker recipeId={recipeId} selected={selected} onChange={() => {}} initialOpen={open} /></MemoryRouter>);
   assert.equal(render("another-model"), "");
   assert.equal(render(""), "");
+  assert.match(render("test-recipe", [], false), /No adapter/);
   assert.match(render("test-recipe"), /Fixture adapter/);
   const stale = render("another-model", [{ releaseId: release.id, sha256: release.source.sha256, strength: 1 }]);
+  assert.match(stale, /Adapter unavailable/);
   assert.match(stale, /Saved adapter unavailable/);
   assert.match(stale, /Choose None to clear it/);
   assert.doesNotMatch(stale, /Adapter strength/);
 });
 
-test("picker identifies owner approval and its untested status without overriding a user block", () => {
+test("an approved adapter is listed by name alone, with its strength, and a user block still names itself", () => {
   const approved = AdapterReleaseSchema.parse({ ...release, compatibility: [{ recipeId: "test-recipe", state: "owner-approved",
     reason: "Owner approved; generation not run.", evidence: "Owner acceptance record", minStrength: 1, maxStrength: 1,
     ownerApproval: { approvedAt: "2026-09-25T00:00:00.000Z", generation: "not-run" } }] });
   const entry = { ...library.entries[0]!, release: approved, installed: true, reason: null };
   const selected = [{ releaseId: approved.id, sha256: approved.source.sha256, strength: 1 }];
-  const render = () => renderToString(<MemoryRouter><AdapterPicker recipeId="test-recipe" selected={selected} onChange={() => {}} /></MemoryRouter>);
+  const render = (open = true) => renderToString(<MemoryRouter><AdapterPicker recipeId="test-recipe" selected={selected} onChange={() => {}} initialOpen={open} /></MemoryRouter>).replaceAll("<!-- -->", "");
   set({ ...library, entries: [entry] });
+  assert.match(render(false), />Fixture adapter<small>1<\/small>/);
   const available = render();
-  assert.match(available.replaceAll("<!-- -->", ""), /Fixture adapter · Owner approved/);
-  assert.match(available, /Owner approved; generation not run/);
-  assert.doesNotMatch(available, /<option[^>]*value="test-release"[^>]*disabled/);
+  // The approval stays in Settings (design 180c): no suffix, no reason sentence on the composer.
+  assert.doesNotMatch(available, /Owner approved/);
+  assert.doesNotMatch(available, /disabled=""[^>]*data-value="test-release"/);
+  assert.match(available, /aria-label="Adapter strength"[^>]*min="1"[^>]*max="1"/);
   set({ ...library, entries: [{ ...entry, decision: { sha256: approved.source.sha256, decision: "disabled" as const, reason: "Disabled by the user.",
     policyRevision: "user", assessedAt: "2026-09-24T00:00:00.000Z" } }] });
-  assert.match(render(), /<option[^>]*value="test-release"[^>]*disabled/);
   assert.match(render(), /Disabled by the user/);
+  // Not chosen, the same row cannot be picked.
+  const fresh = renderToString(<MemoryRouter><AdapterPicker recipeId="test-recipe" selected={[]} onChange={() => {}} initialOpen /></MemoryRouter>);
+  assert.match(fresh, /disabled=""[^>]*data-value="test-release"/);
 });

@@ -569,6 +569,10 @@ const CLIENT_COMMAND_METADATA = {
   "bench-accept": action("production", "take-review", "bench", "authored-change", ["bench", "takes", "scenes", "shots", "boards"]),
   "bench-discard": action("world", "destructive", "bench", "destructive-change", ["bench", "takes"]),
   "bench-clear-view": action("world", "destructive", "bench", "destructive-change", ["bench", "takes"]),
+  "bench-take-files": readOnly(QUERY),
+  // Deleting removes files from disk after the person's one confirm (design turn 180); nothing
+  // can be restored from the session afterwards, so the confirm is the person's, not Arke's.
+  "bench-delete": humanOnly("Deleting a take's files is confirmed by the person who sees the file list."),
   "bench-select-take": action("world", "command", "bench", "authored-change", ["bench", "takes"]),
   "stage-artifact-reference": action("world", "command", "world-store", "authored-change", ["artifacts", "references"]),
   "attach-files-correlated": action("world", "host-action", "host", "host-file-access", ["artifacts"]),
