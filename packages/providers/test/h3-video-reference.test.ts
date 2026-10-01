@@ -25,7 +25,7 @@ import type { FetchLike, SubmitRequest } from "../src/types.js";
 type Graph = Record<string, { class_type: string; inputs: Record<string, unknown> }>;
 const base = comfyUiRecipeById("comfyui-h3-video")!;
 const route = comfyUiRouteRecipe(base, "reference");
-const pictures = [Uint8Array.from([1, 2, 3]), Uint8Array.from([4, 5, 6]), Uint8Array.from([7, 8, 9])];
+const pictures = Array.from({ length: 10 }, (_, i) => Uint8Array.from([i, i + 1, i + 2]));
 const hashOf = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 const motionAnatomy = H3_ADAPTER_BUNDLES.find((bundle) => bundle.id === "minimax-h3-motion-anatomy-v1")!.selections;
 
@@ -94,7 +94,7 @@ test("the reference route is fl2va through MiniMaxH3ReferenceToVideo, and otherw
   assert.deepEqual(route.adapterSlot, base.adapterSlot);
   assert.deepEqual(route.sampling, base.sampling);
   assert.deepEqual(route.requires, base.requires);
-  assert.equal(route.referenceImages!.length, 3);
+  assert.equal(route.referenceImages!.length, 9, "the node's own ref_images maximum");
   assert.deepEqual(route.engine, { minVersion: "0.33.1", exercisedThroughVersion: "0.38.1" });
   assert.ok(recipeNodeClasses(route).includes("MiniMaxH3ReferenceToVideo"));
   assert.ok(!recipeNodeClasses(route).includes("MiniMaxH3ImageToVideo"));
@@ -105,7 +105,7 @@ test("the route's identity is its own: same id and pins, another graph, named", 
   assert.equal(own.id, parent.id);
   assert.equal(own.route, "reference");
   assert.equal(parent.route, undefined);
-  assert.equal(own.version, 1);
+  assert.equal(own.version, 2, "nine carriers where version 1 had three");
   assert.notEqual(own.templateDigest, parent.templateDigest);
   assert.equal(own.dependencyDigest, parent.dependencyDigest);
   assert.ok(RecipeIdentitySchema.safeParse(own).success);
@@ -114,25 +114,25 @@ test("the route's identity is its own: same id and pins, another graph, named", 
   assert.ok(COMFYUI_RECIPES.some((recipe) => recipe.routes?.reference === route));
 });
 
-test("only H3 Video has the route, and the row offers what was measured", () => {
+test("only H3 Video has the route, and the row offers what the node takes", () => {
   assert.throws(() => comfyUiRouteRecipe(comfyUiRecipeById("comfyui-h3-video-768")!, "reference"), /^Error: H3 Video 768p takes no reference pictures yet$/);
   assert.throws(() => comfyUiRouteRecipe(base, "sideways"), /not a recipe route/);
   assert.equal(comfyUiRouteRecipe(base, undefined), base);
   const row = COMFYUI_MANIFEST_MODELS.find((model) => model.id === base.id)!;
-  assert.deepEqual(row.referenceRoute, { maxImages: 2, referenceSyntax: "minimax-h3" });
+  assert.deepEqual(row.referenceRoute, { maxImages: 9, referenceSyntax: "minimax-h3" });
   assert.equal(row.accepts.referenceImages, 1, "the first frame keeps its own budget");
   assert.ok(row.referenceRoute!.maxImages <= route.referenceImages!.length);
   for (const other of COMFYUI_MANIFEST_MODELS.filter((model) => model.id !== base.id)) assert.equal(other.referenceRoute, undefined, other.id);
 });
 
-for (const count of [1, 2, 3]) {
+for (const count of [1, 2, 3, 9]) {
   test(`${count} picture(s) bind ref_image_0..${count - 1} and drop the unused carriers`, async () => {
     const { client, graphs, calls } = engine();
     try {
       await client.submit("", request(count));
       assert.equal(calls.filter((url) => url.endsWith("/upload/image")).length, count);
       const graph = graphs[0]!;
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 9; i++) {
         const node = String(20 + i), slot = `ref_images.ref_image_${i}`;
         if (i < count) {
           assert.deepEqual(graph["7"]!.inputs[slot], [node, 0]);
@@ -187,16 +187,16 @@ test("refusals land before anything reaches the engine", async () => {
     ["no recorded hashes", { ...request(1), params: { ...request(1).params, referenceHashes: undefined } }, /reviewed as/],
     ["a keyframe beside references", { ...request(1), params: { ...request(1).params, taskMode: "first-frame" } }, /keyframe and reference pictures/],
     ["no picture", { ...request(0), params: { ...request(0).params, references: [] } }, /at least one picture/],
-    ["more pictures than carriers", request(3, {}, base.id), /./],
+    ["more pictures than carriers", request(9, {}, base.id), /./],
     ["768p", { ...request(1), model: "comfyui-h3-video-768" }, /H3 Video 768p takes no reference pictures yet/],
     ["the parent's identity", { ...request(1), recipe: comfyUiRecipeIdentity(base) }, /refused rather than run against a different graph/],
   ];
-  // Three carriers exist; four pictures must refuse rather than drop one.
-  const four = request(3);
+  // Nine carriers exist; a tenth picture must refuse rather than drop one.
+  const four = request(9);
   four.imageReferences = [...four.imageReferences!, four.imageReferences![0]!];
-  four.params.references = [...(four.params.references as string[]), "artifacts/p3.png"];
+  four.params.references = [...(four.params.references as string[]), "artifacts/p9.png"];
   four.params.referenceHashes = [...(four.params.referenceHashes as string[]), hashOf(pictures[0]!)];
-  cases[4] = ["more pictures than carriers", four, /up to 3 reference images/];
+  cases[4] = ["more pictures than carriers", four, /up to 9 reference images/];
   for (const [what, input, refusal] of cases) {
     const { client, calls } = engine();
     try {
