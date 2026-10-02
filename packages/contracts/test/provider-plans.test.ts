@@ -245,6 +245,9 @@ describe("Read replies' narrator (design turn 183)", () => {
     assert.equal(narratorReadsUnasked(ife, "w1", models, 0), true);
     assert.equal(narratorReadsUnasked(paul, "w1", models, 1), true);
     assert.equal(narratorReadsUnasked(paul, "w1", models, 0), false);
+    // One reply weighed against what is left: room for five characters is not room for ten.
+    assert.equal(narratorReadsUnasked(paul, "w1", models, 100, "Tides"), true);
+    assert.equal(narratorReadsUnasked(paul, "w1", models, 100, "Tides rise"), false);
   });
   it("asks through a priced reader, a hosted clone, and a choice the manifest does not list", () => {
     assert.equal(narratorReadsUnasked(paul, "w1", manifest.models, Infinity), false);

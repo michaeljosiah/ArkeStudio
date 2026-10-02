@@ -3,6 +3,7 @@ import type { ProviderPlans } from "./settings.js";
 import type { LedgerEntry } from "./job.js";
 import { formatMicroUsd } from "./money.js";
 import { legacyVoiceModel, narratorAppliesTo, supportsVoiceUse } from "./voice.js";
+import { estimateSpeechMicroUsd } from "./speech-pricing.js";
 
 /**
  * A provider's Free plan (design turn 182): what the author's Plan row means for a read.
@@ -89,12 +90,17 @@ export function freeCreditOverrun(drawMicroUsd: number, creditLeftMicroUsd: numb
  * recording is asked about before every read, issue 1215), and a choice the manifest does not
  * list, because the screen cannot see what it would cost — the coordinator still asks before it
  * spends, so a wrong "no" here costs a toggle, never money.
+ *
+ * With `text`, the question is about that one read: a free credit with room for something but
+ * not for this reply would ask (codex on PR 1473), so an automatic read weighs the reply's own
+ * estimate against what is left rather than only whether anything is.
  */
 export function narratorReadsUnasked(
   stored: { provider: string; model?: string; voiceId: string; worldId?: string } | null,
   worldId: string | undefined,
-  models: readonly Pick<ManifestModel, "provider" | "id" | "pricing" | "speechPlan">[],
+  models: readonly ManifestModel[],
   creditLeftMicroUsd: number,
+  text?: string,
 ): boolean {
   if (stored === null || !supportsVoiceUse(stored, "narration") || !narratorAppliesTo(stored, worldId)) return true;
   if (stored.provider === "kokoro") return true;
@@ -104,7 +110,14 @@ export function narratorReadsUnasked(
   if (model.pricing.kind === "unmetered") return true;
   if (stored.worldId !== undefined) return false;
   if (model.speechPlan === "free-plan") return true;
-  return model.speechPlan === "free-credit" && creditLeftMicroUsd > 0;
+  if (model.speechPlan !== "free-credit" || creditLeftMicroUsd <= 0) return false;
+  if (text === undefined) return true;
+  try {
+    return !speechAsks(model, estimateSpeechMicroUsd(model, text), creditLeftMicroUsd);
+  } catch {
+    // A reply the reader cannot price is one it would ask about, not one it reads unasked.
+    return false;
+  }
 }
 
 /** What a reader says where the price was: `free plan` or `free credit`, or null when it is priced. */

@@ -10,7 +10,7 @@ import { WorldChatScreen } from "../src/screens/world-chat.js";
 import { ProductionSetupScreen } from "../src/screens/production-setup.js";
 import { ProductionConversation } from "../src/components/conversation.js";
 import { __applyEventForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
-import { dismissPlayback, setAudioFactoryForTest } from "../src/lib/audio.js";
+import { dismissPlayback, playbackSnapshot, setAudioFactoryForTest } from "../src/lib/audio.js";
 import { resetReadRepliesForTest, setReadReplies } from "../src/lib/reply-reads.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { CHAT_ID, chatArtifactsFixture } from "./chat-artifacts-fixture.js";
@@ -126,6 +126,7 @@ describe("Listen on every chat's replies", () => {
     const player = studio[0]!.querySelector(".fy-replyplay");
     assert.ok(player, "the player sits under the reply it reads");
     assert.match(player.textContent ?? "", /George · this machine/);
+    assert.equal(player.getAttribute("aria-live"), "off", "the ticking clock is kept out of the transcript's live region");
     await click(player.querySelector<HTMLButtonElement>('[aria-label="Stop"]'));
     assert.equal(studio[0]!.querySelector(".fy-replyplay"), null);
     assert.equal(listenIn(studio[0]!)?.textContent, "Listen");
@@ -230,10 +231,34 @@ describe("Read replies", () => {
     const state = chatArtifactsFixture();
     const container = await worldChat(state);
     assert.equal(readRepliesButton(container)!.getAttribute("aria-pressed"), "true");
+    // A reply being read when the narrator changes is not cut off: the switch is for the replies
+    // still to come (codex on PR 1473).
+    const studio = turns(container).filter((turn) => turn.classList.contains("fy-chat__turn--studio"));
+    await click(listenIn(studio[0]!));
+    await act(async () => __applyEventForTest(landed(reads()[0]!.requestId)));
     await act(async () => __setStateForTest(withNarrator(structuredClone(state), PAUL), { connection: "open" }));
     assert.equal(readRepliesButton(container), null);
     assert.match(container.querySelector(".fy-cx")!.textContent ?? "", /Read replies off · Paul asks first/);
     assert.equal(stored.get("arke.chat.readReplies"), "off");
+    assert.ok(studio[0]!.querySelector(".fy-replyplay"), "the read under way goes on");
+    assert.equal(sent.some((message) => message.kind === "stop-prose-page"), false);
+  });
+
+  it("a read waiting on its price says it is under way, and pressing it cancels", async () => {
+    const container = await worldChat(withNarrator(chatArtifactsFixture(), PAUL));
+    const studio = turns(container).filter((turn) => turn.classList.contains("fy-chat__turn--studio"));
+    await click(listenIn(studio[0]!));
+    const requestId = reads()[0]!.requestId;
+    await act(async () => __applyEventForTest({ ...landed(requestId), provider: "mistral", model: "voxtral-mini-tts", voiceId: "en_paul_neutral",
+      status: "confirmation-required", file: null, estimatedMicroUsd: 3200, confirmationToken: "quote-1" } as DomainEvent));
+    assert.ok(dom.document.querySelector('[role="dialog"]'), "the price is asked in place");
+    assert.equal(listenIn(studio[0]!)?.textContent, "Listening");
+    assert.equal(listenIn(studio[0]!)?.getAttribute("aria-pressed"), "true");
+    assert.equal(studio[0]!.querySelector(".fy-replyplay"), null, "no player before anything is bought");
+    await click(listenIn(studio[0]!));
+    assert.equal(dom.document.querySelector('[role="dialog"]'), null);
+    assert.equal(listenIn(studio[0]!)?.textContent, "Listen");
+    assert.ok(sent.some((message) => message.kind === "stop-prose-page" && message.requestId === requestId), "the quote is dropped");
   });
 
   it("stops the read when a message is sent", async () => {
@@ -254,6 +279,21 @@ describe("Read replies", () => {
 });
 
 describe("one read at a time", () => {
+  it("a streamed reply that loses the player stops, and its next piece does not start it again", async () => {
+    const container = await worldChat(chatArtifactsFixture());
+    const studio = turns(container).filter((turn) => turn.classList.contains("fy-chat__turn--studio"));
+    await click(listenIn(studio[0]!));
+    const requestId = reads()[0]!.requestId;
+    const piece = (part: number) => ({ ...landed(requestId, `.cache/voice/piece-${part}.wav`), part, parts: 2 }) as DomainEvent;
+    await act(async () => __applyEventForTest(piece(0)));
+    assert.match(playbackSnapshot().clip?.url ?? "", /piece-0/);
+    await act(async () => dismissPlayback());
+    assert.equal(listenIn(studio[0]!)?.textContent, "Listen");
+    assert.ok(sent.some((message) => message.kind === "stop-prose-page" && message.requestId === requestId));
+    await act(async () => __applyEventForTest(piece(1)));
+    assert.equal(playbackSnapshot().clip, null, "the dismissed reply stays dismissed");
+  });
+
   it("starting a second reply's read stops the first outright, and its late piece never plays", async () => {
     const state = chatArtifactsFixture();
     const container = await worldChat(state);

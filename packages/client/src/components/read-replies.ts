@@ -29,13 +29,16 @@ export function useReadReplies(workspace: WorldChatWorkspace | null): {
   const models = state?.app.manifest?.models;
   // A cloud narrator cannot be judged before the manifest arrives; the shipped voice always can.
   const known = narrator === null || narrator.provider === "kokoro" || models !== undefined;
-  const offered = known && narratorReadsUnasked(narrator, worldId, models ?? [], freeCreditLeft(state?.app.ledger ?? []));
+  const creditLeft = freeCreditLeft(state?.app.ledger ?? []);
+  const offered = known && narratorReadsUnasked(narrator, worldId, models ?? [], creditLeft);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Off for the replies still to come, not for the one being read (codex on PR 1473): the read
+  // that spends the last of a free credit lands its ledger line before its audio, and stopping
+  // it here would cut off a read that was admitted free.
   useEffect(() => {
     if (!choice || !known || offered) return;
     setReadReplies(false);
-    stopReplyRead();
     setNotice(`Read replies off · ${narratorLabelFor(narrator, worldId)} asks first`);
   }, [choice, known, offered]);
   useEffect(() => { if (offered) setNotice(null); }, [offered]);
@@ -46,15 +49,20 @@ export function useReadReplies(workspace: WorldChatWorkspace | null): {
   const newest = useRef<{ conversationId: string; id: string | null } | null>(null);
   const [autoRead, setAutoRead] = useState<string | null>(null);
   const studio = (workspace?.messages ?? []).filter((message) => message.role === "studio" && message.benchOutcome === undefined && message.frameRunOutcome === undefined);
-  const last = studio.at(-1)?.id ?? null;
+  const last = studio.at(-1) ?? null;
+  // This reply, weighed on its own: a free credit with room for something may not have room for
+  // a long reply, and reading it would put a price in front of the author unasked (codex on PR
+  // 1473). Such a reply is left for Listen, which asks.
+  const unasked = useRef<(text: string) => boolean>(() => false);
+  unasked.current = (text) => narratorReadsUnasked(narrator, worldId, models ?? [], creditLeft, text);
   useEffect(() => {
     if (workspace === null) return;
     const seen = newest.current;
-    newest.current = { conversationId: workspace.conversationId, id: last };
+    newest.current = { conversationId: workspace.conversationId, id: last?.id ?? null };
     // The first window of a conversation is history, not a reply that has just finished.
     if (seen === null || seen.conversationId !== workspace.conversationId) { setAutoRead(null); return; }
-    if (last !== null && last !== seen.id && onRef.current) setAutoRead(last);
-  }, [workspace?.conversationId, last]);
+    if (last !== null && last.id !== seen.id && onRef.current && unasked.current(last.text)) setAutoRead(last.id);
+  }, [workspace?.conversationId, last?.id]);
 
   return {
     composer: {

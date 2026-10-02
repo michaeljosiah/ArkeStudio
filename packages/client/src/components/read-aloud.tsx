@@ -247,16 +247,20 @@ export function ReplyRead({
   const mine = read.request !== null && playback.clip?.id === read.request;
 
   // The row rests again when the read is over: its last piece played out, a failure, a Stop
-  // from anywhere (the composer, the next read), or another sound taking the player over.
+  // from anywhere (the composer, the next read), or another sound taking the player over. A
+  // read that loses the player — the dock dismissed, another clip played — is stopped, not only
+  // relabelled (codex on PR 1473): its request would otherwise stay live, and the next piece to
+  // land would start the old reply again over whatever replaced it.
   useEffect(() => {
     if (mode === null) return;
     if (read.request === null || read.error !== null) { setMode(null); return; }
     if (mine) {
       sounded.current = true;
-      if ((playback.status === "ended" && read.settled) || playback.status === "error") setMode(null);
+      if (playback.status === "ended" && read.settled) setMode(null);
+      else if (playback.status === "error") { read.stop(); setMode(null); }
       return;
     }
-    if (sounded.current) setMode(null);
+    if (sounded.current) { read.stop(); setMode(null); }
   }, [mode, mine, playback.status, read.request, read.settled, read.error]);
 
   const start = (how: "listen" | "auto") => {
@@ -274,16 +278,19 @@ export function ReplyRead({
   }, [auto]);
 
   if (text.trim() === "") return null;
-  const active = mode !== null && !read.asking;
+  // A read waiting on its price or its upload question is under way too (codex on PR 1473): the
+  // button says so, and pressing it cancels, as it stops one that is sounding.
+  const active = mode !== null || read.asking;
+  const playing = active && !read.asking;
   const label = active ? (mode === "auto" ? "Reading" : "Listening") : "Listen";
   const listen = (
     <button
       type="button"
-      className={cx("fy-replyacts__btn", (active || read.asking) && "fy-replyacts__btn--on")}
+      className={cx("fy-replyacts__btn", active && "fy-replyacts__btn--on")}
       aria-label={phone ? (active ? "Stop reading" : "Listen") : undefined}
       aria-pressed={active}
       onClick={() => {
-        if (active || read.asking) { read.stop(); setMode(null); }
+        if (active) { read.stop(); setMode(null); }
         else start("listen");
       }}
     >
@@ -307,11 +314,12 @@ export function ReplyRead({
       <div className="fy-replyacts" data-phone={phone ? "true" : undefined}>
         {listen}
         {copy}
-        {phone && active && <span className="fy-mono fy-replyacts__reader">{`${read.reader} · ${time}`}</span>}
+        {/* The transcript is a polite live region; a clock that ticks every frame is not news. */}
+        {phone && playing && <span className="fy-mono fy-replyacts__reader" aria-live="off">{`${read.reader} · ${time}`}</span>}
       </div>
       {read.confirmation}
-      {!phone && active && (
-        <div className="fy-replyplay" role="group" aria-label="Reading this reply">
+      {!phone && playing && (
+        <div className="fy-replyplay" role="group" aria-label="Reading this reply" aria-live="off">
           <button type="button" className="fy-replyplay__stop" aria-label="Stop" onClick={() => { read.stop(); setMode(null); }}>
             <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" /></svg>
           </button>
