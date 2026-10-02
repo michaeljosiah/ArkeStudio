@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CADENCE_PHRASE_MAX, CadencePlanObjectSchema, CadencePlanSchema, isPointCue, migratePlanNote, normalizeSpeechText, type CadenceCue, type CadencePlan } from "./cadence.js";
+import { CADENCE_PHRASE_MAX, CadencePlanSchema, isPointCue, normalizeSpeechText, VoiceDirectionInputSchema, type CadenceCue, type CadencePlan } from "./cadence.js";
 import { orderCues } from "./direction-tags.js";
 import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema } from "./ids.js";
 import { isSceneBreak } from "./manuscript.js";
@@ -212,8 +212,7 @@ export type AudiobookDirection = z.infer<typeof AudiobookDirectionSchema>;
  * What a window, a derivation or the Bench writes: the plan without its hashes, which the
  * coordinator supplies from the words. An old `phrase` reads as the note (design turn 181).
  */
-export const AudiobookDirectionInputObjectSchema = CadencePlanObjectSchema.omit({ schemaVersion: true, sourceTextHash: true });
-export const AudiobookDirectionInputSchema = z.preprocess(migratePlanNote, AudiobookDirectionInputObjectSchema);
+export const AudiobookDirectionInputSchema = VoiceDirectionInputSchema;
 export type AudiobookDirectionInput = z.infer<typeof AudiobookDirectionInputSchema>;
 
 /**

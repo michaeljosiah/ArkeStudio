@@ -24,6 +24,7 @@ import { PROVIDERS, type Capability } from "./provider.js";
 import { ReferenceKindSchema, type ReferenceKind } from "./reference-budget.js";
 import { ProvenanceSchema, TakeCostSchema } from "./take.js";
 import { DeliverySchema } from "./voice.js";
+import { VoiceDirectionInputSchema, type VoiceDirectionInput } from "./cadence.js";
 import { upscalePlan, type UpscalePlan } from "./upscale.js";
 
 /**
@@ -121,13 +122,35 @@ export const BenchVoiceParamsSchema = z
     voiceModel: z.string().min(1).optional(),
     /** What the picker showed, kept so a take can name its voice without the catalogue. */
     voiceLabel: z.string().min(1).optional(),
-    /** One of DELIVERIES (voice.ts); the row maps it, or states that it cannot. */
+    /**
+     * The delivery alone, as a session written before design turn 181 held it. Still read — as a
+     * direction of that delivery and nothing else (`benchVoiceDirection`) — and never written:
+     * the composer writes `direction`.
+     */
     delivery: DeliverySchema.optional(),
+    /**
+     * How the line is read (design turn 181): the same direction the audiobook writes for a
+     * block — a delivery, a speed, a note, and markers placed in the brief's words (folded as
+     * `normalizeSpeechText` folds them). The words hold no tag; the coordinator compiles the
+     * direction for the chosen reader, and what it cannot take is held and named.
+     */
+    direction: VoiceDirectionInputSchema.optional(),
     /** How many reads one press asks for — each its own numbered take, as images are. */
     count: z.number().int().min(1).max(4),
   })
   .strict();
 export type BenchVoiceParams = z.infer<typeof BenchVoiceParamsSchema>;
+
+/** A Bench line's direction: the one it holds, an older session's delivery as one, or none. */
+export function benchVoiceDirection(params: Pick<BenchVoiceParams, "delivery" | "direction">): VoiceDirectionInput | null {
+  if (params.direction !== undefined) return params.direction;
+  return params.delivery !== undefined ? { delivery: params.delivery, speed: 1, cues: [] } : null;
+}
+
+/** Whether a direction says anything at all: a delivery, a speed, a note or a marker. */
+export function directionSaysAnything(direction: VoiceDirectionInput | null): direction is VoiceDirectionInput {
+  return direction !== null && (direction.delivery !== undefined || direction.speed !== 1 || direction.note !== undefined || direction.cues.length > 0);
+}
 
 /**
  * A song (design turn 73). The route requires two things and neither can be derived from the
@@ -449,6 +472,21 @@ export const BenchRequestSnapshotSchema = z
           )
           .min(1)
           .max(9),
+      })
+      .strict()
+      .optional(),
+    /**
+     * What a voice take's reader was sent (design turn 181): the text with its syntax in, the
+     * style beside it, the hash of the text, the direction's name, and what was held — so the
+     * take says what went, and `Run it again` can be checked against it.
+     */
+    speech: z
+      .object({
+        text: z.string().min(1),
+        style: z.string().min(1).optional(),
+        providerTextHash: z.string().min(1),
+        directionHash: z.string().min(1),
+        held: z.array(z.object({ control: z.string().min(1), reason: z.string().min(1) }).strict()).max(60),
       })
       .strict()
       .optional(),

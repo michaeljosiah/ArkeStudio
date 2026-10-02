@@ -9,6 +9,10 @@ import {
   recogniseDirection,
   sentAs,
   bracketNote,
+  benchVoiceDirection,
+  BenchVoiceParamsSchema,
+  directionSaysAnything,
+  shiftCues,
   type CadencePlan,
   type ManifestModel,
 } from "../src/index.js";
@@ -74,7 +78,7 @@ describe("each reader is sent its own syntax", () => {
   });
 
   it("no delivery is the reader's own reading: nothing sent for it and nothing held", () => {
-    const sent = sentAs("Wait here.", plan("Wait here."), gemini);
+    const { sent: _plan, ...sent } = sentAs("Wait here.", plan("Wait here."), gemini);
     assert.deepEqual(sent, { text: "Wait here.", voiceSettings: {}, held: [], parts: [] });
   });
 
@@ -150,5 +154,50 @@ describe("typed and pasted tags become markers (181c)", () => {
       { kind: "sound", at: 1, sound: "sighs" },
     ]);
     assert.deepEqual(kept, [{ kind: "sound", at: 1, sound: "sighs" }, { kind: "pause", at: 4, length: "long" }]);
+  });
+});
+
+describe("the Bench line's direction (181a, 181c)", () => {
+  it("takes a pasted tag out of the words as typed, closing the space it leaves", () => {
+    const read = recogniseDirection("Don’t go, Ade. [long pause] Not\nthis time.");
+    assert.equal(read.raw, "Don’t go, Ade. Not\nthis time.", "the words as typed, line break and all");
+    assert.equal(read.text, "Don’t go, Ade. Not this time.");
+    assert.deepEqual(read.cues, [{ kind: "pause", at: 14, length: "long" }]);
+  });
+
+  it("keeps markers on their words through an edit, stretching a span typed inside and dropping one cut through", () => {
+    const before = "I am here. You came back.";
+    const cues = [
+      { kind: "delivery" as const, span: { from: 0, to: 10, text: "I am here." }, delivery: "whispered" as const },
+      { kind: "sound" as const, at: 10, sound: "laughs" as const },
+      { kind: "pause" as const, at: 25, length: "long" as const },
+    ];
+    const typedAhead = shiftCues(before, cues, `Oh. ${before}`);
+    assert.equal(typedAhead.dropped, 0);
+    assert.deepEqual(typedAhead.cues.map((cue) => (cue.kind === "delivery" ? cue.span.text : (cue as { at: number }).at)), ["I am here.", 14, 29]);
+    const typedInside = shiftCues(before, cues, "I am still here. You came back.");
+    assert.deepEqual(typedInside.cues[0], { kind: "delivery", span: { from: 0, to: 16, text: "I am still here." }, delivery: "whispered" });
+    const shrunk = shiftCues(before, cues, "I am here You came back.");
+    assert.deepEqual(shrunk.cues.map((cue) => (cue.kind === "delivery" ? cue.span.text : (cue as { at: number }).at)), ["I am here", 9, 24], "a stop deleted at a span's end shrinks it");
+    const cut = shiftCues(before, cues, "I am here, you came back.");
+    assert.equal(cut.dropped, 2, "the marker and the laugh the edit cut through");
+    assert.deepEqual(cut.cues, [{ kind: "pause", at: 25, length: "long" }]);
+  });
+
+  it("holds a marker a one-request surface cannot make, and reads an old session's delivery as a direction", () => {
+    const text = "I’m here. You came back.";
+    const marked = plan(text, { cues: [{ kind: "delivery", span: { from: 0, to: 9, text: "I’m here." }, delivery: "cold" }] });
+    const one = sentAs(text, marked, gemini, undefined, { oneRequest: true });
+    assert.deepEqual(one.held, [{ control: "marker", cueIndex: 0, reason: "needs a read in parts" }]);
+    assert.equal(one.text, text);
+    assert.deepEqual(sentAs(text, marked, gemini).held, [], "the audiobook makes it in parts and holds nothing");
+    assert.deepEqual(benchVoiceDirection({ delivery: "warm" }), { delivery: "warm", speed: 1, cues: [] });
+    assert.equal(benchVoiceDirection({}), null);
+    const old = BenchVoiceParamsSchema.parse({ kind: "voice", count: 1, delivery: "cold" });
+    assert.equal(old.delivery, "cold", "a session written before turn 181 still reads");
+    const fresh = BenchVoiceParamsSchema.parse({ kind: "voice", count: 1, direction: { delivery: "cold", speed: 1, cues: [], phrase: "quietly" } });
+    assert.equal(fresh.direction?.note, "quietly", "a direction's phrase reads as its note");
+    assert.equal(directionSaysAnything({ speed: 1, cues: [] }), false);
+    assert.equal(directionSaysAnything({ speed: 1, cues: [], note: "x" }), true);
   });
 });

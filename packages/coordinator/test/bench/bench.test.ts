@@ -1669,24 +1669,58 @@ describe("reading a line on the bench (design 70)", () => {
     if (!plan.ok) assert.match(plan.reason, /another speech model/);
   });
 
-  it("refuses a delivery the provider cannot express, rather than dropping it", async () => {
-    // Kokoro shapes pace only. Sending "breaking" anyway would come back as a neutral read with
-    // nothing said about the direction having been ignored (SPEC-011 R-15).
-    const refused = await planVoice(LOCAL, { voiceId: "af_heart", delivery: "breaking" });
-    assert.equal(refused.ok, false);
-    if (!refused.ok) assert.match(refused.reason, /cannot express "breaking"/);
-    // The same delivery on a row that maps it goes as settings the provider understands.
+  it("holds a delivery the reader cannot express, named on the take, never dropped in silence (design turn 181)", async () => {
+    // Kokoro shapes pace only. "breaking" is held: left out of what is sent and named on the
+    // take, where before it was refused — the composer shows it struck under Sent as first.
+    const held = await planVoice(LOCAL, { voiceId: "af_heart", delivery: "breaking" });
+    assert.ok(held.ok, held.ok ? undefined : held.reason);
+    if (held.ok) {
+      assert.equal(held.inputs[0]!.params["text"], LINE.replace(/\s+/g, " ").trim());
+      assert.deepEqual(held.reserved[0]!.request.speech?.held, [{ control: "delivery", reason: "reads measured · urgent" }]);
+    }
+    // The same delivery on a row that maps it is compiled for that reader (design turn 181): its
+    // tag in the words, its numbers beside them, and no delivery name for a client to tag again.
     const ok = await planVoice(VOICE, { voiceId: "vale", delivery: "breaking" });
     assert.ok(ok.ok, ok.ok ? undefined : ok.reason);
     if (ok.ok) {
-      // Compiled for the reader (design turn 181): its tag in the words, its numbers beside them,
-      // and no delivery name for a client to tag a second time.
       assert.deepEqual(ok.inputs[0]!.params["voiceSettings"], { stability: 0, speed: 1 }, "the direction reaches the wire");
       assert.match(String(ok.inputs[0]!.params["text"]), /^\[crying\] /);
       assert.equal(ok.inputs[0]!.params["delivery"], undefined);
       assert.equal(typeof ok.inputs[0]!.params["directionHash"], "string");
       assert.equal(ok.inputs[0]!.params["authoredText"], LINE, "the take's line is the words as written");
+      assert.equal(ok.reserved[0]!.request.speech?.directionHash, ok.inputs[0]!.params["directionHash"]);
     }
+  });
+
+  it("sends a line's whole direction in the reader's syntax, and records what went (design turn 181)", async () => {
+    const line = "Don’t you dare walk away from me, Ade. Not this time.";
+    const after = (words: string) => line.indexOf(words) + words.length;
+    const direction = {
+      delivery: "cold", speed: 1, note: "angry and hurt",
+      cues: [
+        { kind: "pause", at: after("Ade."), length: "long" },
+        { kind: "emphasis", span: { from: line.indexOf("this"), to: line.indexOf("this") + 4, text: "this" }, level: "strong" },
+        { kind: "sound", at: line.length, sound: "sighs" },
+      ],
+    };
+    const plan = await planVoice(VOICE, { voiceId: "vale", direction }, line);
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    if (!plan.ok) return;
+    const params = plan.inputs[0]!.params;
+    assert.equal(params["text"], "[coldly] [angry and hurt] Don’t you dare walk away from me, Ade. [long pause] Not THIS time.");
+    const speech = plan.reserved[0]!.request.speech!;
+    assert.equal(speech.text, params["text"]);
+    assert.deepEqual(speech.held, [{ control: "sound", reason: "no sounds" }], "the test row makes no sounds: held, never spoken");
+    assert.match(speech.providerTextHash, /^sha256:[0-9a-f]{64}$/);
+    assert.deepEqual(plan.reserved[0]!.request.params, { kind: "voice", count: 1, voiceId: "vale", direction }, "the take keeps the direction as written");
+  });
+
+  it("refuses a reader's tag still typed in the words, which would be read aloud", async () => {
+    const plan = await planVoice(VOICE, { voiceId: "vale" }, "Not this time. [sighs]");
+    assert.equal(plan.ok, false);
+    if (!plan.ok) assert.match(plan.reason, /would be read aloud/);
+    const kept = await planVoice(VOICE, { voiceId: "vale" }, "Say it [like a pirate] once.");
+    assert.ok(kept.ok, "a bracket that is no marker is the author's words, kept as words");
   });
 
   it("will not read without a voice, and says which is missing", async () => {

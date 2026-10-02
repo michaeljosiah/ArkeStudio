@@ -1,8 +1,8 @@
 import {
   audiobookDirectionHash,
   holdDirection,
+  sentAs,
   mapCadence,
-  markerMode,
   markerSegments,
   normalizeSpeechText,
   speechInputFits,
@@ -175,9 +175,6 @@ export function heldKey(plan: CadencePlan, control: HeldControl): string {
   return control.control;
 }
 
-/** Why a one-request surface holds a marker its reader could only make in parts. */
-export const ONE_REQUEST_HOLD = "needs a read in parts";
-
 /** Why a line could not be compiled: no words, held direction (strict), words that cannot fit, or a plan wrong for its words. */
 export type CompileFailure = "empty" | "held" | "limit" | "invalid";
 
@@ -215,38 +212,27 @@ export function compileLine(
   const plan = directionPlan(text, input);
   // One request is mapped whole, never cut at the reader's cap as the audiobook's parts are, so
   // a line too long for one request is refused as that, not as an emphasis across a seam.
-  let held: HeldControl[];
-  let mapped: ReturnType<typeof mapCadence>;
+  let compiled: ReturnType<typeof sentAs>;
   try {
-    const kept = holdDirection(text, plan, model, language);
-    held = kept.held;
-    let sent = kept.plan;
-    // What is sent: the reader's own held plan, less any marker it could only make in parts.
-    const whole = normalizeSpeechText(text);
-    const parted = sent.cues.filter((cue) => cue.kind === "delivery" && markerMode(cue, sent, model, language, whole.length).mode === "parts");
-    if (parted.length > 0) {
-      for (const cue of parted) held.push({ control: "marker", cueIndex: plan.cues.indexOf(cue), reason: ONE_REQUEST_HOLD });
-      sent = { ...sent, cues: sent.cues.filter((cue) => !parted.includes(cue)) };
-    }
-    held.sort((a, b) => (a.cueIndex ?? -1) - (b.cueIndex ?? -1));
-    mapped = mapCadence(text, sent.sourceTextHash, sent, model, language);
+    compiled = sentAs(text, plan, model, language, { oneRequest: true });
   } catch (err) {
     return { ok: false, kind: "invalid", reason: err instanceof Error ? err.message : String(err) };
   }
+  const held = compiled.held;
   if (mode === "strict" && held.length > 0) {
     const first = held[0]!;
     const name = first.control === "delivery" ? (plan.delivery ?? "delivery") : first.control === "marker" ? markerName(plan, first.cueIndex) : first.control;
     return { ok: false, kind: "held", reason: `${name} · ${model.displayName} ${first.reason}`.replace(/\.$/, "") };
   }
-  if (!speechInputFits(mapped.providerText, model.limits, mapped.instructions)) {
+  if (!speechInputFits(compiled.text, model.limits, compiled.style)) {
     return { ok: false, kind: "limit", reason: "The line and its direction exceed this model's request limit. Shorten it or use an audiobook read in parts." };
   }
   return {
     ok: true,
     line: {
-      text: mapped.providerText,
-      voiceSettings: mapped.voiceSettings,
-      ...(mapped.instructions !== undefined ? { instructions: mapped.instructions } : {}),
+      text: compiled.text,
+      voiceSettings: compiled.voiceSettings,
+      ...(compiled.style !== undefined ? { instructions: compiled.style } : {}),
       directionHash: audiobookDirectionHash(plan),
       plan,
       held,

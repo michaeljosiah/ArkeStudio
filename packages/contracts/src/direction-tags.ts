@@ -71,7 +71,9 @@ export function directionWord(word: string): DirectionWord | null {
 }
 
 export interface RecognisedDirection {
-  /** The words with every recognised tag taken out, whitespace folded (`normalizeSpeechText`). */
+  /** The words as typed, with every recognised tag taken out and the space it leaves closed up. */
+  raw: string;
+  /** `raw`, whitespace folded (`normalizeSpeechText`): the words the cues are placed in. */
   text: string;
   /** The markers the tags named, at their places in `text`, in position order. */
   cues: CadenceCue[];
@@ -103,8 +105,13 @@ export function recogniseDirection(raw: string): RecognisedDirection {
     stripped += raw.slice(last, start);
     if (word !== null) {
       found.push({ word, at: stripped.length });
-      // `word[pause]word` keeps its two words apart once the tag is gone.
       const next = start + match[0].length;
+      // `Ade. [long pause] Not` leaves two spaces where the tag was: one goes.
+      if ((stripped === "" || /[ \t]$/.test(stripped)) && /[ \t]/.test(raw[next] ?? "")) {
+        last = next + 1;
+        continue;
+      }
+      // `word[pause]word` keeps its two words apart once the tag is gone.
       if (stripped !== "" && !/\s$/.test(stripped) && next < raw.length && !/\s/.test(raw[next]!)) stripped += " ";
     } else {
       // A parenthesis that names nothing is prose; the other two are a reader's syntax.
@@ -181,7 +188,57 @@ export function recogniseDirection(raw: string): RecognisedDirection {
     const to = Math.max(from, place(span.to - 1) + 1);
     return { from, to, text: text.slice(from, to) };
   });
-  return { text, cues: orderCues(cues).slice(0, 40), unknown };
+  return { raw: stripped, text, cues: orderCues(cues).slice(0, 40), unknown };
+}
+
+/**
+ * Cues kept with their words through an edit (design turn 181): the Bench's line is typed, so
+ * the markers on it follow each keystroke. The edit is the stretch between the words both
+ * versions share at the start and at the end; a cue before it stays, one after it moves by
+ * what was typed, a span that holds the whole edit stretches over it (words typed inside a
+ * whisper are whispered), and a cue the edit cut through is dropped and counted. Both texts
+ * are folded (`normalizeSpeechText`), as cues are placed.
+ */
+export function shiftCues(before: string, cues: readonly CadenceCue[], after: string): { cues: CadenceCue[]; dropped: number } {
+  if (before === after) return { cues: [...cues], dropped: 0 };
+  let prefix = 0;
+  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix++;
+  let suffix = 0;
+  while (suffix < before.length - prefix && suffix < after.length - prefix && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix++;
+  const editEnd = before.length - suffix;
+  const delta = after.length - before.length;
+  const moved: CadenceCue[] = [];
+  let dropped = 0;
+  const move = (at: number): number | null => (at <= prefix ? at : at >= editEnd ? at + delta : null);
+  for (const cue of cues) {
+    if (isPointCue(cue)) {
+      const at = move(cue.at);
+      if (at === null) dropped += 1;
+      else moved.push({ ...cue, at });
+      continue;
+    }
+    // Words typed right before a span are not in it, nor words typed right after it.
+    let from: number | null = cue.span.from < prefix ? cue.span.from : cue.span.from >= editEnd ? cue.span.from + delta : null;
+    let to = move(cue.span.to);
+    // A span that holds the whole edit keeps it: its start is before, its end after.
+    if (from === null || to === null) {
+      if (cue.span.from <= prefix && cue.span.to >= editEnd) {
+        from = cue.span.from;
+        to = cue.span.to + delta;
+      } else {
+        dropped += 1;
+        continue;
+      }
+    }
+    const words = after.slice(from, to);
+    if (to <= from || words.trim() === "") {
+      dropped += 1;
+      continue;
+    }
+    moved.push({ ...cue, span: { from, to, text: words } });
+  }
+  const kept = orderCues(moved);
+  return { cues: kept, dropped: dropped + (moved.length - kept.length) };
 }
 
 /**
