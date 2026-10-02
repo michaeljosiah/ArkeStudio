@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { it } from "node:test";
 import { prepareRemoteSession, remoteSocketProtocols, remoteFetch, RemoteBrowserError } from "../src/lib/remote-session.js";
 import { installTestBrowserStorage } from "./remote-browser.js";
@@ -88,8 +89,13 @@ it("a page no worker controls still gets its key and sends it on its own request
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
   const previousFetch = globalThis.fetch;
-  const workers = Object.assign(new EventTarget(), {
-    register: async () => ({}), ready: new Promise<object>(() => {}), controller: null,
+  const claims: unknown[] = [];
+  const workers: EventTarget & { register(): Promise<object>; ready: Promise<object>; controller: object | null } = Object.assign(new EventTarget(), {
+    register: async () => ({ active: { postMessage: (message: unknown) => {
+      // The active worker answers a claim by taking control of the page.
+      claims.push(message); queueMicrotask(() => { workers.controller = {}; workers.dispatchEvent(new Event("controllerchange")); });
+    } } }),
+    ready: new Promise<object>(() => {}), controller: null,
   });
   const sent: (string | null)[] = [];
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -101,6 +107,8 @@ it("a page no worker controls still gets its key and sends it on its own request
   Object.defineProperty(globalThis, "document", { configurable: true, value: { querySelector: () => ({ getAttribute: () => "true" }) } });
   try {
     await prepareRemoteSession();
+    assert.deepEqual(claims, ["arke-remote-claim"], "the active worker is asked to take control, so media carries the key");
+    assert.ok(workers.controller);
     const key = stored.get("browser") as string;
     assert.match(key, /^[a-f0-9]{64}$/, "a first visit makes the key the worker will read");
     await remoteFetch("/remote/session");
@@ -112,5 +120,14 @@ it("a page no worker controls still gets its key and sends it on its own request
     for (const [target, name, descriptor] of [[navigator, "serviceWorker", previousWorker], [globalThis, "window", previousWindow], [globalThis, "document", previousDocument]] as const) {
       if (descriptor) Object.defineProperty(target, name, descriptor); else Reflect.deleteProperty(target, name);
     }
+  }
+});
+
+it("the page and the worker read the key from the same store", () => {
+  const page = readFileSync(new URL("../src/lib/remote-session.ts", import.meta.url), "utf8");
+  const worker = readFileSync(new URL("../public/notification-worker.js", import.meta.url), "utf8");
+  for (const shared of ['indexedDB.open("arke-remote-browser", 1)', 'createObjectStore("keys")', 'transaction("keys", "readwrite")',
+    'store.get("browser")', 'store.put(key, "browser")', "/^[a-f0-9]{64}$/"]) {
+    assert.ok(page.includes(shared) && worker.includes(shared), `both copies use ${shared}`);
   }
 });

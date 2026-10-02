@@ -368,6 +368,8 @@ it("names why a phone was refused, without its credentials, once a minute per re
     assert.deepEqual(why(), ["device not paired: revoked, expired or never approved"], "a polling phone is traced once");
     assert.equal((await get(port, "/", { headers: { Host: "evil.example" } })).status, 403);
     assert.deepEqual(why(), ["another address"]);
+    for (const path of ["/remote/a", "/remote/b", "/remote/c"]) await get(port, path, { headers: { Host: "evil.example" } });
+    assert.equal((gateway as unknown as { traced: Map<string, number> }).traced.size, 6, "request paths never become trace keys");
     assert.ok(!logged.includes(proof) && !logged.includes(browserKey) && !logged.includes(sealed(proof).slice(3, 20)), "no credential is logged");
   } finally { await gateway.stop(); await devices.stop(); await rm(root, { recursive: true, force: true }); }
 });
