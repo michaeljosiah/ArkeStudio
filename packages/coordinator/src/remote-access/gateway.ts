@@ -77,12 +77,13 @@ export class RemoteGateway {
   }
   // A phone that lands on pairing, or on "Not answering", left no other record of why: each
   // answer below is a different repair (re-pair, the address, the browser's storage), so the
-  // reason is named. Once a minute per reason keeps a polling phone from filling the log; `at`
-  // and the reasons are fixed words, never the request's own path, so the map stays this size.
+  // reason is named. Once a minute per reason keeps a polling phone from filling the log. `at` is
+  // a fixed word, never the request's own path, and the map is emptied before it can grow large.
   private refused(at: "socket" | "session" | "remote" | "page", reason: () => string): void {
     if (!this.options.trace) return;
     const why = reason(), key = at + ":" + why, now = Date.now();
     if ((this.traced.get(key) ?? 0) > now - 60_000) return;
+    if (this.traced.size >= 256) this.traced.clear();
     this.traced.set(key, now);
     this.options.trace("remote.refused", { at, why });
   }
@@ -235,7 +236,16 @@ export class RemoteGateway {
       let input: unknown;
       try { input = JSON.parse(raw.toString()); } catch { client.close(1002); return; }
       const parsed = ClientMessageSchema.safeParse(input);
-      if (!parsed.success) { client.close(1008, "invalid Studio command"); return; }
+      if (!parsed.success) {
+        // Dropped, as the coordinator drops it (transport.ts): valid JSON that fails the schema is
+        // version skew or one screen's bad field. Closing the socket here sent the phone into a
+        // reconnect, a fresh snapshot and the same command again, and the world kept reloading.
+        // It is never forwarded either way. The command and field are named, never their values.
+        const kind = (input as { kind?: unknown } | null)?.kind;
+        const field = parsed.error.issues[0]?.path.join(".").slice(0, 120) ?? "";
+        this.refused("socket", () => `dropped ${typeof kind === "string" ? kind.slice(0, 60) : "a command"} (${field})`);
+        return;
+      }
       if (Object.hasOwn(hostFileCommands, parsed.data.kind) || isRemoteHostCommand(parsed.data)) {
         const refusal = { kind: "command-refused", refused: "host-only", command: parsed.data.kind } as RemoteCommandRefusal;
         client.send(JSON.stringify(refusal)); return;
