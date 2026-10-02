@@ -1,6 +1,6 @@
 import { estimateSpeechMicroUsd, SAMPLING_CHOICE_NAMES, samplingSummary } from "@arke-studio/contracts";
 import { castVoiceSummary, planCastCharacterAudio, planSubjectCharacterAudio } from "@arke-studio/contracts";
-import { castNameFor, DEFAULT_REFERENCE_WHO, referenceRouteModel, referenceRouteRefusal, referenceSheetId } from "@arke-studio/contracts";
+import { benchLineLanguage, castNameFor, DEFAULT_REFERENCE_WHO, referenceRouteModel, referenceRouteRefusal, referenceSheetId } from "@arke-studio/contracts";
 import { AdapterPicker } from "../components/adapter-picker.js";
 import { SamplingChip, hasSampling } from "../components/local-sampling.js";
 import { benchUpscalePlan, hasAdultAdapter, matchingAdapterBundle, upscaleFrameCopy } from "@arke-studio/contracts";
@@ -542,11 +542,12 @@ function BenchWorkspace({
     compose({ ...draft, brief: edited.brief, params: withBenchDirection(voiceParams, edited.direction) });
   };
   const onBracket = (start: number, end: number) => setVoiceMarker(benchMarkerAt(draft.brief, start, end));
-  // A cloned voice's recording language is the line's (issue 1163): it decides a paren reader's tags.
+  // The line's language decides a paren reader's tags: a cloned voice's recording language
+  // (issue 1163), otherwise the catalogue voice's own, as the coordinator decides it.
   const voiceLanguage = ((): string | undefined => {
     if (voiceParams?.voiceId === undefined || model === null) return undefined;
     const source = voiceSourceFor(world?.clonedVoices ?? [], model.provider, model.id, voiceParams.voiceId);
-    return source.kind === "cloned" ? source.voice.language : undefined;
+    return source.kind === "cloned" ? source.voice.language : benchLineLanguage(voiceParams.voiceLanguage);
   })();
   const laneTabs = !soundOnly && (frameModes.length > 0 || (draft.mode === "video" && frames.length > 0));
   /**
@@ -2382,6 +2383,7 @@ function BenchWorkspace({
                         voiceProvider: _voiceProvider,
                         voiceModel: _voiceModel,
                         voiceLabel: _voiceLabel,
+                        voiceLanguage: _voiceLanguage,
                         ...rest
                       } = params;
                       // The direction stays with the line (design turn 181): what the new
@@ -2867,6 +2869,7 @@ function BenchWorkspace({
                 voiceProvider: voice.provider,
                 voiceModel: voice.model,
                 voiceLabel: voice.label,
+                ...(voice.facets?.language ? { voiceLanguage: voice.facets.language } : {}),
               } as BenchParams,
               // A voice belongs to a provider, so choosing one may change which model reads it.
               ...(chosenModel ? { provider: voice.provider, model: chosenModel.id } : {}),

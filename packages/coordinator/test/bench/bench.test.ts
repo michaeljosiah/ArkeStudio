@@ -1715,6 +1715,37 @@ describe("reading a line on the bench (design 70)", () => {
     assert.deepEqual(plan.reserved[0]!.request.params, { kind: "voice", count: 1, voiceId: "vale", direction }, "the take keeps the direction as written");
   });
 
+  // Found in the installed app on 2026-10-02: an English Breeze library voice had its sigh and
+  // pause held, because only a cloned voice stated a language and Breeze writes tags only for a
+  // line stated English (SPEC-046 R-23).
+  it("an English library voice on a paren reader states its language, so its tags are written (design turn 181)", async () => {
+    const breeze = SHIPPED_MANIFEST.models.find((row) => row.id === "breeze-tts-2")!;
+    const line = "You came back.";
+    const direction = { speed: 1, cues: [{ kind: "sound" as const, at: line.length, sound: "sighs" as const }] };
+    const planned = async (voiceLanguage?: string) => {
+      const { dir, store } = await open();
+      const opened = await freshBench(dir);
+      await opened.store.append({ type: "composer-set", mode: "voice", provider: breeze.provider, model: breeze.id,
+        params: { kind: "voice", count: 1, voiceId: "abigail", ...(voiceLanguage !== undefined ? { voiceLanguage } : {}), direction }, brief: line }, { at: CLOCK() });
+      return planBenchDispatch((await opened.store.fold())!, store.getBundle(), { ...MANIFEST_3, models: [...MANIFEST_3.models, breeze] },
+        { worldId: store.worldId, requestId: "breeze", at: CLOCK() });
+    };
+    const english = await planned("en-US");
+    assert.ok(english.ok, english.ok ? undefined : english.reason);
+    if (english.ok) {
+      assert.match(String(english.inputs[0]!.params["text"]), /\(sigh\)$/);
+      assert.equal(english.inputs[0]!.params["language"], "en", "the job names the line's language, as Breeze routes by it");
+      assert.deepEqual(english.reserved[0]!.request.speech!.held, []);
+    }
+    const unstated = await planned();
+    assert.ok(unstated.ok, unstated.ok ? undefined : unstated.reason);
+    if (unstated.ok) {
+      assert.equal(unstated.inputs[0]!.params["text"], line, "a voice that lists no language is not assumed English");
+      assert.equal(unstated.inputs[0]!.params["language"], undefined);
+      assert.equal(unstated.reserved[0]!.request.speech!.held.length, 1);
+    }
+  });
+
   it("reads an older line's typed tags as markers, and refuses tags beside a direction (design turn 181)", async () => {
     // A take made before the turn, run again: its tag is the marker it names, never spoken.
     const older = await planVoice(VOICE, { voiceId: "vale", delivery: "cold" }, "Not this time. [long pause] Go.");
