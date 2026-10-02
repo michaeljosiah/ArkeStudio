@@ -1,10 +1,10 @@
 import type { CapabilityProbe, ClientDeclarations, SpeechUsage, VoiceCandidate } from "@arke-studio/contracts";
 import { randomUUID } from "node:crypto";
-import { speechInputFits } from "@arke-studio/contracts";
+import { GOOGLE_FREE_LIMIT, speechInputFits } from "@arke-studio/contracts";
 import { GEMINI_SPEECH_INPUT_BYTES, geminiSpeechModel } from "../gemini-tts-models.js";
 import { googleVoiceDesignBody, googleVoiceDesignResult, googleDesignedVoicePage, requireGoogleVoiceId } from "./google-voices.js";
 import type { VoiceDesignClient, VoiceDesignInput } from "../types.js";
-import { ProviderAuthError, ProviderBusyError, ProviderRequestRejectedError,
+import { ProviderAuthError, ProviderBusyError, ProviderFreeLimitError, ProviderPaymentRequiredError, ProviderRequestRejectedError,
   type FetchLike, type PollResult, type SubmitRequest, type SubmitResult, type VoiceCatalogueClient } from "../types.js";
 
 export const GEMINI_TTS_MODELS = ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"] as const;
@@ -46,6 +46,27 @@ export function geminiSpeechUsage(value: unknown): SpeechUsage {
   const inputTextTokens = modalityCount(usage.input_tokens_by_modality, "text") ?? count(usage.total_input_tokens);
   const outputAudioTokens = modalityCount(usage.output_tokens_by_modality, "audio") ?? count(usage.total_output_tokens);
   return { ...(inputTextTokens !== undefined ? { inputTextTokens } : {}), ...(outputAudioTokens !== undefined ? { outputAudioTokens } : {}) };
+}
+
+/**
+ * Whether a 429 is the free tier's daily quota (design turn 182), which resets at midnight
+ * Pacific and is not worth retrying, rather than a per-minute limit, which is. Reviewed
+ * 2026-10-02 against Google's errors and rate-limit pages: the Interactions API says
+ * `{"error":{"code":"quota_exceeded"}}` for the daily quota and `rate_limit_exceeded` /
+ * `too_many_requests` for the per-minute ones; the older shape is RESOURCE_EXHAUSTED with a
+ * QuotaFailure whose quota id ends `-FreeTier` (a per-minute free quota says `PerMinute` in it)
+ * or whose metric names `free_tier`. Anything unrecognised retries, as every 429 did before.
+ */
+export function googleFreeDailyLimit(body: unknown): boolean {
+  const error = record(record(body).error);
+  if (error.code === "quota_exceeded") return true;
+  const details = Array.isArray(error.details) ? error.details.map(record) : [];
+  return details.some(detail => (Array.isArray(detail.violations) ? detail.violations.map(record) : []).some(violation => {
+    const id = typeof violation.quotaId === "string" ? violation.quotaId : "";
+    const metric = typeof violation.quotaMetric === "string" ? violation.quotaMetric : "";
+    const free = id.endsWith("-FreeTier") || /free_tier/i.test(metric);
+    return free && !/PerMinute/i.test(id) && !/per_minute/i.test(metric);
+  }));
 }
 
 /** Unary only: a complete, validated WAV is the one artifact, never streamed PCM fragments. */
@@ -210,7 +231,13 @@ export class GoogleClient implements VoiceCatalogueClient, VoiceDesignClient {
     }
     if (response.status === 401) throw new ProviderAuthError(this.id, "Google rejected this credential (HTTP 401)");
     if (response.status === 403) throw new ProviderRequestRejectedError("Google refused access: check this key's project, API permissions and billing (HTTP 403)");
-    if (response.status === 429) throw new ProviderBusyError("Google's project quota was reached (HTTP 429)", { witnessed: true });
+    if (response.status === 402) throw new ProviderPaymentRequiredError("Google asked for payment for this request (HTTP 402 payment_required)");
+    if (response.status === 429) {
+      if (googleFreeDailyLimit(await response.json().catch(() => null))) {
+        throw new ProviderFreeLimitError(`${GOOGLE_FREE_LIMIT} (HTTP 429 free daily quota)`);
+      }
+      throw new ProviderBusyError("Google's project quota was reached (HTTP 429)", { witnessed: true });
+    }
     if (response.status >= 500) throw new Error(`Google synthesis outcome is uncertain (HTTP ${response.status})`);
     throw new ProviderRequestRejectedError(`Google refused this request (HTTP ${response.status})`);
   }

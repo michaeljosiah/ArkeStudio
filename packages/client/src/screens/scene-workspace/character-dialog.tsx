@@ -1,9 +1,8 @@
-import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, speechPriceCopy } from "@arke-studio/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import {
   deriveRehearsalLines,
-  formatMicroUsd,
   lookHoldingScope,
   legacyVoiceModel,
   normalizeSpeechText,
@@ -184,7 +183,7 @@ export function CharacterDialog({ world, production, scene, sheetId, locked = fa
     : state?.app.manifest?.models.find((model) => model.id === assignedModel && model.provider === sheet.voice?.provider && supportsPerformanceGeneration(model) && !state.app.models.disabled.includes(model.id));
   const firstLine = lines[0];
   const price = voiceModel !== undefined && firstLine !== undefined
-    ? `${voiceModel.pricing.kind === "perToken" ? "up to " : ""}${formatMicroUsd(estimateSpeechMicroUsd(voiceModel, normalizeSpeechText(firstLine.text)))}`
+    ? speechPriceCopy(voiceModel, estimateSpeechMicroUsd(voiceModel, normalizeSpeechText(firstLine.text)))
     : null;
   const voicePage = () => { onClose(); navigate(`/w/${worldId}/cast/${sheetId}/voice`); };
 

@@ -1,6 +1,7 @@
 import {
   IDLE_UPDATE_STATE,
   SIGNED_OUT,
+  PAID_PLANS,
   vendorAuthUnavailable,
   type AppHealth,
   type ClientState,
@@ -45,6 +46,7 @@ export class ReadModel {
         account: SIGNED_OUT,
         research: { web: false },
         narrator: null,
+        providerPlans: PAID_PLANS,
         appearance: { theme: "system" },
         runtime: null,
         harness: null,
@@ -91,6 +93,7 @@ export class ReadModel {
         | "research"
         | "appearance"
         | "narrator"
+        | "providerPlans"
         | "localSampling"
         | "runtime"
         | "drift"
@@ -342,6 +345,10 @@ export class ReadModel {
       }
       case "narrator.changed": {
         this.state = { ...this.state, app: { ...this.state.app, narrator: event.voice } };
+        return;
+      }
+      case "provider-plans.changed": {
+        this.state = { ...this.state, app: { ...this.state.app, providerPlans: event.plans, manifest: event.manifest } };
         return;
       }
       case "appearance.changed": {

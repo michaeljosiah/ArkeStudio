@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { GoogleClient, GEMINI_TTS_MODELS, geminiSpeechUsage, geminiWav } from "../src/clients/google.js";
-import { ProviderAuthError, ProviderBusyError, ProviderRequestRejectedError, type SubmitRequest } from "../src/types.js";
+import { GoogleClient, GEMINI_TTS_MODELS, geminiSpeechUsage, geminiWav, googleFreeDailyLimit } from "../src/clients/google.js";
+import { ProviderAuthError, ProviderBusyError, ProviderFreeLimitError, ProviderPaymentRequiredError, ProviderRequestRejectedError, type SubmitRequest } from "../src/types.js";
 import { ManifestModelSchema, mapCadence } from "@arke-studio/contracts";
 import { geminiSpeechModel } from "../src/gemini-tts-models.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
@@ -160,6 +160,34 @@ it("separates witnessed auth/permission/quota rejection from an uncertain server
   await assert.rejects(new GoogleClient(async () => new Response("", { status: 503 })).submit("test", request), error =>
     error instanceof Error && !("submissionRejected" in error));
   await assert.rejects(new GoogleClient(async () => Response.json({ error: { details: [{ reason: "API_KEY_INVALID" }] } }, { status: 400 })).submit("test", request), ProviderAuthError);
+});
+
+// Design turn 182: the free tier's daily quota is not worth retrying; a per-minute limit is.
+it("tells the free tier's daily limit from a per-minute limit, and a payment refusal from both", async () => {
+  const daily = [
+    { error: { code: "quota_exceeded", message: "You exceeded your current quota." } },
+    { error: { code: 429, status: "RESOURCE_EXHAUSTED", details: [{ "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+      violations: [{ quotaMetric: "generativelanguage.googleapis.com/generate_requests_per_model_per_day", quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier" }] }] } },
+    { error: { details: [{ violations: [{ quotaMetric: "generativelanguage.googleapis.com/generate_content_free_tier_requests", quotaId: "GenerateContent" }] }] } },
+  ];
+  const minute = [
+    { error: { code: "rate_limit_exceeded", message: "Slow down." } },
+    { error: { code: "too_many_requests" } },
+    { error: { details: [{ violations: [{ quotaId: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier" }] }] } },
+    null,
+  ];
+  for (const body of daily) {
+    assert.equal(googleFreeDailyLimit(body), true);
+    await assert.rejects(new GoogleClient(async () => Response.json(body, { status: 429 })).submit("test", request), error =>
+      error instanceof ProviderFreeLimitError && error.failureClass === "terminal" && error.submissionRejected === true && /Google free limit reached/.test(error.message));
+  }
+  for (const body of minute) {
+    assert.equal(googleFreeDailyLimit(body), false);
+    await assert.rejects(new GoogleClient(async () => body === null ? new Response("", { status: 429 }) : Response.json(body, { status: 429 })).submit("test", request), error =>
+      error instanceof ProviderBusyError && !(error instanceof ProviderFreeLimitError));
+  }
+  await assert.rejects(new GoogleClient(async () => Response.json({ error: { code: "payment_required" } }, { status: 402 })).submit("test", request), error =>
+    error instanceof ProviderPaymentRequiredError && error.paymentRequired === true && error.submissionRejected === true && /HTTP 402/.test(error.message));
 });
 
 it("passes cancellation through without promising a refund", async () => {

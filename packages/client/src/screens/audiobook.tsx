@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { DEFAULT_NARRATOR, narratorLabelFor, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, providerName, readerPlace, type AudiobookPriceLine, type AudiobookRow } from "@arke-studio/contracts";
+import { DEFAULT_NARRATOR, freePlanNote, narratorLabelFor, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, providerName, readerPlace, type AudiobookPriceLine, type AudiobookRow } from "@arke-studio/contracts";
 import { HeldBar } from "../components/held-bar.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
@@ -246,7 +246,7 @@ export function AudiobookScreen() {
     book?.state === "stopped"
       ? "stopped · the takes made stand"
       : book?.state === "failed" || book?.state === "unavailable"
-        ? `could not read · ${book.reason ?? "the run failed"}`
+        ? freePlanNote(book.reason) ?? `could not read · ${book.reason ?? "the run failed"}`
         : book?.state === "read" && book.chaptersRefused > 0
           ? book.chaptersRefused === 1
             ? "1 chapter left to its row"

@@ -1,0 +1,32 @@
+/* A provider's Free plan (design turn 182). The Plan row is a two-item seg in the pane's fact
+   rows, 26 high, with mono data under it; a read that a free plan ended says so in a line with
+   its one remedy beside it. Labels only. */
+.fy-fact:has(.fy-plan) { align-items: flex-start; }
+.fy-plan { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.fy-plan .fy-seg__item { height: 26px; padding: 0 12px; display: inline-flex; align-items: center; white-space: nowrap; }
+.fy-plan .fy-seg__item:disabled { cursor: default; }
+.fy-plan__under { display: flex; flex-direction: column; font: 400 12px var(--font-mono); color: var(--muted-foreground); line-height: 1.7; }
+.fy-plan__billed { font: 400 12px var(--font-mono); color: var(--destructive); }
+
+.fy-freestop { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; font-size: 13px; }
+.fy-freestop__warn { color: var(--warning); }
+.fy-freestop__bad { color: var(--destructive); }
+.fy-freestop__mono { font: 400 12px var(--font-mono); color: var(--muted-foreground); }
+.fy-freestop__act {
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+  color: var(--foreground);
+  font: 500 12px var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fy-freestop__act:hover { background: var(--secondary); }
+
+/* The spend panel's free reads: counted apart, never in the bar chart of what was billed. */
+.fy-spendplans { margin-top: 12px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.fy-spendplans > div { display: flex; gap: 14px; padding: 9px 14px; border-bottom: 1px solid var(--border); font: 400 12px var(--font-mono); color: var(--muted-foreground); }
+.fy-spendplans > div:last-child { border-bottom: 0; }
+.fy-spendplans > div > span:first-child { flex: 1; min-width: 0; color: var(--foreground); }

@@ -19,6 +19,7 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
     const payloads: Record<string, Record<string, unknown>> = {
       "account-open": { page: "account" }, "set-background-notifications": { preference: "off" },
       "set-credential": { provider: "openai", key: "test-secret-only" },
+      "set-provider-plan": { provider: "google", plan: "free" },
       "clear-credential": { provider: "openai" },
       "submit-vendor-key": { vendor: "openai", key: "test-secret-only" },
       "begin-vendor-sign-in": { vendor: "openai", method: "oauth" },

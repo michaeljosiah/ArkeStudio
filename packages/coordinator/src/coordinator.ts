@@ -1,4 +1,5 @@
 import { estimateSpeechMicroUsd, samplingProblems, speechInputFits } from "@arke-studio/contracts";
+import { applyProviderPlans, freePlanFailure, PAID_PLANS, speechAsks, type ProviderPlans } from "@arke-studio/contracts";
 import { designedVoiceTarget, isDesignedVoiceTarget, narratorDesignedRecord, resolveDesignedVoice, VoiceDesignDraftSchema, quoteVoiceDesign, type NarratorDesignedVoice, type NarratorSettings, type WorldDesignedVoice } from "@arke-studio/contracts";
 import type { VoiceDesignClient } from "@arke-studio/providers";
 import { saveDesignedVoice } from "./voice/designed-library.js";
@@ -1431,8 +1432,14 @@ export class Coordinator {
    * the audiobook resolves the same choice through `audiobookNarrator` and finds a cloned
    * narrator's recording per block, as it finds a speaker's.
    */
-  private async narratorVoice(store: WorldStore, voice: VoiceService | null): Promise<{ narrator: NarrationVoice; catalogue: VoiceCandidate[] }> {
+  private async narratorVoice(store: WorldStore, voice: VoiceService | null, shipped = false): Promise<{ narrator: NarrationVoice; catalogue: VoiceCandidate[] }> {
     const { chosen, narrationCatalogue, catalogue, designedBinding } = await this.appNarrator(store, voice);
+    // The shipped narrator for one read (design turn 182): what a free plan's daily limit
+    // offers, without touching the author's choice.
+    if (shipped) {
+      const speaks = narratorFor(null, narrationCatalogue);
+      return { narrator: { provider: speaks.provider, model: speaks.model, voiceId: speaks.voiceId, label: speaks.label ?? speaks.voiceId, cloned: false }, catalogue };
+    }
     const source = voiceSourceFor(store.getBundle().clonedVoices ?? [], chosen.provider, chosen.model, chosen.voiceId);
     if (source.kind === "cloned") {
       const clip = await clipFor(store, source.voice);
@@ -1754,6 +1761,8 @@ export class Coordinator {
     confirmationToken?: string;
     /** A cloned narrator's vendor, answered (issue 1215) — the frame carries it back once asked. */
     voiceUploadConfirmedFor?: string;
+    /** This read only, in the shipped narrator (design turn 182). */
+    defaultNarrator?: boolean;
     /**
      * The passage, already resolved and normalised by the caller — this method never reads a
      * document. A page read (issue 859) is narrated in the order the screen declared and each
@@ -1790,7 +1799,7 @@ export class Coordinator {
     // somebody in their own voice was the old behaviour, and it refused entirely for the
     // many characters who have no voice assigned. The narrator may be a cloned voice through a
     // hosted reader (issue 1215): its recording then goes with every piece made below.
-    const { narrator } = await this.narratorVoice(store, this.voiceService);
+    const { narrator } = await this.narratorVoice(store, this.voiceService, input.defaultNarrator === true);
     const speaking = { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId };
     if (speaking.provider === "kokoro" && !this.voiceService.localSpeechConfigured) {
       fail("Local narration is unavailable on this host. Choose a configured cloud narrator in Settings.", characters);
@@ -2011,7 +2020,10 @@ export class Coordinator {
         ...(narrator.cloned && input.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor } : {}),
       })).map((queued) => bindDesignedNarrator(queued, narrator.designedBinding)),
     );
-    if (input.confirmationToken !== token) {
+    // A read that costs nothing asks nothing (SPEC-012 R-47, design turn 182), as the page and
+    // chapter reads already did: a $0 quote, a free plan's read or a free credit's starts at once.
+    const asks = speechAsks(model, estimate);
+    if (asks && input.confirmationToken !== token) {
       this.pendingVoiceReads.set(requestId, { token, inputs: enqueued });
       this.emit({
         at: new Date().toISOString(),
@@ -2041,12 +2053,16 @@ export class Coordinator {
       } as DomainEvent);
       return;
     }
-    const pending = this.pendingVoiceReads.get(requestId);
-    if (!pending || pending.token !== token) {
-      fail("The read request changed; review it again.", characters);
-      return;
+    let pending: { token: string; inputs: EnqueueInput[] } = { token, inputs: enqueued };
+    if (asks) {
+      const asked = this.pendingVoiceReads.get(requestId);
+      if (!asked || asked.token !== token) {
+        fail("The read request changed; review it again.", characters);
+        return;
+      }
+      pending = asked;
+      this.pendingVoiceReads.delete(requestId);
     }
-    this.pendingVoiceReads.delete(requestId);
     // A block already in the cache never went to the queue, and is ready the moment the page is.
     for (const [index, block] of blocks.entries()) if (!misses.includes(index)) cachedReady(block, index);
     // So are the pieces of a single block the cache held, in their places; a page's block waits
@@ -2186,6 +2202,7 @@ export class Coordinator {
     requestId: string;
     confirmationToken?: string;
     voiceUploadConfirmedFor?: string;
+    defaultNarrator?: boolean;
     blocks: readonly { heading: string; text: string; subjectId: string; voice?: { provider: string; model?: string; voiceId: string; label?: string } }[];
     subject: { id: string; version: number };
     fail: (error: string, characters?: number) => void;
@@ -2205,7 +2222,7 @@ export class Coordinator {
     // engine is down, and a block sent that way fails instead of falling to the narrator. The
     // narrator itself may be a cloned voice (issue 1215): its blocks then carry the recording
     // exactly as a cloned speaker's do below.
-    const { narrator: narration, catalogue } = await this.narratorVoice(store, this.voiceService);
+    const { narrator: narration, catalogue } = await this.narratorVoice(store, this.voiceService, input.defaultNarrator === true);
     const manifest = this.opts.manifest;
     const modelOf = (voice: { provider: string; model: string }) =>
       manifest?.models.find((candidate) => candidate.provider === voice.provider && candidate.id === voice.model && candidate.capability === "voice-tts") ?? null;
@@ -2313,6 +2330,9 @@ export class Coordinator {
       const piecePrices = new Map(misses.map(index => [index, new Map(toMake(index).map(piece => [piece.text, estimateSpeechMicroUsd(cloud[index]!.model, piece.text)] as const))]));
       const priceOf = (index: number, text: string) => piecePrices.get(index)!.get(text)!;
       const estimate = misses.reduce((sum, index) => sum + toMake(index).reduce((total, piece) => total + priceOf(index, piece.text), 0), 0);
+      // What would be asked about: a free credit's reads keep their estimate but ask nothing
+      // (design turn 182), so a page read wholly from one starts at once like a free one.
+      const asks = misses.some(index => speechAsks(cloud[index]!.model, toMake(index).reduce((total, piece) => total + priceOf(index, piece.text), 0)));
       const token = createHash("sha256")
         .update(["voiced", subject.id, String(subject.version), String(estimate), ...misses.flatMap((index) => toMake(index).map((piece) => piece.file))].join("\n"))
         .digest("hex");
@@ -2349,7 +2369,7 @@ export class Coordinator {
       });
       // Priced once before anything plays, and asked only when there is a price (R-47): a free
       // voice, and a cached line, say nothing.
-      if (estimate > 0 && input.confirmationToken !== token) {
+      if (asks && input.confirmationToken !== token) {
         this.pendingVoiceReads.set(requestId, { token, inputs: queuedInputs });
         const first = cloud[misses[0]!]!;
         // Every cloud voice the words would go to, named once (R-47, codex on PR 914): the
@@ -2387,7 +2407,7 @@ export class Coordinator {
         } as DomainEvent);
         return;
       }
-      if (estimate > 0) {
+      if (asks) {
         const pending = this.pendingVoiceReads.get(requestId);
         if (!pending || pending.token !== token) {
           fail("The read request changed; review it again.", characters);
@@ -2750,8 +2770,25 @@ export class Coordinator {
   private backfillStore: WorldStore | null = null;
 
   private readonly localGpu: LocalGpu;
+  /**
+   * The author's plans for free-tier keys (design turn 182), paid until settings are read. The
+   * manifest every consumer reads is the shipped one with these stamped on (`servedManifest`),
+   * so a quote, a confirmation, a digest and a price label cannot disagree about a plan.
+   */
+  private providerPlans: ProviderPlans = PAID_PLANS;
+  private shippedManifest: ModelManifest | undefined;
+  private plannedManifest: { base: ModelManifest; plans: ProviderPlans; manifest: ModelManifest } | null = null;
 
   constructor(private readonly opts: CoordinatorOptions) {
+    // `opts.manifest` is read in a hundred places and handed to services as they are built; a
+    // getter makes each of them read the manifest as the author's plans price it, now, rather
+    // than as it was when they were built — so a plan switched mid-session reaches every quote.
+    this.shippedManifest = opts.manifest;
+    Object.defineProperty(opts, "manifest", {
+      configurable: true, enumerable: true,
+      get: () => this.servedManifest(),
+      set: (value: ModelManifest | undefined) => { this.shippedManifest = value; },
+    });
     this.armCatalogueGate();
     this.armVendorAuthGate();
     // No harness, no catalogue and no sign-in state: nothing to wait for. A harness that never
@@ -2821,6 +2858,7 @@ export class Coordinator {
             journalPath: join(opts.appRoot, "queue", "jobs.jsonl"),
             clients: opts.dispatchClients,
             speechModel: (provider, id) => this.opts.manifest?.models.find(model => model.provider === provider && model.id === id),
+            onFreePlanBilled: job => { void this.markFreePlanBilled(job.provider).catch(() => {}); },
             getKey: async (provider) =>
               this.credentials ? this.credentials.get(provider as ProviderId) : null,
             emit: (event) => {
@@ -3145,7 +3183,7 @@ export class Coordinator {
         })
       : null;
     if (opts.appRoot && opts.voice) this.cataloguePreviews = new CataloguePreviewService({
-      root: join(opts.appRoot, "voice-previews"), sidecar: opts.voice.sidecar, manifest: opts.manifest,
+      root: join(opts.appRoot, "voice-previews"), sidecar: opts.voice.sidecar, get manifest() { return opts.manifest; },
       ...(this.jobQueue ? { enqueue: input => this.jobQueue!.enqueue(input), cancel: id => this.jobQueue!.cancel(id) } : {}),
       emit: event => this.emit(event),
     });
@@ -4932,6 +4970,38 @@ export class Coordinator {
     });
   }
 
+  /** The shipped manifest with the author's plans stamped on, memoised so its identity holds between changes. */
+  private servedManifest(): ModelManifest | undefined {
+    const base = this.shippedManifest;
+    if (base === undefined) return undefined;
+    const cached = this.plannedManifest;
+    if (cached !== null && cached.base === base && cached.plans === this.providerPlans) return cached.manifest;
+    const manifest = applyProviderPlans(base, this.providerPlans);
+    this.plannedManifest = { base, plans: this.providerPlans, manifest };
+    return manifest;
+  }
+
+  /** Adopt plans as written and tell every client, with the manifest as they now price it. */
+  private adoptProviderPlans(plans: ProviderPlans): void {
+    if (plans === this.providerPlans) return;
+    this.providerPlans = plans;
+    this.emit({ at: new Date().toISOString(), type: "provider-plans.changed", plans, manifest: this.opts.manifest ?? null });
+  }
+
+  /**
+   * A read on a key marked Free was billed or refused for payment (design turn 182). The switch
+   * stays where the author put it — Arke never turns it off unasked — but Google reads are priced
+   * again from here until the author says Free once more.
+   */
+  private async markFreePlanBilled(provider: string): Promise<void> {
+    if (provider !== "google" || !this.appSettings) return;
+    const at = new Date().toISOString();
+    const plans = await this.appSettings.updatePlans((current) =>
+      current.google === "free" && current.googleBilledAt === null ? { ...current, googleBilledAt: at } : current);
+    void this.appLog?.append({ kind: "provider-plan.billed", provider });
+    this.adoptProviderPlans(plans);
+  }
+
   /** Seed the SPEC-008 app-config slice: manifest, provider statuses, routing, spend, drift. */
   private async seedAppConfig(): Promise<void> {
     await this.providerService.init();
@@ -4941,8 +5011,10 @@ export class Coordinator {
       await tool.refresh();
       if (tool.current().state === "ready") await this.providerService.validate(provider);
     }
-    const manifest = this.opts.manifest ?? null;
     const settings = this.appSettings ? await this.appSettings.load() : null;
+    // Before the manifest is read: the first snapshot already prices as the author's plans say.
+    if (settings) this.providerPlans = settings.plans;
+    const manifest = this.opts.manifest ?? null;
     // Capture this before commands can change the saved preference. Failed discovery has no
     // harnessInfo, but Settings must still attach its health failure to the engine we tried.
     const generation = this.opts.harnessInfo?.generation;
@@ -4986,6 +5058,7 @@ export class Coordinator {
       // Without this the narrator was correct on disk and absent from every snapshot, so a
       // restart showed the shipped local voice while a cloud one was actually stored.
       ...(settings ? { narrator: settings.narrator } : {}),
+      providerPlans: this.providerPlans,
       ...(settings ? { localSampling: settings.localSampling } : {}),
       // `null` is a read that failed, and it is left out rather than seeded: the read model
       // keeps its [] — same state, but nothing pretends it was derived (SPEC-032 R-21). The
@@ -5092,7 +5165,9 @@ export class Coordinator {
             cached: false,
             characterCount: Number(job.params["characterCount"] ?? 0),
             estimatedMicroUsd: job.estimatedMicroUsd,
-            error: "Voice synthesis failed. Open Activity for details.",
+            // The two ways a free plan ends are said on the read itself (design turn 182), so
+            // the reader can offer the narrator or the switch; anything else stays generic.
+            error: freePlanFailure(job.error) ?? "Voice synthesis failed. Open Activity for details.",
           });
         }
       }
@@ -9121,6 +9196,17 @@ export class Coordinator {
       }
       case "account-open": {
         await this.account.open(msg.page);
+        return;
+      }
+      case "set-provider-plan": {
+        // The author's statement of a key's plan (design turn 182). Google's Free set again is
+        // the author saying so again after a billed read, so it clears the billed mark.
+        if (!this.appSettings) return;
+        if (msg.provider === "google" ? msg.plan === "free-credit" : msg.plan === "free") return;
+        const plans = await this.appSettings.updatePlans((current) => msg.provider === "google"
+          ? { ...current, google: msg.plan === "free" ? "free" : "paid", googleBilledAt: null }
+          : { ...current, mistral: msg.plan === "free-credit" ? "free-credit" : "paid" });
+        this.adoptProviderPlans(plans);
         return;
       }
       case "set-narrator": {
@@ -15089,6 +15175,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
           ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
+          ...(msg.defaultNarrator === true ? { defaultNarrator: true } : {}),
           blocks: [{ heading: msg.sectionHeading, text: bibleText }],
           page: false,
           purpose: "bible-section",
@@ -15141,6 +15228,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
           ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
+          ...(msg.defaultNarrator === true ? { defaultNarrator: true } : {}),
           blocks: [{ heading: resolved.heading, text: resolved.text }],
           page: false,
           purpose: "prose",
@@ -15247,6 +15335,7 @@ export class Coordinator {
             requestId: msg.requestId,
             ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
             ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
+            ...(msg.defaultNarrator === true ? { defaultNarrator: true } : {}),
             blocks,
             subject: { id: blocks[0]!.subjectId, version },
             fail: failPage,
@@ -15260,6 +15349,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
           ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
+          ...(msg.defaultNarrator === true ? { defaultNarrator: true } : {}),
           blocks,
           page: true,
           purpose: "prose",
@@ -15323,6 +15413,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
           ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
+          ...(msg.defaultNarrator === true ? { defaultNarrator: true } : {}),
           blocks: [{ heading: msg.sectionHeading, text: resolved.text }],
           page: false,
           purpose: "sheet-section",
@@ -15390,6 +15481,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
           ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
+          ...(msg.defaultNarrator === true ? { defaultNarrator: true } : {}),
           blocks,
           page: true,
           purpose: "sheet-page",

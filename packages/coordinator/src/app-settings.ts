@@ -13,6 +13,7 @@ import {
   type RoutingFault,
   type ThemePreference,
   type NarratorSettings,
+  type ProviderPlans,
   type SamplingSetting,
   type SamplingTimingSample,
   type VoxaSettings,
@@ -270,6 +271,20 @@ export class AppSettingsFile {
     return this.mutate((current) => {
       const settings: AppSettings = { ...current, narrator: voice };
       return { settings, value: settings };
+    });
+  }
+
+  /**
+   * A free-tier provider's plan (design turn 182), changed as `change` decides from the plans
+   * as they are under the file's lock — so a billed mark recorded by a settling read and the
+   * author's own choice cannot overwrite one another. Resolves with the plans written.
+   */
+  async updatePlans(change: (current: ProviderPlans) => ProviderPlans): Promise<ProviderPlans> {
+    return this.mutate((current) => {
+      const next = change(current.plans);
+      if (next === current.plans) return { value: current.plans };
+      const settings: AppSettings = { ...current, plans: next };
+      return { settings, value: next };
     });
   }
 

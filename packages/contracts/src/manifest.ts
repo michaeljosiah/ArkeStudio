@@ -352,6 +352,12 @@ export const ManifestModelSchema = z
     limits: ModelLimitsSchema,
     pricing: PricingSchema,
     /**
+     * The plan the author says this row's key is on, stamped by the coordinator onto the
+     * manifest it serves (design turn 182) — never authored. `free-plan` quotes a read at $0;
+     * `free-credit` keeps the estimate but asks nothing. Absent is paid, as every row was.
+     */
+    speechPlan: z.enum(["free-plan", "free-credit"]).optional(),
+    /**
      * The model family this row belongs to, e.g. "seedance" (SPEC-019 R-16). Models in one
      * family answer the same prompting conventions, so it is the family — not the row — that a
      * skill is written for and selected by. Optional: a row with no family gets no skill and
@@ -1142,6 +1148,10 @@ export function pricedDuration(model: ManifestModel, requestedSec: number, opts?
  * at all, so there is no unpriced case here beyond the local runtimes, which say so.
  */
 export function modelPriceCopy(model: ManifestModel): string {
+  // The author's plan names itself where the price was (design turn 182): a free read has no
+  // rate worth showing, and a credit read's rate is still what the allowance is drawn at.
+  if (model.speechPlan === "free-plan") return "free plan";
+  if (model.speechPlan === "free-credit") return `${modelPriceCopy({ ...model, speechPlan: undefined })} · free credit`;
   const pricing = model.pricing;
   switch (pricing.kind) {
     case "unmetered":

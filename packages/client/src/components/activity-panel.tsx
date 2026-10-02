@@ -9,6 +9,8 @@ import {
   jobActions,
   jobOrigin,
   spendSummary,
+  compactCount,
+  PROVIDERS,
   type ClientState,
   type Job,
   type LedgerEntry,
@@ -828,6 +830,26 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
             <span className="fy-spendbar__value">{formatMicroUsd(p.microUsd)}</span>
           </div>
         ))}
+      {/* Reads on a key the author marked free, counted apart (design turn 182): a free plan's at
+          $0 with its tokens, a free credit's at what it drew from the month's allowance. */}
+      {spend.plans.length > 0 && (
+        <div className="fy-spendplans" data-testid="spend-plans">
+          {spend.plans.map((row) => (
+            <div key={`${row.provider}:${row.plan}`}>
+              <span>
+                {[
+                  (PROVIDERS as Record<string, { displayName: string } | undefined>)[row.provider]?.displayName ?? row.provider,
+                  row.plan === "free-plan" ? "free plan" : "free credit",
+                  `${row.entries} read${row.entries === 1 ? "" : "s"}`,
+                  ...(row.tokens > 0 ? [`${compactCount(row.tokens)} tokens`] : []),
+                  ...(row.characters > 0 ? [`${compactCount(row.characters)} characters`] : []),
+                ].join(" · ")}
+              </span>
+              <span>{row.plan === "free-plan" ? formatMicroUsd(row.microUsd) : `${formatMicroUsd(row.microUsd)} of credit`}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {spend.unmeteredRuns > 0 && (
         <div className="fy-mono" style={{ marginTop: 12 }}>
           {spend.unmeteredRuns} unmetered run{spend.unmeteredRuns === 1 ? "" : "s"}

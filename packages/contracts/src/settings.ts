@@ -224,6 +224,28 @@ export const NarratorSettingsSchema = z
   .nullable();
 export type NarratorSettings = z.infer<typeof NarratorSettingsSchema>;
 
+/**
+ * What plan the author says a provider's key is on (design turn 182). No provider says through
+ * its API which plan a key is on, so this is the author's statement, kept here beside the key
+ * rather than in the credentials file, and only for providers whose speech has a free tier.
+ * Paid is the default, and a file from before this existed parses as all-paid.
+ *
+ * Google's Free makes Gemini Flash TTS and Flash-Lite TTS reads cost nothing; Mistral's Free
+ * credit draws Voxtral reads from the month's $10 allowance without asking. `googleBilledAt` is
+ * when a read on a key marked Free was billed or refused for payment: from then on Google reads
+ * are priced again until the author says Free once more — the switch itself is never turned off
+ * unasked, and a read is never priced free after a charge without the author saying so again.
+ */
+export const ProviderPlansSchema = z
+  .object({
+    google: z.enum(["paid", "free"]).default("paid"),
+    mistral: z.enum(["paid", "free-credit"]).default("paid"),
+    googleBilledAt: z.string().datetime({ offset: true }).nullable().default(null),
+  })
+  .strict();
+export type ProviderPlans = z.infer<typeof ProviderPlansSchema>;
+export const PAID_PLANS: ProviderPlans = { google: "paid", mistral: "paid", googleBilledAt: null };
+
 const AppSettingsObjectSchema = z
   .object({
     /**
@@ -291,6 +313,17 @@ const AppSettingsObjectSchema = z
         NarratorSettingsSchema,
       )
       .default(null),
+    /**
+     * Each free-tier provider's plan (design turn 182). Guarded like the narrator: a malformed
+     * block reads as all-paid — the conservative answer, since paid asks before it spends —
+     * never as the loss of the settings file.
+     */
+    plans: z
+      .preprocess(
+        (value) => (ProviderPlansSchema.safeParse(value).success ? value : PAID_PLANS),
+        ProviderPlansSchema,
+      )
+      .default(PAID_PLANS),
     /**
      * Sampling per local recipe, and this machine's measured times for it (design turn 177). A
      * device setting: it lives here beside the engine, never in a world. Guarded like voxa, so a

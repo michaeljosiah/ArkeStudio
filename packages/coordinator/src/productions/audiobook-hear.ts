@@ -50,7 +50,9 @@ export async function hearAudiobookLine(store: WorldStore, productionId: string,
   const token = speechConsentToken(JSON.stringify([deps.worldId, productionId, chapter.file, block, cacheFile]), quotes);
   // Preparation owns the actual request split and direction. A displayed single-request
   // estimate cannot authorise an arbitrary number of token-priced calls.
-  if (quotes.some(quote => quote.unit === "token") && deps.quoteToken !== token) {
+  // A $0 quote — a free plan's (design turn 182) — authorises nothing it could overspend, and a
+  // read that costs nothing asks nothing (SPEC-047 R-17).
+  if (quotes.some(quote => quote.unit === "token" && quote.authorisedMicroUsd > 0) && deps.quoteToken !== token) {
     return { quote: { token, authorisedMicroUsd: quotes.reduce((sum, quote) => sum + quote.authorisedMicroUsd, 0), parts: quotes.length } };
   }
   const pieces: Uint8Array[] = [];

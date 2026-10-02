@@ -170,6 +170,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * voice and vendor and carried back on the frame that asked, as the voiced page carries it.
        */
       voiceUploadConfirmedFor: z.string().min(1).optional(),
+      /** Read in the shipped narrator, this request only: what a free plan's limit offers (design turn 182). */
+      defaultNarrator: z.literal(true).optional(),
     })
     .strict(),
   /**
@@ -202,6 +204,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       confirmationToken: z.string().min(1).optional(),
       /** A cloned narrator's vendor, answered (issue 1215). */
       voiceUploadConfirmedFor: z.string().min(1).optional(),
+      /** Read in the shipped narrator, this request only: what a free plan's limit offers (design turn 182). */
+      defaultNarrator: z.literal(true).optional(),
     })
     .strict(),
   /**
@@ -243,6 +247,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       confirmationToken: z.string().min(1).optional(),
       /** A cloned narrator's vendor, answered (issue 1215). */
       voiceUploadConfirmedFor: z.string().min(1).optional(),
+      /** Read in the shipped narrator, this request only: what a free plan's limit offers (design turn 182). */
+      defaultNarrator: z.literal(true).optional(),
     })
     .strict(),
   /**
@@ -276,6 +282,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       confirmationToken: z.string().min(1).optional(),
       /** A cloned voice on a voiced page (turn 130), or a cloned narrator (issue 1215): where its recording may go. */
       voiceUploadConfirmedFor: z.string().min(1).optional(),
+      /** Read in the shipped narrator, this request only: what a free plan's limit offers (design turn 182). */
+      defaultNarrator: z.literal(true).optional(),
     })
     .strict(),
   /**
@@ -301,6 +309,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       confirmationToken: z.string().min(1).optional(),
       /** A cloned narrator's vendor, answered (issue 1215). */
       voiceUploadConfirmedFor: z.string().min(1).optional(),
+      /** Read in the shipped narrator, this request only: what a free plan's limit offers (design turn 182). */
+      defaultNarrator: z.literal(true).optional(),
     })
     .strict(),
   /**
@@ -1440,6 +1450,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       voice: NarratorSettingsSchema,
     })
     .strict(),
+  /**
+   * The author's statement of a free-tier provider's plan (design turn 182). Setting Google to
+   * Free again also clears a billed mark: it is the author saying so again. A plan the provider
+   * does not have (Google's free credit, Mistral's Free) is ignored by the coordinator.
+   */
+  z.object({ kind: z.literal("set-provider-plan"), provider: z.enum(["google", "mistral"]), plan: z.enum(["paid", "free", "free-credit"]) }).strict(),
   /** SPEC-009 R-14: cancel a job in any non-terminal state; remote cancel attempted where supported. */
   z.object({ kind: z.literal("cancel-job"), jobId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("list-provider-calls"), jobId: JobIdSchema.nullable() }).strict(),

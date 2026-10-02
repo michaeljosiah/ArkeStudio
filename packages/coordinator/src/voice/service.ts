@@ -822,7 +822,7 @@ export class VoiceService {
       throw new Error("The preview line exceeds this model's request limit. Shorten the line or use an audiobook read in parts.");
     }
     const quote = quoteSpeech(model, normalized, { at: this.now() });
-    if (quote.unit === "token" && input.quoteToken !== speechConsentToken(JSON.stringify([voiceTargetKey({ provider, model: model.id, voiceId }), normalized]), [quote])) {
+    if (quote.unit === "token" && quote.authorisedMicroUsd > 0 && input.quoteToken !== speechConsentToken(JSON.stringify([voiceTargetKey({ provider, model: model.id, voiceId }), normalized]), [quote])) {
       throw new Error("The preview price changed. Reopen the voice picker to review its current price.");
     }
     // The format the provider actually returns, not a guess: ComfyUI's SaveAudio writes FLAC, and
@@ -930,7 +930,7 @@ export function voiceLineRequest(input: {
   }
   // The compiled text is priced: its tags are in it, so no delivery is named to count twice.
   const quote = quoteSpeech(input.model, text, { language: input.language, at: input.at });
-  if (quote.unit === "token" && (input.confirmedSpeechMicroUsd === undefined || input.confirmedSpeechMicroUsd < quote.authorisedMicroUsd)) {
+  if (quote.unit === "token" && quote.authorisedMicroUsd > 0 && (input.confirmedSpeechMicroUsd === undefined || input.confirmedSpeechMicroUsd < quote.authorisedMicroUsd)) {
     throw new Error("The speech price needs confirmation. Open the line again and confirm its current price.");
   }
   return {

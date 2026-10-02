@@ -18,6 +18,7 @@ import {
   type SceneRecord,
   type Sheet,
   type Shot,
+  tableReadPlanNote,
 } from "@arke-studio/contracts";
 import { ImageMark, PauseSolid, PlaySolid, RotateCcw } from "../../components/icons.js";
 import { artifactsForProduction } from "../../lib/artifact-view.js";
@@ -453,7 +454,7 @@ export function ScenePreview({
             {plan === null ? null : <span className="fy-swpreview__lines-count">{playable.length} of {lines.length} line{lines.length === 1 ? "" : "s"} {lines.length === 1 ? "has" : "have"} a read</span>}
             {plan === null || missing.length === 0 ? null : (
               <button type="button" className="fy-swpreview__lines-door" disabled={preparing} onClick={prepareLines}>
-                Prepare {missing.length} line{missing.length === 1 ? "" : "s"} · {plan.items.some(item => state?.app.manifest?.models.some(model => model.id === item.model && model.pricing.kind === "perToken")) ? "up to " : ""}{formatMicroUsd(plan.totalEstimatedMicroUsd)}
+                Prepare {missing.length} line{missing.length === 1 ? "" : "s"} · {tableReadPlanNote(plan, state?.app.manifest?.models ?? []) ?? `${plan.items.some(item => state?.app.manifest?.models.some(model => model.id === item.model && model.pricing.kind === "perToken")) ? "up to " : ""}${formatMicroUsd(plan.totalEstimatedMicroUsd)}`}
               </button>
             )}
             {linesNotice === "" ? null : <span role="status" className="fy-swpreview__lines-notice">{linesNotice}</span>}

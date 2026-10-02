@@ -294,6 +294,7 @@ const CLIENT_COMMAND_METADATA = {
   "sheet-refs": readOnly(QUERY),
   "set-credential": globalOnly(GLOBAL_OPERATION),
   "clear-credential": globalOnly(GLOBAL_OPERATION),
+  "set-provider-plan": globalOnly(GLOBAL_OPERATION),
   "validate-provider": readOnly("Checks provider capability without changing a creative target."),
   "sign-in-provider-tool": globalOnly(GLOBAL_OPERATION),
   "cancel-provider-tool-sign-in": globalOnly(GLOBAL_OPERATION),

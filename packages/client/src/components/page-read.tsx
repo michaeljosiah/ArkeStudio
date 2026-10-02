@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { formatMicroUsd, narratorLabelFor, type NarratorSettings, type ProseReadSource } from "@arke-studio/contracts";
+import { formatMicroUsd, freePlanStop, narratorLabelFor, speechPlanLabel, type NarratorSettings, type ProseReadSource } from "@arke-studio/contracts";
 import {
   clearQueue,
   dismissPlayback,
@@ -11,6 +11,7 @@ import {
 import { readProsePage, subscribeVoiceUploadConfirmations, useStore, useVoiceAudio, useVoiceParts, stopProsePage } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { RemoteVoiceUploadConfirmation } from "./remote-voice-upload-confirmation.js";
+import { FreePlanStop } from "./free-plan-stop.js";
 import { Button } from "./ui.js";
 
 /**
@@ -39,6 +40,8 @@ export interface PageRead {
   /** Present while a cloned voice's recording waits for leave to go to a remote engine (turn 130). */
   upload: { destination: string; notice?: string; confirm: () => void } | null;
   begin: () => void;
+  /** The same page again in the shipped narrator, this read only: what a free plan's daily limit offers (design turn 182). */
+  beginShipped: () => void;
   stop: () => void;
   skip: (direction: 1 | -1) => void;
 }
@@ -58,7 +61,7 @@ export function usePageRead(input: {
   /** The blocks this screen reads, in the order it reads them. Empty ones never get here. */
   blocks: readonly PageReadBlock[];
   /** Ask for the page. Called again with the token when a charged read is confirmed, and with the engine a cloned voice's recording may go to once that is allowed. */
-  start: (requestId?: string, confirmationToken?: string, voiceUploadConfirmedFor?: string) => string;
+  start: (requestId?: string, confirmationToken?: string, voiceUploadConfirmedFor?: string, defaultNarrator?: boolean) => string;
   /** Tell the coordinator to stop making the page (codex, PR 879); absent, stopping is local. */
   cancel?: (requestId: string) => void;
   /** What the player calls a block's voice (turn 130); absent, the narrator's label. */
@@ -84,6 +87,8 @@ export function usePageRead(input: {
    */
   const [upload, setUpload] = useState<{ destination: string; token: string; notice?: string } | null>(null);
   const uploadAllowed = useRef<string | null>(null);
+  /** This run reads in the shipped narrator; every later frame of it says so too. */
+  const shipped = useRef(false);
   const voiceAudio = useVoiceAudio();
   const parts = useVoiceParts()[run ?? ""];
   const result = run ? voiceAudio[run] : undefined;
@@ -96,6 +101,9 @@ export function usePageRead(input: {
   // withdrawn — and the player must never say the stored name over another voice. A voiced
   // page's blocks name their own speaker through `voiceOf`.
   const narratorLabel = narratorLabelFor(narrator, worldId, result?.status === "ready" ? result : undefined);
+  // Where a price would show, the reader names its plan (design turn 182): `· free plan`.
+  const manifest = useStore().state?.app.manifest;
+  const plan = speechPlanLabel(manifest?.models.find((model) => model.provider === (result?.provider ?? narrator?.provider) && model.id === (result?.model ?? narrator?.model)));
 
   /*
    * A page read stops when its page is left; a block read does not (issue 859).
@@ -128,17 +136,20 @@ export function usePageRead(input: {
     [],
   );
 
-  const begin = useCallback(() => {
+  const beginRun = useCallback((inShipped: boolean) => {
     clearQueue();
     dismissPlayback();
     queued.current = 0;
     uploadAllowed.current = null;
-    const requestId = start();
+    shipped.current = inShipped;
+    const requestId = start(undefined, undefined, undefined, inShipped || undefined);
     live.current = requestId;
     setRun(requestId);
     setConfirmed(null);
     setUpload(null);
   }, [start]);
+  const begin = useCallback(() => beginRun(false), [beginRun]);
+  const beginShipped = useCallback(() => beginRun(true), [beginRun]);
 
   // Blocks land in whatever order they finish, so this counts what exists rather than how far
   // the array reaches: a cloud page whose second block returns first would otherwise never
@@ -157,12 +168,12 @@ export function usePageRead(input: {
         id: run,
         url: mediaUrl(worldSlug, file),
         title: block ? `${title} · ${block.heading}` : title,
-        sub: `read aloud · ${input.voiceOf?.(i) ?? narratorLabel} · ${i + 1} of ${blocks.length}`,
+        sub: `read aloud · ${input.voiceOf?.(i) ?? narratorLabel}${plan !== null ? ` · ${plan}` : ""} · ${i + 1} of ${blocks.length}`,
         part: i,
       });
       queued.current = i + 1;
     }
-  }, [run, landed, result?.status, result?.file, worldSlug, title, narratorLabel, blocks.length, input.voiceOf]);
+  }, [run, landed, result?.status, result?.file, worldSlug, title, narratorLabel, plan, blocks.length, input.voiceOf]);
 
   const token = result?.status === "confirmation-required" ? result.confirmationToken : undefined;
   return {
@@ -179,7 +190,7 @@ export function usePageRead(input: {
             notices: result?.notices ?? [],
             confirm: () => {
               setConfirmed(run);
-              start(run, token, uploadAllowed.current ?? undefined);
+              start(run, token, uploadAllowed.current ?? undefined, shipped.current || undefined);
             },
           }
         : null,
@@ -191,11 +202,12 @@ export function usePageRead(input: {
             confirm: () => {
               uploadAllowed.current = upload.token;
               setUpload(null);
-              start(run, undefined, upload.token);
+              start(run, undefined, upload.token, shipped.current || undefined);
             },
           }
         : null,
     begin,
+    beginShipped,
     stop,
     skip: (direction) => {
       if (at !== null) jumpQueue(at + direction);
@@ -234,13 +246,14 @@ export function useProsePageRead(input: {
     worldSlug: world?.meta.slug,
     blocks: input.blocks,
     ...(input.voiceOf !== undefined ? { voiceOf: input.voiceOf } : {}),
-    start: (requestId, confirmationToken, voiceUploadConfirmedFor) =>
+    start: (requestId, confirmationToken, voiceUploadConfirmedFor, defaultNarrator) =>
       readProsePage(
         world?.meta.worldId ?? "",
         input.sources ?? input.blocks.map((block) => block.source),
         requestId,
         confirmationToken,
         voiceUploadConfirmedFor,
+        defaultNarrator,
       ),
     cancel: (requestId) => stopProsePage(world?.meta.worldId ?? "", requestId),
   });
@@ -274,7 +287,9 @@ export function PageReadControl({ read, label }: { read: PageRead; label: ReactN
   if (read.failure) {
     return (
       <span style={ROW}>
-        <span className="fy-mono">{read.failure}</span>
+        {/* A free plan's end is said with its remedy (design turn 182); anything else as it was. */}
+        <FreePlanStop error={read.failure} onDefaultNarrator={read.beginShipped} />
+        {freePlanStop(read.failure) === null && <span className="fy-mono">{read.failure}</span>}
         <Button variant="ghost" onClick={read.stop}>
           Close
         </Button>

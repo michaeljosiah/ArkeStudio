@@ -5,9 +5,14 @@ import {
   ENGINE_PROVIDERS,
   PROVIDERS as PROVIDER_TABLE,
   comfyUiWeightsRecipeId,
+  compactCount,
   credentialFaulted,
   deriveCapabilityAvailability,
+  formatMicroUsd,
+  freeCreditThisMonth,
   modelPriceCopy,
+  MISTRAL_FREE_CREDIT_MICRO_USD,
+  PAID_PLANS,
   type EngineId,
   type ProviderId,
   type ProviderStatus,
@@ -28,6 +33,7 @@ import {
   selectProviderWorkspace,
   setCredential,
   setModelEnabled,
+  setProviderPlan,
   setupRetry,
   signInProviderTool,
   useSetup,
@@ -401,6 +407,80 @@ export function ProviderKeyLine({ id }: { id: ProviderId }) {
 }
 
 /**
+ * A free-tier provider's plan (design turn 182): the author's statement, since no provider says
+ * through its API which plan a key is on. Under the switch, mono data, no sentences: what free
+ * covers, what it leaves priced, how it ends, and what the provider may do with the words.
+ */
+const PLAN_ROWS = {
+  google: {
+    options: [["paid", "Paid"], ["free", "Free"]],
+    under: ["voices free · Gemini Flash TTS · Flash-Lite TTS", "voice design priced · daily limit · resets 00:00 PT", "may train Google models · billing linked = paid"],
+  },
+  mistral: {
+    options: [["paid", "Paid"], ["free-credit", "Free credit"]],
+    under: ["$10 a month · Voxtral reads drawn from it · estimate kept", "stops when used · unless pay-as-you-go is on", "may train Mistral models · opt out in Mistral Admin"],
+  },
+} as const;
+
+export function ProviderPlanLine({ id }: { id: "google" | "mistral" }) {
+  const { state } = useStore();
+  const plans = state?.app.providerPlans ?? PAID_PLANS;
+  const current: string = id === "google" ? plans.google : plans.mistral;
+  const row = PLAN_ROWS[id];
+  // A plan stops reads asking before they spend, so it is set where the key is, never remotely.
+  const remote = isRemoteSession();
+  const choose = (plan: string) => {
+    if (id === "google") setProviderPlan("google", plan === "free" ? "free" : "paid");
+    else setProviderPlan("mistral", plan === "free-credit" ? "free-credit" : "paid");
+  };
+  const billed = id === "google" && plans.google === "free" ? plans.googleBilledAt : null;
+  const month = id === "mistral" && plans.mistral === "free-credit" ? freeCreditThisMonth(state?.app.ledger ?? [], "mistral") : null;
+  return (
+    <>
+      <FactRow
+        what="Plan"
+        does={billed !== null ? (
+          <ActionButton icon={<Check size={13} />} disabled={remote} onClick={() => choose("free")}>Keep Free</ActionButton>
+        ) : undefined}
+      >
+        <span className="fy-plan">
+          <span className="fy-seg" role="radiogroup" aria-label={`${PROVIDER_TABLE[id].displayName} plan`}>
+            {row.options.map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={current === value}
+                disabled={remote}
+                className={cx("fy-seg__item", current === value && "fy-seg__item--active")}
+                onClick={() => { if (current !== value) choose(value); }}
+              >
+                {label}
+              </button>
+            ))}
+          </span>
+          {current !== "paid" && (
+            <span className="fy-plan__under" data-testid="plan-under">
+              {row.under.map((line) => <span key={line}>{line}</span>)}
+            </span>
+          )}
+          {billed !== null && (
+            <span className="fy-plan__billed" data-testid="plan-billed">billed {shortDateTime(billed)} · key looks paid · reads priced</span>
+          )}
+        </span>
+      </FactRow>
+      {month !== null && (
+        <FactRow what="This month">
+          <span className="fy-fact__mono" data-testid="plan-month">
+            {formatMicroUsd(month.microUsd)} of ${MISTRAL_FREE_CREDIT_MICRO_USD / 1_000_000} credit · {compactCount(month.characters)} characters
+          </span>
+        </FactRow>
+      )}
+    </>
+  );
+}
+
+/**
  * The key was accepted and nothing is unlocked (issue 1167): the account is what needs
  * attention — a balance, a plan — and "key rejected" would send the person to replace a key
  * that is fine. The probe's own reason is on the pane's "Last tested" line. Shared with the
@@ -479,6 +559,7 @@ function ServicePane({ id }: { id: ProviderId }) {
       </div>
       <div className="fy-facts">
         {info.credential === "external" ? <ProviderToolLine id={id} /> : <ProviderKeyLine id={id} />}
+        {(id === "google" || id === "mistral") && <ProviderPlanLine id={id} />}
       </div>
       {compact && models.length > 0 && <div className="fy-provider-models">{models.map(model => {
         const enabled = unlocked.has(model.capability) && !disabled.has(model.id);

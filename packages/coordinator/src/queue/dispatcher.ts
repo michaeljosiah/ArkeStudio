@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
 import {
   canDeleteJob,
+  GOOGLE_BILLED,
   quoteSpeech,
   quoteVoiceDesign,
   isDesignedVoiceTarget,
@@ -162,6 +163,11 @@ export interface JobQueueOptions {
   readDesignedVoice?: (worldId: string, target: string, params?: Record<string, unknown>) => Promise<{ target: string; remoteId: string }>;
   /** Resolve qualified speech pricing at admission and immediately before paid I/O. */
   speechModel?: (provider: string, model: string) => ManifestModel | undefined;
+  /**
+   * A read on a key the author marked free was billed or refused for payment (design turn 182).
+   * The host records it so later reads are priced; the switch itself is never turned off here.
+   */
+  onFreePlanBilled?: (job: Job) => void;
   /** Recheck host authorization after preparation and before the durable submission boundary. */
   beforeSubmit?: (job: Job) => Promise<void>;
   /** The host owns durability; journalPath still locates disposable inline-artifact staging. */
@@ -650,9 +656,13 @@ export class JobQueue {
     this.requireAccepting();
     const now = this.clock();
     const model = input.capability === "voice-tts" ? this.opts.speechModel?.(input.provider, input.model) : undefined;
+    // A read drawn from a free credit is quoted too, though nothing about its price is checked
+    // here: the quote is the record that it was a credit read, and of the characters it drew
+    // (design turn 182). Token-priced speech is quoted and checked, as it always was.
     const speechQuote = model?.pricing.kind === "perToken"
-      ? (input.target.kind === "voice-design" ? quoteVoiceDesign(model, String(input.params.text ?? ""), now) : quoteSpeech(model, String(input.params.text ?? ""), { at: now })) : undefined;
-    if (speechQuote && speechQuote.authorisedMicroUsd > input.estimatedMicroUsd) {
+      ? (input.target.kind === "voice-design" ? quoteVoiceDesign(model, String(input.params.text ?? ""), now) : quoteSpeech(model, String(input.params.text ?? ""), { at: now }))
+      : model?.speechPlan === "free-credit" && input.target.kind !== "voice-design" ? quoteSpeech(model, String(input.params.text ?? ""), { at: now }) : undefined;
+    if (speechQuote?.unit === "token" && speechQuote.authorisedMicroUsd > input.estimatedMicroUsd) {
       throw new Error("Speech pricing changed. Review the new quote before reading.");
     }
     const job: Job = {
@@ -1126,7 +1136,7 @@ export class JobQueue {
       await this.opts.beforeSubmit?.(job);
       const pricedModel = job.capability === "voice-tts" ? this.opts.speechModel?.(job.provider, job.model) : undefined;
       if (pricedModel?.pricing.kind === "perToken" && !job.speechQuote) throw new Error("Speech needs a fresh token quote before reading.");
-      if (job.speechQuote) {
+      if (job.speechQuote?.unit === "token") {
         const model = this.opts.speechModel?.(job.provider, job.model);
         if (!model || !speechQuoteIsCurrent(job.speechQuote, this.clock())) throw new Error("Speech quote expired. Review the new price before reading.");
         const current = job.target.kind === "voice-design" ? quoteVoiceDesign(model, String(job.params.text ?? ""), this.clock()) : quoteSpeech(model, String(job.params.text ?? ""), { at: this.clock() });
@@ -1256,6 +1266,14 @@ export class JobQueue {
   }
 
   private async handleSubmitError(job: Job, client: DispatchClient, err: unknown): Promise<void> {
+    // A payment refusal on a read the author priced free is the evidence the key is paid
+    // (design turn 182): said on the read, terminal — a paused lane would leave the reader
+    // waiting on a plan only the author can correct — and recorded so later reads are priced.
+    if (job.speechQuote?.plan === "free-plan" && typeof err === "object" && err !== null && (err as { paymentRequired?: unknown }).paymentRequired === true) {
+      this.opts.onFreePlanBilled?.(job);
+      await this.terminalize(job, "failed", `${GOOGLE_BILLED} · key looks paid (${describeCoordinatorError(err)})`, undefined, "terminal");
+      return;
+    }
     const message = describeCoordinatorError(err);
     const klass: FailureClass = classifyError(err);
     if (isRateLimit(err)) this.noteRateLimit(job.provider);
@@ -1826,6 +1844,13 @@ export class JobQueue {
     } else if (job.speechQuote?.unit === "token") {
       const reported = job.providerCostMicroUsd ?? (client?.declarations.reportsCost && costMicroUsd !== undefined ? Math.round(costMicroUsd) : undefined);
       ({ actualMicroUsd, actualSource } = speechSettlement({ ...job, providerCostMicroUsd: reported }));
+      // A charge reported on a read priced free is a billed usage report: the key is paid.
+      if (job.speechQuote.plan === "free-plan" && (reported ?? 0) > 0) this.opts.onFreePlanBilled?.(job);
+    } else if (job.speechQuote?.plan === "free-credit" && outcome === "succeeded") {
+      // Drawn from the month's free credit at its estimate (design turn 182): no charge to a
+      // card, but the allowance is real money spent, recorded apart from what was billed.
+      actualMicroUsd = client?.declarations.reportsCost && costMicroUsd !== undefined ? Math.round(costMicroUsd) : job.estimatedMicroUsd;
+      actualSource = "free-credit";
     } else if (client?.declarations.reportsCost && costMicroUsd !== undefined) {
       actualMicroUsd = Math.round(costMicroUsd);
       actualSource = "provider-reported";

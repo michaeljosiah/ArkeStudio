@@ -286,7 +286,7 @@ export const LedgerEntrySchema = z
     outcome: z.enum(["succeeded", "failed", "cancelled"]),
     estimatedMicroUsd: z.number().int().min(0),
     actualMicroUsd: z.number().int().min(0).nullable(),
-    actualSource: z.enum(["provider-reported", "usage-derived", "mixed-measured", "manifest-derived", "local-zero"]).optional(),
+    actualSource: z.enum(["provider-reported", "usage-derived", "mixed-measured", "manifest-derived", "local-zero", "free-plan", "free-credit"]).optional(),
     speechQuote: SpeechQuoteSchema.optional(),
     speechUsage: SpeechUsageSchema.optional(),
     speechAttempts: z.array(SpeechAttemptSchema).optional(),

@@ -21,6 +21,7 @@ import {
   type SceneRecord,
   type WorldBundle,
   type WorldChatSubject,
+  tableReadPlanNote,
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel } from "../../components/dispatch-bar.js";
 import { initials, seconds } from "../../lib/format.js";
@@ -619,6 +620,7 @@ export function SceneWorkspace({
                 notice={tableRead.notice}
                 onPrepare={tableRead.prepare}
                 ceiling={tableRead.plan?.items.some((item) => state?.app.manifest?.models.some((model) => model.id === item.model && model.pricing.kind === "perToken")) ?? false}
+                planNote={tableReadPlanNote(tableRead.plan, state?.app.manifest?.models ?? [])}
               />
             ) : null}
             {/* Boards pack shots into a clip's length; a visual novel renders no clips. */}

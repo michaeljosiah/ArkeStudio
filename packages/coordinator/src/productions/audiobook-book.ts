@@ -303,7 +303,9 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
     if (await deps.requireUploadConfirmation(reader)) return;
   }
   const estimate = toRead.reduce((sum, entry) => sum + entry.prepared.estimate, 0);
-  if (estimate > 0) {
+  // Asked once for the book only where some read is priced (R-17): a book read on a free plan
+  // or credit starts at once (design turn 182).
+  if (toRead.some((entry) => entry.prepared.asks)) {
     const token = createHash("sha256")
       .update(
         [
