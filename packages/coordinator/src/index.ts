@@ -1,6 +1,6 @@
 export { AppLog } from "./app-log.js";
 export { RemoteDevices, writeRemotePrivate } from "./remote-access/devices.js";
-export { RemoteGateway } from "./remote-access/gateway.js";
+export { RemoteGateway, type RemoteTrace } from "./remote-access/gateway.js";
 export { AppSettingsFile, routingFaults } from "./app-settings.js";
 export { ChangeLog, WriteQueue, type LogRecord } from "./change-log.js";
 export { Coordinator, type CoordinatorOptions } from "./coordinator.js";

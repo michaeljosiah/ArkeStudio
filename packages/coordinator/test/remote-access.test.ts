@@ -341,6 +341,36 @@ it("cookies captured by another service cannot authenticate without the origin-b
     assert.equal((await get(port, "/remote/session", { headers: { Cookie: "__Host-arke-device=" + captured } })).status, 204);
   } finally { await gateway.stop(); await devices.stop(); await rm(root, { recursive: true, force: true }); }
 });
+it("names why a phone was refused, without its credentials, once a minute per reason", async () => {
+  const root = await temporary();
+  const devices = new RemoteDevices(join(root, "devices.json")); await devices.load();
+  await writeFile(join(root, "index.html"), "<head></head>");
+  const traces: { kind: string; detail: Record<string, unknown> }[] = [];
+  let logged = "";
+  const gateway = new RemoteGateway({ origin, clientDirectory: root, devices, session: { port: 9999, token: "a".repeat(64) },
+    trace: (kind, detail) => { traces.push({ kind, detail }); logged += JSON.stringify(detail); } });
+  const port = await gateway.start(0);
+  const why = () => traces.splice(0).map(trace => trace.detail.why);
+  try {
+    const { proof, id } = await paired(devices);
+    const cookie = { Cookie: "__Host-arke-device=" + sealed(proof) };
+    assert.equal((await get(port, "/remote/session", { headers: cookie })).status, 204);
+    assert.deepEqual(why(), [], "an answered check is not traced");
+    assert.equal((await get(port, "/remote/session")).status, 401);
+    assert.deepEqual(why(), ["no device cookie"]);
+    assert.equal((await get(port, "/remote/session", { headers: { ...cookie, "x-arke-browser-key": "" } })).status, 401);
+    assert.deepEqual(why(), ["no browser key"], "the request the worker did not handle");
+    assert.equal((await get(port, "/remote/session", { headers: { ...cookie, "x-arke-browser-key": "c".repeat(64) } })).status, 401);
+    assert.deepEqual(why(), ["cookie sealed with another browser key"]);
+    await devices.revoke(id);
+    assert.equal((await get(port, "/remote/session", { headers: cookie })).status, 401);
+    assert.equal((await get(port, "/remote/session", { headers: cookie })).status, 401);
+    assert.deepEqual(why(), ["device not paired: revoked, expired or never approved"], "a polling phone is traced once");
+    assert.equal((await get(port, "/", { headers: { Host: "evil.example" } })).status, 403);
+    assert.deepEqual(why(), ["another address"]);
+    assert.ok(!logged.includes(proof) && !logged.includes(browserKey) && !logged.includes(sealed(proof).slice(3, 20)), "no credential is logged");
+  } finally { await gateway.stop(); await devices.stop(); await rm(root, { recursive: true, force: true }); }
+});
 it("served page CSP names only the hosted origin; the source page is not weakened", () => {
   const html = '<head><meta http-equiv="Content-Security-Policy" content="connect-src ws://localhost:*"></head>';
   const served = remotePage(html, origin);

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { initStore } from "../lib/store.js";
-import { prepareRemoteSession, remoteFetch, RemoteBrowserError } from "../lib/remote-session.js";
+import { prepareRemoteSession, remoteFetch, RemoteBrowserError, withBrowserKey } from "../lib/remote-session.js";
 import { CloudWay, LaunchFoot, LaunchFrame, remoteStudio } from "../screens/launch.js";
 import { Laptop, Unplug } from "./icons.js";
 
@@ -130,11 +130,11 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
     try {
       // The code is consumed by this POST. Aborting it on our probe deadline could discard
       // the only response carrying its pairing cookie; leave it to the browser, without replay.
-      const response = await fetch("/remote/pair", {
+      const response = await fetch("/remote/pair", withBrowserKey({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, name: name.trim() || "My phone" }),
-      });
+      }));
       if (response.status === 202) { setCode(""); asked.current = true; setState("pending"); }
       else setError(response.status === 429
         ? { title: "Too many tries", line: "Wait a minute." }

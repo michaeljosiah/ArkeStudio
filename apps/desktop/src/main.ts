@@ -1491,7 +1491,7 @@ async function initialize(): Promise<{ port: number }> {
   const { port } = await studioServer.start(0);
   transportSession = { port, token: transportToken };
   remoteAccess = new DesktopRemoteAccess({ root: appRoot, clientDirectory: dirname(clientIndex), session: transportSession,
-    writeClipboard: text => clipboard.writeText(text),
+    writeClipboard: text => clipboard.writeText(text), trace: traceDesktop,
     startupSupported: app.isPackaged && (process.platform === "win32" || process.platform === "darwin"),
     setStartOnLogin: enabled => app.setLoginItemSettings({ openAtLogin: enabled,
       ...(process.platform === "win32" ? { args: ["--remote-background"] } : {}) }),

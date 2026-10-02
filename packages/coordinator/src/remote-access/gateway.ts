@@ -20,10 +20,14 @@ const hostFileCommands: Record<HostFileCommand["kind"], true> = {
   "world-chat-attach": true, "stage-playblast": true, "conversation-action-stage-playblast-complete": true,
   "upload-artifacts": true, "file-artifact": true, "genesis-attach": true, "import-folder": true,
 };
+const cookies = (req: IncomingMessage, name: string) =>
+  (req.headers.cookie ?? "").split(";").map(part => part.trim()).filter(part => part.startsWith(name + "="));
 function cookie(req: IncomingMessage, name: string): string | undefined {
-  const values = (req.headers.cookie ?? "").split(";").map(part => part.trim()).filter(part => part.startsWith(name + "="));
+  const values = cookies(req, name);
   return values.length === 1 ? values[0]!.slice(name.length + 1) : undefined;
 }
+/** What a remote refusal was, in words a log reader can act on and never a credential. */
+export type RemoteTrace = (kind: string, detail: Record<string, unknown>) => void;
 const setCookie = (name: string, value: string, seconds: number) =>
   `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${seconds}`;
 const mime: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css",
@@ -52,20 +56,46 @@ export class RemoteGateway {
   private attempts: number[] = [];
   private root = "";
   private origin: URL;
+  private traced = new Map<string, number>();
   constructor(private readonly options: { origin: string; clientDirectory: string; devices: RemoteDevices;
-    session: { port: number; token: string } }) {
+    session: { port: number; token: string }; trace?: RemoteTrace }) {
     this.origin = new URL(options.origin);
     if (this.origin.protocol !== "https:" || this.origin.origin !== options.origin) throw new Error("Remote access requires an exact HTTPS origin.");
     this.server.requestTimeout = 15_000;
     this.server.headersTimeout = 10_000;
     this.server.on("upgrade", (req, socket, head) => {
       const keys = (req.headers["sec-websocket-protocol"] ?? "").split(",").map(part => part.trim()).filter(part => part.startsWith("arke-browser."));
-      const proof = openBrowserProof(cookie(req, deviceCookie), keys.length === 1 ? keys[0]!.slice(13) : undefined, this.origin.origin);
+      const key = keys.length === 1 ? keys[0]!.slice(13) : undefined;
+      const proof = openBrowserProof(cookie(req, deviceCookie), key, this.origin.origin);
       if (this.closing || req.url !== "/" || !this.accepts(req) || req.headers.origin !== this.origin.origin || !options.devices.authenticate(proof)) {
+        this.refused("socket", this.closing ? "closing" : req.url !== "/" ? "path" : !this.accepts(req) ? this.forbidden(req)
+          : req.headers.origin !== this.origin.origin ? "origin" : this.unpaired(req, key));
         socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n"); return;
       }
       this.wss.handleUpgrade(req, socket, head, client => this.connect(client, proof!));
     });
+  }
+  // A phone that lands on pairing, or on "Not answering", left no other record of why: each
+  // answer below is a different repair (re-pair, the address, the browser's storage), so the
+  // reason is named. Once a minute per reason keeps a polling phone from filling the log.
+  private refused(at: string, why: string): void {
+    if (!this.options.trace) return;
+    const key = at + ":" + why, now = Date.now();
+    if ((this.traced.get(key) ?? 0) > now - 60_000) return;
+    this.traced.set(key, now);
+    this.options.trace("remote.refused", { at, why });
+  }
+  private forbidden(req: IncomingMessage): string {
+    return req.headers.host !== this.origin.host ? "another address" : req.headers.origin && req.headers.origin !== this.origin.origin
+      ? "another origin" : "cross-site request";
+  }
+  private unpaired(req: IncomingMessage, key: unknown): string {
+    const count = cookies(req, deviceCookie).length;
+    if (count === 0) return "no device cookie";
+    if (count > 1) return "more than one device cookie";
+    if (!validBrowserKey(key)) return "no browser key";
+    if (!openBrowserProof(cookie(req, deviceCookie), key, this.origin.origin)) return "cookie sealed with another browser key";
+    return "device not paired: revoked, expired or never approved";
   }
   async start(port = 8793): Promise<number> {
     this.root = await realpath(this.options.clientDirectory);
@@ -95,11 +125,15 @@ export class RemoteGateway {
     // cookies do not ride on the cross-site visit, and everything the page does next is same-origin.
     const shellVisit = (req.method === "GET" || req.method === "HEAD") && req.headers["sec-fetch-mode"] === "navigate"
       && req.headers["sec-fetch-dest"] === "document" && !/^\/(remote|media|genesis-media)\//.test(url.pathname);
-    if (this.closing || !this.accepts(req, shellVisit)) { res.writeHead(403).end(); return; }
+    if (this.closing || !this.accepts(req, shellVisit)) {
+      if (!this.closing) this.refused(url.pathname.startsWith("/remote/") ? url.pathname : "page", this.forbidden(req));
+      res.writeHead(403).end(); return;
+    }
     if (url.origin !== this.origin.origin) { res.writeHead(403).end(); return; }
     const browserKey = req.headers["x-arke-browser-key"];
     const proof = openBrowserProof(cookie(req, deviceCookie), browserKey, this.origin.origin);
     const authenticated = this.options.devices.authenticate(proof);
+    if (!authenticated && url.pathname === "/remote/session") this.refused(url.pathname, this.unpaired(req, browserKey));
     if (url.pathname === "/remote/device" && req.method === "GET") {
       if (!authenticated) { res.writeHead(401).end(); return; }
       const device = this.options.devices.list().find(row => row.id === authenticated);
@@ -177,9 +211,15 @@ export class RemoteGateway {
   private connect(client: WebSocket, proof: string): void {
     const upstream = new WebSocket(`ws://127.0.0.1:${this.options.session.port}`, { maxPayload: frameLimit, handshakeTimeout: 10_000 });
     this.clients.set(client, { proof, upstream });
+    const id = this.options.devices.authenticate(proof);
+    const device = this.options.devices.list().find(row => row.id === id)?.name ?? id;
+    this.options.trace?.("remote.socket", { event: "open", device });
     const pending: string[] = [];
     let pendingBytes = 0;
-    const refuse = () => { client.close(1008, "session authentication required"); upstream.terminate(); };
+    const refuse = () => {
+      this.options.trace?.("remote.socket", { event: "refused", device, why: this.closing ? "closing" : "device no longer paired" });
+      client.close(1008, "session authentication required"); upstream.terminate();
+    };
     const check = () => !this.closing && !!this.options.devices.authenticate(proof);
     upstream.on("open", () => {
       if (!check() || client.readyState !== WebSocket.OPEN) { refuse(); return; }
@@ -215,10 +255,14 @@ export class RemoteGateway {
     upstream.on("error", () => client.close(1011, "Studio is unavailable"));
     upstream.on("close", () => { if (client.readyState === WebSocket.OPEN) client.close(1012, "Studio is restarting"); });
     client.on("error", () => upstream.terminate());
-    client.on("close", () => { this.clients.delete(client); upstream.terminate(); });
+    client.on("close", (code, reason) => {
+      this.options.trace?.("remote.socket", { event: "closed", device, code, reason: reason.toString().slice(0, 80) });
+      this.clients.delete(client); upstream.terminate();
+    });
   }
   recheckDevices(): void {
-    for (const [client, { proof, upstream }] of this.clients) if (!this.options.devices.authenticate(proof)) {
+    for (const [client, { proof, upstream }] of this.clients) if (client.readyState === WebSocket.OPEN && !this.options.devices.authenticate(proof)) {
+      this.options.trace?.("remote.socket", { event: "refused", why: "device no longer paired" });
       client.close(1008, "session authentication required"); upstream.terminate();
     }
     for (const transfer of this.transfers.values()) if (!this.options.devices.authenticate(transfer.proof)) transfer.cancel();

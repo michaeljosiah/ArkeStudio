@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { join } from "node:path";
 import { z } from "zod";
 import { RemoteAccessCommandSchema, RemotePairingDurationSchema, type RemoteAccessReply, type RemoteAccessStatus } from "@arke-studio/contracts";
-import { RemoteDevices, RemoteGateway, writeRemotePrivate } from "@arke-studio/coordinator";
+import { RemoteDevices, RemoteGateway, writeRemotePrivate, type RemoteTrace } from "@arke-studio/coordinator";
 import { ServeCleanupRequired, TailscaleServe } from "./tailscale-serve.js";
 
 const Config = z.object({ enabled: z.boolean(), startOnLogin: z.boolean(), origin: z.string().url().nullable(),
@@ -29,7 +29,7 @@ export class DesktopRemoteAccess {
   private path: string;
   constructor(private readonly options: { root: string; clientDirectory: string; session: { port: number; token: string };
     startupSupported: boolean; setStartOnLogin: (enabled: boolean) => void; tailscale?: TailscaleServe;
-    writeClipboard?: (text: string) => void }) {
+    writeClipboard?: (text: string) => void; trace?: RemoteTrace }) {
     this.path = join(options.root, "remote", "settings.json");
     this.devices = new RemoteDevices(join(options.root, "remote", "devices.json"));
   }
@@ -107,10 +107,13 @@ export class DesktopRemoteAccess {
       // A replacement service at the old origin can read that origin's browser key.
       // Revoke durably before publishing elsewhere, including recovery without an origin.
       const hadDevices = this.devices.list().length > 0;
+      // Every phone has to pair again after this, so the move is recorded with what forced it.
+      this.options.trace?.("remote.address-moved", { from: this.config.origin, to: origin, unpaired: this.devices.list().map(row => row.name) });
       await this.devices.revokeAll();
       if (hadDevices) this.reason = "Studio has a new address. Pair your devices again using the new link.";
     }
-    const gateway = new RemoteGateway({ origin, clientDirectory: this.options.clientDirectory, devices: this.devices, session: this.options.session });
+    const gateway = new RemoteGateway({ origin, clientDirectory: this.options.clientDirectory, devices: this.devices, session: this.options.session,
+      ...(this.options.trace ? { trace: this.options.trace } : {}) });
     let published = false;
     try {
       // Also withdraw a matching mapping left by an interrupted older host before trying
@@ -126,6 +129,7 @@ export class DesktopRemoteAccess {
       this.gateway = gateway;
       this.gatewayOrigin = origin;
       this.running = true;
+      this.options.trace?.("remote.started", { origin, devices: this.devices.list().map(row => row.name) });
     } catch (error) {
       if (published || error instanceof ServeCleanupRequired) {
         this.gateway = gateway;
@@ -170,6 +174,7 @@ export class DesktopRemoteAccess {
             this.options.writeClipboard(this.config.origin); copied = true; break;
           case "enable": await this.start(); break;
           case "disable":
+            this.options.trace?.("remote.disabled", {});
             await this.stopGateway();
             if (this.options.startupSupported) this.options.setStartOnLogin(false);
             await this.devices.stop();
@@ -185,11 +190,22 @@ export class DesktopRemoteAccess {
             if (!this.running) throw new Error("Enable remote access first.");
             pairing = this.devices.createCode(); break;
           case "duration": await this.save({ ...this.config, pairingDuration: command.duration }); break;
-          case "approve": await this.devices.approve(command.id, this.config.pairingDuration); break;
+          case "approve": {
+            const name = this.devices.pending().find(row => row.id === command.id)?.name;
+            await this.devices.approve(command.id, this.config.pairingDuration);
+            this.options.trace?.("remote.paired", { device: name, days: this.config.pairingDuration }); break;
+          }
           case "reject": this.devices.reject(command.id); break;
-          case "revoke": await this.devices.revoke(command.id); this.gateway?.recheckDevices(); break;
+          case "revoke": {
+            const name = this.devices.list().find(row => row.id === command.id)?.name;
+            await this.devices.revoke(command.id); this.gateway?.recheckDevices();
+            this.options.trace?.("remote.revoked", { device: name }); break;
+          }
         }
-      } catch (error) { this.reason = error instanceof Error ? error.message : "Remote access could not complete that action."; }
+      } catch (error) {
+        this.reason = error instanceof Error ? error.message : "Remote access could not complete that action.";
+        this.options.trace?.("remote.failed", { command: command.kind, reason: this.reason });
+      }
       return { status: this.status(), ...(pairing ? { pairing } : {}), ...(copied ? { copied } : {}) };
     });
     this.tail = work.catch(() => {});
