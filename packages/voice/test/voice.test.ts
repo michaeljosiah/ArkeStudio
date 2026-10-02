@@ -112,15 +112,16 @@ describe("preview lines (R-9, D7, §3.2)", () => {
 });
 
 describe("delivery (R-15, D9, §3.2)", () => {
-  it("maps deliveries per provider and reports what cannot be expressed", () => {
-    const eleven = deliveryParams("elevenlabs", "breaking");
-    assert.ok(eleven.ok && eleven.params["stability"] !== undefined);
-    const kokoroPace = deliveryParams("kokoro", "urgent");
-    assert.ok(kokoroPace.ok && kokoroPace.params["speed"] !== undefined);
-    const kokoroNo = deliveryParams("kokoro", "breaking");
-    assert.ok(!kokoroNo.ok && /cannot express "breaking"/.test(kokoroNo.reason), "stated, never silently ignored");
-    const unknown = deliveryParams("higgsfield", "cold");
-    assert.ok(!unknown.ok && /no declared delivery mapping/.test(unknown.reason));
+  it("maps a delivery by the reader's cadence row and reports what it cannot express (design turn 181)", () => {
+    const kokoro = { displayName: "Kokoro 82M", cadence: { deliveries: ["measured" as const, "urgent" as const], speed: null, pause: "best-effort-punctuation" as const,
+      emphasis: "unsupported" as const, breath: "unsupported" as const, outputTimestamps: "none" as const,
+      deliveryMappings: { measured: { settings: { speed: 0.92 } }, urgent: { settings: { speed: 1.15 } } } } };
+    const kokoroPace = deliveryParams(kokoro, "urgent");
+    assert.ok(kokoroPace.ok && kokoroPace.params["speed"] === 1.15);
+    const kokoroNo = deliveryParams(kokoro, "breaking");
+    assert.ok(!kokoroNo.ok && kokoroNo.reason === "Kokoro 82M reads measured · urgent", "stated, never silently ignored");
+    const unknown = deliveryParams({ displayName: "Higgsfield" }, "cold");
+    assert.ok(!unknown.ok && /takes no delivery/.test(unknown.reason));
   });
 });
 

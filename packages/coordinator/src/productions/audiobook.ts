@@ -263,7 +263,7 @@ export function directionSourceHash(text: string): string {
 
 /** A plan from what a window or a derivation sends (R-6): the hashes are the block's, never the sender's. */
 export function directionPlan(text: string, input: AudiobookDirectionInput): CadencePlan {
-  return { schemaVersion: 1, sourceTextHash: directionSourceHash(text), delivery: input.delivery, speed: input.speed, cues: input.cues, ...(input.phrase !== undefined ? { phrase: input.phrase } : {}) };
+  return { schemaVersion: 1, sourceTextHash: directionSourceHash(text), ...(input.delivery !== undefined ? { delivery: input.delivery } : {}), speed: input.speed, cues: input.cues, ...(input.note !== undefined ? { note: input.note } : {}) };
 }
 
 /** The model that speaks a block's assigned reader, or the narrator's when the manifest lacks it. */
@@ -414,7 +414,8 @@ function markerName(plan: CadencePlan, cueIndex: number | undefined): string {
 export function heldKey(plan: CadencePlan, control: HeldControl): string {
   if (control.cueIndex !== undefined) return `cue:${JSON.stringify(plan.cues[control.cueIndex])}`;
   if (control.control === "delivery") return `delivery:${plan.delivery}`;
-  if (control.control === "phrase") return `phrase:${plan.phrase ?? ""}`;
+  // The note keeps the phrase's key, so a note held before the rename matches after it.
+  if (control.control === "note") return `phrase:${plan.note ?? ""}`;
   if (control.control === "speed") return `speed:${plan.speed}`;
   return control.control;
 }

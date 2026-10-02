@@ -1,4 +1,5 @@
-import { quoteSpeech, speechInputFits } from "@arke-studio/contracts";
+import { audiobookDirectionHash, quoteSpeech, sentAs, speechInputFits, supportedDeliveries, type CadencePlan } from "@arke-studio/contracts";
+import { directionSourceHash } from "../productions/audiobook.js";
 import { stageArtifactProblem } from "../productions/stage-playblast.js";
 import { planCastCharacterAudio, planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem, type FrozenPerformanceAudio } from "@arke-studio/contracts";
 import { castNameFor, referenceRouteModel, referenceSheetId, referenceRouteRefusal, referenceSubjectLines, whoFor, REFERENCE_ROUTE } from "@arke-studio/contracts";
@@ -12,7 +13,6 @@ import {
   benchSessionSummary,
   benchUpscalePlan,
   UPSCALE_SIZE,
-  deliveryParams,
   benchSourceKey,
   benchTokenFor,
   bindingPreamble,
@@ -999,21 +999,32 @@ export function planBenchDispatch(
       : {}),
   };
 
-  // A delivery this provider cannot express refuses here rather than being dropped on the way
+  // A delivery this reader cannot express refuses here rather than being dropped on the way
   // out: a take that silently ignores the direction is a take the user has to listen to before
-  // discovering the direction never applied (SPEC-011 R-15).
-  let voiceSettings: Record<string, number> | null = null;
+  // discovering the direction never applied (SPEC-011 R-15). What it can is compiled by the one
+  // compiler every speech surface shares (SPEC-049 R-28, design turn 181): the reader's tag in
+  // the words, its sentence beside them, its numbers — and the job names no delivery, so no
+  // client adds a second tag of its own.
+  const voiceLanguage = params.kind === "voice" && params.voiceId !== undefined ? (() => {
+    const source = voiceSourceFor(bundle.clonedVoices, model.provider, model.id, params.voiceId!);
+    return source.kind === "cloned" ? source.voice.language : undefined;
+  })() : undefined;
+  let directed: { text: string; voiceSettings: Record<string, number>; instructions?: string; directionHash: string } | null = null;
   if (params.kind === "voice" && params.delivery !== undefined) {
-    if (!model.limits.deliveries?.includes(params.delivery as Delivery)) {
+    if (!supportedDeliveries(model).includes(params.delivery as Delivery)) {
       return { ok: false, reason: `${model.displayName} cannot express "${params.delivery}".` };
     }
-    const mapped = deliveryParams(model.provider, params.delivery as Delivery);
-    if (!mapped.ok) return { ok: false, reason: mapped.reason };
-    voiceSettings = mapped.params;
+    const plan: CadencePlan = { schemaVersion: 1, sourceTextHash: directionSourceHash(composer.brief), delivery: params.delivery as Delivery, speed: 1, cues: [] };
+    try {
+      const sent = sentAs(composer.brief, plan, model, voiceLanguage);
+      if (sent.held.length > 0) return { ok: false, reason: `${model.displayName} cannot express "${params.delivery}".` };
+      directed = { text: sent.text, voiceSettings: sent.voiceSettings, ...(sent.style !== undefined ? { instructions: sent.style } : {}), directionHash: audiobookDirectionHash(plan) };
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+    }
   }
   if (params.kind === "voice") {
-    const instructions = params.delivery === undefined ? undefined : model.cadence?.deliveryMappings[params.delivery as Delivery]?.instruction;
-    if (!speechInputFits(composer.brief, model.limits, instructions)) {
+    if (!speechInputFits(directed?.text ?? composer.brief, model.limits, directed?.instructions)) {
       return { ok: false, reason: "The line and its direction exceed this model's request limit. Shorten it or use an audiobook read in parts." };
     }
   }
@@ -1222,20 +1233,21 @@ export function planBenchDispatch(
         provider: model.provider,
         model: model.id,
         params: {
-          text: composer.brief,
+          text: directed?.text ?? composer.brief,
           audioFormat: voiceFormatForModel(model),
           ...(params.voiceId !== undefined ? { voiceId: params.voiceId } : {}),
-          // The delivery is sent in the provider's own vocabulary, or not at all — a row that
-          // cannot express one says so rather than having a neighbour's settings guessed at. Its
-          // name rides too, for a reader whose vocabulary is words (SPEC-046 R-22).
-          ...(voiceSettings !== null ? { voiceSettings, delivery: params.delivery } : {}),
+          // The direction as the compiler wrote it for this reader (design turn 181): the words
+          // with its tags in, its numbers, its sentence, and the hash that marks the text as
+          // compiled — never the delivery's name, which a client would turn into a second tag.
+          ...(directed !== null ? { voiceSettings: directed.voiceSettings, directionHash: directed.directionHash, ...(directed.instructions !== undefined ? { instructions: directed.instructions } : {}) } : {}),
           // A cloned voice's recording language is the line's (issue 1163): the reader routes and
           // tags by it, and the estimate counts the tag it would put in.
           ...(voiceSource.kind === "cloned" ? { language: voiceSource.voice.language } : {}),
           // No container control: the concrete model declares its format and every downstream
           // layer consumes that same value.
         },
-        estimatedMicroUsd: quoteSpeech(model, composer.brief, { at: options.at, delivery: voiceSettings !== null ? params.delivery : undefined, language: voiceSource.kind === "cloned" ? voiceSource.voice.language : undefined }).authorisedMicroUsd,
+        // The compiled text is priced: its tags are in it, so no delivery is named to count twice.
+        estimatedMicroUsd: quoteSpeech(model, directed?.text ?? composer.brief, { at: options.at, language: voiceSource.kind === "cloned" ? voiceSource.voice.language : undefined }).authorisedMicroUsd,
         landing: { dir: sessionMediaDir(session.id, takeId) },
         ...(voiceSource.kind === "cloned" ? { voiceReference: true } : {}),
       });

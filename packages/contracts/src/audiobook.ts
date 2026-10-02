@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { CADENCE_PHRASE_MAX, CadencePlanSchema, cueStart, normalizeSpeechText, type CadenceCue, type CadencePlan } from "./cadence.js";
+import { CADENCE_PHRASE_MAX, CadencePlanObjectSchema, CadencePlanSchema, isPointCue, migratePlanNote, normalizeSpeechText, type CadenceCue, type CadencePlan } from "./cadence.js";
+import { orderCues } from "./direction-tags.js";
 import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema } from "./ids.js";
 import { isSceneBreak } from "./manuscript.js";
 import { DeliverySchema } from "./voice.js";
@@ -207,20 +208,25 @@ export const AudiobookDirectionSchema = z
   .strict();
 export type AudiobookDirection = z.infer<typeof AudiobookDirectionSchema>;
 
-/** What a window or a derivation writes: the plan without its hashes, which the coordinator supplies from the block's words. */
-export const AudiobookDirectionInputSchema = CadencePlanSchema.omit({ schemaVersion: true, sourceTextHash: true });
+/**
+ * What a window, a derivation or the Bench writes: the plan without its hashes, which the
+ * coordinator supplies from the words. An old `phrase` reads as the note (design turn 181).
+ */
+export const AudiobookDirectionInputObjectSchema = CadencePlanObjectSchema.omit({ schemaVersion: true, sourceTextHash: true });
+export const AudiobookDirectionInputSchema = z.preprocess(migratePlanNote, AudiobookDirectionInputObjectSchema);
 export type AudiobookDirectionInput = z.infer<typeof AudiobookDirectionInputSchema>;
 
 /**
  * The name of a direction as a take remembers it (R-14): the plan's fields in a fixed order,
- * so the same direction hashes the same whatever order it was written in, and a phrase or a
- * cue changed moves the block to `stale`.
+ * so the same direction hashes the same whatever order it was written in, and a note or a
+ * cue changed moves the block to `stale`. The note is named by its old key, `phrase`, so a
+ * take made under a phrase is current under the same words as a note (design turn 181).
  */
 export function audiobookDirectionHash(plan: CadencePlan): string {
   const canonical = {
     delivery: plan.delivery,
     speed: plan.speed,
-    ...(plan.phrase !== undefined ? { phrase: plan.phrase } : {}),
+    ...(plan.note !== undefined ? { phrase: plan.note } : {}),
     cues: plan.cues.map((cue) =>
       cue.kind === "emphasis"
         ? { kind: cue.kind, from: cue.span.from, to: cue.span.to, text: cue.span.text, level: cue.level }
@@ -228,6 +234,8 @@ export function audiobookDirectionHash(plan: CadencePlan): string {
           ? { kind: cue.kind, from: cue.span.from, to: cue.span.to, text: cue.span.text, ...(cue.delivery !== undefined ? { delivery: cue.delivery } : {}), ...(cue.phrase !== undefined ? { phrase: cue.phrase } : {}) }
           : cue.kind === "pause"
           ? { kind: cue.kind, at: cue.at, length: cue.length }
+          : cue.kind === "sound"
+          ? { kind: cue.kind, at: cue.at, sound: cue.sound }
           : { kind: cue.kind, at: cue.at, action: cue.action },
     ),
   };
@@ -259,7 +267,7 @@ export function rekeyCues(oldText: string, cues: readonly CadenceCue[], newText:
   const moved: CadenceCue[] = [];
   let dropped = 0;
   for (const cue of cues) {
-    if (cue.kind === "emphasis" || cue.kind === "delivery") {
+    if (!isPointCue(cue)) {
       const at = once(cue.span.text);
       if (at === null) dropped += 1;
       else moved.push({ ...cue, span: { ...cue.span, from: at, to: at + cue.span.text.length } });
@@ -278,28 +286,15 @@ export function rekeyCues(oldText: string, cues: readonly CadenceCue[], newText:
     if (tail === null || found === null) dropped += 1;
     else moved.push({ ...cue, at: Math.max(0, found - tail[1]!.length) });
   }
-  moved.sort((a, b) => cueStart(a) - cueStart(b));
-  const kept: CadenceCue[] = [];
-  const clashes = (cue: CadenceCue): boolean =>
-    kept.some((other) => {
-      if (cue.kind === "pause" || cue.kind === "breath") return other.kind === cue.kind && other.at === cue.at;
-      if (other.kind === "pause" || other.kind === "breath") return false;
-      const overlaps = cue.span.from < other.span.to && cue.span.to > other.span.from;
-      if (!overlaps) return false;
-      if (cue.kind === other.kind) return true;
-      const [marker, emphasis] = cue.kind === "delivery" ? [cue, other] : [other, cue];
-      return emphasis.span.from < marker.span.from || emphasis.span.to > marker.span.to;
-    });
-  for (const cue of moved) {
-    if (clashes(cue)) dropped += 1;
-    else kept.push(cue);
-  }
-  return { cues: kept, dropped };
+  // In position order first, so the earlier of two clashing cues is the one kept, as before.
+  const ordered = [...moved].sort((a, b) => (isPointCue(a) ? a.at : a.span.from) - (isPointCue(b) ? b.at : b.span.from));
+  const kept = orderCues(ordered);
+  return { cues: kept, dropped: dropped + (ordered.length - kept.length) };
 }
 
 /**
  * A direction written for other words, carried to the block's words now (R-43): the block's
- * delivery, phrase and speed kept, its cues re-keyed, and the count of what could not be
+ * delivery, note and speed kept, its cues re-keyed, and the count of what could not be
  * carried. Null when the direction stands for these words already, or was written by a build
  * that did not keep its words, which a wording change drops whole as before.
  */
@@ -308,7 +303,7 @@ export function audiobookRekeyed(record: Pick<ChapterAudiobook, "direction"> | n
   if (held === undefined || held.text === undefined || held.textHash === audiobookTextHash(block.text)) return null;
   const { cues, dropped } = rekeyCues(held.text, held.plan.cues, block.text);
   return {
-    input: { delivery: held.plan.delivery, speed: held.plan.speed, cues, ...(held.plan.phrase !== undefined ? { phrase: held.plan.phrase } : {}) },
+    input: { ...(held.plan.delivery !== undefined ? { delivery: held.plan.delivery } : {}), speed: held.plan.speed, cues, ...(held.plan.note !== undefined ? { note: held.plan.note } : {}) },
     dropped: dropped + (held.dropped ?? 0),
   };
 }

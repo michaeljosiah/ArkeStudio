@@ -24,13 +24,13 @@ it("shipped rows compile all six deliveries into structured style", async () => 
     assert.deepEqual(SHIPPED_MANIFEST.models.find(model => model.id === row.id), row);
     for (const delivery of row.cadence!.deliveries) {
       const hash = `sha256:${"a".repeat(64)}`;
-      const mapped = mapCadence("Keep these exact words.", hash, { schemaVersion: 1, sourceTextHash: hash, delivery, speed: 1, phrase: "quietly confident", cues: [] }, row);
+      const mapped = mapCadence("Keep these exact words.", hash, { schemaVersion: 1, sourceTextHash: hash, delivery, speed: 1, note: "quietly confident", cues: [] }, row);
       const client = new GoogleClient(async (_url, init) => {
         const body = JSON.parse(String(init?.body));
         const content = body.input[0].content[0];
         assert.equal(content.text, "Keep these exact words.");
         assert.equal(content.annotations[0].style, mapped.instructions);
-        assert.ok(mapped.instructions?.endsWith("quietly confident"));
+        assert.ok(mapped.instructions?.endsWith("Quietly confident."), "the note as a sentence after the delivery's");
         return Response.json({ ...responseBody(), model: row.id });
       });
       const result = await client.submit("test", { ...request, model: row.id, params: { text: mapped.providerText, voiceId: "Charon", voiceSettings: mapped.voiceSettings, instructions: mapped.instructions } });

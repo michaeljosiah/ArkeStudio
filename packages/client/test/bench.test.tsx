@@ -614,7 +614,7 @@ describe("the bench in voice mode (design 70)", () => {
     capability: "voice-tts",
     displayName: "Test Voice",
     accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
-    limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"] },
+    limits: {}, cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: null, pause: "unsupported" as const, emphasis: "unsupported" as const, breath: "unsupported" as const, outputTimestamps: "none" as const, deliveryMappings: { measured: { settings: {} }, whispered: { settings: {} }, breaking: { settings: {} }, cold: { settings: {} }, warm: { settings: {} }, urgent: { settings: {} } } },
     pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
   };
   const TTS_SIBLING: ManifestModel = {
@@ -716,6 +716,8 @@ describe("the bench in voice mode (design 70)", () => {
       displayName: "Local Cloned Voice",
       limits: { maxPromptChars: 400, audioFormat: "flac" },
       pricing: { kind: "unmetered" },
+      // A row with no cadence reads no delivery (design turn 181: support is the row's alone).
+      cadence: undefined,
     };
     const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, {
       ...state,
@@ -746,6 +748,8 @@ describe("the bench in voice mode (design 70)", () => {
       displayName: "Local Cloned Voice",
       limits: { maxPromptChars: 400, audioFormat: "flac" },
       pricing: { kind: "unmetered" },
+      // A row with no cadence reads no delivery (design turn 181: support is the row's alone).
+      cadence: undefined,
     };
     const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, {
       ...state,

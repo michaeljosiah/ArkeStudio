@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   AUDIOBOOK_TITLE_KEY,
+  AudiobookDirectionInputSchema,
   AudiobookDirectionSchema,
   audiobookBlocks,
   audiobookSpeakerColours,
@@ -27,6 +28,7 @@ import {
   type ChapterAudiobook,
 } from "../src/audiobook.js";
 import type { CadencePlan } from "../src/cadence.js";
+import { textDigest } from "../src/subtitles.js";
 
 /**
  * The audiobook's blocks and states (design turn 146, SPEC-047 R-2, R-13, R-14): the title
@@ -131,8 +133,8 @@ describe("a block's state (R-13, R-14)", () => {
     const hash = audiobookDirectionHash(plan({ delivery: "urgent" }));
     const under = record({ [narration.key]: take(narration.text, GEORGE, { directionHash: hash }) }, {}, { [narration.key]: directed(narration.text, plan({ delivery: "urgent" })) });
     assert.equal(audiobookBlockState(narration, under, GEORGE), "made", "the take was made under the direction that stands");
-    const changed = record({ [narration.key]: take(narration.text, GEORGE, { directionHash: hash }) }, {}, { [narration.key]: directed(narration.text, plan({ delivery: "urgent", phrase: "flat" })) });
-    assert.equal(audiobookBlockState(narration, changed, GEORGE), "stale", "a phrase added is a different direction");
+    const changed = record({ [narration.key]: take(narration.text, GEORGE, { directionHash: hash }) }, {}, { [narration.key]: directed(narration.text, plan({ delivery: "urgent", note: "flat" })) });
+    assert.equal(audiobookBlockState(narration, changed, GEORGE), "stale", "a note added is a different direction");
     const dropped = record({ [narration.key]: take(narration.text, GEORGE, { directionHash: hash }) });
     assert.equal(audiobookBlockState(narration, dropped, GEORGE), "stale", "the direction cleared since the take");
     const otherWords = record({ [narration.key]: take(narration.text, GEORGE) }, {}, { [narration.key]: directed("other words entirely", plan({ delivery: "urgent" })) });
@@ -141,10 +143,10 @@ describe("a block's state (R-13, R-14)", () => {
   });
 
   it("names a direction the same whatever order its fields came in, and differently for any change", () => {
-    const a = audiobookDirectionHash({ schemaVersion: 1, sourceTextHash: SOURCE, delivery: "cold", speed: 0.9, cues: [{ kind: "pause", at: 4, length: "long" }], phrase: "flat" });
-    const b = audiobookDirectionHash({ phrase: "flat", cues: [{ length: "long", at: 4, kind: "pause" }], speed: 0.9, delivery: "cold", sourceTextHash: SOURCE, schemaVersion: 1 } as CadencePlan);
+    const a = audiobookDirectionHash({ schemaVersion: 1, sourceTextHash: SOURCE, delivery: "cold", speed: 0.9, cues: [{ kind: "pause", at: 4, length: "long" }], note: "flat" });
+    const b = audiobookDirectionHash({ note: "flat", cues: [{ length: "long", at: 4, kind: "pause" }], speed: 0.9, delivery: "cold", sourceTextHash: SOURCE, schemaVersion: 1 } as CadencePlan);
     assert.equal(a, b);
-    assert.notEqual(a, audiobookDirectionHash(plan({ delivery: "cold", speed: 0.9, cues: [{ kind: "pause", at: 4, length: "short" }], phrase: "flat" })));
+    assert.notEqual(a, audiobookDirectionHash(plan({ delivery: "cold", speed: 0.9, cues: [{ kind: "pause", at: 4, length: "short" }], note: "flat" })));
     assert.notEqual(a, audiobookDirectionHash(plan({ delivery: "cold", speed: 0.9, cues: [{ kind: "pause", at: 4, length: "long" }] })));
   });
 
@@ -176,7 +178,14 @@ describe("the record", () => {
     const { direction: _none, ...firstBuild } = rec;
     const parsed = ChapterAudiobookSchema.safeParse(firstBuild);
     assert.ok(parsed.success && Object.keys(parsed.data.direction).length === 0, "a record the first build wrote, with no direction field, reads with none");
-    assert.ok(!AudiobookDirectionSchema.safeParse({ textHash: "text-v1:x", plan: plan({ phrase: "x".repeat(61) }), at: AT }).success, "a phrase over 60 characters is refused");
+    assert.ok(!AudiobookDirectionSchema.safeParse({ textHash: "text-v1:x", plan: plan({ note: "x".repeat(301) }), at: AT }).success, "a note over 300 characters is refused");
+    // A record written before design turn 181 holds a phrase: it reads as the note, and the take
+    // made under it keeps the name it was given, so nothing goes stale by the rename.
+    const old = AudiobookDirectionSchema.parse({ textHash: "text-v1:x", plan: { ...plan(), phrase: "flat" }, at: AT });
+    assert.equal(old.plan.note, "flat");
+    assert.equal("phrase" in old.plan, false);
+    assert.equal(audiobookDirectionHash(old.plan), textDigest(`direction-v1:${JSON.stringify({ delivery: old.plan.delivery, speed: old.plan.speed, phrase: "flat", cues: [] })}`));
+    assert.equal(AudiobookDirectionInputSchema.parse({ delivery: "cold", speed: 1, cues: [], phrase: "flat" }).note, "flat", "a proposed direction migrates too");
     assert.ok(!AudiobookDirectionSchema.safeParse({ textHash: "text-v1:x", plan: plan({ speed: 1.3 }), at: AT }).success, "speed is the plan's own 0.7–1.2");
     assert.deepEqual(summariseAudiobook(rec), { chapterVersion: 4, hash: "sha256:body", updatedAt: AT, takes: 1, flagged: 1 });
     assert.ok(!ChapterAudiobookSchema.safeParse({ ...rec, extra: true }).success, "strict: a field this build does not know is not a record");

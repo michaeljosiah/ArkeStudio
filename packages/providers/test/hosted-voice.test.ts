@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { billableCharacters, BREEZE_DELIVERY, estimateMicroUsd, modelPriceCopy } from "@arke-studio/contracts";
+import { billableCharacters, estimateMicroUsd, modelPriceCopy } from "@arke-studio/contracts";
+import { BREEZE_DELIVERY } from "../src/voice-direction.js";
 import { BreezeBlueClient, BREEZE_CATALOGUE_PAGES, BREEZE_MODEL, BREEZE_TEXT_CAP } from "../src/clients/breezeblue.js";
 import { MistralClient, VOXTRAL_MODEL, VOXTRAL_PRESETS, VOXTRAL_TEXT_CAP } from "../src/clients/mistral.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
@@ -448,13 +449,14 @@ describe("the rows and the registry (SPEC-046 R-6..R-8, R-28)", () => {
   it("the Voxtral row is honest: one delivery, WAV, our own cap, sixteen micro-dollars a character", () => {
     const row = SHIPPED_MANIFEST.models.find((m) => m.id === VOXTRAL_MODEL)!;
     assert.equal(row.providerModelId, "voxtral-mini-tts-2603");
-    assert.deepEqual(row.limits.deliveries, ["measured"]);
+    assert.equal(row.limits.deliveries, undefined, "support is the cadence row's alone (design turn 181)");
+    assert.deepEqual(row.cadence?.deliveries, ["measured"]);
     assert.equal(row.limits.audioFormat, "wav");
     assert.equal(row.limits.maxPromptChars, VOXTRAL_TEXT_CAP, "the row and the client agree on the cap");
     assert.deepEqual(row.pricing, { kind: "perCharacter", microUsdPerCharacter: 16 });
     assert.equal(modelPriceCopy(row), "$16.00 / M characters");
     assert.equal(row.cadence?.speed, null);
-    assert.equal(row.cadence?.pause, "unsupported");
+    assert.equal(row.cadence?.pause, "best-effort-punctuation", "a pause is punctuation, which every reader reads (design turn 181)");
   });
 
   it("the Breeze row carries the free-plan rate, the vendor's 1,000-character cap, and the one delivery table", () => {
@@ -484,11 +486,18 @@ describe("Breeze on the performance path (SPEC-046 issue 1149)", () => {
     assert.equal(body["text"], "(whispers) Do not open it.");
     assert.equal(body["instructions"], "Whisper it.");
     assert.equal(body["language_code"], "en");
-    // A delivery named beside a mapped sentence: the sentence rides as mapped, the tag as derived.
+    // A delivery named beside a mapped sentence: the job is compiled, so the sentence rides as
+    // mapped and no tag is derived from the name — the compiler placed any tag already, and a
+    // second would be read twice (design turn 181, SPEC-049 R-28). Before, the tag was derived.
     await new BreezeBlueClient(r.fetchImpl).submit("k", { model: BREEZE_MODEL, capability: "voice-tts",
       params: { text: "Do not open it.", voiceId: "voc_1", language: "en", delivery: "whispered", instructions: "As mapped." } });
     assert.equal(r.body()["instructions"], "As mapped.");
+    assert.equal(r.body()["text"], "Do not open it.");
+    // Nor from a job that carries its direction's hash, whatever it names.
+    await new BreezeBlueClient(r.fetchImpl).submit("k", { model: BREEZE_MODEL, capability: "voice-tts",
+      params: { text: "(whispers) Do not open it.", voiceId: "voc_1", language: "en", delivery: "whispered", directionHash: "direction-v1:x" } });
     assert.equal(r.body()["text"], "(whispers) Do not open it.");
+    assert.equal(r.body()["instructions"], undefined);
     // An empty sentence is no sentence: the delivery's own carries.
     await new BreezeBlueClient(r.fetchImpl).submit("k", { model: BREEZE_MODEL, capability: "voice-tts",
       params: { text: "Do not open it.", voiceId: "voc_1", delivery: "whispered", instructions: "  " } });

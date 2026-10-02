@@ -244,7 +244,11 @@ export const ModelLimitsSchema = z
     maxPromptChars: z.number().int().min(1).optional(),
     /** Conservative request packing budget for spoken text plus separate style, not a token count. */
     maxSpeechUtf8Bytes: z.number().int().min(1).optional(),
-    /** Delivery directions this concrete speech model has a measured wire mapping for. */
+    /**
+     * Retired (design turn 181): what a reader can do is read from its `cadence` row alone, and
+     * no row declares this any more. Still parsed so a manifest or session written before
+     * reads; nothing reads it.
+     */
     deliveries: z.array(z.enum(["measured", "whispered", "breaking", "cold", "warm", "urgent"])).optional(),
     /** Generated speech container, consumed consistently by cache, verification, media, and events. */
     audioFormat: z.enum(["wav", "mp3", "flac"]).optional(),

@@ -163,7 +163,7 @@ export interface BlockRow {
 /** A plan for the view alone: the window holds no digest of the words, and none is checked here. */
 const VIEW_HASH = `sha256:${"0".repeat(64)}`;
 function viewPlan(input: AudiobookDirectionInput): CadencePlan {
-  return { schemaVersion: 1, sourceTextHash: VIEW_HASH, delivery: input.delivery, speed: input.speed, cues: input.cues, ...(input.phrase !== undefined ? { phrase: input.phrase } : {}) };
+  return { schemaVersion: 1, sourceTextHash: VIEW_HASH, ...(input.delivery !== undefined ? { delivery: input.delivery } : {}), speed: input.speed, cues: input.cues, ...(input.note !== undefined ? { note: input.note } : {}) };
 }
 
 /** The block's direction as it stands for its words (R-43): the record's, or carried from earlier words. */
@@ -171,7 +171,7 @@ export function rowDirection(record: ChapterAudiobook | null, block: Pick<Audiob
   const standing = audiobookDirectionFor(record, block);
   if (standing !== null) {
     const plan = standing.plan;
-    return { input: { delivery: plan.delivery, speed: plan.speed, cues: plan.cues, ...(plan.phrase !== undefined ? { phrase: plan.phrase } : {}) }, dropped: standing.dropped ?? 0 };
+    return { input: { ...(plan.delivery !== undefined ? { delivery: plan.delivery } : {}), speed: plan.speed, cues: plan.cues, ...(plan.note !== undefined ? { note: plan.note } : {}) }, dropped: standing.dropped ?? 0 };
   }
   return audiobookRekeyed(record, block);
 }
@@ -196,9 +196,10 @@ export function directionView(text: string, input: AudiobookDirectionInput | nul
   }
 }
 
-/** A marker's word on the page (R-42): `[whispered]`, `[pause]`, `[breath]`, `[emphasis]`. */
+/** A marker's word on the page (R-42): `[whispered]`, `[pause]`, `[breath]`, `[emphasis]`, `[sighs]`. */
 export function markerLabel(cue: CadenceCue): string {
   if (cue.kind === "delivery") return `[${[cue.delivery, cue.phrase].filter((part) => part !== undefined).join(" · ")}]`;
+  if (cue.kind === "sound") return `[${cue.sound}]`;
   if (cue.kind === "pause") return cue.length === "long" ? "[long pause]" : "[pause]";
   return `[${cue.kind}]`;
 }
@@ -1309,6 +1310,7 @@ export function cueLabel(text: string, cue: CadencePlan["cues"][number]): string
   if (cue.kind === "pause") return `pause · ${cue.length} · ${after(cue.at)}`;
   if (cue.kind === "breath") return `${cue.action} · before ${text.slice(cue.at, cue.at + 12).replace(/\s\S*$/, "").trim()}`;
   if (cue.kind === "delivery") return cue.span.text;
+  if (cue.kind === "sound") return `${cue.sound} · ${after(cue.at)}`;
   return `emphasis · ${cue.level} · ${cue.span.text}`;
 }
 
@@ -1573,11 +1575,11 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
     if (phraseDraft === null) return;
     const trimmed = phraseDraft.trim();
     setPhraseDraft(null);
-    if (trimmed === (base.phrase ?? "")) return;
+    if (trimmed === (base.note ?? "")) return;
     if (trimmed === "") {
-      const { phrase: _gone, ...rest } = base;
+      const { note: _gone, ...rest } = base;
       send(rest);
-    } else write({ phrase: trimmed.slice(0, 60) });
+    } else write({ note: trimmed.slice(0, 60) });
   };
   // Delivery is six chips, the chosen one filled (turn 165, 155e): a grey seg of six words wrapped
   // to two rows in the side's 250 (issue 1324 §3). One or none is chosen, so a radiogroup whose
@@ -1668,7 +1670,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
           {phraseSupported ? (
             <input
               className="fy-ab__phrase fy-mono"
-              value={phraseDraft ?? held?.phrase ?? ""}
+              value={phraseDraft ?? held?.note ?? ""}
               maxLength={60}
               aria-label="Phrase"
               onChange={(event) => setPhraseDraft(event.target.value)}

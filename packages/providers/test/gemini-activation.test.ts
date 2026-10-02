@@ -10,7 +10,7 @@ it("offers both Gemini rows ahead of ElevenLabs for new cloud choices, preservin
     assert.ok(supportsPerformanceGeneration(model));
     assert.equal(model.pricing.kind, "perToken");
     assert.equal(model.limits.audioFormat, "wav");
-    assert.deepEqual(deliveryParams(model.provider, "whispered"), { ok: true, params: {} });
+    assert.deepEqual(deliveryParams(model, "whispered"), { ok: true, params: {} });
   }
   assert.equal(modelForCapability(SHIPPED_MANIFEST, { "voice-tts": "eleven-v3" }, "voice-tts")?.id, "eleven-v3");
   assert.equal(DEFAULT_NARRATOR.provider, "kokoro");

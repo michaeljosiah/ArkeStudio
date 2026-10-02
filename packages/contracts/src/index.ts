@@ -103,6 +103,7 @@ export * from "./audio-reference.js";
 export * from "./performance.js";
 
 export * from "./cadence.js";
+export * from "./direction-tags.js";
 
 export * from "./rehearsal.js";
 export * from "./performance-bible.js";

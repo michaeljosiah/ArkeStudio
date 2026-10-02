@@ -330,7 +330,7 @@ describe("a direction held to its block and its reader (SPEC-047 R-10)", () => {
     assert.deepEqual(verified.proposed["p1.0"], {
       delivery: "cold",
       speed: 0.9,
-      phrase: "to the water, flat",
+      note: "to the water, flat",
       cues: [
         { kind: "emphasis", span: { from: 9, to: 12, text: "not" }, level: "strong" },
         { kind: "pause", at: 27, length: "long" },
@@ -359,7 +359,7 @@ describe("a direction held to its block and its reader (SPEC-047 R-10)", () => {
     const plan = directionPlan(text, {
       delivery: "whispered",
       speed: 1,
-      phrase: "to the water",
+      note: "to the water",
       cues: [
         { kind: "pause", at: text.indexOf("tide.") + 5, length: "long" },
         { kind: "emphasis", span: { from: text.indexOf("nobody"), to: text.indexOf("nobody") + 6, text: "nobody" }, level: "strong" },
@@ -876,7 +876,7 @@ describe("the audiobook run (turn 146)", () => {
         assert.ok(directed.proposed && Object.keys(directed.proposed).length >= 2, "every block addressed");
         assert.equal(directed.proposed["title"]?.delivery, "urgent");
         assert.equal(directed.proposed["p0.0"]?.delivery, "measured", "the whisper fell to measured");
-        assert.equal(directed.proposed["p0.0"]?.phrase, undefined, "Kokoro takes no phrase");
+        assert.equal(directed.proposed["p0.0"]?.note, undefined, "Kokoro takes no phrase");
         assert.equal(directed.dropped, 2, "the whisper and the phrase, counted");
         assert.equal(directed.summary, "Every block measured but the title, said with urgency.");
         assert.equal(directed.hash, blocks.bodyHash);
@@ -1391,7 +1391,7 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
         synthesize: async () => {
           if (!redirected && sendRef !== null) {
             redirected = true;
-            await sendRef({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "02-the-same-ink", block: "p0.1", direction: { delivery: "whispered", speed: 1, cues: [], phrase: "under her breath" } });
+            await sendRef({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "02-the-same-ink", block: "p0.1", direction: { delivery: "whispered", speed: 1, cues: [], note: "under her breath" } });
           }
           return wav();
         },
@@ -1544,7 +1544,7 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
       await send({ kind: "set-narrator", voice: { provider: "elevenlabs", model: V3.id, voiceId: V3_LOW_TIDE.voiceId, label: "Low tide" } });
       // The title, narration, directed for Eleven v3: a whisper and a phrase.
-      await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "title", direction: { delivery: "whispered", speed: 1, cues: [], phrase: "under her breath" } });
+      await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "title", direction: { delivery: "whispered", speed: 1, cues: [], note: "under her breath" } });
       type Recorded = Extract<DomainEvent, { type: "audiobook.record" }>;
       const written = events.filter((e): e is Recorded => e.type === "audiobook.record").at(-1);
       assert.ok(written?.record, written?.refused);
@@ -1558,7 +1558,7 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       // Held, not dropped (R-47): kept for a narrator that can read them again.
       const record = await readRecord(worldDir);
       assert.equal(record.direction["title"]?.plan.delivery, "whispered");
-      assert.equal(record.direction["title"]?.plan.phrase, "under her breath");
+      assert.equal(record.direction["title"]?.plan.note, "under her breath");
     }));
 
   it("a chapter read pressed while the book is being read is refused in a word, and a chapter its own run holds is left to that run (codex on PR 1187)", async () => {
@@ -1672,7 +1672,7 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
         const door = await openDoor(send, events);
         const line = door.rows[0]!;
         assert.equal(line.castTrouble, undefined);
-        await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.1", direction: { delivery: "whispered", speed: 1, cues: [], phrase: "under her breath" } });
+        await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.1", direction: { delivery: "whispered", speed: 1, cues: [], note: "under her breath" } });
         type Recorded = Extract<DomainEvent, { type: "audiobook.record" }>;
         const written = events.filter((e): e is Recorded => e.type === "audiobook.record").at(-1);
         assert.ok(written?.record, written?.refused);
@@ -1687,7 +1687,7 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
         assert.equal(conformed.chapters, 1);
         const record = await readRecord(worldDir);
         assert.equal(record.direction["p0.1"]?.plan.delivery, "whispered", "held on the record, not fallen to what Kokoro reads");
-        assert.equal(record.direction["p0.1"]?.plan.phrase, "under her breath");
+        assert.equal(record.direction["p0.1"]?.plan.note, "under her breath");
       },
     ));
 });

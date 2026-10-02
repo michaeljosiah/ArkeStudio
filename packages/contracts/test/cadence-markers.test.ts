@@ -70,12 +70,12 @@ it("an emphasis inside a marker is allowed, one across its edge is not, and a ma
 });
 
 it("what a reader cannot express is held: left out of what is sent, named, and kept on the plan (R-47)", () => {
-  const input = plan(text, [{ kind: "pause", at: 14, length: "long" }, { kind: "delivery", span: span("Not tonight,"), delivery: "whispered" }], { phrase: "tired", speed: 1.1 });
+  const input = plan(text, [{ kind: "pause", at: 14, length: "long" }, { kind: "delivery", span: span("Not tonight,"), delivery: "whispered" }], { note: "tired", speed: 1.1 });
   const { plan: sent, held } = holdDirection(text, input, kokoro);
-  assert.deepEqual(held.map((h) => [h.control, h.cueIndex]), [["speed", undefined], ["pause", 0], ["marker", 1], ["phrase", undefined]]);
+  assert.deepEqual(held.map((h) => [h.control, h.cueIndex]), [["speed", undefined], ["pause", 0], ["marker", 1], ["note", undefined]]);
   assert.equal(held.find((h) => h.control === "marker")?.reason, "reads measured · urgent");
   assert.deepEqual(sent.cues, []);
-  assert.equal(sent.phrase, undefined);
+  assert.equal(sent.note, undefined);
   assert.equal(sent.speed, 1);
   assert.equal(holdDirection(text, input, fish).held.length, 0, "a reader that can express it holds nothing");
 });
@@ -114,7 +114,7 @@ it("a direction that kept its words is carried to new ones; one from an earlier 
   const before = "Not tonight, she said.";
   const direction = {
     textHash: "old",
-    plan: plan(before, [{ kind: "delivery", span: { from: 0, to: 12, text: "Not tonight," }, delivery: "whispered" }], { delivery: "cold", phrase: "flat" }),
+    plan: plan(before, [{ kind: "delivery", span: { from: 0, to: 12, text: "Not tonight," }, delivery: "whispered" }], { delivery: "cold", note: "flat" }),
     at: "2026-09-26T00:00:00.000Z",
     text: before,
   };
@@ -122,7 +122,7 @@ it("a direction that kept its words is carried to new ones; one from an earlier 
   const carried = audiobookRekeyed({ direction: { "p1.1": direction } }, block);
   assert.equal(carried?.dropped, 0);
   assert.equal(carried?.input.delivery, "cold");
-  assert.equal(carried?.input.phrase, "flat");
+  assert.equal(carried?.input.note, "flat");
   assert.equal(carried?.input.cues.length, 1);
   const { text: _gone, ...earlier } = direction;
   assert.equal(audiobookRekeyed({ direction: { "p1.1": earlier } }, block), null);

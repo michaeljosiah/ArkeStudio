@@ -1541,14 +1541,21 @@ describe("reading a line on the bench (design 70)", () => {
     capability: "voice-tts",
     displayName: "Test Voice",
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-    limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"] },
+    limits: {},
     pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
+    // What a reader can do is its cadence row's alone (design turn 181).
+    cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.2 }, pause: "best-effort-audio-tag",
+      emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none", phrase: "best-effort-tag",
+      deliveryMappings: { measured: { settings: { stability: 0.5 } }, whispered: { settings: { stability: 0.5 }, tag: "whispers" }, breaking: { settings: { stability: 0 }, tag: "crying" },
+        cold: { settings: { stability: 1 }, tag: "coldly" }, warm: { settings: { stability: 0.5 }, tag: "warmly" }, urgent: { settings: { stability: 0 }, tag: "urgent" } } },
   };
   const VOICE_SIBLING: ManifestModel = {
     ...VOICE,
     id: "test-tts-sibling",
     displayName: "Test Voice Sibling",
-    limits: { deliveries: ["urgent"], audioFormat: "wav" },
+    limits: { audioFormat: "wav" },
+    cadence: { deliveries: ["urgent"], speed: null, pause: "unsupported", emphasis: "unsupported", breath: "unsupported", outputTimestamps: "none",
+      deliveryMappings: { urgent: { settings: { stability: 0 } } } },
   };
   /** A local row, which maps far fewer deliveries than the cloud one. */
   const LOCAL: ManifestModel = {
@@ -1556,8 +1563,10 @@ describe("reading a line on the bench (design 70)", () => {
     id: "test-local-tts",
     provider: "kokoro",
     displayName: "Local Voice",
-    limits: { deliveries: ["measured", "urgent"] },
+    limits: {},
     pricing: { kind: "unmetered" },
+    cadence: { deliveries: ["measured", "urgent"], speed: null, pause: "best-effort-punctuation", emphasis: "unsupported", breath: "unsupported", outputTimestamps: "none",
+      deliveryMappings: { measured: { settings: { speed: 0.92 } }, urgent: { settings: { speed: 1.15 } } } },
   };
   const CLONED: ManifestModel = {
     ...VOICE,
@@ -1669,7 +1678,14 @@ describe("reading a line on the bench (design 70)", () => {
     // The same delivery on a row that maps it goes as settings the provider understands.
     const ok = await planVoice(VOICE, { voiceId: "vale", delivery: "breaking" });
     assert.ok(ok.ok, ok.ok ? undefined : ok.reason);
-    if (ok.ok) assert.ok(ok.inputs[0]!.params["voiceSettings"], "the direction reaches the wire");
+    if (ok.ok) {
+      // Compiled for the reader (design turn 181): its tag in the words, its numbers beside them,
+      // and no delivery name for a client to tag a second time.
+      assert.deepEqual(ok.inputs[0]!.params["voiceSettings"], { stability: 0, speed: 1 }, "the direction reaches the wire");
+      assert.match(String(ok.inputs[0]!.params["text"]), /^\[crying\] /);
+      assert.equal(ok.inputs[0]!.params["delivery"], undefined);
+      assert.equal(typeof ok.inputs[0]!.params["directionHash"], "string");
+    }
   });
 
   it("will not read without a voice, and says which is missing", async () => {

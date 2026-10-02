@@ -1,4 +1,5 @@
-import { DeliverySchema, fishDirection, HOSTED_VOICE_READERS, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
+import { DeliverySchema, HOSTED_VOICE_READERS, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
+import { FISH_DELIVERY } from "../voice-direction.js";
 import { jsonRequest, tryProbe } from "./http.js";
 import {
   ProviderAuthError,
@@ -38,7 +39,8 @@ type FishError = { status?: number; message?: string };
  * Voxtral shape.
  *
  * Direction is a `[bracket]` phrase in the text, read by the model as language rather than as a
- * control token, so the phrases live in the contract's `FISH_DELIVERY` table and are placed here.
+ * control token. A job the direction compiler made (design turn 181) arrives with its tags in the
+ * text and names no delivery; a job written before names one, and its phrase is placed here.
  * `speed` travels as `prosody.speed`. The response is audio bytes, chunked; `format: "wav"` is
  * asked for and the header is checked, because a body that is not a WAV is the one failure the
  * artifact verifier would otherwise file as an unverifiable blob.
@@ -105,9 +107,13 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
           : "fishaudio: a read needs a voice id",
       );
     }
+    // A compiled job (one that carries its direction's hash) is sent as it is: the compiler put
+    // every tag in already, and a second would be read twice (SPEC-049 R-28). Only a job written
+    // before the compiler, naming a delivery, has its phrase placed here — in front of the line,
+    // where Fish's own guidance puts a sentence-level cue.
+    const compiled = typeof request.params["directionHash"] === "string";
     const delivery = DeliverySchema.safeParse(request.params["delivery"]);
-    // The phrase goes in front of the line, where Fish's own guidance puts a sentence-level cue.
-    const directed = delivery.success ? `[${fishDirection(delivery.data).tag}] ${text}` : text;
+    const directed = delivery.success && !compiled ? `[${FISH_DELIVERY[delivery.data].tag}] ${text}` : text;
     // The phrase counts against the cap: what leaves is what is measured, as the estimate does.
     if (directed.length > FISH_TEXT_CAP) {
       throw new ProviderRequestRejectedError(

@@ -91,7 +91,7 @@ describe("the voice-line dialog", () => {
                   capability: "voice-tts",
                   displayName: "Eleven Multilingual v2",
                   accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-                  limits: { deliveries: ["measured", "urgent"] },
+                  limits: {}, cadence: { deliveries: ["measured", "urgent"], speed: null, pause: "unsupported" as const, emphasis: "unsupported" as const, breath: "unsupported" as const, outputTimestamps: "none" as const, deliveryMappings: { measured: { settings: {} }, urgent: { settings: {} } } },
                   pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
                 },
               ],
@@ -106,7 +106,7 @@ describe("the voice-line dialog", () => {
                   capability: "voice-tts",
                   displayName: "Eleven Multilingual v2",
                   accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-                  limits: { deliveries: ["measured", "urgent"] },
+                  limits: {}, cadence: { deliveries: ["measured", "urgent"], speed: null, pause: "unsupported" as const, emphasis: "unsupported" as const, breath: "unsupported" as const, outputTimestamps: "none" as const, deliveryMappings: { measured: { settings: {} }, urgent: { settings: {} } } },
                   pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
                 },
               ],
@@ -218,7 +218,7 @@ describe("the voice-line dialog", () => {
       capability: "voice-tts" as const,
       displayName: "Assigned speech model",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-      limits: { deliveries: ["measured" as const] },
+      limits: {}, cadence: { deliveries: ["measured" as const], speed: null, pause: "unsupported" as const, emphasis: "unsupported" as const, breath: "unsupported" as const, outputTimestamps: "none" as const, deliveryMappings: { measured: { settings: {} } } },
       pricing: { kind: "perCharacter" as const, microUsdPerCharacter: 300 },
     };
     const productionModel = { ...assignedModel, id: "eleven_production_voice", displayName: "Production speech model" };

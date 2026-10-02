@@ -524,7 +524,7 @@ export async function quoteNarrator(store: WorldStore, productionId: string, now
       if (direction === null) continue;
       const speaks = await effectiveReader(store, planned.assigned, next);
       if (speaks === null) continue;
-      const controls = 1 + (direction.plan.speed !== 1 ? 1 : 0) + (direction.plan.phrase !== undefined ? 1 : 0) + direction.plan.cues.length;
+      const controls = 1 + (direction.plan.speed !== 1 ? 1 : 0) + (direction.plan.note !== undefined ? 1 : 0) + direction.plan.cues.length;
       directed += controls;
       try {
         held += holdDirection(planned.block.text, direction.plan, speaks.model, readerLanguage(clonedVoices, speaks.reader)).held.length;

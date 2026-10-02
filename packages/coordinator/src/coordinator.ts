@@ -143,8 +143,8 @@ import {
   type CharacterReferenceWorkflow,
   type BenchSession,
   type SessionId,
-  deliveryParams as mapDelivery,
   type Delivery,
+  supportedDeliveries,
   type ChapterAudiobook,
   type AudiobookDirection,
   type AudiobookDirectionInput,
@@ -14403,22 +14403,15 @@ export class Coordinator {
           );
           return;
         }
-        // A delivery this provider cannot express is stated and travels with the job rather
-        // than being dropped into a read that quietly ignores it (R-15).
-        let deliveryParams: Record<string, number> | null = null;
-        let deliveryNotice: string | null = null;
-        if (msg.delivery !== undefined) {
-          if (!model.limits.deliveries?.includes(msg.delivery)) {
-            this.rejectEnqueue(
-              msg.requestId,
-              msg.kind,
-              `${model.displayName} cannot express "${msg.delivery}".`,
-            );
-            return;
-          }
-          const mapped = mapDelivery(voice.provider, msg.delivery as Delivery);
-          if (mapped.ok) deliveryParams = mapped.params;
-          else deliveryNotice = mapped.reason;
+        // A delivery this reader cannot express is refused rather than dropped into a read that
+        // quietly ignores it (R-15); what it reads is its cadence row's (design turn 181).
+        if (msg.delivery !== undefined && !supportedDeliveries(model).includes(msg.delivery as Delivery)) {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            `${model.displayName} cannot express "${msg.delivery}".`,
+          );
+          return;
         }
         let input;
         try {
@@ -14431,8 +14424,6 @@ export class Coordinator {
             sheet,
             text: shot.audio.line,
             ...(msg.delivery !== undefined ? { delivery: msg.delivery as Delivery } : {}),
-            deliveryParams,
-            deliveryNotice,
             model,
             // The recording's language is the line's (issue 1163): the reader routes and tags by it.
             ...(source.kind === "cloned" ? { voiceReference: true, language: source.voice.language } : {}),
