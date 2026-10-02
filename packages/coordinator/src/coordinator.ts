@@ -289,7 +289,8 @@ import { exportScript, matchFiles, type MatchedFile } from "./productions/audiob
 import { acceptDirections, directChapter, directableBlocks, makeAdapterDirectionDeriver, type DirectionDeriver } from "./productions/audiobook-direction.js";
 import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiobookBook } from "./productions/audiobook-book.js";
 import { hearAudiobookLine } from "./productions/audiobook-hear.js";
-import { checkDirection, currentDirection, directionEntry, directionPlan, heldKey, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection } from "./productions/audiobook.js";
+import { currentDirection, directionEntry, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection } from "./productions/audiobook.js";
+import { checkDirection, directionPlan, heldKey } from "./voice/direction.js";
 import { runAudiobookChapter } from "./productions/audiobook-run.js";
 import { exportManuscript, importManuscript, readManuscript } from "./productions/manuscript.js";
 import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";

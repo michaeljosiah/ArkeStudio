@@ -24,7 +24,8 @@ import {
 import { Coordinator } from "../../src/coordinator.js";
 import { geminiSpeechModel } from "@arke-studio/providers";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
-import { audiobookBookPath, audiobookPath, checkDirection, directionPlan, legacyAudiobookPath, renderParts } from "../../src/productions/audiobook.js";
+import { audiobookBookPath, audiobookPath, legacyAudiobookPath } from "../../src/productions/audiobook.js";
+import { checkDirection, directionPlan, renderParts } from "../../src/voice/direction.js";
 import { verifyDirections, type DirectionDeriver, type DirectableBlock } from "../../src/productions/audiobook-direction.js";
 import { bookPriceLines } from "../../src/productions/audiobook-book.js";
 import { chapterPriceToken, prepareChapter, priorPartJob, type PartIdentity } from "../../src/productions/audiobook-run.js";

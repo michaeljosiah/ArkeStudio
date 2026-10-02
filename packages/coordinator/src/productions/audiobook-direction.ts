@@ -17,7 +17,8 @@ import {
 } from "@arke-studio/contracts";
 import type { SessionInput } from "../harness/session-files.js";
 import type { WorldStore } from "../world/store.js";
-import { castRefusal, checkDirection, directionEntry, directionPlan, effectiveReader, planAudiobook, readerLanguage, updateAudiobook, type PlannedBlock } from "./audiobook.js";
+import { checkDirection, directionPlan } from "../voice/direction.js";
+import { castRefusal, directionEntry, effectiveReader, planAudiobook, readerLanguage, updateAudiobook, type PlannedBlock } from "./audiobook.js";
 import { CONTINUITY_BOUNDS, makeAdapterJsonDeriver } from "./continuity.js";
 
 /**

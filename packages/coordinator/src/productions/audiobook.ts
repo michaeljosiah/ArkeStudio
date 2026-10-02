@@ -14,33 +14,25 @@ import {
   audiobookTextHash,
   CADENCE_PHRASE_MAX,
   legacyVoiceModel,
-  holdDirection,
-  mapCadence,
-  markerSegments,
   normalizeSpeechText,
-  speechInputFits,
-  splitSpeechInput,
   voiceSourceFor,
   type AudiobookBlock,
   type AudiobookBlockState,
   type AudiobookBook,
   type AudiobookDirection,
-  type AudiobookDirectionInput,
   type AudiobookReader,
   type AudiobookReading,
   type AudiobookSubstitution,
   type CadencePlan,
   type ChapterAudiobook,
-  type HeldControl,
   type ChapterVoices,
   type ClonedVoice,
   type ManifestModel,
   type Sheet,
   type VoiceCandidate,
 } from "@arke-studio/contracts";
-import { audioHash } from "../audio/qc.js";
 import { clipFor } from "../voice/library.js";
-import { splitForSpeech } from "../voice/service.js";
+import { directionPlan } from "../voice/direction.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -270,16 +262,6 @@ export function emptyAudiobook(chapterVersion: number, hash: string, now: string
   return { schemaVersion: 1, chapterVersion, hash, updatedAt: now, takes: {}, flags: {}, direction: {} };
 }
 
-/** The digest `mapCadence` verifies a plan against: the block's words, whitespace folded. */
-export function directionSourceHash(text: string): string {
-  return audioHash(Buffer.from(normalizeSpeechText(text)));
-}
-
-/** A plan from what a window or a derivation sends (R-6): the hashes are the block's, never the sender's. */
-export function directionPlan(text: string, input: AudiobookDirectionInput): CadencePlan {
-  return { schemaVersion: 1, sourceTextHash: directionSourceHash(text), ...(input.delivery !== undefined ? { delivery: input.delivery } : {}), speed: input.speed, cues: input.cues, ...(input.note !== undefined ? { note: input.note } : {}) };
-}
-
 /** The model that speaks a block's assigned reader, or the narrator's when the manifest lacks it. */
 export function readerModel(models: readonly ManifestModel[], reader: AudiobookReader, narrator: AudiobookReader): ManifestModel | null {
   const of = (candidate: AudiobookReader) => models.find((m) => m.provider === candidate.provider && m.id === candidate.model && m.capability === "voice-tts") ?? null;
@@ -290,148 +272,6 @@ export function readerModel(models: readonly ManifestModel[], reader: AudiobookR
 export function readerLanguage(clonedVoices: readonly ClonedVoice[], reader: AudiobookReader): string | undefined {
   const source = voiceSourceFor(clonedVoices, reader.provider, reader.model, reader.voiceId);
   return source.kind === "cloned" ? source.voice.language : undefined;
-}
-
-/** One request's worth of a directed block: the words as sent, and the settings and sentence beside them. */
-export interface RenderedPart {
-  text: string;
-  voiceSettings: Record<string, number>;
-  instructions?: string;
-}
-
-export type DirectionCheck =
-  | { ok: true; mapped: ReturnType<typeof mapCadence>; parts: RenderedPart[]; held: HeldControl[] }
-  | { ok: false; reason: string };
-
-/**
- * A directed block in parts, each rendered on its own (R-5; codex on PR 1186): the words are
- * split at sentence ends within the reader's cap, each piece carries the cues that fall in it
- * at their positions in the piece, and each is mapped whole, so the delivery's tag and the
- * phrase's lead every part rather than the first alone. A piece whose rendering still runs
- * over the cap — the tags are extra ink — is split again at half its size until it fits, so the
- * bound holds after rendering for any authored text. An emphasis whose span a seam would cut
- * cannot be carried by either piece: the direction is refused in one clause rather than sent
- * with the emphasis silently gone and its name on the take. One part for a block within the cap.
- *
- * Before the cap, a block is cut at the edges of every marker its row makes in parts (R-41):
- * a settings-only or sentence-carried delivery cannot change inside one request, so the
- * marker's words are a request of their own, with its delivery's settings and sentence, and
- * the block's reading resumes in the next.
- */
-export function renderParts(text: string, plan: CadencePlan, model: ManifestModel, language: string | undefined, cap: number | undefined): RenderedPart[] {
-  const out: RenderedPart[] = [];
-  for (const segment of markerSegments(text, plan, model, language)) out.push(...renderSegment(segment.text, segment.plan, model, language, cap));
-  return out;
-}
-
-function renderSegment(whole: string, plan: CadencePlan, model: ManifestModel, language: string | undefined, cap: number | undefined): RenderedPart[] {
-  const render = (piece: string, cues: CadencePlan["cues"]): RenderedPart => {
-    const mapped = mapCadence(piece, directionSourceHash(piece), { ...plan, sourceTextHash: directionSourceHash(piece), cues }, model, language);
-    return { text: mapped.providerText, voiceSettings: mapped.voiceSettings, ...(mapped.instructions !== undefined ? { instructions: mapped.instructions } : {}) };
-  };
-  const limits = { ...model.limits, maxPromptChars: cap };
-  if (cap === undefined && limits.maxSpeechUtf8Bytes === undefined) return [render(whole, plan.cues)];
-  const out: RenderedPart[] = [];
-  const placed = new Set<CadencePlan["cues"][number]>();
-  const place = (piece: string, from: number, max: number): void => {
-    const to = from + piece.length;
-    for (const cue of plan.cues) {
-      if ((cue.kind === "emphasis" || cue.kind === "delivery") && ((cue.span.from < from && cue.span.to > from) || (cue.span.from < to && cue.span.to > to))) {
-        throw new Error(`${cue.kind === "emphasis" ? "emphasis" : "marker"} “${cue.span.text}” straddles the cap's split · shorten the span`);
-      }
-    }
-    const cues = plan.cues
-      .filter((cue) => !placed.has(cue) && (cue.kind === "emphasis" || cue.kind === "delivery" ? cue.span.from >= from && cue.span.to <= to : cue.at >= from && cue.at <= to))
-      .map((cue) => (cue.kind === "emphasis" || cue.kind === "delivery" ? { ...cue, span: { ...cue.span, from: cue.span.from - from, to: cue.span.to - from } } : { ...cue, at: cue.at - from }));
-    const rendered = render(piece, cues);
-    if (speechInputFits(rendered.text, limits, rendered.instructions)) {
-      out.push(rendered);
-      for (const cue of plan.cues) {
-        if (cue.kind !== "emphasis" && cue.kind !== "delivery" && cue.at >= from && cue.at <= to) placed.add(cue);
-      }
-      return;
-    }
-    if (piece.length <= 1 || max <= 1) throw new Error("The speech direction and words cannot fit this reader's request limit.");
-    if (limits.maxSpeechUtf8Bytes !== undefined) {
-      let smaller = splitSpeechInput(piece, limits, rendered.instructions);
-      // Inline tags can make the rendered text larger than the source. If source packing
-      // alone made no progress, reduce it before rendering its cues again.
-      if (smaller.length === 1 && smaller[0]!.text === piece) smaller = splitSpeechInput(piece, { ...limits, maxPromptChars: Math.max(1, Math.floor(piece.length / 2)) }, rendered.instructions);
-      for (const part of smaller) {
-        place(part.text, from + part.from, part.text.length);
-      }
-      return;
-    }
-    let offset = 0;
-    for (const smaller of splitForSpeech(piece, Math.max(1, Math.floor(max / 2)))) {
-      const at = piece.indexOf(smaller, offset);
-      place(smaller, from + Math.max(at, 0), Math.floor(max / 2));
-      offset = Math.max(at, 0) + smaller.length;
-    }
-  };
-  const pieces = limits.maxSpeechUtf8Bytes === undefined && cap !== undefined && whole.length > cap ? splitForSpeech(whole, cap) : [whole];
-  let offset = 0;
-  for (const piece of pieces) {
-    const at = whole.indexOf(piece, offset);
-    place(piece, Math.max(at, 0), cap ?? piece.length);
-    offset = Math.max(at, 0) + piece.length;
-  }
-  return out;
-}
-
-/**
- * A direction held to its block and its reader (R-9): every cue is checked by `mapCadence`
- * against the words it names, and the parts the reader's cap makes of the block are rendered
- * here too, so a cue no part can carry is refused where the direction is written.
- *
- * `strict` is the author's write (R-42): a control the reader cannot express is refused in one
- * clause, never accepted to be flagged later — except one the stored direction already holds,
- * which a write of another control carries on unchanged. `hold` is everything after (R-47): a
- * reader change, a run, an accepted card — what the reader cannot express is left out of what
- * is sent and named in `held`, and the direction stands for a reader that can.
- */
-export function checkDirection(text: string, plan: CadencePlan, model: ManifestModel, language?: string, mode: "strict" | "hold" = "strict", alreadyHeld: readonly string[] = []): DirectionCheck {
-  let sent: CadencePlan;
-  let held: HeldControl[];
-  let mapped: ReturnType<typeof mapCadence>;
-  try {
-    mapped = mapCadence(text, directionSourceHash(text), plan, model, language);
-    ({ plan: sent, held } = holdDirection(text, plan, model, language));
-  } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
-  }
-  if (mode === "strict") {
-    const fresh = held.find((control) => !alreadyHeld.includes(heldKey(plan, control)));
-    if (fresh !== undefined) {
-      const name = fresh.control === "delivery" ? plan.delivery : fresh.control === "marker" ? markerName(plan, fresh.cueIndex) : fresh.control;
-      return { ok: false, reason: `${name} · ${model.displayName} ${fresh.reason}`.replace(/\.$/, "") };
-    }
-  }
-  let parts: RenderedPart[];
-  try {
-    parts = renderParts(text, sent, model, language, model.limits.maxPromptChars);
-  } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
-  }
-  return { ok: true, mapped, parts, held };
-}
-
-function markerName(plan: CadencePlan, cueIndex: number | undefined): string {
-  const cue = cueIndex === undefined ? undefined : plan.cues[cueIndex];
-  return cue?.kind === "delivery" ? `[${cue.delivery ?? cue.phrase}]` : "marker";
-}
-
-/**
- * A held control named by what it is rather than where it sits, so the same control held
- * before and after a write matches although other cues moved around it.
- */
-export function heldKey(plan: CadencePlan, control: HeldControl): string {
-  if (control.cueIndex !== undefined) return `cue:${JSON.stringify(plan.cues[control.cueIndex])}`;
-  if (control.control === "delivery") return `delivery:${plan.delivery}`;
-  // The note keeps the phrase's key, so a note held before the rename matches after it.
-  if (control.control === "note") return `phrase:${plan.note ?? ""}`;
-  if (control.control === "speed") return `speed:${plan.speed}`;
-  return control.control;
 }
 
 /**

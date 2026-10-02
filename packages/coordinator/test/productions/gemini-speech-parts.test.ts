@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { mapCadence, normalizeSpeechText, quoteSpeech, speechInputFits, type CadencePlan } from "@arke-studio/contracts";
 import { geminiSpeechModel } from "@arke-studio/providers";
-import { checkDirection, directionPlan, directionSourceHash } from "../../src/productions/audiobook.js";
+import { checkDirection, directionPlan, directionSourceHash } from "../../src/voice/direction.js";
 import { piecesFor } from "../../src/voice/pieces.js";
 
 it("keeps Gemini delivery and note out of spoken words, restores block style after a span", () => {

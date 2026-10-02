@@ -5,7 +5,8 @@ import { speechInputFits, splitSpeechInput } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
-import { cachedVoiceAudioLooksRight, joinSpeech, splitForSpeech } from "./service.js";
+import { cachedVoiceAudioLooksRight, joinSpeech } from "./service.js";
+import { splitForSpeech } from "./split.js";
 
 /**
  * A read over the reader's cap is made in pieces rather than refused (issue 1208).
