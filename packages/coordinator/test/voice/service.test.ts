@@ -281,6 +281,7 @@ describe("routing (R-2, D1, §3.2): local never touches the queue; cloud always 
     assert.equal(measured.params["voiceId"], breaking.params["voiceId"], "the voice is the sheet's");
     assert.notDeepEqual(measured.params["voiceSettings"], breaking.params["voiceSettings"]);
     assert.equal(breaking.params["text"], "[crying] again, colder");
+    assert.equal(breaking.params["authoredText"], "again, colder", "the take's line is the words as written");
     assert.equal(breaking.params["delivery"], undefined);
     assert.equal(typeof breaking.params["directionHash"], "string");
 

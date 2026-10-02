@@ -1559,6 +1559,23 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       const record = await readRecord(worldDir);
       assert.equal(record.direction["title"]?.plan.delivery, "whispered");
       assert.equal(record.direction["title"]?.plan.note, "under her breath");
+      // A note that fits the old phrase is written under that key (design turn 181), so the
+      // builds before the rename still read the record, and the world is not raised for it.
+      const raw = JSON.parse(await readFile(recordPath(worldDir), "utf8")) as { direction: Record<string, { plan: Record<string, unknown> }> };
+      assert.equal(raw.direction["title"]?.plan["phrase"], "under her breath");
+      assert.equal(raw.direction["title"]?.plan["note"], undefined);
+      assert.ok(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion < 43);
+    }));
+
+  it("a direction older builds cannot read raises the world first: no delivery, a sound, a longer note (design turn 181)", () =>
+    withHarness({}, async ({ worldDir, events, send }) => {
+      // A plan that names no delivery: the reader's own reading.
+      await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "title", direction: { speed: 1, cues: [] } });
+      type Recorded = Extract<DomainEvent, { type: "audiobook.record" }>;
+      const written = events.filter((e): e is Recorded => e.type === "audiobook.record").at(-1);
+      assert.ok(written?.record, written?.refused);
+      assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 43);
+      assert.equal((await readRecord(worldDir)).direction["title"]?.plan.delivery, undefined);
     }));
 
   it("a chapter read pressed while the book is being read is refused in a word, and a chapter its own run holds is left to that run (codex on PR 1187)", async () => {

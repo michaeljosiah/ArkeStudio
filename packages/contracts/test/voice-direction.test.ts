@@ -137,6 +137,9 @@ describe("typed and pasted tags become markers (181c)", () => {
     assert.deepEqual(read.cues.map((cue) => cue.kind === "delivery" ? [cue.delivery, cue.span.text] : null), [["cold", "Go."], ["warm", "Come back"]]);
     assert.doesNotThrow(() => mapCadence(read.text, hash(read.text), plan(read.text, { cues: read.cues }), gemini));
     assert.equal(directionWord("Throat-Clearing")?.kind, "sound");
+    const joined = recogniseDirection("Hello<sigh>there");
+    assert.equal(joined.text, "Hello there", "two words stay two once the tag between them goes");
+    assert.deepEqual(joined.cues, [{ kind: "sound", at: 5, sound: "sighs" }]);
     assert.equal(directionWord("like a pirate"), null);
   });
 

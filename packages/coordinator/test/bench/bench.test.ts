@@ -1685,6 +1685,7 @@ describe("reading a line on the bench (design 70)", () => {
       assert.match(String(ok.inputs[0]!.params["text"]), /^\[crying\] /);
       assert.equal(ok.inputs[0]!.params["delivery"], undefined);
       assert.equal(typeof ok.inputs[0]!.params["directionHash"], "string");
+      assert.equal(ok.inputs[0]!.params["authoredText"], LINE, "the take's line is the words as written");
     }
   });
 

@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import {
   AUDIOBOOK_DELIVERIES,
   AUDIOBOOK_TITLE_KEY,
+  CADENCE_NOTE_MAX,
+  CADENCE_PHRASE_MAX,
   DEFAULT_NARRATOR,
   audiobookBlockState,
   audiobookBlocks,
@@ -1571,6 +1573,9 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
     write({ cues });
   };
   const phraseSupported = support !== null && support.phrase.status !== "unsupported";
+  // An instruction reader takes the note whole, to 300; a tag reader takes one tag of sixty
+  // (design turn 181), so its field stops there rather than cutting a longer note on save.
+  const noteMax = support?.note.method === "instruction" ? CADENCE_NOTE_MAX : CADENCE_PHRASE_MAX;
   const commitPhrase = () => {
     if (phraseDraft === null) return;
     const trimmed = phraseDraft.trim();
@@ -1579,7 +1584,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
     if (trimmed === "") {
       const { note: _gone, ...rest } = base;
       send(rest);
-    } else write({ note: trimmed.slice(0, 60) });
+    } else write({ note: trimmed.slice(0, noteMax) });
   };
   // Delivery is six chips, the chosen one filled (turn 165, 155e): a grey seg of six words wrapped
   // to two rows in the side's 250 (issue 1324 §3). One or none is chosen, so a radiogroup whose
@@ -1671,7 +1676,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
             <input
               className="fy-ab__phrase fy-mono"
               value={phraseDraft ?? held?.note ?? ""}
-              maxLength={60}
+              maxLength={noteMax}
               aria-label="Phrase"
               onChange={(event) => setPhraseDraft(event.target.value)}
               onBlur={commitPhrase}

@@ -336,6 +336,14 @@ export const AUDIOBOOK_MARKERS_SCHEMA_VERSION = 33;
  * lost, the narrator the app's — and the chapter's record as unreadable, every take lost.
  */
 export const AUDIOBOOK_PERFORMED_SCHEMA_VERSION = 34;
+/**
+ * One voice direction (design turn 181, SPEC-047 R-7, SPEC-049 R-22): a block's note longer
+ * than the phrase it replaced, a `sound` cue, or a plan with no delivery. The builds before it
+ * read the chapter's audiobook record strictly and would take it for unreadable — every take of
+ * the chapter lost — so the world is raised before the first such direction is written. A note
+ * that fits the old phrase is written under that key and raises nothing. 35–42 are claimed.
+ */
+export const AUDIOBOOK_NOTE_SCHEMA_VERSION = 43;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

@@ -957,7 +957,7 @@ export function voiceLineRequest(input: {
       audioFormat: voiceFormatForModel(input.model),
       ...(input.language !== undefined ? { language: input.language } : {}),
       // The direction as compiled, marked by its hash so no client re-derives a tag from a name.
-      ...(directed !== null ? { voiceSettings: directed.voiceSettings, directionHash: directed.directionHash, ...(directed.instructions !== undefined ? { instructions: directed.instructions } : {}) } : {}),
+      ...(directed !== null ? { authoredText: input.text, voiceSettings: directed.voiceSettings, directionHash: directed.directionHash, ...(directed.instructions !== undefined ? { instructions: directed.instructions } : {}) } : {}),
     },
     estimatedMicroUsd: quote.authorisedMicroUsd,
     landing: { dir: `productions/${input.productionId}/audio` },

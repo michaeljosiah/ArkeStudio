@@ -1239,7 +1239,7 @@ export function planBenchDispatch(
           // The direction as the compiler wrote it for this reader (design turn 181): the words
           // with its tags in, its numbers, its sentence, and the hash that marks the text as
           // compiled — never the delivery's name, which a client would turn into a second tag.
-          ...(directed !== null ? { voiceSettings: directed.voiceSettings, directionHash: directed.directionHash, ...(directed.instructions !== undefined ? { instructions: directed.instructions } : {}) } : {}),
+          ...(directed !== null ? { authoredText: composer.brief, voiceSettings: directed.voiceSettings, directionHash: directed.directionHash, ...(directed.instructions !== undefined ? { instructions: directed.instructions } : {}) } : {}),
           // A cloned voice's recording language is the line's (issue 1163): the reader routes and
           // tags by it, and the estimate counts the tag it would put in.
           ...(voiceSource.kind === "cloned" ? { language: voiceSource.voice.language } : {}),

@@ -130,7 +130,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Thirty-four is the performed reading, notes and book narrator (SPEC-047 R-44..R-46).
 // Thirty-five adds the durable founding conversation carried into world chat.
 // Forty-one adds a visual novel's beat to strict shots (turn 174).
-export const SUPPORTED_SCHEMA_VERSION = 42;
+// Forty-three is a direction's longer note, sounds and absent delivery (turn 181).
+export const SUPPORTED_SCHEMA_VERSION = 43;
 
 export class WorldOpenError extends Error {
   constructor(

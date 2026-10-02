@@ -103,6 +103,9 @@ export function recogniseDirection(raw: string): RecognisedDirection {
     stripped += raw.slice(last, start);
     if (word !== null) {
       found.push({ word, at: stripped.length });
+      // `word[pause]word` keeps its two words apart once the tag is gone.
+      const next = start + match[0].length;
+      if (stripped !== "" && !/\s$/.test(stripped) && next < raw.length && !/\s/.test(raw[next]!)) stripped += " ";
     } else {
       // A parenthesis that names nothing is prose; the other two are a reader's syntax.
       if (match[3] === undefined) unknownRaw.push({ from: stripped.length, to: stripped.length + match[0].length });
