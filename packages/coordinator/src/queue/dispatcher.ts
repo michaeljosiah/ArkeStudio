@@ -1136,6 +1136,9 @@ export class JobQueue {
       await this.opts.beforeSubmit?.(job);
       const pricedModel = job.capability === "voice-tts" ? this.opts.speechModel?.(job.provider, job.model) : undefined;
       if (pricedModel?.pricing.kind === "perToken" && !job.speechQuote) throw new Error("Speech needs a fresh token quote before reading.");
+      // A read drawn from a free credit asked nothing; once the author says the key is paid, it
+      // must be asked about again rather than sent on the paid key unasked (design turn 182).
+      if (job.speechQuote?.plan === "free-credit" && pricedModel?.speechPlan !== "free-credit") throw new Error("Speech pricing changed. Review the new quote before reading.");
       if (job.speechQuote?.unit === "token") {
         const model = this.opts.speechModel?.(job.provider, job.model);
         if (!model || !speechQuoteIsCurrent(job.speechQuote, this.clock())) throw new Error("Speech quote expired. Review the new price before reading.");
@@ -1276,7 +1279,9 @@ export class JobQueue {
     }
     const message = describeCoordinatorError(err);
     const klass: FailureClass = classifyError(err);
-    if (isRateLimit(err)) this.noteRateLimit(job.provider);
+    // The free tier's daily limit is the key's, not the lane's pace: it must not slow paid reads.
+    const freeLimit = typeof err === "object" && err !== null && (err as { freeLimit?: unknown }).freeLimit === true;
+    if (isRateLimit(err) && !freeLimit) this.noteRateLimit(job.provider);
     const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
     const submissionRejected =
       typeof err === "object" && err !== null && (err as { submissionRejected?: unknown }).submissionRejected === true;

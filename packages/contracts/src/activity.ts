@@ -586,8 +586,9 @@ export function spendSummary(ledger: LedgerEntry[], periodDays: number, now: Dat
   const plans = new Map<string, SpendSummary["plans"][number]>();
   for (const entry of inWindow) {
     if (entry.actualSource === "free-plan" || entry.actualSource === "free-credit") {
-      const key = `${entry.provider}
-${entry.actualSource}`;
+      // A failed attempt drew nothing it could show; counting it would inflate the reads.
+      if (entry.outcome !== "succeeded") continue;
+      const key = `${entry.provider}:${entry.actualSource}`;
       const row = plans.get(key) ?? { provider: entry.provider, plan: entry.actualSource, entries: 0, microUsd: 0, tokens: 0, characters: 0 };
       row.entries += 1;
       row.microUsd += entry.actualMicroUsd ?? entry.estimatedMicroUsd;

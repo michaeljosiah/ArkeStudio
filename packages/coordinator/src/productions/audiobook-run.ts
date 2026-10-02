@@ -444,7 +444,9 @@ export function chapterPriceToken(worldId: string, productionId: string, chapter
  * direction.
  */
 export function missIdentity(block: Speaking): string {
-  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}:${JSON.stringify(block.quotes.map(q => [q.rateVersion, q.authorisedMicroUsd, q.tokenLimits]))}${block.compiledSpeechHash !== undefined ? `:${block.compiledSpeechHash}` : ""}${block.reference !== null ? `:${block.reference}` : ""}`;
+  // The plan is in it (design turn 182): a free credit's price is the paid price, so without it
+  // a book answered on credit would read on, unasked, after the author switched to paid.
+  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}:${JSON.stringify(block.quotes.map(q => [q.rateVersion, q.authorisedMicroUsd, q.tokenLimits, ...(q.plan !== undefined ? [q.plan] : [])]))}${block.compiledSpeechHash !== undefined ? `:${block.compiledSpeechHash}` : ""}${block.reference !== null ? `:${block.reference}` : ""}`;
 }
 
 /**

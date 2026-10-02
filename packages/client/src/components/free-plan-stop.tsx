@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { DEFAULT_NARRATOR, formatTimeLeft, freePlanStop, GOOGLE_BILLED, GOOGLE_FREE_LIMIT } from "@arke-studio/contracts";
 import { setProviderPlan } from "../lib/store.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 
 /**
  * The two ways a free plan ends, as a read says them (design turn 182), or null for any other
@@ -38,9 +39,12 @@ export function FreePlanStop({ error, onDefaultNarrator }: { error: string | nul
     <span className="fy-freestop" data-testid="free-billed">
       <span className="fy-freestop__bad">{GOOGLE_BILLED}</span>
       <span className="fy-freestop__mono">· key looks paid</span>
-      <button type="button" className="fy-freestop__act" onClick={() => setProviderPlan("google", "paid")}>
-        Turn off Free plan
-      </button>
+      {/* The plan is set where the key is; a remote session says what happened and nothing more. */}
+      {!isRemoteSession() && (
+        <button type="button" className="fy-freestop__act" onClick={() => setProviderPlan("google", "paid")}>
+          Turn off Free plan
+        </button>
+      )}
     </span>
   );
 }

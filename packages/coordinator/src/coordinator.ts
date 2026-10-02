@@ -2241,6 +2241,9 @@ export class Coordinator {
         if (source.kind === "missing-clone") return narration;
         const clip = source.kind === "cloned" ? await clipFor(store, source.voice) : null;
         if (source.kind === "cloned" && clip === null) return narration;
+        // A read in the shipped narrator after Google's free daily limit (design turn 182): the
+        // speakers on that free plan would only meet the same limit, so they read in it too.
+        if (input.defaultNarrator === true && modelOf({ provider: assigned.provider, model })?.speechPlan === "free-plan") return narration;
         return { provider: assigned.provider, model, voiceId: assigned.voiceId, label: assigned.label ?? listed.label, cloned: source.kind === "cloned",
           ...(source.kind === "cloned" ? { clonedVoice: source.voice } : {}),
           ...(clip !== null ? { clipHash: clipHashOf(clip) } : {}) };
@@ -3696,6 +3699,8 @@ export class Coordinator {
     if (
       parsed.type !== "health.changed" &&
       parsed.type !== "appearance.changed" &&
+      // The plans live in app settings; the manifest it carries is derived, not a domain record.
+      parsed.type !== "provider-plans.changed" &&
       // The dedicated flushed adapter journal owns policy history; this is its UI projection.
       parsed.type !== "adapters.changed" &&
       parsed.type !== "update.status" &&

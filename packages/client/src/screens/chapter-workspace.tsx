@@ -1064,6 +1064,14 @@ export function ChapterWorkspace({
       }
       voicedRead.begin();
     },
+    // The shipped narrator's read (design turn 182) waits for the save too; a second press reads.
+    beginShipped: () => {
+      if ((draft !== null && draft !== live) || pendingSave.current !== null) {
+        if (draft !== null && draft !== live) flushSave(draft);
+        return;
+      }
+      voicedRead.beginShipped();
+    },
   };
   // The block being read, for the band over the manuscript (turn 130).
   const voicedAt = voicedRead.reading && voicedRead.at !== null ? voiced.blocks[voicedRead.at] ?? null : null;
@@ -1188,6 +1196,13 @@ export function ChapterWorkspace({
         return;
       }
       pageRead.begin();
+    },
+    beginShipped: () => {
+      if (draft !== null && draft !== live) {
+        flushSave(draft);
+        return;
+      }
+      pageRead.beginShipped();
     },
   };
 

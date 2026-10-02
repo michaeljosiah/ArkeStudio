@@ -116,3 +116,14 @@ it("draws a free-credit read from the allowance at its estimate, with the charac
     assert.equal(h.ledger[0]!.speechQuote?.quantities.characters, 11);
   } finally { h.queue.dispose(); }
 });
+
+it("asks again about a free-credit read once the author says the key is paid", async () => {
+  const h = await harness(creditMistral, async () => ({ remoteId: "mistral-1", acceptedAt: now }));
+  try {
+    h.switchTo(manifest);
+    const job = await h.queue.enqueue(read(creditMistral.models[1]!, "Hello there"));
+    await until(() => h.queue.listJobs().find(j => j.id === job.id)?.status === "failed", "refused at dispatch", 30000);
+    assert.equal(h.submissions(), 0);
+    assert.match(h.queue.listJobs().find(j => j.id === job.id)!.error!, /pricing changed/);
+  } finally { h.queue.dispose(); }
+});
