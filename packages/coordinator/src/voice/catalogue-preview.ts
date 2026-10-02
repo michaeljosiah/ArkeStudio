@@ -42,7 +42,9 @@ export class CataloguePreviewService {
       // A library voice is never previewed here (SPEC-046 R-16, R-37): this path sends no
       // recording and asks no vendor, so the reader would take the clone's id for a preset it
       // has never heard of. Its own page previews it, with the question asked first.
-      if (supportsVoiceUse(voice, "narration") && !voice.unavailableReason && voice.readsClone === undefined) {
+      // Nor the app narrator's copy of another world's designed voice: a preview job is no
+      // narration and carries no binding, so dispatch has no record to read it from.
+      if (supportsVoiceUse(voice, "narration") && !voice.unavailableReason && voice.readsClone === undefined && voice.narratorCopy !== true) {
         if (approvedVoiceSample(voice.previewUrl)) preview = { kind: "sample", microUsd: 0 };
         else if (voice.provider === "kokoro" && this.deps.sidecar) preview = { kind: "generate", microUsd: 0 };
         else if (model && this.deps.enqueue && model.capability === "voice-tts") {

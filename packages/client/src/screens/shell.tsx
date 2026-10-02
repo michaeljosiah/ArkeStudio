@@ -2329,6 +2329,9 @@ export function SettingsGeneralScreen() {
     const lapse = setTimeout(() => setResetArmed(false), 4000);
     return () => clearTimeout(lapse);
   }, [resetArmed]);
+  // The question is about the narrator it was asked over: opening the picker or a new choice
+  // withdraws it, so the next press asks again rather than clearing the new voice.
+  useEffect(() => setResetArmed(false), [narratorOpen, narrator?.provider, narrator?.voiceId]);
   const navigate = useNavigate();
   const manifest = state?.app.manifest ?? null;
   const routing = state?.app.routing ?? { defaults: {}, faults: [] };

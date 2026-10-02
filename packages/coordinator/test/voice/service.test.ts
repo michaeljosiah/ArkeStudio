@@ -1114,6 +1114,22 @@ describe("the narrator survives a restart (found live, 2026-08-17)", () => {
     await file.setNarrator(null);
     assert.equal((await new AppSettingsFile(join(dir, "settings.json")).load()).narrator, null);
   });
+
+  it("changes the narrator by compare-and-set, so a write from an earlier read cannot undo a newer choice", async () => {
+    const dir = await tempDir("narrator");
+    const file = new AppSettingsFile(join(dir, "settings.json"));
+    const ife = { provider: "google", model: "gemini-3.8-flash-tts", voiceId: "designed:dv_01M3WMVV9W7J85PPRYQJ0YB26G:1", label: "Ife's voice" };
+    await file.setNarrator(ife);
+    // A Reset lands between the backfill's read and its write: the write sees null and leaves it.
+    await file.setNarrator(null);
+    const unchanged = await file.updateNarrator((current) => (current?.voiceId === ife.voiceId ? { ...current, label: "stale" } : current));
+    assert.equal(unchanged, null, "nothing written");
+    assert.equal((await file.load()).narrator, null, "the Reset stands");
+    await file.setNarrator(ife);
+    const written = await file.updateNarrator((current) => (current?.voiceId === ife.voiceId ? { ...current, label: "kept" } : current));
+    assert.equal(written?.label, "kept");
+    assert.equal((await file.load()).narrator?.label, "kept");
+  });
 });
 
 /**

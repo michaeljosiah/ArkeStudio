@@ -7,6 +7,7 @@ import { GoogleClient, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
+import { readAudiobookBook } from "../../src/productions/audiobook.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { until } from "../wait.js";
 
@@ -53,7 +54,9 @@ async function harness(options: { worldHoldsTheVoice?: boolean } = {}) {
   await provider.loadWorld(WORLD_ID);
   const events: DomainEvent[] = [];
   const spokenWith: unknown[] = [];
+  const bodies: string[] = [];
   const google = new GoogleClient(async (url, init) => {
+    if (init?.body !== undefined) bodies.push(String(init.body));
     if (String(url).endsWith(`/voices/${IFE.remoteId}`)) return Response.json(remote());
     if (String(url).endsWith("/interactions")) {
       const body = JSON.parse(String(init?.body));
@@ -87,7 +90,8 @@ async function harness(options: { worldHoldsTheVoice?: boolean } = {}) {
   const read = (requestId: string, confirmationToken?: string) =>
     send({ kind: "read-sheet-section", requestId, worldId: WORLD_ID, sheetId: "maren-kest", sectionHeading: "Essence", ...(confirmationToken ? { confirmationToken } : {}) });
   const close = async () => { await coordinator.stop(); await provider.close(); };
-  return { events, send, settings, audio, read, spoken, spokenWith, close };
+  const store = () => provider.openStore()!;
+  return { events, send, settings, audio, read, spoken, spokenWith, bodies, store, close };
 }
 
 describe("a designed narrator in a world that does not hold it", () => {
@@ -115,6 +119,18 @@ describe("a designed narrator in a world that does not hold it", () => {
       assert.ok(ready, `read, not refused: ${JSON.stringify(h.audio(REQUEST).map((event) => [event.status, event.error]))}`);
       assert.deepEqual(h.spokenWith, [IFE.remoteId], "synthesis bound the remote voice from the kept copy");
       assert.equal(h.spoken.length, 0, "and nothing was read in George");
+      // The binding rides on the job it admitted, so dispatch reads the voice the read was
+      // priced in rather than whatever the app narrator is by then — and it never reaches Google.
+      const job = h.events.findLast((event) => event.type === "job.updated" && event.job.params["requestId"] === REQUEST);
+      assert.ok(job && job.type === "job.updated");
+      assert.deepEqual(job.job.params["designedBinding"], { remoteId: IFE.remoteId, expiresAt: IFE.expiresAt });
+      assert.equal(h.bodies.some((body) => body.includes("designedBinding")), false);
+      // Never previewed from the catalogue: a preview job is no narration and carries no binding.
+      assert.equal(row.preview?.kind, "unavailable");
+      // And never a book's narrator: a book is written into the world, which lacks the record.
+      await h.send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: "the-ledger-of-nights", voice: CHOICE });
+      const book = await readAudiobookBook(h.store(), "the-ledger-of-nights");
+      assert.ok(book === null || book === "unreadable" || book.narrator === undefined, "the book keeps its own narrator, or none");
     } finally {
       await h.close();
     }

@@ -273,6 +273,20 @@ export class AppSettingsFile {
     });
   }
 
+  /**
+   * Change the narrator only as `change` decides from the narrator as it is under the file's
+   * lock: a compare-and-set, so a write derived from an earlier read cannot undo a choice made
+   * since. Resolves with the narrator written, or null when `change` left it as it was.
+   */
+  async updateNarrator(change: (current: NarratorSettings) => NarratorSettings): Promise<NarratorSettings | null> {
+    return this.mutate((current) => {
+      const next = change(current.narrator);
+      if (next === current.narrator) return { value: null };
+      const settings: AppSettings = { ...current, narrator: next };
+      return { settings, value: next };
+    });
+  }
+
   async setVoxa(patch: Partial<VoxaSettings>): Promise<AppSettings> {
     return this.mutate((current) => {
       const settings: AppSettings = { ...current, voxa: { ...current.voxa, ...patch } };
