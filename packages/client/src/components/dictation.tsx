@@ -166,9 +166,12 @@ const LISTENING = "listening — click to stop";
 export function ComposerMic({
   onText,
   disabled = false,
+  onListen,
 }: {
   onText: (text: string) => void;
   disabled?: boolean;
+  /** Called as listening starts: a reply being read stops, rather than being dictated (turn 183). */
+  onListen?: () => void;
 }) {
   const ptt = usePushToTalk(onText);
   const say =
@@ -189,7 +192,10 @@ export function ComposerMic({
             ? `Dictation is off — ${ptt.off}`
             : "Speak instead of typing — transcribed on this machine, never sent to a provider"
         }
-        onClick={ptt.toggle}
+        onClick={() => {
+          if (ptt.phase !== "listening") onListen?.();
+          ptt.toggle();
+        }}
       >
         <Mic size={15} />
       </button>

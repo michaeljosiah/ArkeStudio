@@ -13,6 +13,7 @@ import {
   freePlanNote,
   freePlanStop,
   modelPriceCopy,
+  narratorReadsUnasked,
   nextPacificMidnight,
   PAID_PLANS,
   quoteSpeech,
@@ -227,5 +228,28 @@ describe("a table read's door", () => {
     assert.equal(tableReadPlanNote({ items: [{ route: "cloud", provider: "mistral", model: voxtral.id }, { route: "cloud", provider: "google", model: gemini.id }] }, models), "free credit");
     assert.equal(tableReadPlanNote({ items: [{ route: "cloud", provider: "google", model: gemini.id }, { route: "cloud", provider: "fal", model: "other" }] }, models), null);
     assert.equal(tableReadPlanNote({ items: [{ route: "local" }] }, models), null);
+  });
+});
+
+describe("Read replies' narrator (design turn 183)", () => {
+  const paul = { provider: "mistral", model: voxtral.id, voiceId: "en_paul_neutral" };
+  const ife = { provider: "google", model: gemini.id, voiceId: "Kore" };
+  it("reads unasked through the shipped voice, and through any narrator that falls to it", () => {
+    assert.equal(narratorReadsUnasked(null, "w1", manifest.models, 0), true);
+    assert.equal(narratorReadsUnasked({ provider: "kokoro", voiceId: "bf_emma" }, "w1", manifest.models, 0), true);
+    // A clone chosen in another world is not this world's voice; the shipped one reads here.
+    assert.equal(narratorReadsUnasked({ ...paul, worldId: "w2" }, "w1", manifest.models, 0), true);
+  });
+  it("reads unasked on a Free plan, and on a free credit only while there is some left", () => {
+    const models = applyProviderPlans(manifest, { ...free, mistral: "free-credit" }).models;
+    assert.equal(narratorReadsUnasked(ife, "w1", models, 0), true);
+    assert.equal(narratorReadsUnasked(paul, "w1", models, 1), true);
+    assert.equal(narratorReadsUnasked(paul, "w1", models, 0), false);
+  });
+  it("asks through a priced reader, a hosted clone, and a choice the manifest does not list", () => {
+    assert.equal(narratorReadsUnasked(paul, "w1", manifest.models, Infinity), false);
+    const models = applyProviderPlans(manifest, credit).models;
+    assert.equal(narratorReadsUnasked({ ...paul, worldId: "w1" }, "w1", models, Infinity), false);
+    assert.equal(narratorReadsUnasked({ provider: "fishaudio", model: "s1", voiceId: "x" }, "w1", manifest.models, Infinity), false);
   });
 });

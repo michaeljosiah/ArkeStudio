@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { claimRead, releaseRead } from "../lib/reply-reads.js";
 import { formatMicroUsd, freePlanStop, narratorLabelFor, speechPlanLabel, type NarratorSettings, type ProseReadSource } from "@arke-studio/contracts";
 import {
   clearQueue,
@@ -112,9 +113,11 @@ export function usePageRead(input: {
    * otherwise reach it. The rule is by scale rather than by screen: a page read is *about* the
    * page, and a block read is a thing somebody asked for and can follow them.
    */
+  const owner = useId();
   const stop = useCallback(() => {
     const id = live.current;
     live.current = null;
+    releaseRead(owner);
     queued.current = 0;
     setRun(null);
     setConfirmed(null);
@@ -124,7 +127,7 @@ export function usePageRead(input: {
     cancel.current?.(id);
     if (playbackSnapshot().clip?.id === id) dismissPlayback();
     clearQueue();
-  }, []);
+  }, [owner]);
   useEffect(() => stop, [stop, pageId]);
   useEffect(
     () =>
@@ -137,6 +140,8 @@ export function usePageRead(input: {
   );
 
   const beginRun = useCallback((inShipped: boolean) => {
+    // One read at a time across the app (design turn 183): a reply being read stops outright.
+    claimRead(owner, stop);
     clearQueue();
     dismissPlayback();
     queued.current = 0;
@@ -147,7 +152,7 @@ export function usePageRead(input: {
     setRun(requestId);
     setConfirmed(null);
     setUpload(null);
-  }, [start]);
+  }, [start, owner, stop]);
   const begin = useCallback(() => beginRun(false), [beginRun]);
   const beginShipped = useCallback(() => beginRun(true), [beginRun]);
 

@@ -53,7 +53,8 @@ import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
 import { Film, Pin, ChevronDown, ChevronUp, Sparkle } from "./icons.js";
 import { PosterVideo } from "./player.js";
-import { ReadAloud } from "./read-aloud.js";
+import { ReplyRead } from "./read-aloud.js";
+import { useReadReplies } from "./read-replies.js";
 import { renderInlineMarkdown } from "./inline-markdown.js";
 import { mediaUrl } from "../lib/media.js";
 
@@ -83,7 +84,7 @@ export function ConversationTranscript({
   onSelectShot,
   shotLabel,
   empty,
-  inlineTextActions = true,
+  autoRead = null,
 }: {
   workspace: WorldChatWorkspace | null;
   running: boolean;
@@ -100,8 +101,8 @@ export function ConversationTranscript({
   shotLabel?: (shotId: string) => string;
   /** What stands in for the transcript before anything has been said. */
   empty?: React.ReactNode;
-  /** Compact World Chat keeps reply read/copy controls in its conversation options sheet. */
-  inlineTextActions?: boolean;
+  /** The reply that has just finished and reads itself — Read replies (design turn 183). */
+  autoRead?: string | null;
 }) {
   const navigate = useNavigate();
   const worldId = useStore().state?.world?.meta.worldId;
@@ -139,9 +140,6 @@ export function ConversationTranscript({
             "fy-chat__turn",
             `fy-chat__turn--${m.role}`,
             actions.length > 0 && "fy-chat__turn--action",
-            // Arke's replies are long and are prose somebody may want read back rather than read
-            // (issue 857). The host is the turn, so the speaker appears under the whole reply.
-            m.role === "studio" && "fy-texthost",
           )}
         >
           <div className="fy-chat__bubble">
@@ -158,13 +156,14 @@ export function ConversationTranscript({
               <div className="fy-chat__refusals">{`✕ Refused: ${m.refusals.join(" · ")}`}</div>
             )}
           </div>
-          {/* Only Arke's replies: nobody needs their own sentence spoken back to them. */}
-          {inlineTextActions && m.role === "studio" && workspace !== null && (
-            <ReadAloud
-              source={{ of: "reply", conversationId: workspace.conversationId, messageId: m.id }}
-              title="Arke"
-              text={m.text}
-            />
+          {/*
+            Arke's replies are long, and are prose somebody may want read back rather than read
+            (issue 857) — in every chat that draws this transcript, on every width (design turn
+            183). Only Arke's replies: nobody needs their own sentence spoken back to them, and a
+            filed-take or frame-run report is a card about work done, not something said.
+          */}
+          {m.role === "studio" && workspace !== null && m.benchOutcome === undefined && m.frameRunOutcome === undefined && (
+            <ReplyRead conversationId={workspace.conversationId} messageId={m.id} text={m.text} auto={autoRead === m.id} />
           )}
           {/*
             Outside the bubble, because it is not something the Studio said — it is something it
@@ -1059,6 +1058,7 @@ export function ProductionConversation({
     setOpening(null);
   }, [opening, worldId, workspace?.conversationId, conversationId, connection]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
+  const readReplies = useReadReplies(loaded);
   const turnAttachments = (loaded?.attachments ?? []).slice(-20).filter(attachment => !omittedAttachments.has(attachment.id));
   const attachRefusals = useWorldChatRefusals(conversationId ?? undefined);
   const loadedRef = useRef(loaded);
@@ -1404,6 +1404,7 @@ export function ProductionConversation({
   const transcript = (
     <ConversationTranscript
       workspace={loaded}
+      autoRead={readReplies.autoRead}
       running={running}
       progress={progress}
       failure={failure && !running ? failure : null}
@@ -1574,6 +1575,7 @@ export function ProductionConversation({
             focusRequest={focusRequest}
             disabledReason={languageUnavailableReason}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
+            readReplies={readReplies.composer}
             {...attachProps}
           />
           {/* Only a dock that departs from the promise says anything here (issue 1008). The
@@ -1633,7 +1635,7 @@ export function ProductionConversation({
         {(!responsive || !compact) && languageControl}
         <Composer value={message} onChange={setMessage} onSubmit={submit} placeholder={responsive && compact ? "Keep shaping the story…" : placeholder}
           agentLabel="story author" busy={running} busyLabel="reading the world…" disabledReason={languageUnavailableReason}
-          onDictate={text => setMessage(prev => prev ? prev + " " + text : text)} {...attachProps} />
+          onDictate={text => setMessage(prev => prev ? prev + " " + text : text)} readReplies={readReplies.composer} {...attachProps} />
         {(!responsive || !compact) && footer}
       </HeldBar>
     </div>

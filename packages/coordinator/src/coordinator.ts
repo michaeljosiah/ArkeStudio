@@ -507,6 +507,7 @@ import type { ComfyUiEngineService } from "./comfyui/engine.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
 import { ConversationInUseError, WorldChatService } from "./world-chat/service.js";
+import { conversationReplyText } from "./world-chat/reply-text.js";
 import {
   acceptDecided,
   artDirectionFormContent,
@@ -1752,11 +1753,10 @@ export class Coordinator {
       return chapterProseSpeech(await opened, source);
     }
     if (source.of !== "reply") return authoritativeProseSpeech(store.getBundle(), source);
-    const loaded = await new WorldChatService(store.dir).load(source.conversationId);
-    const message = loaded?.messages.find((candidate) => candidate.id === source.messageId);
-    if (!message) throw new Error("That reply is no longer in this conversation.");
-    if (message.role !== "studio") throw new Error("Only Arke's replies are read aloud.");
-    const text = normalizeSpeechText(message.text);
+    // Any chat in this world — World Chat, a production's thread or dock, production setup —
+    // from its own log, by id, whether or not the reply is in the window a screen opened on
+    // (design turn 183).
+    const text = normalizeSpeechText(await conversationReplyText(store.dir, source.conversationId, source.messageId));
     if (!text) throw new Error("Nothing to read yet.");
     return { text, heading: "Arke", version: 1, subjectId: source.messageId };
   }

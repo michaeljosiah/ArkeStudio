@@ -13,6 +13,7 @@ import { useOpenWorldGuard } from "../lib/selectors.js";
 import { listHarnessModels, openWorldChat, send, subscribeProductionSetupResults, useStore, useWorldChatProgress } from "../lib/store.js";
 import { ConversationTranscript, languageChoiceReason } from "../components/conversation.js";
 import { Composer } from "../components/composer.js";
+import { useReadReplies } from "../components/read-replies.js";
 import { ProductionSetupOutline } from "../components/production-setup-outline.js";
 import { Button } from "../components/ui.js";
 import { HarnessModelOptions, HarnessModelStatus } from "../components/harness-models.js";
@@ -30,6 +31,7 @@ export function ProductionSetupScreen() {
   const navigate = useNavigate();
   const workspace = state?.worldChat?.conversationId === setupId ? state.worldChat : null;
   const setup = workspace?.productionSetup;
+  const readReplies = useReadReplies(workspace);
   const [message, setMessage] = useState("");
   const [failure, setFailure] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
@@ -117,7 +119,7 @@ export function ProductionSetupScreen() {
       <div className="fy-production-setup__panels" data-active={tab}>
         <section id="setup-conversation" className="fy-production-setup__conversation" aria-label="Conversation with Arke">
           <div className="fy-production-setup__log">
-            <ConversationTranscript workspace={workspace} running={running} progress={progress}
+            <ConversationTranscript workspace={workspace} autoRead={readReplies.autoRead} running={running} progress={progress}
               failure={workspace?.lastFailure ?? null} canRetry={!locked && !running}
               onStop={() => command({ operation: "cancel" })}
               onRetry={turnId => command({ operation: "retry", turnId })}
@@ -137,7 +139,7 @@ export function ProductionSetupScreen() {
               onSubmit={() => command({ operation: "send", text: message, ...(modelId ? { modelId } : {}) })}
               agentLabel="Arke" busy={running} autoFocus={!phone}
               disabledReason={locked ? "Creation is being resolved." : !draft ? "Opening production setup…" : unavailable}
-              onDictate={text => setMessage(value => value ? `${value} ${text}` : text)} />
+              onDictate={text => setMessage(value => value ? `${value} ${text}` : text)} readReplies={readReplies.composer} />
             <p className="fy-mono">Uses your configured writing model. No media generation starts here.</p>
           </HeldBar>
         </section>
