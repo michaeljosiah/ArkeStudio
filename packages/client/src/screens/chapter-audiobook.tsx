@@ -4,7 +4,6 @@ import {
   AUDIOBOOK_DELIVERIES,
   AUDIOBOOK_TITLE_KEY,
   CADENCE_NOTE_MAX,
-  CADENCE_PHRASE_MAX,
   DEFAULT_NARRATOR,
   audiobookBlockState,
   audiobookBlocks,
@@ -46,7 +45,7 @@ import {
   type ManifestModel,
 } from "@arke-studio/contracts";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
-import { DirectedText, MarkerMenu, VIEW_HASH, cueLabel, markerLabel, viewPlan, type MarkerAt } from "../components/voice-direction.js";
+import { DirectedText, MarkerMenu, VIEW_HASH, cueLabel, heldWords, markerLabel, viewPlan, type MarkerAt } from "../components/voice-direction.js";
 
 // The marker and cue words moved to the shared direction module (design turn 181); kept here too
 // for the callers and tests that name them from the audiobook.
@@ -157,7 +156,8 @@ export interface BlockRow {
   /** What the reader that will speak cannot express, held rather than sent (R-47); by cue index where it is a cue. */
   held: HeldControl[];
   /** What that reader is sent (R-42): each part's text, tags in; null without a direction. */
-  sentAs: string[] | null;
+  /** What the reader is sent, part by part: the words with its syntax in, and the style beside them (design turn 181e). */
+  sentAs: SentPart[] | null;
   /** The speaker's note the line is played with under `performed` (R-44). */
   note?: string;
   /** The narrator reads it (turn 165's `read by … · narrator`): narration, a line under `narrator` or `performed`, or a stand-in. */
@@ -179,15 +179,24 @@ export function rowDirection(record: ChapterAudiobook | null, block: Pick<Audiob
  * sent, part by part — a marker it makes in parts is a part of its own. Null when the plan is
  * wrong for the words, which the coordinator refuses and says.
  */
-export function directionView(text: string, input: AudiobookDirectionInput | null, model: ManifestModel, language?: string, note?: string): { held: HeldControl[]; sentAs: string[] } | null {
+export interface SentPart { text: string; style?: string }
+export function directionView(text: string, input: AudiobookDirectionInput | null, model: ManifestModel, language?: string, note?: string): { held: HeldControl[]; sentAs: SentPart[] } | null {
   try {
     // The speaker's note leads every part on a row that takes it as a tag (R-45); on a row that
-    // takes an instruction it rides beside the words, and on one that takes neither it is held.
+    // takes an instruction it rides beside the words, ahead of the block's own style, and on one
+    // that takes neither it is held.
     const playing = note === undefined ? null : performanceNote(note, model, language);
-    const lead = (part: string) => (playing?.mode === "tag" ? `${playing.tag} ${part}` : part);
-    if (input === null) return { held: [], sentAs: [lead(normalizeSpeechText(text))] };
+    const lead = (part: SentPart): SentPart => {
+      if (playing?.mode === "tag") return { ...part, text: `${playing.tag} ${part.text}` };
+      if (playing?.mode === "instruction") return { ...part, style: part.style === undefined ? note! : `${note!} ${part.style}` };
+      return part;
+    };
+    if (input === null) return { held: [], sentAs: [lead({ text: normalizeSpeechText(text) })] };
     const { plan: sent, held } = holdDirection(text, viewPlan(input), model, language);
-    const sentAs = markerSegments(text, sent, model, language).map((segment) => lead(mapCadence(segment.text, VIEW_HASH, { ...segment.plan, sourceTextHash: VIEW_HASH }, model, language).providerText));
+    const sentAs = markerSegments(text, sent, model, language).map((segment) => {
+      const mapped = mapCadence(segment.text, VIEW_HASH, { ...segment.plan, sourceTextHash: VIEW_HASH }, model, language);
+      return lead({ text: mapped.providerText, ...(mapped.instructions !== undefined ? { style: mapped.instructions } : {}) });
+    });
     return { held, sentAs };
   } catch {
     return null;
@@ -1170,7 +1179,7 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
     if (heard?.state !== "done" || slug === undefined) return;
     void playClip({ id: `hear-${hearId}`, url: mediaUrl(slug, heard.file), title: name, sub: note ?? "plain" });
   }, [heard?.state]);
-  const sent = line?.sentAs?.join(" ") ?? (line === null ? null : normalizeSpeechText(line.block.text));
+  const sent = line?.sentAs?.map((part) => part.text).join(" ") ?? (line === null ? null : normalizeSpeechText(line.block.text));
   const tokenPriced = model?.pricing.kind === "perToken";
   const price = model === null || sent === null || tokenPriced ? 0 : estimateSpeechMicroUsd(model, sent);
   return (
@@ -1332,10 +1341,12 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
     const cues = [...base.cues, cue].sort((a, b) => cueStart(a) - cueStart(b));
     write({ cues });
   };
-  const phraseSupported = support !== null && support.phrase.status !== "unsupported";
-  // An instruction reader takes the note whole, to 300; a tag reader takes one tag of sixty
-  // (design turn 181), so its field stops there rather than cutting a longer note on save.
-  const noteMax = support?.note.method === "instruction" ? CADENCE_NOTE_MAX : CADENCE_PHRASE_MAX;
+  // The note (design turn 181e): to 300 on every reader. An instruction reader takes it whole; a
+  // tag reader takes it as one tag to sixty and holds a longer one, struck under Sent as.
+  const noteSupported = support !== null && support.note.status !== "unsupported";
+  const noteMax = CADENCE_NOTE_MAX;
+  const noteValue = phraseDraft ?? held?.note ?? "";
+  const anySound = support !== null && Object.values(support.sounds).some((sound) => sound.status !== "unsupported");
   const commitPhrase = () => {
     if (phraseDraft === null) return;
     const trimmed = phraseDraft.trim();
@@ -1431,21 +1442,25 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
           )}
         </div>
         <div className="fy-ab__row">
-          <span className="fy-ab__label">Phrase</span>
-          {phraseSupported ? (
-            <input
-              className="fy-ab__phrase fy-mono"
-              value={phraseDraft ?? held?.note ?? ""}
-              maxLength={noteMax}
-              aria-label="Phrase"
-              onChange={(event) => setPhraseDraft(event.target.value)}
-              onBlur={commitPhrase}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") (event.target as HTMLInputElement).blur();
-              }}
-            />
+          <span className="fy-ab__label">Note</span>
+          {noteSupported ? (
+            <>
+              <input
+                className="fy-ab__phrase"
+                value={noteValue}
+                maxLength={noteMax}
+                aria-label="Note"
+                aria-describedby={`fy-ab-note-${row.block.key}`}
+                onChange={(event) => setPhraseDraft(event.target.value)}
+                onBlur={commitPhrase}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+                }}
+              />
+              <span id={`fy-ab-note-${row.block.key}`} className="fy-ab__note-count fy-mono" data-testid="audiobook-note-count">{`${noteValue.length} / ${noteMax}`}</span>
+            </>
           ) : (
-            <span className="fy-ab__off fy-mono">{support === null ? "no reader" : supportWord(support.phrase)}</span>
+            <span className="fy-ab__off fy-mono">{support === null ? "no reader" : supportWord(support.note)}</span>
           )}
         </div>
         <div className="fy-ab__row">
@@ -1471,7 +1486,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
             {base.cues.length === 0 && <span className="fy-ab__off fy-mono">none</span>}
             {base.cues.map((cue, index) => (
               <span key={index} className={`fy-ab__cue fy-mono${heldCues.has(index) ? " fy-ab__cue--held" : ""}`}>
-                <span className={`fy-ab__mk${cue.kind === "delivery" ? "" : " fy-ab__mk--cue"}${heldCues.has(index) ? " fy-ab__mk--held" : ""}`} data-mk={markerLabel(cue)} aria-hidden="true" />
+                <span className={`fy-ab__mk${cue.kind === "delivery" ? "" : cue.kind === "sound" ? " fy-ab__mk--sound" : " fy-ab__mk--cue"}${heldCues.has(index) ? " fy-ab__mk--held" : ""}`} data-mk={markerLabel(cue)} aria-hidden="true" />
                 {cueLabel(text, cue)}
                 <button type="button" className="fy-ab__cue-x" aria-label="Remove marker" onClick={() => write({ cues: base.cues.filter((_, at) => at !== index) })}>
                   ×
@@ -1523,6 +1538,28 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
                   </button>
                 );
               })}
+              {/* `+ Sound` opens the marker menu on its Sound group alone (design turns 165, 181e),
+                  where `+ Marker` opens it: beside the words on a wide window, in the sheet on a
+                  narrow one. */}
+              {onMarker !== undefined && (
+                <button
+                  type="button"
+                  className="fy-ab__add"
+                  disabled={!anySound}
+                  aria-label="Add sound"
+                  title={support === null ? "no reader" : anySound ? "sound at the words selected" : (Object.values(support.sounds)[0]?.reason ?? "no sounds")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const span = selectionSpan();
+                    const point = span === null ? text.length : span.to;
+                    const at: MarkerAt = { key: row.block.key, span: { from: point, to: point }, only: "sound" };
+                    if (inSheet) setMarkerMenu(at); else onMarker(at);
+                  }}
+                >
+                  <Plus size={10} aria-hidden="true" />
+                  Sound
+                </button>
+              )}
             </span>
           </span>
         </div>
@@ -1535,10 +1572,24 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
         {row.sentAs !== null && (
           <div className="fy-ab__row fy-ab__row--top">
             <span className="fy-ab__label">Sent as</span>
-            <span className="fy-ab__sent fy-mono" data-testid="audiobook-sent-as">
-              {row.sentAs.map((part, index) => (
-                <span key={index}>{part}</span>
+            <span className="fy-ab__sentcol">
+              {/* The style beside the words (design turn 181e), once for each that differs. */}
+              {[...new Set(row.sentAs.flatMap((part) => (part.style !== undefined ? [part.style] : [])))].map((style) => (
+                <span key={style} className="fy-ab__sent-style fy-mono" data-testid="audiobook-sent-style">
+                  <span className="fy-vd__sent-k">style</span> {style}
+                </span>
               ))}
+              <span className="fy-ab__sent fy-mono" data-testid="audiobook-sent-as">
+                {row.sentAs.map((part, index) => (
+                  <span key={index}>{part.text}</span>
+                ))}
+              </span>
+              {/* What the reader is not sent, named, as the Bench names it (design turn 181d). */}
+              {row.held.length > 0 && row.direction !== null && (
+                <span className="fy-ab__sent-style fy-vd__sent-held fy-mono" data-testid="audiobook-sent-held">
+                  <span className="fy-vd__sent-k">Held</span> {heldWords(viewPlan(row.direction.input), row.held).join(" · ")} — {model?.displayName ?? "this reader"}
+                </span>
+              )}
             </span>
           </div>
         )}

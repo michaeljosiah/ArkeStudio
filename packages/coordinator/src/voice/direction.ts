@@ -1,5 +1,6 @@
 import {
   audiobookDirectionHash,
+  NOTE_TAG_HOLD,
   holdDirection,
   sentAs,
   mapCadence,
@@ -142,7 +143,10 @@ export function checkDirection(text: string, plan: CadencePlan, model: ManifestM
     return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
   if (mode === "strict") {
-    const fresh = held.find((control) => !alreadyHeld.includes(heldKey(plan, control)));
+    // The note is written to 300 on every reader (design turn 181): a tag reader takes it as one
+    // tag to sixty and holds a longer one, so that hold is the author's to see under Sent as,
+    // not a refusal.
+    const fresh = held.find((control) => !alreadyHeld.includes(heldKey(plan, control)) && !(control.control === "note" && control.reason === NOTE_TAG_HOLD));
     if (fresh !== undefined) {
       const name = fresh.control === "delivery" ? plan.delivery : fresh.control === "marker" ? markerName(plan, fresh.cueIndex) : fresh.control;
       return { ok: false, reason: `${name} · ${model.displayName} ${fresh.reason}`.replace(/\.$/, "") };

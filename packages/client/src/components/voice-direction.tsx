@@ -179,6 +179,8 @@ export interface MarkerAt {
   key: string;
   span: { from: number; to: number };
   edit?: number;
+  /** One group alone, for a press that names it: the block panel's `+ Sound` (design turn 181e). */
+  only?: "sound";
 }
 
 /**
@@ -190,7 +192,7 @@ export interface MarkerAt {
  * emphasis needs words. `oneRequest` is a surface that joins no parts (the Bench): a delivery
  * marker the reader could only make in parts is struck there too.
  */
-export function MarkerMenu({ text, base, language, at, model, oneRequest = false, onApply, onClose, onNote }: {
+export function MarkerMenu({ text, base, language, at, model, oneRequest = false, only = at.only, onApply, onClose, onNote }: {
   /** The words, normalised as cues are placed. */
   text: string;
   base: VoiceDirectionInput;
@@ -198,6 +200,8 @@ export function MarkerMenu({ text, base, language, at, model, oneRequest = false
   at: MarkerAt;
   model: ManifestModel | null;
   oneRequest?: boolean;
+  /** One group alone, for a press that names it: the block panel's `+ Sound` (design turn 181e). */
+  only?: "sound";
   onApply: (cues: CadenceCue[] | null) => void;
   onClose: () => void;
   /** The note, where the surface has one beside the words (the Bench): the menu's last item. */
@@ -264,22 +268,26 @@ export function MarkerMenu({ text, base, language, at, model, oneRequest = false
   );
   return (
     <div className="fy-ab__menu fy-ab__menu--marker" role="menu" aria-label="Marker" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === "Escape" && onClose()}>
-      <input className="fy-ab__menu-search" placeholder="Marker" aria-label="Marker" value={query} autoFocus onChange={(event) => setQuery(event.target.value)} />
-      <div className="fy-ab__menu-eb">Delivery</div>
-      <div className="fy-ab__mgrid">
-        {AUDIOBOOK_DELIVERIES.map((delivery) =>
-          chip(`d:${delivery}`, delivery, deliveryReason(delivery), editing?.kind === "delivery" && editing.delivery === delivery, () =>
-            place({ kind: "delivery", span: words, delivery, ...(editing?.kind === "delivery" && editing.phrase !== undefined ? { phrase: editing.phrase } : {}) }),
-          ),
-        )}
-      </div>
-      <div className="fy-ab__menu-eb">Cue</div>
-      <div className="fy-ab__mgrid">
-        {chip("c:short", "pause · short", cueReason("pause"), editing?.kind === "pause" && editing.length === "short", () => place({ kind: "pause", at: point ?? span.to, length: "short" }))}
-        {chip("c:long", "pause · long", cueReason("pause"), editing?.kind === "pause" && editing.length === "long", () => place({ kind: "pause", at: point ?? span.to, length: "long" }))}
-        {chip("c:breath", "breath", cueReason("breath"), editing?.kind === "breath", () => place({ kind: "breath", at: point ?? span.from, action: "inhale" }))}
-        {chip("c:emphasis", "emphasis", cueReason("emphasis"), editing?.kind === "emphasis", () => place({ kind: "emphasis", span: words, level: "moderate" }))}
-      </div>
+      <input className="fy-ab__menu-search" placeholder={only === "sound" ? "Sound" : "Marker"} aria-label={only === "sound" ? "Sound" : "Marker"} value={query} autoFocus onChange={(event) => setQuery(event.target.value)} />
+      {only !== "sound" && (
+        <>
+          <div className="fy-ab__menu-eb">Delivery</div>
+          <div className="fy-ab__mgrid">
+            {AUDIOBOOK_DELIVERIES.map((delivery) =>
+              chip(`d:${delivery}`, delivery, deliveryReason(delivery), editing?.kind === "delivery" && editing.delivery === delivery, () =>
+                place({ kind: "delivery", span: words, delivery, ...(editing?.kind === "delivery" && editing.phrase !== undefined ? { phrase: editing.phrase } : {}) }),
+              ),
+            )}
+          </div>
+          <div className="fy-ab__menu-eb">Cue</div>
+          <div className="fy-ab__mgrid">
+            {chip("c:short", "pause · short", cueReason("pause"), editing?.kind === "pause" && editing.length === "short", () => place({ kind: "pause", at: point ?? span.to, length: "short" }))}
+            {chip("c:long", "pause · long", cueReason("pause"), editing?.kind === "pause" && editing.length === "long", () => place({ kind: "pause", at: point ?? span.to, length: "long" }))}
+            {chip("c:breath", "breath", cueReason("breath"), editing?.kind === "breath", () => place({ kind: "breath", at: point ?? span.from, action: "inhale" }))}
+            {chip("c:emphasis", "emphasis", cueReason("emphasis"), editing?.kind === "emphasis", () => place({ kind: "emphasis", span: words, level: "moderate" }))}
+          </div>
+        </>
+      )}
       {soundChips.some((node) => node !== null) && (
         <>
           <div className="fy-ab__menu-eb">Sound</div>
@@ -287,8 +295,8 @@ export function MarkerMenu({ text, base, language, at, model, oneRequest = false
           {noSounds && model !== null && <p className="fy-ab__menu-why fy-mono">{`${model.displayName} · ${soundReasons[0]}`}</p>}
         </>
       )}
-      <div className="fy-ab__menu-sep" />
-      {phrase === null ? (
+      {only !== "sound" && <div className="fy-ab__menu-sep" />}
+      {only === "sound" ? null : phrase === null ? (
         (() => {
           const reason = deliveryReason(undefined);
           return (
@@ -314,7 +322,7 @@ export function MarkerMenu({ text, base, language, at, model, oneRequest = false
           }}
         />
       )}
-      {onNote !== undefined && (
+      {onNote !== undefined && only !== "sound" && (
         <button type="button" role="menuitem" className="fy-ab__menu-opt" onClick={onNote}>
           <span className="fy-ab__menu-label">Note…</span>
           <span className="fy-ab__menu-meta">{CADENCE_NOTE_MAX}</span>
