@@ -128,6 +128,11 @@ describe("the character dialog (SPEC-044 R-11..R-16)", () => {
         cadencePlanHash: HASH1, modelHash: HASH2, local: false, createdAt: AT, audioFormat: "wav", estimatedMicroUsd: 100000,
         mapping: { ...mapCadence(LINE, hashOf(LINE), request.cadencePlan, model), providerTextHash: hashOf(LINE) } } }); });
     assert.match(container.textContent!, /Generate · up to \$0\.10/);
+    // Sent as (design turn 181): the style beside the words, exactly as the reader gets them.
+    const sentAs = container.querySelector('[data-testid="sent-as"]')!.textContent!;
+    assert.match(sentAs, /style Read calmly and evenly, at a steady pace\./);
+    assert.ok(sentAs.includes(`text ${LINE}`), "the words as sent");
+    assert.equal(request.cadencePlan.delivery, "measured", "Gemini reads measured, so the door asks for it");
   });
   it("shows the facts, the picture in use and the three rows from the record alone (T-3, T-10)", async () => {
     const { container } = await mount(stateFor({ voice: { kind: "performance", performanceId: P1, hash: HASH1 } }));

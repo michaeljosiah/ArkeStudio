@@ -41,7 +41,9 @@ it("prepares a priced Gemini performance with separate style and refuses spans t
   assert.equal(job.params.instructions, quote.mapping.instructions);
   assert.equal(job.params.audioFormat, "wav");
   await assert.rejects(preparePerformanceGeneration(store, model, { ...request, cadencePlan: { ...request.cadencePlan,
-    cues: [{ kind: "delivery", span: { from: 0, to: 4, text: normalizeSpeechText(line.text).slice(0, 4) }, delivery: "whispered" }] } }), /one delivery.*audiobook/);
+    cues: [{ kind: "delivery", span: { from: 0, to: 4, text: normalizeSpeechText(line.text).slice(0, 4) }, delivery: "whispered" }] } }), /needs a read in parts · remove it, choose another voice, or read the passage in the audiobook/);
+  // What the reader cannot take is refused before the price in its own clause (design turn 181).
+  await assert.rejects(preparePerformanceGeneration(store, model, { ...request, cadencePlan: { ...request.cadencePlan, speed: 0.8 } }), /speed · Gemini 3\.8 Flash TTS no speed · remove it or choose another voice$/);
 });
 
 it("quotes exact decorated wording and keeps paid output with unknown duration through replay and restart", async t => {

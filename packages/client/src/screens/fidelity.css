@@ -7016,7 +7016,6 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-linedoor__note { margin: 0; font: 400 10px var(--font-mono); color: var(--neutral-400); }
 .fy-linedoor__keep { display: flex; flex-direction: column; gap: 8px; font: 400 11.5px var(--font-sans); }
 .fy-linedoor__keep > label { display: flex; align-items: center; gap: 8px; }
-.fy-linedoor__wording { margin: 0; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 11px var(--font-mono); }
 /* The view tabs are one segmented control on a recessed pill, the way the prototype draws them:
    the chosen mode lifts out on the page colour with a hairline shadow, the rest sit in the well. */
 .fy-sw__metrics { padding: 3px 4px; color: var(--neutral-400); font: 400 10px var(--font-mono); }

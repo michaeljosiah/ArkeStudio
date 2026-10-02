@@ -16,6 +16,7 @@ import { Button } from "../../components/ui.js";
 import { dismissPlayback, playClip, playbackSnapshot } from "../../lib/audio.js";
 import { generatePerformance, send, subscribePerformanceResults, subscribeQueueResults, subscribeVoiceUploadConfirmations } from "../../lib/store.js";
 import { RemoteVoiceUploadConfirmation } from "../../components/remote-voice-upload-confirmation.js";
+import { SentAs } from "../../components/voice-direction.js";
 
 /** One line the character speaks in the scene, as the dialog lists it (SPEC-044 R-16). */
 export interface SpokenLine { id: string; shotId: string; blockId?: string; number: number; text: string }
@@ -237,7 +238,7 @@ export function GenerateLineSheet({ world, production, scene, sheet, model, line
         </div>
       ) : (
         <div className="fy-linedoor__keep">
-          <pre className="fy-linedoor__wording">{quote.mapping.providerText}</pre>
+          <SentAs {...(quote.mapping.instructions !== undefined ? { style: quote.mapping.instructions } : {})} text={quote.mapping.providerText} held={[]} />
           {uploadConfirmation && (
             <RemoteVoiceUploadConfirmation
               destinationLabel={uploadConfirmation.destinationLabel}
