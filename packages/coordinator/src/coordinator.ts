@@ -1867,17 +1867,25 @@ export class Coordinator {
          * and starts on the first, which is the same total render with none of the silence.
          */
         const block = blocks[0]!;
+        // Stop ends it at the next chunk and cancels the one in flight.
+        const abort = new AbortController();
+        this.localReads.set(requestId, abort);
+        if (this.stoppedReads.has(requestId)) abort.abort();
         const result = await this.voiceService.localSpeech(store, speaking.voiceId, block.text, (piece) => {
           // A single-piece read stays exactly what it was: one event, no part numbers.
-          if (piece.total < 2) return;
+          if (piece.total < 2 || abort.signal.aborted) return;
           ready(block, piece.file, false, { part: piece.index, parts: piece.total });
-        });
+        }, { signal: abort.signal });
         // The joined clip follows the pieces, with no part of its own (codex on PR 1210): a
         // screen already sounding the pieces does not start it, and a replay has the whole
         // passage rather than whichever piece landed last.
-        ready(block, result.file, result.cached);
+        if (!abort.signal.aborted) ready(block, result.file, result.cached);
       } catch (error) {
-        fail(describeCoordinatorError(error), characters);
+        // A read told to stop has nobody waiting on it; its stopping is not a failure to report.
+        if (!this.stoppedReads.has(requestId)) fail(describeCoordinatorError(error), characters);
+      } finally {
+        this.localReads.delete(requestId);
+        this.stoppedReads.delete(requestId);
       }
       return;
     }
@@ -2717,6 +2725,13 @@ export class Coordinator {
   private readonly stoppedReads = new Set<string>();
   /** Cloud jobs queued for a page read, by requestId, so Stop can cancel what it already paid for. */
   private readonly readJobs = new Map<string, string[]>();
+  /**
+   * A single block being made on the local engine, by requestId (design turn 183; codex on PR
+   * 1473). A chat reply read is stopped by the next read, by sending, by leaving the chat; the
+   * page loop checks between blocks, but one block's chunks ran to the end, holding the one
+   * engine lane for minutes while the read that replaced it waited behind.
+   */
+  private readonly localReads = new Map<string, AbortController>();
   /** The blocks of a read being made in pieces (issue 1208): joined, and for a page announced, once every piece has landed. */
   private readonly pieceReads = new PieceReads();
   /** Page reads that failed as a whole (codex on PR 1210): what their remaining jobs say afterwards is not news. Bounded; a stop clears its own. */
@@ -15261,6 +15276,7 @@ export class Coordinator {
         // a cloud narrator are cancelled, because a thousand paid syntheses after Stop is the
         // spend the control exists to prevent (codex, PR 879).
         this.stoppedReads.add(msg.requestId);
+        this.localReads.get(msg.requestId)?.abort();
         this.pendingVoiceReads.delete(msg.requestId);
         this.pieceReads.drop(msg.requestId);
         this.failedReads.delete(msg.requestId);

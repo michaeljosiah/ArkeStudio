@@ -10,7 +10,7 @@ import { WorldChatScreen } from "../src/screens/world-chat.js";
 import { ProductionSetupScreen } from "../src/screens/production-setup.js";
 import { ProductionConversation } from "../src/components/conversation.js";
 import { __applyEventForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
-import { dismissPlayback, playbackSnapshot, setAudioFactoryForTest } from "../src/lib/audio.js";
+import { dismissPlayback, emitForTest, playbackSnapshot, playClip, setAudioFactoryForTest } from "../src/lib/audio.js";
 import { resetReadRepliesForTest, setReadReplies } from "../src/lib/reply-reads.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { CHAT_ID, chatArtifactsFixture } from "./chat-artifacts-fixture.js";
@@ -292,6 +292,43 @@ describe("one read at a time", () => {
     assert.ok(sent.some((message) => message.kind === "stop-prose-page" && message.requestId === requestId));
     await act(async () => __applyEventForTest(piece(1)));
     assert.equal(playbackSnapshot().clip, null, "the dismissed reply stays dismissed");
+  });
+
+  it("a reply still being made stops when something else is played before it lands", async () => {
+    const container = await worldChat(chatArtifactsFixture());
+    const studio = turns(container).filter((turn) => turn.classList.contains("fy-chat__turn--studio"));
+    await click(listenIn(studio[0]!));
+    const requestId = reads()[0]!.requestId;
+    await act(async () => playClip({ id: "take-preview", url: "arke-media://take.wav", title: "Take" }));
+    assert.equal(listenIn(studio[0]!)?.textContent, "Listen");
+    assert.ok(sent.some((message) => message.kind === "stop-prose-page" && message.requestId === requestId));
+    await act(async () => __applyEventForTest(landed(requestId)));
+    assert.equal(playbackSnapshot().clip?.id, "take-preview", "the reply does not interrupt what was chosen instead");
+  });
+
+  it("a streamed reply that outruns its synthesis is not over until its last piece is heard", async () => {
+    const container = await worldChat(chatArtifactsFixture());
+    const studio = turns(container).filter((turn) => turn.classList.contains("fy-chat__turn--studio"));
+    await click(listenIn(studio[0]!));
+    const requestId = reads()[0]!.requestId;
+    const piece = (part: number) => ({ ...landed(requestId, `.cache/voice/piece-${part}.wav`), part, parts: 2 }) as DomainEvent;
+    await act(async () => __applyEventForTest(piece(0)));
+    await act(async () => emitForTest("ended"));
+    assert.ok(studio[0]!.querySelector(".fy-replyplay"), "waiting on the next piece is still reading");
+    await act(async () => __applyEventForTest(piece(1)));
+    assert.match(playbackSnapshot().clip?.url ?? "", /piece-1/);
+    assert.ok(studio[0]!.querySelector(".fy-replyplay"), "the last piece plays with its controls");
+    await act(async () => emitForTest("ended"));
+    assert.equal(studio[0]!.querySelector(".fy-replyplay"), null, "over once the last piece has ended");
+  });
+
+  it("keeps a playback error on the reply", async () => {
+    const container = await worldChat(chatArtifactsFixture());
+    const studio = turns(container).filter((turn) => turn.classList.contains("fy-chat__turn--studio"));
+    await click(listenIn(studio[0]!));
+    await act(async () => __applyEventForTest(landed(reads()[0]!.requestId)));
+    await act(async () => emitForTest("error"));
+    assert.match(studio[0]!.textContent ?? "", /could not be played/);
   });
 
   it("starting a second reply's read stops the first outright, and its late piece never plays", async () => {

@@ -34,7 +34,7 @@ function wav(): Uint8Array {
   return new Uint8Array(out);
 }
 
-async function harness() {
+async function harness(hold?: () => Promise<void>) {
   const { root, worldDir } = await makeTempRoot();
   const provider = new FsWorldProvider(root, { clock: () => CLOCK });
   await provider.loadWorld(WORLD_ID);
@@ -52,6 +52,7 @@ async function harness() {
         listVoices: async () => [{ id: "bm_george", label: "George", attributes: [] }],
         synthesize: async (input: { voiceId: string; text: string }) => {
           spoken.push(input.text);
+          await hold?.();
           return wav();
         },
         transcribe: async () => ({ text: "" }),
@@ -134,6 +135,29 @@ describe("reading Arke's reply from its conversation's log", () => {
       await h.send(read(setupId, reply, "01J8F3K2QW9VZX4N7M0RTYB7A2"));
       assert.equal(reads(h.events).at(-1)!.status, "ready");
       assert.deepEqual(h.spoken, ["A heist on the lighthouse, then."]);
+    } finally {
+      await h.provider.close();
+    }
+  });
+
+  it("stops a long local read at the next chunk when told to, without reporting a failure", async () => {
+    let release!: () => void;
+    const first = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    const h = await harness(() => (calls++ === 0 ? first : Promise.resolve()));
+    try {
+      const long = Array.from({ length: 12 }, (_, i) => `Sentence ${i} of a long reply about the tide and the bells under the western lock.`).join(" ");
+      const thread = await conversation(h.worldDir, { kind: "production", productionId: "saltlight" }, [["Tell me everything.", long]]);
+      const requestId = "01J8F3K2QW9VZX4N7M0RTYB7C1";
+      const reading = h.send(read(thread.id, thread.ids[0]!.studio, requestId));
+      // The first chunk is on the engine; Stop lands while it is.
+      while (h.spoken.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+      await h.send({ kind: "stop-prose-page", worldId: WORLD_ID, requestId });
+      release();
+      await reading;
+      assert.equal(h.spoken.length, 1, "no chunk after the stop is made");
+      assert.equal(reads(h.events).some((event) => event.status === "failed"), false, "a stopped read is not a failure");
+      assert.equal(reads(h.events).some((event) => event.status === "ready" && event.part === undefined), false, "nothing whole is announced");
     } finally {
       await h.provider.close();
     }

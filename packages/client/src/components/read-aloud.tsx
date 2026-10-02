@@ -2,9 +2,10 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { freePlanStop, narratorLabelFor, speechPlanLabel, type ProseReadSource } from "@arke-studio/contracts";
 import { readProse, stopProsePage, useStore, useVoiceAudio, useVoiceParts } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
-import { clearQueue, dismissPlayback, enqueueClip, playbackSnapshot, playClip, usePlayback, type Clip } from "../lib/audio.js";
+import { clearQueue, dismissPlayback, enqueueClip, playbackSnapshot, playClip, usePlayback, useQueueAt, type Clip } from "../lib/audio.js";
 import { claimRead, releaseRead } from "../lib/reply-reads.js";
 import { useMediaQuery } from "../lib/media-query.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 import { clock, TextActions } from "./player.js";
 import { Copy, Speaker } from "./icons.js";
 import { cx } from "./ui.js";
@@ -55,8 +56,9 @@ function useProseRead(source: ProseReadSource, title: string, reply = false) {
   const sub = `read aloud · ${narratorLabel}${plan !== null ? ` · ${plan}` : ""}`;
   // A reply's player names where the voice runs when it costs nothing there (design 183c):
   // `George · this machine`, beside a cloud plan's `Ife's voice · free plan`.
+  // A paired browser hears what the PC made (codex on PR 1473): there the voice is the PC's.
   const local = (result?.provider ?? state?.app.narrator?.provider ?? "kokoro") === "kokoro" || model?.pricing.kind === "unmetered";
-  const reader = `${narratorLabel}${plan !== null ? ` · ${plan}` : local ? " · this machine" : ""}`;
+  const reader = `${narratorLabel}${plan !== null ? ` · ${plan}` : local ? (isRemoteSession() ? " · your PC" : " · this machine") : ""}`;
 
   /*
    * A long read arrives in pieces, because local synthesis runs at about the speed of speech and
@@ -70,6 +72,9 @@ function useProseRead(source: ProseReadSource, title: string, reply = false) {
    */
   const parts = partsByRequest[request ?? ""] ?? [];
   const landed = parts.filter((file) => file !== undefined).length;
+  // Every piece the read will have has landed. The whole a streamed read is joined into arrives
+  // last with no part of its own, so the pieces themselves are what say a streamed read is made.
+  const made = result?.status === "ready" && (parts.length === 0 || (landed === parts.length && (result.parts === undefined || landed >= result.parts)));
   const queued = useRef(0);
   useEffect(() => {
     if (request === null || slug === undefined) return;
@@ -110,7 +115,7 @@ function useProseRead(source: ProseReadSource, title: string, reply = false) {
     setRequest(null);
     releaseRead(key);
     if (id === null) return;
-    if (worldId !== undefined && !(result?.status === "ready" && (result.parts === undefined || landed >= result.parts))) stopProsePage(worldId, id);
+    if (worldId !== undefined && !made) stopProsePage(worldId, id);
     if (playbackSnapshot().clip?.id === id) {
       dismissPlayback();
       clearQueue();
@@ -170,7 +175,9 @@ function useProseRead(source: ProseReadSource, title: string, reply = false) {
     request,
     reader,
     /** Every piece the read will have has landed: when the player rests, the read is over. */
-    settled: result?.status === "ready" && (result.parts === undefined || landed >= result.parts),
+    settled: made,
+    /** How many pieces a streamed read has; 0 for a read that arrived whole. */
+    pieces: parts.length,
     onRead: () => ask(),
     onReadShipped: () => ask(undefined, true),
     /** Play a read already made, from this session, without asking the coordinator again. */
@@ -244,27 +251,37 @@ export function ReplyRead({
   /** Which press started the read under way, or null when none is: the label says it. */
   const [mode, setMode] = useState<"listen" | "auto" | null>(null);
   const sounded = useRef(false);
+  /** What the player held when this read was asked for: anything else starting means it was displaced. */
+  const before = useRef<string | null>(null);
   const mine = read.request !== null && playback.clip?.id === read.request;
+  // Which piece of a streamed read is sounding; past the last once the last has played out.
+  const at = useQueueAt();
 
   // The row rests again when the read is over: its last piece played out, a failure, a Stop
   // from anywhere (the composer, the next read), or another sound taking the player over. A
-  // read that loses the player — the dock dismissed, another clip played — is stopped, not only
-  // relabelled (codex on PR 1473): its request would otherwise stay live, and the next piece to
-  // land would start the old reply again over whatever replaced it.
+  // read that loses the player — the dock dismissed, another clip played, before or after it
+  // first sounded — is stopped, not only relabelled (codex on PR 1473): its request would
+  // otherwise stay live, and the next piece to land would start the old reply again over
+  // whatever replaced it. A playback error stays on the row rather than being cleared away.
   useEffect(() => {
     if (mode === null) return;
     if (read.request === null || read.error !== null) { setMode(null); return; }
     if (mine) {
       sounded.current = true;
-      if (playback.status === "ended" && read.settled) setMode(null);
-      else if (playback.status === "error") { read.stop(); setMode(null); }
+      // Over only once the last piece has itself ended (codex on PR 1473): a streamed read that
+      // outran its synthesis rests on `ended` between pieces, and every piece having landed by
+      // then does not mean the last one has been heard.
+      const lastHeard = read.pieces === 0 || at === null || at >= read.pieces;
+      if (playback.status === "ended" && read.settled && lastHeard) setMode(null);
       return;
     }
-    if (sounded.current) { read.stop(); setMode(null); }
-  }, [mode, mine, playback.status, read.request, read.settled, read.error]);
+    const displaced = sounded.current ? true : playback.clip !== null && playback.clip.id !== before.current && playback.status !== "ended";
+    if (displaced) { read.stop(); setMode(null); }
+  }, [mode, mine, playback.status, playback.clip?.id, at, read.request, read.settled, read.pieces, read.error]);
 
   const start = (how: "listen" | "auto") => {
     sounded.current = false;
+    before.current = playbackSnapshot().clip?.id ?? null;
     setMode(how);
     // A read already made this session replays from here, without another call.
     if (read.clip !== null) read.replay(read.clip);
@@ -288,6 +305,7 @@ export function ReplyRead({
       type="button"
       className={cx("fy-replyacts__btn", active && "fy-replyacts__btn--on")}
       aria-label={phone ? (active ? "Stop reading" : "Listen") : undefined}
+      title={active ? "Stop reading" : undefined}
       aria-pressed={active}
       onClick={() => {
         if (active) { read.stop(); setMode(null); }
@@ -309,6 +327,7 @@ export function ReplyRead({
     </button>
   );
   const time = mine ? clock(playback.currentTime) : "0:00";
+  const broken = mine && playback.status === "error" ? (playback.error ?? "This audio could not be played.") : null;
   return (
     <>
       <div className="fy-replyacts" data-phone={phone ? "true" : undefined}>
@@ -330,6 +349,7 @@ export function ReplyRead({
           <span className="fy-mono">{mine ? `${time} / ${clock(playback.duration)}` : time}</span>
         </div>
       )}
+      {playing && broken !== null && <span className="fy-textactions__note" role="status">{broken}</span>}
       {read.error !== null && (freePlanStop(read.error) !== null
         ? <FreePlanStop error={read.error} onDefaultNarrator={() => { sounded.current = false; setMode("listen"); read.onReadShipped(); }} />
         : <span className="fy-textactions__note">{read.error}</span>)}
