@@ -83,6 +83,8 @@ export {
   ProviderAuthError,
   ProviderBusyError,
   ProviderRequestRejectedError,
+  ProviderFreeLimitError,
+  ProviderPaymentRequiredError,
   type CommandResult,
   type CommandRunner,
   type FetchedArtifact,

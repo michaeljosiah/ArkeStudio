@@ -54,6 +54,8 @@ import {
   RoutingFaultSchema,
   SpendStatusSchema,
   NarratorSettingsSchema,
+  ProviderPlansSchema,
+  PAID_PLANS,
 } from "./settings.js";
 import { SetupStatusSchema } from "./setup.js";
 import { VendorAuthStatusSchema, vendorAuthUnavailable } from "./vendor-auth.js";
@@ -501,6 +503,8 @@ export const ClientStateSchema = valueSchema(z
         appearance: AppearanceSettingsSchema.default({ theme: "system" }),
         /** Who reads the app's prose aloud. Null is the shipped local voice, and free. */
         narrator: NarratorSettingsSchema.default(null),
+        /** What plan the author says each free-tier provider's key is on (design turn 182). */
+        providerPlans: ProviderPlansSchema.default(PAID_PLANS),
         runtime: LocalRuntimeStatusSchema.nullable().default(null),
         residency: z.array(ModelResidencySchema).optional(),
         /**

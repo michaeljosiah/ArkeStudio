@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { narratorLabelFor, type ProseReadSource } from "@arke-studio/contracts";
+import { freePlanStop, narratorLabelFor, speechPlanLabel, type ProseReadSource } from "@arke-studio/contracts";
 import { readProse, useStore, useVoiceAudio, useVoiceParts } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { clearQueue, enqueueClip, playClip, type Clip } from "../lib/audio.js";
 import { TextActions } from "./player.js";
 import { ReadAloudConfirmation } from "./read-aloud-confirmation.js";
+import { FreePlanStop } from "./free-plan-stop.js";
 import { RemoteVoiceUploadConfirmation, useVoiceUploadAsk } from "./remote-voice-upload-confirmation.js";
 
 /**
@@ -39,7 +40,9 @@ function useProseRead(source: ProseReadSource, title: string) {
   // is named as the shipped local voice it falls to, never as itself — and once the read lands,
   // the voice that read it is what is named.
   const narratorLabel = narratorLabelFor(state?.app.narrator ?? null, world?.meta.worldId, result?.status === "ready" ? result : undefined);
-  const sub = `read aloud · ${narratorLabel}`;
+  // Where a price would show, the reader names its plan (design turn 182): `· free plan`.
+  const plan = speechPlanLabel(state?.app.manifest?.models.find((model) => model.provider === (result?.provider ?? state.app.narrator?.provider) && model.id === (result?.model ?? state.app.narrator?.model)));
+  const sub = `read aloud · ${narratorLabel}${plan !== null ? ` · ${plan}` : ""}`;
 
   /*
    * A long read arrives in pieces, because local synthesis runs at about the speed of speech and
@@ -78,15 +81,21 @@ function useProseRead(source: ProseReadSource, title: string) {
       : null;
 
   /** Fresh when nothing is passed; the same request again when a charge, or the vendor, has been confirmed. */
-  const ask = (again?: { requestId: string; confirmationToken?: string }) => {
+  // `shipped` reads in the shipped narrator for this read only: what a free plan's limit offers
+  // (design turn 182). It rides every later frame of the same read.
+  const shipped = useRef(false);
+  const ask = (again?: { requestId: string; confirmationToken?: string }, inShipped?: boolean) => {
     const worldId = world?.meta.worldId;
     if (worldId === undefined) return;
     queued.current = 0;
     // A second read replaces the first outright: two voices over one another is never what
     // anybody meant.
     clearQueue();
-    if (again === undefined) upload.drop();
-    setRequest(readProse(worldId, source, again?.requestId, again?.confirmationToken, upload.allowed()));
+    if (again === undefined) {
+      upload.drop();
+      shipped.current = inShipped === true;
+    }
+    setRequest(readProse(worldId, source, again?.requestId, again?.confirmationToken, upload.allowed(), shipped.current || undefined));
   };
 
   /*
@@ -114,6 +123,7 @@ function useProseRead(source: ProseReadSource, title: string) {
   return {
     clip,
     onRead: () => ask(),
+    onReadShipped: () => ask(undefined, true),
     note,
     confirmation,
     preparing,
@@ -136,13 +146,15 @@ export function ReadAloud({
   /** The words on screen — copied by the second button, and what makes an empty block silent. */
   text: string;
 }) {
-  const { clip, onRead, note, error, confirmation } = useProseRead(source, title);
+  const { clip, onRead, onReadShipped, note, error, confirmation } = useProseRead(source, title);
   if (text.trim() === "") return null;
   return (
     <>
       {confirmation}
       <TextActions clip={clip} onRead={onRead} copyText={text} readLabel="Read aloud" note={note} />
-      {error !== null && <span className="fy-textactions__note">{error}</span>}
+      {error !== null && (freePlanStop(error) !== null
+        ? <FreePlanStop error={error} onDefaultNarrator={onReadShipped} />
+        : <span className="fy-textactions__note">{error}</span>)}
     </>
   );
 }
@@ -165,7 +177,7 @@ export function ReadAloudButton({
   text: string;
   disabled?: boolean;
 }) {
-  const { clip, onRead, preparing, confirmation, error } = useProseRead(source, title);
+  const { clip, onRead, onReadShipped, preparing, confirmation, error } = useProseRead(source, title);
   return (
     <>
     {confirmation}
@@ -180,7 +192,9 @@ export function ReadAloudButton({
     >
       {preparing ? "Preparing…" : "Listen"}
     </button>
-    {error && <span className="fy-textactions__note">{error}</span>}
+    {error && (freePlanStop(error) !== null
+      ? <FreePlanStop error={error} onDefaultNarrator={onReadShipped} />
+      : <span className="fy-textactions__note">{error}</span>)}
     </>
   );
 }

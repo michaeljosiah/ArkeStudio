@@ -4,6 +4,7 @@ import {
   HOSTED_READER_LABELS,
   designatedVoiceSample,
   formatMicroUsd,
+  speechPlanLabel,
   isClonedVoice,
   isHostedVoiceReader,
   legacyVoiceModel,
@@ -875,7 +876,7 @@ function ChooseVoiceDialog({
                         picked.local
                           ? " · free"
                           : price !== null && price !== undefined
-                            ? ` · ${pickedRow?.pricing.kind === "perToken" ? "up to " : ""}${formatMicroUsd(price)} preview`
+                            ? ` · ${speechPlanLabel(pickedRow) ?? `${pickedRow?.pricing.kind === "perToken" ? "up to " : ""}${formatMicroUsd(price)} preview`}`
                             : ""
                       }`}
                     </span>

@@ -71,7 +71,8 @@ import {
   VoiceCandidateSchema,
   VoiceRuntimeStatusSchema,
 } from "./voice.js";
-import { NarratorSettingsSchema } from "./settings.js";
+import { NarratorSettingsSchema, ProviderPlansSchema } from "./settings.js";
+import { ModelManifestSchema } from "./manifest.js";
 import { UpdateStateSchema } from "./update.js";
 import { MediaOpportunityMediumSchema } from "./world-chat.js";
 import { ProductionSetupStateSchema } from "./production-setup.js";
@@ -697,6 +698,11 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     .strict(),
   /** Who reads the app's prose aloud changed; null is the shipped local voice. */
   z.object({ ...base, type: z.literal("narrator.changed"), voice: NarratorSettingsSchema }).strict(),
+  /**
+   * A provider's plan changed (design turn 182), with the manifest as it now prices: a Free key's
+   * reads are quoted at $0 everywhere the manifest is read, so the two travel together.
+   */
+  z.object({ ...base, type: z.literal("provider-plans.changed"), plans: ProviderPlansSchema, manifest: ModelManifestSchema.nullable() }).strict(),
   /** Ranked voice candidates for a sheet, matched attributes shown (SPEC-011 R-7, R-8). */
   z
     .object({

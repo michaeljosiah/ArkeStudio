@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type KeyboardEvent } from "react";
-import { cloudSpeechPreference, estimateMicroUsd, formatMicroUsd, modelPriceCopy, readerName, readerPlace, supportsVoiceUse, type AudiobookReader, type ManifestModel } from "@arke-studio/contracts";
+import { cloudSpeechPreference, estimateMicroUsd, formatMicroUsd, speechPlanLabel, modelPriceCopy, readerName, readerPlace, supportsVoiceUse, type AudiobookReader, type ManifestModel } from "@arke-studio/contracts";
 import { PageSheet } from "../components/page-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { EditorDialog } from "../components/editor-dialog.js";
@@ -115,6 +115,8 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
   const price = (voice: { provider: string; model: string }) => {
     const model = rowOf(voice);
     if (model === undefined) return "";
+    const plan = speechPlanLabel(model);
+    if (plan !== null) return plan;
     if (model.pricing.kind === "perToken") return "quoted per read";
     const perK = estimateMicroUsd(model, { characters: 1000 });
     return perK === 0 ? "free" : `${formatMicroUsd(perK)} / 1k`;

@@ -410,9 +410,12 @@ export function readerPlace(provider: string, local?: boolean): string {
  * rate has them: $0.016 rounded to a cent is a different price. Null for a row priced some
  * other way, which no voice row is.
  */
-export function readerPriceLabel(row: Pick<ManifestModel, "pricing"> | null | undefined): string | null {
+export function readerPriceLabel(row: Pick<ManifestModel, "pricing" | "speechPlan"> | null | undefined): string | null {
   if (!row) return null;
   if (row.pricing.kind === "unmetered") return "free";
+  // The author's plan, where the price was (design turn 182).
+  if (row.speechPlan === "free-plan") return "free plan";
+  if (row.speechPlan === "free-credit") return "free credit";
   if (row.pricing.kind === "perToken" && row.pricing.speech !== undefined) return "quoted per read";
   if (row.pricing.kind !== "perCharacter") return null;
   const perThousand = (row.pricing.microUsdPerCharacter / 1000).toFixed(3).replace(/(\.\d\d)0$/, "$1");

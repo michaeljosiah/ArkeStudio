@@ -1,4 +1,4 @@
-import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, freePlanNote, speechPlanLabel, speechPriceCopy } from "@arke-studio/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   AUDIOBOOK_DELIVERIES,
@@ -372,13 +372,17 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // What a press would spend, before the run asks: the cloud blocks not made, by the character
   // as the row bills it (SPEC-046 R-8) — bytes or doubled CJK for the readers that count so.
   // The cache is not consulted here, so the run's own price can only be lower.
-  const estimate = useMemo(
+  // A free plan's or credit's read is named rather than priced (design turn 182): it asks
+  // nothing, so a sum including it would be a price nobody is asked to pay.
+  const { estimate, plan } = useMemo(
     () =>
-      rows.reduce((sum, row) => {
+      rows.reduce<{ estimate: number; plan: string | null }>((sum, row) => {
         if (row.state === "made" || row.state === "awaiting" || row.speaker.provider === "kokoro") return sum;
         const model = modelOf(row.speaker);
-        return model === null ? sum : sum + estimateSpeechMicroUsd(model, row.block.text);
-      }, 0),
+        if (model === null) return sum;
+        const label = speechPlanLabel(model);
+        return label !== null ? { ...sum, plan: sum.plan ?? label } : { ...sum, estimate: sum.estimate + estimateSpeechMicroUsd(model, row.block.text) };
+      }, { estimate: 0, plan: null }),
     [rows, modelOf],
   );
 
@@ -627,7 +631,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         {counts.toMake.length > 0 && (
           <Button variant="primary" disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
             Read the chapter · {counts.toMake.length} block{counts.toMake.length === 1 ? "" : "s"}
-            {estimate > 0 ? ` · ${formatMicroUsd(estimate)}` : ""}
+            {estimate > 0 ? ` · ${formatMicroUsd(estimate)}` : plan !== null ? ` · ${plan}` : ""}
           </Button>
         )}
       </span>
@@ -638,7 +642,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     record === "unreadable"
       ? "record unreadable · Read the chapter replaces it"
       : run?.state === "refused" || run?.state === "failed" || run?.state === "unavailable"
-        ? `could not read · ${run.reason ?? "the run failed"}`
+        ? freePlanNote(run.reason) ?? `could not read · ${run.reason ?? "the run failed"}`
         : run?.state === "stopped"
           ? "stopped · the takes made stand"
           : null;
@@ -1189,7 +1193,7 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
     void playClip({ id: `hear-${hearId}`, url: mediaUrl(slug, heard.file), title: name, sub: note ?? "plain" });
   }, [heard?.state]);
   const sent = line?.sentAs?.map((part) => part.text).join(" ") ?? (line === null ? null : normalizeSpeechText(line.block.text));
-  const tokenPriced = model?.pricing.kind === "perToken";
+  const tokenPriced = model?.pricing.kind === "perToken" && model.speechPlan !== "free-plan";
   const price = model === null || sent === null || tokenPriced ? 0 : estimateSpeechMicroUsd(model, sent);
   return (
     <li className={`fy-ab__performer${focused ? " fy-ab__performer--focused" : ""}`} onFocus={onFocus} onClick={onFocus} data-testid="performed-speaker">
@@ -1228,7 +1232,7 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
             data-testid="performed-hear"
           >
             Hear {name}
-            {heard?.state === "priced" ? ` · up to ${formatMicroUsd(heard.authorisedMicroUsd)} · ${heard.parts} part${heard.parts === 1 ? "" : "s"}` : tokenPriced ? " · get price" : price > 0 ? ` · ${formatMicroUsd(price)}` : ""}
+            {heard?.state === "priced" ? ` · up to ${formatMicroUsd(heard.authorisedMicroUsd)} · ${heard.parts} part${heard.parts === 1 ? "" : "s"}` : speechPlanLabel(model) !== null ? ` · ${speechPlanLabel(model)}` : tokenPriced ? " · get price" : price > 0 ? ` · ${formatMicroUsd(price)}` : ""}
           </button>
           {heard?.state === "refused" && <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">{heard.refused}</span>}
           {sent !== null && <span className="fy-ab__sent fy-mono" data-testid="performed-sent-as">{sent}</span>}
@@ -1654,7 +1658,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
           {takes.length > 0 && (
             <Button variant="ghost" onClick={() => onMakeAgain(row.block.key)} data-testid="audiobook-make-again">
               Make again
-              {model !== null && row.speaker.provider !== "kokoro" ? ` · ${model.pricing.kind === "perToken" ? "up to " : ""}${formatMicroUsd(estimateSpeechMicroUsd(model, row.block.text))}` : ""}
+              {model !== null && row.speaker.provider !== "kokoro" ? ` · ${speechPriceCopy(model, estimateSpeechMicroUsd(model, row.block.text))}` : ""}
             </Button>
           )}
           {onUpload !== undefined && (

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { DesignedVoiceModelSchema, VoiceDesignDraftSchema, designedVoiceTarget, formatMicroUsd, quoteSpeech, quoteVoiceDesign,
+import { DesignedVoiceModelSchema, VoiceDesignDraftSchema, designedVoiceTarget, formatMicroUsd, quoteSpeech, quoteVoiceDesign, speechPriceCopy,
   type VoiceCandidate, type WorldDesignedVoice } from "@arke-studio/contracts";
 import { EditorDialog } from "./editor-dialog.js";
 import { Button, Input, Select, Textarea } from "./ui.js";
@@ -116,7 +116,7 @@ export function DesignVoiceDialog({ worldId, description: initialDescription = "
           if (!readQuote) return; setTrouble(null); setAuditionFile(null);
           hearing.current = hearDesignedVoice(worldId, saved.model, designedVoiceTarget(saved), line, readQuote.authorisedMicroUsd);
           setHearId(hearing.current);
-        }}>{hearingBusy ? "Reading…" : `Hear this line${readQuote ? ` · up to ${formatMicroUsd(readQuote.authorisedMicroUsd)}` : ""}`}</Button>
+        }}>{hearingBusy ? "Reading…" : `Hear this line${readQuote ? ` · ${speechPriceCopy(readModel, readQuote.authorisedMicroUsd)}` : ""}`}</Button>
         <p>Saved auditions replay free. A new line is a separate read; matching cached reads are reused.</p>
         {heard?.error && <p role="status">{heard.error}</p>}
         {playable && world && <audio controls preload="none" src={mediaUrl(world.meta.slug, playable)} aria-label="Your audition line" />}

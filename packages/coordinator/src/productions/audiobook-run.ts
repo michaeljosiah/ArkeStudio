@@ -1,4 +1,4 @@
-import { quoteSpeech, type SpeechQuote } from "@arke-studio/contracts";
+import { freePlanFailure, quoteSpeech, speechAsks, type SpeechQuote } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -35,6 +35,9 @@ import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
 import { checkDirection, type RenderedPart } from "../voice/direction.js";
 import { audiobookLanding, castRefusal, currentDirection, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock } from "./audiobook.js";
+
+/** A read ended by its free plan — the day's limit, or a billed key — which ends the run with it. */
+class FreePlanEnded extends Error {}
 
 /**
  * A chapter read into kept takes (design turn 146, SPEC-047 R-16..R-19): every block that is
@@ -224,6 +227,11 @@ export interface PreparedChapter {
   clones: { provider: string; voice: ClonedVoice; reference: string | null }[];
   priceOf: (block: Speaking) => number;
   estimate: number;
+  /**
+   * Whether pressing read asks first: a price outside a free plan or credit (SPEC-047 R-17,
+   * design turn 182). A chapter read wholly on a free key, or from a free credit, starts at once.
+   */
+  asks: boolean;
 }
 
 export type ChapterPreparation = { kind: "ready"; prepared: PreparedChapter } | { kind: "refused"; reason: string; plan: AudiobookPlan } | { kind: "unavailable"; reason: string };
@@ -413,7 +421,8 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
   const prices = new Map(misses.map(block => [block, block.quotes.reduce((sum, quote) => sum + quote.authorisedMicroUsd, 0)]));
   const priceOf = (block: Speaking) => prices.get(block) ?? 0;
   const estimate = misses.reduce((sum, block) => sum + priceOf(block), 0);
-  return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate } };
+  const asks = misses.some((block) => speechAsks(block.model, priceOf(block)));
+  return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate, asks } };
 }
 
 /**
@@ -435,7 +444,9 @@ export function chapterPriceToken(worldId: string, productionId: string, chapter
  * direction.
  */
 export function missIdentity(block: Speaking): string {
-  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}:${JSON.stringify(block.quotes.map(q => [q.rateVersion, q.authorisedMicroUsd, q.tokenLimits]))}${block.compiledSpeechHash !== undefined ? `:${block.compiledSpeechHash}` : ""}${block.reference !== null ? `:${block.reference}` : ""}`;
+  // The plan is in it (design turn 182): a free credit's price is the paid price, so without it
+  // a book answered on credit would read on, unasked, after the author switched to paid.
+  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}:${JSON.stringify(block.quotes.map(q => [q.rateVersion, q.authorisedMicroUsd, q.tokenLimits, ...(q.plan !== undefined ? [q.plan] : [])]))}${block.compiledSpeechHash !== undefined ? `:${block.compiledSpeechHash}` : ""}${block.reference !== null ? `:${block.reference}` : ""}`;
 }
 
 /**
@@ -479,7 +490,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     finish(preparation.kind, { reason: preparation.reason });
     return;
   }
-  const { plan, toMake, speaking, misses, clones, priceOf, estimate } = preparation.prepared;
+  const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks } = preparation.prepared;
   const partPrices = new Map(misses.map(block => [block, block.quotes.map(quote => quote.authorisedMicroUsd)]));
   let record = preparation.prepared.record;
   const chapterFile = plan.chapter.file;
@@ -496,14 +507,14 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   // never showed: that chapter is refused and left to its row rather than read on an answer
   // given for other words (codex on PR 1187). Judged before any consent is asked, so a chapter
   // that moved never puts a question under the book that the book's answer cannot follow.
-  if (deps.priced !== undefined && estimate > 0 && deps.priced !== token) {
+  if (deps.priced !== undefined && asks && deps.priced !== token) {
     finish("refused", { reason: "moved since the book was priced" });
     return;
   }
   for (const reader of clones) {
     if (await deps.requireUploadConfirmation(reader)) return;
   }
-  if (estimate > 0 && deps.priced === undefined && deps.confirmationToken !== token) {
+  if (asks && deps.priced === undefined && deps.confirmationToken !== token) {
     emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: token, voices: priceLines(misses, priceOf), notices: firstReadNotices(clones) });
     return;
   }
@@ -766,6 +777,8 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           }
           const jobId = job.id;
           if (job.status !== "succeeded" || job.landedFiles?.[0] === undefined) {
+            const ended = job.status === "failed" ? freePlanFailure(job.error) : null;
+            if (ended !== null) throw new FreePlanEnded(ended);
             throw new Error(job.status === "cancelled" ? "stopped" : "the voice job failed · open Activity for details");
           }
           landed.push(job.landedFiles[0]);
@@ -801,6 +814,12 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           await flag(block, message);
         } catch (flagErr) {
           finish("failed", { reason: flagErr instanceof Error ? flagErr.message : String(flagErr), record });
+          return;
+        }
+        // A free plan's end stops the chapter (design turn 182): the day's limit fails every
+        // later read the same way, and a billed key must not keep reading on a free price.
+        if (err instanceof FreePlanEnded) {
+          finish("failed", { reason: message, record });
           return;
         }
       }

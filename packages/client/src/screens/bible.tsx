@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
-import { bibleSize, narratorLabelFor, splitBible } from "@arke-studio/contracts";
+import { bibleSize, freePlanStop, narratorLabelFor, speechPlanLabel, splitBible } from "@arke-studio/contracts";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
 import { Button, Callout, IconButton } from "../components/ui.js";
@@ -15,6 +15,7 @@ import { mediaUrl } from "../lib/media.js";
 import { clearQueue, enqueueClip, playClip } from "../lib/audio.js";
 import { ClipPlayButton } from "../components/player.js";
 import { ReadAloudConfirmation } from "../components/read-aloud-confirmation.js";
+import { FreePlanStop } from "../components/free-plan-stop.js";
 import { RemoteVoiceUploadConfirmation, useVoiceUploadAsk } from "../components/remote-voice-upload-confirmation.js";
 
 /**
@@ -168,7 +169,9 @@ export function BibleScreen() {
   // Named as this world will hear it (SPEC-046 R-37): a clone is its own world's, and a choice
   // that cannot narrate here is named as the shipped local voice it falls to; once the section
   // lands, the voice that read it.
-  const narratorLabel = narratorLabelFor(state?.app.narrator ?? null, worldId, readResult?.status === "ready" ? readResult : undefined);
+  // The reader names its plan where a price would show (design turn 182): `· free plan`.
+  const readerPlan = speechPlanLabel(state?.app.manifest?.models.find((model) => model.provider === (readResult?.provider ?? state.app.narrator?.provider) && model.id === (readResult?.model ?? state.app.narrator?.model)));
+  const narratorLabel = `${narratorLabelFor(state?.app.narrator ?? null, worldId, readResult?.status === "ready" ? readResult : undefined)}${readerPlan !== null ? ` · ${readerPlan}` : ""}`;
   /*
    * Plays the moment it lands, rather than making somebody press twice for the same thing.
    *
@@ -322,9 +325,18 @@ export function BibleScreen() {
                       }}
                     />
                   )}
-                  {mine?.status === "failed" && (
+                  {mine?.status === "failed" && (freePlanStop(mine.error) !== null ? (
+                    <FreePlanStop error={mine.error} onDefaultNarrator={() => {
+                      if (!worldId) return;
+                      queued.current = 0;
+                      clearQueue();
+                      upload.drop();
+                      // This read once in the shipped narrator: a free plan's limit (design turn 182).
+                      setRead({ requestId: readBibleSection(worldId, section.heading, undefined, undefined, undefined, true), heading: section.heading });
+                    }} />
+                  ) : (
                     <span className="fy-bible__tocnote">{mine.error ?? "Read aloud failed."}</span>
-                  )}
+                  ))}
                 </li>
               );
             })}

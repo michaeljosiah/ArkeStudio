@@ -91,6 +91,14 @@ account is assumed to be free and no missing usage becomes a zero charge. Report
 priced at the frozen published rates and labelled usage-derived, not provider-reported billing.
 Rates change on 2027-01-01 and are rechecked before submission. Tests incur no provider charges.
 
+A key's plan is the author's statement (design turn 182): Arke still assumes no account is free,
+but the Providers pane's **Plan** row lets the author say Google's key is on Free. Reads on
+Flash TTS and Flash-Lite TTS are then quoted at $0 with a `free-plan:` rate version, ask
+nothing, and settle as `free-plan` with their usage kept; voice design stays priced. The free
+daily quota (429 `quota_exceeded`, or a `-FreeTier` per-day quota) is not retried and the read
+says when it resets; a 402 on a free read fails it as billed and prices Google reads again until
+the author says Free once more. The plan never changes on its own.
+
 Design-master turn 165d's comparison is delivered as successive individually priced candidates:
 the API returns one voice per creation. Three candidates require three explicit Generate actions.
 Closing the dialog keeps jobs and auditions and does not delete remote candidates.

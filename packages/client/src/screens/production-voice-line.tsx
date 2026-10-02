@@ -4,6 +4,7 @@ import {
   legacyVoiceModel,
   orderedShots,
   quoteSpeech,
+  speechPlanLabel,
   supportedDeliveries,
   voiceSourceFor,
   type Delivery,
@@ -245,7 +246,7 @@ export function VoiceLineDialogScreen() {
             }
             onClick={() => generateLine()}
           >
-            {sending ? "Generating…" : linePrice.amount === undefined ? "Generate line" : `Generate line · up to ${usdPrecise(Math.ceil(linePrice.amount / 100) * 100)}`}
+            {sending ? "Generating…" : speechPlanLabel(voiceModel) !== null ? `Generate line · ${speechPlanLabel(voiceModel)}` : linePrice.amount === undefined ? "Generate line" : `Generate line · up to ${usdPrecise(Math.ceil(linePrice.amount / 100) * 100)}`}
           </Button>
           {firstRead !== null && (
             <span className="fy-mono" data-testid="voice-line-first-read" style={{ marginLeft: 12 }}>

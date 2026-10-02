@@ -1303,7 +1303,9 @@ export function planBenchDispatch(
   }
   if (model.capability === "voice-tts" && model.pricing.kind === "perToken" && options.speechAuthorisation !== undefined) {
     const maximum = options.speechAuthorisation.maximumMicroUsd;
-    if (maximum === undefined || inputs.reduce((sum, input) => sum + input.estimatedMicroUsd, 0) > maximum) {
+    const total = inputs.reduce((sum, input) => sum + input.estimatedMicroUsd, 0);
+    // A $0 read — a free plan's (design turn 182) — has nothing to authorise.
+    if (total > 0 && (maximum === undefined || total > maximum)) {
       return { ok: false, reason: "The speech price needs confirmation. Review the current price in the composer and press Generate." };
     }
   }

@@ -50,6 +50,12 @@ export const SpeechQuoteSchema = z.object({
   assumptions: z.array(z.string()),
   expectedMicroUsd: Quantity,
   authorisedMicroUsd: Quantity,
+  /**
+   * The author's plan for the key when the read was quoted (design turn 182). `free-plan` is a
+   * $0 quote that is the author's statement, recorded as such rather than inferred (SPEC-049
+   * R-19 yields to it); `free-credit` keeps its estimate and is drawn from a monthly allowance.
+   */
+  plan: z.enum(["free-plan", "free-credit"]).optional(),
 }).strict();
 export type SpeechQuote = z.infer<typeof SpeechQuoteSchema>;
 
@@ -69,7 +75,13 @@ export function speechSettlement(job: {
   speechUsage?: SpeechUsage;
   speechAttempts?: SpeechAttempt[];
   providerCostMicroUsd?: number;
-}): { actualMicroUsd: number | null; actualSource?: "provider-reported" | "usage-derived" | "mixed-measured" } {
+}): { actualMicroUsd: number | null; actualSource?: "provider-reported" | "usage-derived" | "mixed-measured" | "free-plan" } {
+  // A read on a key the author marked Free is recorded at $0 with its usage kept (design turn
+  // 182) — unless the provider reported a charge, which is the evidence the key is paid and is
+  // recorded as reported, never hidden behind the plan.
+  const free = job.speechQuote?.plan === "free-plan" && (job.speechAttempts ?? []).every(attempt => attempt.quote.plan === "free-plan");
+  const charged = (job.providerCostMicroUsd ?? 0) > 0 || (job.speechAttempts ?? []).some(attempt => (attempt.providerCostMicroUsd ?? 0) > 0);
+  if (free && !charged) return { actualMicroUsd: 0, actualSource: "free-plan" };
   const archived = job.speechAttempts?.some(attempt => attempt.attempt === job.attempt) === true;
   let hasReported = !archived && job.providerCostMicroUsd !== undefined;
   let hasUsage = !archived && job.providerCostMicroUsd === undefined;
@@ -93,6 +105,8 @@ function tokenCost(input: number, output: number, rates: { input: number; output
   return result;
 }
 
+const FREE_PLAN_ASSUMPTION = "Free plan: the author marked this key free; the read is recorded at $0.";
+
 /** The compiled transcript is priced; callers must not count direction tags twice. */
 export function quoteSpeech(model: ManifestModel, text: string, options: {
   at?: string;
@@ -105,16 +119,19 @@ export function quoteSpeech(model: ManifestModel, text: string, options: {
   if (!Number.isFinite(Date.parse(at))) throw new Error("A speech quote needs a valid date");
   const base = { model: model.id, provider: model.provider, quotedAt: at, validUntil: null };
   const pricing = model.pricing;
+  const plan = pricing.kind === "unmetered" ? undefined : model.speechPlan;
+  const free = plan === "free-plan";
+  const planned = plan === undefined ? {} : { plan };
   if (pricing.kind === "unmetered") {
     return SpeechQuoteSchema.parse({ ...base, tier: "unmetered", unit: "unmetered", rateVersion: "unmetered",
       quantities: {}, assumptions: [], expectedMicroUsd: 0, authorisedMicroUsd: 0 });
   }
   if (pricing.kind === "perCharacter") {
     const characters = billableCharacters(model, text, options.delivery, options.language);
-    const cost = characters * pricing.microUsdPerCharacter;
-    return SpeechQuoteSchema.parse({ ...base, tier: "standard", unit: pricing.unit ?? "character",
-      rateVersion: `${pricing.unit ?? "character"}:${pricing.microUsdPerCharacter}`, quantities: { characters },
-      assumptions: [], expectedMicroUsd: cost, authorisedMicroUsd: cost });
+    const cost = free ? 0 : characters * pricing.microUsdPerCharacter;
+    return SpeechQuoteSchema.parse({ ...base, ...planned, tier: "standard", unit: pricing.unit ?? "character",
+      rateVersion: `${free ? "free-plan:" : ""}${pricing.unit ?? "character"}:${pricing.microUsdPerCharacter}`, quantities: { characters },
+      assumptions: free ? [FREE_PLAN_ASSUMPTION] : [], expectedMicroUsd: cost, authorisedMicroUsd: cost });
   }
   if (pricing.kind !== "perToken" || pricing.speech === undefined) {
     throw new Error(`${model.displayName} has no qualified speech pricing`);
@@ -123,8 +140,10 @@ export function quoteSpeech(model: ManifestModel, text: string, options: {
   const active = speech.rates.findLastIndex((rate) => Date.parse(rate.effectiveFrom) <= Date.parse(at));
   if (active < 0) throw new Error(`${model.displayName} has no speech rate for this date`);
   const rate = speech.rates[active]!;
-  const rates = { input: rate.microUsdPerMillionInput, output: rate.microUsdPerMillionOutput };
-  const assumptions: string[] = [];
+  // Free keeps the token arithmetic, at zero rates, so usage is still measured and recorded; the
+  // rate version names the plan, so a quote made on one plan is never current on the other.
+  const rates = free ? { input: 0, output: 0 } : { input: rate.microUsdPerMillionInput, output: rate.microUsdPerMillionOutput };
+  const assumptions: string[] = free ? [FREE_PLAN_ASSUMPTION] : [];
   const input = options.inputTextTokens ?? speech.maxInputTokens;
   Quantity.parse(input);
   if (input > speech.maxInputTokens) throw new Error("Speech input exceeds the model's token limit");
@@ -136,8 +155,8 @@ export function quoteSpeech(model: ManifestModel, text: string, options: {
     if (output > speech.maxOutputTokens) throw new Error("Expected speech exceeds the model's output limit; split the text");
     assumptions.push("Expected audio tokens are estimated from duration; the authorisation uses the service limit.");
   } else assumptions.push("Output priced at the service token limit; duration is not known before synthesis.");
-  return SpeechQuoteSchema.parse({ ...base, validUntil: speech.rates[active + 1]?.effectiveFrom ?? null,
-    tier: speech.tier, rateVersion: rate.version, unit: "token", quantities: { inputTextTokens: input, outputAudioTokens: output },
+  return SpeechQuoteSchema.parse({ ...base, ...planned, validUntil: speech.rates[active + 1]?.effectiveFrom ?? null,
+    tier: speech.tier, rateVersion: free ? `free-plan:${rate.version}` : rate.version, unit: "token", quantities: { inputTextTokens: input, outputAudioTokens: output },
     tokenRates: rates, tokenLimits: { input: speech.maxInputTokens, output: speech.maxOutputTokens }, assumptions,
     expectedMicroUsd: tokenCost(input, output, rates),
     authorisedMicroUsd: tokenCost(speech.maxInputTokens, speech.maxOutputTokens, rates) });

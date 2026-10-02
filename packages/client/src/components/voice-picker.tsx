@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { cloudSpeechPreference, readerName, filterVoices, formatMicroUsd, supportsVoiceUse, voiceTargetKey, voiceFacet, VOICE_FACETS,
+import { cloudSpeechPreference, readerName, filterVoices, formatMicroUsd, speechPlanLabel, supportsVoiceUse, voiceTargetKey, voiceFacet, VOICE_FACETS,
   UNSPECIFIED_VOICE_FACET, type VoiceFilters } from "@arke-studio/contracts";
 import { requestVoiceCatalogue, requestCataloguePreview, stopCataloguePreview, useStore, type ReadingVoice } from "../lib/store.js";
 import { dismissPlayback, playbackSnapshot, playClip, usePlayback } from "../lib/audio.js";
@@ -137,7 +137,7 @@ export function VoicePickerDialog({ open, worldId, chosenId, chosenProvider, cho
           const isActive = active && voiceTargetKey(active.voice) === key;
           const busy = isActive && !previewError && sounding?.status !== "ended";
           const usable = voice.preview && voice.preview.kind !== "unavailable";
-          const label = voice.preview?.kind === "sample" ? "Provider sample · no generation charge" : heard.has(key) ? "Cached preview" : voice.preview?.kind === "generate" ? `Generate preview · ${voice.local ? "Free · on this machine" : formatMicroUsd(voice.preview.microUsd ?? 0)}` : voice.preview?.reason ?? "No preview available";
+          const label = voice.preview?.kind === "sample" ? "Provider sample · no generation charge" : heard.has(key) ? "Cached preview" : voice.preview?.kind === "generate" ? `Generate preview · ${voice.local ? "Free · on this machine" : speechPlanLabel(state?.app.manifest?.models.find(model => model.provider === voice.provider && model.id === voice.model)) ?? formatMicroUsd(voice.preview.microUsd ?? 0)}` : voice.preview?.reason ?? "No preview available";
           return <div key={key} className={cx("fy-voices__row", key === pick && "fy-voices__row--on")}>
             <button type="button" className="fy-voice-browser__play" disabled={!usable} aria-label={`${busy ? "Stop" : "Play"} ${voice.label} sample`} title={label} onClick={() => busy ? stop() : listen(voice)}>{busy ? "■" : "▶"}</button>
             <div className="fy-voice-browser__identity"><span className="fy-voices__name">{voice.label}</span>{key === chosenKey && <small>Current</small>}<p>{voice.description || voice.attributes.join(" · ") || "No description"}</p>

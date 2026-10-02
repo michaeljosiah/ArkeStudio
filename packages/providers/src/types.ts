@@ -176,6 +176,35 @@ export class ProviderRequestRejectedError extends Error {
 }
 
 /**
+ * A free tier's allowance for the day is used up (design turn 182): Google's free daily quota.
+ * Waiting minutes changes nothing, so it is terminal — never retried on backoff, which would
+ * only spend the attempts and say "came back dark" about a limit that resets at midnight.
+ */
+export class ProviderFreeLimitError extends ProviderRequestRejectedError {
+  readonly failureClass = "terminal" as const;
+  readonly freeLimit = true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ProviderFreeLimitError";
+  }
+}
+
+/**
+ * The provider refused for payment (HTTP 402). On a paid key it is a billing fault, and the
+ * message's status classes it so; on a key the author marked free it is the evidence the key is
+ * paid, which the queue reads from `paymentRequired` (design turn 182).
+ */
+export class ProviderPaymentRequiredError extends ProviderRequestRejectedError {
+  readonly paymentRequired = true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ProviderPaymentRequiredError";
+  }
+}
+
+/**
  * The provider cannot take the request right now, and nothing about the request is why — a
  * graphics card without room for the recipe, most likely, with another job's model still on it.
  * The same request is expected to succeed later, so this is SPEC-009's transient: the queue

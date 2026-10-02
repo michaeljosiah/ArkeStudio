@@ -62,7 +62,9 @@ export function designedVoiceCandidates(voices: readonly Pick<WorldDesignedVoice
 
 /** Published model rates are the explicit basis, not an endpoint-specific price guarantee. */
 export function quoteVoiceDesign(model: ManifestModel, description: string, at?: string): SpeechQuote {
-  const quote = quoteSpeech(model, description, { at });
+  // Voice design stays priced on a Free key (design turn 182): Google does not say it is free,
+  // so the author's plan, which covers reads, is left off the row before it is quoted.
+  const quote = quoteSpeech({ ...model, speechPlan: undefined }, description, { at });
   return { ...quote, costBasis: "estimate", tokenLimits: undefined, assumptions: [
     "Estimate uses Google's published Standard model rates and full model token limits as a budgeting allowance.",
     "CreateVoice reports usage but documents no separate tariff or request spending cap. This allowance is not an enforced maximum.",

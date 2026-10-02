@@ -1188,6 +1188,9 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, appearance: { theme: event.preference } } };
     case "narrator.changed":
       return { ...state, app: { ...state.app, narrator: event.voice } };
+    case "provider-plans.changed":
+      // The manifest travels with the plans: every price on screen reads it (design turn 182).
+      return { ...state, app: { ...state.app, providerPlans: event.plans, manifest: event.manifest } };
     case "runtime.status":
       return { ...state, app: { ...state.app, runtime: event.runtime } };
     case "local-ai.residency":
@@ -3906,6 +3909,13 @@ export function setNarrator(
   send({ kind: "set-narrator", voice });
 }
 
+/** The author's statement of a free-tier provider's plan (design turn 182). */
+export function setProviderPlan(provider: "google", plan: "paid" | "free"): void;
+export function setProviderPlan(provider: "mistral", plan: "paid" | "free-credit"): void;
+export function setProviderPlan(provider: "google" | "mistral", plan: "paid" | "free" | "free-credit"): void {
+  send({ kind: "set-provider-plan", provider, plan });
+}
+
 export function requestVoiceCatalogue(worldId?: string): void {
   emitChange({ ...current, voiceCatalogue: null, voiceCatalogueErrors: [] });
   send({ kind: "voice-catalogue", ...(worldId ? { worldId } : {}) });
@@ -4008,6 +4018,8 @@ export function readSheetSection(
   requestId = queueRequest("read-sheet-section"),
   confirmationToken?: string,
   voiceUploadConfirmedFor?: string,
+  /** This read only, in the shipped narrator: what a free plan's limit offers (design turn 182). */
+  defaultNarrator?: boolean,
 ): string {
   send({
     kind: "read-sheet-section",
@@ -4017,6 +4029,7 @@ export function readSheetSection(
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
     ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
+    ...(defaultNarrator ? { defaultNarrator: true as const } : {}),
   });
   return requestId;
 }
@@ -4035,6 +4048,8 @@ export function readSheetPage(
   requestId = queueRequest("read-sheet-page"),
   confirmationToken?: string,
   voiceUploadConfirmedFor?: string,
+  /** This read only, in the shipped narrator: what a free plan's limit offers (design turn 182). */
+  defaultNarrator?: boolean,
 ): string {
   send({
     kind: "read-sheet-page",
@@ -4044,6 +4059,7 @@ export function readSheetPage(
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
     ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
+    ...(defaultNarrator ? { defaultNarrator: true as const } : {}),
   });
   return requestId;
 }
@@ -4058,6 +4074,8 @@ export function readBibleSection(
   requestId = queueRequest("read-bible-section"),
   confirmationToken?: string,
   voiceUploadConfirmedFor?: string,
+  /** This read only, in the shipped narrator: what a free plan's limit offers (design turn 182). */
+  defaultNarrator?: boolean,
 ): string {
   send({
     kind: "read-bible-section",
@@ -4066,6 +4084,7 @@ export function readBibleSection(
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
     ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
+    ...(defaultNarrator ? { defaultNarrator: true as const } : {}),
   });
   return requestId;
 }
@@ -4083,6 +4102,8 @@ export function readProse(
   requestId = queueRequest("read-prose"),
   confirmationToken?: string,
   voiceUploadConfirmedFor?: string,
+  /** This read only, in the shipped narrator: what a free plan's limit offers (design turn 182). */
+  defaultNarrator?: boolean,
 ): string {
   send({
     kind: "read-prose",
@@ -4091,6 +4112,7 @@ export function readProse(
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
     ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
+    ...(defaultNarrator ? { defaultNarrator: true as const } : {}),
   });
   return requestId;
 }
@@ -4107,6 +4129,8 @@ export function readProsePage(
   requestId = queueRequest("read-prose-page"),
   confirmationToken?: string,
   voiceUploadConfirmedFor?: string,
+  /** This read only, in the shipped narrator: what a free plan's limit offers (design turn 182). */
+  defaultNarrator?: boolean,
 ): string {
   send({
     kind: "read-prose-page",
@@ -4115,6 +4139,7 @@ export function readProsePage(
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
     ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
+    ...(defaultNarrator ? { defaultNarrator: true as const } : {}),
   });
   return requestId;
 }

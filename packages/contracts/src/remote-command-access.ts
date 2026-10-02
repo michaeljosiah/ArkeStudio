@@ -10,7 +10,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "upload-world-image": "host", "upload-master-look": "host", "world-chat-attach": "host",
   "world-chat-attach-files": "host", "setup-skip": "host", "setup-retry": "host",
   "comfyui-update-runtime": "host", "setup-pause": "host", "setup-resume": "host",
-  "setup-repair": "host", "setup-cancel": "host", "set-credential": "host",
+  "setup-repair": "host", "setup-cancel": "host", "set-credential": "host", "set-provider-plan": "host",
   "clear-credential": "host", "sign-in-provider-tool": "host", "cancel-provider-tool-sign-in": "host",
   "select-provider-workspace": "host", "begin-vendor-sign-in": "host", "submit-vendor-sign-in-code": "host",
   "submit-vendor-key": "host", "cancel-vendor-sign-in": "host", "remove-vendor-connection": "host",

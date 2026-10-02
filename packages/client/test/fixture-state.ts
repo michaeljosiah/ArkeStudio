@@ -128,6 +128,7 @@ const state: ClientState = {
     research: { web: false },
 
     narrator: null,
+    providerPlans: { google: "paid", mistral: "paid", googleBilledAt: null },
     appearance: { theme: "system" },
     runtime: null,
     harness: null,

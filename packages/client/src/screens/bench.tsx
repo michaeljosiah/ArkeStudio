@@ -1,4 +1,4 @@
-import { estimateSpeechMicroUsd, SAMPLING_CHOICE_NAMES, samplingSummary } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, SAMPLING_CHOICE_NAMES, samplingSummary, speechPriceCopy } from "@arke-studio/contracts";
 import { castVoiceSummary, planCastCharacterAudio, planSubjectCharacterAudio } from "@arke-studio/contracts";
 import { benchLineLanguage, castNameFor, DEFAULT_REFERENCE_WHO, referenceRouteModel, referenceRouteRefusal, referenceSheetId } from "@arke-studio/contracts";
 import { AdapterPicker } from "../components/adapter-picker.js";
@@ -1013,7 +1013,7 @@ function BenchWorkspace({
     estimate === null
       ? null
       : speaking
-        ? `${model?.pricing.kind === "perToken" ? "up to " : ""}${formatMicroUsd(estimate)}`
+        ? speechPriceCopy(model, estimate)
         : singing
           ? `up to ${formatMicroUsd(estimate)}`
           : `~${formatMicroUsd(estimate)}`;

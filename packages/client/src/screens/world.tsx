@@ -13,6 +13,8 @@ import {
   deriveCut,
   designatedCompilation,
   formatMicroUsd,
+  freePlanStop,
+  speechPlanLabel,
   formatSeconds,
   mainPhotoFor,
   pendingSheets,
@@ -53,6 +55,7 @@ import { Composer } from "../components/composer.js";
 import { DictationButton } from "../components/dictation.js";
 import { ExtractionOffer } from "../components/extraction-offer.js";
 import { PageReadControl, usePageRead, type PageReadBlock } from "../components/page-read.js";
+import { FreePlanStop } from "../components/free-plan-stop.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { episodeThumbnailPath } from "./production-episode-picker.js";
 import { takeMediaPath } from "../lib/take-presentation.js";
@@ -1649,7 +1652,7 @@ function VoiceCard({
           <Button variant="ghost" disabled={busy} onClick={() => start()}>
             {busy
               ? "Preparing…"
-              : `Hear this voice${cloudPrice !== null ? ` · ${models.some(model => model.provider === voice.provider && model.id === voiceModel && model.pricing.kind === "perToken") ? "up to " : ""}${formatMicroUsd(cloudPrice)}` : ""}`}
+              : `Hear this voice${cloudPrice !== null ? ` · ${speechPlanLabel(models.find(model => model.provider === voice.provider && model.id === voiceModel)) ?? `${models.some(model => model.provider === voice.provider && model.id === voiceModel && model.pricing.kind === "perToken") ? "up to " : ""}${formatMicroUsd(cloudPrice)}`}` : ""}`}
           </Button>
         ) : (
           voice &&
@@ -1736,7 +1739,10 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   // hear it (SPEC-046 R-37): a clone is its own world's, a choice that cannot narrate here is
   // named as the shipped local voice it falls to, and once the section lands, the voice that read it.
   const storedNarrator = useStore().state?.app.narrator ?? null;
-  const narratorLabel = narratorLabelFor(storedNarrator, worldId, readResult?.status === "ready" ? readResult : undefined);
+  const manifestModels = useStore().state?.app.manifest?.models ?? [];
+  // The reader names its plan where a price would show (design turn 182): `· free plan`.
+  const readerPlan = speechPlanLabel(manifestModels.find((model) => model.provider === (readResult?.provider ?? storedNarrator?.provider) && model.id === (readResult?.model ?? storedNarrator?.model)));
+  const narratorLabel = `${narratorLabelFor(storedNarrator, worldId, readResult?.status === "ready" ? readResult : undefined)}${readerPlan !== null ? ` · ${readerPlan}` : ""}`;
   /*
    * A long section arrives in pieces — a local read's synthesis chunks, and a cloud read over
    * its reader's cap (issue 1208) — each queued as it lands so the first sounds while the rest
@@ -1811,7 +1817,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
     worldId,
     worldSlug: world?.meta.slug,
     blocks: pageBlocks,
-    start: (requestId, confirmationToken, voiceUploadConfirmedFor) =>
+    start: (requestId, confirmationToken, voiceUploadConfirmedFor, defaultNarrator) =>
       readSheetPage(
         worldId ?? "",
         sheet?.id ?? "",
@@ -1819,6 +1825,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         requestId,
         confirmationToken,
         voiceUploadConfirmedFor,
+        defaultNarrator,
       ),
   });
   const sheetRefsMap = useSheetRefs();
@@ -1862,15 +1869,17 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
             sub: `read aloud · ${narratorLabel}`,
           }
         : null;
-    const onRead = () => {
+    // `shipped` reads this section once in the shipped narrator: a free plan's limit (turn 182).
+    const readSection = (shipped: boolean) => {
       if (!worldId) return;
       // A second read replaces the first: two voices over one another is never what was meant.
       pageRead.stop();
       queued.current = 0;
       clearQueue();
       upload.drop();
-      setRead({ requestId: readSheetSection(worldId, sheet.id, heading), section: heading });
+      setRead({ requestId: readSheetSection(worldId, sheet.id, heading, undefined, undefined, undefined, shipped || undefined), section: heading });
     };
+    const onRead = () => readSection(false);
     const quote = `${read?.requestId}:${active?.confirmationToken ?? ""}`;
     const cancel = () => { upload.drop(); setRead(null); };
     // The vendor's question comes before the price (issue 1215), and both are this section's
@@ -1895,18 +1904,21 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
     ) : null;
     const note = read?.section === heading && (!active || (active.status === "confirmation-required" && submittedRead === quote))
       ? <span className="fy-textactions__note">Preparing audio…</span> : undefined;
-    return { clip, onRead, note, confirmation };
+    return { clip, onRead, onReadShipped: () => readSection(true), note, confirmation };
   };
   // Text with the hover read-aloud/copy affordance (design 3a). The prose element differs by
   // section — a lead paragraph, a grid cell — so the caller passes it; the host is the same.
   const readableProse = (heading: string, body: string, prose: ReactNode) => {
-    const { clip, onRead, note, confirmation } = sectionAudio(heading);
+    const { clip, onRead, onReadShipped, note, confirmation } = sectionAudio(heading);
     return (
       <div className="fy-texthost">
         {confirmation}
         {prose}
         <TextActions clip={clip} onRead={onRead} copyText={body} readLabel="Read aloud" note={note} />
-        {read?.section === heading && readResult?.status === "failed" && (
+        {read?.section === heading && readResult?.status === "failed" && freePlanStop(readResult.error) !== null && (
+          <FreePlanStop error={readResult.error} onDefaultNarrator={onReadShipped} />
+        )}
+        {read?.section === heading && readResult?.status === "failed" && freePlanStop(readResult.error) === null && (
           <Callout tone="warning" title="Read aloud unavailable">
             {readResult.error}{" "}
             {sheet.voice?.provider === "kokoro" && (

@@ -567,6 +567,12 @@ export interface SpendSummary {
   /** Unmetered runs: counted, never $0.00 line items (R-12, D9). */
   unmeteredRuns: number;
   byProvider: Array<{ provider: string; microUsd: number; entries: number; unmetered: boolean }>;
+  /**
+   * Reads on a key the author marked free, counted apart (design turn 182): never in the total,
+   * which is money billed, and never as unmetered, which is a local run. A free-plan read is $0
+   * with its tokens kept; a free-credit read is its estimate drawn from the month's allowance.
+   */
+  plans: Array<{ provider: string; plan: "free-plan" | "free-credit"; entries: number; microUsd: number; tokens: number; characters: number }>;
 }
 
 export function spendSummary(ledger: LedgerEntry[], periodDays: number, now: Date): SpendSummary {
@@ -577,7 +583,20 @@ export function spendSummary(ledger: LedgerEntry[], periodDays: number, now: Dat
   let reported = 0;
   let derived = 0;
   let unmetered = 0;
+  const plans = new Map<string, SpendSummary["plans"][number]>();
   for (const entry of inWindow) {
+    if (entry.actualSource === "free-plan" || entry.actualSource === "free-credit") {
+      // A failed attempt drew nothing it could show; counting it would inflate the reads.
+      if (entry.outcome !== "succeeded") continue;
+      const key = `${entry.provider}:${entry.actualSource}`;
+      const row = plans.get(key) ?? { provider: entry.provider, plan: entry.actualSource, entries: 0, microUsd: 0, tokens: 0, characters: 0 };
+      row.entries += 1;
+      row.microUsd += entry.actualMicroUsd ?? entry.estimatedMicroUsd;
+      row.tokens += (entry.speechUsage?.inputTextTokens ?? 0) + (entry.speechUsage?.outputAudioTokens ?? 0);
+      row.characters += entry.speechQuote?.quantities.characters ?? 0;
+      plans.set(key, row);
+      continue;
+    }
     const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[entry.provider]?.local === true;
     if (entry.actualSource === "local-zero" || local) {
       unmetered += 1;
@@ -605,5 +624,6 @@ export function spendSummary(ledger: LedgerEntry[], periodDays: number, now: Dat
     byProvider: [...byProvider.entries()]
       .map(([provider, row]) => ({ provider, ...row }))
       .sort((a, b) => b.microUsd - a.microUsd),
+    plans: [...plans.values()],
   };
 }
