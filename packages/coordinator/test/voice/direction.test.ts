@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { audiobookDirectionHash } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
-import { compileLine, directionPlan } from "../../src/voice/direction.js";
+import { checkDirection, compileLine, directionPlan } from "../../src/voice/direction.js";
 
 // The one direction module (design turn 181, SPEC-049 R-28): a one-request surface's compile.
 const row = (id: string) => SHIPPED_MANIFEST.models.find((model) => model.id === id)!;
@@ -49,4 +49,14 @@ it("holds what Kokoro cannot take, and refuses words that will not fit one reque
   const long = compileLine("word ".repeat(1200), { speed: 1, cues: [] }, row("eleven-v3"), undefined, "hold");
   assert.ok(!long.ok && /request limit/.test(long.reason));
   assert.deepEqual(compileLine("  ", { speed: 1, cues: [] }, row("eleven-v3"), undefined, "hold"), { ok: false, kind: "empty", reason: "There are no words to read yet." });
+});
+
+it("an author's note longer than a tag is held on a tag reader, not refused; a reader with no note still refuses one (design turn 181)", () => {
+  const long = "angry and hurt — quieter, not louder; holding back tears, slower";
+  const v3 = checkDirection(text, directionPlan(text, { delivery: "cold", speed: 1, cues: [], note: long }), row("eleven-v3"), undefined, "strict");
+  assert.ok(v3.ok, v3.ok ? undefined : v3.reason);
+  assert.deepEqual(v3.held, [{ control: "note", reason: "a tag takes 60 characters" }]);
+  assert.equal(v3.parts[0]?.text, "[coldly] I’m here. You came back.");
+  const kokoro = checkDirection(text, directionPlan(text, { delivery: "measured", speed: 1, cues: [], note: "flat" }), row("kokoro-82m"), undefined, "strict");
+  assert.deepEqual(kokoro, { ok: false, reason: "note · Kokoro 82M no note" });
 });

@@ -210,6 +210,7 @@ const VOICE_ROWS: ManifestModel[] = [
     pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
     cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.2 }, pause: "best-effort-audio-tag",
       emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none", phrase: "best-effort-tag",
+      sounds: { sighs: "sighs", laughs: "laughs" },
       deliveryMappings: { measured: { settings: { stability: 0.5 } }, whispered: { settings: { stability: 0.5 }, tag: "whispers" }, cold: { settings: { stability: 1 }, tag: "coldly" } } },
   },
 ];
@@ -672,7 +673,7 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(whispered.disabled && whispered.className.includes("fy-ab__chip--off"), "Kokoro cannot whisper: struck");
     assert.equal(whispered.getAttribute("title"), "reads measured · urgent", "the reason, one clause, on the control");
     assert.ok(!deliveries.find((b) => b.textContent === "urgent")!.disabled);
-    assert.equal(panel.querySelector(".fy-ab__off")?.textContent, "no phrase", "no phrase on this reader");
+    assert.equal(panel.querySelector(".fy-ab__off")?.textContent, "no note", "no note on this reader");
     const speeds = [...panel.querySelectorAll('[aria-label="Speed"] button')] as HTMLButtonElement[];
     assert.ok(speeds.find((b) => b.textContent === "0.9")!.disabled && !speeds.find((b) => b.textContent === "1.0")!.disabled, "no speed on Kokoro, but one is always one");
     assert.ok(!/\bis\b.*\bbecause\b/.test(panel.textContent ?? ""), "no sentence explains the controls");
@@ -810,6 +811,35 @@ describe("the Audiobook view (turn 146)", () => {
     const confirmed = m.sent.findLast(message => message.kind === "hear-audiobook-line") as Extract<ClientMessage, { kind: "hear-audiobook-line" }>;
     assert.equal(confirmed.quoteToken, "prepared-three-parts");
     assert.equal(confirmed.block, first.block);
+  });
+
+  it("the block panel shares the note, the Sound button and Sent as (design turn 181e)", async () => {
+    const state = voiced(inkbound());
+    const reader = { provider: "elevenlabs", model: "eleven-v3", voiceId: "test", label: "Test" };
+    state.world = { ...state.world!, productions: state.world!.productions.map(p => p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "narrator", narrator: reader } } : p) };
+    const m = await mount(state);
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
+    const held = record(NARRATION_KEYS, texts);
+    held.direction["p0.0"] = directed(texts["p0.0"], "cold", { note: "flat", cues: [{ kind: "sound", at: 24, sound: "sighs" }] });
+    await answerOpen(m, { audiobook: held });
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...reader, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    const panel = q(m, '[data-testid="audiobook-direction"]')!;
+    const note = panel.querySelector('input[aria-label="Note"]') as HTMLInputElement;
+    assert.equal(note.value, "flat");
+    assert.equal(panel.querySelector('[data-testid="audiobook-note-count"]')?.textContent, "4 / 300");
+    assert.deepEqual([...panel.querySelectorAll('[data-testid="audiobook-sent-as"] > span')].map((part) => part.textContent), ["[coldly] [flat] Maren counted the bells. [sighs]"]);
+    assert.ok(panel.querySelector('[data-testid="audiobook-markers"] .fy-ab__mk--sound'), "a sound's plate is outlined");
+    const sound = panel.querySelector('[aria-label="Add sound"]') as HTMLButtonElement;
+    assert.ok(!sound.disabled, "Eleven v3 makes sounds");
+    await act(async () => sound.click());
+    const menu = q(m, '[role="menu"][aria-label="Marker"]')!;
+    assert.deepEqual([...menu.querySelectorAll(".fy-ab__menu-eb")].map((eyebrow) => eyebrow.textContent), ["Sound"], "the Sound group alone");
+    const chips = [...menu.querySelectorAll(".fy-ab__mchip")] as HTMLButtonElement[];
+    assert.ok(chips.find((chip) => chip.textContent === "coughs")!.disabled, "a sound the reader does not make is struck");
+    await act(async () => chips.find((chip) => chip.textContent === "laughs")!.click());
+    const set = m.sent.findLast((message) => message.kind === "set-audiobook-block") as Extract<ClientMessage, { kind: "set-audiobook-block" }>;
+    assert.deepEqual(set.direction?.cues, [{ kind: "sound", at: 24, sound: "sighs" }, { kind: "sound", at: 24, sound: "laughs" }]);
   });
 
   it("a direction written for earlier words shows carried to the words now, with what could not be carried counted (SPEC-047 R-43)", async () => {
@@ -1003,8 +1033,10 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(!title.className.includes("fy-bible__paneltitle"), "not letter-spaced capitals");
     assert.equal(q(m, ".fy-ab__readby")?.textContent, "read by George · narrator");
     const adds = all(m, '[data-testid="audiobook-direction"] .fy-ab__add');
-    assert.deepEqual(adds.map((b) => b.textContent), ["Marker", "Pause", "Breath", "Emphasis"]);
-    assert.deepEqual(adds.map((b) => b.getAttribute("aria-label")), ["Add marker", "Add pause", "Add breath", "Add emphasis"]);
+    assert.deepEqual(adds.map((b) => b.textContent), ["Marker", "Pause", "Breath", "Emphasis", "Sound"]);
+    assert.deepEqual(adds.map((b) => b.getAttribute("aria-label")), ["Add marker", "Add pause", "Add breath", "Add emphasis", "Add sound"]);
+    assert.ok((adds[4] as HTMLButtonElement).disabled, "Kokoro makes no sound: struck, with the reason");
+    assert.equal(adds[4]!.getAttribute("title"), "no sounds");
     assert.ok(adds.every((b) => b.querySelector("svg") !== null), "the plus is an icon inside the button, never a line of its own");
   });
 });

@@ -6612,6 +6612,8 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-ab__mchip--struck { text-decoration: line-through; color: var(--neutral-400); cursor: default; }
 .fy-ab__cue--held { color: var(--neutral-400); }
 .fy-ab__row--top { align-items: flex-start; }
+.fy-ab__sentcol { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fy-ab__sent-style { font-size: 11px; line-height: 1.5; color: var(--foreground); overflow-wrap: anywhere; }
 .fy-ab__sent { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 11px; line-height: 1.5; color: var(--foreground); overflow-wrap: anywhere; }
 /* One narrator performs the cast (design turn 155g, SPEC-047 R-44, R-45): a speaker's row in
    Voices is the name and count over a 28 note field with its count; the focused row adds Hear
