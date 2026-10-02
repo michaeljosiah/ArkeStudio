@@ -1,7 +1,7 @@
-import { unresolvedWorldChatInputs } from "@arke-studio/contracts";
+import { unresolvedWorldChatInputs, type WorldChatStoredEvent } from "@arke-studio/contracts";
 import { foldWorldChatInputs } from "./input-fold.js";
 import { inputCommandDigest } from "./input-journal.js";
-import type { WorldChatStore } from "./store.js";
+import { ConversationSequenceError, type WorldChatStore } from "./store.js";
 
 /**
  * Startup's half of SPEC-045 R-13 and R-19. Called only during owned-world recovery, before any
@@ -14,29 +14,37 @@ import type { WorldChatStore } from "./store.js";
  */
 export async function recoverWorldChatInputs(log: WorldChatStore, now: () => string): Promise<boolean> {
   let changed = false;
-  const read = async () => {
+  for (;;) {
     const { events, problems } = await log.read();
-    const folded = foldWorldChatInputs(events);
     // A repaired torn tail is already flushed. Interior damage needs a person: appending after a
     // line nothing can read could repeat its sequence and obscure what it recorded.
-    return problems.some(one => one.kind !== "torn-tail") || folded.problems.length ? null : folded;
-  };
-  let folded = await read();
-  if (!folded) return false;
-  for (const row of unresolvedWorldChatInputs(folded.queue)) {
-    if ((row.status !== "offering" && row.status !== "accepted") || !row.attempt) continue;
-    const command = { kind: "restart", messageId: row.input.messageId, attempt: row.attempt };
-    await log.append({ type: "input.delivery-unknown", messageId: row.input.messageId, attempt: row.attempt,
-      commandDigest: inputCommandDigest(command), queueRevision: folded.queue.revision + 1 },
-    { at: now(), requestId: `world-chat-input:recovery:${row.input.messageId}:${row.attempt.inputId}` });
-    changed = true;
-    folded = await read();
-    if (!folded) return changed;
+    const folded = foldWorldChatInputs(events);
+    if (problems.some(one => one.kind !== "torn-tail") || folded.problems.length) return changed;
+    const pending = unresolvedWorldChatInputs(folded.queue);
+    const lost = pending.find(row => (row.status === "offering" || row.status === "accepted") && row.attempt);
+    let next: { event: WorldChatStoredEvent; requestId?: string } | null = null;
+    if (lost?.attempt) {
+      next = {
+        event: { type: "input.delivery-unknown", messageId: lost.input.messageId, attempt: lost.attempt,
+          commandDigest: inputCommandDigest({ kind: "restart", messageId: lost.input.messageId, attempt: lost.attempt }),
+          queueRevision: folded.queue.revision + 1 },
+        requestId: `world-chat-input:recovery:${lost.input.messageId}:${lost.attempt.inputId}`,
+      };
+    } else if (pending.length > 0 && folded.queue.pauseReason === null) {
+      next = { event: { type: "input-queue.paused", reason: "restart", queueRevision: folded.queue.revision + 1,
+        commandDigest: inputCommandDigest({ kind: "pause", reason: "restart" }) } };
+    }
+    if (!next) return changed;
+    try {
+      // Against the sequence just read: the revision above was computed from it, and a terminal
+      // event landing in between would otherwise leave this one non-consecutive.
+      const appended = await log.append(next.event, { at: now(), ...(next.requestId ? { requestId: next.requestId } : {}),
+        expectedSeq: events.reduce((max, envelope) => Math.max(max, envelope.seq), 0) });
+      // An earlier pass's record under the same id changes nothing the fold has not seen.
+      if (appended.deduplicated) return changed;
+      changed = true;
+    } catch (error) {
+      if (!(error instanceof ConversationSequenceError)) throw error;
+    }
   }
-  if (unresolvedWorldChatInputs(folded.queue).length > 0 && folded.queue.pauseReason === null) {
-    await log.append({ type: "input-queue.paused", reason: "restart", queueRevision: folded.queue.revision + 1,
-      commandDigest: inputCommandDigest({ kind: "pause", reason: "restart" }) }, { at: now() });
-    changed = true;
-  }
-  return changed;
 }

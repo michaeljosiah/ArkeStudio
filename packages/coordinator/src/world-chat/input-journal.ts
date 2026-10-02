@@ -78,6 +78,11 @@ export class WorldChatInputJournal {
       if (request.modelId !== undefined && request.modelId !== routing.modelId) {
         throw new WorldChatInputError("conflict", "The captured model does not match this message.");
       }
+      // Refused while the words are still in the editor, not when the turn would start: outside a
+      // production the run takes the default, and a named model is refused there (issue 1403).
+      if (routing.modelId !== null && !(view.entryContext && "productionId" in view.entryContext)) {
+        throw new WorldChatInputError("conflict", "A language model can only be chosen inside a production.");
+      }
       const attachments = request.attachmentIds.map(id => {
         const attachment = view.attachments.find(one => one.id === id);
         if (!attachment) throw new WorldChatInputError("unavailable", "An attachment is no longer in this conversation.");
@@ -136,8 +141,11 @@ export class WorldChatInputJournal {
       const row = queue.inputs.find(one => one.input.messageId === messageId);
       if (!row) throw new WorldChatInputError("stale", "That queued message is no longer here.");
       const expected = worldChatInputRouting(queue, row);
+      // Routing names the model the author *asked* for. Null asks for the default, which a new
+      // turn resolves afresh (R-14) — an agent override or the local default — so only a named
+      // model has to reappear on the run unchanged.
       if (stableJson(expected) !== stableJson(capturedRouting) || capturedRun.adapter !== capturedRouting.adapter ||
-        (capturedRun.model ?? null) !== capturedRouting.modelId) {
+        (capturedRouting.modelId !== null && capturedRun.model !== capturedRouting.modelId)) {
         throw new WorldChatInputError("stale", "The writing engine or model changed. Review the target before continuing.");
       }
       const view = this.openView(events, this.now());
@@ -176,6 +184,12 @@ export class WorldChatInputJournal {
     if (openIntentOf(events)) throw new WorldChatInputError("unavailable", "Wait for this conversation's wrap-up to finish.");
     const view = foldConversation(this.conversationId, at, events).view;
     if (view.status !== "open") throw new WorldChatInputError("unavailable", "Restore or reopen this conversation before adding a message.");
+    // A setup conversation writes through ProductionSetupConversationStore, whose ownership gate,
+    // draft-state refusal and outline checks a promotion through the plain log would bypass. It
+    // keeps one message at a time until that store can take a queued turn.
+    if (view.entryContext?.kind === "production-setup") {
+      throw new WorldChatInputError("unavailable", "Production setup takes one message at a time.");
+    }
     return view;
   }
 

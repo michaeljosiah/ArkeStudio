@@ -35,9 +35,17 @@ Unresolved inputs block conversation deletion and wrap-up. Both lifecycle intent
 
 ## Running a queued primary turn
 
-`WorldChatRunner.sendQueued` is the execution boundary for a scheduler-selected queue row. It reserves the same conversation slot as ordinary Send before its first read, rebuilds context, and asks the journal to promote the original message, constraints and new run atomically. A refused or failed promotion never reaches session preparation or model dispatch. A promoted turn that fails uses ordinary Retry with its captured constraints, never a second promotion.
+`WorldChatRunner.sendQueued` is the execution boundary for a scheduler-selected queue row. It reserves the same conversation slot as ordinary Send before its first read, then checks the queue's own rules (FIFO, pause, routing) before any model work. It rebuilds context and asks the journal to promote the original message, constraints and new run atomically. A refused or failed promotion never reaches session preparation or model dispatch. A Stop before promotion records a durable `stopped` pause, so the next advance cannot start the stopped turn; a world closing cannot be written to, and reopening pauses through recovery. A promoted turn that fails uses ordinary Retry with its captured constraints, never a second promotion.
+
+Routing records the model the author asked for. `null` asks for the default, which the new turn resolves afresh (an agent override or the local default), and a named model is accepted only inside a production. Production setup conversations refuse additional input: their turns go through `ProductionSetupConversationStore`, whose guards a promotion through the plain log would bypass.
 
 This is an internal entry point. It adds no automatic advancement, input wire commands or editable busy composer. The admission scheduler must still serialize Stop and Continue, pause durably before interruption, validate the current subject and routing, and wait for native settlement before selecting the next row.
+
+Known limits owed to later slices:
+
+- A run failure or an archive pauses the queue only in replay, and that implicit pause moves the queue revision without a written event. Replay is deterministic, so the journal and snapshots agree today. A future change to those replay rules would shift recorded revisions, though, so the scheduler should write these pauses as explicit events.
+- Input history that fails replay blocks Delete and wrap-up (`pending-inputs`), and nothing repairs it yet. A deliberate discard or repair path is needed.
+- Loss of harness readiness before promotion returns `unavailable` without pausing. The scheduler owns that pause (R-19).
 
 ## Native protocol evidence
 

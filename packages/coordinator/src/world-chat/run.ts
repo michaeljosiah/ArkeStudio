@@ -1,5 +1,7 @@
 import {
   newId,
+  advanceWorldChatInputQueue,
+  worldChatInputRouting,
   applyProductionSetupUpdate,
   type ProductionSetupDraft,
   type ProductionSetupState,
@@ -37,6 +39,7 @@ import { foldConversation } from "./fold.js";
 import { WorldChatStore } from "./store.js";
 import { WorldChatInputJournal, WorldChatInputError } from "./input-journal.js";
 import { foldWorldChatInputs } from "./input-fold.js";
+import { stableJson } from "../arke-actions/digest.js";
 import type { PreparedWorldChatAction, WorldChatActionTurn } from "./actions.js";
 import { refreshConversationSummary, type ConversationSummariser } from "./summarisation.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
@@ -434,12 +437,37 @@ export class WorldChatRunner {
       if (!row || queue.revision !== expectedRevision) {
         return { status: "unavailable", reason: "The queued messages changed. Look again before continuing." };
       }
-      if (controller.signal.aborted) return { status: "cancelled" };
+      // The queue's own rules are asked before any model work (R-16): a paused queue, a later
+      // input or one already spent refuses here, rather than after a summary refresh, a model
+      // decision and the context reads that only promotion could justify.
+      const dryRun = advanceWorldChatInputQueue(queue, { type: "input.promoted", queueRevision: queue.revision + 1,
+        commandDigest: `sha256:${"0".repeat(64)}`, messageId, turnId: newId("turn") as TurnId, runId: newId("run") as RunId }, 1);
+      if (dryRun.problem) return { status: "unavailable", reason: "This message cannot start yet. Look at the queue again." };
+      if (stableJson(worldChatInputRouting(queue, row)) !== stableJson(capturedRouting)) {
+        return { status: "unavailable", reason: "The writing engine or model changed. Review the target before continuing." };
+      }
+      if (controller.signal.aborted) return this.stopQueued(journal, controller, messageId);
       const queued: QueuedTurn = { journal, input: row.input, revision: expectedRevision, routing: capturedRouting };
       return this.runRegisteredTurn(controller, journal.log, journal.conversationId, row.input.request.text,
         row.input.request.attachmentIds, undefined, row.input.constraints.subject,
         capturedRouting.modelId ?? undefined, row.input.constraints.replyOnly, undefined, queued);
     });
+  }
+
+  /**
+   * A Stop that lands before promotion still has to stop the queue (SPEC-045 R-17): returning
+   * `cancelled` with nothing written would leave the input waiting under a running queue, ready
+   * for the next advance to start the very turn the author just stopped. A world closing cannot
+   * be written to; reopening it pauses everything waiting, as startup recovery does.
+   */
+  private async stopQueued(journal: WorldChatInputJournal, controller: AbortController, messageId: MessageId): Promise<TurnOutcome> {
+    if (controller.signal.reason === "world-closed") return { status: "cancelled" };
+    try {
+      await journal.pause("stopped", `stop:${messageId}:${newId("run")}`);
+    } catch (error) {
+      if (!(error instanceof WorldChatInputError)) throw error;
+    }
+    return { status: "cancelled" };
   }
 
   /**
@@ -712,7 +740,7 @@ export class WorldChatRunner {
       // Admission may have moved while the context was assembled. The journal compares the queue
       // revision and the whole log position before recording message, constraints and run as one
       // event; a refused or failed append must never reach preparation or session creation.
-      if (controller.signal.aborted) return { status: "cancelled" };
+      if (controller.signal.aborted) return this.stopQueued(queued.journal, controller, queued.input.messageId);
       if (modelChoice.reason !== undefined) return { status: "unavailable", reason: modelChoice.reason };
       try {
         await queued.journal.promote(queued.input.messageId, queued.revision, run, queued.routing, runId);

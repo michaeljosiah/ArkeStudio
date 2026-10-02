@@ -53,7 +53,8 @@ async function setup() {
   const id = newId("cv");
   const journal = new WorldChatInputJournal(world, id, () => AT);
   await journal.log.create(id, AT);
-  await journal.log.append({ type: "conversation.created", title: "Direction", entryContext: { kind: "world" } }, { at: AT });
+  // A production, the one place a named model may be asked for (issue 1403).
+  await journal.log.append({ type: "conversation.created", title: "Direction", entryContext: { kind: "production", productionId: "the-crossing" } }, { at: AT });
   return { journal, world, closing, id, get boundary() { return boundary; }, other: () => new WorldChatInputJournal(world, id, () => AT) };
 }
 
@@ -166,6 +167,25 @@ describe("durable additional conversation inputs (SPEC-045)", () => {
     assert.equal((await state.journal.read()).inputs.length, 0);
     const accepted = await state.journal.record(input, CAPTURE);
     assert.equal(accepted.queue.inputs[0]?.input.routing.modelId, input.modelId);
+  });
+
+  it("promotes a default-model input under whatever model the new turn resolves", async () => {
+    const { journal } = await setup();
+    const routing = { ...ROUTING, modelId: null };
+    const queued = await journal.record(request("Use the default"), { ...CAPTURE, routing });
+    const resolved = await preparedRun(journal, { model: "agent-override-model" });
+    const promoted = await journal.promote(queued.queue.inputs[0]!.input.messageId, queued.queue.revision, resolved, routing, "default");
+    assert.equal(promoted.queue.inputs[0]?.status, "promoted");
+  });
+
+  it("refuses additional input in a production setup conversation, whose own store guards its turns", async () => {
+    const state = await setup();
+    await state.journal.log.append({ type: "conversation.metadata-updated",
+      entryContext: { kind: "production-setup", setupId: state.id } }, { at: AT });
+    const before = await readFile(state.journal.log.eventsPath, "utf8");
+    await assert.rejects(state.journal.record(request(), { ...CAPTURE, routing: { ...ROUTING, modelId: null } }), /one message at a time/);
+    assert.equal(await readFile(state.journal.log.eventsPath, "utf8"), before);
+    assert.equal(state.boundary, 22, "a refused admission does not upgrade the world");
   });
 
   it("preserves a Stop pause across new admissions and revision-checks Remove and Continue", async () => {
@@ -418,6 +438,28 @@ describe("durable additional conversation inputs (SPEC-045)", () => {
     assert.deepEqual(parkedRecovery.inputQueues, [parked.id]);
     assert.deepEqual((await recoverConversations(parked.world.dir, () => AT)).inputQueues, []);
     assert.equal((await parked.journal.read()).pauseReason, "restart");
+  });
+
+  it("re-reads when a terminal event lands between recovery's read and its pause", async t => {
+    const state = await setup();
+    const primary = run();
+    await state.journal.log.append({ type: "turn.started", run: primary, message: { id: newId("msg"), turnId: primary.turnId,
+      role: "user", text: "Draft the scene", attachmentIds: [], createdAt: AT } }, { at: AT });
+    await state.journal.record(request("Waiting"), CAPTURE);
+    const append = state.journal.log.append.bind(state.journal.log);
+    let raced = false;
+    t.mock.method(state.journal.log, "append", async (...args: Parameters<typeof append>) => {
+      if (args[0].type === "input-queue.paused" && !raced) {
+        raced = true;
+        // A failure bumps the replayed revision: an unfenced pause would land non-consecutive.
+        await append({ type: "run.finished", run: { ...primary, status: "failed", endedAt: AT } }, { at: AT });
+      }
+      return append(...args);
+    });
+    assert.equal(await recoverWorldChatInputs(state.journal.log, () => AT), false, "the failure already paused it");
+    assert.equal(raced, true);
+    const queue = await state.journal.read();
+    assert.equal(queue.pauseReason, "failed");
   });
 
   it("leaves a live conversation's inputs to the runner that holds it", async () => {
@@ -685,7 +727,9 @@ describe("durable additional conversation inputs (SPEC-045)", () => {
       const service = new WorldChatService(dir, () => AT);
       const created = await world.ownedWrite(() => service.create({ title: "Queued input" }));
       const journal = new WorldChatInputJournal(world, created.id, () => AT);
-      const receipt = await journal.record(request(), CAPTURE);
+      // A world conversation: the default model, never a named one.
+      await assert.rejects(journal.record(request(), CAPTURE), /only be chosen inside a production/);
+      const receipt = await journal.record(request(), { ...CAPTURE, routing: { ...ROUTING, modelId: null } });
       assert.equal(receipt.deduplicated, false);
       assert.equal((await readWorldMeta(dir)).schemaVersion, WORLD_CHAT_INPUT_SCHEMA_VERSION);
       await assert.rejects(readWorldMeta(dir, { supports: WORLD_CHAT_INPUT_SCHEMA_VERSION - 1 }), /newer|version/i);

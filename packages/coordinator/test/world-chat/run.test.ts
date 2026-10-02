@@ -1112,8 +1112,41 @@ describe("running a durable queued input (SPEC-045 R-16)", () => {
     const queued = await queueInput(state.journal, "Stop before it starts.");
     assert.equal((await state.runner.sendQueued(state.journal, queued.id, queued.revision, QUEUE_ROUTING)).status, "cancelled");
     assert.equal(prompts.length, 0);
-    assert.equal((await state.journal.read()).inputs[0]!.status, "queued");
+    const queue = await state.journal.read();
+    assert.equal(queue.inputs[0]!.status, "queued");
+    assert.equal(queue.pauseReason, "stopped", "Stop pauses the queue durably, so the next advance cannot restart it (R-17)");
     assert.equal(state.runner.isRunning(state.conversationId), false);
+    assert.equal((await state.runner.sendQueued(state.journal, queued.id, queue.revision, QUEUE_ROUTING)).status, "unavailable");
+  });
+
+  it("starts a world conversation's queued input on the default model the resolver supplies", async () => {
+    const createdModels: Array<string | undefined> = [];
+    const requested: Array<string | undefined> = [];
+    const state = await setup(fakeAdapter([JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] })]), {
+      createdModels,
+      resolveLanguageModel: async ({ modelId }) => {
+        requested.push(modelId);
+        return modelId === undefined ? { modelId: "local-default", sessionModel: "local-default" }
+          : { modelId, reason: "A language model can only be chosen inside a production." };
+      },
+    });
+    const queued = await queueInput(state.journal, "Use whatever is set.");
+    assert.equal((await state.runner.sendQueued(state.journal, queued.id, queued.revision, QUEUE_ROUTING)).status, "completed");
+    assert.deepEqual(requested, [undefined], "no model is asked for where none can be chosen");
+    assert.deepEqual(createdModels, ["local-default"]);
+    const promotion = (await state.store.read()).events.find(one => one.event.type === "input.promoted")!.event;
+    assert.ok(promotion.type === "input.promoted" && promotion.run.model === "local-default");
+  });
+
+  it("refuses a paused or overtaking input before any model work", async () => {
+    let resolved = 0;
+    const state = await setup(fakeAdapter([]), { resolveLanguageModel: async () => { resolved++; return {}; } });
+    const first = await queueInput(state.journal, "First");
+    const second = await queueInput(state.journal, "Second");
+    assert.equal((await state.runner.sendQueued(state.journal, second.id, second.revision, QUEUE_ROUTING)).status, "unavailable");
+    const paused = await state.journal.pause("stopped", "stop");
+    assert.equal((await state.runner.sendQueued(state.journal, first.id, paused.queue.revision, QUEUE_ROUTING)).status, "unavailable");
+    assert.equal(resolved, 0);
   });
 
   it("registers before reading the journal so an immediate Stop and ordinary Send cannot miss it", async () => {
@@ -1127,6 +1160,7 @@ describe("running a durable queued input (SPEC-045 R-16)", () => {
     assert.equal((await completion).status, "cancelled");
     assert.equal(prompts.length, 0);
     assert.equal((await state.journal.read()).inputs[0]!.status, "queued");
+    assert.equal((await state.journal.read()).pauseReason, "stopped");
   });
 
   it("a failed promotion write never creates a native session or loses the waiting input", async t => {

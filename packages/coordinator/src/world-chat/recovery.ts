@@ -95,7 +95,6 @@ async function repairInterruptedRun(
   isLive: (conversationId: ConversationId) => boolean,
   now: () => string,
 ): Promise<boolean> {
-
   // Asked on both sides of the read. The runner registers a turn before appending its running
   // run and lets go only after appending its end, so a turn live at either moment is one this
   // log may show mid-flight — or, if it ended in between, already ended by its own hand. A turn
