@@ -840,6 +840,16 @@ describe("the Audiobook view (turn 146)", () => {
     await act(async () => chips.find((chip) => chip.textContent === "laughs")!.click());
     const set = m.sent.findLast((message) => message.kind === "set-audiobook-block") as Extract<ClientMessage, { kind: "set-audiobook-block" }>;
     assert.deepEqual(set.direction?.cues, [{ kind: "sound", at: 24, sound: "sighs" }, { kind: "sound", at: 24, sound: "laughs" }]);
+
+    // A note longer than a tag is held on a tag reader: kept, left out of what is sent, named.
+    const long = "angry and hurt, quieter rather than louder, holding back her tears";
+    const longer = record(NARRATION_KEYS, texts);
+    longer.direction["p0.0"] = directed(texts["p0.0"], "cold", { note: long });
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, record: { ...longer, updatedAt: "2026-09-14T10:00:00.000Z" } }));
+    const side = q(m, '[data-testid="audiobook-direction"]')!;
+    assert.deepEqual([...side.querySelectorAll('[data-testid="audiobook-sent-as"] > span')].map((part) => part.textContent), ["[coldly] Maren counted the bells."]);
+    assert.equal(side.querySelector('[data-testid="audiobook-sent-held"]')?.textContent, "Held note — Eleven v3");
   });
 
   it("a direction written for earlier words shows carried to the words now, with what could not be carried counted (SPEC-047 R-43)", async () => {

@@ -45,7 +45,7 @@ import {
   type ManifestModel,
 } from "@arke-studio/contracts";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
-import { DirectedText, MarkerMenu, VIEW_HASH, cueLabel, markerLabel, viewPlan, type MarkerAt } from "../components/voice-direction.js";
+import { DirectedText, MarkerMenu, VIEW_HASH, cueLabel, heldWords, markerLabel, viewPlan, type MarkerAt } from "../components/voice-direction.js";
 
 // The marker and cue words moved to the shared direction module (design turn 181); kept here too
 // for the callers and tests that name them from the audiobook.
@@ -1263,8 +1263,6 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   const [supportNotice, setSupportNotice] = useState<string | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
   const [markerMenu, setMarkerMenu] = useState<MarkerAt | null>(null);
-  // `+ Sound` opens the menu on its Sound group alone (design turns 165, 181e).
-  const [soundOnly, setSoundOnly] = useState(false);
   const coarse = useMediaQuery("(pointer: coarse)");
   const [phraseDraft, setPhraseDraft] = useState<string | null>(null);
   // Edits compose while the record's answer is on its way (codex on PR 1186): a delivery then
@@ -1452,13 +1450,14 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
                 value={noteValue}
                 maxLength={noteMax}
                 aria-label="Note"
+                aria-describedby={`fy-ab-note-${row.block.key}`}
                 onChange={(event) => setPhraseDraft(event.target.value)}
                 onBlur={commitPhrase}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") (event.target as HTMLInputElement).blur();
                 }}
               />
-              <span className="fy-ab__note-count fy-mono" data-testid="audiobook-note-count">{`${noteValue.length} / ${noteMax}`}</span>
+              <span id={`fy-ab-note-${row.block.key}`} className="fy-ab__note-count fy-mono" data-testid="audiobook-note-count">{`${noteValue.length} / ${noteMax}`}</span>
             </>
           ) : (
             <span className="fy-ab__off fy-mono">{support === null ? "no reader" : supportWord(support.note)}</span>
@@ -1512,7 +1511,6 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
                     event.stopPropagation();
                     const span = selectionSpan();
                     const at = { key: row.block.key, span: span ?? { from: 0, to: text.length } };
-                    setSoundOnly(false);
                     if (inSheet) setMarkerMenu(at); else onMarker(at);
                   }}
                   data-testid="audiobook-marker-open"
@@ -1540,27 +1538,32 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
                   </button>
                 );
               })}
-              <button
-                type="button"
-                className="fy-ab__add"
-                disabled={!anySound}
-                aria-label="Add sound"
-                title={support === null ? "no reader" : anySound ? "sound at the words selected" : (Object.values(support.sounds)[0]?.reason ?? "no sounds")}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  const span = selectionSpan();
-                  const point = span === null ? text.length : span.to;
-                  setSoundOnly(true);
-                  setMarkerMenu({ key: row.block.key, span: { from: point, to: point } });
-                }}
-              >
-                <Plus size={10} aria-hidden="true" />
-                Sound
-              </button>
+              {/* `+ Sound` opens the marker menu on its Sound group alone (design turns 165, 181e),
+                  where `+ Marker` opens it: beside the words on a wide window, in the sheet on a
+                  narrow one. */}
+              {onMarker !== undefined && (
+                <button
+                  type="button"
+                  className="fy-ab__add"
+                  disabled={!anySound}
+                  aria-label="Add sound"
+                  title={support === null ? "no reader" : anySound ? "sound at the words selected" : (Object.values(support.sounds)[0]?.reason ?? "no sounds")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const span = selectionSpan();
+                    const point = span === null ? text.length : span.to;
+                    const at: MarkerAt = { key: row.block.key, span: { from: point, to: point }, only: "sound" };
+                    if (inSheet) setMarkerMenu(at); else onMarker(at);
+                  }}
+                >
+                  <Plus size={10} aria-hidden="true" />
+                  Sound
+                </button>
+              )}
             </span>
           </span>
         </div>
-        {markerMenu !== null && <MarkerMenu text={text} base={base} {...(row.language !== undefined ? { language: row.language } : {})} {...(soundOnly ? { only: "sound" as const } : {})} at={markerMenu} model={model} onClose={() => setMarkerMenu(null)} onApply={cues => { setMarkerMenu(null); send(cues === null ? null : { ...base, cues }); }} />}
+        {markerMenu !== null && <MarkerMenu text={text} base={base} {...(row.language !== undefined ? { language: row.language } : {})} at={markerMenu} model={model} onClose={() => setMarkerMenu(null)} onApply={cues => { setMarkerMenu(null); send(cues === null ? null : { ...base, cues }); }} />}
         {(report !== null || refused !== null) && (
           <p className={`fy-ch__stamp fy-mono${refused !== null ? " fy-ch__who-where--warn" : ""}`} data-testid="audiobook-report">
             {refused ?? report}
@@ -1581,6 +1584,12 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
                   <span key={index}>{part.text}</span>
                 ))}
               </span>
+              {/* What the reader is not sent, named, as the Bench names it (design turn 181d). */}
+              {row.held.length > 0 && row.direction !== null && (
+                <span className="fy-ab__sent-style fy-vd__sent-held fy-mono" data-testid="audiobook-sent-held">
+                  <span className="fy-vd__sent-k">Held</span> {heldWords(viewPlan(row.direction.input), row.held).join(" · ")} — {model?.displayName ?? "this reader"}
+                </span>
+              )}
             </span>
           </div>
         )}

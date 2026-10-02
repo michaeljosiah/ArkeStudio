@@ -186,6 +186,9 @@ export function cueTagWord(model: CadenceRow, cue: PauseCue | BreathCue): string
   return cue.kind === "pause" ? `${cue.length} pause` : cue.action === "inhale" ? "inhales deeply" : "exhales";
 }
 
+/** Why a tag reader holds a note: one tag takes no more than a marker's phrase. */
+export const NOTE_TAG_HOLD = `a tag takes ${CADENCE_PHRASE_MAX} characters`;
+
 /**
  * A note as a sentence beside the delivery's: capitalised and ended, so the two read as one
  * style. Only a note that ends in a Latin letter or a digit gains a full stop; one in another
@@ -206,7 +209,7 @@ export function noteMode(note: string, model: CadenceRow, language?: string): { 
   if (cap?.phrase === "best-effort-instruction") return { mode: "instruction" };
   if (cap?.phrase === "best-effort-tag") {
     if (!tagsGo(cap, language)) return { mode: "unsupported", reason: UNTAGGED };
-    if (note.length > CADENCE_PHRASE_MAX) return { mode: "unsupported", reason: `a tag takes ${CADENCE_PHRASE_MAX} characters` };
+    if (note.length > CADENCE_PHRASE_MAX) return { mode: "unsupported", reason: NOTE_TAG_HOLD };
     return { mode: "tag", tag: tagFor(model, note) };
   }
   return { mode: "unsupported", reason: "no note" };

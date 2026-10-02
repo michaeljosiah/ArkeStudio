@@ -179,6 +179,8 @@ export interface MarkerAt {
   key: string;
   span: { from: number; to: number };
   edit?: number;
+  /** One group alone, for a press that names it: the block panel's `+ Sound` (design turn 181e). */
+  only?: "sound";
 }
 
 /**
@@ -190,7 +192,7 @@ export interface MarkerAt {
  * emphasis needs words. `oneRequest` is a surface that joins no parts (the Bench): a delivery
  * marker the reader could only make in parts is struck there too.
  */
-export function MarkerMenu({ text, base, language, at, model, oneRequest = false, only, onApply, onClose, onNote }: {
+export function MarkerMenu({ text, base, language, at, model, oneRequest = false, only = at.only, onApply, onClose, onNote }: {
   /** The words, normalised as cues are placed. */
   text: string;
   base: VoiceDirectionInput;
@@ -266,7 +268,7 @@ export function MarkerMenu({ text, base, language, at, model, oneRequest = false
   );
   return (
     <div className="fy-ab__menu fy-ab__menu--marker" role="menu" aria-label="Marker" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === "Escape" && onClose()}>
-      <input className="fy-ab__menu-search" placeholder="Marker" aria-label="Marker" value={query} autoFocus onChange={(event) => setQuery(event.target.value)} />
+      <input className="fy-ab__menu-search" placeholder={only === "sound" ? "Sound" : "Marker"} aria-label={only === "sound" ? "Sound" : "Marker"} value={query} autoFocus onChange={(event) => setQuery(event.target.value)} />
       {only !== "sound" && (
         <>
           <div className="fy-ab__menu-eb">Delivery</div>
