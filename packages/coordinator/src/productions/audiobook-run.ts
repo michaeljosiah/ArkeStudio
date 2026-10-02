@@ -31,7 +31,8 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
-import { audiobookLanding, castRefusal, checkDirection, currentDirection, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type RenderedPart } from "./audiobook.js";
+import { checkDirection, type RenderedPart } from "../voice/direction.js";
+import { audiobookLanding, castRefusal, currentDirection, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock } from "./audiobook.js";
 
 /**
  * A chapter read into kept takes (design turn 146, SPEC-047 R-16..R-19): every block that is

@@ -1,5 +1,5 @@
-import { audiobookDirectionHash, quoteSpeech, sentAs, speechInputFits, supportedDeliveries, type CadencePlan } from "@arke-studio/contracts";
-import { directionSourceHash } from "../productions/audiobook.js";
+import { quoteSpeech, speechInputFits, supportedDeliveries } from "@arke-studio/contracts";
+import { compileLine } from "../voice/direction.js";
 import { stageArtifactProblem } from "../productions/stage-playblast.js";
 import { planCastCharacterAudio, planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem, type FrozenPerformanceAudio } from "@arke-studio/contracts";
 import { castNameFor, referenceRouteModel, referenceSheetId, referenceRouteRefusal, referenceSubjectLines, whoFor, REFERENCE_ROUTE } from "@arke-studio/contracts";
@@ -1014,14 +1014,9 @@ export function planBenchDispatch(
     if (!supportedDeliveries(model).includes(params.delivery as Delivery)) {
       return { ok: false, reason: `${model.displayName} cannot express "${params.delivery}".` };
     }
-    const plan: CadencePlan = { schemaVersion: 1, sourceTextHash: directionSourceHash(composer.brief), delivery: params.delivery as Delivery, speed: 1, cues: [] };
-    try {
-      const sent = sentAs(composer.brief, plan, model, voiceLanguage);
-      if (sent.held.length > 0) return { ok: false, reason: `${model.displayName} cannot express "${params.delivery}".` };
-      directed = { text: sent.text, voiceSettings: sent.voiceSettings, ...(sent.style !== undefined ? { instructions: sent.style } : {}), directionHash: audiobookDirectionHash(plan) };
-    } catch (error) {
-      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
-    }
+    const compiled = compileLine(composer.brief, { delivery: params.delivery as Delivery, speed: 1, cues: [] }, model, voiceLanguage, "strict");
+    if (!compiled.ok) return { ok: false, reason: /request limit|no words/.test(compiled.reason) ? compiled.reason : `${model.displayName} cannot express "${params.delivery}".` };
+    directed = compiled.line;
   }
   if (params.kind === "voice") {
     if (!speechInputFits(directed?.text ?? composer.brief, model.limits, directed?.instructions)) {
