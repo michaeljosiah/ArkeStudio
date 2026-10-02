@@ -1,4 +1,4 @@
-import { benchVoiceDirection, directionSaysAnything, quoteSpeech, recogniseDirection, speechInputFits } from "@arke-studio/contracts";
+import { benchLineLanguage, benchVoiceDirection, directionSaysAnything, quoteSpeech, recogniseDirection, speechInputFits } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { compileLine, type CompiledLine } from "../voice/direction.js";
 import { stageArtifactProblem } from "../productions/stage-playblast.js";
@@ -1005,9 +1005,12 @@ export function planBenchDispatch(
   // this reader cannot take is held and named on the take, never spoken and never refused: the
   // composer has already shown it struck under Sent as. A tag still typed in the words is the
   // one thing refused — it would be read aloud (R-22), and the composer turns it into a marker.
+  // The line's language: a cloned voice's recording language (issue 1163), otherwise the
+  // catalogue voice's own — without it an English library voice on a paren reader (Breeze) had
+  // every sound and pause held. The same language goes to the job, where only Breeze reads it.
   const voiceLanguage = params.kind === "voice" && params.voiceId !== undefined ? (() => {
     const source = voiceSourceFor(bundle.clonedVoices, model.provider, model.id, params.voiceId!);
-    return source.kind === "cloned" ? source.voice.language : undefined;
+    return source.kind === "cloned" ? source.voice.language : benchLineLanguage(params.voiceLanguage);
   })() : undefined;
   let directed: CompiledLine | null = null;
   // The words the line says: the brief, less any reader's tag it still held.
@@ -1259,14 +1262,14 @@ export function planBenchDispatch(
           // with its tags in, its numbers, its sentence, and the hash that marks the text as
           // compiled — never the delivery's name, which a client would turn into a second tag.
           ...(directed !== null ? { authoredText: voiceWords, voiceSettings: directed.voiceSettings, directionHash: directed.directionHash, ...(directed.instructions !== undefined ? { instructions: directed.instructions } : {}) } : {}),
-          // A cloned voice's recording language is the line's (issue 1163): the reader routes and
-          // tags by it, and the estimate counts the tag it would put in.
-          ...(voiceSource.kind === "cloned" ? { language: voiceSource.voice.language } : {}),
+          // The line's language (a clone's recording language, issue 1163, or the catalogue
+          // voice's own): the reader routes and tags by it, and the estimate counts its tags.
+          ...(voiceLanguage !== undefined ? { language: voiceLanguage } : {}),
           // No container control: the concrete model declares its format and every downstream
           // layer consumes that same value.
         },
         // The compiled text is priced: its tags are in it, so no delivery is named to count twice.
-        estimatedMicroUsd: quoteSpeech(model, directed?.text ?? composer.brief, { at: options.at, language: voiceSource.kind === "cloned" ? voiceSource.voice.language : undefined }).authorisedMicroUsd,
+        estimatedMicroUsd: quoteSpeech(model, directed?.text ?? composer.brief, { at: options.at, language: voiceLanguage }).authorisedMicroUsd,
         landing: { dir: sessionMediaDir(session.id, takeId) },
         ...(voiceSource.kind === "cloned" ? { voiceReference: true } : {}),
       });

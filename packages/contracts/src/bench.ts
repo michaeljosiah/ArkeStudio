@@ -123,6 +123,13 @@ export const BenchVoiceParamsSchema = z
     /** What the picker showed, kept so a take can name its voice without the catalogue. */
     voiceLabel: z.string().min(1).optional(),
     /**
+     * The catalogue voice's own language, as the picker listed it (`en`, `en-US`). A paren reader
+     * writes its tags only for a line stated English (SPEC-046 R-23), and before this only a
+     * cloned voice stated one — so an English library voice on Breeze had every sound and pause
+     * held (found in the installed app, 2026-10-02). A cloned voice still states its recording's.
+     */
+    voiceLanguage: z.string().regex(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/).max(35).optional(),
+    /**
      * The delivery alone, as a session written before design turn 181 held it. Still read — as a
      * direction of that delivery and nothing else (`benchVoiceDirection`) — and never written:
      * the composer writes `direction`.
@@ -1496,4 +1503,14 @@ export function keyframeAddable(model: ManifestModel, count: number): boolean {
     if (keyframePlan(model, n).ok) return true;
   }
   return false;
+}
+
+/**
+ * A Bench voice line's language, as a reader's direction is written for it: the primary subtag
+ * of the catalogue voice's language (`en-US` reads as `en`), or nothing when the voice listed
+ * none. Shared so the composer's Sent as and the dispatch decide a paren reader's tags alike.
+ */
+export function benchLineLanguage(language: string | undefined): string | undefined {
+  const primary = language?.split("-")[0]?.toLowerCase();
+  return primary === undefined || primary === "" ? undefined : primary;
 }
