@@ -12,6 +12,18 @@ let browserKey: string | null = null;
 let preparing: Promise<void> | null = null;
 export class RemoteBrowserError extends Error {}
 
+/** The page's own Studio requests carry the key themselves. The worker adds it too, but only to
+ * the requests it handles, and on a phone that is not all of them: an installed app relaunched
+ * cold after a lock or a fold loads before its worker is running, or without it in control, and
+ * those requests reached the PC bare. The PC cannot open the device cookie without the key, so it
+ * answered "not paired" and a paired phone was sent to pairing. */
+export function withBrowserKey(init: RequestInit = {}): RequestInit {
+  if (!browserKey) return init;
+  const headers = new Headers(init.headers);
+  headers.set("x-arke-browser-key", browserKey);
+  return { ...init, headers };
+}
+
 /** A sleeping host or switching phone network must not occupy the gate's only request
  * forever. Abort the attempt so its existing polling can discover the host again. */
 export async function remoteFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -23,53 +35,59 @@ export async function remoteFetch(path: string, init: RequestInit = {}): Promise
   else init.signal?.addEventListener("abort", abort, { once: true });
   const timer = setTimeout(() => controller.abort(), 10_000);
   try {
-    return await fetch(path, { ...init, signal: controller.signal });
+    return await fetch(path, withBrowserKey({ ...init, signal: controller.signal }));
   } finally { clearTimeout(timer); init.signal?.removeEventListener("abort", abort); }
 }
 
-/** The worker adds the origin-bound key to HTTP requests, including native media loads.
- * WebSockets bypass workers and carry it in a subprotocol, never in the bookmark or URL. */
+/** The origin's key, from the store the worker reads (public/notification-worker.js): one
+ * readwrite transaction, so a page and a worker reaching for a first key together agree on it.
+ * IndexedDB is isolated by origin, including port; cookies are not. */
+function readBrowserKey(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const opening = indexedDB.open("arke-remote-browser", 1);
+    opening.onupgradeneeded = () => opening.result.createObjectStore("keys");
+    opening.addEventListener("error", () => reject(opening.error));
+    opening.onblocked = () => reject(new Error("Browser storage is unavailable"));
+    opening.onsuccess = () => {
+      const db = opening.result;
+      const transaction = db.transaction("keys", "readwrite");
+      const store = transaction.objectStore("keys");
+      const request = store.get("browser");
+      let key: unknown;
+      request.onsuccess = () => {
+        key = request.result;
+        if (typeof key !== "string" || !/^[a-f0-9]{64}$/.test(key)) {
+          key = [...crypto.getRandomValues(new Uint8Array(32))].map(byte => byte.toString(16).padStart(2, "0")).join("");
+          store.put(key, "browser");
+        }
+      };
+      transaction.oncomplete = () => { db.close(); resolve(key as string); };
+      transaction.addEventListener("abort", () => { db.close(); reject(transaction.error); });
+    };
+  });
+}
+
+/** The page reads the origin-bound key itself and the worker adds it to native media loads,
+ * which cannot carry a header. WebSockets carry it in a subprotocol, never in the bookmark or URL.
+ * Nothing here waits for the worker to take control: a page it does not control waited for a
+ * controller that never came and stood on "Not answering" for good. */
 export function prepareRemoteSession(): Promise<void> {
   if (preparing) return preparing;
   preparing = new Promise<void>((resolve, reject) => {
-    if (!("serviceWorker" in navigator)) { reject(new RemoteBrowserError("A secure browser connection is required.")); return; }
-    const channels: MessageChannel[] = [];
-    let settled = false;
-    let requested: ServiceWorker | null = null;
-    const finish = (error?: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer); navigator.serviceWorker.removeEventListener("controllerchange", send);
-      for (const channel of channels) { channel.port1.close(); channel.port2.close(); }
-      error ? reject(error) : resolve();
-    };
-    const send = () => {
-      if (settled) return;
-      const controller = navigator.serviceWorker.controller;
-      if (!controller || controller === requested) return;
-      requested = controller;
-      // An older notification worker cannot answer. Every new controller gets a fresh
-      // channel because the previous worker already owns its transferred port.
-      const channel = new MessageChannel(); channels.push(channel);
-      channel.port1.addEventListener("message", event => {
-        if (settled) return;
-        if (typeof event.data !== "string" || !/^[a-f0-9]{64}$/.test(event.data)) { finish(new RemoteBrowserError("Browser storage is unavailable.")); return; }
-        browserKey = event.data; finish();
-      });
-      channel.port1.start();
-      try { controller.postMessage("arke-remote-browser-key", [channel.port2]); }
-      catch { finish(new Error("The browser connection could not start.")); }
-    };
-    // Cover registration and activation too: ready never rejects, and a worker update can
-    // wait on the network. An existing controller can answer while its update is pending.
-    const timer = setTimeout(() => finish(new Error("The browser connection timed out.")), 10_000);
-    navigator.serviceWorker.addEventListener("controllerchange", send);
-    send();
-    void Promise.resolve().then(() => navigator.serviceWorker.register("/notification-worker.js"))
-      .then(() => navigator.serviceWorker.ready).then(send, error => {
-        finish(["SecurityError", "NotAllowedError", "NotSupportedError"].includes(error?.name)
-          ? new RemoteBrowserError("This browser does not allow service workers.") : error);
-      });
+    if (!("serviceWorker" in navigator) || typeof indexedDB === "undefined") {
+      reject(new RemoteBrowserError("A secure browser connection is required.")); return;
+    }
+    const timer = setTimeout(() => reject(new Error("The browser connection timed out.")), 10_000);
+    // Registration still has to be allowed: without the worker no picture or clip can load.
+    const registered = Promise.resolve().then(() => navigator.serviceWorker.register("/notification-worker.js")).then(() => {}, (error: { name?: string } | undefined) => {
+      throw ["SecurityError", "NotAllowedError", "NotSupportedError"].includes(error?.name ?? "")
+        ? new RemoteBrowserError("This browser does not allow service workers.") : error;
+    });
+    const key = readBrowserKey().then(read => {
+      if (!/^[a-f0-9]{64}$/.test(read)) throw new RemoteBrowserError("Browser storage is unavailable.");
+      return read;
+    }, () => { throw new RemoteBrowserError("Browser storage is unavailable."); });
+    Promise.all([key, registered]).then(([read]) => { browserKey = read; resolve(); }, reject).finally(() => clearTimeout(timer));
   }).catch(error => { preparing = null; browserKey = null; throw error; });
   return preparing;
 }

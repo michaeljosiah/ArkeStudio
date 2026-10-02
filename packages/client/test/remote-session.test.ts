@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { prepareRemoteSession, remoteSocketProtocols, remoteFetch, RemoteBrowserError } from "../src/lib/remote-session.js";
+import { installTestBrowserStorage } from "./remote-browser.js";
 
-it("bounds worker registration and activation, then permits another attempt", async t => {
+it("bounds a registration that never settles, then permits another attempt", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
+  installTestBrowserStorage({ key: "e".repeat(64) });
   const previous = Object.getOwnPropertyDescriptor(navigator, "serviceWorker");
   const workers = Object.assign(new EventTarget(), {
     register: () => new Promise<object>(() => {}),
@@ -14,26 +16,16 @@ it("bounds worker registration and activation, then permits another attempt", as
     const registration = assert.rejects(prepareRemoteSession(), /timed out/);
     t.mock.timers.tick(10_000);
     await registration;
-    workers.register = async () => ({});
-    const activation = assert.rejects(prepareRemoteSession(), /timed out/);
-    await Promise.resolve();
-    t.mock.timers.tick(10_000);
-    await activation;
+    assert.deepEqual(remoteSocketProtocols("wss://studio.example.ts.net:9443/"), [], "a failed attempt holds no key");
   } finally {
     if (previous) Object.defineProperty(navigator, "serviceWorker", previous); else Reflect.deleteProperty(navigator, "serviceWorker");
   }
 });
 
 it("distinguishes unavailable browser storage from an unavailable network", async () => {
+  installTestBrowserStorage({ fails: true });
   const previous = Object.getOwnPropertyDescriptor(navigator, "serviceWorker");
-  const workers = Object.assign(new EventTarget(), {
-    register: async () => ({}), ready: Promise.resolve({}),
-    controller: { postMessage: (_message: unknown, ports: MessagePort[]) => {
-      // MessagePort is private and takes no targetOrigin.
-      // oxlint-disable-next-line unicorn/require-post-message-target-origin
-      ports[0]!.postMessage(null);
-    } },
-  });
+  const workers = Object.assign(new EventTarget(), { register: async () => ({}), ready: Promise.resolve({}), controller: null });
   Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: workers });
   try { await assert.rejects(prepareRemoteSession(), RemoteBrowserError); }
   finally {
@@ -42,6 +34,7 @@ it("distinguishes unavailable browser storage from an unavailable network", asyn
 });
 
 it("reports service-worker policy refusal as a browser limitation", async () => {
+  installTestBrowserStorage({ key: "e".repeat(64) });
   const previous = Object.getOwnPropertyDescriptor(navigator, "serviceWorker");
   const workers = Object.assign(new EventTarget(), {
     register: async () => { throw new DOMException("Disabled by browser policy", "SecurityError"); },
@@ -87,37 +80,35 @@ it("forwards caller cancellation without AbortSignal.any and removes its listene
   } finally { globalThis.fetch = previous; }
 });
 
-it("requests a fresh channel when a legacy notification worker is replaced", { timeout: 2000 }, async () => {
-  const browserKey = "d".repeat(64);
-  let oldRequests = 0, newRequests = 0;
+it("a page no worker controls still gets its key and sends it on its own requests", { timeout: 2000 }, async () => {
+  // An installed app relaunched cold after a lock or a fold: registered, but nothing in control
+  // and nothing activating. The page used to wait for a controller here and never got its key.
+  const stored = installTestBrowserStorage();
   const previousWorker = Object.getOwnPropertyDescriptor(navigator, "serviceWorker");
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const previousFetch = globalThis.fetch;
   const workers = Object.assign(new EventTarget(), {
-    register: () => new Promise<object>(() => {}), ready: Promise.resolve({}),
-    controller: { postMessage: (_message: unknown, _ports: MessagePort[]) => {} },
+    register: async () => ({}), ready: new Promise<object>(() => {}), controller: null,
   });
-  const replacement = { postMessage: (_message: unknown, ports: MessagePort[]) => {
-    newRequests++;
-    // MessagePort is a private channel, not Window.postMessage.
-    // oxlint-disable-next-line unicorn/require-post-message-target-origin
-    ports[0]!.postMessage(browserKey);
-  } };
-  workers.controller = { postMessage: () => {
-    oldRequests++;
-    queueMicrotask(() => { workers.controller = replacement; workers.dispatchEvent(new Event("controllerchange")); });
-  } };
+  const sent: (string | null)[] = [];
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    sent.push(new Headers(init?.headers).get("x-arke-browser-key"));
+    return new Response(null, { status: 204 });
+  }) as typeof fetch;
   Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: workers });
   Object.defineProperty(globalThis, "window", { configurable: true, value: { location: { origin: "https://studio.example.ts.net:9443" } } });
   Object.defineProperty(globalThis, "document", { configurable: true, value: { querySelector: () => ({ getAttribute: () => "true" }) } });
   try {
     await prepareRemoteSession();
-    assert.equal(oldRequests, 1); assert.equal(newRequests, 1);
-    assert.deepEqual(remoteSocketProtocols("wss://studio.example.ts.net:9443/"), ["arke-remote", "arke-browser." + browserKey]);
+    const key = stored.get("browser") as string;
+    assert.match(key, /^[a-f0-9]{64}$/, "a first visit makes the key the worker will read");
+    await remoteFetch("/remote/session");
+    assert.deepEqual(sent, [key], "the request carries the key without the worker");
+    assert.deepEqual(remoteSocketProtocols("wss://studio.example.ts.net:9443/"), ["arke-remote", "arke-browser." + key]);
     assert.deepEqual(remoteSocketProtocols("wss://studio.example.ts.net/"), []);
-    workers.dispatchEvent(new Event("controllerchange"));
-    assert.equal(newRequests, 1, "the upgrade listener is removed after preparation");
   } finally {
+    globalThis.fetch = previousFetch;
     for (const [target, name, descriptor] of [[navigator, "serviceWorker", previousWorker], [globalThis, "window", previousWindow], [globalThis, "document", previousDocument]] as const) {
       if (descriptor) Object.defineProperty(target, name, descriptor); else Reflect.deleteProperty(target, name);
     }
