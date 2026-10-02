@@ -223,8 +223,10 @@ export function compileLine(
     return { ok: false, kind: "invalid", reason: err instanceof Error ? err.message : String(err) };
   }
   const held = compiled.held;
-  if (mode === "strict" && held.length > 0) {
-    const first = held[0]!;
+  // As the author's write: a note only too long to be a tag is held, not refused (design turn 181).
+  const refusing = held.filter((control) => !(control.control === "note" && control.reason === NOTE_TAG_HOLD));
+  if (mode === "strict" && refusing.length > 0) {
+    const first = refusing[0]!;
     const name = first.control === "delivery" ? (plan.delivery ?? "delivery") : first.control === "marker" ? markerName(plan, first.cueIndex) : first.control;
     return { ok: false, kind: "held", reason: `${name} · ${model.displayName} ${first.reason}`.replace(/\.$/, "") };
   }

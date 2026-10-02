@@ -1,4 +1,4 @@
-import { estimateSpeechMicroUsd, speechInputFits } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, ONE_REQUEST_HOLD } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { PerformanceGenerationQuoteSchema, PerformanceRecordSchema, PerformanceIdSchema, AudioAssetProvenanceSchema,
@@ -38,11 +38,13 @@ export async function preparePerformanceGeneration(store: WorldStore, model: Man
   // a settings-only reader's marker passed here and went out as the whole line read plain.
   const { schemaVersion: _version, sourceTextHash: _hash, ...direction } = request.cadencePlan;
   const compiled = compileLine(text, direction, model, language, "strict");
+  // compileLine has checked the request against the reader's limits on these same words. Only a
+  // marker that needs parts is one the audiobook can make; anything else is the voice's limit.
   if (!compiled.ok) {
-    throw new Error(compiled.kind === "held" ? `${compiled.reason} · remove it, choose another voice, or read the passage in the audiobook` : compiled.reason);
+    throw new Error(compiled.kind !== "held" ? compiled.reason
+      : compiled.reason.endsWith(ONE_REQUEST_HOLD) ? `${compiled.reason} · remove it, choose another voice, or read the passage in the audiobook`
+        : `${compiled.reason} · remove it or choose another voice`);
   }
-  if (model.limits.maxPromptChars !== undefined && mapped.providerText.length > model.limits.maxPromptChars) throw new Error("The decorated line exceeds this model's character limit.");
-  if (!speechInputFits(mapped.providerText, model.limits, mapped.instructions)) throw new Error("The line and its direction exceed this model's request limit.");
   const quote = PerformanceGenerationQuoteSchema.parse({ operationId: randomUUID(), target, authoredText: text, voiceAssignment: sheet.voice,
     cadencePlan: request.cadencePlan, cadencePlanHash: digest(request.cadencePlan), mapping: { ...mapped, providerTextHash: audioHash(Buffer.from(mapped.providerText)) },
     modelHash: digest(model), estimatedMicroUsd: estimateSpeechMicroUsd(model, mapped.providerText), local: model.provider === "kokoro",
