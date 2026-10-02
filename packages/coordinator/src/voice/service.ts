@@ -883,7 +883,7 @@ export function voiceLineRequest(input: {
   let directed: { text: string; voiceSettings: Record<string, number>; instructions?: string; directionHash: string } | null = null;
   if (input.delivery !== undefined) {
     const compiled = compileLine(input.text, { delivery: input.delivery, speed: 1, cues: [] }, input.model, input.language, "strict");
-    if (!compiled.ok) throw new Error(/request limit|no words/.test(compiled.reason) ? compiled.reason : `${input.model.displayName} cannot express "${input.delivery}".`);
+    if (!compiled.ok) throw new Error(compiled.kind === "held" ? `${input.model.displayName} cannot express "${input.delivery}".` : compiled.reason);
     directed = compiled.line;
   }
   const text = directed?.text ?? input.text;

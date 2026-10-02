@@ -175,6 +175,12 @@ export function heldKey(plan: CadencePlan, control: HeldControl): string {
   return control.control;
 }
 
+/** Why a one-request surface holds a marker its reader could only make in parts. */
+export const ONE_REQUEST_HOLD = "needs a read in parts";
+
+/** Why a line could not be compiled: no words, held direction (strict), words that cannot fit, or a plan wrong for its words. */
+export type CompileFailure = "empty" | "held" | "limit" | "invalid";
+
 /** One request's worth of a directed line, as a one-request surface sends it. */
 export interface CompiledLine {
   /** The words with this reader's syntax in, as sent. */
@@ -204,29 +210,36 @@ export function compileLine(
   model: ManifestModel,
   language: string | undefined,
   mode: "strict" | "hold",
-): { ok: true; line: CompiledLine } | { ok: false; reason: string } {
-  if (normalizeSpeechText(text) === "") return { ok: false, reason: "There are no words to read yet." };
+): { ok: true; line: CompiledLine } | { ok: false; kind: CompileFailure; reason: string } {
+  if (normalizeSpeechText(text) === "") return { ok: false, kind: "empty", reason: "There are no words to read yet." };
   const plan = directionPlan(text, input);
-  const check = checkDirection(text, plan, model, language, "hold");
-  if (!check.ok) return check;
-  const held = [...check.held];
-  const whole = normalizeSpeechText(text);
-  // What is sent: the reader's own held plan, less any marker it could only make in parts.
-  let sent = holdDirection(text, plan, model, language).plan;
-  const parted = sent.cues.filter((cue) => cue.kind === "delivery" && markerMode(cue, sent, model, language, whole.length).mode === "parts");
-  if (parted.length > 0) {
-    for (const cue of parted) held.push({ control: "marker", cueIndex: plan.cues.indexOf(cue), reason: "a read in parts" });
-    sent = { ...sent, cues: sent.cues.filter((cue) => !parted.includes(cue)) };
+  // One request is mapped whole, never cut at the reader's cap as the audiobook's parts are, so
+  // a line too long for one request is refused as that, not as an emphasis across a seam.
+  let held: HeldControl[];
+  let mapped: ReturnType<typeof mapCadence>;
+  try {
+    const kept = holdDirection(text, plan, model, language);
+    held = kept.held;
+    let sent = kept.plan;
+    // What is sent: the reader's own held plan, less any marker it could only make in parts.
+    const whole = normalizeSpeechText(text);
+    const parted = sent.cues.filter((cue) => cue.kind === "delivery" && markerMode(cue, sent, model, language, whole.length).mode === "parts");
+    if (parted.length > 0) {
+      for (const cue of parted) held.push({ control: "marker", cueIndex: plan.cues.indexOf(cue), reason: ONE_REQUEST_HOLD });
+      sent = { ...sent, cues: sent.cues.filter((cue) => !parted.includes(cue)) };
+    }
+    held.sort((a, b) => (a.cueIndex ?? -1) - (b.cueIndex ?? -1));
+    mapped = mapCadence(text, sent.sourceTextHash, sent, model, language);
+  } catch (err) {
+    return { ok: false, kind: "invalid", reason: err instanceof Error ? err.message : String(err) };
   }
-  held.sort((a, b) => (a.cueIndex ?? -1) - (b.cueIndex ?? -1));
   if (mode === "strict" && held.length > 0) {
     const first = held[0]!;
     const name = first.control === "delivery" ? (plan.delivery ?? "delivery") : first.control === "marker" ? markerName(plan, first.cueIndex) : first.control;
-    return { ok: false, reason: `${name} · ${model.displayName} ${first.reason}`.replace(/\.$/, "") };
+    return { ok: false, kind: "held", reason: `${name} · ${model.displayName} ${first.reason}`.replace(/\.$/, "") };
   }
-  const mapped = mapCadence(text, sent.sourceTextHash, sent, model, language);
   if (!speechInputFits(mapped.providerText, model.limits, mapped.instructions)) {
-    return { ok: false, reason: "The line and its direction exceed this model's request limit. Shorten it or use an audiobook read in parts." };
+    return { ok: false, kind: "limit", reason: "The line and its direction exceed this model's request limit. Shorten it or use an audiobook read in parts." };
   }
   return {
     ok: true,

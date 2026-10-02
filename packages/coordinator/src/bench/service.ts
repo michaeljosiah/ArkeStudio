@@ -1015,7 +1015,7 @@ export function planBenchDispatch(
       return { ok: false, reason: `${model.displayName} cannot express "${params.delivery}".` };
     }
     const compiled = compileLine(composer.brief, { delivery: params.delivery as Delivery, speed: 1, cues: [] }, model, voiceLanguage, "strict");
-    if (!compiled.ok) return { ok: false, reason: /request limit|no words/.test(compiled.reason) ? compiled.reason : `${model.displayName} cannot express "${params.delivery}".` };
+    if (!compiled.ok) return { ok: false, reason: compiled.kind === "held" ? `${model.displayName} cannot express "${params.delivery}".` : compiled.reason };
     directed = compiled.line;
   }
   if (params.kind === "voice") {

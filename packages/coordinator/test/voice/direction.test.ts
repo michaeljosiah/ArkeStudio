@@ -22,11 +22,11 @@ it("holds a marker the reader could only make in parts, by name, and strict refu
   const input = { speed: 1, cues: [{ kind: "delivery" as const, span: { from: 0, to: 9, text: "I’m here." }, delivery: "whispered" as const }] };
   const held = compileLine(text, input, row("gemini-3.8-flash-tts"), undefined, "hold");
   assert.ok(held.ok);
-  assert.deepEqual(held.line.held, [{ control: "marker", cueIndex: 0, reason: "a read in parts" }]);
+  assert.deepEqual(held.line.held, [{ control: "marker", cueIndex: 0, reason: "needs a read in parts" }]);
   assert.equal(held.line.text, text);
   assert.equal(held.line.plan.cues.length, 1, "the authored plan is kept whole");
   const strict = compileLine(text, input, row("gemini-3.8-flash-tts"), undefined, "strict");
-  assert.deepEqual(strict, { ok: false, reason: "[whispered] · Gemini 3.8 Flash TTS a read in parts" });
+  assert.deepEqual(strict, { ok: false, kind: "held", reason: "[whispered] · Gemini 3.8 Flash TTS needs a read in parts" });
   // A tag reader writes a marker inline when nothing after it needs the reading restored — it
   // runs to the end, or the block's own delivery has a tag to write back after it (R-41).
   const toEnd = { speed: 1, cues: [{ kind: "delivery" as const, span: { from: 10, to: text.length, text: "You came back." }, delivery: "whispered" as const }] };
@@ -38,7 +38,7 @@ it("holds a marker the reader could only make in parts, by name, and strict refu
   assert.equal(restored.line.text, "[warmly] [whispers] I’m here. [warmly] You came back.");
   const unrestorable = compileLine(text, input, row("eleven-v3"), undefined, "hold");
   assert.ok(unrestorable.ok);
-  assert.deepEqual(unrestorable.line.held, [{ control: "marker", cueIndex: 0, reason: "a read in parts" }], "a whisper with no reading to return to would run on");
+  assert.deepEqual(unrestorable.line.held, [{ control: "marker", cueIndex: 0, reason: "needs a read in parts" }], "a whisper with no reading to return to would run on");
 });
 
 it("holds what Kokoro cannot take, and refuses words that will not fit one request", () => {
@@ -48,5 +48,5 @@ it("holds what Kokoro cannot take, and refuses words that will not fit one reque
   assert.equal(kokoro.line.text, text);
   const long = compileLine("word ".repeat(1200), { speed: 1, cues: [] }, row("eleven-v3"), undefined, "hold");
   assert.ok(!long.ok && /request limit/.test(long.reason));
-  assert.deepEqual(compileLine("  ", { speed: 1, cues: [] }, row("eleven-v3"), undefined, "hold"), { ok: false, reason: "There are no words to read yet." });
+  assert.deepEqual(compileLine("  ", { speed: 1, cues: [] }, row("eleven-v3"), undefined, "hold"), { ok: false, kind: "empty", reason: "There are no words to read yet." });
 });
