@@ -9056,6 +9056,11 @@ export class Coordinator {
           if (source.kind === "cloned") {
             if (store === null || (await clipFor(store, source.voice)) === null) return;
             if (this.opts.provider.openStore?.() !== store || store.isClosed()) return;
+            // Judged again on the library as it is now, with no await before the write: a
+            // delete-voice that landed during the catalogue and clip reads above must not leave
+            // the narrator naming a freed id the next clone would take (SPEC-046 R-41).
+            const now = voiceSourceFor(store.getBundle().clonedVoices ?? [], asked.provider, model, asked.voiceId);
+            if (now.kind !== "cloned" || now.voice.id !== source.voice.id || now.voice.clip !== source.voice.clip) return;
           }
           narrator = { ...asked, model, ...(source.kind === "cloned" && store ? { worldId: store.worldId } : {}) };
         }
@@ -13065,6 +13070,21 @@ export class Coordinator {
           const source = model === null ? null : voiceSourceFor(bundle.clonedVoices, stored.provider, model, stored.voiceId);
           if (source?.kind === "cloned" && source.voice.id === voice.id) {
             answer("refused", { reason: "The narrator still reads with this voice — choose another in Settings first." });
+            return;
+          }
+        }
+        // A book's own narrator is the same kind of reference (SPEC-046 R-41, SPEC-047 R-46): a
+        // book reading with a deleted clone would fall to the app narrator, and the next clone
+        // given the freed id would narrate it without being chosen.
+        for (const productionId of this.storyProductionIds(store)) {
+          const book = await readAudiobookBook(store, productionId).catch(() => null);
+          const own = book === null || book === "unreadable" ? undefined : book.narrator;
+          if (own === undefined) continue;
+          const model = own.model ?? legacyVoiceModel(own.provider, own.voiceId, bundle.clonedVoices);
+          const source = model === null ? null : voiceSourceFor(bundle.clonedVoices, own.provider, model, own.voiceId);
+          if (source?.kind === "cloned" && source.voice.id === voice.id) {
+            const title = bundle.productions.find((production) => production.meta.id === productionId)?.meta.title ?? productionId;
+            answer("refused", { reason: `${title}'s narrator still reads with this voice — choose another for the book first.` });
             return;
           }
         }

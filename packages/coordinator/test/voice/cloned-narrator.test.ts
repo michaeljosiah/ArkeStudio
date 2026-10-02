@@ -301,8 +301,16 @@ describe("a cloned voice as the narrator (issue 1215)", () => {
       assert.equal(answer.status, "refused");
       assert.match(answer.reason ?? "", /narrator still reads with this voice/);
       assert.ok((await h.library()) !== undefined, "the entry stays");
-      // Chosen elsewhere, the voice is not this world's narrator and goes.
+      // A book's own narrator is the same reference: refused for the book's reason.
       await h.settings.setNarrator({ ...HARBOUR, worldId: ELSEWHERE });
+      await h.send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: "the-ledger-of-nights", voice: HARBOUR });
+      await h.send({ kind: "delete-voice", requestId: PAGE, worldId: WORLD_ID, voiceId: "harbour-glass" });
+      const book = h.events.filter((event) => event.type === "voice.deleted").at(-1);
+      assert.ok(book && book.type === "voice.deleted");
+      assert.equal(book.status, "refused");
+      assert.match(book.reason ?? "", /narrator still reads with this voice — choose another for the book first/);
+      // Neither the app's narrator here nor the book's: the voice goes.
+      await h.send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: "the-ledger-of-nights", voice: null });
       await h.send({ kind: "delete-voice", requestId: AGAIN, worldId: WORLD_ID, voiceId: "harbour-glass" });
       const gone = h.events.filter((event) => event.type === "voice.deleted").at(-1);
       assert.equal(gone && gone.type === "voice.deleted" ? gone.status : null, "deleted");

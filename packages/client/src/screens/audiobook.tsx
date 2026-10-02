@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { DEFAULT_NARRATOR, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, providerName, readerPlace, type AudiobookPriceLine, type AudiobookRow } from "@arke-studio/contracts";
+import { DEFAULT_NARRATOR, narratorLabelFor, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, providerName, readerPlace, type AudiobookPriceLine, type AudiobookRow } from "@arke-studio/contracts";
 import { HeldBar } from "../components/held-bar.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
@@ -339,7 +339,7 @@ export function AudiobookScreen() {
           productionId={prodId}
           narratorLabel={door.voices[0]?.name ?? DEFAULT_NARRATOR.label}
           {...(production?.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {})}
-          appLabel={app?.narrator?.label ?? DEFAULT_NARRATOR.label}
+          appLabel={narratorLabelFor(app?.narrator ?? null, world?.meta.worldId)}
           trial={door.rows[0] !== undefined ? { chapterFile: door.rows[0].file, block: "title" } : null}
           slug={world?.meta.slug}
           data={line.line}
