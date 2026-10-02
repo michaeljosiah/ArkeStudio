@@ -1,5 +1,7 @@
 import {
   newId,
+  advanceWorldChatInputQueue,
+  worldChatInputRouting,
   applyProductionSetupUpdate,
   type ProductionSetupDraft,
   type ProductionSetupState,
@@ -18,6 +20,8 @@ import {
   type WorldChatMessage,
   type WorldChatLoaded,
   type WorldChatRun,
+  type WorldChatInputRecord,
+  type WorldChatInputRouting,
 } from "@arke-studio/contracts";
 import type { ModelEditorRequest, ModelSceneEdit, WorldChatContext, WorldChatSubject } from "@arke-studio/contracts";
 import { mergeAttachmentRanges, type AttachmentRange } from "./attachments.js";
@@ -33,6 +37,9 @@ import { correctiveMessage, personLine, validateTurnResult, type TurnProblem } f
 import type { EvidenceSources } from "./evidence.js";
 import { foldConversation } from "./fold.js";
 import { WorldChatStore } from "./store.js";
+import { WorldChatInputJournal, WorldChatInputError } from "./input-journal.js";
+import { foldWorldChatInputs } from "./input-fold.js";
+import { stableJson } from "../arke-actions/digest.js";
 import type { PreparedWorldChatAction, WorldChatActionTurn } from "./actions.js";
 import { refreshConversationSummary, type ConversationSummariser } from "./summarisation.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
@@ -334,6 +341,14 @@ async function askOnce(
   return finalText;
 }
 
+/** A journal-selected queued input, carried into the turn it becomes (SPEC-045 R-16). */
+interface QueuedTurn {
+  journal: WorldChatInputJournal;
+  input: WorldChatInputRecord;
+  revision: number;
+  routing: WorldChatInputRouting;
+}
+
 export class WorldChatRunner {
   private readonly cancelling = new Map<string, AbortController>();
 
@@ -398,6 +413,64 @@ export class WorldChatRunner {
   }
 
   /**
+   * Run a queued input as the next primary turn, under the identity it was admitted with.
+   *
+   * The scheduler that decides when to call this is not built yet (SPEC-045 T-3); this is the
+   * execution boundary it will use. The conversation's slot is reserved exactly as Send reserves
+   * it, before the first read, so a Stop or an ordinary Send cannot slip in beside it. Promotion
+   * is the turn's only start event: the journal rechecks FIFO order, revision, routing, the
+   * attachment bytes and the log position, and a refused promotion never reaches preparation.
+   * A promoted turn that fails is retried through ordinary Retry, never promoted again.
+   */
+  async sendQueued(journal: WorldChatInputJournal, messageId: MessageId,
+    expectedRevision: number, routing: WorldChatInputRouting): Promise<TurnOutcome> {
+    const capturedRouting = structuredClone(routing);
+    return this.runExclusive(journal.conversationId, async controller => {
+      let queue;
+      try {
+        queue = await journal.read();
+      } catch (error) {
+        if (error instanceof WorldChatInputError) return { status: "unavailable", reason: error.message };
+        throw error;
+      }
+      const row = queue.inputs.find(one => one.input.messageId === messageId);
+      if (!row || queue.revision !== expectedRevision) {
+        return { status: "unavailable", reason: "The queued messages changed. Look again before continuing." };
+      }
+      // The queue's own rules are asked before any model work (R-16): a paused queue, a later
+      // input or one already spent refuses here, rather than after a summary refresh, a model
+      // decision and the context reads that only promotion could justify.
+      const dryRun = advanceWorldChatInputQueue(queue, { type: "input.promoted", queueRevision: queue.revision + 1,
+        commandDigest: `sha256:${"0".repeat(64)}`, messageId, turnId: newId("turn") as TurnId, runId: newId("run") as RunId }, 1);
+      if (dryRun.problem) return { status: "unavailable", reason: "This message cannot start yet. Look at the queue again." };
+      if (stableJson(worldChatInputRouting(queue, row)) !== stableJson(capturedRouting)) {
+        return { status: "unavailable", reason: "The writing engine or model changed. Review the target before continuing." };
+      }
+      if (controller.signal.aborted) return this.stopQueued(journal, controller, messageId);
+      const queued: QueuedTurn = { journal, input: row.input, revision: expectedRevision, routing: capturedRouting };
+      return this.runRegisteredTurn(controller, journal.log, journal.conversationId, row.input.request.text,
+        row.input.request.attachmentIds, undefined, row.input.constraints.subject,
+        capturedRouting.modelId ?? undefined, row.input.constraints.replyOnly, undefined, queued);
+    });
+  }
+
+  /**
+   * A Stop that lands before promotion still has to stop the queue (SPEC-045 R-17): returning
+   * `cancelled` with nothing written would leave the input waiting under a running queue, ready
+   * for the next advance to start the very turn the author just stopped. A world closing cannot
+   * be written to; reopening it pauses everything waiting, as startup recovery does.
+   */
+  private async stopQueued(journal: WorldChatInputJournal, controller: AbortController, messageId: MessageId): Promise<TurnOutcome> {
+    if (controller.signal.reason === "world-closed") return { status: "cancelled" };
+    try {
+      await journal.pause("stopped", `stop:${messageId}:${newId("run")}`);
+    } catch (error) {
+      if (!(error instanceof WorldChatInputError)) throw error;
+    }
+    return { status: "cancelled" };
+  }
+
+  /**
    * Run a turn that already exists again, after it failed (§10.1.1).
    *
    * No second user message. They said it once, and a run that timed out is the app's failure,
@@ -407,6 +480,11 @@ export class WorldChatRunner {
   async retry(store: WorldChatStore, conversationId: ConversationId, turnId: TurnId): Promise<TurnOutcome> {
     const { events } = await store.read();
     const meta = await store.readMeta();
+    // A rejected promotion can still carry a plausible run, model and constraints. Authority is
+    // never recovered from damaged input history, even while the original words stay readable.
+    if (foldWorldChatInputs(events).problems.length > 0) {
+      return { status: "failed", reason: "This conversation's history needs repair before retrying." };
+    }
     const view = foldConversation(conversationId, meta?.createdAt ?? this.deps.now(), events).view;
     const original = view.messages.find((m) => m.turnId === turnId && m.role === "user");
     if (!original) return { status: "failed", reason: "that turn is not in this conversation" };
@@ -423,7 +501,8 @@ export class WorldChatRunner {
     // first carried them.
     const constraints = [...events]
       .reverse()
-      .map(({ event }) => (event.type === "turn.constraints" ? event.constraints : undefined))
+      .map(({ event }) => (event.type === "turn.constraints" ? event.constraints
+        : event.type === "input.promoted" ? { turnId: event.turnId, ...event.constraints } : undefined))
       .find((held) => held?.turnId === turnId);
     // The model is asked for again only where one can be chosen (issue 1403). Everywhere else
     // the run's model was the default — an agent override or the local default — and handing it
@@ -451,6 +530,13 @@ export class WorldChatRunner {
     replyOnly = false,
     onAdmitted?: (turnId: TurnId) => void,
   ): Promise<TurnOutcome> {
+    return this.runExclusive(conversationId, controller => this.runRegisteredTurn(controller, store,
+      conversationId, text, attachmentIds, existingTurnId, subject, modelId, replyOnly, onAdmitted));
+  }
+
+  /** The one admission guard every kind of turn shares: one run per conversation, held to the end. */
+  private async runExclusive(conversationId: ConversationId,
+    work: (controller: AbortController) => Promise<TurnOutcome>): Promise<TurnOutcome> {
     const adapter = this.deps.adapter;
     if (this.deps.closingSignal?.aborted) {
       return { status: "unavailable", reason: "This world closed. Reopen the conversation to continue." };
@@ -468,7 +554,7 @@ export class WorldChatRunner {
     const controller = new AbortController();
     this.cancelling.set(conversationId, controller);
     try {
-      return await this.runRegisteredTurn(controller, store, conversationId, text, attachmentIds, existingTurnId, subject, modelId, replyOnly, onAdmitted);
+      return await work(controller);
     } finally {
       // Include preflight reads and model selection: their failures must release the same slot
       // as a model failure, or the overlap guard would lock this conversation indefinitely.
@@ -487,18 +573,21 @@ export class WorldChatRunner {
     modelId: string | undefined,
     replyOnly: boolean,
     onAdmitted?: (turnId: TurnId) => void,
+    queued?: QueuedTurn,
   ): Promise<TurnOutcome> {
     const adapter = this.deps.adapter!;
     const at = this.deps.now();
     const turnId = existingTurnId ?? (newId("turn") as TurnId);
     const runId = newId("run") as RunId;
+    // A queued input keeps the id it was admitted under: evidence cites it, and a second id for
+    // the same words would make one message two.
     const message: WorldChatMessage = {
-      id: newId("msg") as MessageId,
+      id: queued?.input.messageId ?? newId("msg") as MessageId,
       turnId,
       role: "user",
       text,
       attachmentIds: [...attachmentIds] as WorldChatMessage["attachmentIds"],
-      createdAt: at,
+      createdAt: queued?.input.createdAt ?? at,
     };
 
     /**
@@ -633,7 +722,8 @@ export class WorldChatRunner {
     // before them, the worst a crash leaves is a constraint with no turn, which nothing reads.
     // A chapter subject also survives retry: its drafting brief must name the same chapter.
     // Other selections only colour the narration and are not written.
-    const constrained = !existingTurnId && (replyOnly || subject?.kind === "passage" || subject?.kind === "chapter");
+    // A promotion carries its constraints in the same record as the turn, so it writes none here.
+    const constrained = !queued && !existingTurnId && (replyOnly || subject?.kind === "passage" || subject?.kind === "chapter");
     if (constrained) {
       await this.deps.raiseSchemaBoundary?.(subject?.kind === "chapter" ? 17 : TURN_CONSTRAINTS_SCHEMA_VERSION);
       await store.append(
@@ -646,10 +736,24 @@ export class WorldChatRunner {
     if (this.deps.closingSignal?.aborted) {
       return { status: "unavailable", reason: "The world closed before this message could be sent. Reopen the conversation to continue." };
     }
-    await store.append(
-      existingTurnId ? { type: "run.retry-started", run } : { type: "turn.started", message, run },
-      { at },
-    );
+    if (queued) {
+      // Admission may have moved while the context was assembled. The journal compares the queue
+      // revision and the whole log position before recording message, constraints and run as one
+      // event; a refused or failed append must never reach preparation or session creation.
+      if (controller.signal.aborted) return this.stopQueued(queued.journal, controller, queued.input.messageId);
+      if (modelChoice.reason !== undefined) return { status: "unavailable", reason: modelChoice.reason };
+      try {
+        await queued.journal.promote(queued.input.messageId, queued.revision, run, queued.routing, runId);
+      } catch (error) {
+        if (error instanceof WorldChatInputError) return { status: "unavailable", reason: error.message };
+        throw error;
+      }
+    } else {
+      await store.append(
+        existingTurnId ? { type: "run.retry-started", run } : { type: "turn.started", message, run },
+        { at },
+      );
+    }
     // Taken, and not before (PR 1232): every refusal above returns without appending.
     if (!existingTurnId) onAdmitted?.(turnId);
     if (controller.signal.aborted) {

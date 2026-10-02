@@ -352,6 +352,13 @@ and world-card-heights tests, and typecheck after changing tests.
 
 ## CI
 
+Additional conversation input (#1138) has journal, recovery and compatibility coverage in
+coordinator `test/world-chat/input-journal.test.ts`, and queued-turn execution in `run.test.ts`,
+beside the existing store, recovery, summarisation and wrap-up suites. The opt-in Codex and
+OpenCode native protocol probes, their environment variables and the builds they were measured
+against are in [conversation inputs](conversation-inputs.md#native-protocol-evidence). They make no
+paid model call and do not qualify an adapter for native steering.
+
 For Gemini preset activation, run providers `test/gemini-activation.test.ts` and
 `test/google-tts.test.ts`, coordinator `test/audio/performance-generation.test.ts` and
 `test/voice/service.test.ts`, `test/audio/table-read.test.ts`, `test/voice/page-read.test.ts` and

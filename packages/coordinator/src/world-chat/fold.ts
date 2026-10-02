@@ -18,7 +18,9 @@ import type {
   WorldChatStatus,
   WorldChatSummary,
 } from "@arke-studio/contracts";
+import { projectWorldChatInputQueue, unresolvedWorldChatInputs } from "@arke-studio/contracts";
 import { conversationActionDigest, stableJson } from "../arke-actions/digest.js";
+import { foldWorldChatInputs } from "./input-fold.js";
 
 /**
  * The event log, folded into the workspace a screen renders (#70 §7.2).
@@ -114,7 +116,7 @@ export function foldConversation(
   const benchOutcomes = new Map<string, WorldChatLoaded["benchOutcomes"][string]>();
   /** Durable anchors only; the client joins each one to the live frame-run fold. */
   const frameRunOutcomes = new Map<string, WorldChatLoaded["frameRunOutcomes"][string]>();
-  /** The log sequence each message arrived at, so paging can use a real cursor. */
+  /** Durable transcript positions; a confirmed correction uses its offer's sequence (SPEC-045). */
   const messageSeq = new Map<string, number>();
   const messageIds = new Set<string>();
   const candidates = new Map<string, WorldChangeCandidate>();
@@ -130,6 +132,13 @@ export function foldConversation(
   const proposalIds = new Set<string>();
   const resolvedProposals = new Set<string>();
   let seq = 0;
+  const inputFold = foldWorldChatInputs(events);
+  const inputQueue = inputFold.queue;
+  problems.push(...inputFold.problems);
+  // A valid offer belongs to a live native run: its sequence is after that run started and before
+  // it finished, so it stays a stable paging position when inclusion is only learned later.
+  const inputOfferSeq = new Map(events.flatMap(({ event, seq: at }) =>
+    event.type === "input.offer-started" && inputFold.acceptedSequences.has(at) ? [[event.messageId, at] as const] : []));
 
   /** A snapshot may only move a proposition forward one revision at a time. */
   function applyCandidate(next: WorldChangeCandidate, atSeq: number): void {
@@ -206,6 +215,23 @@ export function foldConversation(
     updatedAt = envelope.at;
     const e = envelope.event;
     switch (e.type) {
+      case "input.promoted":
+        // Only a promotion replay accepted becomes a turn; a rejected one is a named problem.
+        if (inputFold.acceptedSequences.has(envelope.seq)) {
+          addMessage(e.message, envelope.seq);
+          runs.set(e.run.id, e.run);
+        }
+        break;
+      case "input.included": {
+        // Queued, offered and uncertain input is visible in the queue but is not transcript, and so
+        // is not evidence: only proven inclusion makes it a message of the run it reached.
+        if (!inputFold.acceptedSequences.has(envelope.seq)) break;
+        const input = inputQueue.inputs.find(row => row.input.messageId === e.messageId)?.input;
+        if (input) addMessage({ id: input.messageId, turnId: e.attempt.turnId, role: "user",
+          text: input.request.text, attachmentIds: input.request.attachmentIds, createdAt: input.createdAt },
+        inputOfferSeq.get(e.messageId) ?? envelope.seq);
+        break;
+      }
       case "founding.message":
         addMessage(e.message, envelope.seq);
         break;
@@ -560,6 +586,10 @@ export function foldConversation(
 
   // `before` is a log sequence, not a position: messages are append-only, so a sequence stays
   // meaningful even as the conversation grows underneath a client that is paging back.
+  // Reconciliation can place a confirmed correction inside an earlier turn, so messages are put in
+  // position order first: a late receipt must not strand it after a newer exchange, or leave it
+  // off the page just before its own reply. The sort is stable, so equal positions keep log order.
+  messages.sort((a, b) => messageSeq.get(a.id)! - messageSeq.get(b.id)!);
   const windowed =
     options.before === undefined
       ? messages
@@ -620,6 +650,7 @@ export function foldConversation(
       }),
     ),
     hasMore: shown.length < windowed.length,
+    ...(inputQueue.revision > 0 ? { inputQueue: projectWorldChatInputQueue(inputQueue) } : {}),
     candidates: [...candidates.values()],
     actions: actionCards,
     mediaHandoffs,
@@ -637,7 +668,9 @@ export function foldConversation(
     // Computed here because this is the only place all three inputs exist at once, and because
     // one answer is the point: the row that offers Delete and the command that refuses it must
     // not be able to disagree.
-    deletionBlock: needsInterruptedRunRepair
+    deletionBlock: unresolvedWorldChatInputs(inputQueue).length > 0 || inputQueue.pauseReason === "integrity"
+      ? "pending-inputs"
+      : needsInterruptedRunRepair
       ? "active-run"
       : wrapUpInFlight || saveInFlight
         ? "wrap-up-in-flight"

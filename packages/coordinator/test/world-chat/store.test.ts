@@ -228,6 +228,35 @@ describe("world chat store", () => {
     assert.equal(problems[0]!.kind, "interior-corruption");
   });
 
+  it("refuses duplicate receipts after a foreign edit just as it refuses fresh appends", async () => {
+    const s = await store();
+    const event = message("original direction");
+    await s.append(event, { at: AT, requestId: "same-submission" });
+    const text = await readFile(s.eventsPath, "utf8");
+    await writeFile(s.eventsPath, text.replace("original direction", "changed direction!"));
+    await assert.rejects(s.append(event, { at: AT, requestId: "same-submission" }), ConversationIntegrityError);
+  });
+
+  it("flushes a duplicate receipt again and restores the foreign-write guard (issue 826)", async () => {
+    const s = await store();
+    const event = message("original direction");
+    await s.append(message("before"), { at: AT });
+    const probe = await open(s.eventsPath, "r");
+    const handles = Object.getPrototypeOf(probe) as { sync: () => Promise<void> };
+    await probe.close();
+    const real = handles.sync;
+    let syncs = 0;
+    handles.sync = async () => { syncs++; throw new Error("sync failed"); };
+    try {
+      await assert.rejects(s.append(event, { at: AT, requestId: "reconfirm" }), /sync failed/);
+      await assert.rejects(s.append(event, { at: AT, requestId: "reconfirm" }), /sync failed/);
+      assert.equal(syncs, 2, "finding the line again cannot stand in for flushing it");
+    } finally { handles.sync = real; }
+    assert.equal((await s.append(event, { at: AT, requestId: "reconfirm" })).deduplicated, true);
+    await writeFile(s.eventsPath, (await readFile(s.eventsPath, "utf8")).replace("original direction", "changed direction!"));
+    await assert.rejects(s.append(message("after"), { at: AT }), ConversationIntegrityError);
+  });
+
   it("refuses to append when something else has written to the log", async () => {
     const s = await store();
     await s.append(message("ours"), { at: AT });

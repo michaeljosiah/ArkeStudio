@@ -5,6 +5,7 @@ import { toExtendedLength } from "../world/paths.js";
 import { foldConversation } from "./fold.js";
 import { conversationsDir, WorldChatStore } from "./store.js";
 import { preserveConversationActionTombstones } from "../arke-actions/tombstones.js";
+import { recoverWorldChatInputs } from "./input-recovery.js";
 
 /**
  * What startup has to put right before anything new can happen (#70 phase 1, §7.2).
@@ -35,6 +36,8 @@ export interface RecoveryOptions {
 export interface RecoveryOutcome {
   /** Conversations whose interrupted run was made durable on this pass. */
   repaired: string[];
+  /** Conversations whose waiting or uncertain additional input was paused on this pass (SPEC-045). */
+  inputQueues: string[];
   /** Tombstoned directories a previous deletion left behind, now removed. */
   sweptTombstones: string[];
 }
@@ -44,7 +47,7 @@ export async function recoverConversations(
   now: () => string = () => new Date().toISOString(),
   options: RecoveryOptions = {},
 ): Promise<RecoveryOutcome> {
-  const outcome: RecoveryOutcome = { repaired: [], sweptTombstones: [] };
+  const outcome: RecoveryOutcome = { repaired: [], inputQueues: [], sweptTombstones: [] };
   const root = conversationsDir(worldPath);
 
   let entries: string[];
@@ -60,21 +63,38 @@ export async function recoverConversations(
       continue;
     }
     if (entry.startsWith(".")) continue;
-    if (await repairInterruptedRun(join(root, entry), now, options.isLive)) outcome.repaired.push(entry);
+    const repaired = await repairConversation(join(root, entry), now, options.isLive);
+    if (repaired.run) outcome.repaired.push(entry);
+    if (repaired.inputs) outcome.inputQueues.push(entry);
   }
   return outcome;
 }
 
-/** Returns true when this pass wrote a terminal event that was previously missing. */
-async function repairInterruptedRun(
+/**
+ * `run` is true when this pass wrote a terminal event that was previously missing; `inputs` when
+ * it paused waiting input or turned a lost offer into uncertainty. They are independent.
+ */
+async function repairConversation(
   dir: string,
   now: () => string,
   isLive: (conversationId: ConversationId) => boolean = () => false,
-): Promise<boolean> {
+): Promise<{ run: boolean; inputs: boolean }> {
   const store = new WorldChatStore(dir);
   const meta = await store.readMeta();
-  if (!meta) return false;
+  if (!meta) return { run: false, inputs: false };
+  // A live turn's inputs belong to the runner that holds it, not to a restart.
+  if (isLive(meta.id)) return { run: false, inputs: false };
+  const inputs = await recoverWorldChatInputs(store, now);
+  return { run: await repairInterruptedRun(store, meta, isLive, now), inputs };
+}
 
+/** Returns true when this pass wrote a terminal event that was previously missing. */
+async function repairInterruptedRun(
+  store: WorldChatStore,
+  meta: { id: ConversationId; createdAt: string },
+  isLive: (conversationId: ConversationId) => boolean,
+  now: () => string,
+): Promise<boolean> {
   // Asked on both sides of the read. The runner registers a turn before appending its running
   // run and lets go only after appending its end, so a turn live at either moment is one this
   // log may show mid-flight — or, if it ended in between, already ended by its own hand. A turn
