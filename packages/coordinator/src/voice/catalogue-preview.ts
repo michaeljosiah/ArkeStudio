@@ -39,7 +39,10 @@ export class CataloguePreviewService {
     const annotated = voices.map(voice => {
       const model = this.deps.manifest?.models.find(m => m.id === voice.model && m.provider === voice.provider);
       let preview: NonNullable<VoiceCandidate["preview"]> = { kind: "unavailable", reason: "No preview available" };
-      if (supportsVoiceUse(voice, "narration") && !voice.unavailableReason) {
+      // A library voice is never previewed here (SPEC-046 R-16, R-37): this path sends no
+      // recording and asks no vendor, so the reader would take the clone's id for a preset it
+      // has never heard of. Its own page previews it, with the question asked first.
+      if (supportsVoiceUse(voice, "narration") && !voice.unavailableReason && voice.readsClone === undefined) {
         if (approvedVoiceSample(voice.previewUrl)) preview = { kind: "sample", microUsd: 0 };
         else if (voice.provider === "kokoro" && this.deps.sidecar) preview = { kind: "generate", microUsd: 0 };
         else if (model && this.deps.enqueue && model.capability === "voice-tts") {

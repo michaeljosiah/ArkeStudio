@@ -173,18 +173,27 @@ describe("voice picker identity", () => {
     assert.match(markup, /fy-voices__picked">Cloud v3/);
   });
 
-  it("filters cloned voices out of narration until that use is implemented", () => {
+  it("offers a cloned voice for narration through each hosted reader, naming the reader, and never the retired recipe (issue 1215)", () => {
     __setStateForTest(FIXTURE_STATE, {
       voiceCatalogue: [
         { provider: "kokoro", model: "kokoro-82m", voiceId: "same", label: "Preset", attributes: [], local: true, canClone: false, usedBy: [] },
-        { provider: "comfyui", model: "comfyui-cloned-voice", voiceId: "clone", label: "Clone", attributes: [], local: true, canClone: false, usedBy: [] },
+        { provider: "comfyui", model: "comfyui-cloned-voice", voiceId: "old", label: "Recipe clone", attributes: [], local: true, canClone: false, readsClone: "old", usedBy: [] },
+        { provider: "mistral", model: "voxtral-mini-tts", voiceId: "harbour", label: "Harbour glass", attributes: ["low"], local: false, canClone: false, readsClone: "harbour", usedBy: [] },
+        { provider: "breezeblue", model: "breeze-tts-2", voiceId: "harbour", label: "Harbour glass", attributes: ["low"], local: false, canClone: false, readsClone: "harbour", usedBy: [] },
       ],
     });
     const markup = renderToString(
-      <VoicePickerDialog open use="narration" chosenId={undefined} onClose={noop} onPick={noop} />,
+      <VoicePickerDialog open use="narration" chosenId="harbour" chosenProvider="mistral" chosenModel="voxtral-mini-tts" onClose={noop} onPick={noop} />,
     );
     assert.match(markup, /Preset/);
-    assert.doesNotMatch(markup, />Clone</);
+    assert.equal((markup.match(/fy-voices__name">Harbour glass</g) ?? []).length, 2, "one row a reader that can speak it");
+    // Two rows of one name differ only in their reader, so the reader is what they say.
+    assert.match(markup, /fy-voices__where">Voxtral</);
+    assert.match(markup, /fy-voices__where">Breeze</);
+    assert.doesNotMatch(markup, /Recipe clone/, "the retired recipe takes no use");
+    assert.match(markup, /Use Harbour glass/, "picking sets the narrator and spends nothing, and the button says so (issue 1216)");
+    assert.doesNotMatch(markup, /Read with this voice/);
+    assert.match(markup, /fy-voices__picked">Harbour glass<\/span><small> · <!-- -->Voxtral/, "the footer names the reader with the voice");
   });
 });
 

@@ -324,7 +324,7 @@ describe("the Audiobook door (turn 146)", () => {
     const priced = async () => {
       await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 9, blocks: 120 }));
       await act(async () =>
-        __applyEventForTest({ at: AT, type: "audiobook.book-priced", ...ids, ...PRICE, confirmationToken: "tok", voices: LINES }),
+        __applyEventForTest({ at: AT, type: "audiobook.book-priced", ...ids, ...PRICE, confirmationToken: "tok", voices: LINES, notices: ["Harbour glass · first read · voice made on Fish Audio"] }),
       );
     };
     await priced();
@@ -347,6 +347,8 @@ describe("the Audiobook door (turn 146)", () => {
       "Odile Sarnno voice · narrator · ElevenLabs · cloud300 · up to $0.03",
     ]);
     assert.match(text(m), /words and the voice to ElevenLabs · text in Activity/);
+    // A first read's clone charge, on the read that incurs it (SPEC-046 R-40).
+    assert.deepEqual(all(m, '[data-testid="read-book-notice"]').map((line) => line.textContent), ["Harbour glass · first read · voice made on Fish Audio"]);
     const confirm = q(m, '[data-testid="read-book-confirm"]')!;
     assert.equal(confirm.textContent, "Confirm 108,700 characters · up to $10.87");
     await act(async () => confirm.click());

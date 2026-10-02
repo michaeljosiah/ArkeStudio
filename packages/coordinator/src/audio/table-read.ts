@@ -1,6 +1,6 @@
 import { estimateSpeechMicroUsd, speechInputFits, voiceFormatForModel, type ManifestModel } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
-import { deriveRehearsalLines, productionShape, TableReadPlanSchema, normalizeSpeechText, legacyVoiceModel, providerModelId,
+import { deriveRehearsalLines, productionShape, TableReadPlanSchema, normalizeSpeechText, legacyVoiceModel, providerModelId, voiceSourceFor,
   type ModelManifest, type Job, type ProviderStatus, type TableReadPlan } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { speechCacheFile, cachedVoiceAudioLooksRight, type SpeechSpec, type VoiceService } from "../voice/service.js";
@@ -61,6 +61,11 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
     const voice = line.narration ? narrator ?? undefined : store.getBundle().sheets.find(s => s.id === line.speakerSheetId)?.voice;
     if (!voice || (line.narration ? voice.provider === "comfyui" : !["kokoro", "elevenlabs", "google"].includes(voice.provider))) {
       item.reason = line.narration ? "Choose a supported narrator voice in Settings." : "No supported TTS assignment for this character."; continue;
+    }
+    // A cloned narrator (issue 1215) reads the app's prose with its recording and the vendor's
+    // answer; a table read sends neither, so its narration is not made in that voice.
+    if (line.narration && voiceSourceFor(store.getBundle().clonedVoices ?? [], voice.provider, voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId) ?? "", voice.voiceId).kind === "cloned") {
+      item.reason = "A cloned narrator cannot read a table read. Choose another narrator in Settings."; continue;
     }
     const model = manifest.models.find(m => m.id === (voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId)) && m.provider === voice.provider && m.capability === "voice-tts");
     if (!model) { item.reason = "The assigned TTS model is unavailable."; continue; }

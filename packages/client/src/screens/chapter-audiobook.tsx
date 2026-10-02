@@ -25,6 +25,7 @@ import {
   normalizeSpeechText,
   formatMicroUsd,
   legacyVoiceModel,
+  narratorAppliesTo,
   narratorFor,
   readerName,
   readerPlace,
@@ -241,13 +242,16 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // voice cannot speak now falls back the same way on both sides, or the client would judge
   // every take of the local fallback stale against a voice the run never used.
   // The book's own narrator when it has one that can speak now (R-46), by the coordinator's rule.
+  // A cloned app narrator is its own world's (SPEC-046 R-37), and the catalogue marks a clone
+  // whose recording is gone, so both fall back here as they do there.
   const bookNarrator = input.bookNarrator;
   const narrator = useMemo<AudiobookReader>(() => {
     const speakable = (catalogue ?? []).filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
     const own = bookNarrator === undefined ? null : narratorFor(bookNarrator, speakable);
-    const chosen = own !== null && !own.fallback ? own : narratorFor(state?.app.narrator ?? null, speakable);
+    const stored = state?.app.narrator ?? null;
+    const chosen = own !== null && !own.fallback ? own : narratorFor(narratorAppliesTo(stored, worldId) ? stored : null, speakable);
     return { provider: chosen.provider, model: chosen.model, voiceId: chosen.voiceId, label: chosen.label ?? DEFAULT_NARRATOR.label };
-  }, [state?.app.narrator, catalogue, bookNarrator]);
+  }, [state?.app.narrator, catalogue, bookNarrator, worldId]);
   const notes = input.notes;
   const models = state?.app.manifest?.models ?? [];
   const modelOf = useCallback(
@@ -410,12 +414,13 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const sounding = playing && at !== null ? (playable[at] ?? null) : null;
 
   // A cloned voice's recording leaving the machine (SPEC-022, SPEC-046): asked once, by the run's request.
-  const [upload, setUpload] = useState<{ destination: string; token: string } | null>(null);
+  const [upload, setUpload] = useState<{ destination: string; token: string; notice?: string } | null>(null);
   useEffect(
     () =>
       subscribeVoiceUploadConfirmations((confirmation) => {
         if (confirmation.requestId !== run?.requestId) return;
-        setUpload({ destination: confirmation.destinationLabel, token: confirmation.confirmationToken });
+        // With what the vendor does with the clip (SPEC-046 R-17), as every other read shows it.
+        setUpload({ destination: confirmation.destinationLabel, token: confirmation.confirmationToken, ...(confirmation.destinationNotice !== undefined ? { notice: confirmation.destinationNotice } : {}) });
       }),
     [run?.requestId],
   );
@@ -554,6 +559,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       return (
         <RemoteVoiceUploadConfirmation
           destinationLabel={upload.destination}
+          destinationNotice={upload.notice}
           onCancel={() => {
             setUpload(null);
             uploadAllowed.current = null;
@@ -578,6 +584,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             Confirm {price.characters.toLocaleString()} characters · up to {formatMicroUsd(price.estimatedMicroUsd)}
             {price.voices.map((voice) => ` · ${voice.label} · ${readerPlace(voice.provider)}`).join("")}
           </Button>
+          {/* What a first read through a slot-keeping reader adds (SPEC-046 R-40), on the read
+              that incurs it: not in the estimate, so said beside it. */}
+          {price.notices.map((notice) => <span key={notice} className="fy-mono" data-testid="audiobook-notice">{notice}</span>)}
           <Button variant="ghost" onClick={() => dismissAudiobookRun(worldId, prodId, chapter.id)}>
             Cancel
           </Button>

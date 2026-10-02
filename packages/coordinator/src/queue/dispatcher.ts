@@ -307,7 +307,12 @@ const FOLLOW_ON_TARGETS = new Set([
   "voice-line",
   "voice-preview",
 ]);
-const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation"]);
+/**
+ * Params the coordinator keeps on the job for itself and never sends. `voiceClipHash` is the
+ * recording a cloned voice was made from: part of an audiobook part's durable identity
+ * (`priorPartJob`, SPEC-046 R-39), not a control of any reader.
+ */
+const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation", "voiceClipHash"]);
 
 /** Attempts that count against the retry bound: refusals waited out as busy never reached the engine. */
 function spentAttempts(job: Job): number {

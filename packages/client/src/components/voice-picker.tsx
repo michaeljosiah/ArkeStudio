@@ -7,6 +7,18 @@ import { voicePreviewMediaUrl } from "../lib/media.js";
 import { cx } from "./ui.js";
 import { X } from "./icons.js";
 
+/**
+ * Where a row's voice is read: this machine, a Gemini row's reader, or the provider. A library
+ * voice is listed once per hosted reader that can speak it (SPEC-046 R-37), so its rows share a
+ * name and differ only here — they say the reader, `Voxtral` or `Breeze`, rather than a vendor id.
+ */
+function whereLabel(voice: ReadingVoice, use: "bench" | "narration"): string {
+  if (voice.local) return "On this machine";
+  if (voice.readsClone !== undefined) return readerName(voice);
+  if (voice.provider === "google") return `${readerName(voice)}${cloudSpeechPreference(voice, use === "narration" ? "routine" : "creative") === 0 ? " · Recommended" : ""}`;
+  return voice.provider;
+}
+
 /** Design 176: browsing and hearing are independent of the pending narrator choice. */
 export function VoicePickerDialog({ open, worldId, chosenId, chosenProvider, chosenModel, use = "bench", onClose, onPick }: {
   open: boolean; worldId?: string; chosenId: string | undefined; chosenProvider?: string; chosenModel?: string;
@@ -131,7 +143,7 @@ export function VoicePickerDialog({ open, worldId, chosenId, chosenProvider, cho
             <div className="fy-voice-browser__identity"><span className="fy-voices__name">{voice.label}</span>{key === chosenKey && <small>Current</small>}<p>{voice.description || voice.attributes.join(" · ") || "No description"}</p>
               <span className="fy-voice-browser__preview-label">{label}</span></div>
             <span className="fy-voice-browser__metadata">{[voice.facets?.language, voice.facets?.accent, voice.facets?.gender].filter(Boolean).join(" · ")}</span>
-            <span className="fy-voices__where">{voice.unavailableReason ?? (voice.local ? "On this machine" : voice.provider === "google" ? `${readerName(voice)}${cloudSpeechPreference(voice, use === "narration" ? "routine" : "creative") === 0 ? " · Recommended" : ""}` : voice.provider)}{voice.usedBy.length > 0 && <small>{voice.usedBy.join(", ")}</small>}</span>
+            <span className="fy-voices__where">{voice.unavailableReason ?? whereLabel(voice, use)}{voice.usedBy.length > 0 && <small>{voice.usedBy.join(", ")}</small>}</span>
             <button type="button" className="fy-voice-browser__select" aria-pressed={pick === key} aria-label={`Select ${voice.label}`} disabled={!!voice.unavailableReason} onClick={() => setPick(key)}>{pick === key ? "Selected" : "Select"}</button>
           </div>;
         })}
@@ -140,7 +152,7 @@ export function VoicePickerDialog({ open, worldId, chosenId, chosenProvider, cho
         <span>{previewError ?? (sounding?.status === "playing" ? "Playing sample" : sounding?.status === "ended" ? "Sample finished" : "Loading sample…")}</span>
         {sounding && <span>{Math.floor(sounding.currentTime)}s / {Math.floor(sounding.duration)}s</span>}
         {previewError ? <button type="button" onClick={() => listen(active.voice)}>Retry preview</button> : <button type="button" onClick={stop}>Stop</button>}</div>}
-      <div className="fy-voices__foot"><div><span className="fy-voices__picked">{selected?.label ?? "Choose a voice"}</span>{selected && <small> · {selected.provider}{outside ? " · Outside these results" : ""}</small>}</div><span style={{ flex: 1 }} />
+      <div className="fy-voices__foot"><div><span className="fy-voices__picked">{selected?.label ?? "Choose a voice"}</span>{selected && <small> · {selected.readsClone !== undefined ? readerName(selected) : selected.provider}{outside ? " · Outside these results" : ""}</small>}</div><span style={{ flex: 1 }} />
         <button type="button" className="fy-bench__chip" onClick={onClose}>Cancel</button>
         <button type="button" className="fy-voices__use" data-testid="voice-use" disabled={!selected || !!selected.unavailableReason} onClick={() => { if (selected && !selected.unavailableReason) onPick(selected); }}>
           {use === "narration" ? selected ? `Use ${selected.label}` : "Use voice" : "Read with this voice"}</button></div>
