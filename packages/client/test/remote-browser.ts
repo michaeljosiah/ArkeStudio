@@ -40,7 +40,7 @@ export function installTestBrowserStorage(options: { key?: unknown; fails?: bool
 export async function prepareTestRemoteBrowser() {
   installTestBrowserStorage({ key: "b".repeat(64) });
   Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: {
-    register: async () => ({}), ready: Promise.resolve({}), controller: null,
+    register: async () => ({}), ready: Promise.resolve({}), controller: {},
     addEventListener() {}, removeEventListener() {},
   } });
   await prepareRemoteSession();

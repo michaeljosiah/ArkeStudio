@@ -29,7 +29,11 @@ function browserKey() {
   });
 }
 self.addEventListener("message", event => {
-  if (event.data !== "arke-remote-browser-key" || !event.source?.url || new URL(event.source.url).origin !== self.location.origin) return;
+  if (!event.source?.url || new URL(event.source.url).origin !== self.location.origin) return;
+  // A page loaded while this worker was not in control (a cold relaunch of the installed app)
+  // asks to be claimed, so its pictures and clips go through here and carry the key.
+  if (event.data === "arke-remote-claim") { event.waitUntil(self.clients.claim()); return; }
+  if (event.data !== "arke-remote-browser-key") return;
   event.waitUntil(browserKey().then(key => event.ports[0]?.postMessage(key)).catch(() => event.ports[0]?.postMessage(null)));
 });
 self.addEventListener("fetch", event => {

@@ -74,12 +74,17 @@ function readBrowserKey(): Promise<string> {
 export function prepareRemoteSession(): Promise<void> {
   if (preparing) return preparing;
   preparing = new Promise<void>((resolve, reject) => {
-    if (!("serviceWorker" in navigator) || typeof indexedDB === "undefined") {
-      reject(new RemoteBrowserError("A secure browser connection is required.")); return;
-    }
-    const timer = setTimeout(() => reject(new Error("The browser connection timed out.")), 10_000);
+    if (!("serviceWorker" in navigator)) { reject(new RemoteBrowserError("A secure browser connection is required.")); return; }
+    if (typeof indexedDB === "undefined") { reject(new RemoteBrowserError("Browser storage is unavailable.")); return; }
+    let settled = false;
+    const finish = (error?: Error, key?: string) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer);
+      if (error) reject(error); else { browserKey = key!; resolve(); }
+    };
+    const timer = setTimeout(() => finish(new Error("The browser connection timed out.")), 10_000);
     // Registration still has to be allowed: without the worker no picture or clip can load.
-    const registered = Promise.resolve().then(() => navigator.serviceWorker.register("/notification-worker.js")).then(() => {}, (error: { name?: string } | undefined) => {
+    const registered = Promise.resolve().then(() => navigator.serviceWorker.register("/notification-worker.js")).then(claimed, (error: { name?: string } | undefined) => {
       throw ["SecurityError", "NotAllowedError", "NotSupportedError"].includes(error?.name ?? "")
         ? new RemoteBrowserError("This browser does not allow service workers.") : error;
     });
@@ -87,9 +92,25 @@ export function prepareRemoteSession(): Promise<void> {
       if (!/^[a-f0-9]{64}$/.test(read)) throw new RemoteBrowserError("Browser storage is unavailable.");
       return read;
     }, () => { throw new RemoteBrowserError("Browser storage is unavailable."); });
-    Promise.all([key, registered]).then(([read]) => { browserKey = read; resolve(); }, reject).finally(() => clearTimeout(timer));
+    Promise.all([key, registered]).then(([read]) => finish(undefined, read), finish);
   }).catch(error => { preparing = null; browserKey = null; throw error; });
   return preparing;
+}
+
+/** Media cannot carry the key itself, so a page the worker does not control asks the active
+ * worker to claim it. Bounded: a worker that cannot answer (an older one, or one still
+ * installing, which claims on activation) must not keep the studio from opening. */
+function claimed(registration: ServiceWorkerRegistration | undefined): Promise<void> {
+  const workers = navigator.serviceWorker;
+  if (workers.controller) return Promise.resolve();
+  return new Promise(resolve => {
+    const done = () => { clearTimeout(timer); workers.removeEventListener("controllerchange", done); resolve(); };
+    const timer = setTimeout(done, 3000);
+    workers.addEventListener("controllerchange", done);
+    // A ServiceWorker message has no target origin; the worker checks the sender's.
+    // oxlint-disable-next-line unicorn/require-post-message-target-origin
+    registration?.active?.postMessage("arke-remote-claim");
+  });
 }
 export function remoteSocketProtocols(url: string): string[] {
   return url === remoteSocketUrl() && browserKey ? ["arke-remote", "arke-browser." + browserKey] : [];
