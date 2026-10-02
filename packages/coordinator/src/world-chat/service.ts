@@ -43,6 +43,7 @@ const REASONS: Record<WorldChatDeletionBlock, string> = {
   "unresolved-proposals":
     "Proposals from this conversation are still waiting on a decision. Accept or discard them first.",
   "pending-actions": "Actions from this conversation are still waiting. Deny or cancel them before deleting.",
+  "pending-inputs": "Messages are still waiting for delivery. Resolve them before deleting this conversation.",
 } as const;
 
 export interface CreateOptions {

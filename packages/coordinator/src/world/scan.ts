@@ -131,7 +131,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Thirty-five adds the durable founding conversation carried into world chat.
 // Forty-one adds a visual novel's beat to strict shots (turn 174).
 // Forty-three is a direction's longer note, sounds and absent delivery (turn 181).
-export const SUPPORTED_SCHEMA_VERSION = 43;
+// Forty-four fences durable conversation inputs and their promotion (SPEC-045, issue 1138): an
+// older build reads the conversation log tolerantly and would skip them, losing queued words.
+export const SUPPORTED_SCHEMA_VERSION = 44;
 
 export class WorldOpenError extends Error {
   constructor(

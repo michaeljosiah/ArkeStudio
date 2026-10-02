@@ -11,10 +11,16 @@ import { createPreparedSession, type SessionInput } from "../harness/session-fil
 import { toExtendedLength } from "../world/paths.js";
 import { boundSummary, shouldSummarise } from "./context.js";
 import type { WorldChatStore } from "./store.js";
+import { foldWorldChatInputs } from "./input-fold.js";
+
+type SummaryMessage = Pick<WorldChatMessage, "id" | "role" | "text"> & {
+  /** Ties a correction confirmed late to the reply it reached, which an earlier summary may hold. */
+  replyMessageId?: WorldChatMessage["id"];
+};
 
 export interface ConversationSummaryRequest {
   readonly previousSummary?: string;
-  readonly messages: readonly Pick<WorldChatMessage, "id" | "role" | "text">[];
+  readonly messages: readonly SummaryMessage[];
   /** The model the conversation's latest answer ran on, for when the summariser has none of its own. */
   readonly model?: string;
   readonly signal?: AbortSignal;
@@ -83,21 +89,50 @@ async function refreshConversationSummaryOnce(
   for (const envelope of events) {
     if (envelope.seq > through && (envelope.event.type === "turn.completed" || envelope.event.type === "founding.message")) throughSeq = envelope.seq;
   }
-  const messages: Array<Pick<WorldChatMessage, "id" | "role" | "text">> = [];
+  // Additional input (SPEC-045 R-26): only corrections proven included in a finished run count,
+  // and damaged input history is never summarised into context.
+  const inputs = foldWorldChatInputs(events);
+  if (inputs.problems.length) return false;
+  const completed = new Map(events.flatMap(({ event, seq }) => event.type === "turn.completed" ? [[event.run.id, seq] as const] : []));
+  const summarisedIds = new Set(events.flatMap(({ event }) => event.type === "summary.updated" ? event.sourceMessageIds : []));
+  let lateInclusion = false;
+  let includedThroughSeq = 0;
+  const corrections = new Map<string, SummaryMessage[]>();
+  for (const { event, seq } of events) {
+    if (event.type !== "input.included" || !inputs.acceptedSequences.has(seq) ||
+      !completed.has(event.attempt.runId) || summarisedIds.has(event.messageId)) continue;
+    const input = inputs.queue.inputs.find(row => row.input.messageId === event.messageId)?.input;
+    const runId = event.attempt.runId;
+    if (input) corrections.set(runId, [...(corrections.get(runId) ?? []), { id: event.messageId, role: "user", text: input.request.text }]);
+    includedThroughSeq = Math.max(includedThroughSeq, seq);
+    lateInclusion ||= seq > completed.get(runId)!;
+  }
+  const messages: SummaryMessage[] = [];
   let turnCount = 0;
   let model: string | undefined;
   for (const envelope of events) {
-    if (envelope.seq <= through || envelope.seq > throughSeq) continue;
-    if (envelope.event.type === "turn.started" || envelope.event.type === "founding.message") messages.push(envelope.event.message);
-    if (envelope.event.type === "founding.message" && envelope.event.message.role === "studio") turnCount++;
-    if (envelope.event.type === "turn.completed") {
-      messages.push(envelope.event.message);
-      turnCount++;
-      model = envelope.event.run.model ?? model;
+    const event = envelope.event;
+    const inWindow = envelope.seq > through && envelope.seq <= throughSeq;
+    if (inWindow && (event.type === "turn.started" || event.type === "founding.message" ||
+      (event.type === "input.promoted" && inputs.acceptedSequences.has(envelope.seq)))) messages.push(event.message);
+    if (inWindow && event.type === "founding.message" && event.message.role === "studio") turnCount++;
+    if (event.type === "turn.completed") {
+      // The log records when inclusion became known. The summary instead puts that direction
+      // before the reply that used it, even when later turns have finished since.
+      for (const correction of corrections.get(event.run.id) ?? []) {
+        messages.push({ ...correction, replyMessageId: event.message.id });
+      }
+      if (inWindow) {
+        messages.push(event.message);
+        turnCount++;
+        model = event.run.model ?? model;
+      }
     }
   }
   const recentTurnsLength = messages.reduce((sum, message) => sum + message.text.length, 0);
-  if (signal?.aborted || !shouldSummarise({ turnCount, recentTurnsLength })) return false;
+  // A correction reconciled after its turn, or after that turn's summary, is folded in once
+  // without moving the boundary past a later turn still running.
+  if (signal?.aborted || (!lateInclusion && !shouldSummarise({ turnCount, recentTurnsLength }))) return false;
 
   const text = await cancellable(summarise({
     ...(signal ? { signal } : {}),
@@ -113,7 +148,8 @@ async function refreshConversationSummaryOnce(
   });
   await store.append(
     { type: "summary.updated", ...summary, sourceMessageIds: [...summary.sourceMessageIds] },
-    { at: new Date().toISOString(), requestId: `conversation-summary:${throughSeq}` },
+    // The plain form whenever no correction is involved, so request ids match older summaries.
+    { at: new Date().toISOString(), requestId: `conversation-summary:${throughSeq}${includedThroughSeq > 0 ? `:${includedThroughSeq}` : ""}` },
   );
   return true;
 }
@@ -179,7 +215,8 @@ export function makeConversationSummariser(
       ? `Existing summary:\n${input.previousSummary}\n\n`
       : "";
       const transcript = input.messages
-      .map((message) => `${message.role === "user" ? "User" : "Studio"} [${message.id}]: ${message.text}`)
+      .map((message) => `${message.role === "user" ? "User" : "Studio"} [${message.id}]${message.replyMessageId
+        ? ` (direction included in Studio reply [${message.replyMessageId}])` : ""}: ${message.text}`)
       .join("\n\n");
       const prompt = `${prior}New conversation messages to incorporate:\n${transcript}`;
       const timeout = new Promise<never>((_, reject) => {
