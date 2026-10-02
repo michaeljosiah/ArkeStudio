@@ -14,6 +14,7 @@ import { effectiveAudioRights, readAudioRights } from "./rights.js";
 import { readAudioBytes, type AudioMediaTools } from "./media-tools.js";
 import { verifyArtifact } from "../queue/verify.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
+import { compileLine } from "../voice/direction.js";
 
 const digest = (value: unknown) => audioHash(Buffer.from(JSON.stringify(value)));
 export async function preparePerformanceGeneration(store: WorldStore, model: ManifestModel,
@@ -31,8 +32,15 @@ export async function preparePerformanceGeneration(store: WorldStore, model: Man
   const source = voiceSourceFor(store.getBundle().clonedVoices ?? [], model.provider, model.id, sheet.voice.voiceId);
   const language = source.kind === "cloned" ? source.voice.language : undefined;
   const mapped = mapCadence(text, audioHash(Buffer.from(normalizeSpeechText(text))), request.cadencePlan, model, language);
-  if (mapped.controls.some(c => c.status === "unsupported")) throw new Error("Remove unsupported cadence controls or choose a compatible model.");
-  if (model.provider === "google" && mapped.controls.some(c => c.method === "parts")) throw new Error("Use one delivery for this line, or read the directed passage in the audiobook.");
+  // A line is one request on the one compiler every speech surface shares (design turn 181,
+  // SPEC-049 R-28): what the reader cannot take is refused before the price, in its own clause,
+  // and so is a marker it could only make in parts — on any reader, not Gemini alone. Before,
+  // a settings-only reader's marker passed here and went out as the whole line read plain.
+  const { schemaVersion: _version, sourceTextHash: _hash, ...direction } = request.cadencePlan;
+  const compiled = compileLine(text, direction, model, language, "strict");
+  if (!compiled.ok) {
+    throw new Error(compiled.kind === "held" ? `${compiled.reason} · remove it, choose another voice, or read the passage in the audiobook` : compiled.reason);
+  }
   if (model.limits.maxPromptChars !== undefined && mapped.providerText.length > model.limits.maxPromptChars) throw new Error("The decorated line exceeds this model's character limit.");
   if (!speechInputFits(mapped.providerText, model.limits, mapped.instructions)) throw new Error("The line and its direction exceed this model's request limit.");
   const quote = PerformanceGenerationQuoteSchema.parse({ operationId: randomUUID(), target, authoredText: text, voiceAssignment: sheet.voice,
