@@ -199,11 +199,26 @@ export class ProviderBusyError extends Error {
    * the marker's absence with `in`, as the queue's own uncertainty branch could.
    */
   declare readonly submissionRejected?: true;
+  /**
+   * How long the condition can take to clear by itself, when the client knows it is that kind:
+   * the queue re-checks on backoff for this long instead of for its attempt bound, and the
+   * refusals inside the window do not spend attempts. Set only where nothing reached the
+   * provider — a local card measured short before `/prompt` — because a wait of minutes on a
+   * request that may have been taken would be the uncertain retry SPEC-009 forbids.
+   *
+   * Found on 2026-10-01: an engine still putting the last run's models down climbed from 1.1 to
+   * 6.3 GB free across the four attempts the queue's one-second backoff spent in about twelve
+   * seconds, and the job gave up just short of the floor. `declare` for the reason above.
+   */
+  declare readonly patienceMs?: number;
 
-  constructor(message: string, options: { witnessed?: boolean } = {}) {
+  constructor(message: string, options: { witnessed?: boolean; patienceMs?: number } = {}) {
     super(message);
     this.name = "ProviderBusyError";
     if (options.witnessed === true) Object.defineProperty(this, "submissionRejected", { value: true, enumerable: true });
+    if (options.patienceMs !== undefined && Number.isFinite(options.patienceMs) && options.patienceMs > 0) {
+      Object.defineProperty(this, "patienceMs", { value: options.patienceMs, enumerable: true });
+    }
   }
 }
 

@@ -11,7 +11,7 @@ import {
   modelCapabilityCopy,
   referencePrompt,
 } from "@arke-studio/contracts";
-import { ComfyUiClient, COMFYUI_VERSION_FLOOR, meetsVersionFloor, type ProgressSocket } from "../src/clients/comfyui.js";
+import { ComfyUiClient, COMFYUI_VERSION_FLOOR, meetsVersionFloor, ROOM_PATIENCE_MS, type ProgressSocket } from "../src/clients/comfyui.js";
 import {
   callerParamNames,
   COMFYUI_MANIFEST_MODELS,
@@ -1581,6 +1581,11 @@ describe("making room on the graphics card", () => {
         assert.ok(err instanceof ProviderBusyError, "a busy card declares its own class");
         assert.equal(err.failureClass, "transient");
         assert.equal("submissionRejected" in err, false);
+        // The queue's attempt bound is seconds; an engine putting the last run's models down,
+        // or another program giving back RAM, takes tens of them (2026-10-01). The refusal says
+        // how long to keep re-checking, and it is measured in minutes, not attempts.
+        assert.equal(err.patienceMs, ROOM_PATIENCE_MS);
+        assert.ok(ROOM_PATIENCE_MS >= 60_000 && ROOM_PATIENCE_MS <= 300_000, "tens of seconds to a few minutes");
         return true;
       },
     );
