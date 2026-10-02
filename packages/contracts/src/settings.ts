@@ -177,6 +177,25 @@ export type ModelAvailability = z.infer<typeof ModelAvailabilitySchema>;
  * opt-in the user makes with the per-character price in front of them — no other preference in
  * this app spends money on a passive action, and this one must not be the first.
  */
+/**
+ * The fields of a designed voice the narrator needs to be listed, resolved and read anywhere —
+ * `DesignedVoiceSchema`'s, repeated here rather than imported so settings stays a leaf of the
+ * contracts' import graph.
+ */
+export const NarratorDesignedVoiceSchema = z
+  .object({
+    id: z.string().regex(/^dv_[0-9A-HJKMNP-TV-Z]{26}$/),
+    revision: z.number().int().positive(),
+    name: z.string().min(1).max(1000),
+    description: z.string().min(1).max(16000),
+    language: z.string().min(1).max(64),
+    model: z.enum(["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"]),
+    remoteId: z.string().regex(/^voice_[A-Za-z0-9_-]{1,200}$/),
+    expiresAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
+export type NarratorDesignedVoice = z.infer<typeof NarratorDesignedVoiceSchema>;
+
 export const NarratorSettingsSchema = z
   .object({
     provider: z.string().min(1),
@@ -191,6 +210,15 @@ export const NarratorSettingsSchema = z
      * choice in that world alone. Absent on a preset, which reads wherever its reader does.
      */
     worldId: z.string().min(1).optional(),
+    /**
+     * A designed Gemini voice chosen as the narrator, kept with the choice (SPEC-049 R-12): the
+     * world record's identity and its Google binding, so the voice narrates in every world and
+     * not only the one that saved it. A designed voice is the account's — the binding is checked
+     * against the key before every read — where a clone is a recording on one world's disk. The
+     * world's own record stays authoritative where the world has it; the sample path is the
+     * world's and is not copied. Written by `set-narrator` only; a client cannot supply it.
+     */
+    designed: NarratorDesignedVoiceSchema.optional(),
   })
   .strict()
   .nullable();

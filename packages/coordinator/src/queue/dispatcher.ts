@@ -158,7 +158,8 @@ export interface EnqueueInput {
 }
 
 export interface JobQueueOptions {
-  readDesignedVoice?: (worldId: string, target: string) => Promise<{ target: string; remoteId: string }>;
+  /** `params` are the job's, for a narration job's coordinator-only binding (SPEC-049 R-12). */
+  readDesignedVoice?: (worldId: string, target: string, params?: Record<string, unknown>) => Promise<{ target: string; remoteId: string }>;
   /** Resolve qualified speech pricing at admission and immediately before paid I/O. */
   speechModel?: (provider: string, model: string) => ManifestModel | undefined;
   /** Recheck host authorization after preparation and before the durable submission boundary. */
@@ -312,7 +313,7 @@ const FOLLOW_ON_TARGETS = new Set([
  * recording a cloned voice was made from: part of an audiobook part's durable identity
  * (`priorPartJob`, SPEC-046 R-39), not a control of any reader.
  */
-const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation", "voiceClipHash"]);
+const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation", "voiceClipHash", "designedBinding"]);
 
 /** Attempts that count against the retry bound: refusals waited out as busy never reached the engine. */
 function spentAttempts(job: Job): number {
@@ -924,7 +925,7 @@ export class JobQueue {
     if (job.provider === "google" && typeof job.params.voiceId === "string" && isDesignedVoiceTarget(job.params.voiceId)) {
       try {
         if (!this.opts.readDesignedVoice) throw new Error("Saved voice resolution is unavailable.");
-        designedVoice = await this.opts.readDesignedVoice(job.worldId, job.params.voiceId);
+        designedVoice = await this.opts.readDesignedVoice(job.worldId, job.params.voiceId, job.params);
       } catch (error) {
         if (this.stillQueued(job)) await this.terminalize(job, "failed", describeCoordinatorError(error));
         return;

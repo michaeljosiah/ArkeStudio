@@ -1,5 +1,5 @@
 import { estimateSpeechMicroUsd, samplingProblems, speechInputFits } from "@arke-studio/contracts";
-import { isDesignedVoiceTarget, resolveDesignedVoice, VoiceDesignDraftSchema, quoteVoiceDesign } from "@arke-studio/contracts";
+import { designedVoiceTarget, isDesignedVoiceTarget, narratorDesignedRecord, resolveDesignedVoice, VoiceDesignDraftSchema, quoteVoiceDesign, type NarratorDesignedVoice, type NarratorSettings, type WorldDesignedVoice } from "@arke-studio/contracts";
 import type { VoiceDesignClient } from "@arke-studio/providers";
 import { saveDesignedVoice } from "./voice/designed-library.js";
 import { ProductionCreationService } from "./application/production-creation.js";
@@ -573,7 +573,34 @@ type NarrationVoice = {
   clonedVoice?: ClonedVoice;
   /** The recording's hash, for the cache key: a re-recorded clone is another voice to the cache (SPEC-046 R-39). */
   clipHash?: string;
+  /** The narrator's designed voice read from its kept copy, where this world lacks the record (SPEC-049 R-12). */
+  designedBinding?: DesignedBinding;
 };
+
+/**
+ * A designed narrator's Google binding as the narration path derived it from the kept copy
+ * (SPEC-049 R-12), for a world that lacks the voice's record. It rides on each job it admits as
+ * the coordinator-only `designedBinding`, so admission and dispatch read the binding the read
+ * was priced in rather than whatever the app narrator is by then: a run started under Ife's
+ * voice keeps reading in it when the narrator is changed or reset part-way through. Only the
+ * narration paths attach it; every other use of a designed voice needs the world's record.
+ */
+type DesignedBinding = { target: string; remoteId: string; expiresAt: string };
+
+const REMOTE_VOICE_ID = /^voice_[A-Za-z0-9_-]{1,200}$/;
+
+/** The narrator's binding on a job input whose voice it is; anything else is left as it was. */
+function bindDesignedNarrator(input: EnqueueInput, binding: DesignedBinding | undefined): EnqueueInput {
+  if (binding === undefined || input.provider !== "google" || input.params["voiceId"] !== binding.target) return input;
+  return { ...input, params: { ...input.params, designedBinding: { remoteId: binding.remoteId, expiresAt: binding.expiresAt } } };
+}
+
+/** The binding a job carries, read defensively: durable params outlive the code that wrote them. */
+function jobDesignedBinding(params: Record<string, unknown>): { remoteId: string; expiresAt: string } | undefined {
+  const value = params["designedBinding"] as { remoteId?: unknown; expiresAt?: unknown } | undefined;
+  if (typeof value?.remoteId !== "string" || !REMOTE_VOICE_ID.test(value.remoteId) || typeof value.expiresAt !== "string" || Number.isNaN(Date.parse(value.expiresAt))) return undefined;
+  return { remoteId: value.remoteId, expiresAt: value.expiresAt };
+}
 
 function safeExportOutput(output: string | null): string | null {
   if (output === null) return null;
@@ -1271,12 +1298,21 @@ export class Coordinator {
     return client as Pick<VoiceDesignClient, "getDesignedVoice">;
   }
 
-  private async requireEnabledSpeechReader(model: import("@arke-studio/contracts").ManifestModel, voiceId: string): Promise<void> {
+  private async requireEnabledSpeechReader(
+    model: import("@arke-studio/contracts").ManifestModel,
+    voiceId: string,
+    /** A narration job's binding from the narrator's kept copy (SPEC-049 R-12); no other caller passes one. */
+    binding?: { remoteId: string; expiresAt: string },
+  ): Promise<void> {
     if (!supportsVoiceUse(model, "preview")) throw new Error("This provider no longer supports speech. Choose an available voice reader.");
     if (this.readModel.getState().app.models.disabled.includes(model.id)) throw new Error(`${model.displayName} is turned off in AI models.`);
     if (model.provider === "google") {
       if (isDesignedVoiceTarget(voiceId)) {
-        const voice = resolveDesignedVoice(this.opts.provider.openStore?.()?.getBundle().designedVoices ?? [], voiceId);
+        const designed = this.opts.provider.openStore?.()?.getBundle().designedVoices ?? [];
+        // The world's record where it has one; else, for a narration job only, the binding the
+        // read was priced in from the narrator's kept copy (SPEC-049 R-12) — still verified
+        // against the key below, as the world's record would be.
+        const voice = resolveDesignedVoice(designed, voiceId) ?? binding;
         if (!voice || Date.parse(voice.expiresAt) <= Date.now()) throw new Error("This saved voice is missing or expired. Saved audio still plays.");
         const key = await this.credentials?.get("google");
         if (!key) throw new Error("Connect Google in Settings to read with this voice.");
@@ -1307,13 +1343,14 @@ export class Coordinator {
         continue;
       }
       const voiceId = typeof input.params.voiceId === "string" ? input.params.voiceId : "";
+      const binding = jobDesignedBinding(input.params);
       const key = await this.credentials?.get("google") ?? null;
       const credential = key === null ? null : createHash("sha256").update(key).digest("hex");
-      const identity = JSON.stringify([model.id, voiceId, credential]);
+      const identity = JSON.stringify([model.id, voiceId, credential, binding?.remoteId ?? null]);
       let checking = checked.get(identity);
       if (!checking) {
         checking = (async () => {
-          await this.requireEnabledSpeechReader(model, voiceId);
+          await this.requireEnabledSpeechReader(model, voiceId, binding);
           if ((await this.credentials?.get("google") ?? null) !== key) throw new Error("The Google key changed during voice validation. Try the read again.");
         })();
         checked.set(identity, checking);
@@ -1339,13 +1376,49 @@ export class Coordinator {
    * same id in another world is somebody else's recording, so elsewhere the choice does not
    * apply and the default reads.
    */
-  private async appNarrator(store: WorldStore, voice: VoiceService | null): Promise<{ chosen: NarratorChoice; narrationCatalogue: VoiceCandidate[]; catalogue: VoiceCandidate[] }> {
+  private async appNarrator(store: WorldStore, voice: VoiceService | null): Promise<{ chosen: NarratorChoice; narrationCatalogue: VoiceCandidate[]; catalogue: VoiceCandidate[]; designedBinding?: DesignedBinding }> {
     const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
     const bundle = store.getBundle();
-    const catalogue = voice === null ? [] : ((await voice.catalogue(bundle.clonedVoices ?? [], bundle.designedVoices).catch(() => null)) ?? []);
+    // A designed narrator reads in every world (SPEC-049 R-12): its kept copy joins the list
+    // where this world lacks the voice, and the catalogue judges it — key, expiry — as it
+    // judges the world's own. Marked, so only the app narrator can resolve to it.
+    const copy = await this.narratorDesignedCopy(bundle.designedVoices ?? []);
+    const designed = copy === null ? bundle.designedVoices : [...(bundle.designedVoices ?? []), copy];
+    const copyTarget = copy === null ? null : designedVoiceTarget(copy);
+    const catalogue = (voice === null ? [] : ((await voice.catalogue(bundle.clonedVoices ?? [], designed).catch(() => null)) ?? []))
+      .map((candidate) => (candidate.provider === "google" && candidate.voiceId === copyTarget ? { ...candidate, narratorCopy: true as const } : candidate));
     const narrationCatalogue = catalogue.filter((candidate) => supportsVoiceUse(candidate, "narration") && candidate.unavailableReason === undefined);
     const stored = narratorSettings?.narrator ?? null;
-    return { chosen: narratorFor(narratorAppliesTo(stored, store.worldId) ? stored : null, narrationCatalogue), narrationCatalogue, catalogue };
+    await this.keepDesignedNarrator(bundle.designedVoices ?? [], stored).catch(() => {});
+    const chosen = narratorFor(narratorAppliesTo(stored, store.worldId) ? stored : null, narrationCatalogue);
+    return {
+      chosen,
+      narrationCatalogue,
+      catalogue,
+      ...(copy !== null && chosen.provider === "google" && chosen.voiceId === copyTarget
+        ? { designedBinding: { target: copyTarget, remoteId: copy.remoteId, expiresAt: copy.expiresAt } }
+        : {}),
+    };
+  }
+
+  /**
+   * A designed narrator chosen before its record was kept with the choice (SPEC-049 R-12) is
+   * given the copy the first time a read resolves it in the world that holds the voice, so from
+   * then on it narrates in every other world without being chosen again. Only while the stored
+   * choice is still that voice; best effort, since the read goes on either way.
+   */
+  private async keepDesignedNarrator(designed: readonly WorldDesignedVoice[], stored: NarratorSettings): Promise<void> {
+    if (!this.appSettings || stored === null || stored.designed !== undefined || !isDesignedVoiceTarget(stored.voiceId)) return;
+    const record = resolveDesignedVoice(designed, stored.voiceId);
+    if (record === undefined) return;
+    // Compared and written under the settings file's own lock: a Reset or a new choice that
+    // lands between this read and the write must not be undone by it.
+    const written = await this.appSettings.updateNarrator((current) =>
+      current !== null && current.provider === stored.provider && current.voiceId === stored.voiceId && current.designed === undefined
+        ? { ...current, designed: narratorDesignedRecord(record) }
+        : current,
+    );
+    if (written !== null) this.emit({ at: new Date().toISOString(), type: "narrator.changed", voice: written });
   }
 
   /**
@@ -1359,7 +1432,7 @@ export class Coordinator {
    * narrator's recording per block, as it finds a speaker's.
    */
   private async narratorVoice(store: WorldStore, voice: VoiceService | null): Promise<{ narrator: NarrationVoice; catalogue: VoiceCandidate[] }> {
-    const { chosen, narrationCatalogue, catalogue } = await this.appNarrator(store, voice);
+    const { chosen, narrationCatalogue, catalogue, designedBinding } = await this.appNarrator(store, voice);
     const source = voiceSourceFor(store.getBundle().clonedVoices ?? [], chosen.provider, chosen.model, chosen.voiceId);
     if (source.kind === "cloned") {
       const clip = await clipFor(store, source.voice);
@@ -1368,16 +1441,41 @@ export class Coordinator {
       }
     }
     const speaks = source.kind === "catalogue" ? chosen : narratorFor(null, narrationCatalogue);
-    return { narrator: { provider: speaks.provider, model: speaks.model, voiceId: speaks.voiceId, label: speaks.label ?? speaks.voiceId, cloned: false }, catalogue };
+    return { narrator: { provider: speaks.provider, model: speaks.model, voiceId: speaks.voiceId, label: speaks.label ?? speaks.voiceId, cloned: false,
+      ...(designedBinding !== undefined && speaks.voiceId === designedBinding.target ? { designedBinding } : {}) }, catalogue };
+  }
+
+  /**
+   * The narrator's kept copy of a designed voice (SPEC-049 R-12), in the shape the resolvers
+   * take, when the stored narrator is that voice and `designed` — the open world's own list —
+   * lacks it; null otherwise. The world's record stays authoritative where the world has it.
+   * `target`, when given, must be the narrator's voice.
+   */
+  private async narratorDesignedCopy(
+    designed: readonly WorldDesignedVoice[],
+    target?: string,
+  ): Promise<(NarratorDesignedVoice & { provider: "google" }) | null> {
+    const stored = this.appSettings ? (await this.appSettings.load()).narrator : null;
+    const copy = stored?.designed;
+    if (!stored || !copy || stored.voiceId !== designedVoiceTarget(copy)) return null;
+    if (target !== undefined && target !== stored.voiceId) return null;
+    if (resolveDesignedVoice(designed, stored.voiceId) !== undefined) return null;
+    return { ...copy, provider: "google" };
   }
 
   /** The book's available reader, or the app's; reading still checks the host's local capability. */
-  private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[] }> {
-    const { chosen, narrationCatalogue, catalogue } = await this.appNarrator(store, voice);
+  private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[]; designedBinding?: DesignedBinding }> {
+    const { chosen, narrationCatalogue, catalogue, designedBinding } = await this.appNarrator(store, voice);
     const book = productionId === undefined ? null : await readAudiobookBook(store, productionId).catch(() => null);
-    const own = book === null || book === "unreadable" || book.narrator === undefined ? null : narratorFor(book.narrator, narrationCatalogue);
+    // A book's own narrator is written into the world, so it resolves against the world's
+    // voices only — never the app narrator's copy of another world's (SPEC-049 R-12).
+    const own = book === null || book === "unreadable" || book.narrator === undefined ? null : narratorFor(book.narrator, narrationCatalogue.filter((candidate) => candidate.narratorCopy !== true));
     const narrator = own !== null && !own.fallback ? own : chosen;
-    return { narrator: { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, ...(narrator.label !== undefined ? { label: narrator.label } : {}) }, catalogue };
+    return {
+      narrator: { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, ...(narrator.label !== undefined ? { label: narrator.label } : {}) },
+      catalogue,
+      ...(designedBinding !== undefined && narrator.voiceId === designedBinding.target ? { designedBinding } : {}),
+    };
   }
 
   /**
@@ -1389,7 +1487,7 @@ export class Coordinator {
   private async readAudiobookChapter(
     store: WorldStore,
     voice: VoiceService,
-    room: { narrator: AudiobookReader; catalogue: VoiceCandidate[] },
+    room: { narrator: AudiobookReader; catalogue: VoiceCandidate[]; designedBinding?: DesignedBinding },
     ids: { worldId: string; productionId: string; chapterId: string },
     requestId: string,
     command: QueueCommand,
@@ -1438,7 +1536,7 @@ export class Coordinator {
           requestId,
           command,
           inputs.map((input) => ({
-            ...input,
+            ...bindDesignedNarrator(input, room.designedBinding),
             ...(input.voiceReference && options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
           })),
         );
@@ -1911,7 +2009,7 @@ export class Coordinator {
         // preset id it has never heard of.
         ...(narrator.cloned ? { voiceReference: true } : {}),
         ...(narrator.cloned && input.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor } : {}),
-      })),
+      })).map((queued) => bindDesignedNarrator(queued, narrator.designedBinding)),
     );
     if (input.confirmationToken !== token) {
       this.pendingVoiceReads.set(requestId, { token, inputs: enqueued });
@@ -2247,7 +2345,7 @@ export class Coordinator {
           // to go to (codex on PR 914): without them every uncached cloned line fails.
           ...(voice.cloned ? { voiceReference: true } : {}),
           ...(voice.cloned && input.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor } : {}),
-        }));
+        })).map((queued) => bindDesignedNarrator(queued, voice.designedBinding));
       });
       // Priced once before anything plays, and asked only when there is a price (R-47): a free
       // voice, and a cached line, say nothing.
@@ -2846,9 +2944,13 @@ export class Coordinator {
               if(!store||store.worldId!==worldId) throw new Error("the owning world is unavailable");
               return read(store);
             },
-            readDesignedVoice: async (worldId, target) => {
+            readDesignedVoice: async (worldId, target, params) => {
               const read = async (store: WorldStore) => {
-                const voice = resolveDesignedVoice(store.getBundle().designedVoices ?? [], target);
+                const designed = store.getBundle().designedVoices ?? [];
+                // The world's record where it has one; else the binding a narration job was
+                // admitted with from the narrator's kept copy (SPEC-049 R-12) — the job's, not
+                // the app settings' now, so a narrator changed mid-run does not strand it.
+                const voice = resolveDesignedVoice(designed, target) ?? (params === undefined ? undefined : jobDesignedBinding(params));
                 if (!voice || Date.parse(voice.expiresAt) <= Date.now()) throw new Error("This saved voice is missing or expired. Existing audio is still available.");
                 return { target, remoteId: voice.remoteId };
               };
@@ -9033,13 +9135,15 @@ export class Coordinator {
           // whose library may hold the same minted id — is not the one the choice was made in.
           const store = this.opts.provider.openStore?.() ?? null;
           const clonedVoices = store?.getBundle().clonedVoices ?? [];
-          // Whatever the client sent, the world is decided here, for a clone only.
-          const { worldId: _sent, ...asked } = narrator;
+          // Whatever the client sent, the world and a designed voice's record are decided here.
+          const { worldId: _sent, designed: _record, ...asked } = narrator;
           const model = asked.model ?? legacyVoiceModel(asked.provider, asked.voiceId, clonedVoices);
           if (model === null) return;
+          const worldDesigned = store?.getBundle().designedVoices ?? [];
+          const keptCopy = await this.narratorDesignedCopy(worldDesigned, asked.voiceId);
           const available = (
             await this.voiceService
-              .catalogue(clonedVoices, store?.getBundle().designedVoices)
+              .catalogue(clonedVoices, keptCopy === null ? worldDesigned : [...worldDesigned, keptCopy])
               .catch(() => [])
           ).find(
             (voice) =>
@@ -9064,7 +9168,11 @@ export class Coordinator {
             const now = voiceSourceFor(store.getBundle().clonedVoices ?? [], asked.provider, model, asked.voiceId);
             if (now.kind !== "cloned" || now.voice.id !== source.voice.id || now.voice.clip !== source.voice.clip) return;
           }
-          narrator = { ...asked, model, ...(source.kind === "cloned" && store ? { worldId: store.worldId } : {}) };
+          // A designed voice is kept with the choice (SPEC-049 R-12), from the world's record
+          // where the world has it — else the copy the narrator already holds — so it narrates
+          // in every world rather than only the one that saved it.
+          const from = (isDesignedVoiceTarget(asked.voiceId) ? resolveDesignedVoice(worldDesigned, asked.voiceId) : undefined) ?? keptCopy ?? undefined;
+          narrator = { ...asked, model, ...(source.kind === "cloned" && store ? { worldId: store.worldId } : {}), ...(from !== undefined ? { designed: narratorDesignedRecord(from) } : {}) };
         }
         const saved = await this.appSettings.setNarrator(narrator);
         this.emit({ at: new Date().toISOString(), type: "narrator.changed", voice: saved.narrator });
@@ -14132,6 +14240,12 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        // A book's narrator is written into the world, so a designed voice must be the world's
+        // own: the app narrator's copy of another world's is the app's (SPEC-049 R-12).
+        if (msg.voice !== null && isDesignedVoiceTarget(msg.voice.voiceId) && resolveDesignedVoice(store.getBundle().designedVoices ?? [], msg.voice.voiceId) === undefined) {
+          void this.appLog?.append({ kind: "audiobook.narrator-refused", production: msg.productionId, message: "a designed voice this world does not hold" });
+          return;
+        }
         if (this.audiobookBusy(msg.worldId, msg.productionId)) {
           void this.appLog?.append({ kind: "audiobook.narrator-refused", production: msg.productionId, message: "the book is being read" });
           return;
@@ -14179,7 +14293,7 @@ export class Coordinator {
             quoteToken: msg.quoteToken,
             local: (voiceId, text, settings) => voice.synthesizeDirected(voiceId, text, settings, new AbortController().signal),
             enqueue: async (input) => {
-              const queued = await this.enqueueBatch(msg.requestId, "voice-preview", [input]);
+              const queued = await this.enqueueBatch(msg.requestId, "voice-preview", [bindDesignedNarrator(input, room.designedBinding)]);
               if (queued.jobIds[0] === undefined) throw new Error(queued.reason ?? "the voice job could not be queued");
               return queued.jobIds[0];
             },
@@ -14441,9 +14555,15 @@ export class Coordinator {
         }
         const store = this.opts.provider.openStore?.();
         const bundle = store?.getBundle();
-        const voices = await this.voiceService
-          .catalogue(bundle?.clonedVoices ?? [], bundle?.designedVoices, errors)
+        // The narrator's designed voice where this world lacks it (SPEC-049 R-12): listed so the
+        // narrator picker shows the voice that narrates here, and marked so nothing else can
+        // assign it — its record is another world's.
+        const narratorCopy = await this.narratorDesignedCopy(bundle?.designedVoices ?? []);
+        const listed = await this.voiceService
+          .catalogue(bundle?.clonedVoices ?? [], narratorCopy === null ? bundle?.designedVoices : [...(bundle?.designedVoices ?? []), narratorCopy], errors)
           .catch(() => { errors.push("The voice catalogue could not be loaded. Try again."); return []; });
+        const copyTarget = narratorCopy === null ? null : designedVoiceTarget(narratorCopy);
+        const voices = listed.map((candidate) => (candidate.voiceId === copyTarget && candidate.provider === "google" ? { ...candidate, narratorCopy: true as const } : candidate));
         const sheets = bundle?.sheets ?? [];
         this.emit({
           at: new Date().toISOString(),

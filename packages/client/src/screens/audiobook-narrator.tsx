@@ -65,7 +65,9 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
   const voices = useMemo(
     () =>
       (voiceCatalogue ?? [])
-        .filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined)
+        // The app narrator's copy of another world's designed voice is the app's, not this
+        // book's to keep (SPEC-049 R-12): a book narrator is written into the world.
+        .filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined && voice.narratorCopy !== true)
         .filter((voice) => !disabledModels?.includes(voice.model))
         .sort((a, b) => {
           const rank = GROUPS.findIndex((g) => g.where === whereOf(a)) - GROUPS.findIndex((g) => g.where === whereOf(b));

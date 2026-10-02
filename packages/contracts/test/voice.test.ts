@@ -557,8 +557,8 @@ describe("one voice, several readers (SPEC-046 D1, R-10, R-13)", () => {
     assert.equal(narratorAppliesTo(preset, "01J8F3K2QW9VZX4N7M0RTYB6B2"), true, "a preset reads wherever its reader does");
     assert.equal(narratorAppliesTo(null, undefined), true);
     assert.equal(narratorLabelFor(clone, here), "Harbour glass");
-    assert.equal(narratorLabelFor(clone, "01J8F3K2QW9VZX4N7M0RTYB6B2"), DEFAULT_NARRATOR.label, "named as the voice it falls to, never as itself");
-    assert.equal(narratorLabelFor({ provider: "comfyui", model: "comfyui-cloned-voice", voiceId: "harbour-glass", label: "Harbour glass" }, undefined), DEFAULT_NARRATOR.label, "the retired recipe does not narrate");
+    assert.equal(narratorLabelFor(clone, "01J8F3K2QW9VZX4N7M0RTYB6B2"), `Harbour glass unavailable · reading with ${DEFAULT_NARRATOR.label}`, "the fallback is named, never swapped in silence");
+    assert.equal(narratorLabelFor({ provider: "comfyui", model: "comfyui-cloned-voice", voiceId: "harbour-glass", label: "Harbour glass" }, undefined), `Harbour glass unavailable · reading with ${DEFAULT_NARRATOR.label}`, "the retired recipe does not narrate");
     assert.equal(narratorLabelFor(preset, undefined), "Paul");
     assert.equal(narratorLabelFor({ provider: "kokoro", model: "kokoro-82m", voiceId: "bf_emma" }, undefined), "bf_emma", "the id when no label was stored");
     assert.equal(narratorLabelFor(null, undefined), DEFAULT_NARRATOR.label);
@@ -566,8 +566,19 @@ describe("one voice, several readers (SPEC-046 D1, R-10, R-13)", () => {
     // back for reasons a screen cannot see, and the player must never say the stored name over
     // another voice.
     assert.equal(narratorLabelFor(clone, here, { provider: "mistral", voiceId: "harbour-glass" }), "Harbour glass", "the choice, when it is what spoke");
-    assert.equal(narratorLabelFor(clone, here, { provider: "kokoro", voiceId: "bm_george" }), DEFAULT_NARRATOR.label, "the shipped voice, when the read fell to it");
-    assert.equal(narratorLabelFor(clone, here, { provider: "kokoro", voiceId: "bf_emma" }), "bf_emma", "any other voice by its id");
+    assert.equal(narratorLabelFor(clone, here, { provider: "kokoro", voiceId: "bm_george" }), `Harbour glass unavailable · reading with ${DEFAULT_NARRATOR.label}`, "the shipped voice, when the read fell to it — said, not swapped");
+    assert.equal(narratorLabelFor(clone, here, { provider: "kokoro", voiceId: "bf_emma" }), "Harbour glass unavailable · reading with bf_emma", "any other voice by its id");
+    assert.equal(narratorLabelFor(null, here, { provider: "kokoro", voiceId: "bm_george" }), DEFAULT_NARRATOR.label, "nobody chose, nothing fell back");
+    // The report that began this (2026-10-02): a designed narrator whose key or voice is gone.
+    const ife = { provider: "google", model: "gemini-3.8-flash-tts", voiceId: "designed:dv_01M3WMVV9W7J85PPRYQJ0YB26G:1", label: "Ife's voice" };
+    assert.equal(narratorLabelFor(ife, "01J8F3K2QW9VZX4N7M0RTYB6B2"), "Ife's voice", "a designed narrator applies in every world");
+    assert.equal(narratorLabelFor(ife, here, { provider: "kokoro", voiceId: "bm_george" }), "Ife's voice unavailable · reading with George");
+  });
+
+  it("the narrator's copy of another world's designed voice narrates and does nothing else (SPEC-049 R-12)", () => {
+    const copy = { provider: "google", model: "gemini-3.8-flash-tts", voiceId: "designed:dv_01M3WMVV9W7J85PPRYQJ0YB26G:1", readsDesigned: "dv_01M3WMVV9W7J85PPRYQJ0YB26G", narratorCopy: true as const };
+    assert.equal(supportsVoiceUse(copy, "narration"), true);
+    for (const use of ["preview", "line", "bench"] as const) assert.equal(supportsVoiceUse(copy, use), false, `never ${use}: its record is another world's`);
   });
 
   it("a stored cloned narrator resolves through the live catalogue like any other (issue 1215)", () => {
@@ -763,4 +774,19 @@ describe("deleting a cloned voice (SPEC-046 R-15, issue 1162)", () => {
     const noted = DomainEventSchema.safeParse({ ...base, notices: { '["breezeblue","breeze-tts-2","harbour"]': "first read · clone charge, priced by BreezeBlue" } });
     assert.ok(noted.success);
   });
+});
+
+it("a designed narrator keeps its identity and binding with the choice, and never the world's sample path (SPEC-049 R-12)", async () => {
+  const { NarratorSettingsSchema } = await import("../src/settings.js");
+  const { narratorDesignedRecord } = await import("../src/designed-voice.js");
+  const world = {
+    kind: "designed" as const, id: "dv_01M3WMVV9W7J85PPRYQJ0YB26G", revision: 1, name: "Ife's voice", description: "Warm, unhurried Lagos storyteller.",
+    language: "en-NG", provider: "google" as const, model: "gemini-3.8-flash-tts" as const, remoteId: "voice_mall1uvc7rp3",
+    expiresAt: "2027-10-01T00:00:00Z", created: "2026-10-01T00:00:00Z", origin: "generated" as const, sample: "voices/dv_01M3WMVV9W7J85PPRYQJ0YB26G.wav",
+  };
+  const designed = narratorDesignedRecord(world);
+  assert.equal("sample" in designed, false, "the sample is the world's");
+  const stored = NarratorSettingsSchema.parse({ provider: "google", model: "gemini-3.8-flash-tts", voiceId: "designed:dv_01M3WMVV9W7J85PPRYQJ0YB26G:1", label: "Ife's voice", designed });
+  assert.equal(stored?.designed?.remoteId, "voice_mall1uvc7rp3");
+  assert.equal(NarratorSettingsSchema.safeParse({ ...stored, designed: { ...designed, sample: world.sample } }).success, false);
 });

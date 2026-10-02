@@ -50,8 +50,28 @@ it("component deep links go back to the Providers list and a phone can reset its
  await click('dialog [aria-label="Back"]'); await click('.fy-settings-sections a[href="/settings/general"]');
  const state = settingsLayoutFixture(); state.app.narrator = { provider: "kokoro", model: "kokoro-82m", voiceId: "bf_emma", label: "Emma" };
  await act(async () => __setStateForTest(state));
+ // The row's value is the phone's Change; Reset sits beside it and takes a second press, so one
+ // stray tap cannot clear a chosen narrator.
+ assert.ok(find('[data-testid="narrator-change"]'), "a phone can change its narrator");
+ const before = sent.length;
+ await click('[data-testid="narrator-reset"]');
+ assert.equal(sent.length, before, "one tap only asks");
+ assert.match(find('[data-testid="narrator-reset"]').textContent!, /Reset to George\?/);
  await click('[data-testid="narrator-reset"]');
  assert.deepEqual(sent.at(-1), { kind: "set-narrator", voice: null });
+});
+it("an asked Reset is withdrawn by a new narrator, so the next press asks again", async () => {
+ await mount("/settings/general");
+ const state = settingsLayoutFixture(); state.app.narrator = { provider: "kokoro", model: "kokoro-82m", voiceId: "bf_emma", label: "Emma" };
+ await act(async () => __setStateForTest(state));
+ await click('[data-testid="narrator-reset"]');
+ assert.match(find('[data-testid="narrator-reset"]').textContent!, /Reset to George\?/);
+ const chosen = settingsLayoutFixture(); chosen.app.narrator = { provider: "kokoro", model: "kokoro-82m", voiceId: "bf_isabella", label: "Isabella" };
+ await act(async () => __setStateForTest(chosen));
+ assert.equal(find('[data-testid="narrator-reset"]').textContent, "Reset", "the question was about Emma");
+ const before = sent.length;
+ await click('[data-testid="narrator-reset"]');
+ assert.equal(sent.length, before, "Isabella is asked about, not cleared");
 });
 it("paired browsers at desktop width get states, never host key and sign-in controls", async () => {
  await mount("/settings/providers?provider=fal", 1360);

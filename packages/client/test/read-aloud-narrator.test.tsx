@@ -332,7 +332,7 @@ for (const surface of ["sheet", "prose", "button", "bible"] as const) {
   });
 }
 
-it("names the voice that read once a read lands, not the stored narrator it fell from (SPEC-046 R-37)", async () => {
+it("names the voice that read once a read lands, and says the stored narrator it fell from is unavailable (SPEC-046 R-37)", async () => {
   const dock = { playbackRate: 1, src: "", currentTime: 0, duration: NaN, play: async () => {}, pause() {}, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {} };
   setAudioFactoryForTest(() => dock as never);
   const sent: ClientMessage[] = [];
@@ -356,8 +356,9 @@ it("names the voice that read once a read lands, not the stored narrator it fell
     purpose: "sheet-section", sectionHeading: asked.sectionHeading, provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", format: "wav",
     status: "ready", file: ".cache/voice/maren-essence.wav", cached: false, characterCount: 120, estimatedMicroUsd: 0,
   }));
-  assert.equal(playbackSnapshot().clip?.sub, `read aloud · ${DEFAULT_NARRATOR.label}`, "George read it, and the player says so");
-  assert.doesNotMatch(playbackSnapshot().clip?.sub ?? "", /Harbour glass/);
+  // George read it, and the player says so — and says the choice is unavailable rather than
+  // swapping voices in silence (2026-10-02).
+  assert.equal(playbackSnapshot().clip?.sub, `read aloud · Harbour glass unavailable · reading with ${DEFAULT_NARRATOR.label}`);
 });
 
 it("a page asked about two cloned voices is asked twice under one request, and answers both", async () => {
