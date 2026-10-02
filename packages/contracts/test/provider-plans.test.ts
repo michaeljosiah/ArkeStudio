@@ -5,6 +5,9 @@ import {
   applyProviderPlans,
   compactCount,
   formatTimeLeft,
+  freeCreditDraw,
+  freeCreditLeft,
+  freeCreditOverrun,
   freeCreditThisMonth,
   freePlanFailure,
   freePlanNote,
@@ -121,6 +124,32 @@ describe("a read on a free credit", () => {
     assert.equal(speechAsks(voxtral, 0), false, "a read that costs nothing asks nothing");
     assert.equal(speechPriceCopy(row, quote.authorisedMicroUsd), "free credit");
     assert.equal(modelPriceCopy(row), "$16.00 / M characters · free credit");
+  });
+
+  // The owner's rule (2026-10-02): a credit read past what is left of the month asks, because
+  // Mistral bills the rest when pay-as-you-go is on and Arke cannot see whether it is.
+  it("asks again once a read, a chapter or a book would run past the month's credit left", () => {
+    const row = applyProviderPlans(manifest, credit).models[1]!;
+    const price = quoteSpeech(row, "Hello there", { at }).authorisedMicroUsd;
+    assert.equal(speechAsks(row, price, price), false, "exactly what is left still fits");
+    assert.equal(speechAsks(row, price, price - 1), true);
+    assert.equal(speechAsks(row, price), false, "an unknown balance is not short");
+    assert.equal(speechAsks(voxtral, price, Infinity), true, "a paid row asks however much credit is left");
+    assert.equal(speechPriceCopy(row, price, price - 1), "$0.0002 · past free credit");
+    assert.equal(speechPriceCopy(row, price, price), "free credit");
+    const draw = freeCreditDraw([{ model: row, microUsd: 400 }, { model: row, microUsd: 400 }, { model: voxtral, microUsd: 900 }]);
+    assert.equal(draw, 800, "only reads on the credit draw from it");
+    assert.equal(freeCreditOverrun(draw, 799), true, "reads that each fit run past it together");
+    assert.equal(freeCreditOverrun(draw, 800), false);
+    assert.equal(freeCreditOverrun(0, 0), false, "drawing nothing never asks");
+    const spent = (microUsd: number): LedgerEntry => ({
+      ts: new Date(2026, 9, 2, 9).toISOString(), worldId: "01K0000000000000000000000W", jobId: "jb_01K00000000000000000000001", provider: "mistral", model: voxtral.id,
+      outcome: "succeeded", estimatedMicroUsd: microUsd, actualMicroUsd: microUsd, actualSource: "free-credit",
+      speechQuote: { ...quoteSpeech(voxtral, "x", { at }), plan: "free-credit" },
+    });
+    const now = new Date(2026, 9, 20, 12);
+    assert.equal(freeCreditLeft([spent(3_420_000)], now), 6_580_000);
+    assert.equal(freeCreditLeft([spent(12_000_000)], now), 0, "never below zero");
   });
 
   it("counts the month's draw against the credit, this month only", () => {

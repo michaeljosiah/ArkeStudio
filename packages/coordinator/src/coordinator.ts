@@ -1,5 +1,5 @@
 import { estimateSpeechMicroUsd, samplingProblems, speechInputFits } from "@arke-studio/contracts";
-import { applyProviderPlans, freePlanFailure, PAID_PLANS, speechAsks, type ProviderPlans } from "@arke-studio/contracts";
+import { applyProviderPlans, freeCreditDraw, freeCreditLeft, freeCreditOverrun, freePlanFailure, PAID_PLANS, speechAsks, type ProviderPlans } from "@arke-studio/contracts";
 import { designedVoiceTarget, isDesignedVoiceTarget, narratorDesignedRecord, resolveDesignedVoice, VoiceDesignDraftSchema, quoteVoiceDesign, type NarratorDesignedVoice, type NarratorSettings, type WorldDesignedVoice } from "@arke-studio/contracts";
 import type { VoiceDesignClient } from "@arke-studio/providers";
 import { saveDesignedVoice } from "./voice/designed-library.js";
@@ -1470,6 +1470,15 @@ export class Coordinator {
     return { ...copy, provider: "google" };
   }
 
+  /**
+   * What is left of the month's Mistral free credit, read from the ledger (design turn 182): a
+   * credit read past it asks, as a priced read does. With no ledger nothing is known to be short.
+   */
+  private async freeCreditLeftNow(): Promise<number> {
+    if (!this.ledger) return Infinity;
+    return freeCreditLeft(await this.ledger.readAll().catch(() => []));
+  }
+
   /** The book's available reader, or the app's; reading still checks the host's local capability. */
   private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[]; designedBinding?: DesignedBinding }> {
     const { chosen, narrationCatalogue, catalogue, designedBinding } = await this.appNarrator(store, voice);
@@ -1514,6 +1523,7 @@ export class Coordinator {
       productionId: ids.productionId,
       chapterId: ids.chapterId,
       models: this.opts.manifest?.models ?? [],
+      creditLeftMicroUsd: await this.freeCreditLeftNow(),
       narrator: room.narrator,
       catalogue: room.catalogue,
       signal,
@@ -2022,7 +2032,7 @@ export class Coordinator {
     );
     // A read that costs nothing asks nothing (SPEC-012 R-47, design turn 182), as the page and
     // chapter reads already did: a $0 quote, a free plan's read or a free credit's starts at once.
-    const asks = speechAsks(model, estimate);
+    const asks = speechAsks(model, estimate, await this.freeCreditLeftNow());
     if (asks && input.confirmationToken !== token) {
       this.pendingVoiceReads.set(requestId, { token, inputs: enqueued });
       this.emit({
@@ -2335,7 +2345,10 @@ export class Coordinator {
       const estimate = misses.reduce((sum, index) => sum + toMake(index).reduce((total, piece) => total + priceOf(index, piece.text), 0), 0);
       // What would be asked about: a free credit's reads keep their estimate but ask nothing
       // (design turn 182), so a page read wholly from one starts at once like a free one.
-      const asks = misses.some(index => speechAsks(cloud[index]!.model, toMake(index).reduce((total, piece) => total + priceOf(index, piece.text), 0)));
+      const priceOfIndex = (index: number) => toMake(index).reduce((total, piece) => total + priceOf(index, piece.text), 0);
+      // Weighed whole against the month's credit, so blocks that each fit cannot run past it together.
+      const creditDraw = freeCreditDraw(misses.map(index => ({ model: cloud[index]!.model, microUsd: priceOfIndex(index) })));
+      const asks = misses.some(index => speechAsks(cloud[index]!.model, priceOfIndex(index))) || freeCreditOverrun(creditDraw, await this.freeCreditLeftNow());
       const token = createHash("sha256")
         .update(["voiced", subject.id, String(subject.version), String(estimate), ...misses.flatMap((index) => toMake(index).map((piece) => piece.file))].join("\n"))
         .digest("hex");
@@ -14495,7 +14508,7 @@ export class Coordinator {
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         let ended = false;
         try {
-          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [] };
+          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [], creditLeftMicroUsd: await this.freeCreditLeftNow() };
           if (room.narrator.provider === "kokoro" && !voice.localSpeechConfigured) {
             this.emit({ at: at(), type: "audiobook.book-finished", ...ids, outcome: "unavailable", chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0,
               reason: "Local narration is unavailable on this host. Choose a configured cloud narrator." });

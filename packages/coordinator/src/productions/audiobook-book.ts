@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   audiobookDirectionFor,
+  freeCreditOverrun,
   audiobookTakeDirectionHash,
   audiobookTextHash,
   holdDirection,
@@ -305,7 +306,10 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
   const estimate = toRead.reduce((sum, entry) => sum + entry.prepared.estimate, 0);
   // Asked once for the book only where some read is priced (R-17): a book read on a free plan
   // or credit starts at once (design turn 182).
-  if (toRead.some((entry) => entry.prepared.asks)) {
+  // A book is weighed whole against the month's free credit: chapters that each fit cannot
+  // together run past it unasked (owner, 2026-10-02).
+  const creditDraw = toRead.reduce((sum, entry) => sum + entry.prepared.creditDraw, 0);
+  if (toRead.some((entry) => entry.prepared.asks) || freeCreditOverrun(creditDraw, room.creditLeftMicroUsd ?? Infinity)) {
     const token = createHash("sha256")
       .update(
         [

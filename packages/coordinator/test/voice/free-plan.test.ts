@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile } from "node:fs/promises";
+import { appendFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ClientMessage, ClientState, DomainEvent, ManifestModel, VoiceCandidate } from "@arke-studio/contracts";
+import { quoteSpeech, type ClientMessage, type ClientState, type DomainEvent, type ManifestModel, type VoiceCandidate } from "@arke-studio/contracts";
 import { ProviderFreeLimitError, ProviderPaymentRequiredError } from "@arke-studio/providers";
 import { until } from "../wait.js";
 import { Coordinator } from "../../src/coordinator.js";
@@ -151,6 +151,27 @@ describe("a provider's Free plan (design turn 182)", () => {
       assert.match(h.audio("01J8F3K2QW9VZX4N7M0RTYB6R7").find((event) => event.status === "failed")!.error ?? "", /Local narration/);
       assert.equal(h.google.attempts, 2);
       assert.equal(h.app().narrator?.voiceId, PUCK.voiceId, "the author's narrator is untouched");
+    } finally {
+      await h.coordinator.stop();
+    }
+  });
+
+  // The owner's rule (2026-10-02): a credit read past what is left of the month asks, because
+  // Mistral bills the rest when pay-as-you-go is on and Arke cannot see whether it is.
+  it("asks before a free credit's read once the month's credit is used", async () => {
+    const h = await harness();
+    try {
+      await h.narrateWith(PAUL);
+      await h.send({ kind: "set-provider-plan", provider: "mistral", plan: "free-credit" });
+      const now = new Date().toISOString();
+      const spent = {
+        ts: now, worldId: WORLD_ID, jobId: "jb_01K0000000000000000000SPNT", provider: "mistral", model: VOXTRAL.id,
+        outcome: "succeeded", estimatedMicroUsd: 10_000_000, actualMicroUsd: 10_000_000, actualSource: "free-credit",
+        speechQuote: { ...quoteSpeech(VOXTRAL, "x", { at: now }), plan: "free-credit" },
+      };
+      await appendFile(join(h.root, "ledger.jsonl"), `${JSON.stringify(spent)}\n`);
+      await h.read("01J8F3K2QW9VZX4N7M0RTYB6R9");
+      assert.ok(h.audio("01J8F3K2QW9VZX4N7M0RTYB6R9").some((event) => event.status === "confirmation-required"), "past the credit, the read asks");
     } finally {
       await h.coordinator.stop();
     }

@@ -1,4 +1,4 @@
-import { freePlanFailure, quoteSpeech, speechAsks, type SpeechQuote } from "@arke-studio/contracts";
+import { freeCreditDraw, freeCreditOverrun, freePlanFailure, quoteSpeech, speechAsks, type SpeechQuote } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -61,6 +61,8 @@ export interface AudiobookRunDeps {
   productionId: string;
   chapterId: string;
   models: readonly ManifestModel[];
+  /** What is left of the month's free credit (design turn 182); absent is not known to be short. */
+  creditLeftMicroUsd?: number;
   narrator: AudiobookReader;
   /** What can speak now (turn 130's rule): a voice the catalogue lacks or marks reads in the narrator's. */
   catalogue: readonly VoiceCandidate[];
@@ -229,9 +231,12 @@ export interface PreparedChapter {
   estimate: number;
   /**
    * Whether pressing read asks first: a price outside a free plan or credit (SPEC-047 R-17,
-   * design turn 182). A chapter read wholly on a free key, or from a free credit, starts at once.
+   * design turn 182). A chapter read wholly on a free key, or from a free credit, starts at once —
+   * unless its draw on the credit runs past what is left of the month, when it asks.
    */
   asks: boolean;
+  /** What the chapter would draw from the free credit, for a book weighed whole against it. */
+  creditDraw: number;
 }
 
 export type ChapterPreparation = { kind: "ready"; prepared: PreparedChapter } | { kind: "refused"; reason: string; plan: AudiobookPlan } | { kind: "unavailable"; reason: string };
@@ -240,6 +245,8 @@ export interface ReadingRoom {
   narrator: AudiobookReader;
   models: readonly ManifestModel[];
   catalogue: readonly VoiceCandidate[];
+  /** What is left of the month's free credit; absent is not known to be short. */
+  creditLeftMicroUsd?: number;
 }
 
 /**
@@ -421,8 +428,9 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
   const prices = new Map(misses.map(block => [block, block.quotes.reduce((sum, quote) => sum + quote.authorisedMicroUsd, 0)]));
   const priceOf = (block: Speaking) => prices.get(block) ?? 0;
   const estimate = misses.reduce((sum, block) => sum + priceOf(block), 0);
-  const asks = misses.some((block) => speechAsks(block.model, priceOf(block)));
-  return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate, asks } };
+  const creditDraw = freeCreditDraw(misses.map((block) => ({ model: block.model, microUsd: priceOf(block) })));
+  const asks = misses.some((block) => speechAsks(block.model, priceOf(block))) || freeCreditOverrun(creditDraw, room.creditLeftMicroUsd ?? Infinity);
+  return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate, asks, creditDraw } };
 }
 
 /**
@@ -484,7 +492,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   const finish = (outcome: Extract<AudiobookRunEvent, { type: "finished" }>["outcome"], extra: { record?: ChapterAudiobook; reason?: string } = {}) =>
     emit({ type: "finished", outcome, made, flagged: flaggedCount, ...extra });
 
-  const preparation = await prepareChapter(store, productionId, chapterId, { narrator, models: deps.models, catalogue: deps.catalogue }, deps.now, deps.only);
+  const preparation = await prepareChapter(store, productionId, chapterId, { narrator, models: deps.models, catalogue: deps.catalogue, ...(deps.creditLeftMicroUsd !== undefined ? { creditLeftMicroUsd: deps.creditLeftMicroUsd } : {}) }, deps.now, deps.only);
   if (preparation.kind !== "ready") {
     if (preparation.kind === "unavailable") emit({ type: "started", toMake: 0, blocks: 0 });
     finish(preparation.kind, { reason: preparation.reason });
