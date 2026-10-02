@@ -1715,8 +1715,15 @@ describe("reading a line on the bench (design 70)", () => {
     assert.deepEqual(plan.reserved[0]!.request.params, { kind: "voice", count: 1, voiceId: "vale", direction }, "the take keeps the direction as written");
   });
 
-  it("refuses a reader's tag still typed in the words, which would be read aloud", async () => {
-    const plan = await planVoice(VOICE, { voiceId: "vale" }, "Not this time. [sighs]");
+  it("reads an older line's typed tags as markers, and refuses tags beside a direction (design turn 181)", async () => {
+    // A take made before the turn, run again: its tag is the marker it names, never spoken.
+    const older = await planVoice(VOICE, { voiceId: "vale", delivery: "cold" }, "Not this time. [long pause] Go.");
+    assert.ok(older.ok, older.ok ? undefined : older.reason);
+    if (older.ok) {
+      assert.equal(older.inputs[0]!.params["text"], "[coldly] Not this time. [long pause] Go.");
+      assert.equal(older.inputs[0]!.params["authoredText"], "Not this time. Go.");
+    }
+    const plan = await planVoice(VOICE, { voiceId: "vale", direction: { speed: 1, cues: [] } }, "Not this time. [sighs]");
     assert.equal(plan.ok, false);
     if (!plan.ok) assert.match(plan.reason, /would be read aloud/);
     const kept = await planVoice(VOICE, { voiceId: "vale" }, "Say it [like a pirate] once.");

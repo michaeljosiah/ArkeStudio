@@ -385,7 +385,7 @@ import { deleteVoice } from "./voice/library.js";
 import { atomicWriteFile, serializeFileMutation, withTransientRetry } from "./world/atomic.js";
 import { restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
-import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION, RECORDED_TAKE_SCHEMA_VERSION } from "./world/commit.js";
+import { AUDIOBOOK_NOTE_SCHEMA_VERSION, classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION, RECORDED_TAKE_SCHEMA_VERSION } from "./world/commit.js";
 import { describeCoordinatorError } from "./errors/user-message.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError, scanWorld } from "./world/scan.js";
@@ -11822,6 +11822,12 @@ export class Coordinator {
           (candidate) => candidate.provider === msg.provider && candidate.id === msg.model,
         ) ?? null;
         const subjectRouting = subjectSessionReferenceRouting(bench.session, model);
+        // A line's direction (design turn 181) is a field the Bench session log of a build
+        // before it cannot parse, and that build drops the line and would number its next event
+        // over it: the world is raised first, as the audiobook's direction raises it.
+        if (msg.params.kind === "voice" && msg.params.direction !== undefined) {
+          await this.opts.provider.openStore?.()?.ensureSchemaVersion(AUDIOBOOK_NOTE_SCHEMA_VERSION, "voice-direction");
+        }
         await bench.store.append(
           {
             type: "composer-set",

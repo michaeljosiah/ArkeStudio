@@ -1010,14 +1010,22 @@ export function planBenchDispatch(
     return source.kind === "cloned" ? source.voice.language : undefined;
   })() : undefined;
   let directed: CompiledLine | null = null;
+  // The words the line says: the brief, less any reader's tag it still held.
+  let voiceWords = composer.brief;
   if (params.kind === "voice") {
+    // A line written before design turn 181 — a take run again, a draft never edited since — may
+    // hold a reader's tags in its words, which every other reader would speak. They are read as
+    // the markers they name, as the composer reads them; a line that holds both a direction and
+    // tags is the composer's to settle, and refused.
     const typed = recogniseDirection(composer.brief);
-    if (typed.cues.length > 0) {
+    const stated = benchVoiceDirection(params);
+    if (typed.cues.length > 0 && params.direction !== undefined) {
       return { ok: false, reason: "A tag is in the words · it would be read aloud. Open the line to make it a marker." };
     }
-    const direction = benchVoiceDirection(params);
+    voiceWords = typed.cues.length > 0 ? typed.raw : composer.brief;
+    const direction = typed.cues.length > 0 ? { ...(stated ?? { speed: 1 }), cues: typed.cues } : stated;
     if (directionSaysAnything(direction)) {
-      const compiled = compileLine(composer.brief, direction, model, voiceLanguage, "hold");
+      const compiled = compileLine(voiceWords, direction, model, voiceLanguage, "hold");
       if (!compiled.ok) return { ok: false, reason: compiled.reason };
       directed = compiled.line;
     }
@@ -1250,7 +1258,7 @@ export function planBenchDispatch(
           // The direction as the compiler wrote it for this reader (design turn 181): the words
           // with its tags in, its numbers, its sentence, and the hash that marks the text as
           // compiled — never the delivery's name, which a client would turn into a second tag.
-          ...(directed !== null ? { authoredText: composer.brief, voiceSettings: directed.voiceSettings, directionHash: directed.directionHash, ...(directed.instructions !== undefined ? { instructions: directed.instructions } : {}) } : {}),
+          ...(directed !== null ? { authoredText: voiceWords, voiceSettings: directed.voiceSettings, directionHash: directed.directionHash, ...(directed.instructions !== undefined ? { instructions: directed.instructions } : {}) } : {}),
           // A cloned voice's recording language is the line's (issue 1163): the reader routes and
           // tags by it, and the estimate counts the tag it would put in.
           ...(voiceSource.kind === "cloned" ? { language: voiceSource.voice.language } : {}),

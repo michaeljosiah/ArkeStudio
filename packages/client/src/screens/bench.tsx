@@ -36,6 +36,7 @@ import {
   type BenchParams,
   type BenchReferenceToken,
   type BenchVoiceParams,
+  directionSaysAnything,
   type BenchSession,
   type BenchTake,
   type ManifestModel,
@@ -526,6 +527,21 @@ function BenchWorkspace({
   const voiceDeliveries = draft.params.kind === "voice" ? supportedDeliveries(model) : [];
   const voiceParams = draft.params.kind === "voice" ? draft.params : null;
   const voiceDirection = voiceParams === null ? null : benchDirectionOf(voiceParams);
+  /**
+   * The brief as edited, in both editors (design turn 181c): in Voice mode a typed or pasted tag
+   * becomes its marker and every marker already placed follows the edit, and a menu open on the
+   * old words closes, since its place in them has moved.
+   */
+  const onBriefChange = (brief: string) => {
+    if (voiceParams === null) {
+      compose({ ...draft, brief });
+      return;
+    }
+    setVoiceMarker(null);
+    const edited = editBenchBrief(draft.brief, brief, benchDirectionOf(voiceParams));
+    compose({ ...draft, brief: edited.brief, params: withBenchDirection(voiceParams, edited.direction) });
+  };
+  const onBracket = (start: number, end: number) => setVoiceMarker(benchMarkerAt(draft.brief, start, end));
   // A cloned voice's recording language is the line's (issue 1163): it decides a paren reader's tags.
   const voiceLanguage = ((): string | undefined => {
     if (voiceParams?.voiceId === undefined || model === null) return undefined;
@@ -901,13 +917,22 @@ function BenchWorkspace({
 
   const restore = (take: BenchTake) => {
     sendBenchSelectTake(worldId, session.id, take.id);
-    // Selection restores the immutable snapshot into the composer (issue 305 §3).
+    setVoiceMarker(null);
+    // Selection restores the immutable snapshot into the composer (issue 305 §3). A line read
+    // before design turn 181 may hold a reader's tags in its words: they come back as markers.
+    const restoredParams = bindSubjectParams(take.request.params);
+    const restored = restoredParams.kind === "voice"
+      ? (() => {
+          const edited = editBenchBrief(take.request.brief, take.request.brief, benchDirectionOf(restoredParams));
+          return { brief: edited.brief, params: withBenchDirection(restoredParams, edited.direction) as BenchParams };
+        })()
+      : { brief: take.request.brief, params: restoredParams };
     compose({
       mode: take.request.mode,
       provider: take.request.provider,
       model: take.request.model,
-      params: bindSubjectParams(take.request.params),
-      brief: take.request.brief,
+      params: restored.params,
+      brief: restored.brief,
     });
     // ...and the pictures it was made with. Restoring the words and the settings but not the
     // images gave back a request that could not be re-made: press ⟲ on a take built from a
@@ -959,7 +984,9 @@ function BenchWorkspace({
     if (draft.params.kind === "voice") {
       // Character readers price what they are sent — the words with this reader's tags in
       // (design turn 181); token readers show the authorised ceiling.
-      const sent = benchSent(draft.brief, benchDirectionOf(draft.params), candidate);
+      // An undirected line goes as typed, as the coordinator sends it.
+      const direction = benchDirectionOf(draft.params);
+      const sent = directionSaysAnything(direction) ? benchSent(draft.brief, direction, candidate, voiceLanguage) : null;
       return estimateSpeechMicroUsd(candidate, sent?.text ?? draft.brief) * draft.params.count;
     }
     if (draft.params.kind === "music") {
@@ -1738,16 +1765,7 @@ function BenchWorkspace({
           <div className={cx("fy-bench__brief", singing && "fy-bench__brief--style")}>
             <BenchBrief
               value={draft.brief}
-              onChange={(brief) => {
-                if (voiceParams === null) {
-                  compose({ ...draft, brief });
-                  return;
-                }
-                // The words hold no tag (design turn 181c): a typed or pasted tag becomes its
-                // marker, and every marker already placed follows the edit.
-                const edited = editBenchBrief(draft.brief, brief, benchDirectionOf(voiceParams));
-                compose({ ...draft, brief: edited.brief, params: withBenchDirection(voiceParams, edited.direction) });
-              }}
+              onChange={onBriefChange}
               options={mentions}
               worldSlug={worldSlug}
               underlay={briefWithChips(draft.brief, tokens, attached)}
@@ -1759,7 +1777,7 @@ function BenchWorkspace({
                     ? "The words to speak · [ for a marker"
                     : "Say what to make. Type @ to cite a reference."
               }
-              {...(voiceParams !== null ? { onBracket: (start: number, end: number) => setVoiceMarker(benchMarkerAt(draft.brief, start, end)) } : {})}
+              {...(voiceParams !== null ? { onBracket } : {})}
             />
             <PromptCapabilityNotices text={draft.brief} model={model} />
             <div className="fy-bench__brieffoot">
@@ -2579,7 +2597,10 @@ function BenchWorkspace({
                             className="fy-bench__voicedelivery"
                             {...(selected.request.speech !== undefined ? { title: selected.request.speech.text } : {})}
                           >
-                            {benchDirectionSummary(selected.request.params).join(" · ")}
+                            {[
+                              ...benchDirectionSummary(selected.request.params),
+                              ...((selected.request.speech?.held.length ?? 0) > 0 ? [`${selected.request.speech!.held.length} held`] : []),
+                            ].join(" · ")}
                           </span>
                         )}
                       {/* The model, then the length that was actually made — never the ceiling
@@ -2988,12 +3009,22 @@ function BenchWorkspace({
                 variant="large"
                 autoFocus
                 value={draft.brief}
-                onChange={(brief) => compose({ ...draft, brief })}
+                onChange={onBriefChange}
                 options={mentions}
                 worldSlug={worldSlug}
                 underlay={briefWithChips(draft.brief, tokens, attached)}
-                label="Brief"
+                label={speaking ? "Words" : "Brief"}
                 onEscape={() => setBriefExpanded(false)}
+                {...(voiceParams !== null
+                  ? {
+                      // The marker menu lives under the composer's brief: `[` here closes the
+                      // window onto it, at the same words.
+                      onBracket: (start: number, end: number) => {
+                        setBriefExpanded(false);
+                        onBracket(start, end);
+                      },
+                    }
+                  : {})}
               />
               <PromptCapabilityNotices text={draft.brief} model={model} />
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>

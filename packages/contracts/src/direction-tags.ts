@@ -120,6 +120,8 @@ export function recogniseDirection(raw: string): RecognisedDirection {
     }
     last = start + match[0].length;
   }
+  // A tag that ended the words leaves the space before it behind: it goes too.
+  if (found.length > 0 && last >= raw.length) stripped = stripped.replace(/[ \t]+$/, "");
   stripped += raw.slice(last);
   // Fold whitespace as `normalizeSpeechText` does, keeping a map from each stripped position to
   // its place in the folded text.

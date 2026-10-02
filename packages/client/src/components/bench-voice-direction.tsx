@@ -43,7 +43,10 @@ export function withBenchDirection(params: BenchVoiceParams, direction: VoiceDir
 export function editBenchBrief(before: string, after: string, direction: VoiceDirectionInput): { brief: string; direction: VoiceDirectionInput } {
   const read = recogniseDirection(after);
   const brief = read.cues.length > 0 ? read.raw : after;
-  const shifted = shiftCues(normalizeSpeechText(before), direction.cues, normalizeSpeechText(brief)).cues;
+  // Unchanged words that only lose their tags (a restored line): the markers already placed
+  // are on the words as they were before the tags came out, which are the recogniser's.
+  const from = before === after && read.cues.length > 0 ? brief : before;
+  const shifted = shiftCues(normalizeSpeechText(from), direction.cues, normalizeSpeechText(brief)).cues;
   const cues = read.cues.length > 0 ? mergeCues(shifted, read.cues) : shifted;
   return { brief, direction: { ...direction, cues } };
 }

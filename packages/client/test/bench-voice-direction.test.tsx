@@ -147,6 +147,15 @@ describe("the Bench's Voice brief (design turn 181)", () => {
     assert.ok([...menu.querySelectorAll("button")].some((button) => button.textContent?.startsWith("Note…")), "the note is the menu's last item");
   });
 
+  it("a point marker changed from its plate stays where it is", async () => {
+    const said = calls();
+    const m = await mount(editor(LINE, DIRECTED, GEMINI, said, { key: "brief", span: { from: 0, to: 0 }, edit: 0 }));
+    const menu = m.container.querySelector('[aria-label="Marker"][role="menu"]')!;
+    const short = [...menu.querySelectorAll("button")].find((button) => button.textContent === "pause · short") as HTMLButtonElement;
+    await act(async () => short.click());
+    assert.deepEqual(said.direction[0]?.cues[0], { kind: "pause", at: after("Ade."), length: "short" });
+  });
+
   it("[ in the words opens the menu rather than typing", async () => {
     let opened: [number, number] | null = null;
     const m = await mount(
@@ -173,6 +182,11 @@ describe("the line's direction through edits", () => {
     assert.deepEqual(first.direction.cues.map((cue) => cue.kind), ["delivery", "sound", "sound"]);
     const typed = editBenchBrief(first.brief, `${first.brief} Now.`, first.direction);
     assert.deepEqual(typed.direction.cues, first.direction.cues, "typing after the words moves nothing");
+  });
+
+  it("a restored line's tags come back as markers on its words", () => {
+    const restored = editBenchBrief("Not this time. [sighs]", "Not this time. [sighs]", { delivery: "cold", speed: 1, cues: [] });
+    assert.deepEqual(restored, { brief: "Not this time.", direction: { delivery: "cold", speed: 1, cues: [{ kind: "sound", at: 14, sound: "sighs" }] } });
   });
 
   it("writes the direction, retires an old session's delivery, and names it on a take", () => {

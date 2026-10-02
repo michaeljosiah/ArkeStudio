@@ -255,7 +255,8 @@ export function MarkerMenu({ text, base, language, at, model, oneRequest = false
     if (kind === "emphasis" && caret && editing === undefined) return "select words";
     return support[kind].status === "unsupported" ? (support[kind].reason ?? `no ${kind}`) : null;
   };
-  const point = caret ? at.span.from : undefined;
+  // A point marker changed from its plate stays where it is; from a caret, a new one sits there.
+  const point = editing !== undefined && isPointCue(editing) ? editing.at : caret ? at.span.from : undefined;
   const soundReasons = SOUNDS.map((sound) => (support === null ? "no reader" : support.sounds[sound].status === "unsupported" ? (support.sounds[sound].reason ?? "no sounds") : null));
   const noSounds = soundReasons.every((reason) => reason !== null);
   const soundChips = SOUNDS.map((sound, index) =>

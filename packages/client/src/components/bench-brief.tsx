@@ -206,7 +206,9 @@ export function BenchBrief({
   const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
     // Mid-composition every key belongs to the IME, Enter above all: it commits the candidate.
     if (event.nativeEvent.isComposing) return;
-    if (event.key === "[" && onBracket !== undefined && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    // AltGr layouts (German, French) type `[` with Ctrl+Alt held: that is still the bracket.
+    const altGraph = event.nativeEvent.getModifierState?.("AltGraph") === true;
+    if (event.key === "[" && onBracket !== undefined && (altGraph || (!event.ctrlKey && !event.metaKey && !event.altKey))) {
       event.preventDefault();
       onBracket(event.currentTarget.selectionStart ?? 0, event.currentTarget.selectionEnd ?? 0);
       return;
