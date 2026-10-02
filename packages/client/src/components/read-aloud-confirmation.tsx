@@ -32,7 +32,10 @@ export function ReadAloudConfirmation({ title, result, onConfirm, onCancel, inli
   const cancel = () => { setSettled(quote); onCancel(); };
   const content = <div className="fy-exsheet">
     {inline && <div id={heading}>{title} · {reader}{pieces}</div>}
-    <p>{local ? `Read locally with ${reader}.` : `This text will be sent to ${reader}.`} Text is retained in Activity.</p>
+    {/* What leaves the machine, said before it does: the words, and for a cloned narrator the
+        recording with them (SPEC-046 R-40), as the audiobook's door says it. */}
+    <p>{local ? `Read locally with ${reader}.` : result.voiceReference === true ? `This text and the voice recording will be sent to ${reader}.` : `This text will be sent to ${reader}.`} Text is retained in Activity.</p>
+    {(result.notices ?? []).map((notice) => <p key={notice} className="fy-mono" data-testid="read-aloud-notice">{notice}</p>)}
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
       <Button variant="ghost" onClick={cancel}>Cancel</Button>
       <Button variant="primary" disabled={!result.confirmationToken} onClick={() => {

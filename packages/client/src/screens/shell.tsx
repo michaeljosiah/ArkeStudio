@@ -125,6 +125,7 @@ import {
   legacyVoiceModel,
   modelForCapability,
   supportsVoiceUse,
+  narratorAppliesTo,
   ulid,
   modelEligible,
 } from "@arke-studio/contracts";
@@ -1638,7 +1639,9 @@ export function SettingsLayout() {
             </NavLink>
           ))}
           <div style={{ flex: 1 }} />
-          <div className="fy-settings__version">v{state?.app.version ?? (typeof window === "undefined" ? undefined : window.arke?.appVersion) ?? "—"}</div>
+          {/* Bare, as the rail is drawn (turns 125, 149, 150; issue 1216): the `v` is the release
+              tag's and stays on About and the update dialog, where the tag is what is named. */}
+          <div className="fy-settings__version">{state?.app.version ?? (typeof window === "undefined" ? undefined : window.arke?.appVersion) ?? "—"}</div>
         </nav>
         <div className="fy-settings__pane">
           {/* Most panes in here draw from the coordinator's snapshot, and with no snapshot they
@@ -2312,8 +2315,10 @@ export function SettingsGeneralScreen() {
   const phone = useMediaQuery("(max-width: 599px)");
   const { state } = useStore();
   const stored = state?.app.narrator ?? null;
-  const narrator = stored && supportsVoiceUse(stored, "narration") ? stored : null;
   const worldIdForVoices = state?.world?.meta.worldId;
+  // A cloned narrator is its own world's (SPEC-046 R-37): elsewhere, and with no world open, the
+  // row names the shipped voice that reads there rather than a recording this world lacks.
+  const narrator = stored && supportsVoiceUse(stored, "narration") && narratorAppliesTo(stored, worldIdForVoices) ? stored : null;
   const [narratorOpen, setNarratorOpen] = useState(false);
   const navigate = useNavigate();
   const manifest = state?.app.manifest ?? null;

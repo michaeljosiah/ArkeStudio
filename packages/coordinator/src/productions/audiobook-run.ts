@@ -6,6 +6,7 @@ import {
   audiobookTakeDirectionHash,
   performanceNote,
   audiobookTextHash,
+  firstReadNotice,
   normalizeSpeechText,
   speechInputFits,
   speechUtf8Bytes,
@@ -26,6 +27,7 @@ import { fileGeneratedArtifact } from "../artifacts/filing.js";
 import type { MediaProbe } from "../media/probe.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import { cachedVoiceAudioLooksRight, joinSpeech, speechCacheFile } from "../voice/service.js";
+import { clipFor, clipHashOf } from "../voice/library.js";
 import { piecesFor } from "../voice/pieces.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -46,7 +48,7 @@ import { audiobookLanding, castRefusal, currentDirection, effectiveReader, empty
 
 export type AudiobookRunEvent =
   | { type: "started"; toMake: number; blocks: number }
-  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[] }
+  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[] }
   | { type: "progress"; block: string; outcome: "made" | "adopted" | "flagged"; reason?: string; made: number; toMake: number }
   | { type: "finished"; outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; record?: ChapterAudiobook; reason?: string };
 
@@ -108,6 +110,8 @@ export interface Speaking extends PlannedBlock {
   local: boolean;
   /** The library voice the reader is, when it is one: its recording is what leaves the machine. */
   clone: ClonedVoice | null;
+  /** That recording's hash (SPEC-046 R-39): a re-recorded clone is another voice to the cache and to a prior job. */
+  reference: string | null;
   text: string;
   /**
    * The block's direction as it stands, mapped for this reader (R-6, R-8): what the reader is
@@ -171,6 +175,8 @@ export interface PartIdentity {
   /** The direction's name, or null for a block made with none — a job under another direction is not this part (R-14). */
   directionHash: string | null;
   compiledSpeechHash?: string;
+  /** A cloned reader's recording, by hash, or null for a preset: a part made from an older recording is not this part (SPEC-046 R-39). */
+  reference?: string | null;
 }
 
 /**
@@ -196,6 +202,7 @@ export function priorPartJob(jobs: readonly Job[], identity: PartIdentity, part:
       job.params["part"] === part &&
       job.params["parts"] === identity.parts &&
       (identity.compiledSpeechHash === undefined || job.params["compiledSpeechHash"] === identity.compiledSpeechHash) &&
+      (identity.reference === undefined || (job.params["voiceClipHash"] ?? null) === identity.reference) &&
       (job.params["directionHash"] ?? null) === identity.directionHash,
   );
   for (const job of [...matching].reverse()) {
@@ -213,8 +220,8 @@ export interface PreparedChapter {
   speaking: Speaking[];
   /** The cloud blocks the cache does not hold: what a press would pay for (R-17). */
   misses: Speaking[];
-  /** The cloned voices among the misses, hosted readers' first and the engine's last (R-17). */
-  clones: { provider: string; voice: ClonedVoice }[];
+  /** The cloned voices among the misses (R-17), each with its recording's hash. */
+  clones: { provider: string; voice: ClonedVoice; reference: string | null }[];
   priceOf: (block: Speaking) => number;
   estimate: number;
 }
@@ -248,6 +255,16 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       : { ...plan.record, takes: { ...plan.record.takes }, flags: { ...plan.record.flags } };
   const toMake = only !== undefined ? plan.blocks.filter((planned) => only.includes(planned.block.key)) : plan.blocks.filter((planned) => planned.state !== "made" && planned.state !== "awaiting");
   const clonedVoices = store.getBundle().clonedVoices ?? [];
+  // Each cloned reader's recording, hashed once for the chapter (SPEC-046 R-39): the hash keys
+  // its cache files and names its parts' jobs, so a voice re-recorded since is read afresh.
+  const references = new Map<string, string | null>();
+  const referenceOf = async (voice: ClonedVoice): Promise<string | null> => {
+    if (!references.has(voice.id)) {
+      const clip = await clipFor(store, voice);
+      references.set(voice.id, clip === null ? null : clipHashOf(clip));
+    }
+    return references.get(voice.id)!;
+  };
 
   // Who actually speaks each block (R-12): the one rule the direction was verified against.
   const speaking: Speaking[] = [];
@@ -332,6 +349,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     const local = reader.provider === "kokoro";
     const format = voiceFormatForModel(model);
     const source = voiceSourceFor(clonedVoices, reader.provider, reader.model, reader.voiceId);
+    const reference = source.kind === "cloned" ? await referenceOf(source.voice) : null;
     // An explicit `Make again`, whatever the block's state (codex on PR 1193): with its kept
     // take retired, the older take of the same words must not be the answer either.
     const remake = only !== undefined;
@@ -351,6 +369,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       model,
       local,
       clone: source.kind === "cloned" ? source.voice : null,
+      reference,
       text,
       direction,
       parts,
@@ -362,7 +381,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       // cached as a block, so a block over the cap is always made, the cache holds no
       // direction, so a directed block never comes from it, and a block made again unchanged
       // is another performance, not the cached one handed back (issue 1190).
-      cacheFile: local || parts.length > 1 || direction !== null || remake ? null : speechCacheFile({ provider: model.provider, model: model.id, voiceId: reader.voiceId, text, format }),
+      cacheFile: local || parts.length > 1 || direction !== null || remake ? null : speechCacheFile({ provider: model.provider, model: model.id, voiceId: reader.voiceId, text, format, ...(reference !== null ? { reference } : {}) }),
     });
   }
 
@@ -382,9 +401,9 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
   }
   // Ask before the price when a recording first leaves for a hosted reader (R-17). The answer
   // persists per voice and vendor; one question at a time keeps each consent tied to its voice.
-  const cloneMap = new Map<string, { provider: string; voice: ClonedVoice }>();
+  const cloneMap = new Map<string, { provider: string; voice: ClonedVoice; reference: string | null }>();
   for (const block of misses) {
-    if (block.clone !== null) cloneMap.set(`${block.reader.provider}\n${block.clone.id}`, { provider: block.reader.provider, voice: block.clone });
+    if (block.clone !== null) cloneMap.set(`${block.reader.provider}\n${block.clone.id}`, { provider: block.reader.provider, voice: block.clone, reference: block.reference });
   }
   const clones = [...cloneMap.values()];
   // Priced by the character as the row bills it (SPEC-046 R-8): bytes, or doubled CJK, for the
@@ -416,7 +435,22 @@ export function chapterPriceToken(worldId: string, productionId: string, chapter
  * direction.
  */
 export function missIdentity(block: Speaking): string {
-  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}:${JSON.stringify(block.quotes.map(q => [q.rateVersion, q.authorisedMicroUsd, q.tokenLimits]))}${block.compiledSpeechHash !== undefined ? `:${block.compiledSpeechHash}` : ""}`;
+  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}:${JSON.stringify(block.quotes.map(q => [q.rateVersion, q.authorisedMicroUsd, q.tokenLimits]))}${block.compiledSpeechHash !== undefined ? `:${block.compiledSpeechHash}` : ""}${block.reference !== null ? `:${block.reference}` : ""}`;
+}
+
+/**
+ * What a first read through a slot-keeping reader adds (SPEC-046 R-14, R-40), said on the read
+ * that incurs it: a line a voice and vendor, keyed by id so two clones named alike are two
+ * charges said twice, and nothing once the library records the slot. A vendor's clone charge is
+ * not in the estimate, so this is the whole of its disclosure.
+ */
+export function firstReadNotices(clones: readonly { provider: string; voice: ClonedVoice; reference?: string | null }[]): string[] {
+  const lines = new Map<string, string>();
+  for (const { provider, voice, reference } of clones) {
+    const notice = firstReadNotice(voice, provider, reference ?? undefined);
+    if (notice !== null) lines.set(`${provider}\n${voice.id}`, `${voice.name} · ${notice}`);
+  }
+  return [...lines.values()];
 }
 
 /** The price's lines (R-17): every cloud voice the words would go to, once each, with its share. */
@@ -470,7 +504,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     if (await deps.requireUploadConfirmation(reader)) return;
   }
   if (estimate > 0 && deps.priced === undefined && deps.confirmationToken !== token) {
-    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: token, voices: priceLines(misses, priceOf) });
+    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: token, voices: priceLines(misses, priceOf), notices: firstReadNotices(clones) });
     return;
   }
 
@@ -658,6 +692,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           parts: block.parts.length,
           directionHash: block.takeHash ?? null,
           ...(block.compiledSpeechHash !== undefined ? { compiledSpeechHash: block.compiledSpeechHash } : {}),
+          reference: block.reference,
         };
         for (const [index, part] of block.parts.entries()) {
           if (signal.aborted) break;
@@ -699,6 +734,9 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
                 part: index,
                 parts: block.parts.length,
                 ...(block.compiledSpeechHash !== undefined ? { compiledSpeechHash: block.compiledSpeechHash } : {}),
+                // The recording this part is made from, for `priorPartJob`; the coordinator's and
+                // never a reader's — the dispatcher strips it before submission (SPEC-046 R-39).
+                ...(block.reference !== null ? { voiceClipHash: block.reference } : {}),
                 characterCount: part.length,
                 sheetVersion: plan.chapter.version,
                 // The direction rides as the performance path's does (R-8): the words already

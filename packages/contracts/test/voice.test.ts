@@ -12,7 +12,9 @@ import {
   isClonedVoice,
   isHostedVoiceReader,
   mintVoiceId,
+  narratorAppliesTo,
   narratorFor,
+  narratorLabelFor,
   legacyVoiceModel,
   newClonedVoice,
   parseVoiceLibrary,
@@ -530,15 +532,51 @@ describe("one voice, several readers (SPEC-046 D1, R-10, R-13)", () => {
     assert.equal(isHostedVoiceReader("mistral", "some-other-model"), false);
   });
 
-  it("a library voice through a hosted reader is not a narrator, any more than through the recipe", () => {
+  it("a library voice narrates through a hosted reader, and the retired recipe takes no use (issue 1215)", () => {
+    // Held out of narration while a long read went whole and the narrator path queued without
+    // the recording; PR 1210 made pieces of the first and the narrator path now carries the
+    // second.
     const [mistral] = cloudReaderCandidates([harbour], { provider: "mistral", model: "voxtral-mini-tts" });
-    assert.equal(supportsVoiceUse(mistral!, "narration"), false);
+    assert.equal(supportsVoiceUse(mistral!, "narration"), true);
     assert.equal(supportsVoiceUse(mistral!, "line"), true);
     assert.equal(supportsVoiceUse({ provider: "mistral", model: "voxtral-mini-tts", voiceId: "gb_jane_neutral" } as never, "narration"), true, "a preset narrates");
     assert.equal(supportsVoiceUse({ provider: "comfyui", model: "comfyui-cloned-voice" }, "narration"), false);
     for (const use of ["preview", "line", "bench"] as const) {
       assert.equal(supportsVoiceUse({ provider: "comfyui", model: "comfyui-cloned-voice" }, use), false);
     }
+  });
+
+  it("a cloned narrator is its own world's: elsewhere the choice does not apply, and the screens name the fallback (SPEC-046 R-37)", () => {
+    const here = "01J8F3K2QW9VZX4N7M0RTYB6A1";
+    const clone = { provider: "mistral", model: "voxtral-mini-tts", voiceId: "harbour-glass", label: "Harbour glass", worldId: here };
+    assert.equal(narratorAppliesTo(clone, here), true);
+    // The same id in another world is somebody else's recording.
+    assert.equal(narratorAppliesTo(clone, "01J8F3K2QW9VZX4N7M0RTYB6B2"), false);
+    assert.equal(narratorAppliesTo(clone, undefined), false, "and no world is not its world");
+    const preset = { provider: "mistral", model: "voxtral-mini-tts", voiceId: "en_paul_neutral", label: "Paul" };
+    assert.equal(narratorAppliesTo(preset, "01J8F3K2QW9VZX4N7M0RTYB6B2"), true, "a preset reads wherever its reader does");
+    assert.equal(narratorAppliesTo(null, undefined), true);
+    assert.equal(narratorLabelFor(clone, here), "Harbour glass");
+    assert.equal(narratorLabelFor(clone, "01J8F3K2QW9VZX4N7M0RTYB6B2"), DEFAULT_NARRATOR.label, "named as the voice it falls to, never as itself");
+    assert.equal(narratorLabelFor({ provider: "comfyui", model: "comfyui-cloned-voice", voiceId: "harbour-glass", label: "Harbour glass" }, undefined), DEFAULT_NARRATOR.label, "the retired recipe does not narrate");
+    assert.equal(narratorLabelFor(preset, undefined), "Paul");
+    assert.equal(narratorLabelFor({ provider: "kokoro", model: "kokoro-82m", voiceId: "bf_emma" }, undefined), "bf_emma", "the id when no label was stored");
+    assert.equal(narratorLabelFor(null, undefined), DEFAULT_NARRATOR.label);
+    // Once a read has landed, the voice that read it is what is named: the coordinator falls
+    // back for reasons a screen cannot see, and the player must never say the stored name over
+    // another voice.
+    assert.equal(narratorLabelFor(clone, here, { provider: "mistral", voiceId: "harbour-glass" }), "Harbour glass", "the choice, when it is what spoke");
+    assert.equal(narratorLabelFor(clone, here, { provider: "kokoro", voiceId: "bm_george" }), DEFAULT_NARRATOR.label, "the shipped voice, when the read fell to it");
+    assert.equal(narratorLabelFor(clone, here, { provider: "kokoro", voiceId: "bf_emma" }), "bf_emma", "any other voice by its id");
+  });
+
+  it("a stored cloned narrator resolves through the live catalogue like any other (issue 1215)", () => {
+    const readers = cloudReaderCandidates([harbour], { provider: "mistral", model: "voxtral-mini-tts" });
+    const stored = { provider: "mistral", model: "voxtral-mini-tts", voiceId: "harbour-glass", label: "Harbour glass" };
+    const live = narratorFor(stored, readers.filter((voice) => supportsVoiceUse(voice, "narration")));
+    assert.deepEqual([live.provider, live.model, live.voiceId, live.fallback], ["mistral", "voxtral-mini-tts", "harbour-glass", false]);
+    // The key withdrawn: the reader's candidates are gone from the catalogue, and the reading quietens.
+    assert.equal(narratorFor(stored, []).fallback, true);
   });
 
   it("a legacy assignment through a hosted reader migrates to the reader's row", () => {
@@ -643,6 +681,13 @@ describe("what a first read through a reader adds (SPEC-046 R-14, R-34)", () => 
     assert.equal(firstReadNotice(fresh, "mistral"), null, "Mistral keeps nothing: nothing to say");
     assert.equal(firstReadNotice({ remote: { breezeblue: { confirmedAt: "2026-09-14T00:00:00.000Z" } } }, "breezeblue")?.includes("clone charge"), true, "confirmed is not yet saved");
     assert.equal(firstReadNotice({ remote: { breezeblue: { voiceId: "voc_1" } } }, "breezeblue"), null, "the second read is a read");
+    // A recorded slot was made from one recording (R-13): re-record the voice and the next read
+    // remakes the slot, so the charge is said again, as a re-recording's (R-40).
+    const saved = { remote: { breezeblue: { voiceId: "voc_1", clipHash: "sha256:old" } } };
+    assert.equal(firstReadNotice(saved, "breezeblue", "sha256:old"), null, "the slot is the recording's");
+    assert.equal(firstReadNotice(saved, "breezeblue", "sha256:new"), "re-recorded · clone charge, priced by BreezeBlue");
+    assert.equal(firstReadNotice(saved, "breezeblue"), null, "with no recording to compare, the slot stands");
+    assert.equal(firstReadNotice({ remote: { fishaudio: { voiceId: "fv_1", clipHash: "sha256:old" } } }, "fishaudio", "sha256:new"), "re-recorded · voice made on Fish Audio");
     assert.equal(firstReadNotice({ remote: { breezeblue: { voiceId: "voc_1" } } }, "fishaudio")?.includes("Fish Audio"), true, "one vendor's slot says nothing about another's");
   });
 });

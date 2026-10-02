@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { DEFAULT_NARRATOR, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, providerName, readerPlace, type AudiobookPriceLine, type AudiobookRow } from "@arke-studio/contracts";
+import { DEFAULT_NARRATOR, narratorLabelFor, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, providerName, readerPlace, type AudiobookPriceLine, type AudiobookRow } from "@arke-studio/contracts";
 import { HeldBar } from "../components/held-bar.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
@@ -339,7 +339,7 @@ export function AudiobookScreen() {
           productionId={prodId}
           narratorLabel={door.voices[0]?.name ?? DEFAULT_NARRATOR.label}
           {...(production?.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {})}
-          appLabel={app?.narrator?.label ?? DEFAULT_NARRATOR.label}
+          appLabel={narratorLabelFor(app?.narrator ?? null, world?.meta.worldId)}
           trial={door.rows[0] !== undefined ? { chapterFile: door.rows[0].file, block: "title" } : null}
           slug={world?.meta.slug}
           data={line.line}
@@ -442,6 +442,7 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
           })}
         </div>
         {vendors.length > 0 && <div className="fy-ms__line">words and the voice to {vendors.join(", ")} · text in Activity</div>}
+        {(price.notices ?? []).map((notice) => <div key={notice} className="fy-ms__line" data-testid="read-book-notice">{notice}</div>)}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button variant="ghost" onClick={onClose}>
             Cancel
