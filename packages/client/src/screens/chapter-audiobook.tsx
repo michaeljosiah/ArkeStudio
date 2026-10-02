@@ -1,4 +1,4 @@
-import { estimateSpeechMicroUsd, freePlanNote, speechPlanLabel, speechPriceCopy } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, freeCreditLeft, freePlanNote, speechPlanLabel, speechPriceCopy } from "@arke-studio/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   AUDIOBOOK_DELIVERIES,
@@ -1273,6 +1273,8 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   blockHost: (key: string) => HTMLElement | null;
 }) {
   const row = rows.find((candidate) => candidate.block.key === selected) ?? null;
+  // A Make again past the month's free credit is priced again, and says so (design turn 182).
+  const creditLeft = freeCreditLeft(useStore().state?.app.ledger ?? []);
   const [supportNotice, setSupportNotice] = useState<string | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
   const [markerMenu, setMarkerMenu] = useState<MarkerAt | null>(null);
@@ -1658,7 +1660,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
           {takes.length > 0 && (
             <Button variant="ghost" onClick={() => onMakeAgain(row.block.key)} data-testid="audiobook-make-again">
               Make again
-              {model !== null && row.speaker.provider !== "kokoro" ? ` · ${speechPriceCopy(model, estimateSpeechMicroUsd(model, row.block.text))}` : ""}
+              {model !== null && row.speaker.provider !== "kokoro" ? ` · ${speechPriceCopy(model, estimateSpeechMicroUsd(model, row.block.text), creditLeft)}` : ""}
             </Button>
           )}
           {onUpload !== undefined && (

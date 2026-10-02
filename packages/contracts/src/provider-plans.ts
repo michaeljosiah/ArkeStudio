@@ -51,10 +51,29 @@ export function applyProviderPlans(manifest: ModelManifest, plans: ProviderPlans
 /**
  * Whether a read at this price asks before it spends. A read that costs nothing asks nothing,
  * everywhere (SPEC-012 R-47, SPEC-047 R-17); a read drawn from the author's free credit keeps
- * its estimate and asks nothing either. Rows that are not found ask whenever there is a price.
+ * its estimate and asks nothing while it fits in what is left of the month's credit. Past that
+ * it asks, as a priced read does: Mistral bills the rest when pay-as-you-go is on, and Arke
+ * cannot see whether it is (owner, 2026-10-02). Rows that are not found ask whenever there is
+ * a price. `creditLeftMicroUsd` omitted means the credit is not known to be short.
  */
-export function speechAsks(model: Pick<ManifestModel, "speechPlan"> | null | undefined, microUsd: number): boolean {
-  return microUsd > 0 && model?.speechPlan !== "free-credit";
+export function speechAsks(model: Pick<ManifestModel, "speechPlan"> | null | undefined, microUsd: number, creditLeftMicroUsd = Infinity): boolean {
+  return microUsd > 0 && (model?.speechPlan !== "free-credit" || microUsd > creditLeftMicroUsd);
+}
+
+/**
+ * What a set of reads would draw from the free credit: the sum of the prices of those whose
+ * row is on it. A chapter or a book is weighed whole against the credit left, so reads that
+ * each fit cannot together run past it unasked.
+ */
+export function freeCreditDraw(reads: Iterable<{ model: Pick<ManifestModel, "speechPlan"> | null | undefined; microUsd: number }>): number {
+  let draw = 0;
+  for (const read of reads) if (read.model?.speechPlan === "free-credit") draw += read.microUsd;
+  return draw;
+}
+
+/** Whether a draw on the free credit runs past what is left of it this month. */
+export function freeCreditOverrun(drawMicroUsd: number, creditLeftMicroUsd: number): boolean {
+  return drawMicroUsd > 0 && drawMicroUsd > creditLeftMicroUsd;
 }
 
 /** What a reader says where the price was: `free plan` or `free credit`, or null when it is priced. */
@@ -66,8 +85,11 @@ export function speechPlanLabel(model: Pick<ManifestModel, "speechPlan"> | null 
  * A read's price as a screen shows it: the plan's name where the price was, for a free plan or
  * a free credit (design turn 182), else the price — `up to` for a token ceiling.
  */
-export function speechPriceCopy(model: Pick<ManifestModel, "speechPlan" | "pricing"> | null | undefined, microUsd: number): string {
-  return speechPlanLabel(model) ?? `${model?.pricing.kind === "perToken" ? "up to " : ""}${formatMicroUsd(microUsd)}`;
+export function speechPriceCopy(model: Pick<ManifestModel, "speechPlan" | "pricing"> | null | undefined, microUsd: number, creditLeftMicroUsd = Infinity): string {
+  const priced = `${model?.pricing.kind === "perToken" ? "up to " : ""}${formatMicroUsd(microUsd)}`;
+  // Past the month's credit the read is priced again, and says so where the plan's name was.
+  if (model?.speechPlan === "free-credit" && microUsd > creditLeftMicroUsd) return `${priced} · past free credit`;
+  return speechPlanLabel(model) ?? priced;
 }
 
 /*
@@ -147,6 +169,11 @@ export function freeCreditThisMonth(ledger: readonly LedgerEntry[], provider: st
     reads += 1;
   }
   return { microUsd, characters, reads };
+}
+
+/** What is left of the month's Mistral free credit, never below zero. */
+export function freeCreditLeft(ledger: readonly LedgerEntry[], now: Date = new Date()): number {
+  return Math.max(0, MISTRAL_FREE_CREDIT_MICRO_USD - freeCreditThisMonth(ledger, "mistral", now).microUsd);
 }
 
 /**
