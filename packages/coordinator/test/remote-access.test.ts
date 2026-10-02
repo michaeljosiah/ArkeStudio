@@ -288,6 +288,14 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
       "omitting the restriction cannot let a paired peer approve native work");
     const allowed = once(phone, "message"); phone.send(JSON.stringify({ kind: "refresh-diagnostics" }));
     assert.equal(JSON.parse((await allowed)[0].toString()).kind, "refresh-diagnostics", "allowed commands still work after all refusals");
+    // A command this schema rejects is dropped, as the coordinator drops it: closing here sent the
+    // phone through reconnect and a fresh snapshot, and a screen that re-sent it reloaded its world.
+    const forwarded = received.length;
+    phone.send(JSON.stringify({ kind: "open-world", worldId: 42 }));
+    const after = once(phone, "message"); phone.send(JSON.stringify({ kind: "refresh-diagnostics" }));
+    assert.equal(JSON.parse((await after)[0].toString()).kind, "refresh-diagnostics", "a malformed command keeps the session open");
+    assert.equal(phone.readyState, WebSocket.OPEN);
+    assert.equal(received.length, forwarded + 1, "and is never forwarded");
     // The trusted desktop transport bypasses this remote-only boundary.
     const desktop = new WebSocket(`ws://127.0.0.1:${upstreamPort}`); sockets.push(desktop); await once(desktop, "open");
     const ready = once(desktop, "message"); desktop.send(JSON.stringify({ kind: "hello", token })); await ready;
