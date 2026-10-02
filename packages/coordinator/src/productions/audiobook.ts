@@ -12,6 +12,7 @@ import {
   audiobookRecordingKey,
   audiobookHeading,
   audiobookTextHash,
+  CADENCE_PHRASE_MAX,
   legacyVoiceModel,
   holdDirection,
   mapCadence,
@@ -41,7 +42,7 @@ import { audioHash } from "../audio/qc.js";
 import { clipFor } from "../voice/library.js";
 import { splitForSpeech } from "../voice/service.js";
 import { atomicWriteFile } from "../world/atomic.js";
-import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
@@ -147,7 +148,20 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
   if (marked) await store.ensureSchemaVersion(AUDIOBOOK_MARKERS_SCHEMA_VERSION, "audiobook-markers");
   // A take that records its note was not played (R-45) is a field the build before it cannot read.
   if (Object.values(record.takes).some((take) => take.noteHeld !== undefined)) await store.ensureSchemaVersion(AUDIOBOOK_PERFORMED_SCHEMA_VERSION, "audiobook-performed");
-  await writeOwned(store, audiobookPath(productionId, chapterFile), directed ? record : undirected, chapterFile === "book" ? undefined : legacyAudiobookPath(productionId, chapterFile));
+  // The note (design turn 181) is written under the phrase's old key while it is one — sixty
+  // characters or fewer — so a block directed before the rename, or since within the old
+  // bounds, stays readable by the builds before it and raises nothing. A longer note, a sound
+  // or a plan with no delivery is a shape those builds refuse, and raises the world first.
+  const onDisk: Record<string, unknown> = {};
+  let renamed = false;
+  for (const [key, entry] of Object.entries(direction)) {
+    const { note, ...plan } = entry.plan;
+    const fits = note === undefined || note.length <= CADENCE_PHRASE_MAX;
+    if (!fits || plan.delivery === undefined || plan.cues.some((cue) => cue.kind === "sound")) renamed = true;
+    onDisk[key] = note !== undefined && fits ? { ...entry, plan: { ...plan, phrase: note } } : entry;
+  }
+  if (renamed) await store.ensureSchemaVersion(AUDIOBOOK_NOTE_SCHEMA_VERSION, "audiobook-note");
+  await writeOwned(store, audiobookPath(productionId, chapterFile), directed ? { ...record, direction: onDisk } : undirected, chapterFile === "book" ? undefined : legacyAudiobookPath(productionId, chapterFile));
 }
 
 /**
@@ -263,7 +277,7 @@ export function directionSourceHash(text: string): string {
 
 /** A plan from what a window or a derivation sends (R-6): the hashes are the block's, never the sender's. */
 export function directionPlan(text: string, input: AudiobookDirectionInput): CadencePlan {
-  return { schemaVersion: 1, sourceTextHash: directionSourceHash(text), delivery: input.delivery, speed: input.speed, cues: input.cues, ...(input.phrase !== undefined ? { phrase: input.phrase } : {}) };
+  return { schemaVersion: 1, sourceTextHash: directionSourceHash(text), ...(input.delivery !== undefined ? { delivery: input.delivery } : {}), speed: input.speed, cues: input.cues, ...(input.note !== undefined ? { note: input.note } : {}) };
 }
 
 /** The model that speaks a block's assigned reader, or the narrator's when the manifest lacks it. */
@@ -414,7 +428,8 @@ function markerName(plan: CadencePlan, cueIndex: number | undefined): string {
 export function heldKey(plan: CadencePlan, control: HeldControl): string {
   if (control.cueIndex !== undefined) return `cue:${JSON.stringify(plan.cues[control.cueIndex])}`;
   if (control.control === "delivery") return `delivery:${plan.delivery}`;
-  if (control.control === "phrase") return `phrase:${plan.phrase ?? ""}`;
+  // The note keeps the phrase's key, so a note held before the rename matches after it.
+  if (control.control === "note") return `phrase:${plan.note ?? ""}`;
   if (control.control === "speed") return `speed:${plan.speed}`;
   return control.control;
 }

@@ -130,6 +130,7 @@ async function takeForJob(store: WorldStore, productionId: string, jobId: string
 const NOT_A_SETTING = new Set([
   "prompt",
   "text",
+  "authoredText",
   "references",
   "provenance",
   "shotPlan",
@@ -144,6 +145,8 @@ function settingsFrom(params: Job["params"]): Record<string, unknown> {
     if (NOT_A_SETTING.has(key) || value === undefined) continue;
     settings[key] = value;
   }
+  // A compiled read (design turn 181) keeps what the reader was sent beside the words it says.
+  if (typeof params["authoredText"] === "string" && typeof params["text"] === "string") settings["sentText"] = params["text"];
   return settings;
 }
 
@@ -255,9 +258,13 @@ export async function recordTakesFromJob(
       // A spoken job's prompt is its line: it travels as `text`, because that is what a
       // synthesis endpoint calls it. Without this fallback a landed read recorded no words at
       // all, and nothing on disk could say what had been said.
+      // A compiled read's `text` carries its reader's tags (design turn 181); the line is the
+      // words as written, which it sends as `authoredText`.
       ...(typeof job.params["prompt"] === "string"
         ? { prompt: job.params["prompt"] as string }
-        : typeof job.params["text"] === "string"
+        : typeof job.params["authoredText"] === "string"
+          ? { prompt: job.params["authoredText"] as string }
+          : typeof job.params["text"] === "string"
           ? { prompt: job.params["text"] as string }
           : {}),
       references: (job.params["references"] as string[] | undefined) ?? [],

@@ -1,4 +1,5 @@
-import { BREEZE_DELIVERY, FISH_DELIVERY, ModelManifestSchema, type ModelManifest } from "@arke-studio/contracts";
+import { ModelManifestSchema, type ModelManifest } from "@arke-studio/contracts";
+import { BREEZE_DELIVERY, BREEZE_SOUNDS, ELEVEN_V3_SOUNDS, FISH_DELIVERY, FISH_SOUNDS } from "./voice-direction.js";
 import { COMFYUI_MANIFEST_MODELS } from "./comfyui/recipes.js";
 import { geminiSpeechModel } from "./gemini-tts-models.js";
 import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.generated.js";
@@ -234,8 +235,15 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       capability: "voice-tts",
       displayName: "Eleven Multilingual v2",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-      limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], audioFormat: "mp3", maxPromptChars: 10000 },
+      limits: { audioFormat: "mp3", maxPromptChars: 10000 },
       pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
+      // Read 2026-10-02 (design turn 181): Multilingual v2 reads no audio tag — a bracket is
+      // spoken — and takes one direction in the text, an SSML break up to three seconds, plus
+      // capitals for emphasis and `voice_settings.speed` 0.7–1.2. Its stability and style
+      // numbers are a voice's character, not a delivery, so deliveries and sounds are held here
+      // rather than approximated by settings that cannot whisper.
+      cadence: { deliveries: [], speed: { min: 0.7, max: 1.2 }, pause: "best-effort-break", emphasis: "best-effort-capitalization",
+        breath: "unsupported", outputTimestamps: "none", deliveryMappings: {} },
     },
     {
       // Reviewed 2026-09-05: official best-practices documents tags, capitalization and native speed.
@@ -248,6 +256,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       // as it reads `[whispers]`, best effort, and the audiobook's block panel offers it.
       cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.2 },
         pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none", phrase: "best-effort-tag",
+        sounds: ELEVEN_V3_SOUNDS,
         deliveryMappings: { measured: { settings: { stability: 0.5 } }, whispered: { settings: { stability: 0.5 }, tag: "whispers" },
           breaking: { settings: { stability: 0 }, tag: "crying" }, cold: { settings: { stability: 1 }, tag: "coldly" },
           warm: { settings: { stability: 0.5 }, tag: "warmly" }, urgent: { settings: { stability: 0 }, tag: "urgent" } } },
@@ -263,9 +272,10 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       // spoken (R-19). A retake is not reproducible, because there is no seed field (§2.3).
       id: "voxtral-mini-tts", providerModelId: "voxtral-mini-tts-2603", provider: "mistral", capability: "voice-tts", displayName: "Voxtral TTS",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-      limits: { deliveries: ["measured"], audioFormat: "wav", maxPromptChars: 2000 },
+      limits: { audioFormat: "wav", maxPromptChars: 2000 },
       pricing: { kind: "perCharacter", microUsdPerCharacter: 16 },
-      cadence: { deliveries: ["measured"], speed: null, pause: "unsupported", emphasis: "unsupported", breath: "unsupported", outputTimestamps: "none",
+      // No text direction at all; a pause is punctuation, which every reader reads (turn 181).
+      cadence: { deliveries: ["measured"], speed: null, pause: "best-effort-punctuation", emphasis: "unsupported", breath: "unsupported", outputTimestamps: "none",
         deliveryMappings: { measured: { settings: {} } } },
     },
     {
@@ -286,15 +296,16 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       // Emphasis stays unsupported until the probe shows what capitalisation does (R-20).
       id: "breeze-tts-2", provider: "breezeblue", capability: "voice-tts", displayName: "Breeze TTS 2",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-      limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], audioFormat: "wav", maxPromptChars: 1000 },
+      limits: { audioFormat: "wav", maxPromptChars: 1000 },
       pricing: { kind: "perCharacter", microUsdPerCharacter: 40, unit: "cjk-double" },
       cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.2 },
         pause: "best-effort-audio-tag", emphasis: "unsupported", breath: "best-effort-audio-tag", outputTimestamps: "none", tagSyntax: "paren",
         // A phrase is a sentence beside the text, after the delivery's (SPEC-047 R-7): Breeze's
         // `instructions` field takes prose, so the author's words go there and never into the line.
         phrase: "best-effort-instruction",
-        // The one table (contracts `BREEZE_DELIVERY`): the bench path reads its numbers and words
-        // through `deliveryParams` and `breezeDirection`, the performance path through this row.
+        // Breeze's documented English events (design turn 181): `(sigh)`, `(inhale)`, `(exhale)`.
+        sounds: BREEZE_SOUNDS, cueTags: { inhale: "inhale", exhale: "exhale" },
+        // The one table (`voice-direction.ts`): every surface reaches it through this row.
         deliveryMappings: BREEZE_DELIVERY },
     },
     {
@@ -305,7 +316,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       // as the bill does (SPEC-046 R-8). The 2,000-character
       // cap is OURS: Fish publishes no text limit and chunks internally (`chunk_length` 100–300).
       // Direction is a phrase in the text — Fish's S2 reads `[whispering]` as language, not a
-      // control token — declared in the contract's FISH_DELIVERY table in the default bracket
+      // control token — declared in `voice-direction.ts`'s FISH_DELIVERY table in the default bracket
       // syntax; every phrase is unprobed and the listen tunes them (R-22). Speed is `prosody.speed`
       // 0.5–2.0, held to the plan's range. Emphasis stays unsupported until the probe shows what
       // capitalisation, or a `[emphasis]` cue, does (R-20). The free twin `s2.1-pro-free` is the
@@ -313,24 +324,27 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       // what "fair use" is on a scene's worth of lines.
       id: "fish-s2.1-pro", providerModelId: "s2.1-pro", provider: "fishaudio", capability: "voice-tts", displayName: "Fish Audio S2.1 Pro",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-      limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], audioFormat: "wav", maxPromptChars: 2000 },
+      limits: { audioFormat: "wav", maxPromptChars: 2000 },
       pricing: { kind: "perCharacter", microUsdPerCharacter: 15, unit: "utf8-byte" },
       cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.3 },
         pause: "best-effort-audio-tag", emphasis: "unsupported", breath: "best-effort-audio-tag", outputTimestamps: "none",
         // A phrase is one more bracket phrase in the text (SPEC-047 R-7), read as language like
         // the delivery's; unprobed like every phrase here, and the listen tunes it (SPEC-046 R-22).
         phrase: "best-effort-tag",
+        // Fish's documented effects and breath (design turn 181): `[sighing]`, `[inhale]`.
+        sounds: FISH_SOUNDS, cueTags: { inhale: "inhale", exhale: "exhale" },
         deliveryMappings: FISH_DELIVERY },
     },
     {
-      cadence: { deliveries: ["measured", "urgent"], speed: null, pause: "unsupported", emphasis: "unsupported", breath: "unsupported", outputTimestamps: "none",
+      // Speed is the only shaping Kokoro takes (§2.8); a pause is punctuation (design turn 181).
+      cadence: { deliveries: ["measured", "urgent"], speed: null, pause: "best-effort-punctuation", emphasis: "unsupported", breath: "unsupported", outputTimestamps: "none",
         deliveryMappings: { measured: { settings: { speed: 0.92 } }, urgent: { settings: { speed: 1.15 } } } },
       id: "kokoro-82m",
       provider: "kokoro",
       capability: "voice-tts",
       displayName: "Kokoro 82M",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-      limits: { deliveries: ["measured", "urgent"], audioFormat: "wav" },
+      limits: { audioFormat: "wav" },
       pricing: { kind: "unmetered" },
       requires: { memMb: 4000, diskMb: 400 },
     },

@@ -10,6 +10,7 @@ import {
   type SceneRecord,
   type Sheet,
   type WorldBundle,
+  supportedDeliveries,
 } from "@arke-studio/contracts";
 import { Button } from "../../components/ui.js";
 import { dismissPlayback, playClip, playbackSnapshot } from "../../lib/audio.js";
@@ -214,7 +215,9 @@ export function GenerateLineSheet({ world, production, scene, sheet, model, line
       ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}) });
     if (pending.current === null) { setBusy(false); setNotice("The studio is disconnected."); }
   };
-  const plan: CadencePlan = { schemaVersion: 1, sourceTextHash: hash, delivery: "measured", speed: 1, cues: [] };
+  // Measured where the reader reads it; a reader that takes no delivery (Eleven Multilingual v2,
+  // design turn 181) reads its own way, rather than refusing every line it is asked for.
+  const plan: CadencePlan = { schemaVersion: 1, sourceTextHash: hash, ...(supportedDeliveries(model).includes("measured") ? { delivery: "measured" as const } : {}), speed: 1, cues: [] };
   return (
     <div className="fy-linedoor" role="dialog" aria-label="Generate a line">
       <div className="fy-linedoor__head"><span>Generate a line</span><button type="button" className="fy-linedoor__close" aria-label="Close" onClick={onClose}>×</button></div>

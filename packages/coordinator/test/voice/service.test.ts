@@ -242,8 +242,6 @@ describe("routing (R-2, D1, §3.2): local never touches the queue; cloud always 
       shotId: "sh_12",
       sheet: SHEET,
       text: "the verse, under the water",
-      deliveryParams: { stability: 0.7 },
-      deliveryNotice: null,
       model: ELEVEN_MODEL,
     });
     const job = await queue.enqueue(request);
@@ -272,22 +270,27 @@ describe("routing (R-2, D1, §3.2): local never touches the queue; cloud always 
       text: "again, colder",
       model: ELEVEN_MODEL,
     };
-    const measured = voiceLineRequest({ ...base, deliveryParams: { stability: 0.7 }, deliveryNotice: null });
-    const breaking = voiceLineRequest({ ...base, deliveryParams: { stability: 0.25 }, deliveryNotice: null });
+    // The delivery is compiled for the reader (design turn 181): its tag in the words, its numbers
+    // beside them, the job marked compiled — and no delivery name for a client to tag again.
+    const v3: ManifestModel = { ...ELEVEN_MODEL, id: "eleven-v3", cadence: { deliveries: ["measured", "breaking"], speed: { min: 0.7, max: 1.2 },
+      pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none",
+      deliveryMappings: { measured: { settings: { stability: 0.5 } }, breaking: { settings: { stability: 0 }, tag: "crying" } } } };
+    const sheet = { ...SHEET, voice: { ...SHEET.voice!, model: "eleven-v3" } } as Sheet;
+    const measured = voiceLineRequest({ ...base, sheet, model: v3, delivery: "measured" });
+    const breaking = voiceLineRequest({ ...base, sheet, model: v3, delivery: "breaking" });
     assert.equal(measured.params["voiceId"], breaking.params["voiceId"], "the voice is the sheet's");
     assert.notDeepEqual(measured.params["voiceSettings"], breaking.params["voiceSettings"]);
+    assert.equal(breaking.params["text"], "[crying] again, colder");
+    assert.equal(breaking.params["authoredText"], "again, colder", "the take's line is the words as written");
+    assert.equal(breaking.params["delivery"], undefined);
+    assert.equal(typeof breaking.params["directionHash"], "string");
 
-    // An inexpressible delivery travels as a stated notice, never silently dropped.
-    const noticed = voiceLineRequest({
-      ...base,
-      deliveryParams: null,
-      deliveryNotice: 'Kokoro cannot express "breaking" — the read will be neutral',
-    });
-    assert.match(String(noticed.params["deliveryNotice"]), /cannot express/);
+    // An inexpressible delivery is refused, never read neutral in silence.
+    assert.throws(() => voiceLineRequest({ ...base, delivery: "breaking" }), /cannot express "breaking"/);
 
     const voiceless = { ...SHEET, voice: undefined } as unknown as Sheet;
     assert.throws(
-      () => voiceLineRequest({ ...base, sheet: voiceless, deliveryParams: null, deliveryNotice: null }),
+      () => voiceLineRequest({ ...base, sheet: voiceless }),
       /no assigned voice/,
     );
   });
@@ -1034,8 +1037,6 @@ describe("a spoken line reaches the queue (built 2026-08-17)", () => {
       shotId: "sh_12",
       sheet: SPEAKER,
       text: "the verse, under the water",
-      deliveryParams: null,
-      deliveryNotice: null,
       model: LOCAL_MODEL,
     });
     assert.equal(request.params["voiceId"], "af_bella", "the voice is the speaker's");
@@ -1056,8 +1057,6 @@ describe("a spoken line reaches the queue (built 2026-08-17)", () => {
           shotId: "sh_12",
           sheet: voiceless,
           text: "x",
-          deliveryParams: null,
-          deliveryNotice: null,
           model: LOCAL_MODEL,
         }),
       /has no assigned voice/,
@@ -1081,8 +1080,6 @@ describe("a spoken line reaches the queue (built 2026-08-17)", () => {
       shotId: "sh_12",
       sheet: cloned,
       text: "the verse, under the water",
-      deliveryParams: null,
-      deliveryNotice: null,
       model: {
         ...LOCAL_MODEL,
         id: "comfyui-cloned-voice",
@@ -1239,7 +1236,7 @@ it("requires the displayed speech ceiling for a line and rejects it after a rate
       { version: "standard", effectiveFrom: "2027-01-01T00:00:00.000Z", microUsdPerMillionInput: 1000000, microUsdPerMillionOutput: 18000000 },
     ] } } };
   const input = { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", productionId: "book", shotId: "sh_01", sheet: SHEET,
-    text: "Hello", model, deliveryParams: null, deliveryNotice: null, at: "2026-12-31T23:59:59.000Z" };
+    text: "Hello", model, at: "2026-12-31T23:59:59.000Z" };
   assert.throws(() => voiceLineRequest(input), /price needs confirmation/);
   assert.throws(() => voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151551 }), /price needs confirmation/);
   assert.equal(voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151552 }).estimatedMicroUsd, 151552);
@@ -1250,7 +1247,7 @@ it("refuses oversized Gemini shot lines including separate delivery bytes before
   for (const model of SHIPPED_MANIFEST.models.filter(m => m.provider === "google" && m.capability === "voice-tts")) {
     const sheet = { ...SHEET, voice: { ...SHEET.voice!, provider: "google", model: model.id, voiceId: "Charon" } };
     const input = { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", productionId: "book", shotId: "sh_01", sheet, model,
-      delivery: "warm" as const, deliveryParams: {}, deliveryNotice: null, confirmedSpeechMicroUsd: 1000000, at: "2026-09-27T12:00:00.000Z" };
+      delivery: "warm" as const, confirmedSpeechMicroUsd: 1000000, at: "2026-09-27T12:00:00.000Z" };
     assert.throws(() => voiceLineRequest({ ...input, text: "字".repeat(2400) }), /request limit/);
     const allowance = model.limits.maxSpeechUtf8Bytes! - Buffer.byteLength(model.cadence!.deliveryMappings.warm!.instruction!);
     assert.equal(voiceLineRequest({ ...input, text: "a".repeat(allowance) }).params.text, "a".repeat(allowance));

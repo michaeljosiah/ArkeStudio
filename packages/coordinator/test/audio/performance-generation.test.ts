@@ -32,7 +32,8 @@ it("prepares a priced Gemini performance with separate style and refuses spans t
     cadencePlan: { schemaVersion: 1 as const, sourceTextHash: audioHash(Buffer.from(normalizeSpeechText(line.text))), delivery: "warm" as const, speed: 1, phrase: "quietly confident", cues: [] } };
   const quote = await preparePerformanceGeneration(store, model, request);
   assert.equal(quote.mapping.providerText, normalizeSpeechText(line.text));
-  assert.match(quote.mapping.instructions!, /warmly.*quietly confident/);
+  // The plan names its note by the old key, which still reads (design turn 181): the note as a sentence.
+  assert.match(quote.mapping.instructions!, /warmly.*Quietly confident\./);
   assert.ok(quote.estimatedMicroUsd > 0);
   validatePerformanceGeneration(store, model, quote, quote.estimatedMicroUsd);
   assert.throws(() => validatePerformanceGeneration(store, model, quote, quote.estimatedMicroUsd - 1), /stale/);

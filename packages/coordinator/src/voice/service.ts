@@ -1,4 +1,5 @@
-import { quoteSpeech, speechInputFits, designedVoiceCandidates } from "@arke-studio/contracts";
+import { audiobookDirectionHash, quoteSpeech, sentAs, speechInputFits, designedVoiceCandidates, type CadencePlan } from "@arke-studio/contracts";
+import { audioHash } from "../audio/qc.js";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -901,8 +902,9 @@ export class VoiceService {
 
 /**
  * A dialogue-line dispatch (R-14, R-15): the voice is the sheet's — a retake keeps it by
- * construction, only the delivery params change. An inexpressible delivery is stated, and the
- * notice travels with the job rather than being silently dropped.
+ * construction, only the direction changes. The delivery is compiled by the one compiler every
+ * speech surface shares (SPEC-049 R-28, design turn 181) into the reader's own syntax, and a
+ * delivery the reader cannot express is refused rather than read neutral in silence.
  */
 export function voiceLineRequest(input: {
   confirmedSpeechMicroUsd?: number;
@@ -912,12 +914,10 @@ export function voiceLineRequest(input: {
   shotId: string;
   sheet: Sheet;
   text: string;
-  /** The delivery's name, for a reader that takes direction as words as well as numbers (SPEC-046 R-22). */
+  /** The line's delivery, compiled for the reader; absent is the reader's own reading. */
   delivery?: Delivery;
-  /** The line's language when stated (ISO 639-1); nothing states one yet (issue 1163), and the estimate follows R-23 without it. */
+  /** The line's language when stated (ISO 639-1): a cloned voice's (issue 1163), which decides a paren reader's tags (R-23). */
   language?: string;
-  deliveryParams: Record<string, number> | null;
-  deliveryNotice: string | null;
   model: ManifestModel;
   voiceReference?: boolean;
   voiceUploadConfirmedFor?: string;
@@ -928,11 +928,19 @@ export function voiceLineRequest(input: {
   if (voice.provider !== input.model.provider || (assignedModel !== undefined && assignedModel !== input.model.id)) {
     throw new Error("The assigned voice no longer matches its speech model — choose the voice again.");
   }
-  const instructions = input.delivery === undefined ? undefined : input.model.cadence?.deliveryMappings[input.delivery]?.instruction;
-  if (!speechInputFits(input.text, input.model.limits, instructions)) {
+  let directed: { text: string; voiceSettings: Record<string, number>; instructions?: string; directionHash: string } | null = null;
+  if (input.delivery !== undefined) {
+    const plan: CadencePlan = { schemaVersion: 1, sourceTextHash: audioHash(Buffer.from(normalizeSpeechText(input.text))), delivery: input.delivery, speed: 1, cues: [] };
+    const sent = sentAs(input.text, plan, input.model, input.language);
+    if (sent.held.length > 0) throw new Error(`${input.model.displayName} cannot express "${input.delivery}".`);
+    directed = { text: sent.text, voiceSettings: sent.voiceSettings, ...(sent.style !== undefined ? { instructions: sent.style } : {}), directionHash: audiobookDirectionHash(plan) };
+  }
+  const text = directed?.text ?? input.text;
+  if (!speechInputFits(text, input.model.limits, directed?.instructions)) {
     throw new Error("The line and its direction exceed this model's request limit. Shorten it or use an audiobook read in parts.");
   }
-  const quote = quoteSpeech(input.model, input.text, { delivery: input.delivery, language: input.language, at: input.at });
+  // The compiled text is priced: its tags are in it, so no delivery is named to count twice.
+  const quote = quoteSpeech(input.model, text, { language: input.language, at: input.at });
   if (quote.unit === "token" && (input.confirmedSpeechMicroUsd === undefined || input.confirmedSpeechMicroUsd < quote.authorisedMicroUsd)) {
     throw new Error("The speech price needs confirmation. Open the line again and confirm its current price.");
   }
@@ -945,12 +953,11 @@ export function voiceLineRequest(input: {
     model: input.model.id,
     params: {
       voiceId: voice.voiceId,
-      text: input.text,
+      text,
       audioFormat: voiceFormatForModel(input.model),
-      ...(input.delivery !== undefined ? { delivery: input.delivery } : {}),
       ...(input.language !== undefined ? { language: input.language } : {}),
-      ...(input.deliveryParams !== null ? { voiceSettings: input.deliveryParams } : {}),
-      ...(input.deliveryNotice !== null ? { deliveryNotice: input.deliveryNotice } : {}),
+      // The direction as compiled, marked by its hash so no client re-derives a tag from a name.
+      ...(directed !== null ? { authoredText: input.text, voiceSettings: directed.voiceSettings, directionHash: directed.directionHash, ...(directed.instructions !== undefined ? { instructions: directed.instructions } : {}) } : {}),
     },
     estimatedMicroUsd: quote.authorisedMicroUsd,
     landing: { dir: `productions/${input.productionId}/audio` },

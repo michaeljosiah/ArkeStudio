@@ -2301,7 +2301,7 @@ function BenchWorkspace({
                       } = params;
                       params = {
                         ...rest,
-                        ...(delivery !== undefined && chosen.limits.deliveries?.includes(delivery)
+                        ...(delivery !== undefined && supportedDeliveries(chosen).includes(delivery)
                           ? { delivery }
                           : {}),
                       };
@@ -2769,7 +2769,7 @@ function BenchWorkspace({
             const { delivery: currentDelivery, ...withoutDelivery } = currentParams;
             const keepDelivery =
               currentDelivery !== undefined &&
-              chosenModel?.limits.deliveries?.includes(currentDelivery) === true;
+              supportedDeliveries(chosenModel).includes(currentDelivery);
             compose({
               ...draft,
               // The label rides with the id so a take can name its voice without the catalogue.

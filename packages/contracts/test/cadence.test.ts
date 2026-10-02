@@ -12,7 +12,7 @@ it("maps exact spans and tags at UTF-16 positions without modifying authored wor
   const input = plan(text, [{ kind: "emphasis", span: { from: 0, to: 6, text: "Straße" }, level: "strong" },
     { kind: "pause", at: 6, length: "long" }, { kind: "breath", at: text.length, action: "exhale" }]);
   const output = mapCadence(text, hash(text), input, model);
-  assert.equal(output.providerText, "STRASSE [long pause]  waits. [exhales] ");
+  assert.equal(output.providerText, "STRASSE [long pause] waits. [exhales]");
   assert.equal(output.controls.length, 5); assert.equal(output.voiceSettings.speed, 1);
   assert.equal(normalizeSpeechText(" a\n b! "), "a b!");
 });
@@ -52,7 +52,7 @@ it("a paren row writes Breeze's tags and lifts the delivery's sentence out of th
   const text = "Wait here.";
   const cues: CadencePlan["cues"] = [{ kind: "pause", at: 4, length: "long" }, { kind: "breath", at: text.length, action: "inhale" }];
   const whispered = mapCadence(text, hash(text), { ...plan(text, cues), delivery: "whispered" }, breeze, "en");
-  assert.equal(whispered.providerText, "(whispers) Wait (pause)  here. (inhales) ");
+  assert.equal(whispered.providerText, "(whispers) Wait (pause) here. (inhales)");
   assert.equal(whispered.instructions, undefined);
   assert.equal(whispered.controls[0]?.status, "best-effort");
   const breaking = mapCadence(text, hash(text), { ...plan(text), delivery: "breaking" }, breeze, "en");
@@ -77,7 +77,7 @@ it("a paren row writes Breeze's tags and lifts the delivery's sentence out of th
   assert.deepEqual(measured.voiceSettings, { guidance_scale: 4, speed: 1 });
   // A bracket row is untouched by the syntax field's existence: the ElevenLabs rendering stands.
   const bracket = mapCadence(text, hash(text), plan(text, cues), model);
-  assert.equal(bracket.providerText, "Wait [long pause]  here. [inhales deeply] ");
+  assert.equal(bracket.providerText, "Wait [long pause] here. [inhales deeply]");
   assert.equal(bracket.instructions, undefined);
 });
 
@@ -93,7 +93,7 @@ it("a Fish row carries the delivery as a bracket phrase in the text and nothing 
   const text = "Wait here.";
   const cues: CadencePlan["cues"] = [{ kind: "pause", at: 4, length: "long" }];
   const whispered = mapCadence(text, hash(text), { ...plan(text, cues), delivery: "whispered" }, fish);
-  assert.equal(whispered.providerText, "[whispering] Wait [long pause]  here.");
+  assert.equal(whispered.providerText, "[whispering] Wait [long pause] here.");
   assert.equal(whispered.instructions, undefined);
   assert.equal(whispered.controls[0]?.status, "best-effort");
   assert.equal(whispered.controls[0]?.method, "audio tag and declared settings");
@@ -103,29 +103,37 @@ it("a Fish row carries the delivery as a bracket phrase in the text and nothing 
   assert.deepEqual(breaking.voiceSettings, { speed: 0.8 });
 });
 
-it("a phrase rides the row's seam — a tag, an instruction, or refused — and is never spoken words (SPEC-047 R-7)", () => {
+it("a note rides the row's seam — a tag, an instruction, or held — and is never spoken words (SPEC-047 R-7, turn 181)", () => {
   const text = "Wait here.";
   const tagRow: Pick<ManifestModel, "id" | "provider" | "cadence"> = { id: "fish-s2.1-pro", provider: "fishaudio", cadence: {
     deliveries: ["measured", "whispered"], speed: { min: 0.7, max: 1.3 }, pause: "best-effort-audio-tag", emphasis: "unsupported",
     breath: "best-effort-audio-tag", outputTimestamps: "none", phrase: "best-effort-tag",
     deliveryMappings: { measured: { settings: {}, tag: "calm and even" }, whispered: { settings: {}, tag: "whispering" } } } };
-  const tagged = mapCadence(text, hash(text), { ...plan(text), delivery: "whispered", phrase: "to the water, flat" }, tagRow);
+  const tagged = mapCadence(text, hash(text), { ...plan(text), delivery: "whispered", note: "to the water, flat" }, tagRow);
   assert.equal(tagged.providerText, "[whispering] [to the water, flat] Wait here.", "after the delivery's tag, in the row's ink");
-  assert.deepEqual(tagged.controls.find((c) => c.control === "phrase"), { control: "phrase", status: "best-effort", method: "audio tag" });
+  assert.deepEqual(tagged.controls.find((c) => c.control === "note"), { control: "note", status: "best-effort", method: "audio tag" });
   const instructionRow: Pick<ManifestModel, "id" | "provider" | "cadence"> = { id: "breeze-tts-2", provider: "breezeblue", cadence: {
     deliveries: ["measured"], speed: { min: 0.7, max: 1.2 }, pause: "best-effort-audio-tag", emphasis: "unsupported",
     breath: "best-effort-audio-tag", outputTimestamps: "none", tagSyntax: "paren", phrase: "best-effort-instruction",
     deliveryMappings: { measured: { settings: { guidance_scale: 4 }, instruction: "Read it evenly." } } } };
-  const instructed = mapCadence(text, hash(text), { ...plan(text), phrase: "To the water, flat." }, instructionRow, "fr");
-  assert.equal(instructed.providerText, "Wait here.", "nothing of the phrase in the words, whatever the language");
-  assert.equal(instructed.instructions, "Read it evenly. To the water, flat.");
-  assert.deepEqual(instructed.controls.find((c) => c.control === "phrase"), { control: "phrase", status: "best-effort", method: "instruction" });
-  const refused = mapCadence(text, hash(text), { ...plan(text), phrase: "flat" }, model);
+  const instructed = mapCadence(text, hash(text), { ...plan(text), note: "to the water, flat" }, instructionRow, "fr");
+  assert.equal(instructed.providerText, "Wait here.", "nothing of the note in the words, whatever the language");
+  assert.equal(instructed.instructions, "Read it evenly. To the water, flat.", "the note as a sentence after the delivery's");
+  assert.deepEqual(instructed.controls.find((c) => c.control === "note"), { control: "note", status: "best-effort", method: "instruction" });
+  const refused = mapCadence(text, hash(text), { ...plan(text), note: "flat" }, model);
   assert.equal(refused.providerText, "Wait here.");
-  assert.equal(refused.controls.find((c) => c.control === "phrase")?.status, "unsupported", "a row that declares nothing takes no phrase");
-  assert.equal(mapCadence(text, hash(text), plan(text), tagRow).controls.some((c) => c.control === "phrase"), false, "no phrase, no control to report");
-  assert.ok(!CadencePlanSchema.safeParse({ ...plan(text), phrase: "x".repeat(61) }).success, "the phrase is at most 60 characters");
-  assert.ok(!CadencePlanSchema.safeParse({ ...plan(text), phrase: "" }).success);
+  assert.deepEqual(refused.controls.find((c) => c.control === "note"), { control: "note", status: "unsupported", reason: "no note" }, "a row that declares nothing takes no note");
+  assert.equal(mapCadence(text, hash(text), plan(text), tagRow).controls.some((c) => c.control === "note"), false, "no note, no control to report");
+  // A tag reader takes the note as a tag only when it is short enough to be one; a longer one is held.
+  const long = "angry and hurt — quieter, not louder; holding back tears, and slower";
+  const held = mapCadence(text, hash(text), { ...plan(text), note: long }, tagRow);
+  assert.equal(held.providerText, "[calm and even] Wait here.");
+  assert.deepEqual(held.controls.find((c) => c.control === "note"), { control: "note", status: "unsupported", reason: "a tag takes 60 characters" });
+  assert.equal(mapCadence(text, hash(text), { ...plan(text), note: long }, instructionRow, "fr").instructions, `Read it evenly. ${long.charAt(0).toUpperCase()}${long.slice(1)}.`, "an instruction reader takes it whole");
+  assert.ok(CadencePlanSchema.safeParse({ ...plan(text), note: "x".repeat(300) }).success, "the note is up to 300 characters");
+  assert.ok(!CadencePlanSchema.safeParse({ ...plan(text), note: "x".repeat(301) }).success);
+  assert.ok(!CadencePlanSchema.safeParse({ ...plan(text), note: "" }).success);
+  assert.equal(CadencePlanSchema.parse({ ...plan(text), phrase: "flat" }).note, "flat", "a plan written before turn 181 reads its phrase as its note");
 });
 
 it("the support report reads off the row what each control would do, one clause where it cannot (SPEC-047 R-9)", () => {

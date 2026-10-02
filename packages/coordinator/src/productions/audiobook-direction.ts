@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   AUDIOBOOK_DELIVERIES,
+  CADENCE_NOTE_MAX,
   CADENCE_PHRASE_MAX,
   DeliverySchema,
   cadenceSupport,
@@ -141,14 +142,17 @@ export function conformInput(input: AudiobookDirectionInput, support: ReturnType
   const readable = AUDIOBOOK_DELIVERIES.filter((delivery) => support.deliveries[delivery]?.status !== "unsupported");
   if (readable.length === 0) return { input: null, dropped: 1 };
   let delivery: CadencePlan["delivery"] = input.delivery;
-  if (!readable.includes(delivery)) {
+  if (delivery !== undefined && !readable.includes(delivery)) {
     dropped += 1;
     delivery = readable.includes("measured") ? "measured" : readable[0]!;
   }
-  let phrase: string | undefined;
-  if (input.phrase !== undefined && input.phrase !== "") {
-    if (input.phrase.length > CADENCE_PHRASE_MAX || support.phrase.status === "unsupported") dropped += 1;
-    else phrase = input.phrase;
+  let note: string | undefined;
+  if (input.note !== undefined && input.note !== "") {
+    // A tag reader takes a note as a tag only up to a marker phrase's length, and would hold a
+    // longer one: proposing it would be a direction the read never sends.
+    const tagOnly = support.note.method?.startsWith("tag") === true;
+    if (input.note.length > (tagOnly ? CADENCE_PHRASE_MAX : CADENCE_NOTE_MAX) || support.note.status === "unsupported") dropped += 1;
+    else note = input.note;
   }
   let speed = 1;
   if (input.speed !== 1) {
@@ -161,14 +165,14 @@ export function conformInput(input: AudiobookDirectionInput, support: ReturnType
     const unsupported =
       cue.kind === "delivery"
         ? (cue.delivery !== undefined && support.deliveries[cue.delivery]?.status === "unsupported") || (cue.phrase !== undefined && support.phrase.status === "unsupported")
-        : support[cue.kind].status === "unsupported";
+        : cue.kind === "sound" ? support.sounds[cue.sound].status === "unsupported" : support[cue.kind].status === "unsupported";
     if (cues.length >= 40 || unsupported) {
       dropped += 1;
       continue;
     }
     cues.push(cue);
   }
-  return { input: { delivery, speed, cues, ...(phrase !== undefined ? { phrase } : {}) }, dropped };
+  return { input: { ...(delivery !== undefined ? { delivery } : {}), speed, cues, ...(note !== undefined ? { note } : {}) }, dropped };
 }
 
 /**
@@ -213,7 +217,7 @@ export function verifyDirections(raw: RawDirection, blocks: readonly DirectableB
         delivery: asked.success ? asked.data : "measured",
         speed: typeof entry.speed === "number" && Number.isFinite(entry.speed) ? Math.round(entry.speed * 100) / 100 : 1,
         cues,
-        ...(phraseAsked !== "" ? { phrase: phraseAsked } : {}),
+        ...(phraseAsked !== "" ? { note: phraseAsked } : {}),
       },
       support,
     );

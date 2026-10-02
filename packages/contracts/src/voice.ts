@@ -610,99 +610,24 @@ export const PerformanceDeliverySchema = DeliverySchema;
 export const DELIVERIES = DeliverySchema.options;
 export type Delivery = z.infer<typeof DeliverySchema>;
 
-const ELEVENLABS_DELIVERY: Record<Delivery, Record<string, number>> = {
-  measured: { stability: 0.7, similarity_boost: 0.8, style: 0.2 },
-  whispered: { stability: 0.85, similarity_boost: 0.75, style: 0.55 },
-  breaking: { stability: 0.25, similarity_boost: 0.7, style: 0.8 },
-  cold: { stability: 0.9, similarity_boost: 0.85, style: 0.1 },
-  warm: { stability: 0.55, similarity_boost: 0.8, style: 0.45 },
-  urgent: { stability: 0.3, similarity_boost: 0.75, style: 0.65 },
-};
-
-/** Kokoro has far less range (§2.8): speed is the only shaping it can express. */
-const KOKORO_DELIVERY: Partial<Record<Delivery, Record<string, number>>> = {
-  measured: { speed: 0.92 },
-  urgent: { speed: 1.15 },
-};
-
 /**
- * Breeze takes direction three ways — a tag in the text, a sentence beside it, and a guidance
- * scale (SPEC-046 R-20, R-22). The number travels as a voice setting like any other provider's;
- * the tag and the sentence are the client's to place, read back through `breezeDirection`. A tag
- * where Breeze documents one for the delivery, a sentence where it does not. The guidance value
- * is the vendor's own example and every entry here is unprobed: issue 1143's listen tunes them,
- * and nothing else should.
+ * A delivery as a reader's settings (R-15), read off the reader's cadence row — the one place a
+ * reader says what it can do (design turn 181): the per-provider tables this replaced and
+ * `limits.deliveries` disagreed with the rows (Eleven v3 offered six deliveries in the
+ * audiobook and none on the Bench). A delivery the row does not read is refused with the
+ * row's own list. The words a delivery carries — a tag, a sentence — are the compiler's
+ * (`mapCadence`), never re-derived from this.
  */
-export const BREEZE_DELIVERY: Record<Delivery, { settings: { guidance_scale: number }; tag?: string; instruction?: string }> = {
-  measured: { settings: { guidance_scale: 4 }, instruction: "Read it evenly, at a steady pace." },
-  // The sentence rides beside the tag so a line whose language is not known still carries the
-  // delivery: the tag goes only into a line stated to be English (R-23).
-  whispered: { settings: { guidance_scale: 4 }, tag: "whispers", instruction: "Whisper it — hushed and close, barely voiced." },
-  breaking: { settings: { guidance_scale: 4 }, tag: "sobs", instruction: "The voice is breaking; the words come through tears." },
-  cold: { settings: { guidance_scale: 4 }, instruction: "Say it coldly — flat, distant, without warmth." },
-  warm: { settings: { guidance_scale: 4 }, instruction: "Say it warmly and gently, close and kind." },
-  urgent: { settings: { guidance_scale: 4 }, instruction: "Say it urgently, fast and pressing, as if there is no time." },
-};
-
-/** The parts of a Breeze delivery that are words, not numbers: the tag in the text, the sentence beside it. */
-export function breezeDirection(delivery: Delivery): { tag?: string; instruction?: string } {
-  const { tag, instruction } = BREEZE_DELIVERY[delivery];
-  return { ...(tag !== undefined ? { tag } : {}), ...(instruction !== undefined ? { instruction } : {}) };
-}
-
-/**
- * Fish Audio's S2.1 takes direction as a `[bracket]` phrase in the text — natural language, not
- * a fixed set, read by the model like the rest of the line (SPEC-046 §2.9). No settings travel:
- * `temperature` and `top_p` are sampling knobs, not a delivery, and stay at the vendor's
- * defaults. Every phrase here is unprobed; the listen tunes them, and nothing else should.
- */
-export const FISH_DELIVERY: Record<Delivery, { settings: Record<string, number>; tag: string }> = {
-  measured: { settings: {}, tag: "calm and even, at a steady pace" },
-  whispered: { settings: {}, tag: "whispering" },
-  breaking: { settings: {}, tag: "voice breaking, through tears" },
-  cold: { settings: {}, tag: "cold and flat, without warmth" },
-  warm: { settings: {}, tag: "warm and gentle" },
-  urgent: { settings: {}, tag: "urgent, fast and pressing" },
-};
-
-/** The phrase a Fish read carries for a delivery, placed in the text by the client. */
-export function fishDirection(delivery: Delivery): { tag: string } {
-  return { tag: FISH_DELIVERY[delivery].tag };
-}
-
 export type DeliveryMapping =
   | { ok: true; params: Record<string, number> }
   | { ok: false; reason: string };
 
-/**
- * Map a delivery to provider parameters, or state plainly that this voice's provider cannot
- * express it (R-15) — never a take that silently ignores the direction.
- */
-export function deliveryParams(provider: string, delivery: Delivery): DeliveryMapping {
-  // Google carries the named delivery as structured language in the provider adapter.
-  if (provider === "google") return { ok: true, params: {} };
-  if (provider === "elevenlabs") return { ok: true, params: ELEVENLABS_DELIVERY[delivery] };
-  if (provider === "kokoro") {
-    const params = KOKORO_DELIVERY[delivery];
-    if (params) return { ok: true, params };
-    return {
-      ok: false,
-      reason: `Kokoro cannot express "${delivery}" — local presets shape pace only; the read will be neutral`,
-    };
-  }
-  // Voxtral takes no direction at all — no tags, no settings, no speed. The reference clip is
-  // the read (SPEC-046 R-19), so the one honest delivery is the one the recording already has.
-  if (provider === "mistral") {
-    if (delivery === "measured") return { ok: true, params: {} };
-    return {
-      ok: false,
-      reason: `Voxtral reads a line the way the recording was spoken — "${delivery}" would need a recording spoken that way, not a setting`,
-    };
-  }
-  if (provider === "breezeblue") return { ok: true, params: BREEZE_DELIVERY[delivery].settings };
-  // Fish's direction is words in the text (FISH_DELIVERY); there are no numbers to carry.
-  if (provider === "fishaudio") return { ok: true, params: FISH_DELIVERY[delivery].settings };
-  return { ok: false, reason: `${provider} has no declared delivery mapping — the read will use provider defaults` };
+export function deliveryParams(model: Pick<ManifestModel, "cadence" | "displayName">, delivery: Delivery): DeliveryMapping {
+  const cap = model.cadence;
+  const mapping = cap?.deliveries.includes(delivery) ? cap.deliveryMappings[delivery] : undefined;
+  if (mapping !== undefined) return { ok: true, params: { ...mapping.settings } };
+  const reads = cap?.deliveries ?? [];
+  return { ok: false, reason: reads.length === 0 ? `${model.displayName} takes no delivery` : `${model.displayName} reads ${reads.join(" · ")}` };
 }
 
 /**
@@ -719,9 +644,12 @@ export function supportsPerformanceGeneration(model: Pick<ManifestModel, "provid
   return model !== null && model !== undefined && model.capability === "voice-tts" && model.cadence !== undefined && PERFORMANCE_GENERATION_PROVIDERS.includes(model.provider);
 }
 
-/** Deliveries a concrete model may offer before enqueue; absent means provider defaults only. */
-export function supportedDeliveries(model: Pick<ManifestModel, "limits"> | null | undefined): readonly Delivery[] {
-  return model?.limits.deliveries ?? [];
+/**
+ * Deliveries a concrete model may offer before enqueue, from its cadence row alone (design turn
+ * 181): absent means the reader's own reading only. `limits.deliveries` is no longer read.
+ */
+export function supportedDeliveries(model: Pick<ManifestModel, "cadence"> | null | undefined): readonly Delivery[] {
+  return model?.cadence?.deliveries ?? [];
 }
 
 export function voiceFormatForModel(model: Pick<ManifestModel, "limits">): VoiceAudioFormat {

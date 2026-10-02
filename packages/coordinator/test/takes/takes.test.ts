@@ -1129,6 +1129,24 @@ describe("take QC at arrival (#248)", () => {
     await store.close();
   });
 
+  it("a compiled read records the words as written, and what its reader was sent beside them (design turn 181)", async () => {
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    const takes = await recordTakesFromJob(
+      store,
+      {
+        ...shotJob(landed),
+        capability: "voice-tts",
+        target: { kind: "voice-line", id: "sh_12", coversShots: ["sh_12"] },
+        params: { text: "[crying] the verse", authoredText: "the verse", voiceId: "v1", directionHash: "direction-v1:x" },
+      },
+      0,
+    );
+    assert.equal(takes[0]!.prompt, "the verse");
+    assert.deepEqual(takes[0]!.params, { voiceId: "v1", directionHash: "direction-v1:x", sentText: "[crying] the verse" });
+    await store.close();
+  });
+
   it("voice-line finalization is idempotent after both media-move and take-write crash windows", async () => {
     const { dir, store } = await open();
     const landed = await landPass(dir);

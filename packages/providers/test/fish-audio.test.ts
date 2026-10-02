@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { billableCharacters, estimateMicroUsd, FISH_DELIVERY, modelPriceCopy } from "@arke-studio/contracts";
+import { billableCharacters, estimateMicroUsd, modelPriceCopy } from "@arke-studio/contracts";
+import { FISH_DELIVERY } from "../src/voice-direction.js";
 import { FishAudioClient, FISH_CATALOGUE_PAGES, FISH_MODEL, FISH_TEXT_CAP } from "../src/clients/fishaudio.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
 import { createProviderClients, PROVIDER_DECLARATIONS } from "../src/registry.js";
@@ -63,6 +64,9 @@ describe("Fish Audio · S2.1-Pro as a hosted reader (SPEC-046 §2.9)", () => {
     assert.equal(body["references"], undefined, "no inline reference: a cloned voice is a model on the account");
     assert.deepEqual(result.artifacts, [{ name: "speech.wav", contentType: "audio/wav", data: WAV }]);
     assert.match((await client.poll("k", result.remoteId)).error ?? "", /returned by submit/);
+    // A compiled job carries its tags already (design turn 181): a delivery it still names adds none.
+    await client.submit("k", line({ text: "[whispering] Do not open it. [sighing]", voiceId: "voc", delivery: "whispered", directionHash: "direction-v1:x" }));
+    assert.equal(r.body()["text"], "[whispering] Do not open it. [sighing]");
     // No delivery, no phrase; no speed, no prosody.
     await client.submit("k", line({ text: "Plain.", voiceId: "voc" }));
     assert.equal(r.body()["text"], "Plain.");
@@ -198,7 +202,8 @@ describe("Fish Audio · S2.1-Pro as a hosted reader (SPEC-046 §2.9)", () => {
     assert.equal(billableCharacters(row, "Wait here.", "breaking"), `[${FISH_DELIVERY.breaking.tag}] Wait here.`.length);
     assert.equal(row.limits.audioFormat, "wav");
     assert.equal(row.limits.maxPromptChars, 2000);
-    assert.deepEqual(row.limits.deliveries, ["measured", "whispered", "breaking", "cold", "warm", "urgent"]);
+    assert.equal(row.limits.deliveries, undefined, "support is the cadence row's alone (design turn 181)");
+    assert.deepEqual(row.cadence?.deliveries, ["measured", "whispered", "breaking", "cold", "warm", "urgent"]);
     assert.equal(row.cadence?.tagSyntax, undefined, "Fish's cues are bracketed, the default ink");
     assert.deepEqual(row.cadence?.deliveryMappings, FISH_DELIVERY);
     assert.equal(row.cadence?.emphasis, "unsupported");

@@ -63,7 +63,7 @@ export interface SpeakerLine {
   textHash: string;
   /** The narration just before the line, in the same paragraph or the one before, for context. */
   context?: string;
-  /** The line's direction as a performer's note: the delivery, then the phrase. */
+  /** The line's direction as a performer's note: the delivery, then the note. */
   note?: string;
   state: string;
 }
@@ -96,7 +96,7 @@ export async function speakerLines(
       // script has none, since the block before is the narrator's own last line.
       const context = speaker !== "narrator" && before !== undefined && before.block.speaker === undefined && before.block.key !== "title" ? before.block.text : undefined;
       const direction = audiobookDirectionFor(record, planned.block);
-      const note = direction === null ? undefined : [direction.plan.delivery, direction.plan.phrase].filter((part) => part !== undefined && part !== "").join(" · ");
+      const note = direction === null ? undefined : [direction.plan.delivery, direction.plan.note].filter((part) => part !== undefined && part !== "").join(" · ");
       lines.push({
         id: lineId(plan.chapter.order, planned.block.key),
         chapterId: plan.chapter.id,

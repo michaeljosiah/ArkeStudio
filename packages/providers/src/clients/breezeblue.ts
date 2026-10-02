@@ -1,4 +1,5 @@
-import { breezeDirection, DeliverySchema, HOSTED_VOICE_READERS, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
+import { DeliverySchema, HOSTED_VOICE_READERS, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
+import { BREEZE_DELIVERY } from "../voice-direction.js";
 import { jsonRequest, tryProbe } from "./http.js";
 import {
   ProviderAuthError,
@@ -122,11 +123,13 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
           : "breezeblue: a read needs a voice id",
       );
     }
+    // A compiled job arrives already decorated — `mapCadence` put the tag in the text and lifted
+    // the sentence out as `instructions` (issue 1149, design turn 181) — so nothing is re-derived
+    // from a delivery it may still name: a second tag would be read twice (SPEC-049 R-28). Only
+    // a job written before the compiler, naming a delivery alone, is directed here.
+    const compiled = typeof request.params["directionHash"] === "string" || (typeof request.params["instructions"] === "string" && request.params["instructions"].trim() !== "");
     const delivery = DeliverySchema.safeParse(request.params["delivery"]);
-    const direction = delivery.success ? breezeDirection(delivery.data) : {};
-    // A performance job arrives already decorated — `mapCadence` put the tag in the text and
-    // lifted the sentence out as `instructions` (issue 1149) — so it names no delivery here, and
-    // the sentence rides as it was mapped rather than being re-derived.
+    const direction: { tag?: string; instruction?: string } = delivery.success && !compiled ? BREEZE_DELIVERY[delivery.data] : {};
     const instruction = typeof request.params["instructions"] === "string" && request.params["instructions"].trim() !== "" ? request.params["instructions"] : direction.instruction;
     const settings = isNumberRecord(request.params["voiceSettings"]) ? request.params["voiceSettings"] : {};
     const language = typeof request.params["language"] === "string" && /^[A-Za-z]{2}$/.test(request.params["language"]) ? request.params["language"].toLowerCase() : undefined;

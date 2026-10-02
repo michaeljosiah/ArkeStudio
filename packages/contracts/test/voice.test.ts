@@ -1,17 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  BREEZE_DELIVERY,
-  breezeDirection,
   CLONE_LANGUAGES,
   cloudReaderCandidates,
   DEFAULT_NARRATOR,
-  DELIVERIES,
   deliveryParams,
   extractVoiceAttributes,
-  FISH_DELIVERY,
   firstReadNotice,
-  fishDirection,
   HOSTED_VOICE_READERS,
   hostedReaderKeepsSlot,
   isClonedVoice,
@@ -27,6 +22,7 @@ import {
   readerPlace,
   providerName,
   readerPriceLabel,
+  supportedDeliveries,
   supportsPerformanceGeneration,
   supportsVoiceUse,
   voiceSourceFor,
@@ -485,34 +481,21 @@ describe("the stage-voice-clip frame", () => {
   });
 });
 
-describe("the hosted readers' deliveries (SPEC-046 R-19, R-22)", () => {
-  it("Voxtral honours only the read the recording already has, and says why for the rest", () => {
-    assert.deepEqual(deliveryParams("mistral", "measured"), { ok: true, params: {} });
-    const refused = deliveryParams("mistral", "whispered");
-    assert.equal(refused.ok, false);
-    assert.match(!refused.ok ? refused.reason : "", /the way the recording was spoken/);
+describe("a delivery is read off the reader's cadence row alone (design turn 181)", () => {
+  const voxtral = { displayName: "Voxtral TTS", limits: {}, cadence: { deliveries: ["measured" as const], speed: null, pause: "best-effort-punctuation" as const,
+    emphasis: "unsupported" as const, breath: "unsupported" as const, outputTimestamps: "none" as const, deliveryMappings: { measured: { settings: {} } } } };
+  it("maps what the row reads to its settings, and refuses the rest with the row's own list", () => {
+    assert.deepEqual(deliveryParams(voxtral, "measured"), { ok: true, params: {} });
+    assert.deepEqual(deliveryParams(voxtral, "whispered"), { ok: false, reason: "Voxtral TTS reads measured" });
+    assert.deepEqual(deliveryParams({ displayName: "Somebody" }, "cold"), { ok: false, reason: "Somebody takes no delivery" });
   });
-  it("Breeze maps every delivery to a guidance scale, with a tag or a sentence read back by name", () => {
-    for (const delivery of DELIVERIES) {
-      const mapped = deliveryParams("breezeblue", delivery);
-      assert.ok(mapped.ok && mapped.params.guidance_scale === BREEZE_DELIVERY[delivery].settings.guidance_scale);
-      const words = breezeDirection(delivery);
-      assert.ok(words.tag !== undefined || words.instruction !== undefined, `${delivery} has neither a tag nor a sentence`);
-    }
-    assert.equal(breezeDirection("whispered").tag, "whispers");
-    assert.ok(breezeDirection("whispered").instruction, "a tag never travels alone: the line's language may not be known");
-    assert.equal(breezeDirection("cold").tag, undefined);
-  });
-  it("Fish takes every delivery as a phrase in the text, and carries no numbers for it (§2.9)", () => {
-    for (const delivery of DELIVERIES) {
-      assert.deepEqual(deliveryParams("fishaudio", delivery), { ok: true, params: {} });
-      assert.ok(fishDirection(delivery).tag.length > 0, `${delivery} has a phrase`);
-      assert.equal(FISH_DELIVERY[delivery].tag, fishDirection(delivery).tag);
-    }
-    assert.equal(fishDirection("whispered").tag, "whispering");
-    assert.equal(HOSTED_VOICE_READERS["fishaudio"], "fish-s2.1-pro");
+  it("never reads limits.deliveries, which no row declares any more", () => {
+    assert.deepEqual(supportedDeliveries(voxtral), ["measured"]);
+    assert.deepEqual(supportedDeliveries({ limits: { deliveries: ["measured", "whispered"] } } as never), [], "a stale limit is not a capability");
+    assert.deepEqual(supportedDeliveries(null), []);
   });
 });
+
 
 describe("one voice, several readers (SPEC-046 D1, R-10, R-13)", () => {
   const harbour = { id: "harbour-glass", name: "Harbour glass", clip: "voices/harbour-glass.wav", attributes: ["low", "coastal"] } as never;
