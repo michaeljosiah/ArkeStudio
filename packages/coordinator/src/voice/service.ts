@@ -461,7 +461,7 @@ export class VoiceService {
    */
   async catalogue(
     clonedVoices: readonly ClonedVoice[] = [],
-    designedVoices: readonly import("@arke-studio/contracts").WorldDesignedVoice[] = [],
+    designedVoices: readonly Pick<import("@arke-studio/contracts").WorldDesignedVoice, "id" | "revision" | "name" | "description" | "expiresAt">[] = [],
     errors?: string[],
   ): Promise<VoiceCandidate[]> {
     const keyed = designedVoices.length === 0 || await this.deps.getKey("google") !== null;

@@ -38,6 +38,12 @@ export const VoiceCandidateSchema = z
     /** The library voice this candidate reads, for a hosted reader or the recipe (SPEC-046 R-10). */
     readsClone: z.string().min(1).optional(),
     readsDesigned: z.string().min(1).optional(),
+    /**
+     * The app narrator's own copy of a designed voice the open world does not hold (SPEC-049
+     * R-12): listed so the narrator can be seen and kept here, and good for narration only — a
+     * sheet, a bench take or a book is never given a voice whose record is another world's.
+     */
+    narratorCopy: z.literal(true).optional(),
     /** Why this concrete target cannot execute now. Existing assignments remain visible with it. */
     unavailableReason: z.string().min(1).optional(),
   })
@@ -426,9 +432,10 @@ export function readerPriceLabel(row: Pick<ManifestModel, "pricing"> | null | un
  * before the price, the recording with the job (`narratorVoice` in the coordinator).
  */
 export function supportsVoiceUse(
-  candidate: { provider: string; model?: string; readsClone?: string },
-  _use: "preview" | "line" | "bench" | "narration",
+  candidate: { provider: string; model?: string; readsClone?: string; narratorCopy?: true },
+  use: "preview" | "line" | "bench" | "narration",
 ): boolean {
+  if (candidate.narratorCopy === true && use !== "narration") return false;
   return candidate.provider !== "comfyui";
 }
 
@@ -731,12 +738,15 @@ export function narratorLabelFor(
   spoke?: { provider: string; voiceId: string },
 ): string {
   const chosen = stored !== null && supportsVoiceUse(stored, "narration") && narratorAppliesTo(stored, worldId) ? stored : null;
+  // A choice that is not what reads is said, never swapped in silence: `Ife's voice unavailable
+  // · reading with George` (issue 1215 follow-up) — a key withdrawn or a voice gone otherwise
+  // looks like the narrator changing by itself.
+  const instead = (reading: string) => (stored === null ? reading : `${stored.label ?? stored.voiceId} unavailable · reading with ${reading}`);
   if (spoke !== undefined) {
     if (chosen !== null && spoke.provider === chosen.provider && spoke.voiceId === chosen.voiceId) return chosen.label ?? chosen.voiceId;
-    if (spoke.provider === DEFAULT_NARRATOR.provider && spoke.voiceId === DEFAULT_NARRATOR.voiceId) return DEFAULT_NARRATOR.label;
-    return spoke.voiceId;
+    return instead(spoke.provider === DEFAULT_NARRATOR.provider && spoke.voiceId === DEFAULT_NARRATOR.voiceId ? DEFAULT_NARRATOR.label : spoke.voiceId);
   }
-  return chosen === null ? DEFAULT_NARRATOR.label : (chosen.label ?? chosen.voiceId);
+  return chosen === null ? instead(DEFAULT_NARRATOR.label) : (chosen.label ?? chosen.voiceId);
 }
 
 /**

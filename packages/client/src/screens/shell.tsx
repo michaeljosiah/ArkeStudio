@@ -2320,6 +2320,15 @@ export function SettingsGeneralScreen() {
   // row names the shipped voice that reads there rather than a recording this world lacks.
   const narrator = stored && supportsVoiceUse(stored, "narration") && narratorAppliesTo(stored, worldIdForVoices) ? stored : null;
   const [narratorOpen, setNarratorOpen] = useState(false);
+  // Reset takes a second press (2026-10-02): on a phone it sat alone at the row's end, and one
+  // stray tap cleared a chosen narrator with nothing to say it had. The first press asks; the
+  // question lapses on its own.
+  const [resetArmed, setResetArmed] = useState(false);
+  useEffect(() => {
+    if (!resetArmed) return;
+    const lapse = setTimeout(() => setResetArmed(false), 4000);
+    return () => clearTimeout(lapse);
+  }, [resetArmed]);
   const navigate = useNavigate();
   const manifest = state?.app.manifest ?? null;
   const routing = state?.app.routing ?? { defaults: {}, faults: [] };
@@ -2421,15 +2430,22 @@ export function SettingsGeneralScreen() {
                 icon={<RotateCcw size={13} />}
                 hint={`${DEFAULT_NARRATOR.label} · Kokoro · free`}
                 testId="narrator-reset"
-                onClick={() => setNarrator(null)}
+                onClick={() => {
+                  if (!resetArmed) {
+                    setResetArmed(true);
+                    return;
+                  }
+                  setResetArmed(false);
+                  setNarrator(null);
+                }}
               >
-                Reset
+                {resetArmed ? `Reset to ${DEFAULT_NARRATOR.label}?` : "Reset"}
               </ActionButton>
             )}
           </>
         }
       >
-        {phone ? <button type="button" className="fy-narrator-default" onClick={() => setNarratorOpen(true)}><span>{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)} · {narrator ? (PROVIDER_TABLE[narrator.provider as keyof typeof PROVIDER_TABLE]?.displayName ?? narrator.provider) : "Kokoro"}</span><ChevronDown size={14} /></button> : <span data-testid="narrator-name">{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)}</span>}
+        {phone ? <button type="button" className="fy-narrator-default" aria-label="Change narrator" data-testid="narrator-change" onClick={() => setNarratorOpen(true)}><span>{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)} · {narrator ? (PROVIDER_TABLE[narrator.provider as keyof typeof PROVIDER_TABLE]?.displayName ?? narrator.provider) : "Kokoro"}</span><ChevronDown size={14} /></button> : <span data-testid="narrator-name">{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)}</span>}
         <span className="fy-fact__state">{readerChip}</span>
       </FactRow>
       {phone && <FactRow what={CAPABILITY_LABEL.llm}>

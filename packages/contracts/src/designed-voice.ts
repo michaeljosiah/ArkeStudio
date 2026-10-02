@@ -3,6 +3,7 @@ import type { VoiceCandidate } from "./voice.js";
 import { extractVoiceAttributes } from "./voice.js";
 import { quoteSpeech, type SpeechQuote } from "./speech-pricing.js";
 import type { ManifestModel } from "./manifest.js";
+import type { NarratorDesignedVoice } from "./settings.js";
 
 export const DesignedVoiceModelSchema = z.enum(["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"]);
 export const VoiceDesignDraftSchema = z.object({
@@ -42,12 +43,16 @@ export function isDesignedVoiceTarget(value: string): boolean { return value.sta
 export function resolveDesignedVoice(voices: readonly WorldDesignedVoice[], target: string): WorldDesignedVoice | undefined {
   return voices.find(voice => designedVoiceTarget(voice) === target);
 }
+/** What the narrator keeps of a designed voice (SPEC-049 R-12): identity and binding, never the world's sample path. */
+export function narratorDesignedRecord(voice: Pick<WorldDesignedVoice, keyof NarratorDesignedVoice>): NarratorDesignedVoice {
+  return { id: voice.id, revision: voice.revision, name: voice.name, description: voice.description, language: voice.language, model: voice.model, remoteId: voice.remoteId, expiresAt: voice.expiresAt };
+}
 export function parseDesignedVoices(raw: unknown): WorldDesignedVoice[] {
   const entries = (raw as { voices?: unknown } | null)?.voices;
   if (!Array.isArray(entries)) return [];
   return entries.flatMap(entry => { const parsed = DesignedVoiceSchema.safeParse(entry); return parsed.success ? [parsed.data] : []; });
 }
-export function designedVoiceCandidates(voices: readonly WorldDesignedVoice[], at = Date.now()): VoiceCandidate[] {
+export function designedVoiceCandidates(voices: readonly Pick<WorldDesignedVoice, "id" | "revision" | "name" | "description" | "expiresAt">[], at = Date.now()): VoiceCandidate[] {
   return voices.flatMap(voice => DesignedVoiceModelSchema.options.map(model => ({
     provider: "google", model, voiceId: designedVoiceTarget(voice), label: voice.name,
     attributes: extractVoiceAttributes(voice.description), local: false, canClone: false, readsDesigned: voice.id,
