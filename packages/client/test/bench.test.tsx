@@ -739,7 +739,18 @@ describe("the bench in voice mode (design 70)", () => {
     assert.doesNotMatch(html, /aria-label="Delivery"/);
   });
 
-  it("does not carry an old provider's delivery onto a cloned voice", () => {
+  it("puts the line's direction under its words: the note, Sent as, speed and the delivery from the direction (design turn 181)", () => {
+    const html = render({ voiceId: "vale", voiceProvider: "elevenlabs", voiceLabel: "Vale", direction: { delivery: "cold", speed: 1.1, cues: [], note: "flat" } });
+    assert.match(html, /data-testid="bench-voice-direction"/);
+    assert.match(html, /aria-label="Note"/);
+    assert.match(html, /4 \/ 300/);
+    assert.match(html, /data-testid="sent-as"/);
+    assert.match(html, /<select aria-label="Speed"[^>]*>/);
+    assert.match(html, /<option value="cold" selected="">cold<\/option>/, "the delivery is the direction's");
+    assert.match(html, /placeholder="The words to speak · \[ for a marker"/);
+  });
+
+  it("holds an old provider's delivery on a cloned voice, named, never offered as one it reads (design turn 181)", () => {
     const state = voiceState({ voiceId: "clone", voiceProvider: "comfyui", voiceLabel: "Clone", delivery: "breaking" });
     const clone: ManifestModel = {
       ...TTS,
@@ -767,7 +778,8 @@ describe("the bench in voice mode (design 70)", () => {
         session: { ...state.bench!.session, composer: { ...state.bench!.session.composer, provider: clone.provider, model: clone.id } },
       },
     });
-    assert.match(html, /delivery · default only/);
+    // Held, not dropped: the direction stays with the line and says it is held on this reader.
+    assert.match(html, /<option[^>]*>breaking · held<\/option>/);
     assert.doesNotMatch(html, /<option[^>]*>breaking<\/option>/);
   });
 });

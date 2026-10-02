@@ -1,5 +1,5 @@
 import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   AUDIOBOOK_DELIVERIES,
   AUDIOBOOK_TITLE_KEY,
@@ -21,7 +21,6 @@ import {
   cueStart,
   holdDirection,
   mapCadence,
-  markerMode,
   markerSegments,
   performanceNote,
   normalizeSpeechText,
@@ -36,9 +35,7 @@ import {
   type AudiobookBlock,
   type AudiobookBlockState,
   type AudiobookDirectionInput,
-  type CadenceCue,
   type CadencePlan,
-  type DeliveryMarker,
   type HeldControl,
   type AudiobookReader,
   type AudiobookReading,
@@ -49,6 +46,11 @@ import {
   type ManifestModel,
 } from "@arke-studio/contracts";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
+import { DirectedText, MarkerMenu, VIEW_HASH, cueLabel, markerLabel, viewPlan, type MarkerAt } from "../components/voice-direction.js";
+
+// The marker and cue words moved to the shared direction module (design turn 181); kept here too
+// for the callers and tests that name them from the audiobook.
+export { cueLabel, markerLabel, type MarkerAt };
 import { useMediaQuery } from "../lib/media-query.js";
 import { ChevronDown, Mic, Pin, Play, Plus, Waveform } from "../components/icons.js";
 import { EditorDialog } from "../components/editor-dialog.js";
@@ -162,12 +164,6 @@ export interface BlockRow {
   byNarrator: boolean;
 }
 
-/** A plan for the view alone: the window holds no digest of the words, and none is checked here. */
-const VIEW_HASH = `sha256:${"0".repeat(64)}`;
-function viewPlan(input: AudiobookDirectionInput): CadencePlan {
-  return { schemaVersion: 1, sourceTextHash: VIEW_HASH, ...(input.delivery !== undefined ? { delivery: input.delivery } : {}), speed: input.speed, cues: input.cues, ...(input.note !== undefined ? { note: input.note } : {}) };
-}
-
 /** The block's direction as it stands for its words (R-43): the record's, or carried from earlier words. */
 export function rowDirection(record: ChapterAudiobook | null, block: Pick<AudiobookBlock, "key" | "text">): BlockRow["direction"] {
   const standing = audiobookDirectionFor(record, block);
@@ -196,14 +192,6 @@ export function directionView(text: string, input: AudiobookDirectionInput | nul
   } catch {
     return null;
   }
-}
-
-/** A marker's word on the page (R-42): `[whispered]`, `[pause]`, `[breath]`, `[emphasis]`, `[sighs]`. */
-export function markerLabel(cue: CadenceCue): string {
-  if (cue.kind === "delivery") return `[${[cue.delivery, cue.phrase].filter((part) => part !== undefined).join(" · ")}]`;
-  if (cue.kind === "sound") return `[${cue.sound}]`;
-  if (cue.kind === "pause") return cue.length === "long" ? "[long pause]" : "[pause]";
-  return `[${cue.kind}]`;
 }
 
 /** The filter over the blocks (R-33): everyone, the narrator, or one speaker by key. */
@@ -861,222 +849,6 @@ function SpeakerMenu({ row, choices, onPick, onClose }: {
   );
 }
 
-/**
- * Where each character of the normalised words sits in the block's own text (R-42): a cue's
- * offsets are the normalised words', while the page shows the prose as written, wraps and all,
- * so a selection keeps meaning the words the person chose. One entry past the end.
- */
-function normalisedToRaw(raw: string): number[] {
-  const map: number[] = [];
-  let index = 0;
-  while (index < raw.length && /\s/.test(raw[index]!)) index += 1;
-  let space = -1;
-  for (; index < raw.length; index += 1) {
-    if (/\s/.test(raw[index]!)) {
-      if (space < 0) space = index;
-      continue;
-    }
-    if (space >= 0) map.push(space);
-    space = -1;
-    map.push(index);
-  }
-  map.push(space >= 0 ? space : raw.length);
-  return map;
-}
-
-/** Where a sentence that begins at `from` ends, for a delivery marker placed at a caret (R-42). */
-function sentenceEnd(text: string, from: number): number {
-  const rest = text.slice(from);
-  const end = rest.search(/[.!?…]["'”’)\]]*(\s|$)/);
-  if (end < 0) return text.length;
-  const match = rest.slice(end).match(/^[.!?…]["'”’)\]]*/);
-  return from + end + (match?.[0].length ?? 1);
-}
-
-/**
- * The block's words with its markers in place (R-42): each its word in brackets on a plate —
- * drawn by the stylesheet from `data-mk`, so the plate is no text of the page and a selection's
- * offsets still count the words alone — a delivery marker's span underlined, a held control
- * struck (R-47). A press on a plate opens the menu to change or remove it.
- */
-function BlockText({ raw, cues, held, onPlate }: { raw: string; cues: readonly CadenceCue[]; held: ReadonlySet<number>; onPlate?: (index: number) => void }) {
-  if (cues.length === 0) return <>{raw}</>;
-  const map = normalisedToRaw(raw);
-  const at = (normalised: number) => map[Math.min(Math.max(normalised, 0), map.length - 1)]!;
-  const cuts = new Set<number>([0, map.length - 1]);
-  for (const cue of cues) {
-    cuts.add(cueStart(cue));
-    if (cue.kind === "emphasis" || cue.kind === "delivery") cuts.add(cue.span.to);
-  }
-  const edges = [...cuts].filter((edge) => edge >= 0 && edge <= map.length - 1).sort((a, b) => a - b);
-  const plate = (cue: CadenceCue, index: number) => (
-    <span
-      key={`mk${index}`}
-      className={`fy-ab__mk${cue.kind === "delivery" ? "" : " fy-ab__mk--cue"}${held.has(index) ? " fy-ab__mk--held" : ""}`}
-      data-mk={markerLabel(cue)}
-      role="button"
-      tabIndex={-1}
-      aria-label={`${markerLabel(cue)}${held.has(index) ? " · held" : ""}`}
-      onClick={(event) => {
-        event.stopPropagation();
-        onPlate?.(index);
-      }}
-    />
-  );
-  const out: ReactNode[] = [];
-  // Words before the first edge the normalisation trimmed — leading space — stay as written.
-  if (at(0) > 0) out.push(raw.slice(0, at(0)));
-  for (let index = 0; index < edges.length; index += 1) {
-    const from = edges[index]!;
-    cues.forEach((cue, cueIndex) => {
-      if (cueStart(cue) === from) out.push(plate(cue, cueIndex));
-    });
-    const to = edges[index + 1];
-    if (to === undefined) break;
-    const words = raw.slice(at(from), at(to));
-    if (words === "") continue;
-    const marked = cues.some((cue) => cue.kind === "delivery" && cue.span.from <= from && cue.span.to >= to);
-    const stressed = cues.some((cue) => cue.kind === "emphasis" && cue.span.from <= from && cue.span.to >= to);
-    out.push(
-      marked || stressed ? (
-        <span key={`w${from}`} className={`${marked ? "fy-ab__mks" : ""}${stressed ? `${marked ? " " : ""}fy-ab__emph` : ""}`}>
-          {words}
-        </span>
-      ) : (
-        words
-      ),
-    );
-  }
-  if (at(map.length - 1) < raw.length) out.push(raw.slice(at(map.length - 1)));
-  return <>{out}</>;
-}
-
-/** Where the marker menu is open: a block, the words or caret it was opened at, and the marker pressed when one was. */
-export interface MarkerAt {
-  key: string;
-  span: { from: number; to: number };
-  edit?: number;
-}
-
-/**
- * The marker menu (design turn 155f, SPEC-047 R-42): a search, the six deliveries, the four
- * cues and a phrase. What the block's reader cannot do is struck with the reason as its hint,
- * never accepted to be flagged later. From a caret a delivery marker runs to the end of the
- * sentence and a cue sits at the caret; an emphasis needs words.
- */
-function MarkerMenu({ row, at, model, onApply, onClose }: {
-  row: BlockRow;
-  at: MarkerAt;
-  model: ManifestModel | null;
-  onApply: (cues: CadenceCue[] | null) => void;
-  onClose: () => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [phrase, setPhrase] = useState<string | null>(null);
-  const text = normalizeSpeechText(row.block.text);
-  const base = row.direction?.input ?? { delivery: "measured" as const, speed: 1, cues: [] };
-  const editing = at.edit === undefined ? undefined : base.cues[at.edit];
-  const caret = at.span.from === at.span.to;
-  const span = editing !== undefined && (editing.kind === "delivery" || editing.kind === "emphasis") ? editing.span : { from: at.span.from, to: caret ? sentenceEnd(text, at.span.from) : at.span.to, text: "" };
-  const words = { from: span.from, to: span.to, text: text.slice(span.from, span.to) };
-  const support = model === null ? null : cadenceSupport(model, row.language);
-  const match = (label: string) => label.toLowerCase().includes(query.trim().toLowerCase());
-  // A marker placed replaces what it would break (R-40): another marker over the same words,
-  // and an emphasis across its edge; the cue being changed is replaced by its new self.
-  const place = (cue: CadenceCue) => {
-    const others = base.cues.filter((other, index) => {
-      if (index === at.edit) return false;
-      if (cue.kind === "delivery" && (other.kind === "delivery" || other.kind === "emphasis")) {
-        const overlaps = other.span.from < cue.span.to && other.span.to > cue.span.from;
-        if (!overlaps) return true;
-        return other.kind === "emphasis" && other.span.from >= cue.span.from && other.span.to <= cue.span.to;
-      }
-      if (cue.kind === "emphasis" && other.kind === "emphasis") return !(other.span.from < cue.span.to && other.span.to > cue.span.from);
-      if ((cue.kind === "pause" || cue.kind === "breath") && other.kind === cue.kind) return other.at !== cue.at;
-      return true;
-    });
-    onApply([...others, cue].sort((a, b) => cueStart(a) - cueStart(b)));
-  };
-  const struck = (reason: string | null) => (reason === null ? null : `${model?.displayName ?? "this reader"} ${reason}`);
-  const deliveryReason = (delivery: DeliveryMarker["delivery"]) => {
-    if (model === null) return "no reader";
-    if (words.text.trim() === "") return "no words";
-    const mode = markerMode({ kind: "delivery", span: words, ...(delivery !== undefined ? { delivery } : {}), ...(delivery === undefined ? { phrase: "x" } : {}) }, viewPlan(base), model, row.language, text.length);
-    return mode.mode === "unsupported" ? mode.reason : null;
-  };
-  const chip = (key: string, label: string, reason: string | null, on: boolean, press: () => void) =>
-    match(label) ? (
-      <button
-        key={key}
-        type="button"
-        className={`fy-ab__mchip${on ? " fy-ab__mchip--on" : ""}${reason !== null ? " fy-ab__mchip--struck" : ""}`}
-        disabled={reason !== null}
-        title={struck(reason) ?? label}
-        onClick={press}
-      >
-        {label}
-      </button>
-    ) : null;
-  const cueReason = (kind: "pause" | "breath" | "emphasis") => {
-    if (support === null) return "no reader";
-    if (kind === "emphasis" && caret && editing === undefined) return "select words";
-    return support[kind].status === "unsupported" ? (support[kind].reason ?? `no ${kind}`) : null;
-  };
-  const point = caret ? at.span.from : undefined;
-  return (
-    <div className="fy-ab__menu fy-ab__menu--marker" role="menu" aria-label="Marker" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === "Escape" && onClose()}>
-      <input className="fy-ab__menu-search" placeholder="Marker" aria-label="Marker" value={query} autoFocus onChange={(event) => setQuery(event.target.value)} />
-      <div className="fy-ab__menu-eb">Delivery</div>
-      <div className="fy-ab__mgrid">
-        {AUDIOBOOK_DELIVERIES.map((delivery) =>
-          chip(`d:${delivery}`, delivery, deliveryReason(delivery), editing?.kind === "delivery" && editing.delivery === delivery, () =>
-            place({ kind: "delivery", span: words, delivery, ...(editing?.kind === "delivery" && editing.phrase !== undefined ? { phrase: editing.phrase } : {}) }),
-          ),
-        )}
-      </div>
-      <div className="fy-ab__menu-eb">Cue</div>
-      <div className="fy-ab__mgrid">
-        {chip("c:short", "pause · short", cueReason("pause"), editing?.kind === "pause" && editing.length === "short", () => place({ kind: "pause", at: point ?? span.to, length: "short" }))}
-        {chip("c:long", "pause · long", cueReason("pause"), editing?.kind === "pause" && editing.length === "long", () => place({ kind: "pause", at: point ?? span.to, length: "long" }))}
-        {chip("c:breath", "breath", cueReason("breath"), editing?.kind === "breath", () => place({ kind: "breath", at: point ?? span.from, action: "inhale" }))}
-        {chip("c:emphasis", "emphasis", cueReason("emphasis"), editing?.kind === "emphasis", () => place({ kind: "emphasis", span: words, level: "moderate" }))}
-      </div>
-      <div className="fy-ab__menu-sep" />
-      {phrase === null ? (
-        (() => {
-          const reason = deliveryReason(undefined);
-          return (
-            <button type="button" role="menuitem" className="fy-ab__menu-opt" disabled={reason !== null} title={struck(reason) ?? "Phrase"} onClick={() => setPhrase(editing?.kind === "delivery" ? (editing.phrase ?? "") : "")}>
-              <span className={`fy-ab__menu-label${reason !== null ? " fy-ab__mchip--struck" : ""}`}>Phrase…</span>
-              <span className="fy-ab__menu-meta">60</span>
-            </button>
-          );
-        })()
-      ) : (
-        <input
-          className="fy-ab__menu-search fy-mono"
-          aria-label="Phrase"
-          maxLength={60}
-          value={phrase}
-          autoFocus
-          onChange={(event) => setPhrase(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter") return;
-            const trimmed = phrase.trim();
-            if (trimmed === "") return;
-            place({ kind: "delivery", span: words, phrase: trimmed.slice(0, 60), ...(editing?.kind === "delivery" && editing.delivery !== undefined ? { delivery: editing.delivery } : {}) });
-          }}
-        />
-      )}
-      {editing !== undefined && (
-        <button type="button" role="menuitem" className="fy-ab__menu-opt" onClick={() => onApply(base.cues.filter((_, index) => index !== at.edit))}>
-          <span className="fy-ab__menu-label">Remove</span>
-        </button>
-      )}
-    </div>
-  );
-}
-
 export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, onSelect, onPlayOne, slug, filter = null, choices, onPin, marker = null, onMarker, modelOf, onDirect }: {
   rows: BlockRow[];
   sounding: BlockRow | null;
@@ -1191,7 +963,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
                 setMenu({ key: row.block.key, selection: span });
               }}
             >
-              <BlockText
+              <DirectedText
                 raw={row.block.text}
                 cues={row.direction?.input.cues ?? []}
                 held={new Set(row.held.flatMap((control) => (control.cueIndex !== undefined ? [control.cueIndex] : [])))}
@@ -1200,7 +972,9 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
             </span>
             {marker?.key === row.block.key && markable && (
               <MarkerMenu
-                row={row}
+                text={normalizeSpeechText(row.block.text)}
+                base={row.direction?.input ?? { delivery: "measured", speed: 1, cues: [] }}
+                {...(row.language !== undefined ? { language: row.language } : {})}
                 at={marker}
                 model={modelOf?.(row.speaker) ?? null}
                 onClose={() => onMarker(null)}
@@ -1301,20 +1075,6 @@ function supportWord(support: { status: string; method?: string; reason?: string
 
 /** The seg's three speeds, the plan's own range narrowed to what a hand would choose. */
 const SPEEDS = [0.9, 1, 1.1] as const;
-
-/**
- * A cue in the panel's words: `pause · long · after works,`. The words are the block's, verbatim
- * (turn 165): a line's own quotation marks are already in them, so wrapping them in ours printed
- * `““Whoever cut the tenth key,””` (issue 1324 §3). The plate beside it says what the marker is.
- */
-export function cueLabel(text: string, cue: CadencePlan["cues"][number]): string {
-  const after = (at: number) => `after ${text.slice(Math.max(0, at - 12), at).replace(/^\S*\s/, "").trim()}`;
-  if (cue.kind === "pause") return `pause · ${cue.length} · ${after(cue.at)}`;
-  if (cue.kind === "breath") return `${cue.action} · before ${text.slice(cue.at, cue.at + 12).replace(/\s\S*$/, "").trim()}`;
-  if (cue.kind === "delivery") return cue.span.text;
-  if (cue.kind === "sound") return `${cue.sound} · ${after(cue.at)}`;
-  return `emphasis · ${cue.level} · ${cue.span.text}`;
-}
 
 /**
  * Where the window's selection sits in the block's words, as a span of the normalised text
@@ -1766,7 +1526,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
             </span>
           </span>
         </div>
-        {markerMenu !== null && <MarkerMenu row={row} at={markerMenu} model={model} onClose={() => setMarkerMenu(null)} onApply={cues => { setMarkerMenu(null); send(cues === null ? null : { ...base, cues }); }} />}
+        {markerMenu !== null && <MarkerMenu text={text} base={base} {...(row.language !== undefined ? { language: row.language } : {})} at={markerMenu} model={model} onClose={() => setMarkerMenu(null)} onApply={cues => { setMarkerMenu(null); send(cues === null ? null : { ...base, cues }); }} />}
         {(report !== null || refused !== null) && (
           <p className={`fy-ch__stamp fy-mono${refused !== null ? " fy-ch__who-where--warn" : ""}`} data-testid="audiobook-report">
             {refused ?? report}

@@ -30,10 +30,13 @@ import {
   presetFault,
   supportedDeliveries,
   tiersFor,
+  voiceSourceFor,
   unresolvedBenchMentions,
   type BenchMode,
   type BenchParams,
   type BenchReferenceToken,
+  type BenchVoiceParams,
+  directionSaysAnything,
   type BenchSession,
   type BenchTake,
   type ManifestModel,
@@ -76,6 +79,16 @@ import { Button, Badge, cx } from "../components/ui.js";
 import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
 import { ComposerMic } from "../components/dictation.js";
+import {
+  BenchVoiceDirection,
+  benchDirectionOf,
+  benchDirectionSummary,
+  benchMarkerAt,
+  benchSent,
+  editBenchBrief,
+  withBenchDirection,
+} from "../components/bench-voice-direction.js";
+import type { MarkerAt } from "../components/voice-direction.js";
 import { dismissQueueNote } from "../components/queue-toaster.js";
 import {
   Book,
@@ -125,6 +138,9 @@ import {
   worldPickerSources,
   type PickerSource,
 } from "../components/reference-picker.js";
+
+/** The line's speed (design turn 181a): the plan's range in steps; what a reader cannot take is held. */
+const VOICE_SPEEDS = [0.8, 0.9, 1, 1.1, 1.2] as const;
 
 /**
  * The bench (issue 305; design 68b/68c): one picture or one shot made with no production
@@ -509,6 +525,29 @@ function BenchWorkspace({
   const soundOnly = speaking || singing;
   const musicParams = draft.params.kind === "music" ? draft.params : null;
   const voiceDeliveries = draft.params.kind === "voice" ? supportedDeliveries(model) : [];
+  const voiceParams = draft.params.kind === "voice" ? draft.params : null;
+  const voiceDirection = voiceParams === null ? null : benchDirectionOf(voiceParams);
+  /**
+   * The brief as edited, in both editors (design turn 181c): in Voice mode a typed or pasted tag
+   * becomes its marker and every marker already placed follows the edit, and a menu open on the
+   * old words closes, since its place in them has moved.
+   */
+  const onBriefChange = (brief: string) => {
+    if (voiceParams === null) {
+      compose({ ...draft, brief });
+      return;
+    }
+    setVoiceMarker(null);
+    const edited = editBenchBrief(draft.brief, brief, benchDirectionOf(voiceParams));
+    compose({ ...draft, brief: edited.brief, params: withBenchDirection(voiceParams, edited.direction) });
+  };
+  const onBracket = (start: number, end: number) => setVoiceMarker(benchMarkerAt(draft.brief, start, end));
+  // A cloned voice's recording language is the line's (issue 1163): it decides a paren reader's tags.
+  const voiceLanguage = ((): string | undefined => {
+    if (voiceParams?.voiceId === undefined || model === null) return undefined;
+    const source = voiceSourceFor(world?.clonedVoices ?? [], model.provider, model.id, voiceParams.voiceId);
+    return source.kind === "cloned" ? source.voice.language : undefined;
+  })();
   const laneTabs = !soundOnly && (frameModes.length > 0 || (draft.mode === "video" && frames.length > 0));
   /**
    * What the route does with the pictures, on the Keyframe control's hint and nowhere else
@@ -565,6 +604,11 @@ function BenchWorkspace({
   const [presetsOpen, setPresetsOpen] = useState(false);
   const [durationOpen, setDurationOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  // The Voice brief's direction (design turn 181): the marker menu where it is open, the note
+  // field `Note…` focuses, and the brackets the author chose to keep as words.
+  const [voiceMarker, setVoiceMarker] = useState<MarkerAt | null>(null);
+  const voiceNote = useRef<HTMLInputElement | null>(null);
+  const [keptBrackets, setKeptBrackets] = useState<ReadonlySet<string>>(() => new Set());
   const presets = state?.app.presets ?? [];
   // Which providers a stored key actually unlocks, per capability - the presets menu judges
   // its rows with the same evidence the model dropdown does.
@@ -873,13 +917,22 @@ function BenchWorkspace({
 
   const restore = (take: BenchTake) => {
     sendBenchSelectTake(worldId, session.id, take.id);
-    // Selection restores the immutable snapshot into the composer (issue 305 §3).
+    setVoiceMarker(null);
+    // Selection restores the immutable snapshot into the composer (issue 305 §3). A line read
+    // before design turn 181 may hold a reader's tags in its words: they come back as markers.
+    const restoredParams = bindSubjectParams(take.request.params);
+    const restored = restoredParams.kind === "voice"
+      ? (() => {
+          const edited = editBenchBrief(take.request.brief, take.request.brief, benchDirectionOf(restoredParams));
+          return { brief: edited.brief, params: withBenchDirection(restoredParams, edited.direction) as BenchParams };
+        })()
+      : { brief: take.request.brief, params: restoredParams };
     compose({
       mode: take.request.mode,
       provider: take.request.provider,
       model: take.request.model,
-      params: bindSubjectParams(take.request.params),
-      brief: take.request.brief,
+      params: restored.params,
+      brief: restored.brief,
     });
     // ...and the pictures it was made with. Restoring the words and the settings but not the
     // images gave back a request that could not be re-made: press ⟲ on a take built from a
@@ -929,8 +982,12 @@ function BenchWorkspace({
       return each * draft.params.count;
     }
     if (draft.params.kind === "voice") {
-      // Character readers price the typed words; token readers show the authorised ceiling.
-      return estimateSpeechMicroUsd(candidate, draft.brief, draft.params.delivery) * draft.params.count;
+      // Character readers price what they are sent — the words with this reader's tags in
+      // (design turn 181); token readers show the authorised ceiling.
+      // An undirected line goes as typed, as the coordinator sends it.
+      const direction = benchDirectionOf(draft.params);
+      const sent = directionSaysAnything(direction) ? benchSent(draft.brief, direction, candidate, voiceLanguage) : null;
+      return estimateSpeechMicroUsd(candidate, sent?.text ?? draft.brief) * draft.params.count;
     }
     if (draft.params.kind === "music") {
       // A ceiling, and the only honest kind of number here: the route calls its length an upper
@@ -1708,16 +1765,19 @@ function BenchWorkspace({
           <div className={cx("fy-bench__brief", singing && "fy-bench__brief--style")}>
             <BenchBrief
               value={draft.brief}
-              onChange={(brief) => compose({ ...draft, brief })}
+              onChange={onBriefChange}
               options={mentions}
               worldSlug={worldSlug}
               underlay={briefWithChips(draft.brief, tokens, attached)}
-              label={singing ? "Style" : "Brief"}
+              label={singing ? "Style" : speaking ? "Words" : "Brief"}
               placeholder={
                 singing
                   ? "Instrumentation, mood, arrangement — what the song sounds like, not what it says."
-                  : "Say what to make. Type @ to cite a reference."
+                  : speaking
+                    ? "The words to speak · [ for a marker"
+                    : "Say what to make. Type @ to cite a reference."
               }
+              {...(voiceParams !== null ? { onBracket } : {})}
             />
             <PromptCapabilityNotices text={draft.brief} model={model} />
             <div className="fy-bench__brieffoot">
@@ -1843,6 +1903,23 @@ function BenchWorkspace({
             <p className="fy-bench__refusal" data-testid="bench-lost-mentions">
               {`${lostMentions.map((token) => `@${token}`).join(", ")} — not attached`}
             </p>
+          )}
+          {/* The line's direction under its words (design turn 181a–d): plates, the note and
+              exactly what this reader is sent, the same model the audiobook writes. */}
+          {voiceParams !== null && (
+            <BenchVoiceDirection
+              brief={draft.brief}
+              direction={benchDirectionOf(voiceParams)}
+              model={model}
+              {...(voiceLanguage !== undefined ? { language: voiceLanguage } : {})}
+              marker={voiceMarker}
+              noteRef={voiceNote}
+              kept={keptBrackets}
+              onMarker={setVoiceMarker}
+              onDirection={(direction) => compose({ ...draft, params: withBenchDirection(voiceParams, direction) })}
+              onBrief={(brief, direction) => compose({ ...draft, brief, params: withBenchDirection(voiceParams, direction) })}
+              onKeep={(bracket) => setKeptBrackets((was) => new Set([...was, bracket]))}
+            />
           )}
 
           {/* The second of the two things a song asks for (design turn 73). Its own box, not a
@@ -1985,34 +2062,43 @@ function BenchWorkspace({
                   <Waveform size={12} />
                   {draft.params.voiceLabel ?? "choose a voice"}
                 </button>
-                {voiceDeliveries.length > 0 ? (
+                {voiceDeliveries.length > 0 || voiceDirection?.delivery !== undefined ? (
                   <select
                     aria-label="Delivery"
                     className="fy-bench__chip"
-                    value={draft.params.delivery ?? ""}
+                    value={voiceDirection?.delivery ?? ""}
                     onChange={(e) => {
-                      const { delivery: _cleared, ...rest } = draft.params as BenchParams & {
-                        delivery?: string;
-                      };
-                      compose({
-                        ...draft,
-                        params: {
-                          ...rest,
-                          ...(e.target.value ? { delivery: e.target.value } : {}),
-                        } as BenchParams,
-                      });
+                      if (voiceParams === null || voiceDirection === null) return;
+                      const { delivery: _cleared, ...rest } = voiceDirection;
+                      const delivery = DELIVERIES.find((candidate) => candidate === e.target.value);
+                      compose({ ...draft, params: withBenchDirection(voiceParams, delivery !== undefined ? { ...rest, delivery } : rest) });
                     }}
                   >
                     <option value="">delivery · default</option>
-                    {DELIVERIES.filter((delivery) => voiceDeliveries.includes(delivery)).map((delivery) => (
+                    {DELIVERIES.filter((delivery) => voiceDeliveries.includes(delivery) || delivery === voiceDirection?.delivery).map((delivery) => (
                       <option key={delivery} value={delivery}>
-                        {delivery}
+                        {voiceDeliveries.includes(delivery) ? delivery : `${delivery} · held`}
                       </option>
                     ))}
                   </select>
                 ) : (
                   <span className="fy-bench__chip">delivery · default only</span>
                 )}
+                <select
+                  aria-label="Speed"
+                  className="fy-bench__chip"
+                  value={String(voiceDirection?.speed ?? 1)}
+                  onChange={(e) => {
+                    if (voiceParams === null || voiceDirection === null) return;
+                    compose({ ...draft, params: withBenchDirection(voiceParams, { ...voiceDirection, speed: Number(e.target.value) }) });
+                  }}
+                >
+                  {VOICE_SPEEDS.map((speed) => (
+                    <option key={speed} value={String(speed)}>
+                      {`${speed.toFixed(1)}×`}
+                    </option>
+                  ))}
+                </select>
                 <select
                   aria-label="How many reads"
                   className="fy-bench__chip"
@@ -2296,15 +2382,11 @@ function BenchWorkspace({
                         voiceProvider: _voiceProvider,
                         voiceModel: _voiceModel,
                         voiceLabel: _voiceLabel,
-                        delivery,
                         ...rest
                       } = params;
-                      params = {
-                        ...rest,
-                        ...(delivery !== undefined && supportedDeliveries(chosen).includes(delivery)
-                          ? { delivery }
-                          : {}),
-                      };
+                      // The direction stays with the line (design turn 181): what the new
+                      // reader cannot take is held, struck and named, never dropped.
+                      params = withBenchDirection(rest, benchDirectionOf(params));
                     }
                     compose({
                       ...draft,
@@ -2510,8 +2592,16 @@ function BenchWorkspace({
                           <span className="fy-bench__voicename">{selected.request.params.voiceLabel}</span>
                         )}
                       {selected.request.params.kind === "voice" &&
-                        selected.request.params.delivery !== undefined && (
-                          <span className="fy-bench__voicedelivery">{selected.request.params.delivery}</span>
+                        benchDirectionSummary(selected.request.params).length > 0 && (
+                          <span
+                            className="fy-bench__voicedelivery"
+                            {...(selected.request.speech !== undefined ? { title: selected.request.speech.text } : {})}
+                          >
+                            {[
+                              ...benchDirectionSummary(selected.request.params),
+                              ...((selected.request.speech?.held.length ?? 0) > 0 ? [`${selected.request.speech!.held.length} held`] : []),
+                            ].join(" · ")}
+                          </span>
                         )}
                       {/* The model, then the length that was actually made — never the ceiling
                           it was asked at (design turn 73). */}
@@ -2764,18 +2854,15 @@ function BenchWorkspace({
               return;
             }
             setVoiceOpen(false);
-            const currentParams =
+            const currentParams: BenchVoiceParams =
               draft.params.kind === "voice" ? draft.params : { kind: "voice" as const, count: 1 };
-            const { delivery: currentDelivery, ...withoutDelivery } = currentParams;
-            const keepDelivery =
-              currentDelivery !== undefined &&
-              supportedDeliveries(chosenModel).includes(currentDelivery);
+            // The direction stays with the line across a change of voice (design turn 181):
+            // what the new reader cannot take is held, struck and named, never dropped.
             compose({
               ...draft,
               // The label rides with the id so a take can name its voice without the catalogue.
               params: {
-                ...withoutDelivery,
-                ...(keepDelivery ? { delivery: currentDelivery } : {}),
+                ...withBenchDirection(currentParams, benchDirectionOf(currentParams)),
                 voiceId: voice.voiceId,
                 voiceProvider: voice.provider,
                 voiceModel: voice.model,
@@ -2922,12 +3009,22 @@ function BenchWorkspace({
                 variant="large"
                 autoFocus
                 value={draft.brief}
-                onChange={(brief) => compose({ ...draft, brief })}
+                onChange={onBriefChange}
                 options={mentions}
                 worldSlug={worldSlug}
                 underlay={briefWithChips(draft.brief, tokens, attached)}
-                label="Brief"
+                label={speaking ? "Words" : "Brief"}
                 onEscape={() => setBriefExpanded(false)}
+                {...(voiceParams !== null
+                  ? {
+                      // The marker menu lives under the composer's brief: `[` here closes the
+                      // window onto it, at the same words.
+                      onBracket: (start: number, end: number) => {
+                        setBriefExpanded(false);
+                        onBracket(start, end);
+                      },
+                    }
+                  : {})}
               />
               <PromptCapabilityNotices text={draft.brief} model={model} />
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
@@ -2997,7 +3094,7 @@ function takeMeta(take: BenchTake): string {
           : played !== undefined
             ? `${Math.round(played)}s`
             : undefined,
-    p.kind === "voice" ? p.delivery : p.kind === "music" ? undefined : p.aspect,
+    p.kind === "voice" ? (benchDirectionSummary(p).join(" · ") || undefined) : p.kind === "music" ? undefined : p.aspect,
     // A clip's length as measured, to one decimal, a whole second without the trailing zero
     // (turn 147): `720p · 9:16 · 4.0s` is the design's chip with the figure as it really is.
     p.kind === "video" && played !== undefined

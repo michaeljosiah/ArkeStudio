@@ -1,5 +1,6 @@
-import { quoteSpeech, speechInputFits, supportedDeliveries } from "@arke-studio/contracts";
-import { compileLine } from "../voice/direction.js";
+import { benchVoiceDirection, directionSaysAnything, quoteSpeech, recogniseDirection, speechInputFits } from "@arke-studio/contracts";
+import { createHash } from "node:crypto";
+import { compileLine, type CompiledLine } from "../voice/direction.js";
 import { stageArtifactProblem } from "../productions/stage-playblast.js";
 import { planCastCharacterAudio, planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem, type FrozenPerformanceAudio } from "@arke-studio/contracts";
 import { castNameFor, referenceRouteModel, referenceSheetId, referenceRouteRefusal, referenceSubjectLines, whoFor, REFERENCE_ROUTE } from "@arke-studio/contracts";
@@ -48,7 +49,6 @@ import {
   type BenchTake,
   type BoundReference,
   type Capability,
-  type Delivery,
   type ManifestModel,
   type ModelManifest,
   type MultimediaReference,
@@ -999,24 +999,36 @@ export function planBenchDispatch(
       : {}),
   };
 
-  // A delivery this reader cannot express refuses here rather than being dropped on the way
-  // out: a take that silently ignores the direction is a take the user has to listen to before
-  // discovering the direction never applied (SPEC-011 R-15). What it can is compiled by the one
-  // compiler every speech surface shares (SPEC-049 R-28, design turn 181): the reader's tag in
-  // the words, its sentence beside them, its numbers — and the job names no delivery, so no
-  // client adds a second tag of its own.
+  // The line's direction (design turn 181), compiled by the one compiler every speech surface
+  // shares (SPEC-049 R-28): the reader's tags in the words, its sentence beside them, its
+  // numbers — and the job names no delivery, so no client adds a second tag of its own. What
+  // this reader cannot take is held and named on the take, never spoken and never refused: the
+  // composer has already shown it struck under Sent as. A tag still typed in the words is the
+  // one thing refused — it would be read aloud (R-22), and the composer turns it into a marker.
   const voiceLanguage = params.kind === "voice" && params.voiceId !== undefined ? (() => {
     const source = voiceSourceFor(bundle.clonedVoices, model.provider, model.id, params.voiceId!);
     return source.kind === "cloned" ? source.voice.language : undefined;
   })() : undefined;
-  let directed: { text: string; voiceSettings: Record<string, number>; instructions?: string; directionHash: string } | null = null;
-  if (params.kind === "voice" && params.delivery !== undefined) {
-    if (!supportedDeliveries(model).includes(params.delivery as Delivery)) {
-      return { ok: false, reason: `${model.displayName} cannot express "${params.delivery}".` };
+  let directed: CompiledLine | null = null;
+  // The words the line says: the brief, less any reader's tag it still held.
+  let voiceWords = composer.brief;
+  if (params.kind === "voice") {
+    // A line written before design turn 181 — a take run again, a draft never edited since — may
+    // hold a reader's tags in its words, which every other reader would speak. They are read as
+    // the markers they name, as the composer reads them; a line that holds both a direction and
+    // tags is the composer's to settle, and refused.
+    const typed = recogniseDirection(composer.brief);
+    const stated = benchVoiceDirection(params);
+    if (typed.cues.length > 0 && params.direction !== undefined) {
+      return { ok: false, reason: "A tag is in the words · it would be read aloud. Open the line to make it a marker." };
     }
-    const compiled = compileLine(composer.brief, { delivery: params.delivery as Delivery, speed: 1, cues: [] }, model, voiceLanguage, "strict");
-    if (!compiled.ok) return { ok: false, reason: compiled.kind === "held" ? `${model.displayName} cannot express "${params.delivery}".` : compiled.reason };
-    directed = compiled.line;
+    voiceWords = typed.cues.length > 0 ? typed.raw : composer.brief;
+    const direction = typed.cues.length > 0 ? { ...(stated ?? { speed: 1 }), cues: typed.cues } : stated;
+    if (directionSaysAnything(direction)) {
+      const compiled = compileLine(voiceWords, direction, model, voiceLanguage, "hold");
+      if (!compiled.ok) return { ok: false, reason: compiled.reason };
+      directed = compiled.line;
+    }
   }
   if (params.kind === "voice") {
     if (!speechInputFits(directed?.text ?? composer.brief, model.limits, directed?.instructions)) {
@@ -1104,6 +1116,18 @@ export function planBenchDispatch(
     };
     const snapshot: BenchRequestSnapshot = {
       ...snapshotBase,
+      // What the reader was sent (design turn 181): the take says what went and what was held.
+      ...(directed !== null
+        ? {
+            speech: {
+              text: directed.text,
+              ...(directed.instructions !== undefined ? { style: directed.instructions } : {}),
+              providerTextHash: `sha256:${createHash("sha256").update(directed.text).digest("hex")}`,
+              directionHash: directed.directionHash,
+              held: directed.held.map((held) => ({ control: held.control, reason: held.reason })),
+            },
+          }
+        : {}),
       ...(local.seed !== undefined ? { requestedSeed: local.seed } : {}),
       ...(local.sampling !== undefined ? { sampling: local.sampling } : {}),
       params: params.kind === "video" ? { ...params } : { ...params, count: 1 },
@@ -1234,7 +1258,7 @@ export function planBenchDispatch(
           // The direction as the compiler wrote it for this reader (design turn 181): the words
           // with its tags in, its numbers, its sentence, and the hash that marks the text as
           // compiled — never the delivery's name, which a client would turn into a second tag.
-          ...(directed !== null ? { authoredText: composer.brief, voiceSettings: directed.voiceSettings, directionHash: directed.directionHash, ...(directed.instructions !== undefined ? { instructions: directed.instructions } : {}) } : {}),
+          ...(directed !== null ? { authoredText: voiceWords, voiceSettings: directed.voiceSettings, directionHash: directed.directionHash, ...(directed.instructions !== undefined ? { instructions: directed.instructions } : {}) } : {}),
           // A cloned voice's recording language is the line's (issue 1163): the reader routes and
           // tags by it, and the estimate counts the tag it would put in.
           ...(voiceSource.kind === "cloned" ? { language: voiceSource.voice.language } : {}),

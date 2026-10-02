@@ -92,6 +92,15 @@ export function migratePlanNote(raw: unknown): unknown {
 export const CadencePlanSchema = z.preprocess(migratePlanNote, CadencePlanObjectSchema);
 export type CadencePlan = z.infer<typeof CadencePlanObjectSchema>;
 
+/**
+ * A direction as a surface writes it (design turn 181): the plan without its hashes, which the
+ * coordinator supplies from the words — the audiobook's block, the Bench's line, a shot's line.
+ * An old `phrase` reads as the note.
+ */
+export const VoiceDirectionInputObjectSchema = CadencePlanObjectSchema.omit({ schemaVersion: true, sourceTextHash: true });
+export const VoiceDirectionInputSchema = z.preprocess(migratePlanNote, VoiceDirectionInputObjectSchema);
+export type VoiceDirectionInput = z.infer<typeof VoiceDirectionInputObjectSchema>;
+
 export const CadenceCapabilitiesSchema = z.object({
   deliveries: z.array(DeliverySchema), speed: z.object({ min: z.number().positive(), max: z.number().positive() }).strict().nullable(),
   /**
@@ -554,24 +563,34 @@ export function holdDirection(text: string, plan: CadencePlan, model: Pick<Manif
   return { plan: { ...rest, speed, cues: plan.cues.filter((_, index) => !dropCue.has(index)), ...(note !== undefined ? { note } : {}) }, held };
 }
 
+/** Why a one-request surface holds a marker its reader could only make in parts. */
+export const ONE_REQUEST_HOLD = "needs a read in parts";
+
 /**
  * What a reader gets for one request's words (design turn 181's `Sent as`): the style beside
  * the text, the text with this reader's syntax in, the numbers, and what is held with the
  * reason. A marker the row makes in parts is a request of its own on the audiobook (R-41); it
- * is named in `parts` (by its index in the plan) so a one-request surface can hold it. Throws
- * as `mapCadence` does on a plan that is wrong for its words.
+ * is named in `parts` (by its index in the plan), and with `oneRequest` — the Bench, a shot's
+ * line, which join no parts — it is held as well, by name, and left out of what is sent. Held
+ * controls come in plan order. Throws as `mapCadence` does on a plan that is wrong for its words.
  */
-export function sentAs(text: string, plan: CadencePlan, model: Pick<ManifestModel, "id" | "provider" | "providerModelId" | "cadence">, language?: string): {
-  text: string; style?: string; voiceSettings: Record<string, number>; held: HeldControl[]; parts: number[];
+export function sentAs(text: string, plan: CadencePlan, model: Pick<ManifestModel, "id" | "provider" | "providerModelId" | "cadence">, language?: string, options: { oneRequest?: boolean } = {}): {
+  text: string; style?: string; voiceSettings: Record<string, number>; held: HeldControl[]; parts: number[]; sent: CadencePlan;
 } {
-  const { plan: sent, held } = holdDirection(text, plan, model, language);
+  const { plan: kept, held } = holdDirection(text, plan, model, language);
   const whole = normalizeSpeechText(text);
-  const parts: number[] = [];
-  for (const cue of sent.cues) {
-    if (cue.kind === "delivery" && markerMode(cue, sent, model, language, whole.length).mode === "parts") parts.push(plan.cues.indexOf(cue));
+  const parted = kept.cues.filter((cue): cue is DeliveryMarker => cue.kind === "delivery" && markerMode(cue, kept, model, language, whole.length).mode === "parts");
+  const parts = parted.map((cue) => plan.cues.indexOf(cue));
+  let sent = kept;
+  if (options.oneRequest === true && parted.length > 0) {
+    for (const index of parts) held.push({ control: "marker", cueIndex: index, reason: ONE_REQUEST_HOLD });
+    sent = { ...kept, cues: kept.cues.filter((cue) => !(parted as CadenceCue[]).includes(cue)) };
   }
+  // The order a person reads them in: the delivery and speed, the markers in the words, the note.
+  const rank = (control: HeldControl) => (control.cueIndex !== undefined ? control.cueIndex : control.control === "note" ? Number.MAX_SAFE_INTEGER : control.control === "speed" ? -1 : -2);
+  held.sort((a, b) => rank(a) - rank(b));
   const mapped = mapCadence(text, sent.sourceTextHash, sent, model, language);
-  return { text: mapped.providerText, ...(mapped.instructions !== undefined ? { style: mapped.instructions } : {}), voiceSettings: mapped.voiceSettings, held, parts };
+  return { text: mapped.providerText, ...(mapped.instructions !== undefined ? { style: mapped.instructions } : {}), voiceSettings: mapped.voiceSettings, held, parts, sent };
 }
 
 export interface CadenceControlSupport { status: "mapped" | "best-effort" | "unsupported"; method?: string; reason?: string }

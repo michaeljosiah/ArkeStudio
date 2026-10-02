@@ -44,6 +44,7 @@ export function BenchBrief({
   autoFocus = false,
   disabled = false,
   onEscape,
+  onBracket,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -59,6 +60,11 @@ export function BenchBrief({
   disabled?: boolean;
   /** Escape with no menu open — the write-large window closes on it. */
   onEscape?: () => void;
+  /**
+   * `[` at the caret or on a selection, where the brief is a line to be spoken (design turn
+   * 181b): the key opens the marker menu instead of typing, so the words never hold a tag.
+   */
+  onBracket?: (start: number, end: number) => void;
 }) {
   const listId = useId();
   const text = useRef<HTMLTextAreaElement>(null);
@@ -200,6 +206,13 @@ export function BenchBrief({
   const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
     // Mid-composition every key belongs to the IME, Enter above all: it commits the candidate.
     if (event.nativeEvent.isComposing) return;
+    // AltGr layouts (German, French) type `[` with Ctrl+Alt held: that is still the bracket.
+    const altGraph = event.nativeEvent.getModifierState?.("AltGraph") === true;
+    if (event.key === "[" && onBracket !== undefined && (altGraph || (!event.ctrlKey && !event.metaKey && !event.altKey))) {
+      event.preventDefault();
+      onBracket(event.currentTarget.selectionStart ?? 0, event.currentTarget.selectionEnd ?? 0);
+      return;
+    }
     if (open) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
