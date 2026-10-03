@@ -64,6 +64,24 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 @keyframes drift{from{transform:translateY(0)}to{transform:translateY(-7px)}}
 @keyframes barFill{from{width:4%}to{width:78%}}@keyframes kenburns{from{transform:scale(1)}to{transform:scale(1.08)}}@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
 /* Turn 127: settings narrator catalogue. Scoped to these proposed drawings. */
+/* t185 */
+.v185-grp{position:relative;padding-left:14px}
+.v185-grp::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:2px;background:var(--neutral-400)}
+.v185-grp.now::before{background:var(--foreground)}
+.v185-gl{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);padding:8px 0 0}
+.v185-dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:1px;background:var(--neutral-400)}
+.v185-dot.made{background:var(--foreground)}.v185-dot.flag{background:var(--destructive)}
+.v185-flag{display:flex;align-items:center;gap:10px;margin-top:4px;font:var(--type-mono);font-size:var(--text-xs);color:var(--foreground)}
+.v185-flag .grow{flex:1}
+.v185-wave{height:34px;border-radius:8px;background:repeating-linear-gradient(90deg,var(--neutral-400) 0 2px,transparent 2px 5px);opacity:.55;position:relative}
+.v185-wave i{position:absolute;top:-3px;bottom:-3px;border-left:2px solid var(--foreground)}
+.v185-wave b{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--foreground) 14%,transparent);border-radius:4px}
+.v185-panel{width:560px;margin:22px auto;border:1px solid var(--border);border-radius:14px;padding:20px 22px;display:flex;flex-direction:column;gap:12px;background:var(--background);box-shadow:0 18px 50px color-mix(in srgb,var(--foreground) 10%,transparent)}
+.v185-panel h3{margin:0;font:var(--type-ui);font-weight:600}
+.v185-row{display:flex;align-items:center;gap:12px;font-size:var(--text-sm)}
+.v185-row b{width:90px;flex:none;font:var(--type-label);font-weight:500;color:var(--muted-foreground)}
+.v185-row .mono{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+/* /t185 */
 /* t184 */
 .v184-head{display:flex;align-items:center;gap:10px;height:46px;padding:0 34px;border-bottom:1px solid var(--border);font:var(--type-ui)}
 .v184-head .mono{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
