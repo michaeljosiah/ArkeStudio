@@ -1306,9 +1306,12 @@ export function planBenchDispatch(
   }
   if (model.capability === "voice-tts" && model.pricing.kind === "perToken" && options.speechAuthorisation !== undefined) {
     const confirmed = options.speechAuthorisation.confirmedMicroUsd;
-    // The composer's estimate, against these words' now (SPEC-049 R-6): by the words alone, as
-    // estimateSpeechMicroUsd says why, so a sentence the screen left out never refuses the take.
-    const total = inputs.reduce((sum, input) => sum + quoteSpeech(model, String(input.params.text ?? ""), { at: options.at }).expectedMicroUsd, 0);
+    // The composer's estimate, against these words' now (SPEC-049 R-6): by the authored words
+    // alone, as estimateSpeechMicroUsd says why. Not the compiled text: a pre-turn-181 brief's
+    // typed `[pause]` compiles to `<short pause>` here while the composer priced it as typed,
+    // and the take was refused until the brief was edited (review of PR 1477). The authored
+    // words are what the composer's figure always covers; a rate rise still refuses.
+    const total = inputs.reduce((sum, input) => sum + quoteSpeech(model, String(input.params.authoredText ?? input.params.text ?? ""), { at: options.at }).expectedMicroUsd, 0);
     // A $0 read — a free plan's (design turn 182) — has nothing to authorise.
     if (total > 0 && (confirmed === undefined || total > confirmed)) {
       return { ok: false, reason: "The speech price needs confirmation. Review the current price in the composer and press Generate." };
