@@ -62,6 +62,8 @@ import {
   WorldChatProductionBoardExportActionSchema,
   WorldChatProductionTakeImportActionSchema,
   WorldChatProductionTakeGenerationActionSchema,
+  WorldChatProductionTakeFileActionSchema,
+  WorldChatProductionShotFrameClearActionSchema,
   WorldChatProductionTakeReviewActionSchema,
   WorldChatProductionTakeTrimActionSchema,
   WorldChatProductionStagePlayblastActionSchema,
@@ -123,7 +125,6 @@ import {
   type WorldChatReferenceResultUseAction,
   type WorldChatVoiceAssignmentAction,
   type WorldChatProductionTakeImportAction,
-  type WorldChatProductionTakeGenerationAction,
   type WorldChatProductionCutExportAction,
   type WorldChatBenchGenerationAction,
   type ModelEditorRequest,
@@ -150,6 +151,8 @@ import type {
   PreparedConversationActionAuthority,
 } from "../arke-actions/lifecycle.js";
 import { ConversationActionLifecycle, conversationActionDigest } from "../arke-actions/lifecycle.js";
+import type { ProductionTakeFiling } from "./production-take-filing.js";
+import { clearShotFrame } from "../takes/boundary.js";
 import type { GenerationQuotes } from "./generation-quotes.js";
 import { buildItemsFence, type ArkeBuildItemRead } from "./target-reads.js";
 import {
@@ -159,7 +162,6 @@ import {
   type AcceptOutcome,
   type ProposalManager,
 } from "../gate/proposals.js";
-import { discoverBenchSessions } from "../bench/service.js";
 import {
   decideEditorRequest,
   productionOfContext,
@@ -354,15 +356,12 @@ export interface WorldChatActionAdapterDeps {
     action: WorldChatProductionTakeImportAction["action"],
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
   ) => Promise<{ status: "completed" | "cancelled" | "failed"; id?: string; detail?: string }>;
-  /** Opens a prepared Bench subject. Provider execution remains a separate confirmation in Bench. */
-  readonly openProductionTakeGeneration?: (
-    action: WorldChatProductionTakeGenerationAction["action"],
-    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
-  ) => Promise<{ status: "completed" | "failed"; id?: string; detail?: string }>;
   readonly getExports?: () => readonly ArkeExportReadRecord[];
   readonly getJobs?: () => readonly import("@arke-studio/contracts").Job[];
   readonly getBuildItems?: () => readonly ArkeBuildItemRead[];
   readonly generationQuotes?: GenerationQuotes;
+  readonly productionGenerationQuotes?: GenerationQuotes;
+  readonly productionTakeFiling?: ProductionTakeFiling;
   readonly buildGenerationQuotes?: GenerationQuotes;
   readonly benchGenerationQuotes?: GenerationQuotes;
   readonly quoteBenchGeneration?: (
@@ -473,6 +472,8 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-board-export": ["scenes", "takes", "artifacts"],
   "production-take-import": ["scenes", "takes"],
   "production-take-generation": ["scenes", "takes"],
+  "production-take-file": ["scenes", "takes"],
+  "production-shot-frame-clear": ["scenes", "takes"],
   "production-take-review": ["takes"],
   "production-take-trim": ["takes"],
   "production-stage-playblast": ["scenes"],
@@ -667,6 +668,8 @@ function productionActionTargets(
       { requirement: "artifacts", target: worldId },
     ];
     case "production-take-import":
+    case "production-take-file":
+    case "production-shot-frame-clear":
     case "production-take-generation": return [
       { requirement: "scenes", target: `${action.productionId}:${action.sceneId}` },
       { requirement: "takes", target: action.productionId },
@@ -821,6 +824,8 @@ function preparedWorldPayload(
     case "production-board-compile": return WorldChatProductionBoardCompileActionSchema.parse({ kind: "world-chat-production-board-compile", ...common });
     case "production-board-export": return WorldChatProductionBoardExportActionSchema.parse({ kind: "world-chat-production-board-export", ...common });
     case "production-take-import": return WorldChatProductionTakeImportActionSchema.parse({ kind: "world-chat-production-take-import", ...common });
+    case "production-take-file": return WorldChatProductionTakeFileActionSchema.parse({ kind: "world-chat-production-take-file", ...common });
+    case "production-shot-frame-clear": return WorldChatProductionShotFrameClearActionSchema.parse({ kind: "world-chat-production-shot-frame-clear", ...common });
     case "production-take-generation": return WorldChatProductionTakeGenerationActionSchema.parse({ kind: "world-chat-production-take-generation", ...common });
     case "production-take-review": return WorldChatProductionTakeReviewActionSchema.parse({ kind: "world-chat-production-take-review", ...common });
     case "production-take-trim": return WorldChatProductionTakeTrimActionSchema.parse({ kind: "world-chat-production-take-trim", ...common });
@@ -1155,6 +1160,8 @@ function worldActionTargets(
     case "production-take-generation": return action.target.kind === "shot"
       ? [{ kind: "shot", id: action.target.shotId, label: action.target.shotId }]
       : action.target.memberShotIds.map((shotId) => ({ kind: "shot", id: shotId, label: shotId }));
+    case "production-take-file": return [{ kind: "take", id: action.takeId, label: action.takeId }, { kind: "shot", id: action.shotId, label: action.shotId }];
+    case "production-shot-frame-clear": return [{ kind: "shot", id: action.shotId, label: action.shotId }];
     case "production-take-review": return [
       { kind: "take", id: action.takeId, label: action.takeId },
       ...(action.review.shotId ? [{ kind: "shot", id: action.review.shotId, label: action.review.shotId }] : []),
@@ -2761,39 +2768,39 @@ async function sharedResourceProjection(
       break;
     }
     case "world-chat-production-take-generation": {
-      authority = { kind: "bench", id: intent.actionId };
-      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
-      const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
-      if (!production || !scene) throw new Error("That scene is no longer in this production.");
-      const shotIds = payload.action.target.kind === "shot"
-        ? [payload.action.target.shotId]
-        : payload.action.target.memberShotIds;
-      if (shotIds.some((shotId) => !orderedShots(scene).some((shot) => shot.id === shotId))) {
-        throw new Error("A generation target is no longer in this scene.");
-      }
-      if (payload.action.retakeOf && !production.takes.some((take) => take.id === payload.action.retakeOf)) {
-        throw new Error("The take being retaken is no longer in this production.");
-      }
-      if (!deps.openProductionTakeGeneration) approvalBlockedReason = "The production generator is unavailable in this authoring session.";
+      authority = { kind: "job-queue", id: intent.actionId };
+      if (!deps.productionGenerationQuotes) approvalBlockedReason = "The production generation quote source is unavailable.";
+      const body = await deps.productionGenerationQuotes?.prepare(payload.action, intent.actionId, intent.createdAt);
       shown = {
-        title: payload.action.retakeOf ? "Prepare a retake" : "Prepare take generation",
-        consequence: "Opens the exact shot or board in Bench. Provider execution and result selection remain separate decisions.",
-        affectedTargets: [...intent.targets],
-        ripples: ["Opening Bench creates no generated media and selects no take."],
-        permissionReason: "authored-change",
-        body: {
-          family: "generation",
-          medium: payload.action.mode,
-          purpose: payload.action.retakeOf ? `Retake ${payload.action.retakeOf}` : `Generate ${payload.action.target.kind}`,
-          prompt: payload.action.instruction ?? "Use the scene's current inherited context and prompt overrides.",
-          references: payload.action.retakeOf ? [{ id: payload.action.retakeOf, role: "retake reference" }] : [],
-          provider: "Chosen in Bench",
-          model: "Chosen in Bench",
-          quantity: 1,
-          output: "One or more unselected production takes",
-          cost: "Opening Bench has no provider charge; generation is quoted there before it runs.",
-        },
+        title: payload.action.retakeOf ? "Generate a retake" : "Generate production takes",
+        consequence: "Dispatches the quoted image or video jobs and files immutable candidates on the named shots.",
+        affectedTargets: [...intent.targets], ripples: ["Results await a separate take-review decision; selections remain unchanged."],
+        permissionReason: "spend-and-compute",
+        body: body ?? { family: "generation", medium: payload.action.mode, purpose: "Production generation", prompt: "Unavailable",
+          provider: "Unavailable", model: "Unavailable", quantity: 1, references: [], output: "Unselected candidate takes", cost: "Quote unavailable" },
       };
+      break;
+    }
+    case "world-chat-production-take-file": {
+      authority = { kind: "bench", id: payload.action.sessionId };
+      if (!deps.productionTakeFiling) throw new Error("Bench take filing is unavailable.");
+      const body = await deps.productionTakeFiling.prepare(payload.action, intent.actionId);
+      shown = { title: "File and accept a Bench take", consequence: "Copies the reviewed Bench result into the shot and records acceptance and selection together.",
+        affectedTargets: [...intent.targets], ripples: ["The Bench result and its original settings remain available.",
+          ...(body.mediaKind === "video" ? ["Acceptance can seed the following shot when its frame slot is empty."] : [])], permissionReason: "authored-change", body };
+      break;
+    }
+    case "world-chat-production-shot-frame-clear": {
+      authority = { kind: "take-review", id: intent.actionId };
+      const production = bundle.productions.find(p => p.meta.id === payload.action.productionId);
+      const scene = production?.scenes.find(s => s.id === payload.action.sceneId);
+      const shot = scene && orderedShots(scene).find(s => s.id === payload.action.shotId);
+      if (!production || !scene || !shot) throw new Error("That shot is no longer available.");
+      const selected = production.selections[shot.id];
+      shown = { title: `Clear the start frame for ${shot.title}`, consequence: "Clears the start-frame pointer; the immutable image and accepted video take remain available.",
+        affectedTargets: [...intent.targets], ripples: [], permissionReason: "authored-change",
+        body: { family: "command", commands: [{ label: "Clear start frame", detail: `${selected?.startFrameArtifactId ?? selected?.startFrameTakeId ?? "None"} → None` }],
+          expectedResult: "The shot has no selected start frame.", undoAvailable: false } };
       break;
     }
     case "world-chat-production-take-review": {
@@ -3740,12 +3747,18 @@ async function executeSharedResource(
         ? { status: "completed", receipt: { kind: "take", id: result.id ?? action.actionId, summary: "The image was recorded as an unselected immutable take." } }
         : { status: result.status, detail: result.detail };
     }
-    case "world-chat-production-take-generation": {
-      if (!deps.openProductionTakeGeneration) return { status: "failed", detail: "The production generator is unavailable." };
-      const result = await deps.openProductionTakeGeneration(payload.action, options);
-      return result.status === "completed"
-        ? { status: "completed", receipt: { kind: "bench-session", id: result.id ?? action.actionId, summary: "The generation intent was opened in Bench; no provider ran and no take was selected." } }
-        : { status: "failed", detail: result.detail };
+    case "world-chat-production-take-generation":
+      return deps.productionGenerationQuotes?.dispatch(payload.action, action.actionId) ?? { status: "failed", detail: "The production generation quote is unavailable." };
+    case "world-chat-production-take-file": {
+      const filed = await deps.productionTakeFiling?.file(payload.action, action.actionId, precondition);
+      if (!filed) throw new Error("Bench take filing is unavailable.");
+      if (!filed.benchRecorded) return { status: "running", detail: "Production filing is durable; its Bench link needs reconciliation." };
+      return { status: "completed", receipt: { kind: "production-take-file", id: filed.productionTakeIds[0]!, summary: "The Bench take was filed and accepted on the reviewed shot." } };
+    }
+    case "world-chat-production-shot-frame-clear": {
+      const cleared = await clearShotFrame(store, payload.action.productionId, payload.action.shotId, { ...options, precondition });
+      if (!cleared.ok) throw new Error(cleared.reason);
+      return { status: "completed", receipt: { kind: "shot-frame", id: payload.action.shotId, summary: "The shot's start frame was cleared." } };
     }
     case "world-chat-production-take-review": {
       const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
@@ -4362,6 +4375,8 @@ export function worldChatActionAdapters(
   const sharedResource = (actionKind: WorldChatPreparedAction["kind"]): ConversationActionAuthorityAdapter => {
     const abandon = async (id: string) => {
       await deps.generationQuotes?.abandon(id);
+      await deps.productionGenerationQuotes?.abandon(id);
+      await deps.productionTakeFiling?.abandon(id);
       await deps.buildGenerationQuotes?.abandon(id);
       await deps.benchGenerationQuotes?.abandon(id);
       await removePreparation(store, "world", id);
@@ -4373,7 +4388,7 @@ export function worldChatActionAdapters(
     };
     return {
       actionKind,
-      ...(actionKind === "world-chat-production-take-generation" ? { obsoletePermissionReasons: ["spend-and-compute" as const] } : {}),
+      ...(actionKind === "world-chat-production-take-generation" ? { obsoletePermissionReasons: ["authored-change" as const] } : {}),
       prepare: async ({ intent, payload }) => {
         const current = observationsCurrent(store, intent, deps);
         if (!current.ok) throw new Error(current.detail);
@@ -4445,20 +4460,11 @@ export function worldChatActionAdapters(
       },
       deny: (action) => abandon(action.actionId),
       reconcile: async (action) => {
-        if (action.actionKind === "world-chat-production-take-generation") {
-          const sessionId = `sess_${action.actionId.slice(4)}`;
-          if ((await discoverBenchSessions(store.dir)).some((session) => session.id === sessionId)) {
-            await removePreparation(store, "world", action.actionId);
-            return {
-              status: "completed",
-              receipt: {
-                kind: "bench-session",
-                id: sessionId,
-                summary: "The generation intent was opened in Bench; no provider ran and no take was selected.",
-              },
-            };
-          }
+        if (action.actionKind === "world-chat-production-take-file") {
+          const filed = await deps.productionTakeFiling?.reconcile(action.actionId);
+          if (filed) return { status: "completed", receipt: { kind: "production-take-file", id: filed.productionTakeIds[0]!, summary: "The Bench take was filed and accepted on the reviewed shot." } };
         }
+        if (action.actionKind === "world-chat-production-take-generation") return deps.productionGenerationQuotes?.reconcile(action) ?? null;
         if (action.actionKind === "world-chat-production-routing-traversal" && action.productionId) {
           if (await hasTraversalRequest(store, action.productionId, action.actionId)) {
             await removePreparation(store, "world", action.actionId);
@@ -4688,6 +4694,8 @@ export function worldChatActionAdapters(
     "world-chat-production-board-export",
     "world-chat-production-take-import",
     "world-chat-production-take-generation",
+    "world-chat-production-take-file",
+    "world-chat-production-shot-frame-clear",
     "world-chat-production-take-review",
     "world-chat-production-take-trim",
     "world-chat-production-stage-playblast",

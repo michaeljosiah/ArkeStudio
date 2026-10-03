@@ -1,6 +1,8 @@
 import { stageReferenceFrames } from "@arke-studio/contracts";
 import { GenerationQuotes } from "../../src/world-chat/generation-quotes.js";
 import { imageGenerationSource } from "../../src/world-chat/image-generation.js";
+import { ProductionTakeFiling } from "../../src/world-chat/production-take-filing.js";
+import { BenchStore, sessionDir, sessionMediaDir } from "../../src/bench/store.js";
 import { createProp, addPropState } from "../../src/references/props.js";
 import { fileArtifact } from "../../src/artifacts/filing.js";
 import assert from "node:assert/strict";
@@ -26,7 +28,6 @@ import {
   type WorldChangeCandidate,
   type WorldChatContext,
   type WorldChatCheckReceipt,
-  type WorldChatProductionTakeGenerationAction,
 } from "@arke-studio/contracts";
 import { ConversationActionLifecycle, conversationActionDigest } from "../../src/arke-actions/lifecycle.js";
 import { ARKE_CLIENT_COMMAND_REGISTRY, worldChatActionDescriptor } from "../../src/arke-actions/registry.js";
@@ -138,9 +139,22 @@ describe("conversational props", () => {
   });
 });
 
+function quotedProduction(store: WorldStore, admitted: () => void) {
+  return new GenerationQuotes(store, { compile: async action => {
+    assert.equal(action.kind, "production-take-generation");
+    if (action.kind !== "production-take-generation") throw new Error("Wrong action");
+    return { inputs: [{ worldId: store.worldId, productionId: action.productionId,
+      target: { kind: "shot", id: action.target.kind === "shot" ? action.target.shotId : action.target.memberShotIds[0] },
+      capability: action.mode, provider: "fal", model: "test-model", estimatedMicroUsd: 40_000,
+      params: { prompt: action.instruction ?? "Resolved production prompt" } }],
+      body: { family: "generation", medium: action.mode, purpose: "Production take", prompt: action.instruction ?? "Resolved production prompt",
+        references: [], provider: "fal", model: "test-model", quantity: 1, output: "Unselected candidate", cost: "Pending quote" } };
+  } }, { enqueue: async () => { admitted(); }, jobs: () => [] });
+}
+
 async function setup(
   entryContext: WorldChatContext = { kind: "world" },
-  actionDeps: WorldChatActionAdapterDeps = {},
+  actionDeps: WorldChatActionAdapterDeps | ((store: WorldStore) => WorldChatActionAdapterDeps) = {},
 ) {
   const dir = await makeTempWorld();
   const store = await WorldStore.open(dir, { clock: NOW });
@@ -150,14 +164,15 @@ async function setup(
   const log = new WorldChatStore(conversationDir(dir, conversationId));
   await log.create(conversationId, AT);
   await log.append({ type: "conversation.created", title: "Actions", entryContext }, { at: AT });
-  const adapters = worldChatActionAdapters(store, gate, NOW, actionDeps);
+  const resolvedDeps = typeof actionDeps === "function" ? actionDeps(store) : actionDeps;
+  const adapters = worldChatActionAdapters(store, gate, NOW, resolvedDeps);
   const lifecycle = new ConversationActionLifecycle({
     worldPath: dir,
     worldId: store.worldId,
     adapters,
     now: NOW,
   });
-  return { store, gate, conversationId, log, lifecycle, adapters, entryContext, actionDeps };
+  return { store, gate, conversationId, log, lifecycle, adapters, entryContext, actionDeps: resolvedDeps };
 }
 
 async function loaded(log: WorldChatStore) {
@@ -1704,10 +1719,10 @@ describe("World Chat authority adapters", () => {
     assert.equal((await decide(w.lifecycle, w.log, card, "deny")).status, "denied");
   });
 
-  it("stales a legacy spend-labelled Bench handoff with guidance to prepare a new card", async () => {
+  it("stales a legacy authored-change Bench handoff before it can authorize generation", async () => {
     let opened = 0;
     const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
-    const w = await setup(context, { openProductionTakeGeneration: async () => { opened++; return { status: "completed", id: "bench" }; } });
+    const w = await setup(context, store => ({ productionGenerationQuotes: quotedProduction(store, () => { opened++; }) }));
     const scene = currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`);
     const takes = currentReceipt(w.store, "takes", PRODUCTION);
     const one = turn(w.conversationId, context, { receipts: [scene, takes], actions: [{ kind: "production-take-generation", productionId: PRODUCTION, sceneId: context.sceneId,
@@ -1717,7 +1732,7 @@ describe("World Chat authority adapters", () => {
     const { intent, payload } = prepared[0]!;
     const adapter = w.adapters.find((candidate) => candidate.actionKind === intent.actionKind)!;
     const authority = await adapter.prepare!({ intent, payload });
-    const shown = { ...authority.shown, permissionReason: "spend-and-compute" as const };
+    const shown = { ...authority.shown, permissionReason: "authored-change" as const };
     const binding = ConversationActionBindingSchema.parse({ ...intent, authority: authority.authority, authorityRevision: authority.authorityRevision,
       previewDigest: conversationActionDigest(shown), shown, status: "pending", preparedAt: AT });
     await w.log.append({ type: "action.prepared", binding }, { at: AT });
@@ -1827,12 +1842,12 @@ describe("World Chat authority adapters", () => {
     assert.ok(artifacts.some((artifact) => artifact.kind === "board" && artifact.created === AT));
   });
 
-  it("imports an immutable take without selecting it and opens generation in Bench without dispatch", async () => {
+  it("imports an unselected take and dispatches quoted production generation only after approval", async () => {
     const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
     let imported = 0;
-    let opened: WorldChatProductionTakeGenerationAction["action"] | null = null;
+    let dispatched = 0;
     let actionStore: WorldStore;
-    const w = await setup(context, {
+    const w = await setup(context, store => ({
       importProductionTake: async (action, mutation) => {
         imported += 1;
         const takeId = `tk_${mutation.requestId.slice(4)}` as const;
@@ -1846,12 +1861,8 @@ describe("World Chat authority adapters", () => {
         );
         return { status: "completed", id: take.id };
       },
-      openProductionTakeGeneration: async (action, mutation) => {
-        assert.equal(mutation.precondition(), null);
-        opened = action;
-        return { status: "completed", id: `sess_${mutation.requestId.slice(4)}` };
-      },
-    });
+      productionGenerationQuotes: quotedProduction(store, () => { dispatched++; }),
+    }));
     actionStore = w.store;
     const selectedBefore = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
       .selections["sh_12"]?.acceptedTakeId;
@@ -1904,13 +1915,62 @@ describe("World Chat authority adapters", () => {
     await bindAll(w.lifecycle, generationPrepared);
     const generationCard = (await loaded(w.log)).actions.at(-1)!;
     assert.equal(generationCard.shown.body.family, "generation");
-    assert.equal(generationCard.shown.permissionReason, "authored-change", "opening Bench authorizes no spend");
-    if (generationCard.shown.body.family === "generation") assert.match(generationCard.shown.body.cost, /no provider charge/i);
-    assert.equal(opened, null);
-    assert.equal((await decide(w.lifecycle, w.log, generationCard)).status, "completed");
-    assert.deepEqual(opened, generationTurn.actions[0]);
+    assert.equal(generationCard.shown.permissionReason, "spend-and-compute");
+    if (generationCard.shown.body.family === "generation") assert.ok(generationCard.shown.body.estimatedMicroUsd! > 0);
+    assert.equal(dispatched, 0);
+    assert.equal((await decide(w.lifecycle, w.log, generationCard)).status, "queued");
+    assert.equal(dispatched, 1);
+    await decide(w.lifecycle, w.log, generationCard);
+    assert.equal(dispatched, 1, "repeated approval does not dispatch again");
     assert.equal(w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
       .selections["sh_12"]?.acceptedTakeId, selectedBefore);
+  });
+
+  it("reviews a Bench result before filing and clears only the approved shot frame", async () => {
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
+    const deps: { productionTakeFiling?: ProductionTakeFiling } = {};
+    const w = await setup(context, deps);
+    const sessionId = newId("sess");
+    const takeId = newId("tk");
+    const bench = new BenchStore(sessionDir(w.store.dir, sessionId));
+    await bench.create(sessionId, AT);
+    await bench.append({ type: "takes-reserved", takes: [{ id: takeId, n: 1, requestId: "test", createdAt: AT,
+      request: { mode: "image", brief: "An explored frame", provider: "fal", model: "test-image", references: [], keyframes: [], params: { kind: "image", count: 1, aspect: "16:9" } } }] }, { at: AT });
+    const mediaDir = join(w.store.dir, sessionMediaDir(sessionId, takeId));
+    await mkdir(mediaDir, { recursive: true });
+    await writeFile(join(mediaDir, "frame.png"), encodePng(solidImage(4, 4, [20, 40, 60, 255])));
+    await bench.append({ type: "take-completed", takeId, media: { file: "frame.png", hash: "sha256:deadbeefdeadbeef" }, completedAt: AT }, { at: AT });
+    deps.productionTakeFiling = new ProductionTakeFiling(w.store, { bench: async () => ({ session: (await bench.fold())!, store: bench }) });
+    const prepare = async (kind: "production-take-file" | "production-shot-frame-clear") => {
+      const receipts = [currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`), currentReceipt(w.store, "takes", PRODUCTION)];
+      const action = ModelWorldChatActionSchema.parse({ kind, productionId: PRODUCTION, sceneId: context.sceneId, shotId: "sh_12",
+        ...(kind === "production-take-file" ? { sessionId, takeId } : {}), checkReceiptIds: receipts.map(r => r.id) });
+      const one = turn(w.conversationId, context, { receipts, actions: [action] });
+      const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+      await appendTurn(w.log, one, prepared);
+      await bindAll(w.lifecycle, prepared);
+      return (await loaded(w.log)).actions.at(-1)!;
+    };
+    const before = structuredClone(w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!);
+    const denied = await prepare("production-take-file");
+    assert.equal(denied.shown.body.family, "take-review");
+    assert.equal((await decide(w.lifecycle, w.log, denied, "deny")).status, "denied");
+    assert.deepEqual(w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.selections, before.selections);
+    assert.equal((await bench.fold())!.takes[0]!.filedTakeIds, undefined);
+    const card = await prepare("production-take-file");
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const filed = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
+    const count = filed.takes.length;
+    assert.ok(filed.selections.sh_12!.startFrameArtifactId);
+    const video = filed.selections.sh_12!.acceptedTakeId;
+    await decide(w.lifecycle, w.log, card);
+    assert.equal(w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.takes.length, count);
+    const clear = await prepare("production-shot-frame-clear");
+    assert.equal((await decide(w.lifecycle, w.log, clear)).status, "completed");
+    const after = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
+    assert.equal(after.selections.sh_12!.startFrameArtifactId, null);
+    assert.equal(after.selections.sh_12!.acceptedTakeId, video);
+    assert.equal(after.takes.length, count);
   });
 
   it("shows rich take evidence, records cited rejection, and trims only the selected take", async () => {

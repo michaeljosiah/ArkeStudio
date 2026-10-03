@@ -3,7 +3,7 @@ import { readFile, readdir, rm } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { z } from "zod";
 import {
-  ArkeGenerationBodySchema, JobSchema, ModelWorldChatActionSchema, ulid,
+  ArkeGenerationBodySchema, JobSchema, ModelWorldChatActionSchema, isReplayableFinalization, ulid,
   type ArkeGenerationBody, type ConversationActionCard, type ModelWorldChatAction,
 } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
@@ -11,7 +11,7 @@ import type { WorldStore } from "../world/store.js";
 import type { ConversationActionExecutionOutcome } from "../arke-actions/lifecycle.js";
 import { conversationActionDigest } from "../arke-actions/lifecycle.js";
 import { atomicWriteFile } from "../world/atomic.js";
-import { readContainedImageReferences } from "../world/reference-files.js";
+import { readContainedImageReferences, readContainedVideoReferences } from "../world/reference-files.js";
 
 export interface GenerationQuoteSource {
   compile(action: ModelWorldChatAction, actionId: string, createdAt: string): Promise<{
@@ -23,6 +23,7 @@ export interface GenerationQuoteSource {
   }>;
   /** Bench reserves new take identities; those names do not change the authorized request. */
   compareInputs?(inputs: readonly EnqueueInput[]): unknown;
+  beforeDispatch?(action: ModelWorldChatAction, actionId: string, inputs: readonly EnqueueInput[], materialization: unknown, createdAt: string): Promise<void>;
   dispatch?(action: ModelWorldChatAction, actionId: string, inputs: readonly EnqueueInput[], materialization: unknown): Promise<ConversationActionExecutionOutcome>;
   reconcile?(card: ConversationActionCard, action: ModelWorldChatAction, inputs: readonly EnqueueInput[]): Promise<ConversationActionExecutionOutcome | null>;
 }
@@ -36,6 +37,7 @@ const QuoteSchema = z.object({
   body: ArkeGenerationBodySchema,
   inputs: z.array(InputSchema.extend({ idempotencyKey: JobSchema.shape.idempotencyKey })),
   dispatchStarted: z.boolean().default(false), admissionComplete: z.boolean().default(false),
+  admissionIndex: z.number().int().min(0).optional(),
   materialization: z.unknown().optional(),
 }).strict();
 type Quote = z.infer<typeof QuoteSchema>;
@@ -101,8 +103,12 @@ export class GenerationQuotes {
       const paths = input.params.references ?? [];
       if (!Array.isArray(paths) || !paths.every((path): path is string => typeof path === "string")) throw new Error("Invalid image references.");
       const files = await readContainedImageReferences(this.store.dir, paths);
+      const videoPaths = input.params.videoReferences ?? [];
+      if (!Array.isArray(videoPaths) || !videoPaths.every((path): path is string => typeof path === "string")) throw new Error("Invalid video references.");
+      const videos = await readContainedVideoReferences(this.store.dir, videoPaths);
       inputs.push({ ...input, params: { ...input.params,
         generationQuoteReferences: paths.map((file, index) => ({ file, hash: createHash("sha256").update(files[index]!.data).digest("hex") })),
+        ...(videoPaths.length ? { generationQuoteVideoReferences: videoPaths.map((file, index) => ({ file, hash: createHash("sha256").update(videos[index]!.data).digest("hex") })) } : {}),
       } });
     }
     const estimatedMicroUsd = inputs.reduce((sum, input) => sum + input.estimatedMicroUsd, 0);
@@ -143,6 +149,8 @@ export class GenerationQuotes {
     const existing = await this.read(id);
     if (existing?.dispatchStarted && existing.actionDigest === conversationActionDigest(action) && existing.body.quoteDigest === sealedDigest(existing)) return { status: "running", detail: "Rejoining the generation already authorized by this card." };
     const quote = await this.validate(action, id);
+    await this.source.beforeDispatch?.(action, id, quote.inputs, quote.materialization, quote.createdAt);
+    if (this.source.beforeDispatch) await this.validate(action, id);
     quote.dispatchStarted = true;
     await this.write(id, quote);
     if (this.source.dispatch) {
@@ -151,7 +159,11 @@ export class GenerationQuotes {
     }
     // The quote's keys survive any partial admission. An uncertain append is never retried by
     // this adapter: the existing queue reconciles its jobs, and missing work needs a new card.
-    try { for (const input of quote.inputs) await this.ports.enqueue(input); }
+    try { for (const [index, input] of quote.inputs.entries()) {
+      quote.admissionIndex = index;
+      await this.write(id, quote);
+      await this.ports.enqueue(input);
+    } }
     catch { return { status: "running", detail: "Generation admission was interrupted. Existing work needs reconciliation in Activity." }; }
     quote.admissionComplete = true;
     await this.write(id, quote);
@@ -162,14 +174,25 @@ export class GenerationQuotes {
     if (!quote?.dispatchStarted) return null;
     if (this.source.reconcile) return this.source.reconcile(card, quote.action, quote.inputs);
     const jobs = quote.inputs.map(input => this.ports.jobs().find(job => job.worldId === this.store.worldId && job.idempotencyKey === input.idempotencyKey));
+    if (!quote.admissionComplete && (quote.admissionIndex === undefined || jobs.some((job, index) => !job && index <= quote.admissionIndex!))) {
+      return { status: "running", detail: "Generation admission needs reconciliation in Activity; its uncertain purchase was not resubmitted." };
+    }
     if (jobs.some(job => job && !["succeeded", "failed", "cancelled"].includes(job.status))) return { status: "running", detail: "Generation jobs are still active or need reconciliation in Activity." };
     if (jobs.some(job => job?.finalization?.status === "pending")) return { status: "running", detail: "Generation results are being filed." };
+    if (jobs.some(job => job?.status === "succeeded" && job.finalization?.status === "failed" && isReplayableFinalization(job))) {
+      // The provider result is already paid for. Activity can repair its local filing; a
+      // terminal failed card would never hear that repair and would strand its dependents.
+      return { status: "running", detail: "Generation result filing needs retry in Activity; no provider resubmission is required." };
+    }
     const results = jobs.flatMap(job => {
       if (!job) return [];
       const take = this.store.getBundle().referenceTakes.find(take => take.jobId === job.id);
+      const production = this.store.getBundle().productions.find(production => production.meta.id === job.productionId);
+      const productionTake = job.params.generationQuoteProduction === true ? production?.takes.find(take => take.jobId === job.id && take.media) : undefined;
       const owner = take?.reference?.sheetId ?? take?.prop?.propId;
-      const mediaPath = take?.media && owner ? `references/${owner}/takes/${take.id}/${take.media}` : job.landedFiles?.[0];
-      return [{ id: take?.id ?? job.id, medium: "image" as const,
+      const mediaPath = job.params.generationQuoteProduction === true ? productionTake?.media ? `productions/${job.productionId}/takes/${productionTake.id}/${productionTake.media}` : undefined
+        : take?.media && owner ? `references/${owner}/takes/${take.id}/${take.media}` : job.landedFiles?.[0];
+      return [{ id: productionTake?.id ?? take?.id ?? job.id, medium: job.capability === "video" ? "video" as const : "image" as const,
       status: job.status === "succeeded" && job.finalization?.status !== "failed" && mediaPath ? "completed" as const : job.status === "cancelled" ? "cancelled" as const : "failed" as const,
       description: job.error ?? (job.finalization?.status === "failed" ? "Result filing needs retry in Activity."
         : job.status === "succeeded" && !mediaPath ? "The provider returned no landed media." : "Generation settled."),

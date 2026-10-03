@@ -56,7 +56,7 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
         }
       }
     }
-    for (const kind of ["frame-run-start", "bench-accept", "timeline-assemble", "derive-continuity", "read-audiobook-chapter", "export-manuscript"] as const) {
+    for (const kind of ["frame-run-start", "timeline-assemble", "derive-continuity", "read-audiobook-chapter", "export-manuscript"] as const) {
       const descriptor = ARKE_CLIENT_COMMAND_REGISTRY[kind];
       assert.equal(descriptor.classification, "supported-by-arke");
       if (descriptor.classification === "supported-by-arke") assert.deepEqual(descriptor.reachedBy, [], kind);
@@ -80,6 +80,8 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     }
     assert.deepEqual(paths("retire-entity"), ["canon-retire", "sheet-retire"], "chapter edits do not retire an entity");
     assert.deepEqual(paths("save-chapter"), ["production-chapter"], "authored chapter edits remain reachable");
+    assert.deepEqual(paths("bench-accept"), ["production-take-file"]);
+    assert.deepEqual(paths("clear-shot-frame"), ["production-shot-frame-clear"]);
     assert.deepEqual(paths("accept-take"), ["production-take-review"], "accept-and-select remains reachable");
     assert.deepEqual(paths("scene-command"), ["production-scene-command"], "the scene rename channel cannot perform shot commands");
   });

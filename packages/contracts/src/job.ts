@@ -86,17 +86,17 @@ export const REPLAYABLE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Whether a job's finalization can be replayed — the set above by target kind, plus the one
- * parameterised case: a shot job that asked for frame-slot landing (SPEC-036 §2.8). Its
- * finalization is pure local filing — the take rejoins by job id, the filing is fenced — so a
- * retry touches no provider and spends nothing. Bare `shot` stays out: a clip's finalization
- * moves media through a window a replay cannot re-enter.
+ * Whether a job's finalization can be replayed: named targets, frame-slot landing (SPEC-036
+ * §2.8), and quoted production candidates (SPEC-051 R-4). These paths rejoin durable take
+ * identities after media moves; quoted passes also repair missing segments. A retry only
+ * files local results and spends nothing. Legacy bare shots and passes keep their old policy.
  */
 export function isReplayableFinalization(job: {
   target: { kind: string };
   params: Record<string, unknown>;
 }): boolean {
   if (REPLAYABLE_FINALIZATION_TARGETS.has(job.target.kind)) return true;
+  if ((job.target.kind === "shot" || job.target.kind === "scene-pass") && job.params.generationQuoteProduction === true) return true;
   return (job.target.kind === "shot" || job.target.kind === "board-sheet") && job.params["landing"] === "frame-slot";
 }
 

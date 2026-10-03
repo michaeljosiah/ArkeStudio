@@ -93,6 +93,24 @@ describe("durable generation quotes (SPEC-050 R-11..20)", () => {
     assert.equal(h.queue.listJobs().length, 0);
   });
 
+  it("keeps a production-scoped reference result on its reference media path", async () => {
+    const h = await setup();
+    const source = { compile: async (...args: Parameters<typeof h.source.compile>) => {
+      const prepared = await h.source.compile(...args);
+      return { ...prepared, inputs: prepared.inputs.map(input => ({ ...input, productionId: "saltlight" })) };
+    } };
+    const quotes = new GenerationQuotes(h.store, source, { enqueue: input => h.queue.enqueue(input), jobs: () => h.queue.listJobs() });
+    const action = mainPhoto();
+    const id = newId("act");
+    await quotes.prepare(action, id, AT);
+    await quotes.dispatch(action, id);
+    await until(() => h.queue.listJobs()[0]?.finalization?.status === "complete", "scoped reference filing", 30_000);
+    await h.store.reload();
+    const outcome = await quotes.reconcile({ actionId: id } as ConversationActionCard);
+    assert.equal(outcome?.status, "completed");
+    assert.match(outcome?.receipt?.generation?.results[0]?.mediaPath ?? "", /^references\/maren-kest\/takes\//);
+  });
+
   it("refuses changed reference bytes at approval and again at provider dispatch", async () => {
     const h = await setup();
     const action: ModelWorldChatAction = { kind: "reference-generation", modelId: MODEL.id,
@@ -140,8 +158,9 @@ describe("durable generation quotes (SPEC-050 R-11..20)", () => {
     await quotes().dispatch(action, id);
     assert.equal(admissions, 1);
     const outcome = await quotes().reconcile({ actionId: id } as ConversationActionCard);
-    assert.equal(outcome?.receipt?.generation?.actualMicroUsd, null);
-    assert.match(outcome!.receipt!.summary, /interrupted/);
+    assert.equal(outcome?.status, "running", "a missing uncertain queue row is not proof that nothing was purchased");
+    assert.equal(outcome?.receipt, undefined);
+    assert.match(outcome?.detail ?? "", /needs reconciliation.*not resubmitted/);
   });
 
   it("files a generated prop-state candidate as a pending take without accepting it", async () => {

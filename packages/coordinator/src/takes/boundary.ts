@@ -21,7 +21,7 @@ import { hasOwnFrame, ulid, type ArtifactSidecar, type ProductionBundle, type Ta
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
-import type { WorldStore } from "../world/store.js";
+import type { WorldStore, WorldStatePrecondition } from "../world/store.js";
 import type { MediaProbeRunner } from "./qc.js";
 import { isVideoMedia } from "./poster.js";
 
@@ -374,7 +374,7 @@ export async function clearShotFrame(
   store: WorldStore,
   productionId: string,
   shotId: string,
-  options: { requestId?: string; source?: string } = {},
+  options: { requestId?: string; source?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<{ ok: true; cleared: boolean } | { ok: false; reason: string }> {
   const selectionsPath = `productions/${productionId}/selections.json`;
   return store.gateOp(async () => {
@@ -411,5 +411,5 @@ export async function clearShotFrame(
       ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     });
     return { ok: true as const, cleared: true };
-  });
+  }, options.precondition);
 }

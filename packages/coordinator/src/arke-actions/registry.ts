@@ -43,6 +43,8 @@ import {
   WorldChatProductionBoardExportActionSchema,
   WorldChatProductionTakeImportActionSchema,
   WorldChatProductionTakeGenerationActionSchema,
+  WorldChatProductionTakeFileActionSchema,
+  WorldChatProductionShotFrameClearActionSchema,
   WorldChatProductionTakeReviewActionSchema,
   WorldChatProductionTakeTrimActionSchema,
   WorldChatProductionStagePlayblastActionSchema,
@@ -732,6 +734,8 @@ const COMMAND_MODEL_PATHS = {
   "compile-scene-board": ["production-board-compile"],
   "export-scene-board": ["production-board-export"],
   "accept-take": ["production-take-review"],
+  "bench-accept": ["production-take-file"],
+  "clear-shot-frame": ["production-shot-frame-clear"],
   "stage-playblast": ["production-stage-playblast"],
   "reject-take": ["production-take-review"],
   "set-trim": ["production-take-trim"],
@@ -1118,7 +1122,15 @@ const WORLD_CHAT_ACTION_REGISTRY = {
   "world-chat-production-take-generation": {
     kind: "world-chat-production-take-generation",
     schema: WorldChatProductionTakeGenerationActionSchema,
-    ...action("production", "generation", "bench", "authored-change", ["scenes", "takes"]),
+    ...action("production", "generation", "job-queue", "spend-and-compute", ["scenes", "takes"]),
+  },
+  "world-chat-production-take-file": {
+    kind: "world-chat-production-take-file", schema: WorldChatProductionTakeFileActionSchema,
+    ...action("production", "take-review", "bench", "authored-change", ["scenes", "takes"]),
+  },
+  "world-chat-production-shot-frame-clear": {
+    kind: "world-chat-production-shot-frame-clear", schema: WorldChatProductionShotFrameClearActionSchema,
+    ...action("production", "command", "take-review", "authored-change", ["scenes", "takes"]),
   },
   "world-chat-production-take-review": {
     kind: "world-chat-production-take-review",

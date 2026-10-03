@@ -192,6 +192,7 @@ export const REMOTE_PREPARED_ACTION_ACCESS = {
   "world-chat-production-board-compile": "studio", "world-chat-production-board-export": "studio",
   "world-chat-production-take-import": "host", "world-chat-production-take-generation": "studio",
   "world-chat-production-take-review": "studio", "world-chat-production-take-trim": "studio",
+  "world-chat-production-take-file": "studio", "world-chat-production-shot-frame-clear": "studio",
   "world-chat-production-stage-playblast": "host", "world-chat-production-stage-construct": "studio",
   "world-chat-audio-spine-command": "studio", "world-chat-production-routing": "studio",
   "world-chat-production-routing-traversal": "studio", "world-chat-production-branch-canon": "studio",

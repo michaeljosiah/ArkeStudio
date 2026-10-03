@@ -902,6 +902,8 @@ const ProductionTakeGenerationModelActionSchema = z
       z.object({ kind: z.literal("board"), memberShotIds: z.array(ShotIdSchema).min(1) }).strict(),
     ]),
     mode: z.enum(["image", "video"]),
+    modelId: z.string().min(1).max(300).optional(),
+    count: z.number().int().min(1).max(8).optional(),
     retakeOf: TakeIdSchema.optional(),
     instruction: z.string().trim().min(1).max(2_000).optional(),
     checkReceiptIds: CompleteReadIdsSchema,
@@ -931,6 +933,14 @@ const ProductionTakeReviewModelActionSchema = z
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
+const ProductionTakeFileModelActionSchema = z.object({
+  kind: z.literal("production-take-file"), productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema,
+  sessionId: SessionIdSchema, takeId: TakeIdSchema, checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+const ProductionShotFrameClearModelActionSchema = z.object({
+  kind: z.literal("production-shot-frame-clear"), productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema,
+  checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
 const ProductionTakeTrimModelActionSchema = z
   .object({
     kind: z.literal("production-take-trim"),
@@ -1203,6 +1213,8 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionBoardExportModelActionSchema,
   ProductionTakeImportModelActionSchema,
   ProductionTakeGenerationModelActionSchema,
+  ProductionTakeFileModelActionSchema,
+  ProductionShotFrameClearModelActionSchema,
   ProductionTakeReviewModelActionSchema,
   ProductionTakeTrimModelActionSchema,
   ProductionStagePlayblastModelActionSchema,
@@ -1295,6 +1307,8 @@ export const WorldChatProductionBoardCompileActionSchema = preparedAction("world
 export const WorldChatProductionBoardExportActionSchema = preparedAction("world-chat-production-board-export", ProductionBoardExportModelActionSchema);
 export const WorldChatProductionTakeImportActionSchema = preparedAction("world-chat-production-take-import", ProductionTakeImportModelActionSchema);
 export const WorldChatProductionTakeGenerationActionSchema = preparedAction("world-chat-production-take-generation", ProductionTakeGenerationModelActionSchema);
+export const WorldChatProductionTakeFileActionSchema = preparedAction("world-chat-production-take-file", ProductionTakeFileModelActionSchema);
+export const WorldChatProductionShotFrameClearActionSchema = preparedAction("world-chat-production-shot-frame-clear", ProductionShotFrameClearModelActionSchema);
 export const WorldChatProductionTakeReviewActionSchema = preparedAction("world-chat-production-take-review", ProductionTakeReviewModelActionSchema);
 export const WorldChatProductionTakeTrimActionSchema = preparedAction("world-chat-production-take-trim", ProductionTakeTrimModelActionSchema);
 export const WorldChatProductionStageConstructActionSchema = preparedAction("world-chat-production-stage-construct", ProductionStageConstructModelActionSchema);
@@ -1364,6 +1378,8 @@ export type WorldChatProductionBoardCompileAction = z.infer<typeof WorldChatProd
 export type WorldChatProductionBoardExportAction = z.infer<typeof WorldChatProductionBoardExportActionSchema>;
 export type WorldChatProductionTakeImportAction = z.infer<typeof WorldChatProductionTakeImportActionSchema>;
 export type WorldChatProductionTakeGenerationAction = z.infer<typeof WorldChatProductionTakeGenerationActionSchema>;
+export type WorldChatProductionTakeFileAction = z.infer<typeof WorldChatProductionTakeFileActionSchema>;
+export type WorldChatProductionShotFrameClearAction = z.infer<typeof WorldChatProductionShotFrameClearActionSchema>;
 export type WorldChatProductionTakeReviewAction = z.infer<typeof WorldChatProductionTakeReviewActionSchema>;
 export type WorldChatProductionTakeTrimAction = z.infer<typeof WorldChatProductionTakeTrimActionSchema>;
 export type WorldChatProductionStagePlayblastAction = z.infer<typeof WorldChatProductionStagePlayblastActionSchema>;
@@ -1482,6 +1498,8 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionBoardExportActionSchema,
   WorldChatProductionTakeImportActionSchema,
   WorldChatProductionTakeGenerationActionSchema,
+  WorldChatProductionTakeFileActionSchema,
+  WorldChatProductionShotFrameClearActionSchema,
   WorldChatProductionTakeReviewActionSchema,
   WorldChatProductionTakeTrimActionSchema,
   WorldChatProductionStagePlayblastActionSchema,

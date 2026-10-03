@@ -1,4 +1,5 @@
 import { readdir, readFile, rename, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import {
   ProvenanceSchema,
@@ -137,6 +138,9 @@ const NOT_A_SETTING = new Set([
   "startFrame",
   "continuedFrom",
   "videoReferences",
+  "generationQuoteProduction",
+  "generationQuoteReferences",
+  "generationQuoteVideoReferences",
 ]);
 
 function settingsFrom(params: Job["params"]): Record<string, unknown> {
@@ -206,14 +210,14 @@ export async function recordTakesFromJob(
   const continuedFrom = continuedFromOf(store, job);
   /*
    * Replayable finalizations rejoin the take they already wrote instead of minting a second.
-   * Voice lines always did; a frame-slot job joins them because its finalization can fail
-   * *after* the take is durable (the local filing), and the retry must find that take rather
-   * than trying to move a landing file that is long gone.
+   * Voice lines, frame slots and quoted production jobs can fail after media moves. Their
+   * retries retain the same identities; quoted passes also repair any missing segments.
    */
-  const rejoins = job.target.kind === "voice-line" || job.params["landing"] === "frame-slot";
+  const quoted = job.params.generationQuoteProduction === true;
+  const rejoins = quoted || job.target.kind === "voice-line" || job.params["landing"] === "frame-slot";
   if (rejoins) {
     const existing = await takeForJob(store, job.productionId, job.id);
-    if (existing !== null) return [existing];
+    if (existing !== null && !(quoted && job.target.kind === "scene-pass")) return [existing];
   }
   const media = job.landedFiles?.[0];
   if (media === undefined) return [];
@@ -224,6 +228,7 @@ export async function recordTakesFromJob(
   const written: Take[] = [];
 
   await store.gateOp(async () => {
+    const existingPrimary = rejoins ? await takeForJob(store, job.productionId!, job.id) : null;
     // A replayable finalization needs a deterministic id, so a retry can recover the window
     // after media moved into its take directory but before take.json became durable.
     const primaryId = rejoins ? `tk_${job.id.slice(3)}` : `tk_${ulid()}`;
@@ -242,13 +247,13 @@ export async function recordTakesFromJob(
     // immutable, so the only moment to record this is before it is written (#248). Every
     // failure below is swallowed by design: a paid clip must never be lost to a diagnostic that
     // could not run, whether or not its domain finalization can later be replayed.
-    const qc = await measureArrival(qcApplies(job) ? join(takeDir, mediaName) : null, options);
+    const qc = existingPrimary?.qc ?? (existingPrimary ? null : await measureArrival(qcApplies(job) ? join(takeDir, mediaName) : null, options));
 
     // The picture every screen shows for this take. Drawn here, beside the clip, for the same
     // reason the measurement is: the take is about to become immutable, and this is the last
     // moment its media is known to be in one known place. Best-effort throughout — a take with
     // no poster is the state every reader already handles.
-    await writePosterFor(join(takeDir, mediaName), options.poster, options.onPosterUnavailable);
+    if (!existingPrimary) await writePosterFor(join(takeDir, mediaName), options.poster, options.onPosterUnavailable);
 
     const base = {
       jobId: job.id,
@@ -284,7 +289,7 @@ export async function recordTakesFromJob(
       completedAt: now,
     };
 
-    const primary: Take = {
+    const primary: Take = existingPrimary ?? {
       id: primaryId,
       ...base,
       coversShots: (job.target.coversShots ?? (job.target.id !== undefined ? [job.target.id] : [])) as Take["coversShots"],
@@ -305,13 +310,13 @@ export async function recordTakesFromJob(
       media: mediaName,
       ...(qc !== null ? { qc } : {}),
     };
-    await atomicWriteFile(join(takeDir, "take.json"), JSON.stringify(primary, null, 2) + "\n");
+    if (!existingPrimary) await atomicWriteFile(join(takeDir, "take.json"), JSON.stringify(primary, null, 2) + "\n");
     written.push(primary);
 
     // A pass derives per-shot segment takes: ranges within the pass media (R-3), boundaries
     // from the plan (R-4), costs pro-rata and marked allocated, summing exactly (R-5, D4).
     if (job.target.kind === "scene-pass" && shotPlan && shotPlan.length > 0) {
-      const chargeBase = actualMicroUsd ?? job.estimatedMicroUsd;
+      const chargeBase = primary.cost.actualMicroUsd ?? primary.cost.estimatedMicroUsd;
       const totalSec = shotPlan.reduce((a, p) => a + (p.endSec - p.startSec), 0);
       let allocatedSoFar = 0;
       for (const [i, entry] of shotPlan.entries()) {
@@ -320,10 +325,16 @@ export async function recordTakesFromJob(
           ? chargeBase - allocatedSoFar // the remainder lands on the last segment: exact sum
           : Math.floor((chargeBase * (entry.endSec - entry.startSec)) / totalSec);
         allocatedSoFar += share;
-        const segmentId = `tk_${ulid()}`;
+        const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+        const digest = quoted ? createHash("sha256").update(`${job.id}:segment:${i}`).digest() : null;
+        const segmentId = quoted ? `tk_${Array.from({ length: 26 }, (_, index) => alphabet[digest![index]! % 32]).join("")}` : `tk_${ulid()}`;
         const segment: Take = {
           id: segmentId,
           ...base,
+          provenance: primary.provenance,
+          ...(primary.prompt !== undefined ? { prompt: primary.prompt } : {}),
+          references: primary.references, params: primary.params,
+          dispatchedAt: primary.dispatchedAt, ...(primary.completedAt ? { completedAt: primary.completedAt } : {}),
           coversShots: [entry.shotId] as Take["coversShots"],
           kind: "clip",
           cost: {
@@ -331,15 +342,26 @@ export async function recordTakesFromJob(
             actualMicroUsd: share,
             // Pass segments carry the same source as the pass they divide (SPEC-021 §2.9):
             // a local pass's segments are local-zero shares, not manifest-derived ones.
-            actualSource,
+            actualSource: primary.cost.actualSource ?? actualSource,
             allocated: true,
           },
           segment: { passTakeId: primaryId, inSec: entry.startSec, outSec: entry.endSec },
           // The same source-media measurement, not a per-segment one: the pass media was
           // analyzed once, and decoding each range separately would report numbers nobody took.
-          ...(qc !== null ? { qc } : {}),
+          ...(primary.qc ? { qc: primary.qc } : {}),
         };
         const segmentDir = join(store.dir, "productions", job.productionId!, "takes", segmentId);
+        if (quoted) {
+          const raw = await readFile(join(segmentDir, "take.json"), "utf8").catch(error => {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error;
+          });
+          if (raw) {
+            const existing = TakeSchema.parse(JSON.parse(raw));
+            if (existing.jobId !== job.id || existing.segment?.passTakeId !== primaryId || existing.segment.inSec !== entry.startSec || existing.segment.outSec !== entry.endSec) throw new Error("The quoted board segment identity is already occupied.");
+            written.push(existing);
+            continue;
+          }
+        }
         await atomicWriteFile(join(segmentDir, "take.json"), JSON.stringify(segment, null, 2) + "\n");
         written.push(segment);
       }

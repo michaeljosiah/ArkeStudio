@@ -329,7 +329,7 @@ const FOLLOW_ON_TARGETS = new Set([
  * recording a cloned voice was made from: part of an audiobook part's durable identity
  * (`priorPartJob`, SPEC-046 R-39), not a control of any reader.
  */
-const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation", "voiceClipHash", "designedBinding", "generationQuoteReferences", "generationQuotePendingSelection"]);
+const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation", "voiceClipHash", "designedBinding", "generationQuoteReferences", "generationQuoteVideoReferences", "generationQuoteProduction", "generationQuotePendingSelection"]);
 
 /** Attempts that count against the retry bound: refusals waited out as busy never reached the engine. */
 function spentAttempts(job: Job): number {
@@ -1048,6 +1048,12 @@ export class JobQueue {
       }
       if (videoReferences.length !== videoPaths.length) {
         await this.terminalize(job, "failed", "not every video reference could be prepared safely");
+        return;
+      }
+      const pins = job.params.generationQuoteVideoReferences;
+      if (pins !== undefined && (!Array.isArray(pins) || pins.length !== videoPaths.length || pins.some((pin, index) =>
+        !pin || pin.file !== videoPaths[index] || pin.hash !== createHash("sha256").update(videoReferences![index]!.data).digest("hex")))) {
+        await this.terminalize(job, "failed", "Video references changed after generation approval. Prepare a fresh card.");
         return;
       }
     }

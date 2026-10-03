@@ -85,6 +85,20 @@ reservation admission without resubmission, empty provider results, and JPEG/Web
 with staging cleanup. Background finalization checks use a real prop state and verify that
 chat-generated character sheets remain pending for separate selection.
 
+Production Chat generation also runs coordinator `test/world-chat/production-generation.test.ts`,
+`test/world-chat/production-take-filing.test.ts`, `test/world-chat/actions.test.ts`,
+`test/bench/subject.test.ts`, `test/bench/subject-coordinator.test.ts` and
+`test/takes/boundary.test.ts`; contracts `test/schemas.test.ts` checks Activity recovery.
+These cover exact admission after approval, no admission on denial, selected-frame/video byte
+changes, missing kits, retakes, image boards and video pass segments, candidate-only arrival,
+recovery after media moves or a segment record is missing, and explicit Bench filing/acceptance.
+Filing preserves the Bench source and refuses changed media, settings or destination selection.
+Clearing a frame retains immutable takes and the accepted video selection.
+Keep `test/arke-actions/review-regressions.test.ts` in this set: finalized quoted jobs settle
+their open conversation cards after filing/ledger settlement, including failure and cancellation.
+Filing recovery repairs the idempotent Bench journal link before completing the card, and a
+first-frame route neither clears cast audio nor records an upload acknowledgement for it.
+
 Book/audio standards experiments use the separate [publication interoperability checks](publication-interop.md#reproduce).
 They install their own locked development dependencies and exercise Readium, package closure and EPUBCheck.
 
