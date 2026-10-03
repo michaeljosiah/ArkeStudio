@@ -140,7 +140,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
   const count = Object.keys(look?.characters ?? {}).length;
   const state = look === null ? null : rows.some((row) => row.source?.includes("yours")) ? "edited" : "derived";
   return (
-    <EditorDialog open={open} onClose={onClose} onBody width={720} title={`Look · Chapter ${chapterOrder}`} panelClassName="fy-look">
+    <EditorDialog open={open} onClose={onClose} width={720} title={`Look · Chapter ${chapterOrder}`} panelClassName="fy-look">
       <div className="fy-look__body" data-testid="look-sheet">
         {rows.length === 0 && adding.length === 0 && (
           <p className="fy-mono fy-look__none" data-testid="look-none">
