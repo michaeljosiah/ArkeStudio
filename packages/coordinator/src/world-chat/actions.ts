@@ -162,7 +162,6 @@ import {
   type AcceptOutcome,
   type ProposalManager,
 } from "../gate/proposals.js";
-import { discoverBenchSessions } from "../bench/service.js";
 import {
   decideEditorRequest,
   productionOfContext,
