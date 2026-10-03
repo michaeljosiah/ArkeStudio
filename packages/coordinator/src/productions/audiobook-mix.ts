@@ -1,6 +1,6 @@
-import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
-import { join } from "node:path";
-import { bedFade, duckEnvelope, mixKey, ulid, type ChapterMix } from "@arke-studio/contracts";
+import { mkdir, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
+import { isAbsolute, join, relative } from "node:path";
+import { bedFade, duckEnvelope, isWorldAudioPath, mixKey, ulid, type ChapterMix } from "@arke-studio/contracts";
 import { integratedLoudness, loudnessGain, readSpeechWav, writeSpeechWav, type SpeechPcm } from "../audio/speech-wav.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import { atomicWriteFile } from "../world/atomic.js";
@@ -35,11 +35,20 @@ export class MixRefusal extends Error {}
 
 /** A file's samples at the mix's rate: a 16-bit WAV read here, anything else through ffmpeg. */
 async function decode(dir: string, file: string, ffmpeg: FfmpegRunner | undefined, signal: AbortSignal): Promise<SpeechPcm> {
+  // Only audio inside the world is ever read (codex on PR 1497): a world carried in could name
+  // `../../private.wav`, and the render lands in a cache the media route serves. The address is
+  // checked as written, then the resolved file — a link out of the world is no better than `..`.
+  if (!isWorldAudioPath(file)) throw new MixRefusal(`${file.split("/").pop()} is not in this world`);
   const absolute = join(dir, fromPortable(file));
   let bytes: Uint8Array;
   try {
-    bytes = new Uint8Array(await readFile(toExtendedLength(absolute)));
-  } catch {
+    const root = await realpath(toExtendedLength(dir));
+    const target = await realpath(toExtendedLength(absolute));
+    const inside = relative(root, target);
+    if (inside === "" || inside.startsWith("..") || isAbsolute(inside)) throw new MixRefusal(`${file.split("/").pop()} is not in this world`);
+    bytes = new Uint8Array(await readFile(target));
+  } catch (err) {
+    if (err instanceof MixRefusal) throw err;
     throw new MixRefusal(`${file.split("/").pop()} is not on this machine`);
   }
   if (file.toLowerCase().endsWith(".wav")) {
@@ -108,8 +117,19 @@ export async function mixSamples(
 ): Promise<SpeechPcm> {
   const signal = options.signal ?? new AbortController().signal;
   const from = Math.max(0, options.window?.from ?? 0);
-  const to = Math.min(mix.seconds, options.window?.to ?? mix.seconds);
-  if (!(to > from)) throw new MixRefusal("nothing to play there");
+  const windowTo = Math.min(mix.seconds, options.window?.to ?? mix.seconds);
+  if (!(windowTo > from)) throw new MixRefusal("nothing to play there");
+  // Sounds first, measured from their files (codex on PR 1497): a sound past the last voice runs
+  // the chapter on to its own end rather than being cut at the plan's. One that starts after a
+  // window is never read, so a later file cannot hold up or refuse a preview of an early block.
+  const sounds: Array<{ at: number; levelDb: number; pcm: SpeechPcm }> = [];
+  for (const sound of mix.sounds) {
+    if (sound.at >= windowTo) continue;
+    const pcm = await decode(dir, sound.file, options.ffmpeg, signal);
+    if (sound.at + pcm.samples.length / MIX_RATE <= from) continue;
+    sounds.push({ at: sound.at, levelDb: sound.levelDb, pcm });
+  }
+  const to = options.window !== undefined ? windowTo : Math.max(windowTo, ...sounds.map((sound) => sound.at + sound.pcm.samples.length / MIX_RATE));
   const out = new Float32Array(Math.ceil((to - from) * MIX_RATE));
   const inside = (at: number, seconds: number) => at < to && at + seconds > from;
 
@@ -182,12 +202,9 @@ export async function mixSamples(
     }
   }
 
-  for (const sound of mix.sounds) {
-    const pcm = await decode(dir, sound.file, options.ffmpeg, signal);
-    const seconds = pcm.samples.length / MIX_RATE;
-    if (!inside(sound.at, seconds)) continue;
+  for (const sound of sounds) {
     const gain = amp(sound.levelDb);
-    place(pcm.samples, 0, seconds, sound.at, () => gain);
+    place(sound.pcm.samples, 0, sound.pcm.samples.length / MIX_RATE, sound.at, () => gain);
   }
 
   // One loudness after the mix (185): the whole brought to the take target, then held under the ceiling.
@@ -219,15 +236,18 @@ export async function renderChapterMix(
   const name = `${mixKey(mix)}${window === null ? "" : `-${Math.round(window.from * 1000)}-${Math.round(window.to * 1000)}`}.wav`;
   const file = `${folder}/${name}`;
   const absolute = join(dir, fromPortable(file));
-  const seconds = window === null ? mix.seconds : window.to - window.from;
-  const held = await stat(toExtendedLength(absolute)).then((s) => s.isFile(), () => false);
-  if (!held) {
+  // The render's own length, not the plan's: a sound may run past the last voice. A kept render's
+  // is read off its size — the renderer writes a 16-bit mono WAV with a 44-byte header.
+  const held = await stat(toExtendedLength(absolute)).then((s) => (s.isFile() ? s.size : null), () => null);
+  let seconds: number;
+  if (held === null) {
     const pcm = await mixSamples(dir, mix, { ...options, ...(window !== null ? { window } : {}) });
     await mkdir(toExtendedLength(join(dir, fromPortable(folder))), { recursive: true });
     await atomicWriteFile(absolute, writeSpeechWav(pcm));
     await prune(join(dir, fromPortable(folder)), name);
-  }
-  return { file, seconds, from: window?.from ?? 0 };
+    seconds = pcm.samples.length / MIX_RATE;
+  } else seconds = Math.max(0, held - 44) / 2 / MIX_RATE;
+  return { file, seconds: Math.round(seconds * 1000) / 1000, from: window?.from ?? 0 };
 }
 
 /** The folder down to its newest few renders, never the one just made. */

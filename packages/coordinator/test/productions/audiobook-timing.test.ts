@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type ChapterMix, type ClientMessage, type DomainEvent, type ManifestModel } from "@arke-studio/contracts";
+import { audiobookTextHash, type ChapterMix, type ClientMessage, type DomainEvent, type ManifestModel } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -136,6 +136,23 @@ describe("a block's timing (turn 187)", () => {
       assert.equal(lastRecord(events).record?.timing?.["p1.0"]?.trim, undefined);
     }));
 
+  it("plays a reaction's take only while it is on the shelf and says what the reaction says (codex on PR 1497)", () =>
+    withHarness(async ({ send, store }) => {
+      await read(send);
+      const plan = await planAudiobook(store(), LEDGER, "neap", { narrator: NARRATOR });
+      const host = plan.blocks.find((planned) => planned.block.key === "p1.0")!.block;
+      const words = (said: string) => updateAudiobook(store(), LEDGER, plan.chapter, (current) => ({
+        ...current,
+        reactions: { x1: { host: { key: "p1.0", textHash: audiobookTextHash(host.text) }, speaker: "narrator", words: said, offset: 0.2, by: "author", at: CLOCK } },
+        takes: { ...current.takes, x1: { ...current.takes["p0.0"]!, textHash: audiobookTextHash("mm") } },
+      }));
+      const reaction = async () => chapterTiming(store(), await planAudiobook(store(), LEDGER, "neap", { narrator: NARRATOR }), "estimate").bars.find((bar) => bar.key === "x1")!;
+      await words("mm");
+      assert.equal((await reaction()).made, true);
+      await words("Ehen!");
+      assert.equal((await reaction()).made, false, "a take of other words is not this reaction's");
+    }));
+
   it("refuses what the binding forbids, in one clause", () =>
     withHarness(async ({ events, send }) => {
       await read(send);
@@ -167,6 +184,8 @@ describe("a block's timing (turn 187)", () => {
       assert.match(lastRecord(events).refused ?? "", /the start is the reader's/);
       await setTiming(send, "p0.0", { pauseAfter: 0.3 });
       assert.match(lastRecord(events).refused ?? "", /the pause is the reader's/);
+      await setTiming(send, "p1.0", { under: { host: "title", offset: 0 } });
+      assert.match(lastRecord(events).refused ?? "", /the start is the reader's/, "nor taken out of the turn by playing it under another (codex on PR 1497)");
       await setTiming(send, "p0.0", { nudge: 0.05 });
       assert.equal(lastRecord(events).refused, undefined, "the cut can still be nudged");
     }));
@@ -237,6 +256,32 @@ describe("the mix (turn 187, R-85)", () => {
     const ratio = 20 * Math.log10(level(4.5, 5.5) / level(2, 3));
     assert.ok(Math.abs(ratio - -10) < 0.5, `ducked 10 dB under speech: ${ratio}`);
     assert.ok(level(3.5, 3.8) > level(4.5, 5.5) * 2, "not yet down well before the voice");
+  });
+
+  it("reads no audio from outside the world (codex on PR 1497)", async () => {
+    const { root, worldDir } = await makeTempRoot();
+    await writeFile(join(root, "private.wav"), tone(1));
+    const mix: ChapterMix = { seconds: 1, voices: [{ key: "p0.0", at: 0, segments: [{ file: "../private.wav", from: 0, to: 1 }] }], beds: [], sounds: [], speech: [{ from: 0, to: 1 }] };
+    await assert.rejects(mixSamples(worldDir, mix), /not in this world/);
+  });
+
+  it("runs on to a sound's own end, and never reads a sound after a window (codex on PR 1497)", async () => {
+    const { worldDir } = await makeTempRoot();
+    await mkdir(join(worldDir, "artifacts"), { recursive: true });
+    await writeFile(join(worldDir, "artifacts", "voice.wav"), tone(1));
+    await writeFile(join(worldDir, "artifacts", "door.wav"), tone(2, 0.2, 500));
+    const voice = { key: "p0.0", at: 0, segments: [{ file: "artifacts/voice.wav", from: 0, to: 1 }] };
+    // The plan says nothing of the door's length: it ends with the voice, at one second.
+    const trailing: ChapterMix = { seconds: 1, voices: [voice], beds: [], sounds: [{ id: "s1", at: 0.5, file: "artifacts/door.wav", levelDb: -6 }], speech: [{ from: 0, to: 1 }] };
+    const pcm = await mixSamples(worldDir, trailing);
+    assert.ok(Math.abs(pcm.samples.length / MIX_RATE - 2.5) < 0.01, "the sound plays to its end");
+    const rendered = await renderChapterMix(worldDir, LEDGER, "01-neap", trailing);
+    assert.equal(rendered.seconds, 2.5);
+    assert.equal((await renderChapterMix(worldDir, LEDGER, "01-neap", trailing)).seconds, 2.5, "and a kept render says so too");
+    // A window over the voice alone: a later sound whose file is gone does not refuse it.
+    const later: ChapterMix = { seconds: 10, voices: [voice], beds: [], sounds: [{ id: "s2", at: 8, file: "artifacts/gone.wav", levelDb: -6 }], speech: [{ from: 0, to: 1 }] };
+    const window = await mixSamples(worldDir, later, { window: { from: 0, to: 1 } });
+    assert.equal(window.samples.length, MIX_RATE);
   });
 
   it("names a window's render apart from the chapter's", async () => {

@@ -8,6 +8,7 @@ import {
   duckEnvelope,
   formatTimingSeconds,
   hasTiming,
+  isWorldAudioPath,
   mixKey,
   nextReactionKey,
   placeAnchor,
@@ -159,6 +160,13 @@ describe("under Performed a grouped request is the reader's (R-85)", () => {
     assert.equal(at(result, "p3.0").start, 0);
   });
 
+  it("keeps a block inside the group in the reader's turn though it was set to play under another (codex on PR 1497)", () => {
+    const under = { timing: { "p2.0": timing("p2", { under: { host: { key: "title", textHash: hash(TEXT.title) }, offset: 0 } }) } };
+    const result = timeChapter({ blocks: blocks(grouped), record: under, reading: "performed", unmade: "skip" });
+    assert.equal(at(result, "p2.0").under, null);
+    assert.equal(at(result, "p2.0").at, at(result, "p1.0").at + 3);
+  });
+
   it("leaves the same group's timing settable under another reading", () => {
     const result = timeChapter({ blocks: blocks(grouped), record, reading: "narrator", unmade: "skip" });
     assert.equal(at(result, "p2.0").start, -0.4);
@@ -231,6 +239,20 @@ describe("timing holds to the blocks (R-82)", () => {
     assert.equal(result.beds[0]!.seconds, 5.4);
     assert.deepEqual(result.lost.sounds, ["s1"]);
     assert.deepEqual(result.sounds, []);
+  });
+
+  it("never plays a bed or a sound from outside the world (codex on PR 1497)", () => {
+    const outside = { file: "../../private.wav", origin: "world" as const, label: "x" };
+    const record = {
+      beds: { b1: { from: { key: "p0.0", textHash: hash(TEXT.p0) }, to: { key: "p3.0", textHash: hash(TEXT.p3) }, source: outside, levelDb: -14, fadeInSec: 2, fadeOutSec: 4, duckDb: 10, by: "author" as const, at: AT } },
+      sounds: { s1: { block: { key: "p1.0", textHash: hash(TEXT.p1) }, source: { ...outside, file: "C:/Windows/media/ding.wav" }, levelDb: -6, by: "author" as const, at: AT } },
+    };
+    const result = timeChapter({ blocks: blocks(ALL), record, reading: "narrator", unmade: "skip" });
+    assert.deepEqual(result.beds, []);
+    assert.deepEqual(result.sounds, []);
+    assert.deepEqual(result.lost, { sounds: ["s1"], reactions: [], beds: ["b1"] });
+    assert.ok(isWorldAudioPath("artifacts/club.mp3"));
+    assert.equal(isWorldAudioPath("artifacts/../club.wav"), false);
   });
 
   it("places an anchor by the take's former key", () => {
