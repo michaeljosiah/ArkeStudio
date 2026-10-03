@@ -6,6 +6,7 @@ import {
   audiobookTakeDirectionHash,
   performanceNote,
   readingNotesLead,
+  soundMode,
   audiobookTextHash,
   firstReadNotice,
   normalizeSpeechText,
@@ -39,6 +40,7 @@ import { applyGain, dropRunawayTail, normaliseSpeech, readSpeechWav, samplePeak,
 import type { TimedWord } from "../voice/word-times.js";
 import { LONG_TAIL, splitAudio, splitRequest } from "./audiobook-split.js";
 import { checkDirection, directionPlan, type RenderedPart } from "../voice/direction.js";
+import { plannedReactions } from "./audiobook-timing.js";
 import { audiobookLanding, recordsLoudness, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
 
 /**
@@ -311,7 +313,13 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     plan.record === null || plan.record === "unreadable"
       ? emptyAudiobook(plan.chapter.version, plan.chapter.hash, now())
       : { ...plan.record, takes: { ...plan.record.takes }, flags: { ...plan.record.flags } };
-  const toMake = only !== undefined ? plan.blocks.filter((planned) => only.includes(planned.block.key)) : plan.blocks.filter((planned) => planned.state !== "made" && planned.state !== "awaiting");
+  // Reactions are read when the chapter is (design turn 187, R-83), after its blocks, priced as
+  // any read; `Make again` on one names it as it names a block.
+  const reactions = plannedReactions(store, plan, room.narrator);
+  const toMake = [
+    ...(only !== undefined ? plan.blocks.filter((planned) => only.includes(planned.block.key)) : plan.blocks.filter((planned) => planned.state !== "made" && planned.state !== "awaiting")),
+    ...(only !== undefined ? reactions.filter((planned) => only.includes(planned.block.key)) : reactions.filter((planned) => planned.state !== "made" && planned.state !== "awaiting")),
+  ];
   const clonedVoices = store.getBundle().clonedVoices ?? [];
   // Each cloned reader's recording, hashed once for the chapter (SPEC-046 R-39): the hash keys
   // its cache files and names its parts' jobs, so a voice re-recorded since is read afresh.
@@ -433,6 +441,18 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     } catch (error) {
       refusal = error instanceof Error ? error.message : String(error);
       parts = [text];
+    }
+    // A reaction that is a sound (R-83) is sent as the reader's own tag for it, alone: the take
+    // still names what the reaction says (`[laughs]`), and a reader that makes no such sound is
+    // refused in one clause rather than reading the word aloud.
+    const sound = planned.reaction?.sound;
+    if (sound !== undefined) {
+      const how = soundMode(sound, model, language);
+      if (how.mode === "unsupported") refusal = `${model.displayName} makes no ${sound}`;
+      else {
+        parts = [how.tag];
+        direction = null;
+      }
     }
     const local = reader.provider === "kokoro";
     const format = voiceFormatForModel(model);

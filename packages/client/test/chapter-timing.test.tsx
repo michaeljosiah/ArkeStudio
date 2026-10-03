@@ -18,6 +18,7 @@ import {
 
 } from "@arke-studio/contracts";
 import { BlockTimingPanel, betweenClocks, TimingSide, TimingView, timingInputs, timingLanes, type TimingRowLike } from "../src/screens/chapter-timing.js";
+import { ReactionsPanel, soundsByTab } from "../src/components/audiobook-beds.js";
 import { ChapterScreen } from "../src/screens/chapter-workspace.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -302,6 +303,38 @@ describe("codex on PR 1500", () => {
     assert.equal(field.value, "2.90");
     await act(async () => m.root.render(side(2)));
     assert.equal((q(m, "[data-testid=timing-trim-head]") as HTMLInputElement).value, "0.00");
+  });
+});
+
+describe("beds, sounds and reactions on a block (turn 187d)", () => {
+  const audio = (id: string, file: string, origin: ArtifactSidecar["origin"], generation?: ArtifactSidecar["generation"]): ArtifactSidecar =>
+    ({ id, kind: "audio", file, hash: `sha256:${"c".repeat(16)}`, origin, links: [], mediaInfo: { durationSec: 200 }, created: AT, ...(generation !== undefined ? { generation } : {}) }) as unknown as ArtifactSidecar;
+
+  it("offers the world's sounds by where they came from, never a take", () => {
+    const take = audio("ar_01J8F3K2QW9VZX4N7M0RTYB6A3", "neap-p0.wav", { by: "system", producedBy: "audiobook" }, { source: "audiobook" } as ArtifactSidecar["generation"]);
+    const bench = audio("ar_01J8F3K2QW9VZX4N7M0RTYB6A4", "rain.wav", { by: "system", producedBy: "bench" }, { source: "bench" } as ArtifactSidecar["generation"]);
+    const world = { artifacts: [audio("ar_01J8F3K2QW9VZX4N7M0RTYB6A1", "club.wav", { by: "user" }), audio("ar_01J8F3K2QW9VZX4N7M0RTYB6A2", "door.mp3", { by: "system", producedBy: "music" }), take, bench] };
+    const tabs = soundsByTab(world);
+    assert.deepEqual(tabs.library.map((artifact) => artifact.file), ["club.wav"]);
+    assert.deepEqual(tabs.world.map((artifact) => artifact.file), ["door.mp3"]);
+    assert.deepEqual(tabs.generated.map((artifact) => artifact.file), ["rain.wav"]);
+  });
+
+  it("adds a reaction under the block, a sound in a speaker's voice", async () => {
+    const writes: unknown[] = [];
+    const timing = timingOf(record());
+    const m = await render(<ReactionsPanel record={record()} timing={timing} row={ROWS[4]!} speakers={[{ key: "narrator", name: "Narrator" }, { key: "tunde", name: "Tunde" }, { key: "ade", name: "Ade" }]} onReaction={(key, reaction) => writes.push([key, reaction])} locked={false} />);
+    await act(async () => q(m, "[data-testid=reaction-add]")!.click());
+    assert.deepEqual(writes, [[null, { host: "p3.0", speaker: "tunde", sound: "laughs", offset: 0 }]]);
+  });
+
+  it("lists the reactions under a block with who says them, and takes one away", async () => {
+    const writes: unknown[] = [];
+    const held: ChapterAudiobook = { ...record(), reactions: { x1: { host: { key: "p3.0", textHash: audiobookTextHash(TEXT["p3.0"]!) }, speaker: "tunde", words: "mm", offset: 0.5, by: "author", at: AT } } };
+    const m = await render(<ReactionsPanel record={held} timing={timingOf(held)} row={ROWS[4]!} speakers={[{ key: "narrator", name: "Narrator" }, { key: "tunde", name: "Tunde" }]} onReaction={(key, reaction) => writes.push([key, reaction])} locked={false} />);
+    assert.match(q(m, "[data-testid=audiobook-reaction]")!.textContent ?? "", /“mm”Tunde · under · 0\.5 s · not read/);
+    await act(async () => (all(m, "[data-testid=audiobook-reaction] button")[0] as HTMLElement).click());
+    assert.deepEqual(writes, [["x1", null]]);
   });
 });
 

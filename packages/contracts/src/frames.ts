@@ -10,7 +10,7 @@ import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
 import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema } from "./audiobook.js";
 import { AudiobookPictureSourceSchema } from "./audiobook-pictures.js";
-import { BlockTimingInputSchema } from "./audiobook-timing.js";
+import { BedInputSchema, BlockSoundInputSchema, BlockTimingInputSchema, ReactionInputSchema } from "./audiobook-timing.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
@@ -3319,6 +3319,44 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       chapterFile: z.string().min(1),
       block: z.string().min(1).max(40),
       timing: BlockTimingInputSchema,
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /**
+   * A reaction, a bed or a sound at a block set, changed (by its key) or taken away (null) —
+   * design turn 187, SPEC-047 R-83, R-84. A new one takes the next free key. Answered as
+   * `audiobook.record` with the same id, or refused there in one clause.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-reaction"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      key: z.string().min(1).max(40).nullable(),
+      reaction: ReactionInputSchema.nullable(),
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("set-audiobook-bed"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      key: z.string().min(1).max(40).nullable(),
+      bed: BedInputSchema.nullable(),
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("set-audiobook-sound"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      key: z.string().min(1).max(40).nullable(),
+      sound: BlockSoundInputSchema.nullable(),
       requestId: UlidSchema.optional(),
     })
     .strict(),

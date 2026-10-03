@@ -5316,6 +5316,24 @@ export function setAudiobookTiming(worldId: string, productionId: string, chapte
   return send({ kind: "set-audiobook-timing", worldId, productionId, chapterFile, block, timing, requestId }) ? requestId : null;
 }
 
+/** A reaction under a block set, changed by its key, or taken away with null (design turn 187, R-83). */
+export function setAudiobookReaction(worldId: string, productionId: string, chapterFile: string, key: string | null, reaction: import("@arke-studio/contracts").ReactionInput | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "set-audiobook-reaction", worldId, productionId, chapterFile, key, reaction, requestId }) ? requestId : null;
+}
+
+/** A bed from one block to another set, changed or taken away (R-84). */
+export function setAudiobookBed(worldId: string, productionId: string, chapterFile: string, key: string | null, bed: import("@arke-studio/contracts").BedInput | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "set-audiobook-bed", worldId, productionId, chapterFile, key, bed, requestId }) ? requestId : null;
+}
+
+/** A sound at a block's start set, changed or taken away (R-84). */
+export function setAudiobookSound(worldId: string, productionId: string, chapterFile: string, key: string | null, sound: import("@arke-studio/contracts").BlockSoundInput | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "set-audiobook-sound", worldId, productionId, chapterFile, key, sound, requestId }) ? requestId : null;
+}
+
 /** The chapter as it sounds with its timing, or a window of it (R-85): answered as `audiobook.mix` under the id returned. */
 export function renderAudiobookMix(worldId: string, productionId: string, chapterFile: string, window?: { from: number; to: number }): string | null {
   const requestId = ulid();

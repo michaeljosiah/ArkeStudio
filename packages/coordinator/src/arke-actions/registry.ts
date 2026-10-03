@@ -542,6 +542,9 @@ const CLIENT_COMMAND_METADATA = {
   "set-audiobook-picture": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   // Timing on the blocks (turn 187): a command on the record, and the chapter's mix rendered into the cache.
   "set-audiobook-timing": action("production", "command", "voice", "authored-change", ["chapters"]),
+  "set-audiobook-reaction": action("production", "command", "voice", "authored-change", ["chapters"]),
+  "set-audiobook-bed": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
+  "set-audiobook-sound": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   "render-audiobook-mix": readOnly(QUERY),
   // The audiobook's web package and the world's packages (turn 186e): a file the host writes, and a read.
   "export-audiobook-player": action("production", "host-action", "export", "export", ["chapters", "artifacts", "exports"]),

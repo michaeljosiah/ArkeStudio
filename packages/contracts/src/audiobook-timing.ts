@@ -129,6 +129,27 @@ export function reactionText(reaction: Pick<AudiobookReaction, "words" | "sound"
   return reaction.words ?? `[${reaction.sound ?? ""}]`;
 }
 
+/**
+ * The reactions a press would read (R-83): each whose host block still stands and whose take is
+ * not on the shelf or not of what it says now. The coordinator also judges the reader, as for a
+ * block; a window counts these beside its blocks so the press appears while one is left.
+ */
+export function reactionsToRead(
+  record: Pick<ChapterTimingRecord, "reactions"> & { takes?: Readonly<Record<string, { artifactId: string; textHash: string }>> } | null,
+  blocks: readonly { key: string; text: string }[],
+  hasArtifact: (artifactId: string) => boolean,
+): string[] {
+  if (record === null || record.reactions === undefined) return [];
+  const hashed = blocks.map((block) => ({ key: block.key, textHash: audiobookTimingHash(block.text) }));
+  const former = formerKeys(record.takes);
+  return Object.entries(record.reactions).flatMap(([key, reaction]) => {
+    if (placeAnchor(hashed, reaction.host, former).state === "gone") return [];
+    const take = record.takes?.[key];
+    const made = take !== undefined && hasArtifact(take.artifactId) && take.textHash === audiobookTimingHash(reactionText(reaction));
+    return made ? [] : [key];
+  });
+}
+
 /** Where a bed or a sound comes from (R-84): the world's sounds, a library sound, or one generated for the book. */
 export const AudiobookAudioSourceSchema = z
   .object({
@@ -784,6 +805,50 @@ export const BlockTimingInputSchema = z
   })
   .strict();
 export type BlockTimingInput = z.infer<typeof BlockTimingInputSchema>;
+
+/** A reaction as a window writes it (R-83): the block it plays under, who says it, a sound or a few words, and from where. */
+export const ReactionInputSchema = z
+  .object({
+    host: z.string().min(1).max(40),
+    speaker: z.string().min(1).max(120),
+    sound: SoundSchema.optional(),
+    words: z.string().trim().min(1).max(REACTION_WORDS_MAX).optional(),
+    offset: z.number().min(0).max(TIMING_UNDER_MAX_SEC),
+  })
+  .strict()
+  .refine((reaction) => (reaction.sound === undefined) !== (reaction.words === undefined), { message: "a reaction is a sound or a few words" });
+export type ReactionInput = z.infer<typeof ReactionInputSchema>;
+
+/** Where a bed or a sound is chosen from, as a window names it: a file the world holds, and the tab it was on. */
+export const AudioSourceInputSchema = z.object({ file: z.string().min(1).max(1000), origin: z.enum(["world", "library", "generated"]) }).strict();
+
+/** A bed as a window writes it (R-84): from one block to another, its level, fades and duck. */
+export const BedInputSchema = z
+  .object({
+    from: z.string().min(1).max(40),
+    to: z.string().min(1).max(40),
+    source: AudioSourceInputSchema,
+    levelDb: z.number().min(-40).max(0),
+    fadeInSec: z.number().min(0).max(30),
+    fadeOutSec: z.number().min(0).max(30),
+    duckDb: z.number().min(0).max(30),
+  })
+  .strict();
+export type BedInput = z.infer<typeof BedInputSchema>;
+
+/** A sound at a block's start as a window writes it (R-84). */
+export const BlockSoundInputSchema = z.object({ block: z.string().min(1).max(40), source: AudioSourceInputSchema, levelDb: z.number().min(-40).max(6) }).strict();
+export type BlockSoundInput = z.infer<typeof BlockSoundInputSchema>;
+
+/** The next free key for a bed (`b<n>`) or a sound (`s<n>`). */
+export function nextTimingKey(prefix: "b" | "s", entries: Readonly<Record<string, unknown>> | undefined): string {
+  let n = 1;
+  for (const key of Object.keys(entries ?? {})) {
+    const at = new RegExp(`^${prefix}(\\d+)$`).exec(key);
+    if (at !== null) n = Math.max(n, Number(at[1]) + 1);
+  }
+  return `${prefix}${n}`;
+}
 
 /** Seconds as the panel says them: `−0.4 s`, `0.3 s`, `+0.06 s` for a nudge. */
 export function formatTimingSeconds(seconds: number, signed = false): string {

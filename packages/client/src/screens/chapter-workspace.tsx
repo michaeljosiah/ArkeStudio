@@ -54,12 +54,16 @@ import { BlockPicturePanel, useChapterPictures } from "../components/audiobook-p
 import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectSheet, DirectionCard, ReadSheet, PerformedSpeaker, ReadingMenu, ReadingNotes, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { BlockTimingPanel, TimingSide, TimingView, betweenClocks, timingLanes } from "./chapter-timing.js";
+import { BedPanel, ReactionsPanel } from "../components/audiobook-beds.js";
 import { dismissPlayback, playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import {
   openChapter,
   setAudiobookReading,
   setAudiobookTiming,
+  setAudiobookReaction,
+  setAudiobookBed,
+  setAudiobookSound,
   restoreChapter,
   saveChapter,
   subscribeChapterOpenResults,
@@ -1648,6 +1652,32 @@ export function ChapterWorkspace({
       revision={audiobook.lastRecord?.seq}
     />
   );
+  // Reactions under the block, and the bed and the sound on it (design turn 187a, 187d).
+  const timedRecord = audiobookRecord.record === "unreadable" ? null : audiobookRecord.record;
+  const reactors = [{ key: "narrator", name: "Narrator" }, ...timingLanes(audiobook.rows).filter((lane) => lane.id !== "narration").map((lane) => ({ key: lane.id, name: lane.name }))];
+  const soundsPanel = selectedTimingRow === null ? null : (
+    <>
+      <ReactionsPanel
+        record={timedRecord}
+        timing={audiobook.timing}
+        row={selectedTimingRow}
+        speakers={reactors}
+        locked={timingLocked}
+        onReaction={(key, reaction) => !timingLocked && setAudiobookReaction(worldId, prodId, chapter.file, key, reaction)}
+      />
+      <BedPanel
+        worldId={worldId}
+        world={world}
+        record={timedRecord}
+        timing={audiobook.timing}
+        rows={audiobook.rows}
+        row={selectedTimingRow}
+        locked={timingLocked}
+        onBed={(key, bed) => !timingLocked && setAudiobookBed(worldId, prodId, chapter.file, key, bed)}
+        onSound={(key, sound) => !timingLocked && setAudiobookSound(worldId, prodId, chapter.file, key, sound)}
+      />
+    </>
+  );
 
   // The pictures set on blocks (design turn 186c): the margin's chips and the block's Picture.
   const chapterPictures = useChapterPictures(world, audiobook.rows, audiobookRecord.record === "unreadable" ? null : audiobookRecord.record);
@@ -1912,6 +1942,7 @@ export function ChapterWorkspace({
                   onTiming={onTiming}
                   playhead={shownPlayhead}
                   onPlayhead={setPlayhead}
+                  reactionLabels={Object.fromEntries(Object.entries(timedRecord?.reactions ?? {}).map(([key, reaction]) => [key, reaction.sound ?? reaction.words ?? key]))}
                   locked={timingLocked}
                 />
               )}
@@ -2137,7 +2168,7 @@ export function ChapterWorkspace({
               </aside>
             </ResponsiveSheet>
           )}
-          {view === "audiobook" && <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null} title={`${audiobook.selected === "title" ? "Title" : `Block ${audiobook.rows.findIndex(row => row.block.key === audiobook.selected) + 1}`} · ${audiobook.rows.find(row => row.block.key === audiobook.selected)?.mark ?? "Narrator"}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><AudiobookSide {...blockPanel} />{timingPanel}{pictureRow !== null && <BlockPicturePanel worldId={worldId} production={production} chapterFile={chapter.file} chapterOrder={chapter.order} row={pictureRow} rows={audiobook.rows} pictures={chapterPictures} />}</aside></ResponsiveSheet>}
+          {view === "audiobook" && <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null} title={`${audiobook.selected === "title" ? "Title" : `Block ${audiobook.rows.findIndex(row => row.block.key === audiobook.selected) + 1}`} · ${audiobook.rows.find(row => row.block.key === audiobook.selected)?.mark ?? "Narrator"}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><AudiobookSide {...blockPanel} />{timingPanel}{soundsPanel}{pictureRow !== null && <BlockPicturePanel worldId={worldId} production={production} chapterFile={chapter.file} chapterOrder={chapter.order} row={pictureRow} rows={audiobook.rows} pictures={chapterPictures} />}</aside></ResponsiveSheet>}
           {/* The Timing view's side (turn 187a): the bar selected, the same values as the block panel's. */}
           {view === "timing" && <ResponsiveSheet sheet={blockSheet} open={selectedBar !== null} title={`${selectedTimingRow?.mark ?? "Reaction"} · ${audiobook.selected ?? ""}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><TimingSide bar={selectedBar} row={selectedTimingRow} timing={audiobook.timing} rows={audiobook.rows} onTiming={onTiming} onPlayFrom={(at) => { setPlayhead(at); audiobook.mixPlayer.play(betweenClocks(audiobook.timing, audiobook.mixed, at)); }} refused={audiobook.lastRecord?.refused ?? null} locked={timingLocked} revision={audiobook.lastRecord?.seq} /></aside></ResponsiveSheet>}
           <ResponsiveSheet sheet={compact} open={notesOpen} title={`Chapter ${String(chapter.order).padStart(2,"0")} · notes`} onClose={() => setNotesOpen(false)} className="fy-chapter-notes-sheet">

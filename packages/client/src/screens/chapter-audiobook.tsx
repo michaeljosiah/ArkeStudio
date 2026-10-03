@@ -64,6 +64,7 @@ import { Button } from "../components/ui.js";
 import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, usePlayback, useQueueAt } from "../lib/audio.js";
 import { PictureChip, type PictureSpan } from "../components/audiobook-picture.js";
 import { mediaUrl } from "../lib/media.js";
+import { reactionsToRead } from "@arke-studio/contracts";
 import { barAt, chapterTimingOf, hasTiming, useMixPlayer } from "./chapter-timing.js";
 import {
   acceptDirection,
@@ -447,22 +448,23 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   useEffect(() => {
     if (connection === "open") requestVoiceCatalogue(worldId);
   }, [connection, worldId]);
-  const counts = useMemo(
-    () =>
-      audiobookCounts(
-        derived.blocks,
-        recordOrNull,
-        (block) => rows.find((row) => row.block.key === block.key)?.assigned ?? narrator,
-        hasArtifact,
-        (block) => recordedKeys.has(audiobookRecordingKey(block)),
-        // The notes a block is led by name its take (R-45, R-53): the counts judge it as the row does.
-        (block) => {
-          const row = rows.find((candidate) => candidate.block.key === block.key);
-          return { ...(row?.note !== undefined ? { note: row.note } : {}), ...(hasReadingNotes(readingNotes) ? { reading: readingNotes } : {}) };
-        },
-      ),
-    [derived.blocks, recordOrNull, rows, narrator, hasArtifact, recordedKeys, readingNotes],
-  );
+  const counts = useMemo(() => {
+    const blocks = audiobookCounts(
+      derived.blocks,
+      recordOrNull,
+      (block) => rows.find((row) => row.block.key === block.key)?.assigned ?? narrator,
+      hasArtifact,
+      (block) => recordedKeys.has(audiobookRecordingKey(block)),
+      // The notes a block is led by name its take (R-45, R-53): the counts judge it as the row does.
+      (block) => {
+        const row = rows.find((candidate) => candidate.block.key === block.key);
+        return { ...(row?.note !== undefined ? { note: row.note } : {}), ...(hasReadingNotes(readingNotes) ? { reading: readingNotes } : {}) };
+      },
+    );
+    // Reactions are read when the chapter is (design turn 187, R-83): the press counts them with
+    // the blocks, so it stands while one is left to read. The chapter's own totals stay its blocks'.
+    return { ...blocks, toMake: [...blocks.toMake, ...reactionsToRead(recordOrNull, derived.blocks, hasArtifact)] };
+  }, [derived.blocks, recordOrNull, rows, narrator, hasArtifact, recordedKeys, readingNotes]);
   // What a press would spend, before the run asks: the cloud blocks not made, by the character
   // as the row bills it (SPEC-046 R-8) — bytes or doubled CJK for the readers that count so.
   // The cache is not consulted here, so a character reader's run can only be lower. A token
