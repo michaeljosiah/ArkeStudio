@@ -1,18 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pictureLookChanged, type AudiobookLook, type ClientMessage, type DomainEvent, type ManifestModel, type WorldBundle } from "@arke-studio/contracts";
 import { BenchStore, sessionDir } from "../../src/bench/store.js";
-import { Coordinator } from "../../src/coordinator.js";
-import { devCipher } from "../../src/credentials/dev-cipher.js";
-import { FsWorldProvider } from "../../src/world/provider.js";
 import { AUDIOBOOK_LOOK_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readAudiobook } from "../../src/productions/audiobook.js";
-import { type LookDeriver } from "../../src/productions/audiobook-look.js";
-import { buildPicturePrompt, clipPrompt, pictureAspect, pictureQuote, pictureWho, promptRoom, type PictureDeriver, type PictureDeriverInput } from "../../src/productions/audiobook-picture-suggest.js";
-import { pngBytes } from "../queue/fake-provider.js";
-import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { buildPicturePrompt, clipPrompt, pictureAspect, pictureQuote, pictureWho, promptRoom } from "../../src/productions/audiobook-picture-suggest.js";
+import { CHAPTER, IMAGE, LEDGER, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
 
 /**
  * Suggest picture and Generate (design turn 191a, SPEC-047 R-99, R-100): one editable prompt drafted
@@ -20,91 +15,9 @@ import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
  * to the model's limit; nothing made until Generate, which goes through the Bench on the price shown
  * and lands as the block's picture — one that keeps the look it was made under.
  */
-const CLOCK = "2026-10-03T09:00:00.000Z";
-const LEDGER = "the-ledger-of-nights";
-const CHAPTER = "04-her-own-hand";
 const REQUEST = "01J00000000000000000000001";
-const IMAGE: ManifestModel = {
-  id: "stair-image",
-  provider: "fal",
-  capability: "image",
-  displayName: "Stair Image",
-  accepts: { referenceImages: 2, startFrame: false, endFrame: false },
-  limits: { aspects: ["16:9", "1:1"], maxPromptChars: 4000 },
-  pricing: { kind: "perImage", microUsdPerImage: 40_000, microUsdPerReferenceImage: 5_000 },
-};
-
 type SuggestionEvent = Extract<DomainEvent, { type: "audiobook.picture-suggestion" }>;
 type MadeEvent = Extract<DomainEvent, { type: "audiobook.picture-made" }>;
-interface Harness {
-  worldDir: string;
-  events: DomainEvent[];
-  send: (message: ClientMessage) => Promise<void>;
-  schemaVersion: () => number;
-  seen: PictureDeriverInput[];
-  enqueued: Array<{ params: Record<string, unknown>; estimatedMicroUsd: number }>;
-  cancelled: string[];
-  store: () => ReturnType<NonNullable<FsWorldProvider["openStore"]>>;
-}
-
-async function withHarness(run: (h: Harness) => Promise<void>, options: { picture?: PictureDeriver; look?: LookDeriver; model?: ManifestModel | null; land?: boolean | "fail"; prepare?: (worldDir: string) => Promise<void> } = {}): Promise<void> {
-  const { root, worldDir } = await makeTempRoot();
-  await mkdir(join(worldDir, "productions", LEDGER, ".voices"), { recursive: true });
-  await options.prepare?.(worldDir);
-  const provider = new FsWorldProvider(root, { clock: () => CLOCK });
-  await provider.loadWorld(WORLD_ID);
-  const events: DomainEvent[] = [];
-  const seen: PictureDeriverInput[] = [];
-  const enqueued: Harness["enqueued"] = [];
-  const cancelled: string[] = [];
-  const models = options.model === null ? [] : [options.model ?? IMAGE];
-  const coordinator = new Coordinator({
-    provider,
-    adapter: null,
-    changeLogPath: join(root, "logs", "changes.jsonl"),
-    appVersion: "test",
-    appRoot: root,
-    cipher: devCipher(),
-    credentialsFileName: "credentials.dev.dat",
-    manifest: { manifestVersion: 1, generated: "2026-10-03", models },
-    observeEvent: (event) => events.push(event),
-    pictureDeriver: options.picture ?? (async (input) => {
-      seen.push(input);
-      return { prompt: "Maren on the rail with Bray beside her, telling a story to fill the quiet; grey dawn.", who: ["maren-kest", "bray-half-hitch", "nobody"], place: null };
-    }),
-    lookDeriver: options.look ?? (async () => ({ place: { text: "The rail desk at dawn, grey light." }, characters: [{ who: "maren-kest", text: "Oilskin coat, dark with salt." }, { who: "bray-half-hitch", text: "Three belts, a wet cap." }] })),
-  });
-  // The job queue is the one thing stood in for: it accepts the job and lands its picture the way a
-  // finished job lands a Bench take — the session log says the take completed.
-  (coordinator as unknown as { jobQueue: unknown }).jobQueue = {
-    enqueue: async (input: { target: { id: string }; landing: { dir: string }; params: Record<string, unknown>; estimatedMicroUsd: number }) => {
-      enqueued.push({ params: input.params, estimatedMicroUsd: input.estimatedMicroUsd });
-      if (options.land === false) return { id: "jb_01J00000000000000000000001" };
-      if (options.land === "fail") {
-        const [failedSession, failedTake] = input.target.id.split("/") as [string, string];
-        await new BenchStore(sessionDir(worldDir, failedSession as never)).append({ type: "take-status", takeId: failedTake as never, status: "failed", error: "the provider refused the prompt" }, { at: CLOCK });
-        return { id: "jb_01J00000000000000000000001" };
-      }
-      const [sessionId, takeId] = input.target.id.split("/") as [string, string];
-      await mkdir(join(worldDir, input.landing.dir), { recursive: true });
-      await writeFile(join(worldDir, input.landing.dir, "made.png"), pngBytes());
-      await new BenchStore(sessionDir(worldDir, sessionId as never)).append(
-        { type: "take-completed", takeId: takeId as never, media: { file: "made.png", hash: "sha256:0123456789abcdef" as never }, cost: { estimatedMicroUsd: input.estimatedMicroUsd, actualMicroUsd: input.estimatedMicroUsd }, completedAt: CLOCK },
-        { at: CLOCK },
-      );
-      return { id: "jb_01J00000000000000000000001" };
-    },
-    cancel: async (jobId: string) => void cancelled.push(jobId),
-  };
-  const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
-  coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
-  try {
-    await run({ worldDir, events, send, seen, enqueued, cancelled, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!() });
-  } finally {
-    await provider.close();
-  }
-}
 
 const suggest = (send: Harness["send"], block = "p0.0") =>
   send({ kind: "suggest-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, block, requestId: REQUEST });

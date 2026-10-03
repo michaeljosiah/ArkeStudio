@@ -64,6 +64,7 @@ import { EditorDialog } from "../components/editor-dialog.js";
 import { Button } from "../components/ui.js";
 import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, usePlayback, useQueueAt } from "../lib/audio.js";
 import { PictureChip, type PictureSpan } from "../components/audiobook-picture.js";
+import { ProposedChip } from "../components/audiobook-illustrate.js";
 import { mediaUrl } from "../lib/media.js";
 import { reactionsToRead } from "@arke-studio/contracts";
 import { barAt, chapterTimingOf, hasTiming, useMixPlayer } from "./chapter-timing.js";
@@ -144,6 +145,8 @@ export interface ChapterAudiobookInput {
   beforeRead?: (intent: AudiobookIntent) => boolean;
   /** Listen is the head's primary (`listenLeads`): Direct and Read the chapter stand back beside it. */
   listenLeads?: boolean;
+  /** Illustrate this chapter (design turn 191b), beside Direct: its press, whether it is working, and whether a proposal is held (`Illustrate again`). */
+  illustrate?: { press: () => void; busy: boolean; again: boolean };
 }
 
 /** What a press asks for once the save lands: the chapter, these blocks alone, a direction, or a card's acceptance. */
@@ -961,6 +964,12 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             Direct<span className="fy-ab__presstail">{directedBlocks > 0 ? " again" : " this chapter"}</span>
           </Button>
         )}
+        {/* Illustrate this chapter beside Direct (design turn 191b): the same sort of press, read and held. */}
+        {input.illustrate !== undefined && rows.length > 0 && (
+          <Button variant="secondary" disabled={locked || connection !== "open" || input.illustrate.busy} onClick={input.illustrate.press} data-testid="illustrate-chapter">
+            Illustrate<span className="fy-ab__presstail">{input.illustrate.again ? " again" : " this chapter"}</span>
+          </Button>
+        )}
         {counts.toMake.length > 0 && (
           <Button variant={input.listenLeads === true ? "secondary" : "primary"} disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
             Read the chapter · {counts.toMake.length} block{counts.toMake.length === 1 ? "" : "s"}
@@ -1307,7 +1316,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
   /** A block's direction written with its markers changed (R-42). */
   onDirect?: (key: string, direction: AudiobookDirectionInput | null) => void;
   /** The pictures set on blocks (design turn 186c): a chip in the margin with when each starts. */
-  pictures?: { byKey: ReadonlyMap<string, PictureSpan>; estimated: boolean };
+  pictures?: { byKey: ReadonlyMap<string, PictureSpan>; estimated: boolean; /** Proposed by Arke and not yet accepted (191b): a dashed chip with a short title. */ proposed?: ReadonlyMap<string, { title: string }> };
 }) {
   const coarse = useMediaQuery("(pointer: coarse)");
   const pressedSelection = useRef<BlockSelection | null>(null);
@@ -1396,10 +1405,11 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
             );
               // A picture set on the block (turn 186c): its chip under the speaker, in the margin.
               const picture = pictures?.byKey.get(row.block.key);
-              return picture === undefined || slug === undefined ? speaker : (
+              const proposed = pictures?.proposed?.get(row.block.key);
+              return (picture === undefined && proposed === undefined) || slug === undefined ? speaker : (
                 <span className="fy-ab__picwho">
                   {speaker}
-                  <PictureChip slug={slug} picture={picture} estimated={pictures?.estimated === true} />
+                  {picture !== undefined ? <PictureChip slug={slug} picture={picture} estimated={pictures?.estimated === true} /> : <ProposedChip title={proposed!.title} />}
                 </span>
               );
             })()}

@@ -3339,6 +3339,34 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * Illustrate this chapter (design turn 191b, SPEC-047 R-101): the writing service reads the
+   * chapter, its cast and places, the look and the art direction, and proposes where the pictures
+   * go and what each shows — sparse, never over a picture the author set. Held until accepted or
+   * discarded; nothing is made or spent by reading. Answered as `illustration.finished`.
+   */
+  z.object({ kind: z.literal("illustrate-chapter"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("discard-illustration"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  /**
+   * The proposal accepted (R-102): the rows left unskipped, made one at a time through the Bench
+   * under ONE confirm of the total (`confirmedMicroUsd` is the price Accept showed), each filed on
+   * its block as it lands. A row held for a missing reference goes only if named in `without`.
+   * Answered as `illustration.progress`.
+   */
+  z
+    .object({
+      kind: z.literal("accept-illustration"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      proposalId: z.string().min(1).max(64),
+      blocks: z.array(z.string().min(1).max(40)).max(60),
+      without: z.array(z.string().min(1).max(40)).max(60).optional(),
+      confirmedMicroUsd: z.number().int().min(0),
+    })
+    .strict(),
+  /** Stop keeps what is made and costs nothing more (R-102). */
+  z.object({ kind: z.literal("stop-illustration"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  /**
    * The chapter read for its look (design turn 191c, SPEC-047 R-98): the place, the time and the
    * light and what each character wears here, asked of the writing service once and kept on the
    * chapter's record — the author's own lines never replaced. Nothing is spent. Answered as

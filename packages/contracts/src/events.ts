@@ -10,7 +10,7 @@ import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema, DirectionReadsSchema } from "./audiobook.js";
 import { AudiobookListeningSchema } from "./audiobook-listening.js";
-import { PictureSuggestionSchema } from "./audiobook-illustrate.js";
+import { IllustrationProgressSchema, IllustrationProposalSchema, PictureSuggestionSchema } from "./audiobook-illustrate.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX } from "./cadence.js";
 import { FreePlanShortSchema } from "./provider-plans.js";
@@ -1371,6 +1371,38 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       sessionId: z.string().min(1).optional(),
       record: ChapterAudiobookSchema.optional(),
       reason: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** `Illustrate this chapter` reading the chapter (design turn 191b, SPEC-047 R-101); replayed to a window that connects while it runs. */
+  z.object({ ...base, type: z.literal("illustration.started"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema }).strict(),
+  /**
+   * The proposal (R-101), held until accepted or discarded and replayed to a window that connects:
+   * where the pictures go and what each shows, priced and not made. Sent again with what is left
+   * when an accepted run ends with a picture held or stopped.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("illustration.finished"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      outcome: z.enum(["proposed", "stopped", "unavailable", "failed"]),
+      proposal: IllustrationProposalSchema.optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** An accepted proposal made one picture at a time (design turn 191d, R-102): how many, what has landed, what was held and why. */
+  z
+    .object({
+      ...base,
+      type: z.literal("illustration.progress"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      progress: IllustrationProgressSchema,
+      /** The run was refused before it began, in one clause. */
+      refused: z.string().min(1).optional(),
     })
     .strict(),
   /**
