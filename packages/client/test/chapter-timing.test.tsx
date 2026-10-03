@@ -268,6 +268,26 @@ describe("codex on PR 1500", () => {
     assert.deepEqual(writes, []);
   });
 
+  it("lands a playhead in the pause before a block not read where the mix's clock stands (codex on PR 1506)", () => {
+    // p1.0 not read and set to start a second after p0.0: the mix skips it and its pause.
+    const held = { ...record({ "p1.0": { start: 1 } }), takes: Object.fromEntries(Object.entries(record().takes).filter(([key]) => key !== "p1.0")) };
+    const shown = timingOf(held, "narrator", "estimate");
+    const mixed = timingOf(held, "narrator", "skip");
+    const p0 = mixed.bars.find((bar) => bar.key === "p0.0")!;
+    const p1 = shown.bars.find((bar) => bar.key === "p1.0")!;
+    assert.equal(betweenClocks(shown, mixed, p1.at - 0.5), p0.at + p0.seconds, "at the end of the block before, not the chapter's head");
+    assert.equal(betweenClocks(shown, mixed, p1.at + 0.5), p0.at + p0.seconds);
+  });
+
+  it("clears a pause after set back to nothing with Reset (codex on PR 1506)", async () => {
+    const writes: Array<[string, BlockTimingInput]> = [];
+    const held = record({ "p2.0": { start: 0 } });
+    const timing = timingOf(held);
+    const m = await render(<TimingSide bar={timing.bars.find((bar) => bar.key === "p1.0")!} row={ROWS[2]!} timing={timing} rows={ROWS} onTiming={(key, input) => writes.push([key, input])} onPlayFrom={() => {}} refused={null} locked={false} />);
+    await act(async () => q(m, "[data-testid=timing-reset]")!.click());
+    assert.deepEqual(writes, [["p1.0", { reset: true, pauseAfter: null }]]);
+  });
+
   it("resets the pause after a block with the block", async () => {
     const writes: Array<[string, BlockTimingInput]> = [];
     const held = record({ "p2.0": { start: -0.4 } });

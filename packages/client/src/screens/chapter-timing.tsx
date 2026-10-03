@@ -175,18 +175,20 @@ export function barAt(timing: ChapterTiming, t: number): TimedBar | null {
 export function betweenClocks(from: ChapterTiming, to: ChapterTiming, t: number): number {
   const bars = from.bars.filter((bar) => bar.kind === "block" && bar.under === null).sort((a, b) => a.at - b.at);
   const target = new Map(to.bars.filter((bar) => bar.kind === "block").map((bar) => [bar.key, bar]));
-  // Whether `t` sits in a block the other clock has not: it lands where that clock stands.
-  let inMissing = false;
+  // Where the other clock stands: the end of the last block both hold that is behind `t`.
+  let standing = 0;
   for (const bar of bars) {
     const there = target.get(bar.key);
-    if (t >= bar.at + bar.seconds) continue;
-    if (there === undefined) {
-      if (t >= bar.at) inMissing = true;
+    if (t >= bar.at + bar.seconds) {
+      if (there !== undefined) standing = there.at + there.seconds;
       continue;
     }
-    // In the pause before a block, as far before it on the other clock (codex on PR 1500): a
-    // playhead in authored silence stays in it rather than jumping to the next block.
-    return Math.max(0, there.at + (inMissing ? Math.max(0, t - bar.at) : t - bar.at));
+    // In a block the other clock skips, or the pause before it — which the other clock skips
+    // too — it lands where that clock stands (codex on PR 1506), never back at the chapter's head.
+    if (there === undefined) return standing;
+    // In the pause before a block both hold, as far before it on the other clock (codex on PR
+    // 1500): a playhead in authored silence stays in it rather than jumping to the next block.
+    return Math.max(standing, there.at + (t - bar.at));
   }
   return to.seconds;
 }
@@ -436,18 +438,27 @@ export function TimingView({ timing, lanes, rows, selected, onSelect, onTiming, 
  * which is kept on the next block's start — or the pause the field shows would stay.
  */
 function resetOf(bar: TimedBar): BlockTimingInput {
-  return { reset: true, ...(bar.pauseAfter !== null && bar.pauseAfter !== 0 && !bar.locked.pauseAfter ? { pauseAfter: null } : {}) };
+  return { reset: true, ...(bar.pauseAfter !== null && !bar.locked.pauseAfter ? { pauseAfter: null } : {}) };
 }
 
 /** A seconds field that writes on Enter or when it is left, never on each key. */
 export function SecondsField({ label, value, min, max, disabled, onCommit, testId, revision }: { label: string; value: number; min: number; max: number; disabled?: boolean; onCommit: (seconds: number) => void; testId?: string; revision?: number }) {
   const [text, setText] = useState(value.toFixed(2));
+  const field = useRef<HTMLInputElement | null>(null);
+  // Typed into and not yet committed: what an answer to another write must not overwrite.
+  const editing = useRef(false);
   // Put back to the record's value whenever an answer lands (codex on PR 1500): a refused write
   // leaves the value as it was, and the field must not keep showing what was refused.
-  useEffect(() => setText(value.toFixed(2)), [value, revision]);
+  // An answer to another write leaves a field being typed in alone (codex on PR 1506): only one not
+  // in hand is put back, which a committed field is once it has been left.
+  useEffect(() => {
+    if (editing.current && field.current !== null && typeof document !== "undefined" && document.activeElement === field.current) return;
+    setText(value.toFixed(2));
+  }, [value, revision]);
   // Read from the field itself at the commit: what is in it is what was meant, whatever the last
   // change event carried.
   const commit = (typed: string) => {
+    editing.current = false;
     const parsed = Number(typed.replace("−", "-"));
     if (!Number.isFinite(parsed)) {
       setText(value.toFixed(2));
@@ -459,6 +470,7 @@ export function SecondsField({ label, value, min, max, disabled, onCommit, testI
   };
   return (
     <input
+      ref={field}
       className="fy-tm__field fy-mono"
       type="number"
       step={0.01}
@@ -468,7 +480,10 @@ export function SecondsField({ label, value, min, max, disabled, onCommit, testI
       data-testid={testId}
       value={text}
       disabled={disabled}
-      onChange={(event) => setText(event.target.value)}
+      onChange={(event) => {
+        editing.current = true;
+        setText(event.target.value);
+      }}
       onBlur={(event) => commit(event.currentTarget.value)}
       onKeyDown={(event) => {
         if (event.key === "Enter") commit(event.currentTarget.value);
