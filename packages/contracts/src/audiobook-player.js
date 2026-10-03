@@ -406,8 +406,16 @@ export function mountAudiobookPlayer(root, options) {
     for (const audio of players) quietPause(audio);
     holds[0] = holds[1] = -1;
     ci = index;
-    gapNote = null;
+    gapNote = leadingGap();
     seek(at || 0);
+  }
+  /**
+   * The blocks not read before a chapter's first take (codex on PR 1493): the gap and the take
+   * both stand at 0:00, so no clock ever crosses it, and it is said as the chapter opens.
+   */
+  function leadingGap() {
+    const c = chapter();
+    return c && c.audio.length > 0 ? c.gaps.find((gap) => gap.at < 1e-3) || null : null;
   }
   function play() {
     if (!playable(ci)) {
@@ -439,12 +447,16 @@ export function mountAudiobookPlayer(root, options) {
       pause();
       return;
     }
-    goChapter(next, 0);
     if (sleepsHere) {
       // End of chapter: rest at the next chapter's start, so the next press goes on from there.
+      // Stopped before the next chapter is loaded, or its first words would sound (codex on PR 1493).
+      playing = false;
+      lastTick = null;
+      goChapter(next, 0);
       pause();
       return;
     }
+    goChapter(next, 0);
     playing = true;
     startAudio();
     render();
@@ -847,6 +859,7 @@ export function mountAudiobookPlayer(root, options) {
   el.track.addEventListener("pointercancel", onUp);
 
   if (playable(ci)) {
+    if (t < 1e-3) gapNote = leadingGap();
     segIndex = segAt(chapter(), t);
     hold(cur, segIndex, Math.max(0, t - chapter().audio[segIndex].at));
     primeNext();
@@ -866,12 +879,25 @@ export function mountAudiobookPlayer(root, options) {
       const offsetInPiece = players[cur].currentTime || 0;
       chapters = normalise(next);
       const found = place ? resolve(place) : null;
-      ci = found && playable(found.index) ? found.index : Math.max(0, nextPlayable(found ? found.index : 0, 1));
-      const c = chapter();
-      if (!c || c.audio.length === 0) {
+      const from = found ? found.index : 0;
+      // The place's chapter, else the next with takes, else the last one before it with takes.
+      const landed = found && playable(found.index) ? found.index : nextPlayable(from, 1) >= 0 ? nextPlayable(from, 1) : nextPlayable(Math.min(from, chapters.length - 1), -1);
+      if (landed < 0) {
+        // Nothing left to play: what was sounding stops rather than going on as stale narration (codex on PR 1493).
+        for (const audio of players) {
+          quietPause(audio);
+          audio.removeAttribute("src");
+        }
+        holds[0] = holds[1] = -1;
+        playing = false;
+        lastTick = null;
+        ci = 0;
+        t = 0;
         render();
         return;
       }
+      ci = landed;
+      const c = chapter();
       const still = playingSrc ? c.audio.findIndex((a) => a.src === playingSrc) : -1;
       if (still >= 0 && found && found.index === ci) {
         // The element playing holds a piece the new plan still has: it plays on untouched.

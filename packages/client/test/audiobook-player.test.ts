@@ -10,6 +10,8 @@ import { AUDIOBOOK_PLAYER_SOURCE, mountAudiobookPlayer, type AudiobookPlayerChap
  */
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
+/** Every source an element was told to play, in order. */
+const started: string[] = [];
 const store = new Map<string, string>();
 const session: { metadata: { title: string; album: string; artwork: Array<{ src: string }> } | null; handlers: Map<string, ((details?: unknown) => void) | null>; positions: unknown[]; playbackState?: string } = {
   metadata: null,
@@ -42,6 +44,7 @@ class MediaMetadata {
 // An <audio> as far as the player asks of one: play and pause, said the way a browser says them.
 Object.assign(dom.HTMLElement.prototype, {
   play(this: HTMLMediaElement & { paused: boolean; ended: boolean }) {
+    started.push(this.getAttribute("src") ?? "");
     this.paused = false;
     this.ended = false;
     this.dispatchEvent(new dom.Event("play") as unknown as Event);
@@ -187,6 +190,38 @@ describe("the book, not a chapter (186a, R-58)", () => {
     p.at(0.5);
     assert.deepEqual(shown(), ["pics/stair.png"]);
     assert.equal(p.all(".abp-pic").length, 2, "two layers, so one fades into the other");
+  });
+});
+
+describe("what codex found on PR 1493", () => {
+  it("says the blocks not read before a chapter's first take as the chapter opens", () => {
+    const leading: AudiobookPlayerChapter = { ...CH2, id: "lead", gaps: [{ at: 0, from: 1, to: 3 }], blocks: [take("c2.p3", 0, 8)], seconds: 8 };
+    const p = mount({ chapters: [leading, CH4], chapterId: "lead" });
+    p.press("Text");
+    assert.match(p.text(".abp-follow"), /^3 blocks not read/);
+  });
+
+  it("at End of chapter, never starts the next chapter's first words", () => {
+    const p = mount();
+    p.press("Sleep timer");
+    p.end(); p.end();
+    started.length = 0;
+    p.end();
+    assert.deepEqual(started, [], "nothing played after the chapter ended");
+    assert.match(p.text(".abp-chap"), /Chapter 02/);
+  });
+
+  it("stops what was sounding when a newer plan leaves nothing to play", () => {
+    const p = mount();
+    p.handle.update([CH3]);
+    assert.ok(p.playingAudio() === null);
+    assert.ok(p.audios().every((audio) => !audio.hasAttribute("src")), "the stale take is let go");
+  });
+
+  it("lands on the last chapter with takes before the place when none follows it", () => {
+    const p = mount({ chapterId: "hand" });
+    p.handle.update([CH1, CH2, CH3, { ...CH4, state: "not read", seconds: 0, blocks: [], gaps: [{ at: 0, from: 1, to: 2 }] }]);
+    assert.match(p.text(".abp-chap"), /Chapter 02/, "not chapter 1 by default");
   });
 });
 
