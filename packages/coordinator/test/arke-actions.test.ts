@@ -182,6 +182,12 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     assert.equal(clone.conversationSchema.safeParse(frenchClone).success, false, "the current chat clone does not carry a language override");
     const bench = modelActionCatalogue().find((entry) => entry.kind === "bench-dispatch")!.fields;
     assert.equal(bench.some((field) => field.name === "confirmedSpeechMicroUsd" || field.name === "voiceUploadConfirmedFor"), false, "direct speech acknowledgements are not fields on bench-generation");
+    const art = ARKE_CLIENT_COMMAND_REGISTRY["set-art-direction"];
+    assert.ok(art.classification === "supported-by-arke");
+    const direction = { kind: "set-art-direction", worldId, requestId: worldId, description: "Quiet" };
+    assert.equal(art.schema.safeParse({ ...direction, masterLook: "references/master-look.png" }).success, true);
+    assert.equal(art.conversationSchema.safeParse({ ...direction, masterLook: "references/master-look.png" }).success, false, "chat adopts a named candidate through result-use rather than assigning a path");
+    assert.equal(art.conversationSchema.safeParse({ ...direction, masterLook: null }).success, true, "chat can still clear the master look");
   });
 
   it("names unsafe command seams and exposes strict authority actions", () => {

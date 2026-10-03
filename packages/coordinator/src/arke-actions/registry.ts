@@ -757,6 +757,7 @@ function conversationCommandSchema(kind: ClientMessageKind, schema: z.ZodDiscrim
   switch (kind) {
     case "timeline-command": return schema.extend({ commands: ModelEditorRequestSchema.shape.commands });
     case "scene-command": return schema.extend({ command: ChatSceneCommandSchema });
+    case "set-art-direction": return schema.extend({ masterLook: z.null().optional() });
     case "upload-artifacts": return schema.omit({ editor: true, sourcePaths: true });
     case "pick-staged-reference": return schema.omit({ image: true, worldFile: true });
     case "clone-voice": return schema.omit({ language: true });
