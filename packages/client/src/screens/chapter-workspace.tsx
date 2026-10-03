@@ -36,6 +36,7 @@ import {
   PASSAGE_SPAN_MAX,
   readerPlace,
   audiobookReadingNotes,
+  voiceDisplayLabel,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
@@ -49,7 +50,7 @@ import { continuityStamp } from "../lib/continuity.js";
 import { passageAction, passageActions, type PassageAction } from "../lib/passage-actions.js";
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
-import { ListenButton } from "../components/audiobook-player.js";
+import { ListenButton, listenLeads } from "../components/audiobook-player.js";
 import { BlockPicturePanel, useChapterPictures } from "../components/audiobook-picture.js";
 import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectSheet, DirectionCard, ReadSheet, PerformedSpeaker, ReadingMenu, ReadingNotes, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
@@ -1163,6 +1164,7 @@ export function ChapterWorkspace({
     ...(production.audiobook?.requests !== undefined ? { requests: production.audiobook.requests } : {}),
     connection,
     locked: locked || record === null,
+    listenLeads: listenLeads(production, chapter.id),
     // The press waits out the autosave (turn 126's fourth rule, codex on PR 1180): a read of
     // the words on disk while newer ones are on their way would make takes stale on arrival.
     beforeRead: (intent) => {
@@ -1185,7 +1187,7 @@ export function ChapterWorkspace({
     }
     const cast = world.sheets
       .filter((sheet) => sheet.type === "character" && !sheet.retired && (sheet.production === undefined || sheet.production === prodId) && !chapterSpeakers.has(sheet.id))
-      .map((sheet) => ({ sheet: sheet.id, label: sheet.name, voice: sheet.voice === undefined ? null : (sheet.voice.label ?? sheet.voice.voiceId), colour: null }));
+      .map((sheet) => ({ sheet: sheet.id, label: sheet.name, voice: sheet.voice === undefined ? null : voiceDisplayLabel(sheet.voice, world), colour: null }));
     return { chapter: [...chapterSpeakers.values()], cast };
   }, [voicesRecord, voicesStale, castingNow, locked, record, connection, audiobook.rows, world.sheets, prodId]);
   const pinBlock = (row: BlockRow, pick: SpeakerPick, selection?: { from: number; to: number }) => {
@@ -2358,7 +2360,7 @@ export function ChapterWorkspace({
                           {voice !== undefined && voiceUnavailable(voice) ? (
                             <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">voice unavailable · narrator</span>
                           ) : voice !== undefined ? (
-                            <span className="fy-ch__who-where fy-mono">{voice.label ?? voice.voiceId} · {readerPlace(voice.provider)}</span>
+                            <span className="fy-ch__who-where fy-mono" title={`${voiceDisplayLabel(voice, world)} · ${readerPlace(voice.provider)}`}>{voiceDisplayLabel(voice, world)} · {readerPlace(voice.provider)}</span>
                           ) : who.sheet === undefined ? (
                             <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">no sheet · narrator</span>
                           ) : (

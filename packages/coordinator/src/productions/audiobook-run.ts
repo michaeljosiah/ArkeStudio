@@ -13,7 +13,9 @@ import {
   speechInputFits,
   speechUtf8Bytes,
   voiceFormatForModel,
+  voiceDisplayLabel,
   voiceSourceFor,
+  type VoiceNames,
   type ArtifactAudiobookGeneration,
   type BlockTurns,
   type ArtifactSidecar,
@@ -677,11 +679,11 @@ export function firstReadNotices(clones: readonly { provider: string; voice: Clo
 }
 
 /** The price's lines (R-17): every cloud voice the words would go to, once each, with its share. */
-export function priceLines(misses: readonly Speaking[], priceOf: (block: Speaking) => number): { label: string; provider: string; characters: number; estimatedMicroUsd: number }[] {
+export function priceLines(misses: readonly Speaking[], priceOf: (block: Speaking) => number, names: VoiceNames = {}): { label: string; provider: string; characters: number; estimatedMicroUsd: number }[] {
   const voices = new Map<string, { label: string; provider: string; characters: number; estimatedMicroUsd: number }>();
   for (const block of misses) {
     const key = `${block.reader.provider}\n${block.reader.voiceId}`;
-    const held = voices.get(key) ?? { label: block.reader.label ?? block.reader.voiceId, provider: block.reader.provider, characters: 0, estimatedMicroUsd: 0 };
+    const held = voices.get(key) ?? { label: voiceDisplayLabel(block.reader, names), provider: block.reader.provider, characters: 0, estimatedMicroUsd: 0 };
     held.characters += block.text.length;
     held.estimatedMicroUsd += priceOf(block);
     voices.set(key, held);
@@ -741,7 +743,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   // token: the day moves as the book reads, and the book's answer covered it.
   const answer = freePlan !== null ? createHash("sha256").update(`${token}\n${JSON.stringify(freePlan.short)}`).digest("hex") : token;
   if (asks && deps.priced === undefined && deps.confirmationToken !== answer) {
-    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}) });
+    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf, store.getBundle()), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}) });
     return;
   }
 

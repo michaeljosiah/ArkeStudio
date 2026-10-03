@@ -1,4 +1,4 @@
-import { chapterParagraphs, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
+import { chapterParagraphs, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   AUDIOBOOK_DELIVERIES,
@@ -139,6 +139,8 @@ export interface ChapterAudiobookInput {
    * draft, and will send it once the save lands.
    */
   beforeRead?: (intent: AudiobookIntent) => boolean;
+  /** Listen is the head's primary (`listenLeads`): Direct and Read the chapter stand back beside it. */
+  listenLeads?: boolean;
 }
 
 /** What a press asks for once the save lands: the chapter, these blocks alone, a direction, or a card's acceptance. */
@@ -883,12 +885,12 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         {/* Direct this chapter in the head beside the read (design turn 184a), as well as the
             dock's prompt: the same sheet. A held proposal answers it until accepted or discarded. */}
         {directable && (
-          <Button variant="primary" disabled={locked || connection !== "open"} onClick={directPress} data-testid="direct-audiobook">
+          <Button variant={input.listenLeads === true ? "secondary" : "primary"} disabled={locked || connection !== "open"} onClick={directPress} data-testid="direct-audiobook">
             {directedBlocks > 0 ? "Direct again" : "Direct this chapter"}
           </Button>
         )}
         {counts.toMake.length > 0 && (
-          <Button variant={directable ? "secondary" : "primary"} disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
+          <Button variant={directable || input.listenLeads === true ? "secondary" : "primary"} disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
             Read the chapter · {counts.toMake.length} block{counts.toMake.length === 1 ? "" : "s"}
             {grouping.groups.length > 0 ? ` · ${grouping.requests} request${grouping.requests === 1 ? "" : "s"}` : ""}
             {chapterEstimate > 0 ? ` · ${tokenPriced ? "~" : ""}${formatMicroUsd(chapterEstimate)}` : plan !== null ? ` · ${plan}` : ""}
@@ -1713,6 +1715,8 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   const row = rows.find((candidate) => candidate.block.key === selected) ?? null;
   // A Make again past the month's free credit is priced again, and says so (design turn 182).
   const creditLeft = freeCreditLeft(useStore().state?.app.ledger ?? []);
+  // A designed or cloned voice is said by its name, never its id (the door's Cast, 2026-10-03).
+  const voiceNames = useStore().state?.world ?? {};
   const [supportNotice, setSupportNotice] = useState<string | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
   const [markerMenu, setMarkerMenu] = useState<MarkerAt | null>(null);
@@ -1749,7 +1753,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   // Who reads it, in words (turn 165): the voice and its role, never the provider's id — the
   // reader's provider and model are the Voices panel's to say, and the takes'.
   const readBy = [
-    `read by ${row.speaker.label ?? row.speaker.voiceId}`,
+    `read by ${voiceDisplayLabel(row.speaker, voiceNames)}`,
     row.byNarrator || row.speakerKey === null ? "narrator" : row.mark,
     ...(row.speaker !== row.assigned ? ["stands in"] : row.byNarrator && row.note !== undefined ? ["performed"] : []),
     ...(row.proposed !== null ? ["proposed"] : []),
@@ -2108,7 +2112,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
                         ? `recorded${generation.voiceLabel !== undefined ? ` · ${generation.voiceLabel}` : ""}`
                         : (
                           <>
-                            {generation !== null ? `${generation.voiceLabel ?? generation.voiceId} · ${readerName(generation, modelOf(generation))}` : ""}
+                            {generation !== null ? `${voiceDisplayLabel({ label: generation.voiceLabel, voiceId: generation.voiceId }, voiceNames)} · ${readerName(generation, modelOf(generation))}` : ""}
                             {generation?.delivery !== undefined ? ` · ${generation.delivery}` : ""}
                             {generation !== null ? ` · ${generation.costMicroUsd === null ? formatMicroUsd(generation.estimatedMicroUsd) : formatMicroUsd(generation.costMicroUsd)}` : ""}
                           </>
@@ -2627,7 +2631,7 @@ export function RecordedTakeDialog({ staged, row, onCancel, onReplace, onKeep }:
   ].filter((part) => part !== null).join(" · ");
   const refused = staged.state === "refused" ? staged.refused : undefined;
   return (
-    <EditorDialog open title="Upload a take" subtitle={`${row.mark} · ${row.block.key}`} onClose={onCancel} width={540}>
+    <EditorDialog open title="Upload a take" subtitle={`${row.mark} · ${row.block.key}`} onClose={onCancel} width={540} onBody>
       <div className="fy-rectake" data-testid="recorded-take-dialog">
         <div className={`fy-rectake__quote fy-voice--${tone}`}>{row.block.text}</div>
         {refused !== undefined ? (
@@ -2734,7 +2738,7 @@ export function SpeakerLinesDialog({ worldId, productionId, speaker, label, tone
     return { text: row.words === "match" ? "match" : "unchecked", tone: row.words === "match" ? "pass" : "unavailable" };
   };
   return (
-    <EditorDialog open title={label} onClose={close} width={680}>
+    <EditorDialog open title={label} onClose={close} width={680} onBody>
       <div className="fy-rectake" data-testid="speaker-lines-dialog">
         <div className="fy-rectake__sect">
           <span className="fy-rectake__sect-title">Script</span>

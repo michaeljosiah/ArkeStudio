@@ -10,6 +10,8 @@ import { clearQueue, dismissPlayback } from "../lib/audio.js";
 import { claimRead, releaseRead } from "../lib/reply-reads.js";
 import { mediaUrl } from "../lib/media.js";
 import { openAudiobookListening, subscribeAudiobookListening, useAudiobookRecords, useAudiobookRuns, useStore } from "../lib/store.js";
+import { BodyLayer } from "./body-layer.js";
+import { Play } from "./icons.js";
 import { Button } from "./ui.js";
 
 /**
@@ -47,6 +49,17 @@ export function playerChapters(listening: AudiobookListening, src: (file: string
 /** Whether anything of the book is made yet: Listen waits for one block anywhere (R-67). */
 export function bookHasTakes(production: Pick<ProductionBundle, "chapters"> | null): boolean {
   return (production?.chapters ?? []).some((chapter) => !chapter.retired && chapter.audiobook !== undefined && "takes" in chapter.audiobook && chapter.audiobook.takes > 0);
+}
+
+/**
+ * Whether Listen leads the head it sits in (owner, 2026-10-03: the player went unfound as a ghost
+ * beside Export). On the door, once a block anywhere is made; on a chapter, once a block of that
+ * chapter is — before then the chapter's own read is the work, and Listen stands back.
+ */
+export function listenLeads(production: Pick<ProductionBundle, "chapters"> | null, chapterId?: string): boolean {
+  if (chapterId === undefined) return bookHasTakes(production);
+  const chapter = production?.chapters.find((candidate) => candidate.id === chapterId);
+  return chapter !== undefined && !chapter.retired && chapter.audiobook !== undefined && "takes" in chapter.audiobook && chapter.audiobook.takes > 0;
 }
 
 /** What moves the plan while the player is open: each chapter's record and the runs reading it. */
@@ -192,28 +205,36 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan, slug]);
 
+  // Drawn on the body: the door's title row enters with fy-fade-up, and that transformed ancestor
+  // turned this fixed, full-window player into a transparent box over the row.
   return (
-    <div ref={shell} className="fy-abplayer" data-testid="audiobook-player" role="dialog" aria-modal="true" aria-label="Audiobook" tabIndex={-1} style={{ position: "fixed", inset: 0, zIndex: 60 }}>
-      <div ref={host} style={{ position: "absolute", inset: 0 }} />
-      {!ready && (
-        <div className="fy-abplayer__wait" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 12, background: "var(--media-overlay-bg)", color: "var(--media-overlay-fg)" }}>
-          <span className="fy-mono">{refused ?? "opening…"}</span>
-          <Button variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-      )}
-    </div>
+    <BodyLayer>
+      <div ref={shell} className="fy-abplayer" data-testid="audiobook-player" role="dialog" aria-modal="true" aria-label="Audiobook" tabIndex={-1} style={{ position: "fixed", inset: 0, zIndex: 60 }}>
+        <div ref={host} style={{ position: "absolute", inset: 0 }} />
+        {!ready && (
+          <div className="fy-abplayer__wait" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 12, background: "var(--media-overlay-bg)", color: "var(--media-overlay-fg)" }}>
+            <span className="fy-mono">{refused ?? "opening…"}</span>
+            <Button variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        )}
+      </div>
+    </BodyLayer>
   );
 }
 
-/** `Listen` (design turn 186, R-66): on the audiobook door and on a chapter, the book as a listener hears it. */
+/**
+ * `Listen` (design turn 186, R-66): on the audiobook door and on a chapter, the book as a listener
+ * hears it — the head's one primary, with a play icon, once there is something to hear there.
+ */
 export function ListenButton({ worldId, production, chapterId, className }: { worldId: string; production: ProductionBundle; chapterId?: string; className?: string }) {
   const [open, setOpen] = useState(false);
   const connection = useStore().connection;
   return (
     <>
-      <Button variant="ghost" className={className} disabled={!bookHasTakes(production) || connection !== "open"} onClick={() => setOpen(true)} data-testid="audiobook-listen">
+      <Button variant={listenLeads(production, chapterId) ? "primary" : "ghost"} className={className} disabled={!bookHasTakes(production) || connection !== "open"} onClick={() => setOpen(true)} data-testid="audiobook-listen">
+        <Play size={14} />
         Listen
       </Button>
       {open && <AudiobookPlayerView worldId={worldId} production={production} {...(chapterId !== undefined ? { chapterId } : {})} onClose={() => setOpen(false)} />}

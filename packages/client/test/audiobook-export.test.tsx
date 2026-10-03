@@ -109,6 +109,11 @@ describe("Export audiobook (turn 186e)", () => {
     const doorAsk = lastAsk(m, "open-audiobook")!;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: doorAsk.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: DOOR }));
     await press(q(m, '[data-testid="audiobook-export-open"]'));
+    // Drawn on the body (owner, 2026-10-03): inside the title row's fy-fade-up the fixed sheet
+    // was clipped to the top of the page over the head.
+    const sheet = q(m, '[data-testid="audiobook-export"]')!.closest(".fy-editordialog")!;
+    assert.equal(sheet.parentElement, dom.document.body as unknown as HTMLElement);
+    assert.equal(sheet.closest(".fy-h1row, .fy-prodmain"), null);
     const planAsk = lastAsk(m, "open-audiobook-listening")!;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: planAsk.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: PLAN }));
     assert.match(text(q(m, '[data-testid="audiobook-export"]')), /Audiobook player\s*player\.html · 1 chapter · 2 pictures · web package/);

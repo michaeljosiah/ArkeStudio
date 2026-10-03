@@ -1,6 +1,6 @@
 import { estimateSpeechMicroUsd, samplingProblems, speechInputFits } from "@arke-studio/contracts";
 import { applyProviderPlans, localTranscriberAvailable, freeCreditDraw, freeCreditLeft, freeCreditOverrun, freeLimitReason, freePlanAllowance, freePlanFailure, freePlanPending, freePlanShortfall, GOOGLE_DAILY_LIMIT, PAID_PLANS, speechAsks, type FreePlanAllowance, type ProviderPlans } from "@arke-studio/contracts";
-import { designedVoiceTarget, isDesignedVoiceTarget, narratorDesignedRecord, resolveDesignedVoice, VoiceDesignDraftSchema, quoteVoiceDesign, type NarratorDesignedVoice, type NarratorSettings, type WorldDesignedVoice } from "@arke-studio/contracts";
+import { designedVoiceTarget, isDesignedVoiceTarget, narratorDesignedRecord, resolveDesignedVoice, voiceDisplayLabel, VoiceDesignDraftSchema, quoteVoiceDesign, type NarratorDesignedVoice, type NarratorSettings, type WorldDesignedVoice } from "@arke-studio/contracts";
 import type { VoiceDesignClient } from "@arke-studio/providers";
 import { saveDesignedVoice } from "./voice/designed-library.js";
 import { ProductionCreationService } from "./application/production-creation.js";
@@ -1460,7 +1460,7 @@ export class Coordinator {
     // offers, without touching the author's choice.
     if (shipped) {
       const speaks = narratorFor(null, narrationCatalogue);
-      return { narrator: { provider: speaks.provider, model: speaks.model, voiceId: speaks.voiceId, label: speaks.label ?? speaks.voiceId, cloned: false }, catalogue };
+      return { narrator: { provider: speaks.provider, model: speaks.model, voiceId: speaks.voiceId, label: voiceDisplayLabel(speaks, store.getBundle()), cloned: false }, catalogue };
     }
     const source = voiceSourceFor(store.getBundle().clonedVoices ?? [], chosen.provider, chosen.model, chosen.voiceId);
     if (source.kind === "cloned") {
@@ -1470,7 +1470,7 @@ export class Coordinator {
       }
     }
     const speaks = source.kind === "catalogue" ? chosen : narratorFor(null, narrationCatalogue);
-    return { narrator: { provider: speaks.provider, model: speaks.model, voiceId: speaks.voiceId, label: speaks.label ?? speaks.voiceId, cloned: false,
+    return { narrator: { provider: speaks.provider, model: speaks.model, voiceId: speaks.voiceId, label: voiceDisplayLabel(speaks, store.getBundle()), cloned: false,
       ...(designedBinding !== undefined && speaks.voiceId === designedBinding.target ? { designedBinding } : {}) }, catalogue };
   }
 

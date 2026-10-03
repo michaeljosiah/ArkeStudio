@@ -119,9 +119,12 @@ afterEach(async () => {
   }
 });
 
-const text = (m: Mounted): string => m.container.textContent ?? "";
-const q = (m: Mounted, selector: string): HTMLElement | null => m.container.querySelector(selector) as HTMLElement | null;
-const all = (m: Mounted, selector: string): HTMLElement[] => [...m.container.querySelectorAll(selector)] as HTMLElement[];
+// The screen and the sheets it draws on the body (the price, the narrator): read from the body,
+// which holds the one mounted screen.
+const page = (m: Mounted): HTMLElement => (m.container.isConnected ? (dom.document.body as unknown as HTMLElement) : m.container);
+const text = (m: Mounted): string => page(m).textContent ?? "";
+const q = (m: Mounted, selector: string): HTMLElement | null => page(m).querySelector(selector) as HTMLElement | null;
+const all = (m: Mounted, selector: string): HTMLElement[] => [...page(m).querySelectorAll(selector)] as HTMLElement[];
 
 /** A change as React hears it: linkedom raises no input event React listens for. */
 async function typeInto(input: HTMLInputElement, value: string): Promise<void> {

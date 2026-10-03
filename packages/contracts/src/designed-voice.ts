@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { VoiceCandidate } from "./voice.js";
+import type { ClonedVoice, VoiceCandidate } from "./voice.js";
 import { extractVoiceAttributes } from "./voice.js";
 import { quoteSpeech, type SpeechQuote } from "./speech-pricing.js";
 import type { ManifestModel } from "./manifest.js";
@@ -42,6 +42,31 @@ export function designedVoiceTarget(voice: Pick<WorldDesignedVoice, "id" | "revi
 export function isDesignedVoiceTarget(value: string): boolean { return value.startsWith("designed:"); }
 export function resolveDesignedVoice(voices: readonly WorldDesignedVoice[], target: string): WorldDesignedVoice | undefined {
   return voices.find(voice => designedVoiceTarget(voice) === target);
+}
+
+/** Where a voice's name can be found when the voice does not carry one: the world's designed and cloned voices. */
+export interface VoiceNames {
+  designedVoices?: readonly Pick<WorldDesignedVoice, "id" | "revision" | "name">[] | undefined;
+  clonedVoices?: readonly Pick<ClonedVoice, "id" | "name">[] | undefined;
+}
+
+/**
+ * What a voice is called on screen: its own label, else the world's name for the designed or
+ * cloned voice it is — never its id. A designed voice's target (`designed:dv_…:1`) is an address
+ * for takes and caches; a sheet assigned one without a label put that address on the audiobook
+ * door's Cast and in a chapter's Voices rail as if it were a name. A designed voice whose world
+ * entry is gone, or a revision that moved on, still has a name to give: the entry's by its id,
+ * else `Designed voice`.
+ */
+export function voiceDisplayLabel(voice: { label?: string | undefined; voiceId: string }, names: VoiceNames = {}): string {
+  const own = voice.label?.trim();
+  if (own !== undefined && own !== "" && own !== voice.voiceId && !isDesignedVoiceTarget(own)) return own;
+  if (isDesignedVoiceTarget(voice.voiceId)) {
+    const id = voice.voiceId.split(":")[1];
+    const designed = names.designedVoices ?? [];
+    return (designed.find(entry => designedVoiceTarget(entry) === voice.voiceId) ?? designed.find(entry => entry.id === id))?.name ?? "Designed voice";
+  }
+  return names.clonedVoices?.find(entry => entry.id === voice.voiceId)?.name ?? (own !== undefined && own !== "" ? own : voice.voiceId);
 }
 /** What the narrator keeps of a designed voice (SPEC-049 R-12): identity and binding, never the world's sample path. */
 export function narratorDesignedRecord(voice: Pick<WorldDesignedVoice, keyof NarratorDesignedVoice>): NarratorDesignedVoice {

@@ -17,6 +17,7 @@ import {
   CADENCE_PHRASE_MAX,
   legacyVoiceModel,
   normalizeSpeechText,
+  voiceDisplayLabel,
   voiceSourceFor,
   type AudiobookBlock,
   type AudiobookBlockState,
@@ -35,6 +36,7 @@ import {
   type Sheet,
   type Sound,
   type VoiceCandidate,
+  type WorldDesignedVoice,
 } from "@arke-studio/contracts";
 import { clipFor } from "../voice/library.js";
 import { directionPlan } from "../voice/direction.js";
@@ -405,6 +407,8 @@ export function assignReaders(
   notes: Readonly<Record<string, string>> = {},
   /** The book note and the chapter's note (R-53), which lead every block of the chapter. */
   readingNotes: AudiobookReadingNotes = {},
+  /** The world's designed voices, which name a sheet's designed voice that carries no label of its own. */
+  designedVoices: readonly Pick<WorldDesignedVoice, "id" | "revision" | "name">[] = [],
 ): PlannedBlock[] {
   const reading_ = hasReadingNotes(readingNotes) ? readingNotes : undefined;
   return blocks.map((block) => {
@@ -424,7 +428,7 @@ export function assignReaders(
       const model = voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId, clonedVoices);
       if (model === null || model === undefined) return { assigned: narrator, sheet: block.sheet, substituted: "no voice" };
       return {
-        assigned: { provider: voice.provider, model, voiceId: voice.voiceId, ...(voice.label !== undefined ? { label: voice.label } : {}) },
+        assigned: { provider: voice.provider, model, voiceId: voice.voiceId, label: voiceDisplayLabel(voice, { designedVoices, clonedVoices }) },
         sheet: block.sheet,
         sheetVersion: voice.assignedAtVersion,
       };
@@ -520,7 +524,7 @@ export async function planAudiobook(
     override?.chapterNote === undefined ? book : { ...book, chapterNotes: { ...book?.chapterNotes, [summary.id]: override.chapterNote } },
     summary.id,
   );
-  const blocks = assignReaders(derived.blocks, reading, input.narrator, sheets, store.getBundle().clonedVoices ?? [], record === "unreadable" ? null : record, (artifactId) => present.has(artifactId), recorded, notes, readingNotes);
+  const blocks = assignReaders(derived.blocks, reading, input.narrator, sheets, store.getBundle().clonedVoices ?? [], record === "unreadable" ? null : record, (artifactId) => present.has(artifactId), recorded, notes, readingNotes, store.getBundle().designedVoices ?? []);
   return {
     chapter: { id: summary.id, file: summary.file, title: summary.title, order: summary.order, version: opened.version, hash: sha256(opened.body) },
     body: opened.body,

@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { BodyLayer } from "./body-layer.js";
 
 /**
  * A sheet over the editor (SPEC-039 R-5): mounted above the app frame, focus held inside it,
@@ -17,6 +18,7 @@ export function EditorDialog({
   height,
   labelledBy,
   panelClassName,
+  onBody = false,
 }: {
   open: boolean;
   /** The head's title. Absent, the sheet draws no head and `labelledBy` names it instead. */
@@ -28,6 +30,12 @@ export function EditorDialog({
   height?: string;
   labelledBy?: string;
   panelClassName?: string;
+  /**
+   * Drawn on the body (`BodyLayer`) rather than where it is opened. A fixed scrim is fixed to the
+   * window only while no ancestor is transformed or contained: opened from the audiobook door's
+   * title row, which enters with `fy-fade-up`, the Export sheet sat clipped over the head.
+   */
+  onBody?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
@@ -75,7 +83,7 @@ export function EditorDialog({
   }, [open]);
   if (!open) return null;
   const heading = labelledBy ?? "editor-dialog-title";
-  return (
+  const sheet = (
     <div className="fy-editordialog" onClick={onClose} role="presentation">
       <div
         ref={panel}
@@ -99,6 +107,7 @@ export function EditorDialog({
       </div>
     </div>
   );
+  return onBody ? <BodyLayer>{sheet}</BodyLayer> : sheet;
 }
 
 /** The shortcut reference (R-17): every key the editor answers, beside the control that does the same. */
