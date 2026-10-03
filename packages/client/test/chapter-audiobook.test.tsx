@@ -1167,4 +1167,53 @@ describe("the director reads the book (design turn 184)", () => {
     assert.equal(side.querySelector('[data-testid="audiobook-sent-as"]')?.textContent, "Maren counted the bells.");
     assert.equal(side.querySelector('[data-testid="audiobook-reading-held"]')?.textContent, `book note · ${BOOK_NOTE.length} characters · Eleven v3 takes 60 as a tag`);
   });
+
+  it("a proposal that cast the lines first is drawn on the blocks its cast makes (codex on PR 1479)", async () => {
+    const m = await mount(voiced(inkbound("performed")));
+    await answerOpen(m);
+    assert.equal(q(m, '[data-block="p1.1"]'), null, "uncast, the line's paragraph is one block");
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 5, dropped: 0, hash: HASH, chapterVersion: 4, proposalId: "card-2", cast: { lines: 1, speakers: 1 }, castRecord: CAST, proposed: { "p1.1": { delivery: "cold" as const, speed: 1, cues: [] } } }));
+    assert.equal(q(m, '[data-block="p1.0"]')?.getAttribute("data-speaker"), "maren-kest", "the held cast's line has its speaker");
+    assert.equal(q(m, '[data-block="p1.1"]')?.getAttribute("data-proposed"), "true", "the proposal lands on the block its cast made");
+    await act(async () => all(m, '[data-testid="direction-card"] button').find((b) => b.textContent === "Discard")!.click());
+    assert.equal(q(m, '[data-block="p1.1"]'), null, "discarded, the blocks are the record's again");
+  });
+
+  it("the note fields hold while the book or another chapter is being read, and Direct puts a pressed block down (codex on PR 1479)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    assert.ok(q(m, '[data-testid="audiobook-block"]'));
+    await act(async () => all(m, ".fy-arke__prompt").find((b) => b.textContent === "Direct this chapter")!.click());
+    assert.ok(q(m, '[data-testid="direct-sheet"]'), "the sheet takes the panel");
+    assert.equal(q(m, '[data-testid="audiobook-block"]'), null, "the block pressed before is put down");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "slack-water", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H2", toMake: 3, blocks: 3 }));
+    const inputs = [...q(m, '[data-testid="reading-notes"]')!.querySelectorAll("input")] as HTMLInputElement[];
+    assert.deepEqual(inputs.map((input) => input.disabled), [true, true], "another chapter being read holds both notes");
+  });
+
+  it("Hear block says the coordinator's count of reads once it has quoted (codex on PR 1479)", async () => {
+    const reader = RACHEL;
+    const state = voiced(withBook(inkbound(), { narrator: reader }));
+    state.app.manifest = { ...state.app.manifest!, models: state.app.manifest!.models.map((model) => model.id !== reader.model ? model : {
+      ...model, pricing: { kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
+        speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25, rates: [
+          { version: "intro", effectiveFrom: "2026-09-01T00:00:00.000Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 },
+        ] } },
+    }) };
+    const m = await mount(state);
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...reader, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 4, dropped: 0, hash: HASH, chapterVersion: 4, proposalId: "card-3", proposed: { "p0.0": { delivery: "cold" as const, speed: 1, cues: [] } } }));
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    const hear = () => q(m, '[data-testid="proposed-hear"]')!;
+    assert.match(hear().textContent ?? "", /get price · 1 read$/);
+    await act(async () => hear().click());
+    const asked = m.sent.findLast((message) => message.kind === "hear-audiobook-line") as Extract<ClientMessage, { kind: "hear-audiobook-line" }>;
+    await act(async () => __applyEventForTest({ type: "audiobook.heard", at: AT, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: asked.requestId, quote: { token: "three", estimatedMicroUsd: 12000, parts: 3 } }));
+    assert.match(hear().textContent ?? "", /· 3 reads$/);
+    await act(async () => hear().click());
+    const confirmed = m.sent.findLast((message) => message.kind === "hear-audiobook-line") as Extract<ClientMessage, { kind: "hear-audiobook-line" }>;
+    assert.deepEqual({ token: confirmed.quoteToken, proposed: confirmed.proposed }, { token: "three", proposed: true });
+  });
 });

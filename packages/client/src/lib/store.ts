@@ -352,6 +352,8 @@ interface StoreState {
       chapterVersion?: number;
       /** What the proposal carries besides its directions (design turn 184): the lines it casts, the notes it drafted. */
       cast?: { lines: number; speakers: number };
+      /** The cast the proposal was directed against, while it is held (codex on PR 1479). */
+      castRecord?: import("@arke-studio/contracts").ChapterVoices;
       /** Of the blocks addressed, those moved off the ordinary reading — kept past acceptance for the tally. */
       moved?: number;
       /** The card's own name, echoed on acceptance (codex on PR 1476). */
@@ -1424,7 +1426,8 @@ function handleFrame(json: string): void {
       speakerLines: changedWorld ? {} : current.speakerLines,
       narratorQuotes: changedWorld ? {} : current.narratorQuotes,
       heardLines: changedWorld ? {} : current.heardLines,
-      audiobookAsks: changedWorld ? {} : current.audiobookAsks,
+      // A reconnect replays no answer to a question in flight (codex on PR 1479): the asker asks again.
+      audiobookAsks: changedWorld || rejoined ? {} : current.audiobookAsks,
       audiobookDoor: changedWorld ? {} : current.audiobookDoor,
       audiobookBook: changedWorld || rejoined ? {} : current.audiobookBook,
       audiobookNotes: changedWorld ? {} : current.audiobookNotes,
@@ -2084,6 +2087,7 @@ function handleFrame(json: string): void {
           ...(event.hash !== undefined ? { hash: event.hash } : {}),
           ...(event.chapterVersion !== undefined ? { chapterVersion: event.chapterVersion } : {}),
           ...(event.cast !== undefined ? { cast: event.cast } : {}),
+          ...(event.castRecord !== undefined ? { castRecord: event.castRecord } : {}),
           ...(event.proposalId !== undefined ? { proposalId: event.proposalId } : {}),
           ...(event.proposed !== undefined ? { moved: Object.values(event.proposed).filter((input) => (input.delivery !== undefined && input.delivery !== "measured") || input.note !== undefined || input.speed !== 1 || input.cues.length > 0).length } : {}),
           ...(event.chapterNote !== undefined ? { chapterNote: event.chapterNote } : {}),

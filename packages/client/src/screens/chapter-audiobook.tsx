@@ -89,6 +89,7 @@ import {
   subscribeVoiceUploadConfirmations,
   useAudiobookRecords,
   useAudiobookAsks,
+  useAudiobookBooks,
   previewDirection,
   setAudiobookReadingNote,
   draftAudiobookSpeakerNotes,
@@ -134,7 +135,7 @@ export interface ChapterAudiobookInput {
 }
 
 /** What a press asks for once the save lands: the chapter, these blocks alone, a direction, or a card's acceptance. */
-export type AudiobookIntent = { kind: "read"; blocks?: readonly string[] } | { kind: "direct"; also?: DirectAlso } | { kind: "accept" };
+export type AudiobookIntent = { kind: "read"; blocks?: readonly string[] } | { kind: "direct"; also?: DirectAlso } | { kind: "accept" } | { kind: "open-direct" };
 
 /** What the Direct sheet's `Also` asks for with the direction (design turn 184a, R-53, R-54). */
 export interface DirectAlso {
@@ -310,7 +311,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     [models],
   );
   const recordOrNull = record === "unreadable" ? null : record;
-  const derived = useMemo(() => audiobookBlocks(body, cast, audiobookHeading(chapter.order, chapter.title)), [body, cast, chapter.order, chapter.title]);
+  // A proposal that cast the lines first is drawn on the blocks its cast makes (codex on PR 1479):
+  // the record's cast would split the paragraphs elsewhere and give the lines other readers.
+  const blockCast = proposal?.castRecord ?? cast;
+  const derived = useMemo(() => audiobookBlocks(body, blockCast, audiobookHeading(chapter.order, chapter.title)), [body, blockCast, chapter.order, chapter.title]);
   // A take the record names but the shelf no longer holds is not made (codex on PR 1180): the
   // coordinator plans the same way, so the block is made again rather than shown unplayable.
   // The sidecar this window can see for itself; the media it cannot, so the coordinator says
@@ -538,6 +542,11 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // still names its block, and every answer to a price or a consent carries it on.
   const resume = useCallback(
     (intent: AudiobookIntent) => {
+      if (intent.kind === "open-direct") {
+        setSelected(null);
+        setDirectOpen(true);
+        return;
+      }
       if (intent.kind === "direct") {
         directChapter(worldId, prodId, chapter.file, intent.also);
         return;
@@ -576,8 +585,17 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   useEffect(() => setDirectOpen(false), [chapter.id]);
   const directPress = useCallback(() => {
     if (locked || connection !== "open" || directionRun?.state === "directing" || directionRun?.state === "accepting") return;
-    setDirectOpen(true);
-  }, [locked, connection, directionRun?.state]);
+    // The sheet reads the saved words (codex on PR 1479): unsaved typing is saved first, and the
+    // sheet opens once it lands, so Reads describes the chapter Direct will send. It takes the
+    // block panel's place, so a block pressed before is put down.
+    const intent: AudiobookIntent = { kind: "open-direct" };
+    if (input.beforeRead !== undefined && !input.beforeRead(intent)) return;
+    resume(intent);
+  }, [locked, connection, directionRun?.state, input, resume]);
+  // A block pressed while the sheet is open takes the panel back.
+  useEffect(() => {
+    if (selected !== null) setDirectOpen(false);
+  }, [selected]);
   const direct = useCallback((also: DirectAlso) => {
     if (locked || connection !== "open" || directionRun?.state === "directing" || directionRun?.state === "accepting") return;
     setDirectOpen(false);
@@ -1877,7 +1895,8 @@ export function ProposedBlock({ row, proposed, model, hear }: {
     void playClip({ id: `hear-${hearId}`, url: mediaUrl(slug, heard.file), title: row.mark, sub: "proposed" });
   }, [heard?.state]);
   const sent = proposed.sentAs?.map((part) => part.text).join(" ") ?? normalizeSpeechText(row.block.text);
-  const reads = proposed.sentAs?.length ?? 1;
+  // The requests a read makes: the coordinator's count once it has quoted, the parts the markers make before (codex on PR 1479).
+  const reads = heard?.state === "priced" ? heard.parts : (proposed.sentAs?.length ?? 1);
   const tokenPriced = model?.pricing.kind === "perToken" && model.speechPlan !== "free-plan";
   const plan = speechPlanLabel(model);
   const price = model === null || tokenPriced || plan !== null || row.speaker.provider === "kokoro" ? 0 : estimateSpeechMicroUsd(model, sent);
@@ -1950,13 +1969,25 @@ export function ProposedBlock({ row, proposed, model, hear }: {
  * the narrator line, as turn 181's note — the label, the words, the count — written when the
  * field is left.
  */
-export function ReadingNotes({ worldId, productionId, chapterFile, notes, disabled }: {
+/**
+ * Whether the book, or any chapter of it, is being read (codex on PR 1479): the coordinator
+ * refuses a note written meanwhile, production-wide, so every note field holds while it is
+ * rather than taking typing that silently goes back.
+ */
+export function useProductionReading(worldId: string, productionId: string): boolean {
+  const book = useAudiobookBooks()[productionId];
+  const runs = useAudiobookRuns();
+  return book?.state === "reading" || Object.entries(runs).some(([key, run]) => key.startsWith(`${worldId}/${productionId}/`) && run.state === "reading");
+}
+
+export function ReadingNotes({ worldId, productionId, chapterFile, notes, disabled: off }: {
   worldId: string;
   productionId: string;
   chapterFile: string;
   notes: AudiobookReadingNotes;
   disabled: boolean;
 }) {
+  const disabled = off || useProductionReading(worldId, productionId);
   return (
     <div className="fy-ab__notes" data-testid="reading-notes">
       <NoteRow label="Book note" value={notes.book} disabled={disabled} onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note)} />
@@ -2015,7 +2046,11 @@ export function DirectSheet({ worldId, productionId, chapterFile, chapterOrder, 
 }) {
   const [askId, setAskId] = useState<string | null>(null);
   const ask = useAudiobookAsks()[askId ?? ""];
-  useEffect(() => setAskId(previewDirection(worldId, productionId, chapterFile)), [worldId, productionId, chapterFile]);
+  // Asked once the sheet opens, and again when the answer is gone — a reconnect replays none (codex on PR 1479).
+  const asked = ask !== undefined;
+  useEffect(() => {
+    if (!asked) setAskId(previewDirection(worldId, productionId, chapterFile));
+  }, [worldId, productionId, chapterFile, asked]);
   const reads = ask?.state === "reads" ? ask.reads : null;
   const castNeeded = reading !== "narrator" && reads?.cast !== undefined;
   const notesSet = reads?.speakerNotes;
@@ -2095,13 +2130,15 @@ export function BookReadingPanel({ worldId, productionId, title, bookNote, speak
   onDone: () => void;
 }) {
   const connection = useStore().connection;
+  const reading = useProductionReading(worldId, productionId);
+  const held = connection !== "open" || reading;
   const [askId, setAskId] = useState<string | null>(null);
   const ask = useAudiobookAsks()[askId ?? ""];
   const missing = speakers.some((speaker) => speaker.note === undefined);
   return (
     <section className="fy-ab__bookreading" data-testid="book-reading" aria-label="The book's reading">
       <h3 className="fy-ab__card-title">{title}</h3>
-      <NoteRow label="Book note" value={bookNote} disabled={connection !== "open"} multiline onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note)} />
+      <NoteRow label="Book note" value={bookNote} disabled={held} multiline onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note)} />
       <div className="fy-ab__bookreading-lbl">
         <span className="fy-vd__note-k">Speakers</span>
         {speakers.some((speaker) => speaker.source === "sheet") && <span className="fy-mono fy-vd__note-count">drafted from the sheets</span>}
@@ -2109,7 +2146,7 @@ export function BookReadingPanel({ worldId, productionId, title, bookNote, speak
       {speakers.map((speaker) => (
         <div key={speaker.key} className="fy-ab__who" data-testid="book-reading-speaker">
           <b>{speaker.name}</b>
-          <SpeakerNoteInput worldId={worldId} productionId={productionId} speaker={speaker} />
+          <SpeakerNoteInput worldId={worldId} productionId={productionId} speaker={speaker} disabled={held} />
           <small className="fy-mono">{`${speaker.note?.length ?? 0} / ${CADENCE_PHRASE_MAX}${speaker.note === undefined ? "" : speaker.source === "sheet" ? " · sheet" : " · you"}`}</small>
         </div>
       ))}
@@ -2118,7 +2155,7 @@ export function BookReadingPanel({ worldId, productionId, title, bookNote, speak
       <div className="fy-ab__control fy-ab__bookreading-foot">
         <Button
           variant="ghost"
-          disabled={!missing || connection !== "open" || ask?.state === "working"}
+          disabled={!missing || held || ask?.state === "working"}
           data-testid="draft-from-sheets"
           onClick={() => setAskId(draftAudiobookSpeakerNotes(worldId, productionId))}
         >
@@ -2130,7 +2167,7 @@ export function BookReadingPanel({ worldId, productionId, title, bookNote, speak
   );
 }
 
-function SpeakerNoteInput({ worldId, productionId, speaker }: { worldId: string; productionId: string; speaker: { key: string; name: string; note?: string } }) {
+function SpeakerNoteInput({ worldId, productionId, speaker, disabled }: { worldId: string; productionId: string; speaker: { key: string; name: string; note?: string }; disabled: boolean }) {
   const [draft, setDraft] = useState<string | null>(null);
   const value = draft ?? speaker.note ?? "";
   const commit = () => {
@@ -2145,6 +2182,7 @@ function SpeakerNoteInput({ worldId, productionId, speaker }: { worldId: string;
       className="fy-ab__note-input"
       value={value}
       maxLength={CADENCE_PHRASE_MAX}
+      disabled={disabled}
       aria-label={`Note · ${speaker.name}`}
       onChange={(event) => setDraft(event.target.value)}
       onBlur={commit}
