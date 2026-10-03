@@ -1,4 +1,4 @@
-import { estimateSpeechMicroUsd, freeCreditLeft, freePlanNote, speechPlanLabel, speechPriceCopy, speechPricePrefix } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, freeCreditLeft, freePlanAskCopy, freePlanNote, speechPlanLabel, speechPriceCopy, speechPricePrefix } from "@arke-studio/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   AUDIOBOOK_DELIVERIES,
@@ -586,15 +586,22 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       // the character, which a cache hit alone can lower; a token reader's estimate can be
       // passed, so it is `~`, and its service-limit cap is the dispatcher's guard, never shown
       // (SPEC-049 R-6) — said here as the maximum, it was $18.49 for about $0.40 of speech.
+      // A chapter Google's free day cannot cover asks in its own words when it costs nothing:
+      // what the author decides is how far the day's reads go. A priced speaker keeps the price
+      // on the button, the day's line beside it (codex on PR 1475).
+      const free = price.freePlan !== undefined ? freePlanAskCopy(price.freePlan) : null;
       return (
         <span className="fy-ab__control">
           <Button
             onClick={() => send({ confirmationToken: price.confirmationToken })}
             title="the words and the voice go to the provider · the text stays in Activity"
           >
-            Confirm {price.characters.toLocaleString()} characters · {speechPricePrefix(models, price.voices.map((voice) => voice.provider))}{formatMicroUsd(price.estimatedMicroUsd)}
-            {price.voices.map((voice) => ` · ${voice.label} · ${readerPlace(voice.provider)}`).join("")}
+            {free !== null && price.estimatedMicroUsd === 0 ? free.confirm : <>
+              Confirm {price.characters.toLocaleString()} characters · {speechPricePrefix(models, price.voices.map((voice) => voice.provider))}{formatMicroUsd(price.estimatedMicroUsd)}
+              {price.voices.map((voice) => ` · ${voice.label} · ${readerPlace(voice.provider)}`).join("")}
+            </>}
           </Button>
+          {free !== null && <span className="fy-mono" data-testid="audiobook-free-plan">{free.line}</span>}
           {/* What a first read through a slot-keeping reader adds (SPEC-046 R-40), on the read
               that incurs it: not in the estimate, so said beside it. */}
           {price.notices.map((notice) => <span key={notice} className="fy-mono" data-testid="audiobook-notice">{notice}</span>)}

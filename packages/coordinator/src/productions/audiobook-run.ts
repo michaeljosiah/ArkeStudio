@@ -1,4 +1,4 @@
-import { freeCreditDraw, freeCreditOverrun, freePlanFailure, quoteSpeech, speechAsks, type SpeechQuote } from "@arke-studio/contracts";
+import { freeCreditDraw, freeCreditOverrun, freeLimitReason, freePlanFailure, freePlanShortfall, GOOGLE_FREE_LIMIT, quoteSpeech, speechAsks, type FreePlanAllowance, type FreePlanShort, type SpeechQuote } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -37,8 +37,16 @@ import { audioHash } from "../audio/qc.js";
 import { checkDirection, directionPlan, type RenderedPart } from "../voice/direction.js";
 import { audiobookLanding, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
 
-/** A read ended by its free plan — the day's limit, or a billed key — which ends the run with it. */
-class FreePlanEnded extends Error {}
+/**
+ * A read ended by its free plan — the day's limit, or a billed key — which ends the run with it.
+ * The message is what the block's flag says; `reason` is what the run ends with, which keeps the
+ * limit and the reset Google named for the note under the button.
+ */
+class FreePlanEnded extends Error {
+  constructor(message: string, readonly reason: string = message) {
+    super(message);
+  }
+}
 
 /**
  * A chapter read into kept takes (design turn 146, SPEC-047 R-16..R-19): every block that is
@@ -52,7 +60,7 @@ class FreePlanEnded extends Error {}
 
 export type AudiobookRunEvent =
   | { type: "started"; toMake: number; blocks: number }
-  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[] }
+  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: FreePlanShort }
   | { type: "progress"; block: string; outcome: "made" | "adopted" | "flagged"; reason?: string; made: number; toMake: number }
   | { type: "finished"; outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; record?: ChapterAudiobook; reason?: string };
 
@@ -64,6 +72,8 @@ export interface AudiobookRunDeps {
   models: readonly ManifestModel[];
   /** What is left of the month's free credit (design turn 182); absent is not known to be short. */
   creditLeftMicroUsd?: number;
+  /** Each Google model's free day; absent is not known to be short. */
+  freePlanAllowance?: (model: string) => FreePlanAllowance;
   narrator: AudiobookReader;
   /** What can speak now (turn 130's rule): a voice the catalogue lacks or marks reads in the narrator's. */
   catalogue: readonly VoiceCandidate[];
@@ -238,6 +248,10 @@ export interface PreparedChapter {
   asks: boolean;
   /** What the chapter would draw from the free credit, for a book weighed whole against it. */
   creditDraw: number;
+  /** The requests each miss would make, for a book weighed whole against Google's free day. */
+  freeReads: { model: ManifestModel; requests: number }[];
+  /** The chapter's requests on Google's free plan past what is left of the day; it then asks, or is refused once Google has said the day is used up. */
+  freePlan: { short: FreePlanShort; allowance: FreePlanAllowance } | null;
 }
 
 export type ChapterPreparation = { kind: "ready"; prepared: PreparedChapter } | { kind: "refused"; reason: string; plan: AudiobookPlan } | { kind: "unavailable"; reason: string };
@@ -248,6 +262,8 @@ export interface ReadingRoom {
   catalogue: readonly VoiceCandidate[];
   /** What is left of the month's free credit; absent is not known to be short. */
   creditLeftMicroUsd?: number;
+  /** Each Google model's free day (design turn 182 follow-up); absent is not known to be short. */
+  freePlanAllowance?: (model: string) => FreePlanAllowance;
 }
 
 /**
@@ -452,8 +468,12 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
   const priceOf = (block: Speaking) => prices.get(block) ?? 0;
   const estimate = misses.reduce((sum, block) => sum + priceOf(block), 0);
   const creditDraw = freeCreditDraw(misses.map((block) => ({ model: block.model, microUsd: priceOf(block) })));
-  const asks = misses.some((block) => speechAsks(block.model, priceOf(block))) || freeCreditOverrun(creditDraw, room.creditLeftMicroUsd ?? Infinity);
-  return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate, asks, creditDraw } };
+  // A request a part, weighed whole against what is left of Google's free day: 122 blocks on a
+  // ten-a-day free tier ask before the first is sent rather than meeting the limit at the eleventh.
+  const freeReads = misses.map((block) => ({ model: block.model, requests: block.parts.length }));
+  const freePlan = room.freePlanAllowance === undefined ? null : freePlanShortfall(freeReads, room.freePlanAllowance);
+  const asks = misses.some((block) => speechAsks(block.model, priceOf(block))) || freeCreditOverrun(creditDraw, room.creditLeftMicroUsd ?? Infinity) || freePlan !== null;
+  return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate, asks, creditDraw, freeReads, freePlan } };
 }
 
 /**
@@ -515,19 +535,25 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   const finish = (outcome: Extract<AudiobookRunEvent, { type: "finished" }>["outcome"], extra: { record?: ChapterAudiobook; reason?: string } = {}) =>
     emit({ type: "finished", outcome, made, flagged: flaggedCount, ...extra });
 
-  const preparation = await prepareChapter(store, productionId, chapterId, { narrator, models: deps.models, catalogue: deps.catalogue, ...(deps.creditLeftMicroUsd !== undefined ? { creditLeftMicroUsd: deps.creditLeftMicroUsd } : {}) }, deps.now, deps.only);
+  const preparation = await prepareChapter(store, productionId, chapterId, { narrator, models: deps.models, catalogue: deps.catalogue, ...(deps.creditLeftMicroUsd !== undefined ? { creditLeftMicroUsd: deps.creditLeftMicroUsd } : {}), ...(deps.freePlanAllowance !== undefined ? { freePlanAllowance: deps.freePlanAllowance } : {}) }, deps.now, deps.only);
   if (preparation.kind !== "ready") {
     if (preparation.kind === "unavailable") emit({ type: "started", toMake: 0, blocks: 0 });
     finish(preparation.kind, { reason: preparation.reason });
     return;
   }
-  const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks } = preparation.prepared;
+  const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks, freePlan } = preparation.prepared;
   const partPrices = new Map(misses.map(block => [block, block.quotes.map(quote => quote.expectedMicroUsd)]));
   let record = preparation.prepared.record;
   const chapterFile = plan.chapter.file;
   emit({ type: "started", toMake: toMake.length, blocks: plan.blocks.length });
   if (toMake.length === 0) {
     finish("read", { record });
+    return;
+  }
+  // Google has said the day is used up: the run ends before a word is sent, as it would at the
+  // first refusal, and says when the day resets — rather than sitting at `reading… 0 of 122`.
+  if (freePlan?.allowance.reached === true) {
+    finish("failed", { reason: freeLimitReason(freePlan.allowance), record });
     return;
   }
   const token = chapterPriceToken(deps.worldId, productionId, chapterId, plan.chapter, misses);
@@ -545,8 +571,12 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   for (const reader of clones) {
     if (await deps.requireUploadConfirmation(reader)) return;
   }
-  if (asks && deps.priced === undefined && deps.confirmationToken !== token) {
-    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: token, voices: priceLines(misses, priceOf), notices: firstReadNotices(clones) });
+  // The free day's question is part of what the chapter's own press answers (codex on PR 1475),
+  // so `Read 1 now` left open across the reset is asked again. A book's chapters keep the plain
+  // token: the day moves as the book reads, and the book's answer covered it.
+  const answer = freePlan !== null ? createHash("sha256").update(`${token}\n${JSON.stringify(freePlan.short)}`).digest("hex") : token;
+  if (asks && deps.priced === undefined && deps.confirmationToken !== answer) {
+    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}) });
     return;
   }
 
@@ -809,7 +839,8 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           const jobId = job.id;
           if (job.status !== "succeeded" || job.landedFiles?.[0] === undefined) {
             const ended = job.status === "failed" ? freePlanFailure(job.error) : null;
-            if (ended !== null) throw new FreePlanEnded(ended);
+            // The flag says the limit plainly; the run's ending keeps the reset Google named.
+            if (ended !== null) throw new FreePlanEnded(ended.startsWith(GOOGLE_FREE_LIMIT) ? GOOGLE_FREE_LIMIT : ended, ended);
             throw new Error(job.status === "cancelled" ? "stopped" : "the voice job failed · open Activity for details");
           }
           landed.push(job.landedFiles[0]);
@@ -850,7 +881,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         // A free plan's end stops the chapter (design turn 182): the day's limit fails every
         // later read the same way, and a billed key must not keep reading on a free price.
         if (err instanceof FreePlanEnded) {
-          finish("failed", { reason: message, record });
+          finish("failed", { reason: err.reason, record });
           return;
         }
       }

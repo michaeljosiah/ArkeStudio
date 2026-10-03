@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { join } from "node:path";
 import { applyProviderPlans, PAID_PLANS, quoteSpeech, type Job, type LedgerEntry, type ManifestModel, type SpeechUsage } from "@arke-studio/contracts";
-import { ProviderFreeLimitError, ProviderPaymentRequiredError } from "@arke-studio/providers";
-import { JobQueue, type DispatchClient, type EnqueueInput } from "../../src/queue/dispatcher.js";
+import { GoogleClient, ProviderFreeLimitError, ProviderPaymentRequiredError } from "@arke-studio/providers";
+import { JobQueue, type DispatchClient, type EnqueueInput, type JobQueueOptions } from "../../src/queue/dispatcher.js";
 import { classifyError } from "../../src/queue/classify.js";
 import { tempDir } from "../tmp.js";
 import { until } from "../wait.js";
@@ -26,7 +26,7 @@ const read = (model: ManifestModel, text = "Hello"): EnqueueInput => ({ worldId:
   capability: "voice-tts", provider: model.provider, model: model.id, params: { text },
   estimatedMicroUsd: quoteSpeech(model, text, { at: now }).expectedMicroUsd });
 
-async function harness(rows: { models: ManifestModel[] }, submit: () => Promise<Awaited<ReturnType<DispatchClient["submit"]>>>) {
+async function harness(rows: { models: ManifestModel[] }, submit: (request: Parameters<DispatchClient["submit"]>[1]) => Promise<Awaited<ReturnType<DispatchClient["submit"]>>>, extra: Partial<JobQueueOptions> = {}) {
   const dir = await tempDir("arke-free-plan-");
   const ledger: LedgerEntry[] = [];
   const billed: Job[] = [];
@@ -35,7 +35,7 @@ async function harness(rows: { models: ManifestModel[] }, submit: () => Promise<
   let submissions = 0;
   const client = (usage?: SpeechUsage): DispatchClient => ({
     declarations: { supportsIdempotencyKey: false, supportsLookupByKey: false, supportsListRecent: false, reportsCost: false },
-    submit: async () => { submissions++; return submit(); },
+    submit: async (_key, request) => { submissions++; return submit(request); },
     poll: async () => ({ state: "succeeded", ...(usage ? { speechUsage: usage } : {}) }), fetchArtifacts: async () => [], cancel: async () => {},
   });
   const queue = new JobQueue({ journalPath: join(dir, "jobs.jsonl"), clients: { google: client(), mistral: client() }, getKey: async () => "test",
@@ -44,7 +44,7 @@ async function harness(rows: { models: ManifestModel[] }, submit: () => Promise<
     onFreePlanBilled: (job) => { billed.push(job); },
     beforeSubmit: async () => { beforeSubmit?.(); },
     ledger: { readJobIds: async () => new Set(ledger.map(e => e.jobId)), has: async id => ledger.some(e => e.jobId === id), append: async entry => { ledger.push(entry); } },
-    landInWorld: async (_id, fn) => { await fn(dir); return true; }, baseIntervalMs: 1, pollIntervalMs: 1, maxAttempts: 3 });
+    landInWorld: async (_id, fn) => { await fn(dir); return true; }, baseIntervalMs: 1, pollIntervalMs: 1, maxAttempts: 3, ...extra });
   await queue.start();
   return { queue, ledger, billed, submissions: () => submissions, switchTo: (next: { models: ManifestModel[] }) => { beforeSubmit = () => { current = next; }; } };
 }
@@ -101,6 +101,50 @@ it("does not retry the free tier's daily limit", async () => {
     assert.match(h.queue.listJobs().find(j => j.id === job.id)!.error!, /Google free limit reached/);
     assert.equal(h.submissions(), 1);
     assert.equal(h.billed.length, 0);
+  } finally { h.queue.dispose(); }
+});
+
+// What the live service sent on 2026-10-02, through the real Google client: the per-minute code
+// on the daily limit. Each of ~190 queued reads was retried four times against it.
+const OBSERVED_DAILY = { error: { message: "Rate limit exceeded for model gemini-3.8-flash-tts (limit: 10 requests per day on Free Tier). Please retry in 45m28s or upgrade your tier at https://ai.dev/rate-limit.", code: "too_many_requests" } };
+const SHORT = { error: { message: "Rate limit exceeded for model gemini-3.8-flash-tts (limit: 10 requests per minute). Please retry in 1s.", code: "too_many_requests" } };
+const google = (body: unknown) => (request: Parameters<DispatchClient["submit"]>[1]) =>
+  new GoogleClient(async () => Response.json(body, { status: 429 })).submit("test", request as never) as never;
+const spoken = (text: string): EnqueueInput => { const input = read(freeGoogle.models[0]!, text); return { ...input, params: { ...input.params, voiceId: "Kore" } }; };
+
+it("fails a read at the day's limit once, and the rest of the batch without sending them", async () => {
+  const h = await harness(freeGoogle, google(OBSERVED_DAILY), { baseConcurrency: 1 });
+  try {
+    const jobs: Job[] = [];
+    for (const text of ["One.", "Two.", "Three."]) jobs.push(await h.queue.enqueue(spoken(text)));
+    const row = (id: string) => h.queue.listJobs().find((job) => job.id === id)!;
+    await until(() => jobs.every((job) => row(job.id).status === "failed"), "the batch ends", 30000);
+    assert.equal(h.submissions(), 1, "one request met the limit; the rest never left");
+    assert.match(row(jobs[0]!.id).error!, /^Google free limit reached \(HTTP 429 free daily quota · 10 a day · resets \d{4}-/);
+    for (const job of jobs.slice(1)) {
+      assert.match(row(job.id).error!, /^Google free limit reached · 10 a day · resets \d{4}-\S+ · not sent$/);
+      assert.equal(row(job.id).failureClass, "terminal");
+      assert.equal(row(job.id).attempt, 0, "never submitted");
+    }
+    const limit = h.queue.freeLimitFor("google", freeGoogle.models[0]!.id);
+    assert.equal(limit?.limit, 10);
+    assert.ok(Date.parse(limit!.resetsAt) > Date.now() + 45 * 60_000);
+    // Google's free quota is per model: another model's day is its own.
+    assert.equal(h.queue.freeLimitFor("google", "gemini-3.8-flash-lite-tts"), null);
+    // A new key is another project's quota.
+    h.queue.forgetFreeLimits("google");
+    assert.equal(h.queue.freeLimitFor("google", freeGoogle.models[0]!.id), null);
+  } finally { h.queue.dispose(); }
+});
+
+it("still retries a genuine short rate limit", async () => {
+  const h = await harness(freeGoogle, google(SHORT), { baseConcurrency: 1, backoffBaseMs: 1, backoffCapMs: 5 });
+  try {
+    const job = await h.queue.enqueue(spoken("Once more."));
+    await until(() => h.queue.listJobs().find((row) => row.id === job.id)?.status === "failed", "retries spent", 30000);
+    assert.equal(h.submissions(), 3, "every attempt the queue allows");
+    assert.match(h.queue.listJobs().find((row) => row.id === job.id)!.error!, /gave up after 3 attempts/);
+    assert.equal(h.queue.freeLimitFor("google", freeGoogle.models[0]!.id), null);
   } finally { h.queue.dispose(); }
 });
 

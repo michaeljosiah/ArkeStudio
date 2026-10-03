@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { appendFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { quoteSpeech, type ClientMessage, type ClientState, type DomainEvent, type ManifestModel, type VoiceCandidate } from "@arke-studio/contracts";
-import { ProviderFreeLimitError, ProviderPaymentRequiredError } from "@arke-studio/providers";
+import { freePlanNote, quoteSpeech, type ClientMessage, type ClientState, type DomainEvent, type ManifestModel, type VoiceCandidate } from "@arke-studio/contracts";
+import { GoogleClient, ProviderFreeLimitError, ProviderPaymentRequiredError } from "@arke-studio/providers";
 import { until } from "../wait.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
@@ -45,12 +45,22 @@ function wav(): Uint8Array {
 
 type Audio = Extract<DomainEvent, { type: "voice.audio" }>;
 
+// What the live service sent on 2026-10-02 for every block of a 122-block chapter: the per-minute
+// code on the daily limit, which was retried four times a block for eighty minutes.
+const OBSERVED_DAILY = { error: { message: "Rate limit exceeded for model gemini-3.8-flash-tts (limit: 10 requests per day on Free Tier). Please retry in 45m28s or upgrade your tier at https://ai.dev/rate-limit.", code: "too_many_requests" } };
+
 class Reader extends FakeProvider {
   fail: Error | null = null;
+  /** A 429 body answered through the real Google client, so its classification is the one under test. */
+  refuse: unknown = null;
   attempts = 0;
   override async submit(key: string, request: Parameters<FakeProvider["submit"]>[1]): ReturnType<FakeProvider["submit"]> {
     this.attempts += 1;
     if (this.fail !== null) throw this.fail;
+    if (this.refuse !== null) {
+      const body = this.refuse;
+      return new GoogleClient(async () => Response.json(body, { status: 429 })).submit(key, request as never) as never;
+    }
     const result = await super.submit(key, request);
     // The dispatcher reads usage off a unary submission; the fake's declared return omits it.
     const answered = { ...result, artifacts: [{ name: "speech.wav", contentType: "audio/wav", data: wav() }], speechUsage: { inputTextTokens: 12, outputAudioTokens: 400 } };
@@ -198,6 +208,77 @@ describe("a provider's Free plan (design turn 182)", () => {
       assert.equal(h.app().providerPlans.googleBilledAt, null, "Free said again clears the mark");
       assert.equal(h.app().manifest?.models.find((model) => model.id === GEMINI.id)?.speechPlan, "free-plan");
       assert.deepEqual((await h.settings()).plans, { google: "free", mistral: "paid", googleBilledAt: null });
+    } finally {
+      await h.coordinator.stop();
+    }
+  });
+
+  // 2026-10-02, the installed app: `Read the chapter · 122 blocks · free plan` sat at
+  // `reading… 0 of 122` for eighty minutes while every block was retried against a day's limit.
+  it("ends a chapter at Google's daily limit rather than retrying it, says when it resets, and sends nothing more until then", async () => {
+    const h = await harness();
+    try {
+      await h.narrateWith(KORE);
+      await h.send({ kind: "set-provider-plan", provider: "google", plan: "free" });
+      h.google.refuse = OBSERVED_DAILY;
+      const chapter = (confirmationToken?: string) => h.send({ kind: "read-audiobook-chapter", worldId: WORLD_ID, productionId: "the-ledger-of-nights", chapterFile: "01-neap",
+        ...(confirmationToken !== undefined ? { confirmationToken } : {}) });
+      await chapter();
+      // A chapter longer than the day asks first; this one is answered `Read until the limit`.
+      const priced = h.events.find((event) => event.type === "audiobook.priced");
+      if (priced?.type === "audiobook.priced") await chapter(priced.confirmationToken);
+      const ending = h.events.filter((event) => event.type === "audiobook.finished").at(-1);
+      assert.ok(ending?.type === "audiobook.finished");
+      assert.equal(ending.outcome, "failed");
+      assert.match(ending.reason ?? "", /^Google free limit reached · 10 a day · resets \d{4}-\d\d-\d\dT[\d:.]+Z$/);
+      assert.match(freePlanNote(ending.reason) ?? "", /^Google free limit reached · 10 a day · resets \d\d:\d\d PT · 4[56] m$/);
+      assert.equal(h.google.attempts, 1, "the day's limit is not retried");
+      assert.equal(h.app().jobs.find((row) => row.provider === "google")?.failureClass, "terminal");
+
+      // Pressed again before the reset: refused at once, nothing sent, the same note.
+      await chapter();
+      const again = h.events.filter((event) => event.type === "audiobook.finished").at(-1);
+      assert.ok(again?.type === "audiobook.finished" && again !== ending);
+      assert.equal(again.outcome, "failed");
+      assert.match(again.reason ?? "", /^Google free limit reached · 10 a day · resets /);
+      assert.equal(h.google.attempts, 1, "nothing more goes to Google until the reset");
+
+      // A section, a page or a chat reply read takes the same path: refused before anything is
+      // sent, in the words the free-limit stop and its shipped-narrator remedy recognise.
+      await h.read("01J8F3K2QW9VZX4N7M0RTYB6RB");
+      const refused = h.audio("01J8F3K2QW9VZX4N7M0RTYB6RB").find((event) => event.status === "failed");
+      assert.match(refused?.error ?? "", /^Google free limit reached · 10 a day · resets \d{4}-/);
+      assert.equal(h.google.attempts, 1);
+    } finally {
+      await h.coordinator.stop();
+    }
+  });
+
+  it("asks before a free-plan chapter the day cannot cover, in the reads it needs against the day's", async () => {
+    const h = await harness();
+    try {
+      await h.narrateWith(KORE);
+      await h.send({ kind: "set-provider-plan", provider: "google", plan: "free" });
+      // Nine of the day's ten already read, today, on this key.
+      const now = new Date().toISOString();
+      const rows = Array.from({ length: 9 }, (_, i) => JSON.stringify({
+        ts: now, worldId: WORLD_ID, jobId: `jb_01K${"0".repeat(21)}F${i}`, provider: "google", model: GEMINI.id,
+        outcome: "succeeded", estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "free-plan",
+        speechQuote: { ...quoteSpeech(GEMINI, "x", { at: now }), plan: "free-plan" }, speechUsage: { inputTextTokens: 1, outputAudioTokens: 25 },
+      }));
+      await appendFile(join(h.root, "ledger.jsonl"), `${rows.join("\n")}\n`);
+      await h.send({ kind: "read-audiobook-chapter", worldId: WORLD_ID, productionId: "the-ledger-of-nights", chapterFile: "01-neap" });
+      const priced = h.events.find((event) => event.type === "audiobook.priced");
+      assert.ok(priced?.type === "audiobook.priced", "asked, not started");
+      assert.equal(priced.estimatedMicroUsd, 0);
+      assert.ok(priced.freePlan !== undefined && priced.freePlan.requests > 1);
+      assert.deepEqual({ allowed: priced.freePlan.allowed, left: priced.freePlan.left }, { allowed: 10, left: 1 });
+      assert.equal(h.google.attempts, 0, "nothing sent before the answer");
+      assert.ok(!h.events.some((event) => event.type === "audiobook.finished"));
+
+      // A section within the day's one read left starts at once.
+      await h.read("01J8F3K2QW9VZX4N7M0RTYB6RA");
+      assert.ok(!h.audio("01J8F3K2QW9VZX4N7M0RTYB6RA").some((event) => event.status === "confirmation-required"));
     } finally {
       await h.coordinator.stop();
     }

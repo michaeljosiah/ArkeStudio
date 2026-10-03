@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { freeCreditLeft, narratorLabelFor, narratorReadsUnasked, type WorldChatWorkspace } from "@arke-studio/contracts";
+import { freeCreditLeft, freeDayRefused, freePlanAllowance, narratorLabelFor, narratorReadsUnasked, type WorldChatWorkspace } from "@arke-studio/contracts";
 import { useStore } from "../lib/store.js";
 import { setReadReplies, stopReplyRead, useReadRepliesChoice } from "../lib/reply-reads.js";
 import type { ReadRepliesControl } from "./composer.js";
@@ -54,7 +54,12 @@ export function useReadReplies(workspace: WorldChatWorkspace | null): {
   // a long reply, and reading it would put a price in front of the author unasked (codex on PR
   // 1473). Such a reply is left for Listen, which asks.
   const unasked = useRef<(text: string) => boolean>(() => false);
-  unasked.current = (text) => narratorReadsUnasked(narrator, worldId, models ?? [], creditLeft, text);
+  // The same for Google's free day: a reply that needs more of it than is left is left for Listen,
+  // and so is every reply once a job on screen says Google refused the day (codex on PR 1475).
+  const ledger = state?.app.ledger ?? [];
+  const jobs = state?.app.jobs ?? [];
+  unasked.current = (text) => narratorReadsUnasked(narrator, worldId, models ?? [], creditLeft, text,
+    (model) => freeDayRefused(jobs, model) ? 0 : freePlanAllowance(ledger, model).left);
   useEffect(() => {
     if (workspace === null) return;
     const seen = newest.current;

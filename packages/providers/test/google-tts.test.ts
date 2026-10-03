@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { GoogleClient, GEMINI_TTS_MODELS, geminiSpeechUsage, geminiWav, googleFreeDailyLimit } from "../src/clients/google.js";
-import { ProviderAuthError, ProviderBusyError, ProviderFreeLimitError, ProviderPaymentRequiredError, ProviderRequestRejectedError, type SubmitRequest } from "../src/types.js";
+import { GoogleClient, GEMINI_TTS_MODELS, geminiSpeechUsage, geminiWav, googleDailyLimitDetail, googleFreeDailyLimit } from "../src/clients/google.js";
+import { ProviderAuthError, ProviderBusyError, ProviderDailyLimitError, ProviderFreeLimitError, ProviderPaymentRequiredError, ProviderRequestRejectedError, type SubmitRequest } from "../src/types.js";
 import { ManifestModelSchema, mapCadence } from "@arke-studio/contracts";
 import { geminiSpeechModel } from "../src/gemini-tts-models.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
@@ -188,6 +188,47 @@ it("tells the free tier's daily limit from a per-minute limit, and a payment ref
   }
   await assert.rejects(new GoogleClient(async () => Response.json({ error: { code: "payment_required" } }, { status: 402 })).submit("test", request), error =>
     error instanceof ProviderPaymentRequiredError && error.paymentRequired === true && error.submissionRejected === true && /HTTP 402/.test(error.message));
+});
+
+// The body the live service sent on 2026-10-02 for every read of a 122-block chapter: the
+// per-minute code on the daily limit. Retried as a rate limit, it held the chapter for 80 minutes.
+const OBSERVED_DAILY = { error: { message: "Rate limit exceeded for model gemini-3.8-flash-tts (limit: 10 requests per day on Free Tier). Please retry in 45m28s or upgrade your tier at https://ai.dev/rate-limit.", code: "too_many_requests" } };
+
+it("reads a limit stated per day as the daily limit whatever its code, with the limit and the reset it names", async () => {
+  assert.equal(googleFreeDailyLimit(OBSERVED_DAILY), true);
+  const before = Date.now();
+  await assert.rejects(new GoogleClient(async () => Response.json(OBSERVED_DAILY, { status: 429 })).submit("test", request), error => {
+    assert.ok(error instanceof ProviderFreeLimitError);
+    assert.equal(error.failureClass, "terminal");
+    assert.equal(error.limit, 10);
+    const reset = Date.parse(error.resetsAt!);
+    assert.ok(reset >= before + 2_728_000 && reset <= Date.now() + 2_729_000, "45m28s from the refusal");
+    assert.match(error.message, /^Google free limit reached \(HTTP 429 free daily quota · 10 a day · resets \d{4}-\d\d-\d\dT[\d:.]+Z\)$/);
+    assert.ok(!error.message.includes("ai.dev"), "Google's words are read, not copied");
+    return true;
+  });
+  const at = new Date("2026-10-02T23:14:32.000Z");
+  assert.deepEqual(googleDailyLimitDetail(OBSERVED_DAILY, at), { limit: 10, resetsAt: "2026-10-03T00:00:00.000Z" });
+  for (const message of ["Quota exceeded: 50 RPD for this model.", "You have used your daily quota.", "Limit of 10 requests per-day reached."]) {
+    assert.equal(googleFreeDailyLimit({ error: { code: "rate_limit_exceeded", message } }), true, message);
+  }
+  // The structured shape names its day in the quota id, and carries its wait as a RetryInfo.
+  const structured = { error: { status: "RESOURCE_EXHAUSTED", details: [
+    { violations: [{ quotaId: "GenerateRequestsPerDayPerProjectPerModel", quotaValue: "25" }] }, { retryDelay: "3600s" }] } };
+  assert.equal(googleFreeDailyLimit(structured), true);
+  assert.deepEqual(googleDailyLimitDetail(structured, at), { limit: 25, resetsAt: "2026-10-03T00:14:32.000Z" });
+  // A genuine short limit still names no day, and is still retried.
+  const short = { error: { message: "Rate limit exceeded for model gemini-3.8-flash-tts (limit: 10 requests per minute). Please retry in 21.3s.", code: "too_many_requests" } };
+  assert.equal(googleFreeDailyLimit(short), false);
+  // A paid tier's day is final too, but not the free plan's to name.
+  const paidDay = { error: { code: "too_many_requests", message: "Rate limit exceeded for model gemini-3.8-flash-tts (limit: 2000 requests per day). Please retry in 3h." } };
+  await assert.rejects(new GoogleClient(async () => Response.json(paidDay, { status: 429 })).submit("test", request), error =>
+    error instanceof ProviderDailyLimitError && !(error instanceof ProviderFreeLimitError) && error.failureClass === "terminal" && !/free/i.test(error.message));
+  // A short limit that merely mentions the day is still short; a token quota's figure is no read count.
+  assert.equal(googleFreeDailyLimit({ error: { code: "too_many_requests", message: "Too many requests per minute; daily quotas are listed at the console." } }), false);
+  assert.deepEqual(googleDailyLimitDetail({ error: { message: "Quota exceeded (limit: 1000000 tokens per day). Please retry in 1h." } }, at), { resetsAt: "2026-10-03T00:14:32.000Z" });
+  await assert.rejects(new GoogleClient(async () => Response.json(short, { status: 429 })).submit("test", request), error =>
+    error instanceof ProviderBusyError && !(error instanceof ProviderFreeLimitError));
 });
 
 it("passes cancellation through without promising a refund", async () => {

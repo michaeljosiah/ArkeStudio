@@ -1,6 +1,6 @@
 import { useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { readerName, formatMicroUsd, type DomainEvent } from "@arke-studio/contracts";
+import { readerName, formatMicroUsd, freePlanAskCopy, type DomainEvent } from "@arke-studio/contracts";
 import { useStore } from "../lib/store.js";
 import { EditorDialog } from "./editor-dialog.js";
 import { Button } from "./ui.js";
@@ -29,6 +29,9 @@ export function ReadAloudConfirmation({ title, result, onConfirm, onCancel, inli
   // A read over the reader's cap goes as several requests and arrives in as many pieces (issue
   // 1208): said with the price, since each seam is audible and each piece is a call.
   const pieces = result.parts !== undefined && result.parts > 1 ? ` · ${result.parts} parts` : "";
+  // A read Google's free day cannot cover asks in its own words when it costs nothing; a priced
+  // voice in it keeps the price on the button, with the day's line above (codex on PR 1475).
+  const free = result.freePlan !== undefined ? freePlanAskCopy(result.freePlan) : null;
   if (result.status !== "confirmation-required" || settled === quote) return null;
   const cancel = () => { setSettled(quote); onCancel(); };
   const content = <div className="fy-exsheet">
@@ -37,6 +40,7 @@ export function ReadAloudConfirmation({ title, result, onConfirm, onCancel, inli
         recording with them (SPEC-046 R-40), as the audiobook's door says it. */}
     <p>{local ? `Read locally with ${reader}.` : result.voiceReference === true ? `This text and the voice recording will be sent to ${reader}.` : `This text will be sent to ${reader}.`} Text is retained in Activity.</p>
     {(result.notices ?? []).map((notice) => <p key={notice} className="fy-mono" data-testid="read-aloud-notice">{notice}</p>)}
+    {free !== null && <p className="fy-mono" data-testid="read-aloud-free-plan">{free.line}</p>}
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
       <Button variant="ghost" onClick={cancel}>Cancel</Button>
       <Button variant="primary" disabled={!result.confirmationToken} onClick={() => {
@@ -44,7 +48,7 @@ export function ReadAloudConfirmation({ title, result, onConfirm, onCancel, inli
         submitted.current = quote;
         setSettled(quote);
         onConfirm(result.confirmationToken);
-      }}>Confirm {result.characterCount} characters · {estimate ? "~" : ""}{formatMicroUsd(result.estimatedMicroUsd)}</Button>
+      }}>{free !== null && result.estimatedMicroUsd === 0 ? free.confirm : `Confirm ${result.characterCount} characters · ${estimate ? "~" : ""}${formatMicroUsd(result.estimatedMicroUsd)}`}</Button>
     </div>
   </div>;
   if (inline) return <section className="fy-read-confirmation" aria-labelledby={heading}>{content}</section>;

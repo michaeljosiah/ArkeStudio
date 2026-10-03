@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { DEFAULT_NARRATOR, freePlanNote, narratorLabelFor, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, providerName, readerPlace, speechPricePrefix, type AudiobookPriceLine, type AudiobookRow, type ManifestModel } from "@arke-studio/contracts";
+import { DEFAULT_NARRATOR, freePlanAskCopy, freePlanNote, narratorLabelFor, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, providerName, readerPlace, speechPricePrefix, type AudiobookPriceLine, type AudiobookRow, type ManifestModel } from "@arke-studio/contracts";
 import { HeldBar } from "../components/held-bar.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
@@ -431,6 +431,8 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
   onConfirm: () => void;
 }) {
   const vendors = [...new Set(price.voices.filter((line) => !line.local).map((line) => providerName(line.provider)))];
+  // A book Google's free day cannot cover: the reads it needs against the day's, and how far it goes.
+  const free = price.freePlan !== undefined ? freePlanAskCopy(price.freePlan) : null;
   const models = useStore().state?.app.manifest?.models;
   return (
     <EditorDialog open title="Read the book" subtitle={`${price.chapters} chapter${price.chapters === 1 ? "" : "s"} · ${price.characters.toLocaleString()} characters · ${price.cloudBlocks} cloud line${price.cloudBlocks === 1 ? "" : "s"}`} onClose={onClose} width={460} labelledBy="read-book-title">
@@ -449,12 +451,13 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
         </div>
         {vendors.length > 0 && <div className="fy-ms__line">words and the voice to {vendors.join(", ")} · text in Activity</div>}
         {(price.notices ?? []).map((notice) => <div key={notice} className="fy-ms__line" data-testid="read-book-notice">{notice}</div>)}
+        {free !== null && <div className="fy-ms__line fy-ch__who-where--warn" data-testid="read-book-free-plan">{free.line}</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
           <Button variant="primary" onClick={onConfirm} data-testid="read-book-confirm">
-            Confirm {price.characters.toLocaleString()} characters · {speechPricePrefix(models, price.voices.map((line) => line.provider))}{formatMicroUsd(price.estimatedMicroUsd)}
+            {free !== null && price.estimatedMicroUsd === 0 ? free.confirm : `Confirm ${price.characters.toLocaleString()} characters · ${speechPricePrefix(models, price.voices.map((line) => line.provider))}${formatMicroUsd(price.estimatedMicroUsd)}`}
           </Button>
         </div>
       </div>

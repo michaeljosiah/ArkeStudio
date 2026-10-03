@@ -184,9 +184,28 @@ export class ProviderFreeLimitError extends ProviderRequestRejectedError {
   readonly failureClass = "terminal" as const;
   readonly freeLimit = true;
 
-  constructor(message: string) {
+  /**
+   * What the refusal said of the limit, where it said it: the requests a day, and the instant
+   * its "retry in" hint points at. The queue keeps them so the rest of a batch is not sent to
+   * meet the same refusal, and a later read can be weighed against them before it starts.
+   */
+  constructor(message: string, readonly limit?: number, readonly resetsAt?: string) {
     super(message);
     this.name = "ProviderFreeLimitError";
+  }
+}
+
+/**
+ * A paid key's own daily quota is used up (codex on PR 1475): terminal like the free tier's,
+ * since minutes cannot clear it, but neither the free plan's words nor its remedy.
+ */
+export class ProviderDailyLimitError extends ProviderRequestRejectedError {
+  readonly failureClass = "terminal" as const;
+  readonly dailyLimit = true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ProviderDailyLimitError";
   }
 }
 

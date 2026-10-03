@@ -1,9 +1,11 @@
+import { z } from "zod";
 import type { ManifestModel, ModelManifest } from "./manifest.js";
 import type { ProviderPlans } from "./settings.js";
-import type { LedgerEntry } from "./job.js";
+import type { Job, LedgerEntry } from "./job.js";
 import { formatMicroUsd } from "./money.js";
 import { legacyVoiceModel, narratorAppliesTo, supportsVoiceUse } from "./voice.js";
 import { estimateSpeechMicroUsd } from "./speech-pricing.js";
+import { splitSpeechInput } from "./speech-input.js";
 
 /**
  * A provider's Free plan (design turn 182): what the author's Plan row means for a read.
@@ -101,6 +103,8 @@ export function narratorReadsUnasked(
   models: readonly ManifestModel[],
   creditLeftMicroUsd: number,
   text?: string,
+  /** What is left of a model's free day (`freePlanAllowance(...).left`); absent is not known to be short. */
+  freePlanLeft?: (model: string) => number,
 ): boolean {
   if (stored === null || !supportsVoiceUse(stored, "narration") || !narratorAppliesTo(stored, worldId)) return true;
   if (stored.provider === "kokoro") return true;
@@ -109,7 +113,20 @@ export function narratorReadsUnasked(
   if (model === undefined) return false;
   if (model.pricing.kind === "unmetered") return true;
   if (stored.worldId !== undefined) return false;
-  if (model.speechPlan === "free-plan") return true;
+  // A reply read on a free day with nothing left would put the day's question in front of the
+  // author unasked, or meet Google's refusal; it is left for Listen. The toggle itself stays:
+  // the day comes back at the reset, and the author's choice should come back with it.
+  // Weighed in requests, as the read will be made (codex on PR 1475): a reply in two pieces with
+  // one request left would ask.
+  if (model.speechPlan === "free-plan") {
+    if (text === undefined) return true;
+    try {
+      const requests = model.limits.maxSpeechUtf8Bytes !== undefined ? splitSpeechInput(text, model.limits).length : 1;
+      return requests <= (freePlanLeft?.(model.id) ?? Infinity);
+    } catch {
+      return false;
+    }
+  }
   if (model.speechPlan !== "free-credit" || creditLeftMicroUsd <= 0) return false;
   if (text === undefined) return true;
   try {
@@ -145,23 +162,183 @@ export function speechPriceCopy(model: Pick<ManifestModel, "speechPlan" | "prici
 export const GOOGLE_FREE_LIMIT = "Google free limit reached";
 export const GOOGLE_BILLED = "Google billed this read";
 
-export type FreePlanStop = { kind: "free-limit"; provider: "google"; resetsAt: string } | { kind: "billed"; provider: "google" };
+export type FreePlanStop = { kind: "free-limit"; provider: "google"; resetsAt: string; limit?: number } | { kind: "billed"; provider: "google" };
+
+/**
+ * What Google said of a daily limit it refused for, as a failure carries it after the opening:
+ * ` · 10 a day · resets 2026-10-03T00:00:28.000Z`. The reset is an instant, not the "retry in
+ * 45m28s" Google wrote, because the failure is read again long after it was written; a reader
+ * that finds neither falls back to midnight Pacific.
+ */
+export function freeLimitDetail(detail: { limit?: number | undefined; resetsAt?: string | undefined }): string {
+  return `${detail.limit !== undefined ? ` · ${detail.limit} a day` : ""}${detail.resetsAt !== undefined ? ` · resets ${detail.resetsAt}` : ""}`;
+}
 
 /** Recognise a read's failure as the end of a free plan, with when a daily limit resets. */
 export function freePlanStop(error: string | null | undefined, now: Date = new Date()): FreePlanStop | null {
   if (typeof error !== "string") return null;
-  if (error.includes(GOOGLE_FREE_LIMIT)) return { kind: "free-limit", provider: "google", resetsAt: nextPacificMidnight(now).toISOString() };
+  if (error.includes(GOOGLE_FREE_LIMIT)) {
+    const reset = /resets (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/.exec(error)?.[1];
+    const limit = /(\d+) a day/.exec(error)?.[1];
+    // A reset already past (an old failure read again) rolls to the next midnight, as every
+    // failure without one does, rather than counting down to nothing forever.
+    const named = reset !== undefined ? Date.parse(reset) : NaN;
+    return { kind: "free-limit", provider: "google",
+      resetsAt: Number.isFinite(named) && named > now.getTime() ? new Date(named).toISOString() : nextPacificMidnight(now).toISOString(),
+      ...(limit !== undefined ? { limit: Number(limit) } : {}) };
+  }
   if (error.includes(GOOGLE_BILLED)) return { kind: "billed", provider: "google" };
   return null;
 }
 
-/** A free plan's end as a read's failure says it, without the provider's detail: the limit, or the billed key; else null. */
+/**
+ * A free plan's end as a read's failure says it, without the provider's other words: the limit
+ * with what Google said of it, or the billed key; else null.
+ */
 export function freePlanFailure(error: string | null | undefined): string | null {
   const stop = freePlanStop(error);
-  return stop === null ? null : stop.kind === "free-limit" ? GOOGLE_FREE_LIMIT : `${GOOGLE_BILLED} · key looks paid`;
+  if (stop === null) return null;
+  if (stop.kind === "billed") return `${GOOGLE_BILLED} · key looks paid`;
+  // The reset rides only where Google named one: a failure that said nothing keeps saying the
+  // opening alone, and every reader still falls back to midnight Pacific for it.
+  // Carried as written, never re-read against the clock: the failure is passed on, not judged.
+  const named = typeof error === "string" ? /resets (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/.exec(error)?.[1] : undefined;
+  return `${GOOGLE_FREE_LIMIT}${freeLimitDetail({ limit: stop.limit, resetsAt: named })}`;
 }
 
-/** A free plan's end as one line of text, with the time left for a daily limit; null for any other reason. */
+/**
+ * Requests a day on Google's free tier, per speech model (design turn 182 follow-up). No Google
+ * API reports what is left of a day, so a read is weighed against this before it starts. Flash
+ * TTS is what Google's own 429 said on 2026-10-02 — "limit: 10 requests per day on Free Tier"
+ * for gemini-3.8-flash-tts. Flash-Lite's figure was not observed; it is given Flash's, the
+ * conservative reading, until a refusal says otherwise (an observed limit always wins).
+ */
+export const GOOGLE_FREE_DAILY_REQUESTS: Readonly<Record<string, number>> = {
+  "gemini-3.8-flash-tts": 10,
+  "gemini-3.8-flash-lite-tts": 10,
+};
+
+/** What a free tier's refusal told Arke: the model's daily limit and when it resets. Kept by the queue until the reset. */
+export interface FreePlanLimit {
+  provider: string;
+  model: string;
+  limit?: number;
+  resetsAt: string;
+  observedAt: string;
+}
+
+/** A model's free day as Arke can know it: requests allowed, left (Infinity for a model with no known limit), when the day resets, and whether Google has said it is used up. */
+export interface FreePlanAllowance {
+  model: string;
+  allowed: number;
+  left: number;
+  resetsAt: string;
+  /** Google refused for the day and the reset it named has not come: nothing is sent until it does. */
+  reached: boolean;
+}
+
+/**
+ * What is left of a model's free day. The day starts at the last midnight Pacific, when Google
+ * resets the free quota — or at a reset Google itself named, when that is later: on 2026-10-02
+ * a refusal at 23:14 UTC said "retry in 45m28s", which is not midnight Pacific, and what Google
+ * said is the better evidence. The requests counted are the free-plan reads the ledger holds
+ * since then that Google took — succeeded, or answered with usage; a refused request has no
+ * usage and is not counted. Reads made from another machine on the same key are invisible here,
+ * which is why a refusal outranks the count. `pending` is the free-plan reads queued and not yet
+ * settled (codex on PR 1475): they have no ledger line, and two page reads pressed together
+ * would each otherwise see the whole day.
+ */
+export function freePlanAllowance(ledger: readonly LedgerEntry[], model: string, now: Date = new Date(), observed?: FreePlanLimit | null, pending = 0): FreePlanAllowance {
+  // A model with no known figure is not weighed: inventing a limit would ask before every read.
+  const allowed = observed?.limit ?? GOOGLE_FREE_DAILY_REQUESTS[model] ?? Infinity;
+  const observedReset = observed ? Date.parse(observed.resetsAt) : NaN;
+  if (Number.isFinite(observedReset) && observedReset > now.getTime()) {
+    return { model, allowed, left: 0, resetsAt: new Date(observedReset).toISOString(), reached: true };
+  }
+  const next = nextPacificMidnight(now);
+  let start = lastPacificMidnight(now).getTime();
+  if (Number.isFinite(observedReset) && observedReset > start) start = observedReset;
+  let used = 0;
+  for (const entry of ledger) {
+    if (entry.provider !== "google" || entry.model !== model || entry.speechQuote?.plan !== "free-plan") continue;
+    if (Date.parse(entry.ts) < start) continue;
+    const taken = entry.outcome === "succeeded" || entry.speechUsage !== undefined;
+    // A retried read keeps its earlier answered attempts beside the last one (codex on PR 1475);
+    // each was a request. Where the last is itself archived this counts one over, the safe side.
+    used += (taken ? 1 : 0) + (entry.speechAttempts?.length ?? 0);
+  }
+  return { model, allowed, left: Math.max(0, allowed - used - pending), resetsAt: next.toISOString(), reached: false };
+}
+
+/** A read the free day cannot cover: how many requests it needs, against what the day allows and has left. Carried on the read's question. */
+export const FreePlanShortSchema = z
+  .object({ requests: z.number().int().min(1), allowed: z.number().int().min(0), left: z.number().int().min(0) })
+  .strict();
+export type FreePlanShort = z.infer<typeof FreePlanShortSchema>;
+
+/**
+ * Weigh a read's requests on free-plan rows against each model's free day, whole: a chapter or a
+ * page is one question, so reads that each fit cannot together run past the day unasked. Returns
+ * the first model the read would run short on, with its allowance, or null when every one fits.
+ */
+export function freePlanShortfall(
+  reads: Iterable<{ model: Pick<ManifestModel, "id" | "speechPlan"> | null | undefined; requests: number }>,
+  allowance: (model: string) => FreePlanAllowance,
+): { short: FreePlanShort; allowance: FreePlanAllowance } | null {
+  const needed = new Map<string, number>();
+  for (const read of reads) {
+    if (read.model?.speechPlan !== "free-plan" || read.requests <= 0) continue;
+    needed.set(read.model.id, (needed.get(read.model.id) ?? 0) + read.requests);
+  }
+  // A model Google has already refused for the day comes first: that read is refused outright,
+  // and asking about another model's shortfall would send it to meet the queue's refusal.
+  let short: { short: FreePlanShort; allowance: FreePlanAllowance } | null = null;
+  for (const [model, requests] of needed) {
+    const day = allowance(model);
+    if (requests <= day.left) continue;
+    if (day.reached) return { short: { requests, allowed: day.allowed, left: day.left }, allowance: day };
+    short ??= { short: { requests, allowed: day.allowed, left: day.left }, allowance: day };
+  }
+  return short;
+}
+
+/**
+ * Whether a job on screen says Google refused this model's free day and the day has not reset
+ * (codex on PR 1475): the queue's memory of the refusal is the coordinator's, but the refused
+ * job is in every window's list, so a screen deciding to read unasked can see it too. A reset
+ * the failure named decides; without one, a refusal since the last midnight Pacific does.
+ */
+export function freeDayRefused(jobs: readonly Pick<Job, "provider" | "model" | "status" | "error" | "updatedAt">[], model: string, now: Date = new Date()): boolean {
+  const since = lastPacificMidnight(now).getTime();
+  return jobs.some((job) => {
+    if (job.provider !== "google" || job.model !== model || job.status !== "failed" || !job.error?.includes(GOOGLE_FREE_LIMIT)) return false;
+    const named = /resets (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/.exec(job.error)?.[1];
+    return named !== undefined ? Date.parse(named) > now.getTime() : Date.parse(job.updatedAt) >= since;
+  });
+}
+
+/** A free day already used up, as a read's failure says it, so the free-limit stop and its remedy show. */
+export function freeLimitReason(allowance: Pick<FreePlanAllowance, "allowed" | "resetsAt">): string {
+  return `${GOOGLE_FREE_LIMIT}${freeLimitDetail({ limit: Number.isFinite(allowance.allowed) && allowance.allowed > 0 ? allowance.allowed : undefined, resetsAt: allowance.resetsAt })}`;
+}
+
+/**
+ * The question a read past the free day asks, in the confirm the free credit's overrun already
+ * uses: `122 reads · free plan allows 10 a day`, answered `Read until the limit`.
+ *
+ * The answer names no count (codex on PR 1475): the read is not capped at what Arke counts left —
+ * that is an estimate, Flash-Lite's figure a guess, and another machine's reads invisible — but
+ * goes until Google itself refuses, and stops there keeping what it made. `Read 10 now` would
+ * promise ten and could read more, or fewer.
+ */
+export function freePlanAskCopy(short: FreePlanShort): { line: string; confirm: string } {
+  return {
+    line: `${short.requests} read${short.requests === 1 ? "" : "s"} · free plan allows ${short.allowed} a day${short.left < short.allowed ? ` · ${short.left} left` : ""}`,
+    confirm: "Read until the limit",
+  };
+}
+
+/** A free plan's end as one line of text, with when a daily limit resets; null for any other reason. */
 export function freePlanNote(reason: string | null | undefined, now: Date = new Date()): string | null {
   const stop = freePlanStop(reason, now);
   return stop === null ? null : stop.kind === "free-limit" ? freeLimitLine(stop, now) : `${GOOGLE_BILLED} · key looks paid`;
@@ -172,18 +349,45 @@ export function freePlanNote(reason: string | null | undefined, now: Date = new 
  * the platform's time zone data, so daylight saving moves it the hour it really moves.
  */
 export function nextPacificMidnight(now: Date): Date {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles", hourCycle: "h23",
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
-  }).formatToParts(now);
+  const day = pacificDay(now);
+  return new Date(pacificMidnightOf(day.year, day.month, day.day + 1));
+}
+
+/** The midnight Pacific that began today's free day: the other end of `nextPacificMidnight`. */
+export function lastPacificMidnight(now: Date): Date {
+  const day = pacificDay(now);
+  return new Date(pacificMidnightOf(day.year, day.month, day.day));
+}
+
+const PACIFIC_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Los_Angeles", hourCycle: "h23",
+  year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+});
+
+function pacificDay(at: Date): { year: number; month: number; day: number } {
+  const parts = PACIFIC_PARTS.formatToParts(at);
   const part = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
-  // Pacific wall-clock now, read as if it were UTC, gives the zone's offset from the real instant.
-  const wall = Date.UTC(part("year"), part("month") - 1, part("day"), part("hour") % 24, part("minute"), part("second"));
-  const offset = wall - Math.floor(now.getTime() / 1000) * 1000;
-  const midnight = Date.UTC(part("year"), part("month") - 1, part("day") + 1, 0, 0, 0) - offset;
-  // An offset that changes between now and midnight (the DST switch happens at 02:00, after
-  // midnight) cannot move this; the guard only keeps the answer in the future.
-  return new Date(midnight > now.getTime() ? midnight : midnight + 24 * 60 * 60 * 1000);
+  return { year: part("year"), month: part("month"), day: part("day") };
+}
+
+/** The Pacific wall clock at an instant, read as if it were UTC, less the instant: the zone's offset then. */
+function pacificOffset(at: number): number {
+  const parts = PACIFIC_PARTS.formatToParts(new Date(at));
+  const part = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return Date.UTC(part("year"), part("month") - 1, part("day"), part("hour") % 24, part("minute"), part("second")) - Math.floor(at / 1000) * 1000;
+}
+
+/**
+ * 00:00 Pacific on a calendar day (the day may overflow its month), with the offset in force at
+ * that midnight rather than now's (codex on PR 1475): an answer computed the evening before a
+ * daylight-saving switch was an hour off, and the day's start computed the morning after one a
+ * whole day off. Two passes: the first lands within the hour, the second on the midnight itself.
+ * Pacific switches at 02:00, so midnight always exists and is never doubled.
+ */
+function pacificMidnightOf(year: number, month: number, day: number): number {
+  const wall = Date.UTC(year, month - 1, day, 0, 0, 0);
+  const near = wall - pacificOffset(wall);
+  return wall - pacificOffset(near);
 }
 
 /** `5 h 12 m` — the time left before a reset, labels only. */
@@ -193,9 +397,24 @@ export function formatTimeLeft(from: Date, to: Date): string {
   return hours > 0 ? `${hours} h ${minutes % 60} m` : `${minutes} m`;
 }
 
+/** `17:00` — an instant on the Pacific clock Google's free quota keeps. */
+export function pacificClock(at: Date): string {
+  return new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hourCycle: "h23", hour: "2-digit", minute: "2-digit" }).format(at);
+}
+
+/**
+ * After the opening, what a free limit says: `10 a day · resets 00:00 PT · 5 h 12 m`. The reset
+ * is the one Google named when it named one — `resets 17:00 PT` for the 2026-10-02 refusal —
+ * so the clock and the countdown never disagree.
+ */
+export function freeLimitTail(stop: Extract<FreePlanStop, { kind: "free-limit" }>, now: Date = new Date()): string {
+  const resets = new Date(stop.resetsAt);
+  return `${stop.limit !== undefined ? `${stop.limit} a day · ` : ""}resets ${pacificClock(resets)} PT · ${formatTimeLeft(now, resets)}`;
+}
+
 /** The line a free limit shows: `Google free limit reached · resets 00:00 PT · 5 h 12 m`. */
 export function freeLimitLine(stop: Extract<FreePlanStop, { kind: "free-limit" }>, now: Date = new Date()): string {
-  return `${GOOGLE_FREE_LIMIT} · resets 00:00 PT · ${formatTimeLeft(now, new Date(stop.resetsAt))}`;
+  return `${GOOGLE_FREE_LIMIT} · ${freeLimitTail(stop, now)}`;
 }
 
 /**
