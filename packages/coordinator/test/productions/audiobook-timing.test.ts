@@ -9,7 +9,7 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import { AUDIOBOOK_TIMING_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { planAudiobook, updateAudiobook } from "../../src/productions/audiobook.js";
 import { chapterTiming } from "../../src/productions/audiobook-timing.js";
-import { MIX_RATE, mixSamples, renderChapterMix } from "../../src/productions/audiobook-mix.js";
+import { MIX_RATE, mixSamples, RENDER_VERSION, renderChapterMix } from "../../src/productions/audiobook-mix.js";
 import { integratedLoudness, readSpeechWav, writeSpeechWav } from "../../src/audio/speech-wav.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
@@ -282,6 +282,26 @@ describe("the mix (turn 187, R-85)", () => {
     const later: ChapterMix = { seconds: 10, voices: [voice], beds: [], sounds: [{ id: "s2", at: 8, file: "artifacts/gone.wav", levelDb: -6 }], speech: [{ from: 0, to: 1 }] };
     const window = await mixSamples(worldDir, later, { window: { from: 0, to: 1 } });
     assert.equal(window.samples.length, MIX_RATE);
+  });
+
+  it("plays one sound file wherever the chapter places it, and names a render by its renderer too (codex on PR 1503)", async () => {
+    const { worldDir } = await makeTempRoot();
+    await mkdir(join(worldDir, "artifacts"), { recursive: true });
+    await writeFile(join(worldDir, "artifacts", "voice.wav"), tone(4, 0));
+    await writeFile(join(worldDir, "artifacts", "door.wav"), tone(0.5, 0.2, 500));
+    const mix: ChapterMix = {
+      seconds: 4,
+      voices: [{ key: "p0.0", at: 0, segments: [{ file: "artifacts/voice.wav", from: 0, to: 4 }] }],
+      beds: [],
+      sounds: [{ id: "s1", at: 0.5, file: "artifacts/door.wav", levelDb: -6 }, { id: "s2", at: 2.5, file: "artifacts/door.wav", levelDb: -6 }],
+      speech: [{ from: 0, to: 4 }],
+    };
+    const pcm = await mixSamples(worldDir, mix);
+    const peak = (from: number, to: number) => pcm.samples.slice(Math.round(from * MIX_RATE), Math.round(to * MIX_RATE)).reduce((max, s) => Math.max(max, Math.abs(s)), 0);
+    assert.ok(peak(0.6, 0.9) > 0.01 && peak(2.6, 2.9) > 0.01, "both placements sound");
+    assert.ok(peak(1.5, 2.2) < 1e-4, "and nothing between them");
+    const rendered = await renderChapterMix(worldDir, LEDGER, "01-neap", mix);
+    assert.match(rendered.file.split("/").pop()!, new RegExp(`^r${RENDER_VERSION}-`));
   });
 
   it("names a window's render apart from the chapter's", async () => {

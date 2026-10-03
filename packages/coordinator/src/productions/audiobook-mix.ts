@@ -26,6 +26,12 @@ export const MIX_RATE = 24_000;
 const CEILING_DBFS = -1.5;
 /** Renders a chapter keeps: its last Play, a window around a block or two, and the one before. */
 const KEPT = 4;
+/**
+ * The renderer's own version, in a render's name beside its plan's (codex on PR 1503): the same
+ * plan rendered by an earlier renderer is not this one's — the first cut a trailing sound at the
+ * last voice — so a change to how a plan sounds moves this, and old renders are never reused.
+ */
+export const RENDER_VERSION = 2;
 
 export function mixFolder(productionId: string, chapterFile: string): string {
   return `.cache/audiobook-mix/${productionId}/${chapterFile}`;
@@ -122,14 +128,22 @@ export async function mixSamples(
   // Sounds first, measured from their files (codex on PR 1497): a sound past the last voice runs
   // the chapter on to its own end rather than being cut at the plan's. One that starts after a
   // window is never read, so a later file cannot hold up or refuse a preview of an early block.
-  const sounds: Array<{ at: number; levelDb: number; pcm: SpeechPcm }> = [];
+  // Only their lengths are kept here, a file at a time (codex on PR 1503): a chapter of many or
+  // long sounds must not hold every one decoded while the voices and beds are mixed. Each file is
+  // read again when it is placed, at the end, and let go after.
+  const lengths = new Map<string, number>();
+  const sounds: Array<{ at: number; levelDb: number; file: string; seconds: number }> = [];
   for (const sound of mix.sounds) {
     if (sound.at >= windowTo) continue;
-    const pcm = await decode(dir, sound.file, options.ffmpeg, signal);
-    if (sound.at + pcm.samples.length / MIX_RATE <= from) continue;
-    sounds.push({ at: sound.at, levelDb: sound.levelDb, pcm });
+    let seconds = lengths.get(sound.file);
+    if (seconds === undefined) {
+      seconds = (await decode(dir, sound.file, options.ffmpeg, signal)).samples.length / MIX_RATE;
+      lengths.set(sound.file, seconds);
+    }
+    if (sound.at + seconds <= from) continue;
+    sounds.push({ at: sound.at, levelDb: sound.levelDb, file: sound.file, seconds });
   }
-  const to = options.window !== undefined ? windowTo : Math.max(windowTo, ...sounds.map((sound) => sound.at + sound.pcm.samples.length / MIX_RATE));
+  const to = options.window !== undefined ? windowTo : Math.max(windowTo, ...sounds.map((sound) => sound.at + sound.seconds));
   const out = new Float32Array(Math.ceil((to - from) * MIX_RATE));
   const inside = (at: number, seconds: number) => at < to && at + seconds > from;
 
@@ -202,9 +216,14 @@ export async function mixSamples(
     }
   }
 
-  for (const sound of sounds) {
-    const gain = amp(sound.levelDb);
-    place(sound.pcm.samples, 0, sound.pcm.samples.length / MIX_RATE, sound.at, () => gain);
+  // A file at a time: each decoded once, placed wherever the chapter plays it, then let go.
+  for (const file of new Set(sounds.map((sound) => sound.file))) {
+    const pcm = await decode(dir, file, options.ffmpeg, signal);
+    for (const sound of sounds) {
+      if (sound.file !== file) continue;
+      const gain = amp(sound.levelDb);
+      place(pcm.samples, 0, pcm.samples.length / MIX_RATE, sound.at, () => gain);
+    }
   }
 
   // One loudness after the mix (185): the whole brought to the take target, then held under the ceiling.
@@ -233,7 +252,7 @@ export async function renderChapterMix(
 ): Promise<{ file: string; seconds: number; from: number }> {
   const folder = mixFolder(productionId, chapterFile);
   const window = options.window === undefined ? null : { from: Math.max(0, options.window.from), to: Math.min(mix.seconds, options.window.to) };
-  const name = `${mixKey(mix)}${window === null ? "" : `-${Math.round(window.from * 1000)}-${Math.round(window.to * 1000)}`}.wav`;
+  const name = `r${RENDER_VERSION}-${mixKey(mix)}${window === null ? "" : `-${Math.round(window.from * 1000)}-${Math.round(window.to * 1000)}`}.wav`;
   const file = `${folder}/${name}`;
   const absolute = join(dir, fromPortable(file));
   // The render's own length, not the plan's: a sound may run past the last voice. A kept render's
