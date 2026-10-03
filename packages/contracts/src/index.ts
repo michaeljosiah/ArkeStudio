@@ -143,3 +143,5 @@ export * from "./audiobook-listening.js";
 // The interactive player (design turn 156): the module the app mounts, and its text for the exporter.
 export * from "./interactive-player.js";
 export * from "./interactive-player-source.js";
+export * from "./audiobook-player.js";
+export * from "./audiobook-player-source.js";

@@ -122,6 +122,7 @@ describe("the book as a listener hears it (turn 186)", () => {
       assert.equal(neap.blocks[0]!.key, "title", "the title first");
       assert.equal(neap.seconds, neap.blocks.length * 3, "the takes back to back, nothing added");
       assert.ok(neap.blocks.every((block, index) => block.at === index * 3 && block.file.startsWith("artifacts/")));
+      assert.ok(neap.blocks.every((block) => block.artifactId !== undefined), "each block's take by its artifact, for a timing layer to address");
       assert.equal(neap.opening, "world-art.png", "no picture on its opening block: the cover");
 
       const part = listening.chapters[1]!;

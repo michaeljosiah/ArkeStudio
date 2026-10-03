@@ -44,7 +44,7 @@ export function listeningBlocks(store: WorldStore, plan: Pick<AudiobookPlan, "bl
     if (planned.state !== "made" || take === undefined) return block;
     const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === take.artifactId);
     if (artifact === undefined) return block;
-    return { ...block, take: { file: `artifacts/${artifact.file}`, seconds: takeSeconds(store, take.artifactId, take, planned.block.text), grouped: take.grouped !== undefined } };
+    return { ...block, take: { file: `artifacts/${artifact.file}`, seconds: takeSeconds(store, take.artifactId, take, planned.block.text), grouped: take.grouped !== undefined, artifactId: take.artifactId } };
   });
 }
 

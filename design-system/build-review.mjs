@@ -278,6 +278,15 @@ const SCREENS = [
   { group: "Around it", screen: "The book's requests (story)", frame: "185d", route: "#/w/:worldId/p/:prodId/story/audiobook", status: "drifted", checked: "2026-10-03",
     controls: ["Requests", "Grouped", "Per paragraph", "Done"],
     notes: ["Turn 185: offered only where the coordinator says the book's reader groups here; grouped by default, written to the book.", "Drift: on the door, and in the book's reading when it is open; the counts are the book's, not a chapter's, and the provider's tier is not shown."] },
+  { group: "Around it", screen: "The audiobook player (story)", frame: "186a", route: "#/w/:worldId/p/:prodId/story/audiobook · Listen", status: "drifted", checked: "2026-10-03",
+    controls: ["End of chapter", "audiobook", "chapter 7 of 22"],
+    notes: ["Turn 186: <code>audiobook-player.js</code> in contracts, one module for the app and the package; Listen on the door and on a chapter. The made takes back to back with nothing added; a chapter read in part plays its made blocks, its gap marked on the scrubber and said in Text (<code>68 blocks not read</code>); a chapter with none is passed over. Speed 0.8–2× with the pitch kept, the sleep timer, the kept place by block and offset, Media Session.", "Drift: the picture is letterboxed (<code>contain</code>) as the binding says, where the frame's CSS covers; speed and the sleep timer cycle on a press rather than open a menu; the chrome rests after 2.5 s of playing, as 156's does."] },
+  { group: "Around it", screen: "The audiobook player · Chapters (story)", frame: "186b", route: "#/w/:worldId/p/:prodId/story/audiobook · Listen · Chapters", status: "built", checked: "2026-10-03",
+    controls: ["Chapters", "read", "not read"],
+    notes: ["Turn 186: every chapter listed with its progress and running time; a chapter read in part also counts its blocks not read; a chapter with none held and not pressable."] },
+  { group: "Around it", screen: "The audiobook player on a phone (story)", frame: "186d", route: "#/w/:worldId/p/:prodId/story/audiobook · Listen (phone)", status: "built", checked: "2026-10-03",
+    controls: ["Text", "End of chapter"],
+    notes: ["Turn 186: below 600 the picture takes the top, the transport sits under the thumb in three rows, play 64 across, and Text moves to the foot."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
