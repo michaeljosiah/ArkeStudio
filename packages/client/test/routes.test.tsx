@@ -327,7 +327,7 @@ describe("screen inventory", () => {
       const page = document.querySelector('[data-screen="production-cast"]')!;
       assert.ok(page.querySelector('img[src*="references/maren-kest/main-photo.png"]'));
       assert.ok(page.querySelector('img[src*="references/the-vigil/views/establishing.webp"]'));
-      assert.equal(page.querySelector(".fy-hero button")?.textContent, "New guest");
+      assert.equal(page.querySelector(".fy-pcast__head button")?.textContent, "New guest");
       assert.equal(page.querySelector(".fy-corner"), null);
       assert.ok(!page.textContent?.includes("chandlery"));
     } finally {

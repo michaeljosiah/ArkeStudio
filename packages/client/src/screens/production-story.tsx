@@ -62,8 +62,6 @@ import {
   subscribeChapterCreateResults,
   setChapterRetired,
   reorderChapters,
-  deriveContinuity,
-  useDeriving,
 } from "../lib/store.js";
 import { continuityRows, continuityRowStamp, rememberChaptersView, rememberedChaptersView, type ChaptersView } from "../lib/continuity.js";
 import { defaultEpisodeFor } from "../lib/production-navigation.js";
@@ -194,6 +192,7 @@ export function StoryScreen() {
 }
 
 function OverviewStoryScreen() {
+  const compact = useMediaQuery("(max-width: 1099px)");
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const story = production?.story ?? null;
@@ -207,6 +206,12 @@ function OverviewStoryScreen() {
   const staged = (world?.proposals ?? []).find((sp) =>
     sp.proposal.targets.some((t) => t.path === `productions/${prodId}/story.json` || t.path === `productions/${prodId}/prose-style.json`),
   );
+  /** Every field the staged proposal would change, flattened out of its per-target review. */
+  const stagedFields = staged?.review?.targets.flatMap((t) => t.fields) ?? [];
+  const spineLines = (story?.spine ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
   /*
    * The overview is one document, so it is also one listen (issue 859).
    *
@@ -252,11 +257,211 @@ function OverviewStoryScreen() {
     })),
   ];
   const pageRead = useProsePageRead({ pageId: prodId, title: overviewTitle, blocks: pageBlocks });
-  // One overview at every width (design turn 192): turn 171's cards, which the narrow widths
-  // already drew, with one empty state. The wide page said "Nothing settled yet" twice, explained
-  // itself in a footer and kept an empty "Waiting on you" rail beside it.
-  if (!production || !worldId) return <div className="fy-overview fy-prodscroll" data-screen="story-overview" />;
-  return <CompactOverview worldId={worldId} production={production} staged={staged} read={pageRead} />;
+  if (compact && production && worldId) return <CompactOverview worldId={worldId} production={production} staged={staged} read={pageRead} />;
+  return (
+    <div className="fy-story" data-screen="story-overview">
+      {/* The details, not a conversation (turn 88): what the thread settled, read and worked
+          with. Changing any of it is done next door, where it was decided. */}
+      <div className="fy-story__chat">
+        <div className="fy-story__chathead">
+          <div className="fy-eyebrow-sm">
+            OVERVIEW · {production ? productionShape(production.meta).displayLabel.toLowerCase() : ""}
+          </div>
+          <h1 className="fy-story__h1">{story || style ? "The story, as it stands" : "Nothing settled yet"}</h1>
+          {/* Page scale (issue 859): the cards below, read through in the order drawn. Only once
+              there is more than one — a page read of a lone logline is that card's own press. */}
+          {pageBlocks.length > 1 && (
+            <div style={{ marginTop: 10 }}>
+              <PageReadControl read={pageRead} label="Read the overview" />
+            </div>
+          )}
+        </div>
+        <div className="fy-story__log">
+          {/* A style can be settled before an overview is (codex on turn 128): either is enough
+              for the page to have something to draw. */}
+          {story || style ? (
+            <div style={{ display: "grid", gap: 14 }}>
+              {/*
+                The overview is one document, and its cards are the blocks it is read in
+                (issue 857). Each carries its own read-aloud rather than the screen carrying one:
+                a logline and a treatment are not the same length of listen, and the press should
+                say which of them it is starting.
+              */}
+              {story && (
+                <div className="fy-draftcard fy-texthost">
+                  <div className="fy-eyebrow-sm">LOGLINE</div>
+                  <div className="fy-draftcard__logline">“{story.logline}”</div>
+                  <ReadAloud
+                    source={{ of: "story", productionId: prodId ?? "", field: "logline" }}
+                    title={`${production?.meta.title ?? "Overview"} · logline`}
+                    text={story.logline ?? ""}
+                  />
+                </div>
+              )}
+              {(["question", "ending"] as const).map((field) => story?.[field] ? (
+                <div key={field} className="fy-draftcard fy-texthost">
+                  <div className="fy-eyebrow-sm">{field === "question" ? "DRAMATIC QUESTION" : "ENDING"}</div>
+                  <div style={{ whiteSpace: "pre-wrap" }}>{story[field]}</div>
+                  <ReadAloud source={{ of: "story", productionId: prodId ?? "", field }}
+                    title={field === "question" ? "Dramatic question" : "Ending"} text={story[field]} />
+                </div>
+              ) : null)}
+              {spineLines.length > 0 && (
+                <div className="fy-draftcard fy-texthost">
+                  <div className="fy-eyebrow-sm">SPINE</div>
+                  {spineLines.map((line) => (
+                    <div key={line} style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4 }}>
+                      {line}
+                    </div>
+                  ))}
+                  <ReadAloud
+                    source={{ of: "story", productionId: prodId ?? "", field: "spine" }}
+                    title={`${production?.meta.title ?? "Overview"} · spine`}
+                    text={story?.spine ?? ""}
+                  />
+                </div>
+              )}
+              {(story?.acts ?? []).length > 0 && (
+                <div className="fy-draftcard fy-texthost">
+                  <div className="fy-eyebrow-sm">ACTS</div>
+                  {(story?.acts ?? []).map((act, i) => (
+                    <div key={act.title} style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4 }}>
+                      {i + 1}. {act.title}
+                      {act.summary ? ` — ${act.summary}` : ""}
+                    </div>
+                  ))}
+                  <ReadAloud
+                    source={{ of: "story", productionId: prodId ?? "", field: "acts" }}
+                    title={`${production?.meta.title ?? "Overview"} · acts`}
+                    text={(story?.acts ?? [])
+                      .map((act, i) => `${i + 1}. ${act.title}${act.summary ? ` — ${act.summary}` : ""}`)
+                      .join(" ")}
+                  />
+                </div>
+              )}
+              {production?.treatment && (
+                <div className="fy-draftcard fy-texthost">
+                  <div className="fy-eyebrow-sm">TREATMENT</div>
+                  <div
+                    style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4, whiteSpace: "pre-wrap" }}
+                  >
+                    {production.treatment}
+                  </div>
+                  <ReadAloud
+                    source={{ of: "story", productionId: prodId ?? "", field: "treatment" }}
+                    title={`${production.meta.title} · treatment`}
+                    text={production.treatment}
+                  />
+                </div>
+              )}
+              {/*
+                The style the book is written in (turn 128): the overview's cards, at the
+                overview's measure, under a heading that says where it was settled and who reads
+                it. Voice and samples read aloud; point of view and tense are labels, not a listen.
+              */}
+              {style !== null && (
+                <>
+                  <div className="fy-story__stylehead" data-testid="prose-style">
+                    <span style={{ font: "600 13px var(--font-sans)" }}>Style</span>
+                    <span className="fy-mono">v{style.version} · settled in Develop</span>
+                  </div>
+                  {style.pov !== undefined && (
+                    <div className="fy-draftcard fy-texthost">
+                      <div className="fy-eyebrow-sm">POINT OF VIEW</div>
+                      <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4 }}>{style.pov}</div>
+                    </div>
+                  )}
+                  {style.tense !== undefined && (
+                    <div className="fy-draftcard fy-texthost">
+                      <div className="fy-eyebrow-sm">TENSE</div>
+                      <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4 }}>{style.tense}</div>
+                    </div>
+                  )}
+                  {style.voice !== undefined && (
+                    <div className="fy-draftcard fy-texthost">
+                      <div className="fy-eyebrow-sm">VOICE</div>
+                      <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4, whiteSpace: "pre-wrap" }}>{style.voice}</div>
+                      <ReadAloud
+                        source={{ of: "story", productionId: prodId ?? "", field: "voice" }}
+                        title={`${overviewTitle} · voice`}
+                        text={style.voice}
+                      />
+                    </div>
+                  )}
+                  {samples.length > 0 && (
+                    <div className="fy-draftcard fy-texthost">
+                      <div className="fy-eyebrow-sm">SAMPLES · {samples.length}</div>
+                      {/* One read per sample (codex on turn 128): six at their bound read as one
+                          block outrun a narrator's prompt cap, so each sample is its own listen. */}
+                      {samples.map(({ sample, index }) => (
+                        <div key={`${index}:${sample}`} style={{ marginTop: 4 }} data-sample={index}>
+                          <div className="fy-draftcard__logline">“{sample}”</div>
+                          <ReadAloud
+                            source={{ of: "story", productionId: prodId ?? "", field: "samples", sample: index }}
+                            title={`${overviewTitle} · sample ${index + 1}`}
+                            text={sample}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          ) : (
+            <EmptyState
+              title="Nothing settled yet"
+            />
+          )}
+        </div>
+        <div
+          style={{ flex: "none", padding: "14px 36px 22px", display: "flex", gap: 10, alignItems: "center" }}
+        >
+          <NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">
+            &larr; Production Chat
+          </NavLink>
+          <span className="fy-mono">
+            the overview steers scene and chapter drafting · it never overwrites a scene you have locked
+          </span>
+        </div>
+      </div>
+      {/* The rail beside a details screen holds what is staged against it (turn 86/88) — the
+          object itself is the screen, so repeating it here would be two copies of one thing. */}
+      <div className="fy-story__side">
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <div style={{ font: "600 15px var(--font-sans)" }}>Waiting on you</div>
+          <span className="fy-mono" style={{ color: staged ? "var(--warning)" : undefined }}>
+            {staged
+              ? `${stagedFields.length} change${stagedFields.length === 1 ? "" : "s"}`
+              : "nothing staged"}
+          </span>
+        </div>
+        {staged ? (
+          <div style={{ display: "grid", gap: 12 }}>
+            {stagedFields.map((field) => (
+              <div key={field.field} className="fy-draftcard">
+                <div className="fy-draftcard__head">
+                  <span className="fy-eyebrow-sm">{field.field}</span>
+                  <Badge tone="warning">would change</Badge>
+                </div>
+                <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 6 }}>
+                  {field.proposed ?? "(removed)"}
+                </div>
+                {field.before !== null && <div className="fy-draftcard__was">Accepted: “{field.before}”</div>}
+              </div>
+            ))}
+            <div className="fy-mono">return to Production Chat to accept, revise, or discard it</div>
+          </div>
+        ) : (
+          <div className="fy-emptycard">
+            <div style={{ font: "400 13px/1.7 var(--font-sans)" }}>
+              Nothing waiting. What Production Chat settles arrives here to be accepted before it lands.
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -376,10 +581,6 @@ export function ChapterTreeScreen() {
   );
   const rows = view === "continuity" ? continuityRows(chapters, cast.map((sheet) => sheet.id)) : [];
   const derivedCount = chapters.filter((c) => c.continuity !== undefined && !("unreadable" in c.continuity)).length;
-  const firstUnderived = chapters.find((c) => c.continuity === undefined);
-  const deriving = useDeriving();
-  const connection = useStore().connection;
-  const derivingAny = chapters.some((c) => deriving[`${worldId}/${prodId}/${c.id}`]?.state === "deriving");
   const placeName = (id: string) => world?.sheets.find((sheet) => sheet.id === id)?.name ?? id;
   const pad = (order: number) => String(order).padStart(2, "0");
   return (
@@ -448,27 +649,13 @@ export function ChapterTreeScreen() {
           <span style={{ width: `${Math.min(100, Math.round((bookWords / target) * 100))}%` }} />
         </div>
       )}
-      {/* Until a chapter is derived the view is one line and its press (design turn 192): a
-          grid of dashes under a sentence explaining them said "not derived" a dozen ways. Derive
-          reads the first chapter not derived, as its own panel's press would. */}
-      {view === "continuity" && chapters.length > 0 && (derivedCount === 0 ? (
-        <div className="fy-cont__meta fy-cont__none" data-testid="continuity-none">
-          <span>Not derived</span>
-          <button
-            type="button"
-            className="fy-ch__derive"
-            disabled={firstUnderived === undefined || connection !== "open" || derivingAny}
-            onClick={() => firstUnderived !== undefined && worldId !== undefined && prodId !== undefined && deriveContinuity(worldId, prodId, firstUnderived.file)}
-          >
-            {derivingAny ? "deriving…" : "Derive"}
-          </button>
-        </div>
-      ) : derivedCount < chapters.length ? (
+      {view === "continuity" && (
         <div className="fy-cont__meta">
-          {chapters.length - derivedCount} of {chapters.length} not derived
+          after each chapter · derived from the prose, never written into the world · {chapters.length} chapter{chapters.length === 1 ? "" : "s"}, {derivedCount} derived · a
+          quiet cell is carried from the chapter it names · nothing carries past a chapter not derived
         </div>
-      ) : null)}
-      {production && chapters.length > 0 && view === "continuity" && derivedCount > 0 ? (
+      )}
+      {production && chapters.length > 0 && view === "continuity" ? (
         <div className="fy-cont" data-testid="continuity-table">
           {phone && <div className="fy-cont-cards">{rows.map(row => <button type="button" key={row.chapter.id} onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(row.chapter.id)}`)}><strong>{pad(row.chapter.order)} · {row.chapter.title}</strong><span>{continuityRowStamp(row.stamp)}</span>{row.cells.map((cell, i) => <span key={cast[i]!.id}><b>{cast[i]!.name}</b> · {cell?.gone ? `gone since ${pad(cell.since!)}` : cell?.unsure ? "unsure · place dropped" : cell === null ? "not known" : `${placeName(cell.where ?? "")}${cell.since === undefined ? "" : ` · since chapter ${pad(cell.since)}`}`}{cell?.warn ? " · chapter moved" : ""}</span>)}</button>)}</div>}
           <table className="fy-cont__table">
