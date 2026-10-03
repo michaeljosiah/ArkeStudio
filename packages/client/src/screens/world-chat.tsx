@@ -11,6 +11,7 @@ import { FoundingProgressCard } from "../components/genesis-readiness.js";
 import { attachmentChipLabel, ConversationTranscript } from "../components/conversation.js";
 import { EmptyState } from "../components/layout.js";
 import { Button, IconButton, cx } from "../components/ui.js";
+import { BodyLayer } from "../components/body-layer.js";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, More, PanelLeft, Plus } from "../components/icons.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import {
@@ -272,10 +273,10 @@ export function RowMenuPanel({
         )}
   </div>;
   if (compact) return <PageSheet open title={row.title} onClose={onCloseMenu}>{actions}</PageSheet>;
-  return <>
+  return <BodyLayer>
     <div className="fy-chatnav__scrim" onClick={onCloseMenu} />
     <div ref={panel} className="fy-chatnav__menu" style={{ left: menu.x, top: menu.y }} role="menu">{actions}</div>
-  </>;
+  </BodyLayer>;
 
 }
 

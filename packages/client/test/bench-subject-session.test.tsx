@@ -9,6 +9,7 @@ import { App } from "../src/App.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -291,6 +292,14 @@ const q = (bench: Bench, selector: string): HTMLElement => {
 const all = (bench: Bench, selector: string): HTMLElement[] =>
   [...bench.container.querySelectorAll(selector)] as unknown as HTMLElement[];
 const text = (bench: Bench): string => bench.container.textContent ?? "";
+/** The same lookups for a dialog, which is drawn on the body rather than in the bench. */
+const dq = (bench: Bench, selector: string): HTMLElement => {
+  const node = dialogRoot(bench.container).querySelector(selector) as HTMLElement | null;
+  assert.ok(node, `${selector} is on screen`);
+  return node;
+};
+const dall = (bench: Bench, selector: string): HTMLElement[] =>
+  [...dialogRoot(bench.container).querySelectorAll(selector)] as unknown as HTMLElement[];
 
 async function pressLabelled(bench: Bench, label: string): Promise<void> {
   const button = [...bench.container.querySelectorAll("button")].find((node) => node.textContent?.trim() === label);
@@ -551,15 +560,15 @@ describe("the wall and the strip (R-24; design 142a)", () => {
     const ask = bench.sent.at(-1) as unknown as { kind: string; requestId: string; takeId: string };
     assert.equal(ask.kind, "bench-take-files");
     assert.equal(ask.takeId, TAKE_ID);
-    assert.equal(bench.container.querySelector('[data-testid="bench-delete-files"]'), null, "nothing confirms before the list arrives");
+    assert.equal(dialogRoot(bench.container).querySelector('[data-testid="bench-delete-files"]'), null, "nothing confirms before the list arrives");
     await apply({
       at: "2026-10-01T00:00:00.000Z", type: "bench.take-files", worldId: FIXTURE_WORLD_ID, sessionId: SESSION_ID, takeId: TAKE_ID,
       requestId: ask.requestId, files: [{ name: "output-1.mp4", bytes: 2_300_000 }, { name: "output-1.poster.png", bytes: 310_000 }],
     } as DomainEvent);
-    const dialog = q(bench, '[role="dialog"]');
+    const dialog = dq(bench, '[role="dialog"]');
     assert.match(dialog.textContent ?? "", /Delete Take 1\?/);
-    assert.deepEqual(all(bench, '[data-testid="bench-delete-files"] li').map((node) => node.textContent), ["output-1.mp4 · 2.3 MB", "output-1.poster.png · 0.3 MB"]);
-    await act(async () => q(bench, '[data-testid="bench-delete-confirm"]').click());
+    assert.deepEqual(dall(bench, '[data-testid="bench-delete-files"] li').map((node) => node.textContent), ["output-1.mp4 · 2.3 MB", "output-1.poster.png · 0.3 MB"]);
+    await act(async () => dq(bench, '[data-testid="bench-delete-confirm"]').click());
     const del = bench.sent.at(-1) as unknown as { kind: string; requestId: string; takeId: string };
     assert.equal(del.kind, "bench-delete");
     assert.equal(del.takeId, TAKE_ID);
@@ -568,7 +577,7 @@ describe("the wall and the strip (R-24; design 142a)", () => {
       at: "2026-10-01T00:00:00.000Z", type: "bench.take-deleted", worldId: FIXTURE_WORLD_ID, sessionId: SESSION_ID, takeId: TAKE_ID,
       requestId: del.requestId, deleted: false, reason: "Filed — delete it from Artifacts",
     } as DomainEvent);
-    assert.match(q(bench, '[role="dialog"] [role="alert"]').textContent ?? "", /Filed — delete it from Artifacts/);
+    assert.match(dq(bench, '[role="dialog"] [role="alert"]').textContent ?? "", /Filed — delete it from Artifacts/);
   });
 
   it("a filed take's Delete is refused with one clause and sends nothing", async () => {

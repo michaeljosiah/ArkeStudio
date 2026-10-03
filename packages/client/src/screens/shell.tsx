@@ -5,6 +5,7 @@ import { HarnessModelOptions, HarnessModelStatus } from "../components/harness-m
 import { languageChoiceReason } from "../components/conversation.js";
 import { Button, Callout, IconButton, Input, Select, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
+import { BodyLayer } from "../components/body-layer.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { OnYourPC } from "../components/on-your-pc.js";
 import { DeviceNotifications } from "../components/device-notifications.js";
@@ -511,32 +512,34 @@ function ArchiveSheet({ world, onArchive, onKeep }: { world: WorldCardSummary; o
     return () => window.removeEventListener("keydown", key);
   }, [onKeep]);
   return (
-    <div className="fy-archivesheet__scrim" onClick={onKeep}>
-      <div
-        className="fy-archivesheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="fy-archivesheet-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <span className="fy-archivesheet__grab" aria-hidden />
-        <div className="fy-archivesheet__who">
-          {world.keyArt && (
-            <span className="fy-archivesheet__art">
-              <Portrait worldSlug={world.slug} path={world.keyArt} label={world.name} radius={8} />
-            </span>
-          )}
-          <div>
-            <h2 id="fy-archivesheet-title">Archive {world.name}?</h2>
-            <p>Moves its folder to the archive. Nothing is deleted.</p>
+    <BodyLayer>
+      <div className="fy-archivesheet__scrim" onClick={onKeep}>
+        <div
+          className="fy-archivesheet"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="fy-archivesheet-title"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <span className="fy-archivesheet__grab" aria-hidden />
+          <div className="fy-archivesheet__who">
+            {world.keyArt && (
+              <span className="fy-archivesheet__art">
+                <Portrait worldSlug={world.slug} path={world.keyArt} label={world.name} radius={8} />
+              </span>
+            )}
+            <div>
+              <h2 id="fy-archivesheet-title">Archive {world.name}?</h2>
+              <p>Moves its folder to the archive. Nothing is deleted.</p>
+            </div>
+          </div>
+          <div className="fy-archivesheet__acts">
+            <Button variant="primary" size="lg" onClick={onArchive}>Archive</Button>
+            <Button size="lg" onClick={onKeep}>Keep</Button>
           </div>
         </div>
-        <div className="fy-archivesheet__acts">
-          <Button variant="primary" size="lg" onClick={onArchive}>Archive</Button>
-          <Button size="lg" onClick={onKeep}>Keep</Button>
-        </div>
       </div>
-    </div>
+    </BodyLayer>
   );
 }
 

@@ -7,6 +7,7 @@ import { mediaUrl } from "../lib/media.js";
 import { playClip } from "../lib/audio.js";
 import { Button, cx } from "./ui.js";
 import { Check, X } from "./icons.js";
+import { BodyLayer } from "./body-layer.js";
 import { PosterVideo } from "./player.js";
 import { Portrait, sheetPortraitPath } from "./portrait.js";
 
@@ -120,7 +121,7 @@ export function VoiceSampleFlow({ world, sheet, onClose }: { world: WorldBundle;
     </div>
     <button className="fy-character-sheet-close" type="button" aria-label="Close voice sample" onClick={onClose}><X size={18} /></button>
   </header>;
-  if (review) return <>
+  if (review) return <BodyLayer>
     <div className="fy-voicescrim" onClick={onClose} />
     <div className="fy-voicesheet fy-voicesheet--wide" role="dialog" aria-label="Review the sample" data-testid="voice-review">
       {head}
@@ -159,8 +160,8 @@ export function VoiceSampleFlow({ world, sheet, onClose }: { world: WorldBundle;
       </footer>
       <p className="fy-vsnotice" role="status" aria-live="polite">{notice}</p>
     </div>
-  </>;
-  return <>
+  </BodyLayer>;
+  return <BodyLayer>
     <div className="fy-voicescrim" onClick={onClose} />
     <div className="fy-voicesheet fy-voicesheet--wide" role="dialog" aria-label="The voice on screen" data-testid="voice-sample">
       {head}
@@ -257,5 +258,5 @@ export function VoiceSampleFlow({ world, sheet, onClose }: { world: WorldBundle;
       </footer>
       <p className="fy-vsnotice" role="status" aria-live="polite">{notice}</p>
     </div>
-  </>;
+  </BodyLayer>;
 }

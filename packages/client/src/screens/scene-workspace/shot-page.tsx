@@ -36,6 +36,7 @@ import { FrameActions } from "./frame-actions.js";
 import { frameRunShotState, GenerateFramesDialog } from "./frame-run.js";
 import { ShotLightbox } from "./lightbox.js";
 import { stagedShotChanges, useSceneWriter, type SceneWriter } from "./scene-writer.js";
+import { BodyLayer } from "../../components/body-layer.js";
 import { SelectionProvider, type WorkspaceSubject } from "./selection.js";
 import { ShotFields } from "./shot-fields.js";
 import { SceneStage } from "./stage.js";
@@ -665,21 +666,23 @@ function ShotWorkspace({
           />
         )}
         {confirmDelete ? (
-          <div className="fy-shot__confirm" role="alertdialog" aria-modal="true" aria-label={`Delete shot ${shot.number}?`}>
-            <span>Delete shot {shot.number}?</span>
-            <button
-              type="button"
-              autoFocus
-              disabled={disabled}
-              onClick={() => {
-                if (write({ kind: "delete-shot", shotId: shot.id })) void navigate(scenePath);
-                setConfirmDelete(false);
-              }}
-            >
-              Delete
-            </button>
-            <button type="button" onClick={() => setConfirmDelete(false)}>Cancel</button>
-          </div>
+          <BodyLayer>
+            <div className="fy-shot__confirm" role="alertdialog" aria-modal="true" aria-label={`Delete shot ${shot.number}?`}>
+              <span>Delete shot {shot.number}?</span>
+              <button
+                type="button"
+                autoFocus
+                disabled={disabled}
+                onClick={() => {
+                  if (write({ kind: "delete-shot", shotId: shot.id })) void navigate(scenePath);
+                  setConfirmDelete(false);
+                }}
+              >
+                Delete
+              </button>
+              <button type="button" onClick={() => setConfirmDelete(false)}>Cancel</button>
+            </div>
+          </BodyLayer>
         ) : null}
       </div>
     </SelectionProvider>

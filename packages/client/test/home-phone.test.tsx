@@ -7,6 +7,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { FirstRunScreen, WorldPickerScreen } from "../src/screens/shell.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -68,20 +69,20 @@ it("confirms archiving in a sheet on a phone, and in the card elsewhere", async 
       const archive = container.querySelector<HTMLButtonElement>('.fy-home-drift [aria-label="Archive Copper Saints"]')!;
       await act(async () => archive.click());
       if (width === "phone") {
-        assert.ok(container.querySelector('.fy-archivesheet[role="dialog"]'), "a sheet from the bottom");
+        assert.ok(dialogRoot(container).querySelector('.fy-archivesheet[role="dialog"]'), "a sheet from the bottom");
         assert.ok(!container.querySelector(".fy-worldcard__confirm"), "and not the card's own confirm");
-        assert.ok(container.textContent?.includes("Archive Copper Saints?"));
-        const keep = [...container.querySelectorAll("button")].find((b) => b.textContent === "Keep")!;
+        assert.ok(dialogRoot(container).textContent?.includes("Archive Copper Saints?"));
+        const keep = [...dialogRoot(container).querySelectorAll("button")].find((b) => b.textContent === "Keep")!;
         await act(async () => keep.click());
-        assert.ok(!container.querySelector(".fy-archivesheet"), "Keep closes it");
+        assert.ok(!dialogRoot(container).querySelector(".fy-archivesheet"), "Keep closes it");
         assert.equal(sent.filter((m) => m.kind === "archive-world").length, 0, "and archives nothing");
         await act(async () => archive.click());
-        const go = [...container.querySelectorAll<HTMLButtonElement>(".fy-archivesheet button")].find((b) => b.textContent === "Archive")!;
+        const go = [...dialogRoot(container).querySelectorAll<HTMLButtonElement>(".fy-archivesheet button")].find((b) => b.textContent === "Archive")!;
         await act(async () => go.click());
         assert.ok(sent.some((m) => m.kind === "archive-world" && m.worldId === "w-old"));
       } else {
         assert.ok(container.querySelector(".fy-worldcard__confirm"), "the card's own confirm, as shipped");
-        assert.ok(!container.querySelector(".fy-archivesheet"));
+        assert.ok(!dialogRoot(container).querySelector(".fy-archivesheet"));
       }
     } finally {
       await act(async () => root.unmount());

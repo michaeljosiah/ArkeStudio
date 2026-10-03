@@ -91,7 +91,7 @@ export function AudiobookExportSheet({ worldId, production, onClose }: { worldId
   };
   const folder = result?.ok === true ? result.dir.slice("exports/".length) : null;
   return (
-    <EditorDialog open title={`Export audiobook · ${production.meta.title}`} onClose={onClose} width={620} labelledBy="audiobook-export-title" onBody>
+    <EditorDialog open title={`Export audiobook · ${production.meta.title}`} onClose={onClose} width={620} labelledBy="audiobook-export-title">
       <div className="fy-exsheet" data-testid="audiobook-export">
         <div className="fy-abexport__opt fy-abexport__opt--on" role="radio" aria-checked="true">
           <span className="fy-abexport__radio" aria-hidden="true" />

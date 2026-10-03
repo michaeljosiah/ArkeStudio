@@ -209,6 +209,36 @@ transformed or contained ancestor, Listen leads the head, and the chapter's Voic
 designed voice and never overlaps it. `--out <dir>` keeps the screenshots; `--baseline <rev>`
 renders the changed screens as they were at that revision and asserts nothing.
 
+## Dialogs and sheets
+
+Every sheet and dialog is drawn on the document's body, never where it is opened. `EditorDialog`
+and the hand-rolled scrim-and-sheet dialogs (the voice catalogue and clone, the voice sample flow,
+the voice picker, the Bench's lyrics and brief windows, the archive sheet, the shot delete
+confirmation) go through `BodyLayer`; `PageSheet` is a native `<dialog>` portalled to the body.
+A `position: fixed` layer is fixed to the window only while no ancestor has a transform, and the
+page heads and columns enter with `fy-fade-up`, whose transform Chrome keeps as the containing
+block after it settles, so a dialog mounted in place is a clipped box over whatever it was opened
+from. There is no opt-out. A menu that places itself from a button's rectangle (the production
+switcher, the chat list's row menu) is drawn on the body for the same reason.
+
+Two consequences when you write one. CSS cannot reach a dialog through a screen ancestor
+(`.fy-screen .fy-dialog`, `[data-screen="x"] .fy-sheet`) or through a custom property the screen
+defines, because the dialog is no longer inside it: class the dialog's own panel
+(`panelClassName`) or define the property on `:root`. And a DOM test finds the dialog on the
+body, not in the container it mounted into: use `dialogRoot(container)` from
+`packages/client/test/dialog-root.ts`, and remove the host container (not the body) in teardown.
+SSR tests are unaffected, since `BodyLayer` renders in place on the server.
+
+Run `node scripts/smoke-dialog-overlays.mjs` from the root with Chrome installed (or
+`ARKE_CHROME`) after changing any of them. It opens Export and Import manuscript, the Cut's export
+and keyboard sheets, the voice catalogue and the clone dialog at 390, 820, 1440 and 2560 wide,
+each from a page in which every ancestor of the opener has a transform (the worst the page can
+be), and checks each layer is on the body, has no containing ancestor, is inside the window and is
+centred (a phone's sheets are full width from the bottom). `--out <dir>` keeps the screenshots and
+`measurements.json`; `--viewport phone|tablet|laptop|ultrawide` runs one width; `--baseline <rev>`
+renders the dialog sources as they were at that revision and asserts nothing, which is how to see
+the check fail on the old mounting.
+
 ## Independent editor media
 
 After building desktop, run `node apps/desktop/scripts/smoke-editor-import.mjs` from the repository root. It opens a hidden sandboxed Electron file page with the built preload, supplies real file-backed selections, and verifies ordered path resolution and private authentication. It uses a temporary profile and requires a desktop display (it is separate from headless CI).

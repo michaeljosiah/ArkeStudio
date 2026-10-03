@@ -100,7 +100,9 @@
 
 @media (max-width: 599px) {
   /* The master's 84px starts at the page below the 52px bar and 57px pill strip. */
-  .fy-worldapp { --character-sheet-top: 193px; }
+  /* On :root, not .fy-worldapp: the voice sheets are drawn on the body, outside the world frame,
+     and would otherwise read the 84px fallback and cover the chrome the master leaves clear. */
+  :root { --character-sheet-top: 193px; }
   .fy-character-generation__backdrop { display: block; position: fixed; inset: 0; }
   .fy-character-generation__backdrop .fy-worldnav__sentinel { display: none; }
   .fy-character-head { padding: 16px 20px 0; display: grid; grid-template-columns: 40px minmax(0, 1fr); column-gap: 12px; row-gap: 14px; }
@@ -142,7 +144,7 @@
   .fy-voicesheet::before, .fy-clone::before, .fy-voices::before, .fy-gendialog[data-generation-sheet] > .fy-gendialog__panel::before { content: ""; display: block; width: 40px; height: 5px; margin: 10px auto 0; border-radius: 3px; background: var(--border); flex: none; }
   .fy-voicescrim, .fy-bench__scrim:has(+ .fy-clone), .fy-gendialog[data-generation-sheet]::backdrop { background: color-mix(in srgb, var(--neutral-950) 40%, transparent); }
   /* Keep the chrome visually clear while intercepting taps across the entire viewport. */
-  .fy-worldapp .fy-voicescrim, .fy-worldapp .fy-bench__scrim:has(+ .fy-clone), .fy-worldapp .fy-gendialog[data-generation-sheet]::backdrop { top: 0; background: linear-gradient(to bottom, transparent 0 109px, color-mix(in srgb, var(--neutral-950) 40%, transparent) 109px); }
+  .fy-voicescrim, .fy-bench__scrim:has(+ .fy-clone), .fy-worldapp .fy-gendialog[data-generation-sheet]::backdrop { top: 0; background: linear-gradient(to bottom, transparent 0 109px, color-mix(in srgb, var(--neutral-950) 40%, transparent) 109px); }
   .fy-voicesheet__head, .fy-clone .fy-voices__head, .fy-voices .fy-voices__head, .fy-gendialog[data-generation-sheet] .fy-gendialog__head { flex: none; padding: 6px 8px 6px 20px; align-items: center; gap: 8px; }
   .fy-voicesheet__head > div { flex: 1; min-width: 0; }
   .fy-voicesheet__head strong, .fy-voices__title, .fy-gendialog[data-generation-sheet] .fy-gendialog__head h2 { font: var(--type-h3); letter-spacing: normal; }

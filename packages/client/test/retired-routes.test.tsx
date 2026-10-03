@@ -7,6 +7,7 @@ import { parseHTML } from "linkedom";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -52,7 +53,7 @@ async function landAt(path: string): Promise<HTMLElement> {
       </MemoryRouter>,
     );
   });
-  return container;
+  return dialogRoot(container);
 }
 
 const screenOf = (container: HTMLElement): string | null =>

@@ -332,5 +332,5 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
 
 function NarratorSurface({ data, onClose, width, children }: { data: string; onClose: () => void; width: number; children: ReactNode }) {
   const phone = useMediaQuery("(max-width: 599px)");
-  return phone ? <PageSheet open title="Narrator" onClose={onClose} className="fy-abnarr__sheet">{children}</PageSheet> : <EditorDialog open title="Narrator" subtitle={data} onClose={onClose} width={width} panelClassName="fy-abnarr__panel" onBody>{children}</EditorDialog>;
+  return phone ? <PageSheet open title="Narrator" onClose={onClose} className="fy-abnarr__sheet">{children}</PageSheet> : <EditorDialog open title="Narrator" subtitle={data} onClose={onClose} width={width} panelClassName="fy-abnarr__panel">{children}</EditorDialog>;
 }

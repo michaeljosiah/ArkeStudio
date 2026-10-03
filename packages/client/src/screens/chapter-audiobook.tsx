@@ -2687,7 +2687,7 @@ export function RecordedTakeDialog({ staged, row, onCancel, onReplace, onKeep }:
   ].filter((part) => part !== null).join(" · ");
   const refused = staged.state === "refused" ? staged.refused : undefined;
   return (
-    <EditorDialog open title="Upload a take" subtitle={`${row.mark} · ${row.block.key}`} onClose={onCancel} width={540} onBody>
+    <EditorDialog open title="Upload a take" subtitle={`${row.mark} · ${row.block.key}`} onClose={onCancel} width={540}>
       <div className="fy-rectake" data-testid="recorded-take-dialog">
         <div className={`fy-rectake__quote fy-voice--${tone}`}>{row.block.text}</div>
         {refused !== undefined ? (
@@ -2800,7 +2800,7 @@ export function SpeakerLinesDialog({ worldId, productionId, speaker, label, tone
     return { text: row.words === "match" ? "match" : "unchecked", tone: row.words === "match" ? "pass" : "unavailable" };
   };
   return (
-    <EditorDialog open title={label} onClose={close} width={680} onBody>
+    <EditorDialog open title={label} onClose={close} width={680}>
       <div className={`fy-rectake fy-rectake--lines fy-voice--${tone}`} data-testid="speaker-lines-dialog">
         <div className="fy-rectake__summary" role="status">
           <span className="fy-ab__speaker-dot" aria-hidden="true" />

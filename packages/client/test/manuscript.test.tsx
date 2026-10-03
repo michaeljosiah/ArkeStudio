@@ -9,6 +9,7 @@ import { ChapterTreeScreen } from "../src/screens/production-story.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -50,7 +51,9 @@ function inkbound(chapters: ChapterSummary[] = CHAPTERS): ClientState {
 }
 
 interface Mounted {
+  /** Where the sheets are: the body. The screen itself is in `host`. */
   container: HTMLElement;
+  host: HTMLElement;
   root: Root;
   sent: ClientMessage[];
 }
@@ -76,7 +79,7 @@ async function mount(state: ClientState): Promise<Mounted> {
       </MemoryRouter>,
     );
   });
-  const mounted = { container, root, sent };
+  const mounted = { container: dialogRoot(container), host: container, root, sent };
   open.push(mounted);
   return mounted;
 }
@@ -84,7 +87,7 @@ async function mount(state: ClientState): Promise<Mounted> {
 afterEach(async () => {
   for (const mounted of open.splice(0)) {
     await act(async () => mounted.root.unmount());
-    mounted.container.remove();
+    mounted.host.remove();
   }
 });
 

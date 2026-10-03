@@ -515,7 +515,7 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
   const free = price.freePlan !== undefined ? freePlanAskCopy(price.freePlan) : null;
   const models = useStore().state?.app.manifest?.models;
   return (
-    <EditorDialog open title="Read the book" subtitle={`${price.chapters} chapter${price.chapters === 1 ? "" : "s"} · ${price.characters.toLocaleString()} characters · ${price.cloudBlocks} cloud line${price.cloudBlocks === 1 ? "" : "s"}`} onClose={onClose} width={460} labelledBy="read-book-title" onBody>
+    <EditorDialog open title="Read the book" subtitle={`${price.chapters} chapter${price.chapters === 1 ? "" : "s"} · ${price.characters.toLocaleString()} characters · ${price.cloudBlocks} cloud line${price.cloudBlocks === 1 ? "" : "s"}`} onClose={onClose} width={460} labelledBy="read-book-title">
       <div className="fy-exsheet" data-testid="read-book-sheet">
         <div className="fy-abdoor__lines">
           {price.voices.map((line, index) => {

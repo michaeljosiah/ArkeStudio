@@ -7,6 +7,7 @@ import { parseHTML } from "linkedom";
 import type { ClientMessage } from "@arke-studio/contracts";
 import { CharacterVoiceScreen } from "../src/screens/character-voice.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -27,6 +28,7 @@ it("saving a recording keeps it manageable on Mine without assigning any reader 
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
+  const view = dialogRoot(container);
   t.after(async () => {
     await act(async () => root.unmount());
     container.remove();
@@ -39,13 +41,13 @@ it("saving a recording keeps it manageable on Mine without assigning any reader 
     </MemoryRouter>,
   ));
   const press = async (id: string) => {
-    const button = container.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!;
+    const button = view.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!;
     assert.ok(button, id);
     assert.equal(button.disabled, false, `${id} is enabled`);
     await act(async () => button.click());
   };
   const change = async (id: string, target: { value?: string; checked?: boolean }) => {
-    const element = container.querySelector(`[data-testid="${id}"]`)!;
+    const element = view.querySelector(`[data-testid="${id}"]`)!;
     assert.ok(element, id);
     // linkedom does not implement native controlled-input events; call React's bound handler.
     const key = Object.keys(element).find(key => key.startsWith("__reactProps$"))!;
@@ -70,18 +72,18 @@ it("saving a recording keeps it manageable on Mine without assigning any reader 
     voiceCandidates: { [sheet.id]: { extracted: [], ranked: [], previewLine: { text: "A line", source: "stock" },
       cloudPreviewMicroUsd: null, previewMicroUsdByVoice: {}, notices: {} } },
   }));
-  assert.equal(container.querySelector('[data-testid="clone-voice"]'), null);
-  assert.ok(container.querySelector('[data-testid="voice-catalogue"]'), "the chooser survives the recording dialog's close");
-  assert.match(container.querySelector('[data-testid="voice-tab-mine"]')!.className, /active/);
-  assert.equal(container.querySelector('.fy-voicerow__name')?.textContent, "Harbour");
-  assert.equal(container.querySelector('[data-testid="voice-tab-mine"]')?.textContent, "Mine 1");
-  assert.ok(container.querySelector('[data-testid="voice-assign"]')?.hasAttribute("disabled"));
-  assert.match(container.textContent!, /Connect a cloned-voice reader in Providers/);
+  assert.equal(view.querySelector('[data-testid="clone-voice"]'), null);
+  assert.ok(view.querySelector('[data-testid="voice-catalogue"]'), "the chooser survives the recording dialog's close");
+  assert.match(view.querySelector('[data-testid="voice-tab-mine"]')!.className, /active/);
+  assert.equal(view.querySelector('.fy-voicerow__name')?.textContent, "Harbour");
+  assert.equal(view.querySelector('[data-testid="voice-tab-mine"]')?.textContent, "Mine 1");
+  assert.ok(view.querySelector('[data-testid="voice-assign"]')?.hasAttribute("disabled"));
+  assert.match(view.textContent!, /Connect a cloned-voice reader in Providers/);
   assert.equal(sent.some(message => message.kind === "assign-voice"), false);
   assert.deepEqual(sheet.voice, previousVoice);
   await press("voice-delete");
   assert.equal(sent.some(message => message.kind === "delete-voice"), false, "the first press only asks for confirmation");
-  assert.equal(container.querySelector('[data-testid="voice-delete"]')?.textContent, "Delete for good");
+  assert.equal(view.querySelector('[data-testid="voice-delete"]')?.textContent, "Delete for good");
   await press("voice-delete");
   const deletes = sent.filter(message => message.kind === "delete-voice");
   assert.equal(deletes.length, 1);

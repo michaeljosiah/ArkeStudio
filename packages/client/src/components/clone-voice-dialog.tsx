@@ -9,6 +9,7 @@ import {
   type StagedClip,
 } from "../lib/store.js";
 import { MAX_RECORDING_BASE64, recordingToWav, toBase64 } from "../lib/wav.js";
+import { BodyLayer } from "./body-layer.js";
 import { Input, Select, Textarea, cx } from "./ui.js";
 import { Folder, Mic, Waveform, X } from "./icons.js";
 
@@ -161,7 +162,7 @@ export function CloneVoiceDialog({
   };
 
   return (
-    <>
+    <BodyLayer>
       <div className="fy-bench__scrim" onClick={abandon} />
       <div className="fy-clone" role="dialog" aria-label="Clone a voice" data-testid="clone-voice">
         <div className="fy-voices__head">
@@ -218,7 +219,7 @@ export function CloneVoiceDialog({
           />
         )}
       </div>
-    </>
+    </BodyLayer>
   );
 }
 

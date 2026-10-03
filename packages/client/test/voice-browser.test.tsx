@@ -8,6 +8,7 @@ import type { ArkeBridge } from "../src/arke-bridge.js";
 import { VoicePickerDialog } from "../src/components/voice-picker.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest, type ReadingVoice } from "../src/lib/store.js";
 import { playbackSnapshot, setAudioFactoryForTest } from "../src/lib/audio.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -24,21 +25,22 @@ it("filters a large catalogue, keeps the pending choice outside results, and ign
   let plays = 0;
   setAudioFactoryForTest(() => ({ src: "", currentTime: 0, duration: 10, play: async () => { plays++; }, pause() {}, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {} }));
   const host = dom.document.createElement("div"); dom.document.body.append(host);
+  const view = dialogRoot(host);
   const root = createRoot(host);
-  const click = async (selector: string) => { const button = host.querySelector<HTMLButtonElement>(selector); assert.ok(button, selector); await act(async () => button.click()); };
+  const click = async (selector: string) => { const button = view.querySelector<HTMLButtonElement>(selector); assert.ok(button, selector); await act(async () => button.click()); };
   try {
     await act(async () => root.render(<VoicePickerDialog open use="narration" chosenId="0" chosenProvider="elevenlabs" chosenModel="eleven_multilingual_v2" onClose={() => {}} onPick={v => picked.push(v)} />));
     assert.equal(sent.at(-1)?.kind, "voice-catalogue");
     await act(async () => __applyEventForTest({ at: new Date().toISOString(), type: "voice.catalogue", voices }));
-    assert.equal(host.querySelectorAll(".fy-voices__row").length, 358);
+    assert.equal(view.querySelectorAll(".fy-voices__row").length, 358);
     await click('[aria-label="Select Voice 357"]');
-    const gender = host.querySelector<HTMLSelectElement>('select[aria-label="Gender"]')!;
+    const gender = view.querySelector<HTMLSelectElement>('select[aria-label="Gender"]')!;
     await act(async () => {
       Object.defineProperty(gender, "value", { configurable: true, value: "female" });
       gender.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     });
-    assert.equal(host.querySelectorAll(".fy-voices__row").length, 179);
-    assert.match(host.querySelector(".fy-voices__foot")!.textContent!, /Voice 357.*Outside these results/);
+    assert.equal(view.querySelectorAll(".fy-voices__row").length, 179);
+    assert.match(view.querySelector(".fy-voices__foot")!.textContent!, /Voice 357.*Outside these results/);
     await click('[aria-label="Play Voice 0 sample"]');
     const preview = sent.findLast(m => m.kind === "catalogue-voice-preview")!;
     assert.equal(preview.kind, "catalogue-voice-preview");
@@ -71,26 +73,27 @@ it("filters Gemini metadata and previews the exact selected model and voice", as
   __setBridgeForTest({ send: (json: string) => sent.push(JSON.parse(json)) } as unknown as ArkeBridge);
   __setStateForTest(FIXTURE_STATE);
   const host = dom.document.createElement("div"); dom.document.body.append(host); const root = createRoot(host);
+  const view = dialogRoot(host);
   try {
     await act(async () => root.render(<VoicePickerDialog open use="narration" chosenId={undefined} onClose={() => {}} onPick={() => {}} />));
     await act(async () => __applyEventForTest({ at: new Date().toISOString(), type: "voice.catalogue", voices: [...voices, ...catalogue] }));
     const choose = async (name: string, value: string) => {
-      const select = host.querySelector<HTMLSelectElement>(`select[aria-label="${name}"]`); assert.ok(select, name);
+      const select = view.querySelector<HTMLSelectElement>(`select[aria-label="${name}"]`); assert.ok(select, name);
       assert.ok([...select.options].some(option => option.value === value), `${name}: ${value}`);
       await act(async () => { Object.defineProperty(select, "value", { configurable: true, value }); select.dispatchEvent(new dom.window.Event("change", { bubbles: true })); });
     };
     await choose("Provider", "google"); await choose("Language", "english");
-    assert.equal(host.querySelector('select[aria-label="Gender"] option[value="male"]'), null);
-    assert.equal(host.querySelector('select[aria-label="Accent"] option[value="parisian"]'), null);
-    assert.equal(host.querySelector('select[aria-label="Style"] option[value="firm"]'), null);
+    assert.equal(view.querySelector('select[aria-label="Gender"] option[value="male"]'), null);
+    assert.equal(view.querySelector('select[aria-label="Accent"] option[value="parisian"]'), null);
+    assert.equal(view.querySelector('select[aria-label="Style"] option[value="firm"]'), null);
     await choose("Language", "");
-    assert.ok(host.querySelector('select[aria-label="Gender"] option[value="male"]'), "clearing restores available options");
+    assert.ok(view.querySelector('select[aria-label="Gender"] option[value="male"]'), "clearing restores available options");
     await choose("Language", "english"); await choose("Gender", "female");
     await choose("Accent", "british"); await choose("Style", "warm");
-    assert.equal(host.querySelectorAll(".fy-voices__row").length, 1);
-    assert.match(host.querySelector(".fy-voices__name")!.textContent!, /British Reader/);
+    assert.equal(view.querySelectorAll(".fy-voices__row").length, 1);
+    assert.match(view.querySelector(".fy-voices__name")!.textContent!, /British Reader/);
     assert.equal(sent.every(m => m.kind === "voice-catalogue"), true, "filtering never spends");
-    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Play British Reader sample"]')!.click());
+    await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Play British Reader sample"]')!.click());
     const preview = sent.at(-1); assert.equal(preview?.kind, "catalogue-voice-preview");
     if (preview?.kind !== "catalogue-voice-preview") throw new Error("missing preview");
     assert.deepEqual([preview.provider, preview.model, preview.voiceId, preview.maxMicroUsd], ["google", GEMINI_TTS_MODELS[0], "BritishReader", 5000]);
