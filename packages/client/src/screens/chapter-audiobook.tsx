@@ -502,6 +502,14 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   );
 
   const reading_ = run?.state === "reading";
+  // The price confirmed and the run not yet heard from (2026-10-03): the coordinator prepares
+  // the chapter before it says the run started, and for many seconds the Confirm button stood
+  // as if unpressed, so the author pressed it again. Held to the run as it stood when pressed:
+  // whatever the coordinator says next — a start, a progress, a refusal, a price asked again —
+  // is a new run entry, and ends it.
+  const [startingFrom, setStartingFrom] = useState<typeof run | null>(null);
+  useEffect(() => setStartingFrom(null), [chapter.id]);
+  const starting = startingFrom !== null && run === startingFrom;
   // The engine a cloned voice's recording was allowed to go to, kept across the one chain of
   // presses that answers a run's questions (codex on PR 1180, twice): a cast with a cloned voice
   // and a paid one is asked for consent first and the price second, and the price's answer must
@@ -526,14 +534,14 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     only.current = null;
   }, [chapter.id]);
   const send = useCallback(
-    (options: { confirmationToken?: string; voiceUploadConfirmedFor?: string } = {}) => {
+    (options: { confirmationToken?: string; voiceUploadConfirmedFor?: string } = {}): boolean => {
       const consent = options.voiceUploadConfirmedFor ?? uploadAllowed.current ?? undefined;
       const answers = {
         ...(options.confirmationToken !== undefined ? { confirmationToken: options.confirmationToken } : {}),
         ...(consent !== undefined ? { voiceUploadConfirmedFor: consent } : {}),
       };
-      if (only.current !== null) readAudiobookBlocks(worldId, prodId, chapter.file, only.current, answers);
-      else readAudiobookChapter(worldId, prodId, chapter.file, answers);
+      if (only.current !== null) return readAudiobookBlocks(worldId, prodId, chapter.file, only.current, answers);
+      return readAudiobookChapter(worldId, prodId, chapter.file, answers);
     },
     [worldId, prodId, chapter.file],
   );
@@ -687,10 +695,15 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       return (
         <span className="fy-ab__control">
           <Button
-            onClick={() => send({ confirmationToken: price.confirmationToken })}
+            disabled={starting}
+            data-testid="audiobook-confirm"
+            onClick={() => {
+              // A press that never left has no answer coming, so it is not shown as starting.
+              if (send({ confirmationToken: price.confirmationToken })) setStartingFrom(run);
+            }}
             title="the words and the voice go to the provider · the text stays in Activity"
           >
-            {free !== null && price.estimatedMicroUsd === 0 ? free.confirm : <>
+            {starting ? "starting…" : free !== null && price.estimatedMicroUsd === 0 ? free.confirm : <>
               Confirm {price.characters.toLocaleString()} characters · {speechPricePrefix(models, price.voices.map((voice) => voice.provider))}{formatMicroUsd(price.estimatedMicroUsd)}
               {price.voices.map((voice) => ` · ${voice.label} · ${readerPlace(voice.provider)}`).join("")}
             </>}
