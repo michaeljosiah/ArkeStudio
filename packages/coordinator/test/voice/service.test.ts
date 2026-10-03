@@ -57,7 +57,46 @@ it("Google catalogue activation uses only the current configured key and never s
   assert.deepEqual(await service.catalogue(), []);
   key = null;
   assert.deepEqual(await service.catalogue(), []);
-  assert.deepEqual(requestedKeys, ["flash-project", "flash-project", "flash-project", "flash-project", "lite-project", "lite-project", "revoked"]);
+  // The flash key's list is asked once and read twice: the Settings switch filters what is kept.
+  assert.deepEqual(requestedKeys, ["flash-project", "flash-project", "lite-project", "lite-project", "revoked"]);
+});
+
+it("a vendor's voice list is asked once a key while it stands, by any number of readers at once, and a failure is not kept (UI audit A1)", async () => {
+  let lists = 0;
+  let fail = false;
+  let release: () => void = () => {};
+  let gate: Promise<void> = Promise.resolve();
+  const source = { provider: "elevenlabs", list: async (key: string) => {
+    lists += 1;
+    await gate;
+    if (fail) throw new Error("offline");
+    return [{ provider: "elevenlabs", model: "eleven_multilingual_v2", voiceId: `v-${key}`, label: "V", attributes: [], local: false, canClone: false }];
+  } };
+  let key = "k1";
+  let ttl = 60_000;
+  const service = new VoiceService({ sidecar: null, localPresets: [], cloudSources: [source], getKey: async () => key, emit: () => {}, get cloudListTtlMs() { return ttl; } });
+  gate = new Promise((resolve) => { release = resolve; });
+  const together = Promise.all([service.catalogue(), service.catalogue(), service.catalogue()]);
+  await new Promise((resolve) => setImmediate(resolve));
+  release();
+  const answers = await together;
+  assert.equal(lists, 1, "three readers at once, one ask");
+  assert.ok(answers.every((voices) => voices.length === 1 && voices[0]!.voiceId === "v-k1"));
+  answers[0]![0]!.label = "changed by a reader";
+  assert.equal((await service.catalogue())[0]!.label, "V", "a reader's copy is its own");
+  assert.equal(lists, 1, "read again while it stands: no ask");
+  key = "k2";
+  assert.equal((await service.catalogue())[0]!.voiceId, "v-k2", "a new key is another list");
+  assert.equal(lists, 2);
+  ttl = 0;
+  fail = true;
+  const errors: string[] = [];
+  assert.deepEqual(await service.catalogue([], [], errors), []);
+  assert.equal(errors.length, 1, "past its time it is asked again, and the failure said");
+  fail = false;
+  ttl = 60_000;
+  assert.equal((await service.catalogue()).length, 1, "the failure was not kept: the retry asks");
+  assert.equal(lists, 4);
 });
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";

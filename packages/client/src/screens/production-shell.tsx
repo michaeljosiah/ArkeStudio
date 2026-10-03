@@ -52,8 +52,8 @@ import { runtimeSeconds } from "../lib/format.js";
 import { defaultEpisodeFor, productionPages } from "../lib/production-navigation.js";
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
 import { nextEpisodeOrder, useProduction } from "../lib/selectors.js";
-import { createEpisode, openAudiobook, useAudiobookDoors, useStore } from "../lib/store.js";
-import { useAudiobookDoorStamp, useChapterReading } from "./audiobook.js";
+import { createEpisode, useAudiobookDoors } from "../lib/store.js";
+import { useAudiobookDoorAsk } from "./audiobook.js";
 import { exportViewFor } from "./editor-export.js";
 import { NewChapterContext, NewSceneContext, useNewChapter, useNewScene } from "./production-story.js";
 
@@ -308,18 +308,12 @@ export function ProductionLayout() {
   /*
    * The rail's read count (turn 146, SPEC-047 R-29): chapters read of those with prose, which
    * only the coordinator can say — a chapter is read when every block's take is current, and
-   * the bundle carries the record's stamp alone. So a story production asks the door once
-   * when it is shown, and the rail reads the answer; the door itself asks again as the book
-   * changes.
+   * the bundle carries the record's stamp alone. So a story production asks the door as it
+   * is shown and as the book changes, on the same ask as the door itself — one ask between
+   * them — and the rail reads the answer.
    */
   const audiobookDoor = useAudiobookDoors()[prodId ?? ""]?.door ?? null;
-  const shellConnection = useStore().connection;
-  const audiobookStamp = useAudiobookDoorStamp(production, world);
-  const audiobookReading = useChapterReading(worldId, prodId);
-  useEffect(() => {
-    if (!worldId || !prodId || !isStory || shellConnection !== "open" || (audiobookReading && audiobookDoor !== null)) return;
-    openAudiobook(worldId, prodId);
-  }, [worldId, prodId, isStory, shellConnection, audiobookReading, audiobookDoor === null, audiobookStamp]);
+  useAudiobookDoorAsk(worldId, prodId, production, world, isStory);
   const audiobookCount = audiobookDoor === null ? "—" : (() => {
     const line = audiobookDoorLine(audiobookDoor.rows);
     return `${line.read}/${line.withProse}`;

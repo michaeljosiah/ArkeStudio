@@ -91,7 +91,11 @@ export interface VoiceServiceDeps {
   getKey: (provider: string) => Promise<string | null>;
   emit: (event: DomainEvent) => void;
   clock?: () => string;
+  /** How long a vendor's voice list stands before it is asked for again; five minutes unless a test says. */
+  cloudListTtlMs?: number;
 }
+
+const CLOUD_LIST_TTL_MS = 5 * 60_000;
 
 const PREVIEW_CACHE_DIR = ".cache/voice-previews";
 const SPEECH_SETTINGS_VERSION = 1;
@@ -554,15 +558,48 @@ export class VoiceService {
   }
 
   private async cloudVoices(provider?: string, errors?: string[]): Promise<VoiceCandidate[]> {
-    const cloud: VoiceCandidate[] = [];
-    for (const source of this.deps.cloudSources) {
-      if (provider !== undefined && source.provider !== provider) continue;
+    // Every vendor at once, kept in the sources' order: one slow vendor no longer waits behind
+    // another before a door or a picker hears from either.
+    const lists = await Promise.all(this.deps.cloudSources.map(async (source): Promise<VoiceCandidate[] | Error | null> => {
+      if (provider !== undefined && source.provider !== provider) return null;
       const key = await this.deps.getKey(source.provider);
-      if (key === null) continue; // unkeyed providers simply contribute nothing
-      try { cloud.push(...await source.list(key)); }
-      catch { errors?.push(`${source.provider}: voices could not be loaded. Try again.`); }
-    }
+      if (key === null) return null; // unkeyed providers simply contribute nothing
+      return this.cloudList(source, key).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+    }));
+    const cloud: VoiceCandidate[] = [];
+    lists.forEach((list, index) => {
+      if (list instanceof Error) errors?.push(`${this.deps.cloudSources[index]!.provider}: voices could not be loaded. Try again.`);
+      else if (list !== null) cloud.push(...list);
+    });
     return cloud;
+  }
+
+  /**
+   * A vendor's voice list, kept a while per key. Every catalogue went to every keyed vendor —
+   * Google's is a models call and a paged voices call — and the catalogue is read by every
+   * door, chapter, narrator and picker, so the installed app asked Google for its voices about
+   * twenty-eight times a minute while the Audiobook door was open, and the door's answers took
+   * a minute and more to come back (UI audit A1). The lists change when a vendor adds a voice,
+   * not between two reads of a page: one ask a key answers everyone asking at once, and stands
+   * for a few minutes. A new key is another list, and a failure is never kept, so a retry asks.
+   * What can speak now — a rejected key, an engine down, a recording gone — is judged on every
+   * read, outside this.
+   */
+  private readonly cloudLists = new Map<string, { key: string; at: number; voices: Promise<VoiceCandidate[]> }>();
+
+  private async cloudList(source: CloudVoiceSource, key: string): Promise<VoiceCandidate[]> {
+    const fingerprint = createHash("sha256").update(key).digest("hex");
+    let entry = this.cloudLists.get(source.provider);
+    if (entry === undefined || entry.key !== fingerprint || Date.now() - entry.at >= (this.deps.cloudListTtlMs ?? CLOUD_LIST_TTL_MS)) {
+      const fresh = { key: fingerprint, at: Date.now(), voices: source.list(key) };
+      this.cloudLists.set(source.provider, fresh);
+      fresh.voices.catch(() => {
+        if (this.cloudLists.get(source.provider) === fresh) this.cloudLists.delete(source.provider);
+      });
+      entry = fresh;
+    }
+    // Copies, so no reader's change to a row reaches the next reader's list.
+    return (await entry.voices).map((voice) => ({ ...voice }));
   }
 
   /** Rank the catalogue against the sheet's written voice (R-7): emits voice.candidates. */

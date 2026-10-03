@@ -419,6 +419,12 @@ interface StoreState {
   voiceCandidates: Record<string, VoiceCandidatesState>;
   /** Every voice the world can read with (design 70) — unranked, and not per sheet. */
   voiceCatalogue: ReadingVoice[] | null;
+  /**
+   * The last catalogue answered, kept through a re-ask: `voiceCatalogue` goes null while one is
+   * asked for, and a reader of availability alone — the Audiobook door's stamp — would read
+   * every refresh as a change and ask its question again.
+   */
+  voiceCatalogueHeld: ReadingVoice[] | null;
   voiceCatalogueErrors: string[];
   cataloguePreview: Extract<DomainEvent, { type: "voice.catalogue-preview" }> | null;
   /** SPEC-011: audition results keyed provider/model/voiceId — cached files replay free. */
@@ -590,6 +596,7 @@ let current: StoreState = {
   voiceClips: {},
   voiceCloned: null,
   voiceCatalogue: null,
+  voiceCatalogueHeld: null,
   voiceCatalogueErrors: [],
   cataloguePreview: null,
   voicePreviews: {},
@@ -1380,6 +1387,7 @@ function handleFrame(json: string): void {
     const changedWorld = current.state?.world?.meta.worldId !== frame.state.world?.meta.worldId;
     const rejoined = rejoining;
     rejoining = false;
+    if (changedWorld || rejoined) forgetDoorAsks();
     const authoring = seedLiveRuns(current.authoring, frame.state.authoringRuns);
     const durableVoiceAudio: StoreState["voiceAudio"] = {};
     for (const job of frame.state.app.jobs) {
@@ -1445,6 +1453,7 @@ function handleFrame(json: string): void {
       voiceClips: changedWorld ? {} : current.voiceClips,
       voiceCloned: changedWorld ? null : current.voiceCloned,
       voiceCatalogue: changedWorld ? null : current.voiceCatalogue,
+      voiceCatalogueHeld: changedWorld ? null : current.voiceCatalogueHeld,
       voicePreviews: changedWorld ? {} : current.voicePreviews,
       voiceAudio: { ...(changedWorld ? {} : current.voiceAudio), ...durableVoiceAudio },
       voiceParts: changedWorld ? {} : current.voiceParts,
@@ -2083,10 +2092,10 @@ function handleFrame(json: string): void {
         };
       }
     } else if (event.type === "audiobook.door") {
-      // The latest ask's answer alone, and only for the world that is open: a superseded
+      // Any answer newer than the one shown, and only for the world that is open: an older
       // answer is older news, and one for a world since closed would repopulate a same-named
       // production in the next (codex on PR 1187).
-      if (doorRequests.get(`${event.worldId}/${event.productionId}`) === event.requestId && current.state?.world?.meta.worldId === event.worldId) {
+      if (landDoorAnswer(event.worldId, event.productionId, event.requestId) && current.state?.world?.meta.worldId === event.worldId) {
         audiobookDoor = { ...audiobookDoor, [event.productionId]: { door: event.door, requestId: event.requestId, ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
       }
     } else if (event.type === "audiobook.book-started") {
@@ -2201,6 +2210,7 @@ function handleFrame(json: string): void {
     let voiceClips = current.voiceClips;
     let voiceCloned = current.voiceCloned;
     let voiceCatalogue = current.voiceCatalogue;
+    let voiceCatalogueHeld = current.voiceCatalogueHeld;
     let voiceCatalogueErrors = current.voiceCatalogueErrors;
     let cataloguePreview = current.cataloguePreview;
     let voicePreviews = current.voicePreviews;
@@ -2218,6 +2228,7 @@ function handleFrame(json: string): void {
     let locationViewUpload = current.locationViewUpload;
     if (event.type === "voice.catalogue") {
       voiceCatalogue = event.voices;
+      voiceCatalogueHeld = event.voices;
       voiceCatalogueErrors = event.errors ?? [];
     }
     if (event.type === "voice.catalogue-preview") cataloguePreview = event;
@@ -2486,6 +2497,7 @@ function handleFrame(json: string): void {
       voiceClips,
       voiceCloned,
       voiceCatalogue,
+      voiceCatalogueHeld,
       voiceCatalogueErrors,
       cataloguePreview,
       voicePreviews,
@@ -5436,20 +5448,92 @@ export function useAudiobookRecords(): StoreState["audiobookRecords"] {
 
 // ---- turn 146: the door ----------------------------------------------------
 
-/**
- * The latest ask of each door, by world and production: the shell and the door ask by turns
- * and every ask prepares the whole book, so a slower older answer would otherwise put older
- * counts, voices and a price over newer ones (codex on PR 1187). Only the latest ask's answer
- * is kept.
+/*
+ * One ask of each door at a time, by world and production. The rail and the door both want
+ * the answer, and every ask prepares the whole book. They used to ask by turns, each on its
+ * own stamp, and only the latest ask's answer was kept (codex on PR 1187) — so on a long book
+ * whose catalogue refreshed every few seconds nearly every answer arrived superseded, was
+ * thrown away, and the door sat on "Opening…" (UI audit A1, 0.5.60). Now an ask for what is
+ * already being asked is the same ask; an ask for something newer while one is out waits for
+ * it and goes once, however many came in between; and an answer is kept whenever it is newer
+ * than the one on screen, so the door shows the last one it has rather than nothing.
  */
-const doorRequests = new Map<string, string>();
+const doorAsked = new Map<string, { key: string; seq: number; stamp: string }>();
+const doorInFlight = new Map<string, { requestId: string; stamp: string; sentAt: number }>();
+const doorWanted = new Map<string, string>();
+const doorLanded = new Map<string, { seq: number; stamp: string }>();
+let doorSeq = 0;
+/**
+ * An ask out longer than this is presumed lost: the coordinator says nothing to an ask for a
+ * world or production it no longer holds, and a door that waited on it would never ask again.
+ */
+const DOOR_LOST_MS = 30_000;
 
-/** Ask the door (SPEC-047 R-29): every chapter's state, who reads, the price; answered as `audiobook.door`. */
-export function openAudiobook(worldId: string, productionId: string): string | null {
+/**
+ * Every ask forgotten — a new world, or a window rejoining, whose answers in flight will not
+ * come. The door keeps what it shows; forgetting what landed only means the next ask goes, as
+ * one should once a window has been away.
+ */
+function forgetDoorAsks(): void {
+  doorAsked.clear();
+  doorInFlight.clear();
+  doorWanted.clear();
+  doorLanded.clear();
+}
+
+/**
+ * Ask the door (SPEC-047 R-29): every chapter's state, who reads, the price; answered as
+ * `audiobook.door`. `stamp` is what the answer depends on, as `useAudiobookDoorStamp` says it:
+ * an ask for the stamp already out, or already answered, sends nothing.
+ */
+export function openAudiobook(worldId: string, productionId: string, stamp = ""): string | null {
+  const key = `${worldId}/${productionId}`;
+  const flying = doorInFlight.get(key);
+  if (flying !== undefined && Date.now() - flying.sentAt < DOOR_LOST_MS) {
+    if (flying.stamp === stamp) doorWanted.delete(key);
+    else doorWanted.set(key, stamp);
+    return flying.requestId;
+  }
+  const landed = doorLanded.get(key);
+  if (flying === undefined && landed !== undefined && landed.stamp === stamp && current.audiobookDoor[productionId]?.door != null) return null;
+  return sendDoorAsk(worldId, productionId, stamp);
+}
+
+function sendDoorAsk(worldId: string, productionId: string, stamp: string): string | null {
+  const key = `${worldId}/${productionId}`;
   const requestId = ulid();
   if (!send({ kind: "open-audiobook", worldId, productionId, requestId })) return null;
-  doorRequests.set(`${worldId}/${productionId}`, requestId);
+  doorSeq += 1;
+  doorAsked.set(requestId, { key, seq: doorSeq, stamp });
+  doorInFlight.set(key, { requestId, stamp, sentAt: Date.now() });
+  doorWanted.delete(key);
   return requestId;
+}
+
+/**
+ * An answer to one of this window's asks: whether to show it, and — once the ask it answers is
+ * no longer out — the newer ask that waited on it, sent. Another window's answers are its own.
+ */
+function landDoorAnswer(worldId: string, productionId: string, requestId: string): boolean {
+  const key = `${worldId}/${productionId}`;
+  const asked = doorAsked.get(requestId);
+  if (asked === undefined || asked.key !== key) return false;
+  const landed = doorLanded.get(key);
+  const newer = landed === undefined || asked.seq > landed.seq;
+  if (newer) {
+    doorLanded.set(key, { seq: asked.seq, stamp: asked.stamp });
+    for (const [id, other] of doorAsked) if (other.key === key && other.seq <= asked.seq) doorAsked.delete(id);
+  } else doorAsked.delete(requestId);
+  if (doorInFlight.get(key)?.requestId === requestId) {
+    doorInFlight.delete(key);
+    const wanted = doorWanted.get(key);
+    // Sent once this answer is folded, not from inside the fold.
+    if (wanted !== undefined)
+      queueMicrotask(() => {
+        if (!doorInFlight.has(key) && doorWanted.get(key) === wanted) sendDoorAsk(worldId, productionId, wanted);
+      });
+  }
+  return newer;
 }
 
 /** Read the book (SPEC-047 R-16, R-17): every chapter with prose, priced once; the token answers the price. */
@@ -5759,6 +5843,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     voiceClips: {},
     voiceCloned: null,
     voiceCatalogue: null,
+    voiceCatalogueHeld: null,
     voiceCatalogueErrors: [],
     cataloguePreview: null,
     voicePreviews: {},
@@ -5816,6 +5901,8 @@ export function __connectionStatusForTest(status: ConnectionStatus): void {
 /** Test hook: install the real send boundary without opening a WebSocket. */
 export function __setBridgeForTest(next: ArkeBridge | null): void {
   bridge = next;
+  // Another transport: nothing asked over the last one will be answered over this one.
+  forgetDoorAsks();
 }
 
 /**
