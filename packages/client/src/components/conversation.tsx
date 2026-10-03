@@ -48,6 +48,7 @@ import {
 } from "../lib/store.js";
 import { productionModel } from "./dispatch-bar.js";
 import { HarnessModelOptions, HarnessModelStatus, harnessModelLabel, harnessModelUnavailableReason } from "./harness-models.js";
+import { ModelChip } from "./model-chip.js";
 import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
@@ -1402,6 +1403,26 @@ export function ProductionConversation({
     <HarnessModelStatus state={state} />
     </>
   ) : null;
+  // In a dock the model is a chip in the composer's row, beside attach and voice (design turn 190e);
+  // the models' own status is said only while there is something to say about them.
+  const modelChip = productionId && !sceneDock && !(dock?.controlsInSheet && compact) ? (
+    <ModelChip
+      state={state}
+      value={effectiveLanguageModelId}
+      set={languageModelId !== undefined && languageModelId !== rememberedLanguageModel}
+      onPick={(id) => setLanguageModelId(id)}
+      {...(languageModelId !== undefined && languageModelId !== rememberedLanguageModel && worldId && languageUnavailableReason === undefined
+        ? { onRemember: () => { pendingRemember.current = languageModelId; setProductionModel(worldId, productionId, "llm", languageModelId); } }
+        : {})}
+      {...(rememberedLanguageModel !== undefined && worldId
+        ? { onClear: () => { setProductionModel(worldId, productionId, "llm", null); setLanguageModelId(undefined); } }
+        : {})}
+    />
+  ) : null;
+  const modelStatus = productionId && !sceneDock && !(dock?.controlsInSheet && compact) &&
+    (state?.app.harnessModelStatus?.status !== "ready" || (state?.app.harnessModels ?? []).length === 0 || state?.app.health.harness.status !== "healthy")
+    ? <HarnessModelStatus state={state} />
+    : null;
   const transcript = (
     <ConversationTranscript
       workspace={loaded}
@@ -1524,7 +1545,7 @@ export function ProductionConversation({
           </div>
         ) : null}
         <div className="fy-arke__foot">
-          {sceneDock || (dock.controlsInSheet && compact) ? null : languageControl}
+          {modelStatus}
           {dock.subjectLine !== undefined && <div className="fy-mono fy-arke__subject">{dock.subjectLine}</div>}
           {declinedAsk !== null && (
             <div className="fy-mono fy-arke__declined" role="status">
@@ -1577,6 +1598,7 @@ export function ProductionConversation({
             disabledReason={languageUnavailableReason}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             readReplies={readReplies.composer}
+            {...(modelChip !== null ? { modelControl: modelChip } : {})}
             {...attachProps}
           />
           {/* Only a dock that departs from the promise says anything here (issue 1008). The

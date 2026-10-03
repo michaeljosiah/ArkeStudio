@@ -54,6 +54,7 @@ import "./screens/quiet.css";
 // specificity, and the later sheet wins.
 import "./components/activity-panel.css";
 import "./components/account-menu.css";
+import "./components/model-chip.css";
 import "./components/design-voice-dialog.css";
 import "./components/free-plan.css";
 import { App } from "./App.js";

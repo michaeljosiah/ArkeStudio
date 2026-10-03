@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { ComposerMic } from "./dictation.js";
 import { cx } from "./ui.js";
 import { useMediaQuery } from "../lib/media-query.js";
@@ -35,6 +35,8 @@ export interface ComposerProps {
   /** Each change asks for the caret here: a page handing the author a line to finish. */
   focusRequest?: number;
   /** Present → the + button appears and asks the host to open its picker. */
+  /** The model chip, in the tool row beside attach and voice (design turn 190e). */
+  modelControl?: ReactNode;
   onAttach?: () => void;
   /**
    * Present → the microphone appears, and what is heard lands here as text.
@@ -130,6 +132,7 @@ export function Composer(props: ComposerProps) {
     disabledReason,
     autoFocus = false,
     focusRequest,
+    modelControl,
     onAttach,
     onDictate,
     onAttachFiles,
@@ -370,6 +373,7 @@ export function Composer(props: ComposerProps) {
           {/* Mounted only when asked for, which is what keeps this component free of the store:
               the capture state machine lives inside the child, not here. */}
           {onDictate && <ComposerMic onText={onDictate} disabled={locked} onListen={stopReplyRead} />}
+          {modelControl}
           {readReplies?.offered === true && (
             <button
               type="button"
