@@ -1,0 +1,20 @@
+/* Illustrate this chapter (design turn 191b, 191d): the proposal dashed until it is accepted, then made one at a time. */
+.fy-ab__picchip--prop { border-style: dashed; border-color: var(--neutral-400); }
+.fy-ab__picchip--prop i { width: 28px; height: 18px; border-radius: 4px; border: 1px dashed var(--neutral-400); display: inline-block; box-sizing: border-box; }
+.fy-ill { gap: 10px; }
+.fy-ill__rows { display: flex; flex-direction: column; }
+.fy-ill__row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.fy-ill__row:first-child { border-top: 0; }
+.fy-ill__row--off { opacity: 0.5; }
+.fy-ill__ph { width: 64px; height: 40px; border-radius: 8px; border: 1px dashed var(--neutral-400); flex: none; box-sizing: border-box; }
+.fy-ill__t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fy-ill__t b { font-weight: 500; }
+.fy-ill__t span { color: var(--muted-foreground); font-size: var(--text-xs); }
+.fy-ill__at { flex: none; font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; }
+.fy-ill__acts { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.fy-ill__line { display: flex; gap: 12px; font-size: var(--text-sm); }
+.fy-ill__line b { width: 40px; flex: none; font-weight: 500; color: var(--muted-foreground); }
+.fy-ill__bar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--foreground) 14%, transparent); position: relative; overflow: hidden; }
+.fy-ill__bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--foreground); border-radius: 3px; }
+.fy-ill__acts .ui-btn { padding-inline: 8px; font-size: var(--text-xs); }
+.fy-ill__row .ui-btn { flex: none; }

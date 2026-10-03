@@ -1,4 +1,4 @@
-import { isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
+import { illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
 import type { AudiobookReader, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
@@ -143,6 +143,22 @@ export type AudiobookAsk =
   /** A suggested picture on its block (R-99), or held with the reason it was not made. */
   | { state: "made"; sessionId?: string }
   | { state: "failed"; reason: string; sessionId?: string };
+
+/**
+ * `Illustrate this chapter` (design turn 191b, 191d, SPEC-047 R-101, R-102), keyed like a run: the proposal the
+ * window holds until it is accepted or discarded, the rows the author skipped or sent without a missing
+ * reference, and — once accepted — where the pictures stand as they are made, one at a time.
+ */
+export interface IllustrationRun {
+  state: "reading" | "proposed" | "making" | "done" | "failed" | "unavailable" | "stopped";
+  proposal?: import("@arke-studio/contracts").IllustrationProposal;
+  /** Rows the author took out, and held rows they said to make without a reference. */
+  skipped: string[];
+  without: string[];
+  /** While it is made, where it stands; once it has ended, how it ended (what was held, and why). */
+  progress?: import("@arke-studio/contracts").IllustrationProgress;
+  reason?: string;
+}
 
 export type HeardLine = { state: "working" } | { state: "done"; file: string } | { state: "priced"; token: string; estimatedMicroUsd: number; parts: number } | { state: "refused"; refused: string };
 
@@ -363,6 +379,7 @@ interface StoreState {
    * write outside a run answers with — a block's direction set, a card accepted — lands here
    * too, so the workspace takes the newest record whoever wrote it.
    */
+  illustration: Record<string, IllustrationRun>;
   direction: Record<
     string,
     {
@@ -595,6 +612,7 @@ let current: StoreState = {
   casting: {},
   audiobook: {},
   direction: {},
+  illustration: {},
   audiobookRecords: {},
   stagedTakes: {},
   speakerLines: {},
@@ -1493,6 +1511,8 @@ function handleFrame(json: string): void {
       // a snapshot follows every accept, and would otherwise take the ✓ line with it. Only a
       // derivation still going is dropped, since the replay restores it when it is.
       direction: changedWorld ? {} : Object.fromEntries(Object.entries(current.direction).filter(([, held]) => held.state !== "directing")),
+      // A replay restores a proposal held or a run going; what ended while this window was away is not kept.
+      illustration: changedWorld || rejoined ? {} : current.illustration,
       audiobookRecords: changedWorld ? {} : current.audiobookRecords,
       stagedTakes: changedWorld ? {} : current.stagedTakes,
       speakerLines: changedWorld ? {} : current.speakerLines,
@@ -1530,6 +1550,7 @@ function handleFrame(json: string): void {
     let casting = current.casting;
     let audiobook = current.audiobook;
     let direction = current.direction;
+    let illustration = current.illustration;
     let audiobookRecords = current.audiobookRecords;
     let stagedTakes = current.stagedTakes;
     let speakerLines = current.speakerLines;
@@ -2068,6 +2089,47 @@ function handleFrame(json: string): void {
       if (audiobookAsks[event.requestId] !== undefined) {
         audiobookAsks = { ...audiobookAsks, [event.requestId]: event.reads !== undefined ? { state: "reads", reads: event.reads } : { state: "refused", refused: event.refused ?? "could not read the book" } };
       }
+    } else if (event.type === "illustration.started") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      // A replay reaches every refresh: a window already making the pictures keeps what it knows.
+      if (illustration[key]?.state !== "making") illustration = { ...illustration, [key]: { state: "reading", skipped: [], without: [] } };
+    } else if (event.type === "illustration.finished") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const before = illustration[key];
+      if (event.outcome === "proposed" && event.proposal !== undefined) {
+        // What is left after a run keeps the author's skips for the rows still in it, and how the run ended.
+        const present = new Set(event.proposal.rows.map((row) => row.block));
+        illustration = {
+          ...illustration,
+          [key]: {
+            state: "proposed",
+            proposal: event.proposal,
+            skipped: (before?.skipped ?? []).filter((block) => present.has(block)),
+            without: (before?.without ?? []).filter((block) => present.has(block)),
+            ...((before?.state === "done" || before?.state === "stopped") && before.progress !== undefined ? { progress: before.progress } : {}),
+          },
+        };
+      } else {
+        illustration = { ...illustration, [key]: { state: event.outcome === "proposed" ? "failed" : event.outcome, skipped: [], without: [], ...(event.reason !== undefined ? { reason: event.reason } : {}) } };
+      }
+    } else if (event.type === "illustration.progress") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const before = illustration[key];
+      if (event.refused !== undefined) {
+        // Refused before it began: the proposal stands, with the clause that says why.
+        if (before !== undefined) illustration = { ...illustration, [key]: { ...before, state: before.proposal !== undefined ? "proposed" : before.state, reason: event.refused } };
+      } else {
+        illustration = {
+          ...illustration,
+          [key]: {
+            state: event.progress.state,
+            ...(before?.proposal !== undefined ? { proposal: before.proposal } : {}),
+            skipped: before?.skipped ?? [],
+            without: before?.without ?? [],
+            progress: event.progress,
+          },
+        };
+      }
     } else if (event.type === "audiobook.picture-suggestion") {
       if (audiobookAsks[event.requestId] !== undefined) {
         audiobookAsks = { ...audiobookAsks, [event.requestId]: event.suggestion !== undefined ? { state: "suggested", suggestion: event.suggestion } : { state: "refused", refused: event.refused ?? "no picture suggested" } };
@@ -2518,6 +2580,7 @@ function handleFrame(json: string): void {
       casting,
       audiobook,
       direction,
+      illustration,
       audiobookRecords,
       stagedTakes,
       speakerLines,
@@ -5509,6 +5572,64 @@ export function useAudiobookAsks(): StoreState["audiobookAsks"] {
   return useStore().audiobookAsks;
 }
 
+/** `Illustrate this chapter` (design turn 191b): the proposal comes back as `illustration.finished`; nothing is made or spent. */
+export function illustrateChapter(worldId: string, productionId: string, chapterFile: string): boolean {
+  return send({ kind: "illustrate-chapter", worldId, productionId, chapterFile });
+}
+
+/** A row taken out of the proposal, or put back (191b). */
+export function skipIllustrationRow(worldId: string, productionId: string, chapterId: string, block: string): void {
+  const key = `${worldId}/${productionId}/${chapterId}`;
+  const run = current.illustration[key];
+  if (run === undefined || run.state !== "proposed") return;
+  const skipped = run.skipped.includes(block) ? run.skipped.filter((held) => held !== block) : [...run.skipped, block];
+  emitChange({ ...current, illustration: { ...current.illustration, [key]: { ...run, skipped } } });
+}
+
+/** A row held for a missing reference, sent without it (R-100) — only because the author said so — or held again. */
+export function sendIllustrationWithout(worldId: string, productionId: string, chapterId: string, block: string): void {
+  const key = `${worldId}/${productionId}/${chapterId}`;
+  const run = current.illustration[key];
+  if (run === undefined || run.state !== "proposed") return;
+  const without = run.without.includes(block) ? run.without.filter((held) => held !== block) : [...run.without, block];
+  emitChange({ ...current, illustration: { ...current.illustration, [key]: { ...run, without } } });
+}
+
+/** The proposal accepted (191d): the rows left, one confirm of the total Accept showed; made one at a time. */
+export function acceptIllustration(worldId: string, productionId: string, chapterId: string, chapterFile: string): boolean {
+  const key = `${worldId}/${productionId}/${chapterId}`;
+  const run = current.illustration[key];
+  if (run === undefined || run.state !== "proposed" || run.proposal === undefined) return false;
+  const total = illustrationTotal(run.proposal.rows, new Set(run.skipped), new Set(run.without));
+  if (total.count === 0) return false;
+  const blocks = run.proposal.rows.filter((row) => !run.skipped.includes(row.block) && ((row.needs?.length ?? 0) === 0 || run.without.includes(row.block))).map((row) => row.block);
+  const sent = send({ kind: "accept-illustration", worldId, productionId, chapterFile, proposalId: run.proposal.proposalId, blocks, ...(run.without.length > 0 ? { without: run.without } : {}), confirmedMicroUsd: total.microUsd });
+  if (sent) {
+    const { reason: _reason, ...rest } = run;
+    emitChange({ ...current, illustration: { ...current.illustration, [key]: { ...rest, state: "making", progress: { proposalId: run.proposal.proposalId, state: "making", total: total.count, made: [], failed: [], spentMicroUsd: 0, confirmedMicroUsd: total.microUsd } } } });
+  }
+  return sent;
+}
+
+/** Stop keeps what is made and costs nothing more (191d). */
+export function stopIllustration(worldId: string, productionId: string, chapterFile: string): void {
+  send({ kind: "stop-illustration", worldId, productionId, chapterFile });
+}
+
+/** The proposal discarded, or an ended run put away: nothing is spent, and the coordinator stops holding it. */
+export function dismissIllustration(worldId: string, productionId: string, chapterId: string, chapterFile: string): void {
+  const key = `${worldId}/${productionId}/${chapterId}`;
+  const held = current.illustration[key];
+  if (held === undefined || held.state === "making" || held.state === "reading") return;
+  if (held.state === "proposed") send({ kind: "discard-illustration", worldId, productionId, chapterFile });
+  const { [key]: _gone, ...rest } = current.illustration;
+  emitChange({ ...current, illustration: rest });
+}
+
+export function useIllustrationRuns(): StoreState["illustration"] {
+  return useStore().illustration;
+}
+
 /** The card accepted whole: the coordinator checks every direction once more and writes the record. */
 export function acceptDirection(worldId: string, productionId: string, chapterId: string, chapterFile: string): boolean {
   const key = `${worldId}/${productionId}/${chapterId}`;
@@ -5918,6 +6039,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     casting: {},
     audiobook: {},
     direction: {},
+    illustration: {},
     audiobookRecords: {},
     stagedTakes: {},
     speakerLines: {},

@@ -158,6 +158,12 @@ import {
   supportedDeliveries,
   type ChapterAudiobook,
   type AudiobookDirection,
+  audiobookTextHash,
+  type AudiobookLook,
+  type IllustrationProgress,
+  type IllustrationProposal,
+  type IllustrationRow,
+  illustrationTotal,
   type AudiobookReader,
   type ManifestModel,
   CADENCE_NOTE_MAX,
@@ -316,8 +322,9 @@ import {
 } from "./productions/audiobook-direction.js";
 import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiobookBook } from "./productions/audiobook-book.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
-import { audiobookListening, setAudiobookPicture } from "./productions/audiobook-listening.js";
+import { anyNarrator, audiobookListening, setAudiobookPicture } from "./productions/audiobook-listening.js";
 import { deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
+import { makeAdapterIllustrateDeriver, proposeIllustrations, type IllustrateDeriver } from "./productions/audiobook-illustrate.js";
 import { clipPrompt, depictable, makeAdapterPictureDeriver, pictureAspect, pictureRoom, pictureWho, promptRoom, suggestPicture, type PictureDeriver } from "./productions/audiobook-picture-suggest.js";
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
@@ -981,6 +988,8 @@ export interface CoordinatorOptions {
   lookDeriver?: LookDeriver;
   /** Turn 191a: the picture-prompt model seam; who it names and the length it writes are held regardless (SPEC-047 R-99). */
   pictureDeriver?: PictureDeriver;
+  /** Turn 191b: the chapter-illustration model seam; every row is held to the chapter, the pace and the twenty-second rule regardless (SPEC-047 R-101). */
+  illustrateDeriver?: IllustrateDeriver;
   /** Desktop-owned update commands. Electron APIs remain outside the coordinator. */
   updates?: {
     check: () => Promise<void>;
@@ -1256,6 +1265,12 @@ export class Coordinator {
   private readonly derivingLooks = new Map<string, AbortController>();
   /** A picture being made for a block (turn 191a): one at a time a block, ended with the world. */
   private readonly makingPictures = new Map<string, AbortController>();
+  /** `Illustrate this chapter` reading a chapter (turn 191b): one at a time, ended with the world. */
+  private readonly illustrating = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
+  /** A proposal not yet accepted (R-101): held by chapter and replayed to a window that connects. Nothing on disk. */
+  private readonly heldIllustrations = new Map<string, Extract<DomainEvent, { type: "illustration.finished" }>>();
+  /** An accepted proposal being made one picture at a time (R-102), with where it stands, replayed likewise. */
+  private readonly makingIllustrations = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string; progress: IllustrationProgress }>();
   /**
    * A proposal not yet answered (SPEC-047 R-10): held by chapter until it is accepted or
    * discarded and replayed to a window that connects, so a refresh does not lose a card the
@@ -1600,6 +1615,117 @@ export class Coordinator {
   private pictureDeriverFor(): PictureDeriver | null {
     if (this.opts.pictureDeriver) return this.opts.pictureDeriver;
     return this.opts.adapter?.readiness().ready && this.opts.authoring ? makeAdapterPictureDeriver(this.opts.adapter, this.sessionInput, this.extractScratch()) : null;
+  }
+
+  /** The chapter illustrator (design turn 191b): the seam under test, else the harness when it is ready to author. */
+  private illustrateDeriverFor(): IllustrateDeriver | null {
+    if (this.opts.illustrateDeriver) return this.opts.illustrateDeriver;
+    return this.opts.adapter?.readiness().ready && this.opts.authoring ? makeAdapterIllustrateDeriver(this.opts.adapter, this.sessionInput, this.extractScratch()) : null;
+  }
+
+  /**
+   * An accepted proposal made one picture at a time (design turn 191d, SPEC-047 R-102). Each row
+   * is checked again against the chapter as it stands — its block still there with the words it
+   * was drawn for, no picture set on it meanwhile — then made through the Bench as Generate makes
+   * one, under what is left of the ONE total the author confirmed, and filed on its block as it
+   * lands, the record sent to the windows each time. A picture that fails is held with its reason
+   * and the run goes on; Stop cancels the one in hand, keeps what is made and spends nothing more.
+   */
+  private async runIllustration(store: WorldStore, run: { productionId: string; chapter: { id: string; file: string; order: number }; proposal: IllustrationProposal; rows: IllustrationRow[]; confirmedMicroUsd: number; control: AbortController; key: string }): Promise<void> {
+    const { productionId, chapter, proposal, rows, control, key } = run;
+    const ids = { worldId: store.worldId, productionId, chapterId: chapter.id };
+    const progress: IllustrationProgress = { proposalId: proposal.proposalId, state: "making", total: rows.length, made: [], failed: [], spentMicroUsd: 0, confirmedMicroUsd: run.confirmedMicroUsd };
+    const live = this.makingIllustrations.get(key);
+    const publish = () => {
+      if (live !== undefined) live.progress = { ...progress, made: [...progress.made], failed: [...progress.failed] };
+      this.emit({ at: new Date().toISOString(), type: "illustration.progress", ...ids, progress: { ...progress, made: [...progress.made], failed: [...progress.failed] } });
+    };
+    const model = await this.pictureModel(store);
+    try {
+      if (!model) {
+        for (const row of rows) progress.failed.push({ block: row.block, reason: "no picture model is on" });
+      } else {
+        for (const row of rows) {
+          if (control.signal.aborted) break;
+          progress.current = row.block;
+          publish();
+          const held = await readAudiobook(store, productionId, chapter.file);
+          const record = held === null || held === "unreadable" ? null : held;
+          const room = await pictureRoom(store, productionId, chapter.id, record?.look ?? null);
+          const planned = room.plan.blocks.find((candidate) => candidate.block.key === row.block);
+          if (planned === undefined || audiobookTextHash(planned.block.text) !== row.textHash) {
+            progress.failed.push({ block: row.block, reason: "the words changed · illustrate again" });
+            continue;
+          }
+          if (record?.pictures?.[row.block] !== undefined) {
+            progress.failed.push({ block: row.block, reason: "a picture stands here now" });
+            continue;
+          }
+          const chosen = row.who.map((entry) => ({ key: entry.key, name: entry.name, ...(entry.sheet !== undefined ? { sheet: entry.sheet } : {}), kind: entry.kind, ...(room.people.find((person) => person.key === entry.key)?.billing !== undefined ? { billing: room.people.find((person) => person.key === entry.key)!.billing! } : {}) }));
+          const who = pictureWho(store, model, chosen);
+          const made = await this.makeBenchPicture(store, {
+            title: `Chapter ${chapter.order} · ${row.block === "title" ? "title" : row.title}`,
+            prompt: row.prompt,
+            ...(room.art !== undefined ? { art: room.art } : {}),
+            model,
+            ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
+            who,
+            requestId: ulid(),
+            ceilingMicroUsd: Math.max(0, run.confirmedMicroUsd - progress.spentMicroUsd),
+            signal: control.signal,
+          });
+          if (!made.ok) {
+            if (control.signal.aborted) break;
+            progress.failed.push({ block: row.block, reason: made.reason });
+            continue;
+          }
+          progress.spentMicroUsd += made.costMicroUsd ?? made.estimatedMicroUsd;
+          const stamp = pictureLookFor(record?.look ?? null, who.filter((entry) => entry.kind === "character").map((entry) => entry.key));
+          const next = await setAudiobookPicture(store, productionId, chapter.file, row.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, stamp !== undefined ? { look: stamp } : {});
+          progress.made.push(row.block);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record: next });
+          publish();
+        }
+      }
+    } catch (err) {
+      if (!control.signal.aborted) void this.appLog?.append({ kind: "audiobook.illustration-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+      const stuck = progress.current;
+      if (!control.signal.aborted && stuck !== undefined && !progress.made.includes(stuck) && !progress.failed.some((entry) => entry.block === stuck)) progress.failed.push({ block: stuck, reason: describeCoordinatorError(err) });
+    }
+    delete progress.current;
+    progress.state = control.signal.aborted ? "stopped" : "done";
+    // What was made belongs to its blocks now; what is left is the proposal still, for another try.
+    const remaining = proposal.rows.filter((row) => !progress.made.includes(row.block));
+    this.makingIllustrations.delete(key);
+    if (remaining.length > 0 && !store.closingSignal.aborted) {
+      const event: Extract<DomainEvent, { type: "illustration.finished" }> = { at: new Date().toISOString(), type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...proposal, rows: remaining } };
+      this.heldIllustrations.set(key, event);
+      this.emit({ at: new Date().toISOString(), type: "illustration.progress", ...ids, progress: { ...progress } });
+      this.emit(event);
+    } else {
+      this.heldIllustrations.delete(key);
+      this.emit({ at: new Date().toISOString(), type: "illustration.progress", ...ids, progress: { ...progress } });
+    }
+  }
+
+  /**
+   * The chapter's look as a picture is drafted from it (design turn 191c, R-98): the one the record
+   * holds, or — when it holds none — read now by the writing service, kept, and sent to the windows
+   * as the record. A string is why it could not be had.
+   */
+  private async chapterLook(store: WorldStore, productionId: string, chapter: { id: string; file: string }, signal: AbortSignal): Promise<{ look: AudiobookLook | null } | string> {
+    const held = await readAudiobook(store, productionId, chapter.file);
+    const standing = held === null || held === "unreadable" ? null : (held.look ?? null);
+    if (standing !== null) return { look: standing };
+    const deriver = this.lookDeriverFor();
+    if (!deriver) return "the writing service is not running";
+    const derived = await deriveChapterLook(store, productionId, chapter.id, deriver, signal);
+    const written = await writeDerivedLook(store, productionId, chapter.id, derived);
+    if (written === "moved") return "the prose moved · try again";
+    this.refreshIfStillOpen(store);
+    this.emit({ at: new Date().toISOString(), type: "audiobook.record", worldId: store.worldId, productionId, chapterId: chapter.id, record: written.record });
+    return { look: written.record.look ?? null };
   }
 
   /**
@@ -3407,6 +3533,9 @@ export class Coordinator {
           replayed.push({ at: new Date().toISOString(), type: "direction.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
         }
         for (const held of this.heldDirections.values()) replayed.push({ ...held, at: new Date().toISOString() });
+        for (const run of this.illustrating.values()) replayed.push({ at: new Date().toISOString(), type: "illustration.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
+        for (const held of this.heldIllustrations.values()) replayed.push({ ...held, at: new Date().toISOString() });
+        for (const run of this.makingIllustrations.values()) replayed.push({ at: new Date().toISOString(), type: "illustration.progress", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId, progress: run.progress });
         // The counts a run has reached ride on its register (codex on PR 1187), so a window
         // that rejoins is told how far the book and the chapter are; what a reload must never
         // hide is that a paid run is going and can be stopped.
@@ -15043,20 +15172,10 @@ export class Coordinator {
           if (!deriver) return refuse("the writing service is not running");
           const model = await this.pictureModel(store);
           if (!model) return refuse("no picture model is on");
-          const held = await readAudiobook(store, msg.productionId, chapter.file);
-          let look = held === null || held === "unreadable" ? null : (held.look ?? null);
-          if (look === null) {
-            // The look is read once and kept (R-98): the first suggestion in a chapter reads it.
-            const lookDeriver = this.lookDeriverFor();
-            if (!lookDeriver) return refuse("the writing service is not running");
-            const derived = await deriveChapterLook(store, msg.productionId, chapter.id, lookDeriver, control.signal);
-            const written = await writeDerivedLook(store, msg.productionId, chapter.id, derived);
-            if (written === "moved") return refuse("the prose moved · try again");
-            look = written.record.look ?? null;
-            this.refreshIfStillOpen(store);
-            this.emit({ at: at(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, record: written.record });
-          }
-          const room = await pictureRoom(store, msg.productionId, chapter.id, look);
+          // The look is read once and kept (R-98): the first suggestion in a chapter reads it.
+          const looked = await this.chapterLook(store, msg.productionId, chapter, control.signal);
+          if (typeof looked === "string") return refuse(looked);
+          const room = await pictureRoom(store, msg.productionId, chapter.id, looked.look);
           const suggestion = await suggestPicture(store, room, msg.block, { deriver, model, signal: control.signal });
           this.emit({ at: at(), type: "audiobook.picture-suggestion", ...ids, suggestion });
         } catch (err) {
@@ -15121,6 +15240,104 @@ export class Coordinator {
         } finally {
           store.closingSignal.removeEventListener("abort", onClose);
           this.makingPictures.delete(key);
+        }
+        return;
+      }
+      case "illustrate-chapter": {
+        // Illustrate this chapter (design turn 191b, SPEC-047 R-101): the chapter's look is read
+        // first when it has none, then the writing service proposes where the pictures go and
+        // what each shows. Held until accepted or discarded, replayed to a window that connects;
+        // nothing is made and nothing is spent by reading.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
+        if (this.illustrating.has(key)) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
+        const at = () => new Date().toISOString();
+        const finish = (outcome: "proposed" | "stopped" | "unavailable" | "failed", extra: { proposal?: IllustrationProposal; reason?: string } = {}) => {
+          const event: Extract<DomainEvent, { type: "illustration.finished" }> = { at: at(), type: "illustration.finished", ...ids, outcome, ...extra };
+          if (outcome === "proposed") this.heldIllustrations.set(key, event);
+          this.emit(event);
+        };
+        if (this.makingIllustrations.has(key)) {
+          finish("failed", { reason: "making pictures…" });
+          return;
+        }
+        const control = new AbortController();
+        this.illustrating.set(key, { control, ...ids });
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        this.heldIllustrations.delete(key);
+        this.emit({ at: at(), type: "illustration.started", ...ids });
+        try {
+          const deriver = this.illustrateDeriverFor();
+          if (!deriver) return finish("unavailable", { reason: "the writing service is not running" });
+          const model = await this.pictureModel(store);
+          if (!model) return finish("failed", { reason: "no picture model is on" });
+          const looked = await this.chapterLook(store, msg.productionId, chapter, control.signal);
+          if (typeof looked === "string") return finish("failed", { reason: looked });
+          const room = await pictureRoom(store, msg.productionId, chapter.id, looked.look);
+          const { proposal } = await proposeIllustrations(store, room, model, deriver, control.signal);
+          finish("proposed", { proposal: { ...proposal, proposalId: ulid() } });
+        } catch (err) {
+          if (control.signal.aborted) return finish("stopped");
+          void this.appLog?.append({ kind: "audiobook.illustrate-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          finish("failed", { reason: describeCoordinatorError(err) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+          this.illustrating.delete(key);
+        }
+        return;
+      }
+      case "discard-illustration": {
+        const store = this.opts.provider.openStore?.();
+        const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        const key = `${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`;
+        if (!this.makingIllustrations.has(key)) this.heldIllustrations.delete(key);
+        return;
+      }
+      case "stop-illustration": {
+        const store = this.opts.provider.openStore?.();
+        const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        this.makingIllustrations.get(`${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`)?.control.abort();
+        return;
+      }
+      case "accept-illustration": {
+        // The proposal accepted (design turn 191d, R-102): the rows left unskipped, one confirm of
+        // their total, then made one at a time through the Bench. A row held for a missing
+        // reference goes only if the author named it in `without`.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
+        const refuse = (refused: string) => this.emit({ at: new Date().toISOString(), type: "illustration.progress", ...ids, progress: { proposalId: msg.proposalId, state: "done", total: 0, made: [], failed: [], spentMicroUsd: 0, confirmedMicroUsd: msg.confirmedMicroUsd }, refused });
+        const held = this.heldIllustrations.get(key);
+        if (this.makingIllustrations.has(key)) return refuse("making pictures…");
+        if (held?.proposal === undefined || held.proposal.proposalId !== msg.proposalId) return refuse("that proposal is gone · illustrate again");
+        const proposal = held.proposal;
+        const wanted = new Set(msg.blocks);
+        const without = new Set(msg.without ?? []);
+        const rows = proposal.rows.filter((row) => wanted.has(row.block) && ((row.needs?.length ?? 0) === 0 || without.has(row.block)));
+        if (rows.length === 0) return refuse("nothing to make");
+        const total = illustrationTotal(rows, new Set(), new Set()).microUsd;
+        // One confirm of the total (R-102): the price Accept showed is the most the run may spend.
+        if (total > msg.confirmedMicroUsd) return refuse(`the price moved · ${priceLabel(total)}`);
+        const current = await planAudiobook(store, msg.productionId, chapter.id, { narrator: await anyNarrator(store, msg.productionId) }).catch(() => null);
+        if (current === null || current.chapter.hash !== proposal.hash) return refuse("the prose moved · illustrate again");
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        const progress: IllustrationProgress = { proposalId: proposal.proposalId, state: "making", total: rows.length, made: [], failed: [], spentMicroUsd: 0, confirmedMicroUsd: msg.confirmedMicroUsd };
+        this.makingIllustrations.set(key, { control, ...ids, progress });
+        try {
+          await this.runIllustration(store, { productionId: msg.productionId, chapter: { id: chapter.id, file: chapter.file, order: chapter.order }, proposal, rows, confirmedMicroUsd: msg.confirmedMicroUsd, control, key });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+          this.makingIllustrations.delete(key);
         }
         return;
       }
@@ -18782,7 +18999,7 @@ export class Coordinator {
   private async makeBenchPicture(
     store: WorldStore,
     input: { title: string; prompt: string; art?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal },
-  ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null } | { ok: false; reason: string; sessionId?: SessionId }> {
+  ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null; estimatedMicroUsd: number } | { ok: false; reason: string; sessionId?: SessionId }> {
     const worldId = store.worldId;
     const params = { kind: "image" as const, count: 1, ...(input.aspect !== undefined ? { aspect: input.aspect } : {}) };
     const opened = await openBenchSession(store.dir, () => this.nowIso(), { fresh: true, defaultModel: { provider: input.model.provider, model: input.model.id }, initial: { mode: "image", brief: input.prompt, title: input.title } }).catch(() => null);
@@ -18861,7 +19078,7 @@ export class Coordinator {
           await this.refreshWorldSnapshot(worldId);
           this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
           this.transport.broadcastSnapshot();
-          return { ok: true, sessionId, artifact, costMicroUsd: take.cost?.actualMicroUsd ?? null };
+          return { ok: true, sessionId, artifact, costMicroUsd: take.cost?.actualMicroUsd ?? null, estimatedMicroUsd: planned };
         } catch (err) {
           return fail(describeCoordinatorError(err));
         }
@@ -20392,6 +20609,8 @@ export class Coordinator {
       for (const run of this.directingChapters.values()) run.control.abort();
       for (const control of this.derivingLooks.values()) control.abort();
       for (const control of this.makingPictures.values()) control.abort();
+      for (const run of this.illustrating.values()) run.control.abort();
+      for (const run of this.makingIllustrations.values()) run.control.abort();
       for (const run of this.readingBooks.values()) run.control.abort();
       for (const run of this.readingAudiobooks.values()) run.control.abort();
       for (const handle of this.exports.values()) handle.cancel();
