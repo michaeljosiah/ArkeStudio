@@ -9,6 +9,7 @@ import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema } from "./audiobook.js";
+import { FreePlanShortSchema } from "./provider-plans.js";
 import { z } from "zod";
 import { ModelResidencySchema } from "./local-ai.js";
 import { WorldImageReferenceSchema } from "./world-image-references.js";
@@ -779,6 +780,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
        * be on the page (`read-prose-page` takes a thousand sources).
        */
       notices: z.array(z.string().min(1).max(512)).max(1000).optional(),
+      /** A read on Google's free plan the day cannot cover: asked in this confirm rather than started (design turn 182 follow-up). */
+      freePlan: FreePlanShortSchema.optional(),
       error: z.string().optional(),
     })
     .strict(),
@@ -1131,6 +1134,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       ),
       /** What a first read through a slot-keeping reader adds (SPEC-046 R-14), a line a voice and vendor, said on the read that incurs it. Unbounded like `voices`: a chapter's voices are its cast's. */
       notices: z.array(z.string().min(1).max(512)).optional(),
+      /** A chapter on Google's free plan the day cannot cover, as on `voice.audio`. */
+      freePlan: FreePlanShortSchema.optional(),
     })
     .strict(),
   z
@@ -1347,6 +1352,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       voices: z.array(AudiobookPriceLineSchema),
       /** As on `audiobook.priced`: a first read's clone charge, a line a voice and vendor, across the book's chapters. Unbounded like `voices`. */
       notices: z.array(z.string().min(1).max(512)).optional(),
+      /** As on `audiobook.priced`: the book weighed whole against Google's free day. */
+      freePlan: FreePlanShortSchema.optional(),
     })
     .strict(),
   z

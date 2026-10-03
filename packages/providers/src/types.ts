@@ -184,7 +184,12 @@ export class ProviderFreeLimitError extends ProviderRequestRejectedError {
   readonly failureClass = "terminal" as const;
   readonly freeLimit = true;
 
-  constructor(message: string) {
+  /**
+   * What the refusal said of the limit, where it said it: the requests a day, and the instant
+   * its "retry in" hint points at. The queue keeps them so the rest of a batch is not sent to
+   * meet the same refusal, and a later read can be weighed against them before it starts.
+   */
+  constructor(message: string, readonly limit?: number, readonly resetsAt?: string) {
     super(message);
     this.name = "ProviderFreeLimitError";
   }

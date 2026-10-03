@@ -1,4 +1,4 @@
-import { estimateSpeechMicroUsd, freeCreditLeft, freePlanNote, speechPlanLabel, speechPriceCopy } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, freeCreditLeft, freePlanAskCopy, freePlanNote, speechPlanLabel, speechPriceCopy } from "@arke-studio/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   AUDIOBOOK_DELIVERIES,
@@ -579,15 +579,21 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     }
     if (run?.state === "priced" && run.price !== undefined) {
       const price = run.price;
+      // A chapter Google's free day cannot cover asks in its own words: the price is $0, and
+      // what the author is deciding is how far into the chapter the day's reads go.
+      const free = price.freePlan !== undefined ? freePlanAskCopy(price.freePlan) : null;
       return (
         <span className="fy-ab__control">
           <Button
             onClick={() => send({ confirmationToken: price.confirmationToken })}
             title="the words and the voice go to the provider · the text stays in Activity"
           >
-            Confirm {price.characters.toLocaleString()} characters · up to {formatMicroUsd(price.estimatedMicroUsd)}
-            {price.voices.map((voice) => ` · ${voice.label} · ${readerPlace(voice.provider)}`).join("")}
+            {free !== null ? free.confirm : <>
+              Confirm {price.characters.toLocaleString()} characters · up to {formatMicroUsd(price.estimatedMicroUsd)}
+              {price.voices.map((voice) => ` · ${voice.label} · ${readerPlace(voice.provider)}`).join("")}
+            </>}
           </Button>
+          {free !== null && <span className="fy-mono" data-testid="audiobook-free-plan">{free.line}</span>}
           {/* What a first read through a slot-keeping reader adds (SPEC-046 R-40), on the read
               that incurs it: not in the estimate, so said beside it. */}
           {price.notices.map((notice) => <span key={notice} className="fy-mono" data-testid="audiobook-notice">{notice}</span>)}

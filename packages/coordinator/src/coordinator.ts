@@ -1,5 +1,5 @@
 import { estimateSpeechMicroUsd, samplingProblems, speechInputFits } from "@arke-studio/contracts";
-import { applyProviderPlans, freeCreditDraw, freeCreditLeft, freeCreditOverrun, freePlanFailure, PAID_PLANS, speechAsks, type ProviderPlans } from "@arke-studio/contracts";
+import { applyProviderPlans, freeCreditDraw, freeCreditLeft, freeCreditOverrun, freeLimitReason, freePlanAllowance, freePlanFailure, freePlanShortfall, PAID_PLANS, speechAsks, type FreePlanAllowance, type ProviderPlans } from "@arke-studio/contracts";
 import { designedVoiceTarget, isDesignedVoiceTarget, narratorDesignedRecord, resolveDesignedVoice, VoiceDesignDraftSchema, quoteVoiceDesign, type NarratorDesignedVoice, type NarratorSettings, type WorldDesignedVoice } from "@arke-studio/contracts";
 import type { VoiceDesignClient } from "@arke-studio/providers";
 import { saveDesignedVoice } from "./voice/designed-library.js";
@@ -1480,6 +1480,17 @@ export class Coordinator {
     return freeCreditLeft(await this.ledger.readAll().catch(() => []));
   }
 
+  /**
+   * Each Google model's free day as it stands (design turn 182 follow-up): the requests a read
+   * may make before it meets the daily limit, from the ledger's count and what the last refusal
+   * said. Read once per question, so a chapter or a page is weighed against one answer.
+   */
+  private async freePlanAllowanceNow(): Promise<(model: string) => FreePlanAllowance> {
+    const ledger = this.ledger ? await this.ledger.readAll().catch(() => []) : [];
+    const now = new Date();
+    return (model) => freePlanAllowance(ledger, model, now, this.jobQueue?.freeLimitFor("google", model) ?? null);
+  }
+
   /** The book's available reader, or the app's; reading still checks the host's local capability. */
   private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[]; designedBinding?: DesignedBinding }> {
     const { chosen, narrationCatalogue, catalogue, designedBinding } = await this.appNarrator(store, voice);
@@ -1525,6 +1536,7 @@ export class Coordinator {
       chapterId: ids.chapterId,
       models: this.opts.manifest?.models ?? [],
       creditLeftMicroUsd: await this.freeCreditLeftNow(),
+      freePlanAllowance: await this.freePlanAllowanceNow(),
       narrator: room.narrator,
       catalogue: room.catalogue,
       signal,
@@ -1577,7 +1589,7 @@ export class Coordinator {
             this.emit({ at: at(), type: "audiobook.started", ...ids, requestId, toMake: event.toMake, blocks: event.blocks });
             return;
           case "priced":
-            this.emit({ at: at(), type: "audiobook.priced", ...ids, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}) });
+            this.emit({ at: at(), type: "audiobook.priced", ...ids, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}), ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}) });
             return;
           case "progress":
             if (held !== undefined) held.made = event.made;
@@ -1999,6 +2011,14 @@ export class Coordinator {
     const piecePrices = new Map(misses.flatMap(index => toMake(index).map(({ piece }) => [piece, estimateSpeechMicroUsd(model, piece)] as const)));
     const priceOf = (piece: string) => piecePrices.get(piece)!;
     const estimate = misses.reduce((sum, index) => sum + toMake(index).reduce((total, { piece }) => total + priceOf(piece), 0), 0);
+    // A read on Google's free plan weighed against what is left of the day, a request a piece.
+    const freeDay = freePlanShortfall([{ model, requests: misses.reduce((sum, index) => sum + toMake(index).length, 0) }], await this.freePlanAllowanceNow());
+    // Google has said the day is used up: refused before a word is sent, so the free-limit stop
+    // offers the shipped narrator now rather than the queue refusing piece by piece.
+    if (freeDay?.allowance.reached === true) {
+      fail(freeLimitReason(freeDay.allowance), characters);
+      return;
+    }
     const token = createHash("sha256")
       .update([subject.id, String(subject.version), String(estimate), ...misses.flatMap((index) => toMake(index).map(({ piece }) => pieceFile(piece)))].join("\n"))
       .digest("hex");
@@ -2039,8 +2059,9 @@ export class Coordinator {
       })).map((queued) => bindDesignedNarrator(queued, narrator.designedBinding)),
     );
     // A read that costs nothing asks nothing (SPEC-012 R-47, design turn 182), as the page and
-    // chapter reads already did: a $0 quote, a free plan's read or a free credit's starts at once.
-    const asks = speechAsks(model, estimate, await this.freeCreditLeftNow());
+    // chapter reads already did: a $0 quote, a free plan's read or a free credit's starts at once
+    // — unless the free plan's day cannot cover it, which asks in the same confirm.
+    const asks = speechAsks(model, estimate, await this.freeCreditLeftNow()) || freeDay !== null;
     if (asks && input.confirmationToken !== token) {
       this.pendingVoiceReads.set(requestId, { token, inputs: enqueued });
       this.emit({
@@ -2068,6 +2089,7 @@ export class Coordinator {
         // first read through a slot-keeping reader adds, on the read that incurs it (R-14).
         ...(narrator.cloned ? { voiceReference: true } : {}),
         ...(narratorNotice !== null ? { notices: [`${narrator.label} · ${narratorNotice}`] } : {}),
+        ...(freeDay !== null ? { freePlan: freeDay.short } : {}),
       } as DomainEvent);
       return;
     }
@@ -2356,7 +2378,13 @@ export class Coordinator {
       const priceOfIndex = (index: number) => toMake(index).reduce((total, piece) => total + priceOf(index, piece.text), 0);
       // Weighed whole against the month's credit, so blocks that each fit cannot run past it together.
       const creditDraw = freeCreditDraw(misses.map(index => ({ model: cloud[index]!.model, microUsd: priceOfIndex(index) })));
-      const asks = misses.some(index => speechAsks(cloud[index]!.model, priceOfIndex(index))) || freeCreditOverrun(creditDraw, await this.freeCreditLeftNow());
+      // And against what is left of Google's free day, a request a piece, every speaker on it together.
+      const freeDay = freePlanShortfall(misses.map(index => ({ model: cloud[index]!.model, requests: toMake(index).length })), await this.freePlanAllowanceNow());
+      if (freeDay?.allowance.reached === true) {
+        fail(freeLimitReason(freeDay.allowance), characters);
+        return;
+      }
+      const asks = misses.some(index => speechAsks(cloud[index]!.model, priceOfIndex(index))) || freeCreditOverrun(creditDraw, await this.freeCreditLeftNow()) || freeDay !== null;
       const token = createHash("sha256")
         .update(["voiced", subject.id, String(subject.version), String(estimate), ...misses.flatMap((index) => toMake(index).map((piece) => piece.file))].join("\n"))
         .digest("hex");
@@ -2428,6 +2456,7 @@ export class Coordinator {
           voices: [...named.values()],
           ...(misses.some((index) => speaking[index]!.cloned) ? { voiceReference: true } : {}),
           ...(notices.size > 0 ? { notices: [...notices.values()] } : {}),
+          ...(freeDay !== null ? { freePlan: freeDay.short } : {}),
         } as DomainEvent);
         return;
       }
@@ -2890,6 +2919,8 @@ export class Coordinator {
             clients: opts.dispatchClients,
             speechModel: (provider, id) => this.opts.manifest?.models.find(model => model.provider === provider && model.id === id),
             onFreePlanBilled: job => { void this.markFreePlanBilled(job.provider).catch(() => {}); },
+            // The numbers only: Google's message is never copied, and no key is in it to copy.
+            onFreeLimit: limit => { void this.appLog?.append({ kind: "provider.free-limit", ...limit }); },
             getKey: async (provider) =>
               this.credentials ? this.credentials.get(provider as ProviderId) : null,
             emit: (event) => {
@@ -14523,7 +14554,7 @@ export class Coordinator {
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         let ended = false;
         try {
-          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [], creditLeftMicroUsd: await this.freeCreditLeftNow() };
+          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [], creditLeftMicroUsd: await this.freeCreditLeftNow(), freePlanAllowance: await this.freePlanAllowanceNow() };
           if (room.narrator.provider === "kokoro" && !voice.localSpeechConfigured) {
             this.emit({ at: at(), type: "audiobook.book-finished", ...ids, outcome: "unavailable", chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0,
               reason: "Local narration is unavailable on this host. Choose a configured cloud narrator." });
@@ -14591,7 +14622,7 @@ export class Coordinator {
                   this.emit({ at: at(), type: "audiobook.book-started", ...ids, requestId, chapters: event.chapters, blocks: event.blocks });
                   return;
                 case "priced":
-                  this.emit({ at: at(), type: "audiobook.book-priced", ...ids, chapters: event.chapters, blocks: event.blocks, cloudBlocks: event.cloudBlocks, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}) });
+                  this.emit({ at: at(), type: "audiobook.book-priced", ...ids, chapters: event.chapters, blocks: event.blocks, cloudBlocks: event.cloudBlocks, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}), ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}) });
                   return;
                 case "progress":
                   if (held !== undefined) held.done = event.done;

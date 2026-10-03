@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_NARRATOR, formatTimeLeft, freePlanStop, GOOGLE_BILLED, GOOGLE_FREE_LIMIT } from "@arke-studio/contracts";
+import { DEFAULT_NARRATOR, freeLimitTail, freePlanStop, GOOGLE_BILLED, GOOGLE_FREE_LIMIT } from "@arke-studio/contracts";
 import { setProviderPlan } from "../lib/store.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 
@@ -26,7 +26,7 @@ export function FreePlanStop({ error, onDefaultNarrator }: { error: string | nul
     return (
       <span className="fy-freestop" data-testid="free-limit">
         <span className="fy-freestop__warn">{GOOGLE_FREE_LIMIT}</span>
-        <span className="fy-freestop__mono">· resets 00:00 PT · {formatTimeLeft(now, new Date(stop.resetsAt))}</span>
+        <span className="fy-freestop__mono">· {freeLimitTail(stop, now)}</span>
         {onDefaultNarrator !== undefined && (
           <button type="button" className="fy-freestop__act" onClick={onDefaultNarrator}>
             Read with {DEFAULT_NARRATOR.label}

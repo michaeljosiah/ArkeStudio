@@ -4,6 +4,8 @@ import { join } from "node:path";
 import {
   audiobookDirectionFor,
   freeCreditOverrun,
+  freeLimitReason,
+  freePlanShortfall,
   audiobookTakeDirectionHash,
   audiobookTextHash,
   holdDirection,
@@ -18,6 +20,7 @@ import {
   type ChapterAudiobook,
   type ChapterSummary,
   type ClonedVoice,
+  type FreePlanShort,
 } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -250,7 +253,7 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
 
 export type AudiobookBookEvent =
   | { type: "started"; chapters: number; blocks: number }
-  | { type: "priced"; chapters: number; blocks: number; cloudBlocks: number; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: AudiobookPriceLine[]; notices: string[] }
+  | { type: "priced"; chapters: number; blocks: number; cloudBlocks: number; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: AudiobookPriceLine[]; notices: string[]; freePlan?: FreePlanShort }
   | { type: "progress"; chapterId: string; done: number; chapters: number }
   | { type: "finished"; outcome: "read" | "stopped" | "unavailable" | "failed"; chaptersRead: number; chaptersRefused: number; made: number; flagged: number; reason?: string };
 
@@ -309,7 +312,14 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
   // A book is weighed whole against the month's free credit: chapters that each fit cannot
   // together run past it unasked (owner, 2026-10-02).
   const creditDraw = toRead.reduce((sum, entry) => sum + entry.prepared.creditDraw, 0);
-  if (toRead.some((entry) => entry.prepared.asks) || freeCreditOverrun(creditDraw, room.creditLeftMicroUsd ?? Infinity)) {
+  // And against what is left of Google's free day, every chapter's requests together; a day
+  // Google has said is used up ends the book before a word is sent (design turn 182 follow-up).
+  const freePlan = room.freePlanAllowance === undefined ? null : freePlanShortfall(toRead.flatMap((entry) => entry.prepared.freeReads), room.freePlanAllowance);
+  if (freePlan?.allowance.reached === true) {
+    emit({ type: "finished", outcome: "failed", chaptersRead: 0, chaptersRefused: refused, made: 0, flagged: 0, reason: freeLimitReason(freePlan.allowance) });
+    return;
+  }
+  if (toRead.some((entry) => entry.prepared.asks) || freeCreditOverrun(creditDraw, room.creditLeftMicroUsd ?? Infinity) || freePlan !== null) {
     const token = createHash("sha256")
       .update(
         [
@@ -337,6 +347,7 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
         // Across the book's chapters, each voice and vendor once (SPEC-046 R-40): the first
         // chapter's read is the one that makes the slot, and the book asks once for all of them.
         notices: firstReadNotices(toRead.flatMap((entry) => entry.prepared.clones)),
+        ...(freePlan !== null ? { freePlan: freePlan.short } : {}),
       });
       return;
     }

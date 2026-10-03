@@ -2,7 +2,10 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
 import {
   canDeleteJob,
+  freeLimitReason,
   GOOGLE_BILLED,
+  nextPacificMidnight,
+  type FreePlanLimit,
   quoteSpeech,
   quoteVoiceDesign,
   isDesignedVoiceTarget,
@@ -168,6 +171,8 @@ export interface JobQueueOptions {
    * The host records it so later reads are priced; the switch itself is never turned off here.
    */
   onFreePlanBilled?: (job: Job) => void;
+  /** A free tier refused for the day (design turn 182): what it said of the limit, for the host's log. */
+  onFreeLimit?: (limit: FreePlanLimit) => void;
   /** Recheck host authorization after preparation and before the durable submission boundary. */
   beforeSubmit?: (job: Job) => Promise<void>;
   /** The host owns durability; journalPath still locates disposable inline-artifact staging. */
@@ -429,6 +434,12 @@ export class JobQueue {
   private readonly busySince = new Map<string, number>();
   /** Old spawned-engine runs fenced off before their durable requeue is awaited. */
   private readonly retiredEngineRuns = new Set<string>();
+  /**
+   * A free tier's day, used up, by provider and model, until the reset its refusal named
+   * (design turn 182). Memory only: after a restart the first free read meets the refusal once
+   * and puts it back, and the ledger's count still asks before a read the day cannot cover.
+   */
+  private readonly freeLimits = new Map<string, FreePlanLimit>();
 
   constructor(private readonly opts: JobQueueOptions) {
     this.journal = opts.journal ?? new JobJournal(opts.journalPath);
@@ -1153,6 +1164,18 @@ export class JobQueue {
       return;
     }
     if (this.disposed || !this.stillQueued(job)) return;
+    // The rest of a batch once a free tier has refused for the day. On 2026-10-02 every block of
+    // a chapter and two page reads went to Google to meet the same refusal. Failed rather than
+    // held: a held read would sit in the journal for hours, resume unasked after the reset — on
+    // a key the author may meanwhile have said is paid — and leave the reader at `reading…`
+    // until then. Failed, the batch's own stop runs (a page read cancels the rest, a chapter or
+    // a book ends) and the free-limit stop offers the shipped narrator at once. Only reads quoted
+    // free are held to it: a paid read is not the free tier's to refuse.
+    const used = job.speechQuote?.plan === "free-plan" ? this.freeLimitFor(job.provider, job.model) : null;
+    if (used !== null) {
+      await this.terminalize(job, "failed", `${freeLimitReason({ allowed: used.limit ?? 0, resetsAt: used.resetsAt })} · not sent`, undefined, "terminal");
+      return;
+    }
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
     // journal can never undercount requests that may have reached a paid provider.
     const submitting: Job = {
@@ -1282,6 +1305,7 @@ export class JobQueue {
     // The free tier's daily limit is the key's, not the lane's pace: it must not slow paid reads.
     const freeLimit = typeof err === "object" && err !== null && (err as { freeLimit?: unknown }).freeLimit === true;
     if (isRateLimit(err) && !freeLimit) this.noteRateLimit(job.provider);
+    if (freeLimit) this.noteFreeLimit(job, err);
     const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
     const submissionRejected =
       typeof err === "object" && err !== null && (err as { submissionRejected?: unknown }).submissionRejected === true;
@@ -1882,6 +1906,30 @@ export class JobQueue {
       ...(job.speechAttempts ? { speechAttempts: job.speechAttempts } : {}),
       ...(actualSource !== undefined ? { actualSource } : {}),
     });
+  }
+
+  // ---- a free tier's day (design turn 182) ----------------------------------
+
+  /** The day a free tier said is used up for this model, or null once the reset it named has come. */
+  freeLimitFor(provider: string, model: string): FreePlanLimit | null {
+    const key = `${provider}\n${model}`;
+    const held = this.freeLimits.get(key);
+    if (held === undefined) return null;
+    if (Date.parse(held.resetsAt) <= this.now()) {
+      this.freeLimits.delete(key);
+      return null;
+    }
+    return held;
+  }
+
+  /** Keep what a daily-limit refusal said: its reset, else midnight Pacific, when Google resets the free quota. */
+  private noteFreeLimit(job: Job, err: unknown): void {
+    const said = err as { limit?: unknown; resetsAt?: unknown };
+    const resetsAt = typeof said.resetsAt === "string" && Number.isFinite(Date.parse(said.resetsAt)) ? said.resetsAt : nextPacificMidnight(new Date(this.now())).toISOString();
+    const limit: FreePlanLimit = { provider: job.provider, model: job.model,
+      ...(typeof said.limit === "number" && said.limit > 0 ? { limit: said.limit } : {}), resetsAt, observedAt: this.clock() };
+    this.freeLimits.set(`${job.provider}\n${job.model}`, limit);
+    this.opts.onFreeLimit?.(limit);
   }
 
   // ---- cancellation (§2.10) ------------------------------------------------

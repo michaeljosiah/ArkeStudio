@@ -9,8 +9,12 @@ import {
   freeCreditLeft,
   freeCreditOverrun,
   freeCreditThisMonth,
+  freeLimitReason,
+  freePlanAllowance,
+  freePlanAskCopy,
   freePlanFailure,
   freePlanNote,
+  freePlanShortfall,
   freePlanStop,
   modelPriceCopy,
   narratorReadsUnasked,
@@ -221,6 +225,64 @@ describe("the two ways a free plan ends", () => {
   });
 });
 
+// 2026-10-02: Google refused a 122-block chapter at 23:14 UTC with "limit: 10 requests per day on
+// Free Tier ... retry in 45m28s" — a reset at 00:00 UTC, not midnight Pacific.
+describe("a free day Google named", () => {
+  const refusal = "Google free limit reached (HTTP 429 free daily quota · 10 a day · resets 2026-10-03T00:00:00.000Z)";
+  const then = new Date("2026-10-02T23:14:32.000Z");
+
+  it("keeps the limit and the reset a refusal named, and says them", () => {
+    const stop = freePlanStop(refusal, then);
+    assert.deepEqual(stop, { kind: "free-limit", provider: "google", resetsAt: "2026-10-03T00:00:00.000Z", limit: 10 });
+    assert.equal(freePlanNote(refusal, then), "Google free limit reached · 10 a day · resets 17:00 PT · 46 m");
+    assert.equal(freePlanFailure(refusal), "Google free limit reached · 10 a day · resets 2026-10-03T00:00:00.000Z");
+    // A queue refusal of the rest of a batch reads the same way.
+    assert.equal(freePlanStop(`${freeLimitReason({ allowed: 10, resetsAt: "2026-10-03T00:00:00.000Z" })} · not sent`, then)?.kind, "free-limit");
+    // A failure that named no reset still says the opening alone, and midnight Pacific.
+    assert.equal(freePlanFailure("Google free limit reached (HTTP 429 free daily quota)"), "Google free limit reached");
+  });
+
+  const entry = (ts: string, extra: Partial<LedgerEntry> = {}): LedgerEntry => ({
+    ts, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", jobId: `jb_${ts}`, provider: "google", model: gemini.id, outcome: "succeeded",
+    estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "free-plan", speechQuote: { ...quoteSpeech(gemini, "x", { at: ts }), plan: "free-plan" }, ...extra,
+  });
+
+  it("counts the day's free reads Google took, since the last midnight Pacific", () => {
+    const now = new Date("2026-10-02T18:00:00.000Z"); // 11:00 PDT; the day began 07:00 UTC
+    const ledger = [
+      entry("2026-10-02T06:59:00.000Z"), // yesterday, Pacific
+      entry("2026-10-02T08:00:00.000Z"),
+      entry("2026-10-02T09:00:00.000Z"),
+      entry("2026-10-02T09:30:00.000Z", { outcome: "failed" }), // refused: no usage, not a request taken
+      entry("2026-10-02T09:40:00.000Z", { outcome: "failed", speechUsage: { outputAudioTokens: 10 } }), // answered, then failed
+      entry("2026-10-02T10:00:00.000Z", { model: "gemini-3.8-flash-lite-tts" }),
+      entry("2026-10-02T10:00:00.000Z", { speechQuote: quoteSpeech(gemini, "x", { at: "2026-10-02T10:00:00.000Z" }) }), // paid
+    ];
+    assert.deepEqual(freePlanAllowance(ledger, gemini.id, now), { model: gemini.id, allowed: 10, left: 7, resetsAt: "2026-10-03T07:00:00.000Z", reached: false });
+    assert.equal(freePlanAllowance([], "an-unknown-model", now).left, Infinity, "no limit is invented for a model never observed");
+  });
+
+  it("holds the day used up until the reset a refusal named, then counts from that reset", () => {
+    const observed = { provider: "google", model: gemini.id, limit: 10, resetsAt: "2026-10-03T00:00:00.000Z", observedAt: then.toISOString() };
+    assert.deepEqual(freePlanAllowance([], gemini.id, then, observed), { model: gemini.id, allowed: 10, left: 0, resetsAt: "2026-10-03T00:00:00.000Z", reached: true });
+    const after = new Date("2026-10-03T01:00:00.000Z");
+    const ledger = [entry("2026-10-02T23:50:00.000Z"), entry("2026-10-03T00:30:00.000Z")];
+    assert.deepEqual(freePlanAllowance(ledger, gemini.id, after, { ...observed, limit: 25 }), { model: gemini.id, allowed: 25, left: 24, resetsAt: "2026-10-03T07:00:00.000Z", reached: false });
+  });
+
+  it("weighs a read whole per model, and asks in plain words", () => {
+    const models = applyProviderPlans(manifest, free).models;
+    const freeGemini = models.find((model) => model.id === gemini.id)!;
+    const day = (model: string) => ({ model, allowed: 10, left: 10, resetsAt: "2026-10-03T07:00:00.000Z", reached: false });
+    assert.equal(freePlanShortfall([{ model: freeGemini, requests: 6 }, { model: freeGemini, requests: 4 }], day), null);
+    assert.deepEqual(freePlanShortfall([{ model: freeGemini, requests: 61 }, { model: freeGemini, requests: 61 }], day)?.short, { requests: 122, allowed: 10, left: 10 });
+    assert.equal(freePlanShortfall([{ model: gemini, requests: 122 }, { model: null, requests: 5 }], day), null, "a paid row is not the free day's");
+    assert.deepEqual(freePlanAskCopy({ requests: 122, allowed: 10, left: 10 }), { line: "122 reads · free plan allows 10 a day", confirm: "Read 10 now" });
+    assert.deepEqual(freePlanAskCopy({ requests: 12, allowed: 10, left: 3 }), { line: "12 reads · free plan allows 10 a day · 3 left", confirm: "Read 3 now" });
+    assert.equal(freePlanAskCopy({ requests: 2, allowed: 10, left: 0 }).confirm, "Read anyway");
+  });
+});
+
 describe("a table read's door", () => {
   it("names the plan only when every line it sends is on one", () => {
     const models = applyProviderPlans(manifest, { ...free, mistral: "free-credit" }).models;
@@ -248,6 +310,10 @@ describe("Read replies' narrator (design turn 183)", () => {
     // One reply weighed against what is left: room for five characters is not room for ten.
     assert.equal(narratorReadsUnasked(paul, "w1", models, 100, "Tides"), true);
     assert.equal(narratorReadsUnasked(paul, "w1", models, 100, "Tides rise"), false);
+    // A reply on a free day with nothing left is left for Listen; the toggle itself stays offered.
+    assert.equal(narratorReadsUnasked(ife, "w1", models, 0, "Tides", () => 1), true);
+    assert.equal(narratorReadsUnasked(ife, "w1", models, 0, "Tides", () => 0), false);
+    assert.equal(narratorReadsUnasked(ife, "w1", models, 0, undefined, () => 0), true);
   });
   it("asks through a priced reader, a hosted clone, and a choice the manifest does not list", () => {
     assert.equal(narratorReadsUnasked(paul, "w1", manifest.models, Infinity), false);

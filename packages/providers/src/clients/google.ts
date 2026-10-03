@@ -1,6 +1,6 @@
 import type { CapabilityProbe, ClientDeclarations, SpeechUsage, VoiceCandidate } from "@arke-studio/contracts";
 import { randomUUID } from "node:crypto";
-import { GOOGLE_FREE_LIMIT, speechInputFits } from "@arke-studio/contracts";
+import { freeLimitDetail, GOOGLE_FREE_LIMIT, speechInputFits } from "@arke-studio/contracts";
 import { GEMINI_SPEECH_INPUT_BYTES, geminiSpeechModel } from "../gemini-tts-models.js";
 import { googleVoiceDesignBody, googleVoiceDesignResult, googleDesignedVoicePage, requireGoogleVoiceId } from "./google-voices.js";
 import type { VoiceDesignClient, VoiceDesignInput } from "../types.js";
@@ -56,17 +56,63 @@ export function geminiSpeechUsage(value: unknown): SpeechUsage {
  * `too_many_requests` for the per-minute ones; the older shape is RESOURCE_EXHAUSTED with a
  * QuotaFailure whose quota id ends `-FreeTier` (a per-minute free quota says `PerMinute` in it)
  * or whose metric names `free_tier`. Anything unrecognised retries, as every 429 did before.
+ *
+ * Corrected 2026-10-03: the code alone is not the evidence. On 2026-10-02 the live service
+ * answered every read of a 122-block chapter with
+ * `{"error":{"message":"Rate limit exceeded for model gemini-3.8-flash-tts (limit: 10 requests
+ * per day on Free Tier). Please retry in 45m28s or upgrade your tier at …","code":"too_many_requests"}}`
+ * — the per-minute code on the daily limit — and each job was retried four times over eighty
+ * minutes while the chapter sat at `reading… 0 of 122`. A limit stated per day is a day's limit
+ * whatever the code says: waiting minutes cannot clear it, so it is not retried.
  */
 export function googleFreeDailyLimit(body: unknown): boolean {
   const error = record(record(body).error);
   if (error.code === "quota_exceeded") return true;
-  const details = Array.isArray(error.details) ? error.details.map(record) : [];
-  return details.some(detail => (Array.isArray(detail.violations) ? detail.violations.map(record) : []).some(violation => {
+  if (typeof error.message === "string" && perDay(error.message)) return true;
+  return violations(error).some(violation => {
     const id = typeof violation.quotaId === "string" ? violation.quotaId : "";
     const metric = typeof violation.quotaMetric === "string" ? violation.quotaMetric : "";
+    if (/PerDay/.test(id) || /per_day/i.test(metric)) return true;
     const free = id.endsWith("-FreeTier") || /free_tier/i.test(metric);
     return free && !/PerMinute/i.test(id) && !/per_minute/i.test(metric);
-  }));
+  });
+}
+
+function violations(error: Record<string, unknown>): Record<string, unknown>[] {
+  const details = Array.isArray(error.details) ? error.details.map(record) : [];
+  return details.flatMap(detail => Array.isArray(detail.violations) ? detail.violations.map(record) : []);
+}
+
+/** "10 requests per day", "per-day", "RPD", "daily quota": the wordings a day's limit has been seen or documented in. */
+function perDay(message: string): boolean {
+  return /\bper[\s-]?day\b|\brequests?\s+a\s+day\b|\bRPD\b|\bdaily\b/i.test(message);
+}
+
+/** `45m28s`, `1h2m`, `21.3s`, or a RetryInfo delay of `2728s`, in milliseconds; undefined when there is none. */
+function retryMs(text: string): number | undefined {
+  const units = /^\s*(?:(\d+(?:\.\d+)?)h)?\s*(?:(\d+(?:\.\d+)?)m(?!s))?\s*(?:(\d+(?:\.\d+)?)s)?/i.exec(text);
+  if (!units || (units[1] === undefined && units[2] === undefined && units[3] === undefined)) return undefined;
+  const ms = (Number(units[1] ?? 0) * 3600 + Number(units[2] ?? 0) * 60 + Number(units[3] ?? 0)) * 1000;
+  return Number.isFinite(ms) && ms > 0 ? ms : undefined;
+}
+
+/**
+ * What a daily-limit refusal says of the limit, for the queue to keep: the requests a day, and
+ * the instant its retry hint points at (rounded up to the second). Google's message is read for
+ * its numbers only — it is never copied into a failure, and holds no credential to begin with.
+ */
+export function googleDailyLimitDetail(body: unknown, now: Date = new Date()): { limit?: number; resetsAt?: string } {
+  const error = record(record(body).error);
+  const message = typeof error.message === "string" ? error.message : "";
+  const stated = /(\d+)\s+requests?\s+(?:per|a)\s+day/i.exec(message)?.[1] ?? /limit:\s*(\d+)/i.exec(message)?.[1]
+    ?? violations(error).map(violation => violation.quotaValue).find(value => typeof value === "string" && /^\d+$/.test(value)) as string | undefined;
+  const limit = stated !== undefined && Number(stated) > 0 && Number.isSafeInteger(Number(stated)) ? Number(stated) : undefined;
+  const hinted = /retry in\s+([0-9hms.\s]+)/i.exec(message)?.[1];
+  const details = Array.isArray(error.details) ? error.details.map(record) : [];
+  const delay = details.map(detail => detail.retryDelay).find((value): value is string => typeof value === "string");
+  const wait = (hinted !== undefined ? retryMs(hinted) : undefined) ?? (delay !== undefined ? retryMs(delay) : undefined);
+  const resetsAt = wait === undefined ? undefined : new Date(Math.ceil((now.getTime() + wait) / 1000) * 1000).toISOString();
+  return { ...(limit !== undefined ? { limit } : {}), ...(resetsAt !== undefined ? { resetsAt } : {}) };
 }
 
 /** Unary only: a complete, validated WAV is the one artifact, never streamed PCM fragments. */
@@ -233,8 +279,10 @@ export class GoogleClient implements VoiceCatalogueClient, VoiceDesignClient {
     if (response.status === 403) throw new ProviderRequestRejectedError("Google refused access: check this key's project, API permissions and billing (HTTP 403)");
     if (response.status === 402) throw new ProviderPaymentRequiredError("Google asked for payment for this request (HTTP 402 payment_required)");
     if (response.status === 429) {
-      if (googleFreeDailyLimit(await response.json().catch(() => null))) {
-        throw new ProviderFreeLimitError(`${GOOGLE_FREE_LIMIT} (HTTP 429 free daily quota)`);
+      const body: unknown = await response.json().catch(() => null);
+      if (googleFreeDailyLimit(body)) {
+        const { limit, resetsAt } = googleDailyLimitDetail(body);
+        throw new ProviderFreeLimitError(`${GOOGLE_FREE_LIMIT} (HTTP 429 free daily quota${freeLimitDetail({ limit, resetsAt })})`, limit, resetsAt);
       }
       throw new ProviderBusyError("Google's project quota was reached (HTTP 429)", { witnessed: true });
     }

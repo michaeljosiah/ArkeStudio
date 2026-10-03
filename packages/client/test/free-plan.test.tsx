@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router";
 import type { ClientState, LedgerEntry } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { FreePlanStop } from "../src/components/free-plan-stop.js";
+import { ReadAloudConfirmation } from "../src/components/read-aloud-confirmation.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -89,6 +90,28 @@ describe("the two ways a free plan ends, on the read", () => {
     const text = plain(renderToString(<FreePlanStop error="Google free limit reached" onDefaultNarrator={() => {}} />));
     assert.match(text, /Google free limit reached · resets 00:00 PT · \d+ h \d+ m|Google free limit reached · resets 00:00 PT · \d+ m/);
     assert.match(text, /Read with George/);
+  });
+
+  // 2026-10-02: Google's refusal said "retry in 45m28s" at 23:14 UTC — 17:00 Pacific, not midnight.
+  it("says the limit and the reset Google named, when it named them", () => {
+    const reset = new Date(Date.now() + 45 * 60_000).toISOString();
+    const text = plain(renderToString(<FreePlanStop error={`Google free limit reached · 10 a day · resets ${reset}`} onDefaultNarrator={() => {}} />));
+    assert.match(text, /Google free limit reached · 10 a day · resets \d\d:\d\d PT · 4[56] m/);
+    assert.ok(!text.includes(reset), "the instant is read, never shown");
+  });
+
+  it("asks before a read the free day cannot cover, in reads rather than a price", () => {
+    __setStateForTest(withPlans({ google: "free" }));
+    const text = plain(renderToString(
+      <ReadAloudConfirmation inline title="Maren Kest" onConfirm={() => {}} onCancel={() => {}} result={{
+        at: "2026-10-02T23:14:00.000Z", type: "voice.audio", requestId: "01J8F3K2QW9VZX4N7M0RTYB6R1", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", sheetVersion: 1, purpose: "prose",
+        provider: "google", model: "gemini-3.8-flash-tts", voiceId: "Kore", format: "wav", status: "confirmation-required", file: null, cached: false,
+        characterCount: 48_000, estimatedMicroUsd: 0, confirmationToken: "token", freePlan: { requests: 122, allowed: 10, left: 10 },
+      }} />,
+    ));
+    assert.match(text, /122 reads · free plan allows 10 a day/);
+    assert.match(text, /Read 10 now/);
+    assert.ok(!text.includes("Confirm 48"), "no price to confirm");
   });
 
   it("says a billed read and offers to turn the plan off — never turning it off itself", () => {
