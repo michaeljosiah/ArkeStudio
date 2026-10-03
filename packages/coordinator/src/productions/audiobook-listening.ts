@@ -1,6 +1,8 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  chapterMix,
+  hasTiming,
   audiobookTextHash,
   DEFAULT_NARRATOR,
   ESTIMATED_CHARACTERS_PER_SECOND,
@@ -19,6 +21,9 @@ import {
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { planAudiobook, readAudiobookBook, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
+import { renderChapterMix } from "./audiobook-mix.js";
+import { chapterTiming } from "./audiobook-timing.js";
+import type { FfmpegRunner } from "../takes/export.js";
 
 /**
  * The book as a listener hears it (design turn 186, SPEC-047 R-66..R-71): every chapter of the
@@ -88,7 +93,28 @@ async function anyNarrator(store: WorldStore, productionId: string): Promise<Aud
   return book !== null && book !== "unreadable" && book.narrator !== undefined ? book.narrator : { ...DEFAULT_NARRATOR };
 }
 
-export async function audiobookListening(store: WorldStore, productionId: string): Promise<AudiobookListening> {
+/**
+ * A chapter with timing as the player hears it (design turn 187, R-85): its one mix, rendered
+ * by the renderer the chapter's Play uses and kept in the cache under its plan's name, and the
+ * blocks' places on that mix's clock. Null for a chapter with none, or whose mix cannot be made
+ * here — the takes then play back to back, as before timing.
+ */
+async function timedListening(store: WorldStore, productionId: string, plan: AudiobookPlan, ffmpeg: FfmpegRunner | undefined): Promise<{ bars: Array<{ key: string; at: number; seconds: number }>; seconds: number; mix: { file: string; seconds: number } } | null> {
+  const record = plan.record === "unreadable" ? null : plan.record;
+  if (!hasTiming(record)) return null;
+  try {
+    const timing = chapterTiming(store, plan, "skip");
+    const mix = chapterMix(timing);
+    if (mix.voices.length === 0) return null;
+    const rendered = await renderChapterMix(store.dir, productionId, plan.chapter.file, mix, ffmpeg !== undefined ? { ffmpeg } : {});
+    const bars = timing.bars.filter((bar) => bar.kind === "block" && bar.made).map((bar) => ({ key: bar.key, at: bar.at, seconds: bar.seconds }));
+    return { bars, seconds: rendered.seconds, mix: { file: rendered.file, seconds: rendered.seconds } };
+  } catch {
+    return null;
+  }
+}
+
+export async function audiobookListening(store: WorldStore, productionId: string, options: { ffmpeg?: FfmpegRunner } = {}): Promise<AudiobookListening> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const cover = await bookCover(store);
@@ -106,7 +132,8 @@ export async function audiobookListening(store: WorldStore, productionId: string
     const record = plan.record === "unreadable" ? null : plan.record;
     const pictures = record?.pictures ?? {};
     const usable = await usablePictures(store, pictures);
-    chapters.push(listeningChapter({ chapterId: summary.id, order: summary.order, title: summary.title, blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file) }));
+    const timed = await timedListening(store, productionId, plan, options.ffmpeg);
+    chapters.push(listeningChapter({ chapterId: summary.id, order: summary.order, title: summary.title, blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file), ...(timed !== null ? { timed } : {}) }));
   }
   return { productionId, title: production.meta.title, cover, chapters };
 }

@@ -40,7 +40,7 @@ function fullHash(bytes: Uint8Array): string {
 
 /** What a package's chapter depends on, to read the book again under the gate and compare. */
 function signature(chapters: readonly ListeningChapter[]): string {
-  return JSON.stringify(chapters.map((chapter) => [chapter.chapterId, chapter.title, chapter.blocks.map((block) => [block.key, block.file, block.seconds]), chapter.pictures.map((picture) => [picture.key, picture.file, picture.at]), chapter.opening]));
+  return JSON.stringify(chapters.map((chapter) => [chapter.chapterId, chapter.title, chapter.mix?.file ?? null, chapter.blocks.map((block) => [block.key, block.file, block.seconds]), chapter.pictures.map((picture) => [picture.key, picture.file, picture.at]), chapter.opening]));
 }
 
 const extensionOf = (file: string) => {
@@ -76,7 +76,7 @@ export async function exportAudiobookPlayer(
   productionId: string,
   options: { clock: () => string; ffmpeg?: FfmpegRunner; exportId?: string; signal?: AbortSignal } ,
 ): Promise<AudiobookExportResult> {
-  const listening: AudiobookListening = await audiobookListening(store, productionId);
+  const listening: AudiobookListening = await audiobookListening(store, productionId, options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {});
   const whole = listening.chapters.filter((chapter) => chapter.state === "read" && chapter.blocks.length > 0);
   if (whole.length === 0) return { ok: false, blockers: ["no chapter is read whole yet"] };
   const exportId = options.exportId ?? `ab_${ulid()}`;
@@ -97,6 +97,7 @@ export async function exportAudiobookPlayer(
       else real.set(file, found);
     };
     for (const chapter of whole) for (const block of chapter.blocks) await resolve(block.file);
+    for (const chapter of whole) if (chapter.mix !== undefined) await resolve(chapter.mix.file);
     const pictureFiles = [...new Set([...(listening.cover !== null ? [listening.cover] : []), ...whole.flatMap((chapter) => [...chapter.pictures.map((picture) => picture.file), ...(chapter.opening !== null ? [chapter.opening] : [])])])];
     for (const file of pictureFiles) await resolve(file);
     if (outside.length > 0) return { ok: false, blockers: outside.map((file) => `${file} is not a file inside this world — the package would carry something else`) };
@@ -126,6 +127,25 @@ export async function exportAudiobookPlayer(
         opening: picture(chapter.opening),
       };
       const blocks = chapter.blocks.map((block) => ({ key: block.key, at: block.at, seconds: block.seconds, sentences: block.sentences }));
+      // A chapter with timing ships its one mix (design turn 187, R-85): the same render the
+      // chapter's Play and the player in the app hear — overlaps, reactions, beds, one loudness —
+      // encoded where this machine can, else the render itself. Never its takes joined anew.
+      if (chapter.mix !== undefined) {
+        const encoded = `media/chapter-${pad(chapter.order)}.m4a`;
+        let name = `media/chapter-${pad(chapter.order)}.wav`;
+        if (options.ffmpeg !== undefined) {
+          try {
+            await options.ffmpeg.run(["-y", "-i", real.get(chapter.mix.file)!, "-vn", "-ac", "1", "-ar", "44100", "-c:a", "aac", "-b:a", "128k", join(staging, encoded)], () => {}, signal);
+            name = encoded;
+          } catch {
+            if (signal.aborted) return { ok: false, blockers: ["the export was cancelled"] };
+            await rm(toExtendedLength(join(staging, encoded)), { force: true }).catch(() => {});
+          }
+        }
+        if (name !== encoded) await copyFile(toExtendedLength(real.get(chapter.mix.file)!), toExtendedLength(join(staging, name)));
+        chapters.push({ ...base, audio: [{ src: name, at: 0, seconds: chapter.seconds }], blocks });
+        continue;
+      }
       if (options.ffmpeg !== undefined) {
         // One file a chapter: each take made uniform, then joined back to back with nothing added.
         const name = `media/chapter-${pad(chapter.order)}.m4a`;
@@ -207,7 +227,7 @@ export async function exportAudiobookPlayer(
     // Under the gate, the book is read again: a take made or a picture moved meanwhile refuses the
     // package rather than shipping it beside the snapshot's.
     return await store.gateOp(async () => {
-      const again = (await audiobookListening(store, productionId)).chapters.filter((chapter) => chapter.state === "read" && chapter.blocks.length > 0);
+      const again = (await audiobookListening(store, productionId, options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {})).chapters.filter((chapter) => chapter.state === "read" && chapter.blocks.length > 0);
       if (signature(again) !== signature(whole)) return { ok: false as const, blockers: ["the book changed while the package was made — export again"] };
       await mkdir(toExtendedLength(join(store.dir, "exports")), { recursive: true });
       await rename(toExtendedLength(staging), toExtendedLength(join(store.dir, "exports", outName)));

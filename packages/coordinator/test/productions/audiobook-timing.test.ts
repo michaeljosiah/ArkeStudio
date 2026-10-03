@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { audiobookTextHash, type ChapterMix, type ClientMessage, type DomainEvent, type ManifestModel } from "@arke-studio/contracts";
@@ -316,6 +317,35 @@ describe("the mix (turn 187, R-85)", () => {
     assert.equal(window.seconds, 2);
     assert.ok(whole.file.startsWith(".cache/audiobook-mix/"), "kept in the world's cache, never beside its records");
   });
+});
+
+describe("heard as set in the player and the package (turn 187, R-85)", () => {
+  type Listening = Extract<DomainEvent, { type: "audiobook.listening" }>;
+  type Exported = Extract<DomainEvent, { type: "audiobook.exported" }>;
+  it("gives a chapter with timing its one mix, the blocks at their places on it, and packages that mix", () =>
+    withHarness(async ({ worldDir, events, send }) => {
+      await read(send);
+      await setTiming(send, "p1.0", { start: -0.5 });
+      await send({ kind: "open-audiobook-listening", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST });
+      const listening = events.filter((e): e is Listening => e.type === "audiobook.listening").at(-1)!.listening!;
+      const neap = listening.chapters.find((chapter) => chapter.chapterId === "neap")!;
+      assert.ok(neap.mix, "the chapter with timing carries its mix");
+      assert.ok(existsSync(join(worldDir, neap.mix.file)));
+      const p0 = neap.blocks.find((block) => block.key === "p0.0")!;
+      const p1 = neap.blocks.find((block) => block.key === "p1.0")!;
+      assert.equal(p1.at, p0.at + p0.seconds - 0.5, "the block cuts in on the mix's clock");
+      assert.equal(neap.seconds, neap.mix.seconds);
+      const others = listening.chapters.filter((chapter) => chapter.chapterId !== "neap");
+      assert.ok(others.every((chapter) => chapter.mix === undefined), "a chapter with no timing plays its takes as before");
+
+      await send({ kind: "export-audiobook-player", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST });
+      const result = events.filter((e): e is Exported => e.type === "audiobook.exported").at(-1)!.result;
+      assert.ok(result.ok, JSON.stringify(result));
+      const manifest = JSON.parse(await readFile(join(worldDir, result.dir, "manifest.json"), "utf8")) as { chapters: Array<{ id: string; audio: Array<{ src: string; at: number }> }> };
+      const packaged = manifest.chapters.find((chapter) => chapter.id === "neap")!;
+      assert.equal(packaged.audio.length, 1, "one file: the mix, never the takes joined anew");
+      assert.ok(existsSync(join(worldDir, result.dir, packaged.audio[0]!.src)));
+    }));
 });
 
 describe("Propose timing (turn 187b, R-86)", () => {
