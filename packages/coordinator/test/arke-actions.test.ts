@@ -64,6 +64,24 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     assert.match(modelActionCatalogueText(), /timeline-command.*reached by: editorRequests/);
   });
 
+  it("does not borrow nearby actions for different chapter, import or review effects", () => {
+    const paths = (kind: ClientMessageKind) => {
+      const descriptor = ARKE_CLIENT_COMMAND_REGISTRY[kind];
+      assert.ok(descriptor.classification === "supported-by-arke", kind);
+      return descriptor.reachedBy;
+    };
+    for (const kind of ["restore-chapter", "retire-chapter", "restore-chapter-retired", "import-shot-frame", "upload-world-image", "record-review"] as const) {
+      const descriptor = ARKE_CLIENT_COMMAND_REGISTRY[kind];
+      assert.ok(descriptor.classification === "supported-by-arke", kind);
+      assert.deepEqual(descriptor.reachedBy, [], kind);
+      assert.equal(descriptor.support.preparation.state, "blocked", kind);
+      if (descriptor.support.preparation.state === "blocked") assert.ok(descriptor.support.preparation.blockingSeams.includes("no-model-action"), kind);
+    }
+    assert.deepEqual(paths("retire-entity"), ["canon-retire", "sheet-retire"], "chapter edits do not retire an entity");
+    assert.deepEqual(paths("save-chapter"), ["production-chapter"], "authored chapter edits remain reachable");
+    assert.deepEqual(paths("accept-take"), ["production-take-review"], "accept-and-select remains reachable");
+  });
+
   it("classifies every ClientMessage option exactly once and uses that option's strict schema", () => {
     assert.equal(ARKE_CLIENT_COMMAND_COMPILE_TIME_PARITY, true);
     const options = new Map(ClientMessageSchema.options.map((option) => [optionKind(option), option]));

@@ -638,9 +638,10 @@ export type ArkeClientCommandRegistry = {
 // Some authorities predate actions[]: Bible edits, editor requests and authored proposals
 // still arrive in their own typed result channels. Name those paths rather than falsely
 // blocking working controls or inventing model action kinds (SPEC-050 R-7..R-9).
+// A shared authority is not enough: imports that leave candidates unselected do not reach
+// atomic import-and-select commands, and chapter edits cannot restore or retire a chapter.
 type ConversationPath = ModelWorldChatAction["kind"] | "bibleEdits" | "editorRequests" | "sceneEdits" | "candidateOperations";
 const COMMAND_MODEL_PATHS = {
-  "upload-world-image": ["reference-image-import"],
   "use-world-image": ["reference-world-image-result-use"],
   "discard-world-image": ["reference-image-discard"],
   "pick-staged-reference": ["reference-image-import"],
@@ -656,7 +657,7 @@ const COMMAND_MODEL_PATHS = {
   "stage-canon-amendment": ["canon", "candidateOperations"],
   "open-thread": ["canon"],
   "settle-thread": ["canon"],
-  "retire-entity": ["canon-retire", "sheet-retire", "production-chapter"],
+  "retire-entity": ["canon-retire", "sheet-retire"],
   "create-sheet-from-sentence": ["sheet", "candidateOperations"],
   "promote-guest": ["sheet"],
   "duplicate-sheet": ["sheet"],
@@ -701,9 +702,6 @@ const COMMAND_MODEL_PATHS = {
   "scene-command": ["production-scene-command", "sceneEdits"],
   "create-chapter": ["production-chapter"],
   "save-chapter": ["production-chapter"],
-  "restore-chapter": ["production-chapter"],
-  "retire-chapter": ["production-chapter"],
-  "restore-chapter-retired": ["production-chapter"],
   "edit-chapter-plan": ["production-chapter"],
   "save-bible": ["bibleEdits"],
   "reorder-chapters": ["production-chapter-order"],
@@ -715,9 +713,7 @@ const COMMAND_MODEL_PATHS = {
   "export-interactive": ["production-interactive-export"],
   "compile-scene-board": ["production-board-compile"],
   "export-scene-board": ["production-board-export"],
-  "record-review": ["production-take-review"],
   "accept-take": ["production-take-review"],
-  "import-shot-frame": ["production-take-import"],
   "stage-playblast": ["production-stage-playblast"],
   "reject-take": ["production-take-review"],
   "set-trim": ["production-take-trim"],
