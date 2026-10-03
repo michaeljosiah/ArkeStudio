@@ -85,6 +85,11 @@ for (const status of ["succeeded", "failed", "cancelled"] as const) it(`settles 
     w.coordinator.emit({ type: "job.updated", at: AT, job: jobs[0] });
     await Promise.all(w.internal.backgroundWork);
     assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, "queued", "provider success waits for candidate filing");
+    jobs[0] = { ...jobs[0], finalization: { status: "failed", error: "Local filing interrupted", updatedAt: AT } };
+    w.coordinator.emit({ type: "job.updated", at: AT, job: jobs[0] });
+    await Promise.all(w.internal.backgroundWork);
+    assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, "running", "a paid result stays active while Activity repairs local filing");
+    assert.equal(w.coordinator.getState().worldChat?.actions[0]?.receipt, undefined);
     await mkdir(join(w.worldDir, "incoming"), { recursive: true });
     await writeFile(join(w.worldDir, "incoming/chat-frame.png"), encodePng(solidImage(4, 4, [20, 40, 60, 255])));
     await recordTakesFromJob(w.store, jobs[0], null);

@@ -3,7 +3,7 @@ import { readFile, readdir, rm } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { z } from "zod";
 import {
-  ArkeGenerationBodySchema, JobSchema, ModelWorldChatActionSchema, ulid,
+  ArkeGenerationBodySchema, JobSchema, ModelWorldChatActionSchema, isReplayableFinalization, ulid,
   type ArkeGenerationBody, type ConversationActionCard, type ModelWorldChatAction,
 } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
@@ -179,6 +179,11 @@ export class GenerationQuotes {
     }
     if (jobs.some(job => job && !["succeeded", "failed", "cancelled"].includes(job.status))) return { status: "running", detail: "Generation jobs are still active or need reconciliation in Activity." };
     if (jobs.some(job => job?.finalization?.status === "pending")) return { status: "running", detail: "Generation results are being filed." };
+    if (jobs.some(job => job?.status === "succeeded" && job.finalization?.status === "failed" && isReplayableFinalization(job))) {
+      // The provider result is already paid for. Activity can repair its local filing; a
+      // terminal failed card would never hear that repair and would strand its dependents.
+      return { status: "running", detail: "Generation result filing needs retry in Activity; no provider resubmission is required." };
+    }
     const results = jobs.flatMap(job => {
       if (!job) return [];
       const take = this.store.getBundle().referenceTakes.find(take => take.jobId === job.id);
