@@ -1660,6 +1660,47 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z
     .object({ ...base, type: z.literal("diagnostics.snapshot"), snapshot: DiagnosticsSnapshotSchema })
     .strict(),
+  /**
+   * What the grouped-read probe found (design turn 185): the blocks read, and for each packing
+   * the request's outcome and HTTP status, the audio's length, and what the local transcriber
+   * heard, beside the turns that were sent — so a person can listen and choose. Files are
+   * world-relative under the world's folder, kept for listening; nothing is filed as a take.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("probe.grouped-read"),
+      requestId: UlidSchema,
+      worldId: UlidSchema.optional(),
+      /** The world's folder name, so a script can say where the files are. */
+      worldFolder: z.string().optional(),
+      outcome: z.enum(["succeeded", "failed", "refused"]),
+      reason: z.string().optional(),
+      voice: z.object({ provider: z.string().min(1), model: z.string().min(1), voiceId: z.string().min(1), label: z.string().optional() }).strict().optional(),
+      blocks: z.array(z.object({ key: z.string(), who: z.string(), text: z.string() }).strict()).optional(),
+      variants: z
+        .array(
+          z
+            .object({
+              id: z.enum(["A", "B", "C"]),
+              packing: z.enum(["full", "deltas", "merged"]),
+              outcome: z.enum(["succeeded", "failed", "not sent"]),
+              turns: z.array(z.object({ text: z.string(), instructions: z.string().optional() }).strict()),
+              jobId: z.string().optional(),
+              httpStatus: z.number().int().optional(),
+              reason: z.string().optional(),
+              seconds: z.number().nonnegative().optional(),
+              file: z.string().optional(),
+              transcript: z.string().optional(),
+              /** Why no transcript: no local transcriber, or it failed. */
+              transcriptUnavailable: z.string().optional(),
+              costMicroUsd: z.number().int().nonnegative().nullable().optional(),
+            })
+            .strict(),
+        )
+        .optional(),
+    })
+    .strict(),
 
   /** The sidecar's four degradation states, each with its copy (SPEC-011 §2.10). */
   z

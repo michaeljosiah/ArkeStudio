@@ -152,12 +152,17 @@ function speechWords(text: string): number {
   return words + cjk / 2 + unspaced / 6;
 }
 
+/** The words' expected speech at the estimate's pace, without a request's lead-in and tail. */
+export function expectedSpeechSeconds(text: string): number {
+  return speechWords(text) / (SPEECH_TOKEN_ESTIMATE.wordsPerMinute / 60);
+}
+
 /** The estimate's token counts for one request, each clamped to the service limit. */
 export function estimateSpeechTokens(speech: Pick<z.infer<typeof SpeechTokenPricingSchema>, "maxInputTokens" | "maxOutputTokens" | "audioTokensPerSecond">,
   text: string, instructions = ""): { inputTextTokens: number; outputAudioTokens: number } {
   const e = SPEECH_TOKEN_ESTIMATE;
   const input = Math.ceil((speechUtf8Bytes(text) + speechUtf8Bytes(instructions)) / e.bytesPerInputToken) + e.inputOverheadTokens;
-  const seconds = speechWords(text) / (e.wordsPerMinute / 60) + e.edgeSeconds;
+  const seconds = expectedSpeechSeconds(text) + e.edgeSeconds;
   const output = Math.ceil(seconds * speech.audioTokensPerSecond * e.margin);
   return { inputTextTokens: Math.min(input, speech.maxInputTokens), outputAudioTokens: Math.min(output, speech.maxOutputTokens) };
 }

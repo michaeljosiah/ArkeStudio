@@ -552,6 +552,8 @@ const CLIENT_COMMAND_METADATA = {
   "install-update-on-close": globalOnly(GLOBAL_OPERATION),
   "acknowledge-update": globalOnly(GLOBAL_OPERATION),
   "generate-diagnostics": globalOnly(GLOBAL_OPERATION),
+  // One real, priced request to learn whether a reader can group (design turn 185): a person runs it.
+  "probe-grouped-read": humanOnly("The grouped-read probe spends one request so a person can listen to it."),
   "refresh-diagnostics": readOnly(QUERY),
   "open-data-folder": globalOnly(GLOBAL_OPERATION),
   "bench-open": humanOnly("Opening or implicitly creating a Bench session is a human workspace control."),

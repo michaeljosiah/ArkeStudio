@@ -306,9 +306,9 @@ import {
 import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiobookBook } from "./productions/audiobook-book.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
-import { currentDirection, directionEntry, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
+import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
 import { checkDirection, directionPlan, heldKey } from "./voice/direction.js";
-import { runAudiobookChapter } from "./productions/audiobook-run.js";
+import { prepareChapter, runAudiobookChapter } from "./productions/audiobook-run.js";
 import { exportManuscript, importManuscript, readManuscript } from "./productions/manuscript.js";
 import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
 import { voicedBlocks, type ChapterContinuity, type ChapterVoices } from "@arke-studio/contracts";
@@ -401,6 +401,7 @@ import {
 } from "./voice/library.js";
 import { hostedReaderDestination, hostedUploadConfirmed, hostedUploadToken, prepareHostedClip, type HostedVoiceSlots } from "./voice/hosted.js";
 import { deleteVoice } from "./voice/library.js";
+import { probeGroupedRead, probeWindow } from "./voice/grouped-probe.js";
 import { atomicWriteFile, serializeFileMutation, withTransientRetry } from "./world/atomic.js";
 import { restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
@@ -13143,6 +13144,56 @@ export class Coordinator {
         // Schedules only; the derivation runs on the next immediate, off this handler's path
         // (R-34), and reaches the asker as the ordinary broadcast.
         this.diagnosticsSnapshot?.refresh();
+        return;
+      }
+      case "probe-grouped-read": {
+        // Design turn 185's probe: a few consecutive blocks of a chapter, prepared exactly as a
+        // run prepares them, read three ways in the book's narrator — three requests through the
+        // queue, so the ledger and the free day count them like any read.
+        const store = this.opts.provider.openStore?.();
+        const voice = this.voiceService;
+        const answer = (result: Record<string, unknown>) =>
+          this.emit({ at: new Date().toISOString(), type: "probe.grouped-read", requestId: msg.requestId, ...(store ? { worldId: store.worldId, worldFolder: basename(store.dir) } : {}), ...result } as DomainEvent);
+        if (!store) return answer({ outcome: "refused", reason: "no world open" });
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return answer({ outcome: "refused", reason: "no such chapter" });
+        try {
+          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [] };
+          const reader = room.narrator;
+          const plan = await planAudiobook(store, msg.productionId, chapter.id, { narrator: reader });
+          const keys = probeWindow(plan.blocks.map((planned) => ({ key: planned.block.key, ...(planned.block.speaker !== undefined ? { speaker: planned.block.speaker } : {}) })), msg.count ?? 4, msg.from);
+          const prepared = await prepareChapter(store, msg.productionId, chapter.id, room, () => store.now(), keys);
+          if (prepared.kind !== "ready") return answer({ outcome: "refused", reason: prepared.reason });
+          const refused = prepared.prepared.speaking.find((block) => block.refusal !== undefined);
+          if (refused !== undefined) return answer({ outcome: "refused", reason: `${refused.block.key} · ${refused.refusal}` });
+          const sheets = store.getBundle().sheets;
+          const model = room.models.find((m) => m.provider === reader.provider && m.id === reader.model && m.capability === "voice-tts") ?? null;
+          const result = await probeGroupedRead({
+            worldId: store.worldId,
+            productionId: msg.productionId,
+            reader,
+            model,
+            blocks: prepared.prepared.speaking.map((block) => ({
+              key: block.block.key,
+              who: block.block.speaker === undefined ? "narration" : (block.sheet !== undefined ? (sheets.find((sheet) => sheet.id === block.sheet)?.name ?? block.block.speaker) : block.block.speaker),
+              text: block.text,
+              turns: block.turns,
+            })),
+            at: new Date().toISOString(),
+            enqueue: async (input) => {
+              const queued = await this.enqueueBatch(msg.requestId, "voice-preview", [bindDesignedNarrator(input, room.designedBinding)]);
+              if (queued.jobIds[0] === undefined) throw new Error(queued.reason ?? "the voice job could not be queued");
+              return queued.jobIds[0];
+            },
+            waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
+            readLanded: async (file) => new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(file))))),
+            transcribe: voice === null ? null : (bytes, contentType) => voice.transcribe(bytes, contentType),
+            actualCost: async (jobId) => (this.ledger ? ((await this.ledger.readAll()).find((entry) => entry.jobId === jobId)?.actualMicroUsd ?? null) : null),
+          });
+          answer({ ...result, voice: { provider: reader.provider, model: reader.model, voiceId: reader.voiceId, ...(reader.label !== undefined ? { label: reader.label } : {}) } });
+        } catch (err) {
+          answer({ outcome: "refused", reason: describeCoordinatorError(err) });
+        }
         return;
       }
       case "generate-diagnostics": {

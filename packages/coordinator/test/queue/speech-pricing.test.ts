@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
-import { quoteSpeech, type Job, type LedgerEntry, type ManifestModel, type SpeechUsage } from "@arke-studio/contracts";
+import { quoteGroupedSpeech, quoteSpeech, type Job, type LedgerEntry, type ManifestModel, type SpeechUsage } from "@arke-studio/contracts";
 import { JobQueue, type DispatchClient, type EnqueueInput } from "../../src/queue/dispatcher.js";
 import { JobJournal } from "../../src/queue/journal.js";
 import { tempDir } from "../tmp.js";
@@ -415,5 +415,23 @@ it("holds a lost inline result without polling or repeating a paid submission", 
       assert.equal(h.submissions(), 1);
       assert.equal(h.ledger.length, 0);
     } finally { restored.dispose(); }
+  } finally { h.queue.dispose(); }
+});
+
+// Design turn 185: a grouped read is one request, quoted once with every turn's style and capped at the service limits.
+it("quotes a grouped read once, its words and every turn's style, and sends its turns as they were quoted", async () => {
+  const h = await harness({ inputTextTokens: 20, outputAudioTokens: 300 }, "succeeded", true);
+  try {
+    const turns = [{ text: "The first block.", instructions: "Whisper." }, { text: "The second block.", instructions: "Shout." }];
+    const text = turns.map((turn) => turn.text).join(" ");
+    const quote = quoteGroupedSpeech(model, turns, { at: initial });
+    const sent: unknown[] = [];
+    h.client.submit = async (_key, request) => { sent.push(request.params["turns"]); return { remoteId: "remote-1", artifacts: [], speechUsage: { inputTextTokens: 20, outputAudioTokens: 300 } }; };
+    const job = await h.queue.enqueue({ ...input, params: { text, turns }, estimatedMicroUsd: quote.expectedMicroUsd });
+    assert.deepEqual(job.speechQuote, quote);
+    assert.ok(job.speechQuote!.quantities.inputTextTokens! > quoteSpeech(model, text, { at: initial }).quantities.inputTextTokens!, "every style is counted");
+    assert.equal(job.speechQuote!.authorisedMicroUsd, 151552, "one request, capped at the service limits");
+    await until(() => h.ledger.length === 1, "grouped settlement", 30000);
+    assert.deepEqual(sent, [turns]);
   } finally { h.queue.dispose(); }
 });

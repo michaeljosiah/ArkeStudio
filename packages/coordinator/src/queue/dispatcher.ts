@@ -7,6 +7,8 @@ import {
   nextPacificMidnight,
   type FreePlanLimit,
   quoteSpeech,
+  quoteGroupedSpeech,
+  type SpeechTurn,
   quoteVoiceDesign,
   isDesignedVoiceTarget,
   speechQuoteIsCurrent,
@@ -351,10 +353,24 @@ function describeWait(ms: number): string {
 function speechQuoteFor(model: ManifestModel, job: Pick<Job, "target" | "params">, at: string): SpeechQuote {
   const text = String(job.params.text ?? "");
   if (job.target.kind === "voice-design") return quoteVoiceDesign(model, text, at);
+  // A grouped read (design turn 185) is one request, priced once with every turn's style: its
+  // `text` is the turns' words, which the provider refuses to send if they differ.
+  const turns = speechTurnsOf(job.params);
+  if (turns !== null) return quoteGroupedSpeech(model, turns, { at });
   const { instructions, delivery } = job.params;
   return quoteSpeech(model, text, { at,
     ...(typeof instructions === "string" ? { instructions } : {}),
     ...(typeof delivery === "string" ? { delivery } : {}) });
+}
+
+/** A grouped read's turns as its job holds them, or null for a solo read; read defensively, as durable params outlive the code that wrote them. */
+function speechTurnsOf(params: Record<string, unknown>): SpeechTurn[] | null {
+  const turns = params["turns"];
+  if (!Array.isArray(turns)) return null;
+  return turns.map((turn) => {
+    const held = (turn ?? {}) as { text?: unknown; instructions?: unknown };
+    return { text: String(held.text ?? ""), ...(typeof held.instructions === "string" ? { instructions: held.instructions } : {}) };
+  });
 }
 
 function providerParams(params: Record<string, unknown>): Record<string, unknown> {
