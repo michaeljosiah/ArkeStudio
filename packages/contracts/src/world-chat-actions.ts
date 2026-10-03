@@ -14,6 +14,7 @@ import {
   CanonIdSchema,
   CheckReceiptIdSchema,
   EpisodeIdSchema,
+  FrameRunIdSchema,
   SceneIdSchema,
   SessionIdSchema,
   SlugSchema,
@@ -892,6 +893,47 @@ const ProductionTakeImportModelActionSchema = z
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
+const ProductionFrameRunStartModelActionSchema = z.object({
+  kind: z.literal("production-frame-run-start"), productionId: SlugSchema,
+  sceneId: SceneIdSchema, mode: z.enum(["per-shot", "board"]), scope: z.enum(["missing", "all"]), modelId: z.string().min(1).max(300).optional(), shotId: ShotIdSchema.optional(),
+  checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+const ProductionFrameRunPauseModelActionSchema = z.object({
+  kind: z.literal("production-frame-run-pause"), productionId: SlugSchema,
+  runId: FrameRunIdSchema,
+  checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+const ProductionFrameRunResumeModelActionSchema = z.object({
+  kind: z.literal("production-frame-run-resume"), productionId: SlugSchema,
+  runId: FrameRunIdSchema,
+  checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+const ProductionFrameRunCancelModelActionSchema = z.object({
+  kind: z.literal("production-frame-run-cancel"), productionId: SlugSchema,
+  runId: FrameRunIdSchema,
+  checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+const ProductionFrameRunRetryStepModelActionSchema = z.object({
+  kind: z.literal("production-frame-run-retry-step"), productionId: SlugSchema,
+  runId: FrameRunIdSchema, stepIndex: z.number().int().min(0),
+  checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+const ProductionFrameRunRetryCellModelActionSchema = z.object({
+  kind: z.literal("production-frame-run-retry-cell"), productionId: SlugSchema,
+  runId: FrameRunIdSchema, stepIndex: z.number().int().min(0), shotId: ShotIdSchema,
+  checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+const ProductionSceneDispatchModelActionSchema = z.object({
+  kind: z.literal("production-scene-dispatch"), productionId: SlugSchema,
+  sceneId: SceneIdSchema, mode: z.enum(["per-shot", "whole-scene"]), policy: z.enum(["review-gated", "pre-authorized"]), modelId: z.string().min(1).max(300).optional(), audioReferencesDisabled: z.boolean().optional(), resolution: z.string().min(1).max(200).optional(),
+  checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+const ProductionPlanCancelModelActionSchema = z.object({
+  kind: z.literal("production-plan-cancel"), productionId: SlugSchema,
+  planId: z.string().regex(/^pl_[0-9A-HJKMNP-TV-Z]{26}$/),
+  checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+
 const ProductionTakeGenerationModelActionSchema = z
   .object({
     kind: z.literal("production-take-generation"),
@@ -1212,6 +1254,14 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionBoardCompileModelActionSchema,
   ProductionBoardExportModelActionSchema,
   ProductionTakeImportModelActionSchema,
+  ProductionFrameRunStartModelActionSchema,
+  ProductionFrameRunPauseModelActionSchema,
+  ProductionFrameRunResumeModelActionSchema,
+  ProductionFrameRunCancelModelActionSchema,
+  ProductionFrameRunRetryStepModelActionSchema,
+  ProductionFrameRunRetryCellModelActionSchema,
+  ProductionSceneDispatchModelActionSchema,
+  ProductionPlanCancelModelActionSchema,
   ProductionTakeGenerationModelActionSchema,
   ProductionTakeFileModelActionSchema,
   ProductionShotFrameClearModelActionSchema,
@@ -1306,6 +1356,14 @@ export const WorldChatProductionSceneCommandActionSchema = preparedAction("world
 export const WorldChatProductionBoardCompileActionSchema = preparedAction("world-chat-production-board-compile", ProductionBoardCompileModelActionSchema);
 export const WorldChatProductionBoardExportActionSchema = preparedAction("world-chat-production-board-export", ProductionBoardExportModelActionSchema);
 export const WorldChatProductionTakeImportActionSchema = preparedAction("world-chat-production-take-import", ProductionTakeImportModelActionSchema);
+export const WorldChatProductionFrameRunStartActionSchema = preparedAction("world-chat-production-frame-run-start", ProductionFrameRunStartModelActionSchema);
+export const WorldChatProductionFrameRunPauseActionSchema = preparedAction("world-chat-production-frame-run-pause", ProductionFrameRunPauseModelActionSchema);
+export const WorldChatProductionFrameRunResumeActionSchema = preparedAction("world-chat-production-frame-run-resume", ProductionFrameRunResumeModelActionSchema);
+export const WorldChatProductionFrameRunCancelActionSchema = preparedAction("world-chat-production-frame-run-cancel", ProductionFrameRunCancelModelActionSchema);
+export const WorldChatProductionFrameRunRetryStepActionSchema = preparedAction("world-chat-production-frame-run-retry-step", ProductionFrameRunRetryStepModelActionSchema);
+export const WorldChatProductionFrameRunRetryCellActionSchema = preparedAction("world-chat-production-frame-run-retry-cell", ProductionFrameRunRetryCellModelActionSchema);
+export const WorldChatProductionSceneDispatchActionSchema = preparedAction("world-chat-production-scene-dispatch", ProductionSceneDispatchModelActionSchema);
+export const WorldChatProductionPlanCancelActionSchema = preparedAction("world-chat-production-plan-cancel", ProductionPlanCancelModelActionSchema);
 export const WorldChatProductionTakeGenerationActionSchema = preparedAction("world-chat-production-take-generation", ProductionTakeGenerationModelActionSchema);
 export const WorldChatProductionTakeFileActionSchema = preparedAction("world-chat-production-take-file", ProductionTakeFileModelActionSchema);
 export const WorldChatProductionShotFrameClearActionSchema = preparedAction("world-chat-production-shot-frame-clear", ProductionShotFrameClearModelActionSchema);
@@ -1377,6 +1435,14 @@ export type WorldChatProductionSceneCommandAction = z.infer<typeof WorldChatProd
 export type WorldChatProductionBoardCompileAction = z.infer<typeof WorldChatProductionBoardCompileActionSchema>;
 export type WorldChatProductionBoardExportAction = z.infer<typeof WorldChatProductionBoardExportActionSchema>;
 export type WorldChatProductionTakeImportAction = z.infer<typeof WorldChatProductionTakeImportActionSchema>;
+export type WorldChatProductionFrameRunStartAction = z.infer<typeof WorldChatProductionFrameRunStartActionSchema>;
+export type WorldChatProductionFrameRunPauseAction = z.infer<typeof WorldChatProductionFrameRunPauseActionSchema>;
+export type WorldChatProductionFrameRunResumeAction = z.infer<typeof WorldChatProductionFrameRunResumeActionSchema>;
+export type WorldChatProductionFrameRunCancelAction = z.infer<typeof WorldChatProductionFrameRunCancelActionSchema>;
+export type WorldChatProductionFrameRunRetryStepAction = z.infer<typeof WorldChatProductionFrameRunRetryStepActionSchema>;
+export type WorldChatProductionFrameRunRetryCellAction = z.infer<typeof WorldChatProductionFrameRunRetryCellActionSchema>;
+export type WorldChatProductionSceneDispatchAction = z.infer<typeof WorldChatProductionSceneDispatchActionSchema>;
+export type WorldChatProductionPlanCancelAction = z.infer<typeof WorldChatProductionPlanCancelActionSchema>;
 export type WorldChatProductionTakeGenerationAction = z.infer<typeof WorldChatProductionTakeGenerationActionSchema>;
 export type WorldChatProductionTakeFileAction = z.infer<typeof WorldChatProductionTakeFileActionSchema>;
 export type WorldChatProductionShotFrameClearAction = z.infer<typeof WorldChatProductionShotFrameClearActionSchema>;
@@ -1497,6 +1563,14 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionBoardCompileActionSchema,
   WorldChatProductionBoardExportActionSchema,
   WorldChatProductionTakeImportActionSchema,
+  WorldChatProductionFrameRunStartActionSchema,
+  WorldChatProductionFrameRunPauseActionSchema,
+  WorldChatProductionFrameRunResumeActionSchema,
+  WorldChatProductionFrameRunCancelActionSchema,
+  WorldChatProductionFrameRunRetryStepActionSchema,
+  WorldChatProductionFrameRunRetryCellActionSchema,
+  WorldChatProductionSceneDispatchActionSchema,
+  WorldChatProductionPlanCancelActionSchema,
   WorldChatProductionTakeGenerationActionSchema,
   WorldChatProductionTakeFileActionSchema,
   WorldChatProductionShotFrameClearActionSchema,

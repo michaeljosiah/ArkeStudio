@@ -1,3 +1,5 @@
+import { type AppSettings, type ProductionBundle, JobSchema as QuotedJobSchema } from "@arke-studio/contracts";
+import { ProductionBatchControls, productionBatchSource, type ProductionBatchPorts } from "./world-chat/production-batch.js";
 import { estimateSpeechMicroUsd, samplingProblems, speechInputFits } from "@arke-studio/contracts";
 import { applyProviderPlans, localTranscriberAvailable, freeCreditDraw, freeCreditLeft, freeCreditOverrun, freeLimitReason, freePlanAllowance, freePlanFailure, freePlanPending, freePlanShortfall, GOOGLE_DAILY_LIMIT, PAID_PLANS, speechAsks, type FreePlanAllowance, type ProviderPlans } from "@arke-studio/contracts";
 import { designedVoiceTarget, isDesignedVoiceTarget, narratorDesignedRecord, resolveDesignedVoice, voiceDisplayLabel, VoiceDesignDraftSchema, quoteVoiceDesign, type NarratorDesignedVoice, type NarratorSettings, type WorldDesignedVoice } from "@arke-studio/contracts";
@@ -49,7 +51,7 @@ import { preparePerformanceGeneration, readPerformanceGenerationQuote, validateP
 import { reviewPerformance, clearPerformanceSelection, selectKeptPerformance, choosePerformance } from "./audio/performance-review.js";
 import { purgePerformance } from "./audio/performance-purge.js";
 import { keepPerformanceRecording, performanceConversionRequest, readPerformanceConversionInputs, finalizePerformanceConversion } from "./audio/performances.js";
-import { readCharacterAudioInputs, resolveCastVoices, resolveSubjectCastVoices, resolvePerformanceAudioReferences, preparePerformanceAudioRange, prepareMasterAudioReference, resolveMasterAudioReferences } from "./audio/reference-inputs.js";
+import { readCharacterAudioInputs, resolveCastVoices, resolveSubjectCastVoices, preparePerformanceAudioRange, prepareMasterAudioReference, resolveMasterAudioReferences } from "./audio/reference-inputs.js";
 import { resumeCharacterSample, prepareCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample, characterSpeakingRequest } from "./audio/character-sample.js";
 import type { AudioMediaTools } from "./audio/media-tools.js";
 import { CataloguePreviewService } from "./voice/catalogue-preview.js";
@@ -221,7 +223,6 @@ import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
 import {
   highestChapterRank,
   compileBoard,
-  composeDispatches,
   createEpisode,
   createScene,
   draftSceneSkeleton,
@@ -11051,102 +11052,7 @@ export class Coordinator {
         return;
       }
       case "dispatch-scene": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || !this.opts.manifest) {
-          this.rejectEnqueue(msg.requestId, msg.kind, "The scene could not be prepared for Activity.");
-          return;
-        }
-        const bundle = store.getBundle();
-        const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
-        const scene = production?.scenes.find((s) => production.sceneFiles[s.id] === msg.sceneFile);
-        const model = this.opts.manifest.models.find((m) => m.id === msg.modelId);
-        if (!production || !scene || !model) {
-          this.rejectEnqueue(msg.requestId, msg.kind, "The scene or selected model is no longer available.");
-          return;
-        }
-        // The negatives derive from the production's audio design (SPEC-019 R-9, R-11): a cut
-        // that composes its own score means the model must not lay music under every clip.
-        let performanceReferences, masterReferences;
-        try {
-          if (msg.audioReferencesDisabled && (msg.performanceAudio?.length || msg.masterAudio?.length)) throw new Error("Disabled references cannot carry selected performances.");
-          performanceReferences = await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, msg.performanceAudio ?? [], msg.requestId);
-          masterReferences = await resolveMasterAudioReferences(store, production.meta.id, scene.id, msg.masterAudio ?? [], msg.requestId);
-        } catch (error) {
-          const reason = describeCoordinatorError(error);
-          this.rejectEnqueue(msg.requestId, msg.kind, reason);
-          return;
-        }
-        const audioDesign = await audioDesignFor(store, production.meta.id);
-        // Recompute the plan server-side — the request the dialog showed is the one executed.
-        const plan = planScene(
-          {
-            timingProduction: production,
-            audioReferencesDisabled: msg.audioReferencesDisabled,
-            performanceReferences, masterReferences,
-            world: bundle.meta,
-            artDirection: bundle.artDirection,
-            productionId: production.meta.id,
-            // The production's own standing constraints, merged with the world's inside planning
-            // (#244). Passed as the record rather than looked up there, because planning is pure.
-            production: {
-              ...(production.meta.styleOverride !== undefined
-                ? { styleOverride: production.meta.styleOverride }
-                : {}),
-              ...(production.meta.musicPolicy !== undefined
-                ? { musicPolicy: production.meta.musicPolicy }
-                : {}),
-              failureModes: production.meta.failureModes,
-            },
-            sheets: bundle.sheets,
-            kits: bundle.referenceKits,
-            props: bundle.props,
-            scene,
-            selections: production.selections,
-            model,
-            audioDesign,
-            // The world's shelf, for resolving durable boundary frames (issue 154).
-            artifacts: bundle.artifacts,
-            // The production's takes, for resolving a continuation's predecessor (R-50). Both
-            // are here for one reason: the request the dialog showed is the one executed.
-            takes: production.takes,
-            // The production's delivery aspect (issue 389): stills shape to it, video routes
-            // receive it, and an impossible shape is refused by composition below.
-            ...(production.meta.aspect !== undefined ? { aspect: production.meta.aspect } : {}),
-            ...(msg.resolution !== undefined ? { resolution: msg.resolution } : {}),
-            ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
-          },
-          msg.mode,
-        );
-        if (msg.mode === "whole-scene" && !plan.pack.ok) {
-          void this.appLog?.append({ kind: "dispatch.refused", reason: "oversize shot", detail: plan.pack });
-          this.rejectEnqueue(
-            msg.requestId,
-            msg.kind,
-            "Whole-scene dispatch is unavailable because one shot exceeds the model limit.",
-          );
-          return;
-        }
-        // Composition refuses work it cannot honour — a shot longer than the model can make, a
-        // pass over its reference limit. Those refusals are the point of recomputing the plan
-        // here rather than trusting the dialog, so they have to come back as a refusal. Thrown
-        // out of this handler they became an unhandled rejection: nothing answered the request,
-        // the dialog waited for a job that never arrived, and the process was entitled to exit.
-        let dispatches;
-        try {
-          dispatches = composeDispatches(msg.worldId, msg.productionId, scene, plan, model, bundle, this.opts.manifest, msg.acknowledgedRecommendationIds, this.nowIso());
-        } catch (err) {
-          // appLog keeps the raw diagnostic (composeDispatches' own words, whatever they are);
-          // the enqueue's refusal gets the translated sentence — the two audiences read different
-          // text for the same failure, same as the credential and extraction handlers already do.
-          void this.appLog?.append({
-            kind: "dispatch.refused",
-            reason: err instanceof Error ? err.message : String(err),
-            detail: { sceneFile: msg.sceneFile },
-          });
-          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(err));
-          return;
-        }
-        await this.enqueueBatch(msg.requestId, msg.kind, dispatches);
+        this.rejectEnqueue(msg.requestId, msg.kind, "Unplanned scene dispatch is retired. Use planned scene dispatch and review its durable plan.");
         return;
       }
       case "stage-construct-cancel": this.stageConstructor.cancel(msg.worldId, msg.requestId); return;
@@ -18789,7 +18695,9 @@ export class Coordinator {
     return {
       enqueue: (input) => {
         if (!this.jobQueue) throw new Error("the queue is not available");
-        return this.jobQueue.enqueue(input);
+        const identity = input.params.generationQuoteLocalIdentity;
+        const frozen = identity ? QuotedJobSchema.pick({ recipe: true, engine: true }).parse(identity) : {};
+        return this.jobQueue.enqueue({ ...input, ...frozen });
       },
       jobFacts: (jobIds) => {
         const wanted = new Set(jobIds);
@@ -18808,6 +18716,68 @@ export class Coordinator {
       fresh: (worldId) => {
         const store = this.opts.provider.openStore?.();
         return store && store.worldId === worldId ? store.getBundle() : undefined;
+      },
+    };
+  }
+
+  private productionBatchPorts(store: WorldStore): ProductionBatchPorts {
+    const modelFor = (production: ProductionBundle, capability: "image" | "video", id: string | undefined, settings: AppSettings | null) => {
+      const manifest = this.opts.manifest;
+      const modelId = id ?? production.meta.models?.[capability] ?? (manifest && modelForCapability(manifest, settings?.routing, capability)?.id);
+      const model = manifest?.models.find(candidate => candidate.id === modelId);
+      const app = this.readModel.getState().app;
+      if (!model || !["image", "video"].includes(model.capability) || settings?.models.disabled.includes(model.id) || !modelEligible(model, {
+        providers: app.providers, disabled: app.models.disabled, recipes: app.comfyui?.recipes ?? [],
+        comfyUiLocality: app.comfyui?.engine.locality, gated: app.runtime?.models ?? [],
+      })) throw new Error("Choose an enabled, eligible production model.");
+      return model;
+    };
+    return {
+      jobs: () => this.jobQueue?.listJobs().filter(job => job.worldId === store.worldId) ?? [],
+      freeze: input => this.freezeLocalIdentity(input),
+      frameDeps: () => this.frameRunDriverDeps(), planDeps: () => this.planDriverDeps(),
+      cancel: async id => { await this.jobQueue?.cancel(id); },
+      refresh: async (productionId, runId) => {
+        if (this.stopping || !this.stillOpen(store)) return;
+        if (runId) await this.emitFrameRun(store, store.worldId, productionId, runId);
+        else await this.emitPlanStates(store, store.worldId, productionId);
+        await this.refreshWorldSnapshot(store.worldId);
+        this.trackBackground(this.reconcileGenerationConversationActions(store));
+      },
+      frameInput: async (action, _id, at) => {
+        const settings = this.appSettings ? await this.appSettings.load() : null;
+        const bundle = store.getBundle();
+        const production = bundle.productions.find(p => p.meta.id === action.productionId);
+        const scene = production?.scenes.find(s => s.id === action.sceneId);
+        if (!production || !scene) throw new Error("The production scene is unavailable.");
+        const model = modelFor(production, "image", action.modelId, settings);
+        const videoModelId = production.meta.models?.video ?? (this.opts.manifest && modelForCapability(this.opts.manifest, settings?.routing, "video")?.id);
+        const video = this.opts.manifest?.models.find(candidate => candidate.id === videoModelId);
+        const identity = this.freezeLocalIdentity({ worldId: store.worldId, productionId: action.productionId, target: { kind: "shot", id: scene.id },
+          capability: "image", provider: model.provider, model: model.id, params: {}, estimatedMicroUsd: 0 });
+        return { worldId: store.worldId, productionId: action.productionId, production, scene, world: bundle, model, mode: action.mode, scope: action.scope,
+          shotId: action.shotId, boardCapSec: video?.limits.maxDurationSec ?? 10, boardPanelCap: video?.limits.storyboardPanels,
+          eligible: true, recipe: identity.recipe, engine: identity.engine, clock: () => at };
+      },
+      planInput: async (action, id, at, acknowledgeShotIds) => {
+        const settings = this.appSettings ? await this.appSettings.load() : null;
+        const bundle = store.getBundle();
+        const production = bundle.productions.find(p => p.meta.id === action.productionId);
+        const scene = production?.scenes.find(s => s.id === action.sceneId);
+        if (!production || !scene) throw new Error("The production scene is unavailable.");
+        const model = modelFor(production, "video", action.modelId, settings);
+        const route = characterAudioRoute(model);
+        const disabled = action.audioReferencesDisabled || !route;
+        const cast = disabled ? { references: [], notSent: [], refused: [] }
+          : await resolveCastVoices(store, production, scene, id, acknowledgeShotIds, route?.local === true, { acknowledge: acknowledgeShotIds !== undefined, at });
+        const audioDesign = await audioDesignFor(store, production.meta.id);
+        const plan = planScene({ timingProduction: production, world: bundle.meta, artDirection: bundle.artDirection, productionId: action.productionId,
+          production: { styleOverride: production.meta.styleOverride, musicPolicy: production.meta.musicPolicy, failureModes: production.meta.failureModes },
+          sheets: bundle.sheets, kits: bundle.referenceKits, props: bundle.props, scene, selections: production.selections, model, audioDesign,
+          artifacts: bundle.artifacts, takes: production.takes, aspect: production.meta.aspect, resolution: action.resolution,
+          audioReferencesDisabled: disabled, performanceReferences: cast.references, masterReferences: [] }, action.mode);
+        return { manifest: this.opts.manifest, castNotSent: [...cast.notSent, ...cast.refused], worldId: store.worldId,
+          productionId: action.productionId, scene, plan, model, world: bundle, policy: action.policy, requestId: id.slice(4), clock: () => at };
       },
     };
   }
@@ -19308,7 +19278,7 @@ export class Coordinator {
     if (this.stopping || !this.stillOpen(store)) return;
     const lifecycle = this.conversationActionLifecycle(store);
     for (const action of activeActions) {
-      if (action.authority.kind !== "job-queue" || action.shown.body.family !== "generation") continue;
+      if (!["job-queue", "frame-run", "dispatch-plan"].includes(action.authority.kind) || action.shown.body.family !== "generation") continue;
       if (await lifecycle.reconcileAction(action.conversationId, action.actionId)) {
         await this.refreshConversationOutcome(store, action.conversationId);
       }
@@ -19983,6 +19953,8 @@ export class Coordinator {
         toPng: this.opts.boundaryFrameMaker,
         refresh: async sessionId => { await this.refreshWorldSnapshot(store.worldId); await this.refreshBench(store.worldId, sessionId); },
       }),
+      productionBatchQuotes: new GenerationQuotes(store, productionBatchSource(store, this.productionBatchPorts(store)), quotePorts),
+      productionBatchControls: new ProductionBatchControls(store, this.productionBatchPorts(store)),
       productionGenerationQuotes: new GenerationQuotes(store, productionGenerationSource(store, {
         manifest: this.opts.manifest ?? null,
         settings: () => this.appSettings ? this.appSettings.load() : Promise.resolve(null),

@@ -10,6 +10,8 @@ import { readCharacterAudioInputs } from "../audio/reference-inputs.js";
 
 import { mkdir, open as openFile, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
   bindPassFrame,
   chainedDependencies,
@@ -40,6 +42,7 @@ import { toExtendedLength } from "../world/paths.js";
 import { extractBoundaryArtifact, type BoundaryFrameMaker } from "../takes/boundary.js";
 import type { WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
+import { readContainedImageReferences } from "../world/reference-files.js";
 
 function plansDir(store: WorldStore, productionId: string): string {
   return join(store.dir, "productions", productionId, "plans");
@@ -107,6 +110,10 @@ export async function listPlans(store: WorldStore, productionId: string): Promis
 }
 
 export interface CreatePlanInput {
+  planId?: string;
+  idempotencyKeys?: readonly string[];
+  idempotencyKeyFor?: (passIndex: number) => string;
+  preparedPlan?: DispatchPlan;
   manifest?: import("@arke-studio/contracts").ModelManifest;
   acknowledgedRecommendationIds?: string[];
   /** Scene-cast voices that did not resolve, for the plan card's clause (SPEC-044 R-28). */
@@ -225,10 +232,7 @@ function passCarries(
  * Create the durable plan (R-12..R-15): compile, write the aggregate atomically, append
  * `authorized` — all before any pass may reach a provider. Idempotent by requestId.
  */
-export async function createDispatchPlan(store: WorldStore, input: CreatePlanInput): Promise<DispatchPlan> {
-  const existing = (await listPlans(store, input.productionId)).find((plan) => plan.requestId === input.requestId);
-  if (existing !== undefined) return existing;
-
+export async function compileDispatchPlan(store: WorldStore, input: CreatePlanInput): Promise<DispatchPlan> {
   // Compilation refuses what dispatch would refuse (R-13) — a plan that could not compile does
   // not exist. Whole-scene passes chain behind boundary frames where the model has a route.
   const chainFrames = input.plan.mode === "whole-scene" && !input.plan.passReferences.some(p => p.audioReferences?.references.length);
@@ -261,7 +265,7 @@ export async function createDispatchPlan(store: WorldStore, input: CreatePlanInp
     timingByPass.set(Math.max(index, 0), slot);
   }
   const aggregate: DispatchPlan = DispatchPlanSchema.parse({
-    planId: `pl_${ulid()}`,
+    planId: input.planId ?? `pl_${ulid()}`,
     requestId: input.requestId,
     worldId: input.worldId,
     productionId: input.productionId,
@@ -285,7 +289,7 @@ export async function createDispatchPlan(store: WorldStore, input: CreatePlanInp
     },
     passes: compiled.map((pass, passIndex) => ({
       passIndex,
-      idempotencyKey: ulid(),
+      idempotencyKey: input.idempotencyKeys?.[passIndex] ?? input.idempotencyKeyFor?.(passIndex) ?? ulid(),
       dependsOn: dependencies[passIndex]!,
       compiled: pass,
       carries: passCarries(pass, input, input.castNotSent ?? [], timingByPass.get(passIndex)),
@@ -293,6 +297,26 @@ export async function createDispatchPlan(store: WorldStore, input: CreatePlanInp
     ...(input.castNotSent?.length ? { castNotSent: input.castNotSent } : {}),
     createdAt: input.clock(),
   });
+  return aggregate;
+}
+
+/** Persist the exact authorization before any pass may enqueue (SPEC-024 R-12). */
+export async function createDispatchPlan(store: WorldStore, input: CreatePlanInput): Promise<DispatchPlan> {
+  const existing = (await listPlans(store, input.productionId)).find(plan => plan.requestId === input.requestId);
+  if (existing) return existing;
+  const current = await compileDispatchPlan(store, input);
+  const withoutPins = (plan: DispatchPlan) => {
+    const copy = structuredClone(plan);
+    for (const pass of copy.passes) {
+      delete pass.compiled.params.generationQuoteReferences;
+      delete pass.compiled.params.generationQuoteVideoReferences;
+      delete pass.compiled.params.generationQuoteProduction;
+      delete pass.compiled.params.generationQuoteLocalIdentity;
+    }
+    return JSON.parse(JSON.stringify(copy)) as DispatchPlan;
+  };
+  const aggregate = input.preparedPlan ? DispatchPlanSchema.parse(input.preparedPlan) : current;
+  if (!isDeepStrictEqual(withoutPins(current), withoutPins(aggregate))) throw new Error("The scene dispatch quote is stale; prepare a fresh card.");
   /*
    * The write joins the store's queue rather than landing beside it (issue 654). Everything
    * above read the scene outside that queue, and a shot deletion takes its R-39 blockers
@@ -311,6 +335,10 @@ export async function createDispatchPlan(store: WorldStore, input: CreatePlanInp
         `the scene moved v${input.scene.version} → v${current.version} since the plan was priced — price it again`,
       );
     }
+    const bundle = store.getBundle();
+    const production = bundle.productions.find(p => p.meta.id === input.productionId)!;
+    const drift = input.preparedPlan ? sourceDrift(aggregate, production, bundle) : null;
+    if (drift) throw new Error(`The scene dispatch quote is stale: ${drift}.`);
     await mkdir(toExtendedLength(plansDir(store, input.productionId)), { recursive: true });
     await atomicWriteFile(join(plansDir(store, input.productionId), `${aggregate.planId}.json`), // atomic: temp + rename
       JSON.stringify(aggregate, null, 2) + "\n");
@@ -509,10 +537,24 @@ export async function advancePlan(
 
     if (next.kind === "materialise") {
       const passState = state.passes[next.passIndex]!;
-      const params =
+      let params =
         pass.compiled.route.kind === "frame" && pass.dependsOn.some((dep) => dep.needs === "boundary-frame")
           ? bindPassFrame(pass.compiled, passState.boundFrame!)
           : pass.compiled.params;
+      if (Array.isArray(params.generationQuoteReferences) && passState.boundFrame && pass.dependsOn.some(dep => dep.needs === "boundary-frame")) {
+        const paths = params.references as string[];
+        const files = await readContainedImageReferences(store.dir, paths);
+        const oldPins = params.generationQuoteReferences as { file: string; hash: string }[];
+        const pins = paths.map((file, index) => {
+          const hash = createHash("sha256").update(files[index]!.data).digest("hex");
+          const prior = oldPins.find(pin => pin.file === file);
+          if (prior ? prior.hash !== hash : file !== passState.boundFrame!.file || !`sha256:${hash}`.startsWith(passState.boundFrame!.hash)) {
+            throw new Error("A quoted plan reference changed before materialisation.");
+          }
+          return { file, hash };
+        });
+        params = { ...params, generationQuoteReferences: pins };
+      }
       await appendPlanEvents(store, plan.productionId, plan.planId, [
         {
           kind: "pass-materialised",

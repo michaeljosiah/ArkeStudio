@@ -138,7 +138,7 @@ const NOT_A_SETTING = new Set([
   "startFrame",
   "continuedFrom",
   "videoReferences",
-  "generationQuoteProduction",
+  "generationQuoteProduction", "generationQuoteLocalIdentity",
   "generationQuoteReferences",
   "generationQuoteVideoReferences",
 ]);

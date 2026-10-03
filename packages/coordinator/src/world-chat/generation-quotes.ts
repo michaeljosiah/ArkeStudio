@@ -25,7 +25,8 @@ export interface GenerationQuoteSource {
   compareInputs?(inputs: readonly EnqueueInput[]): unknown;
   beforeDispatch?(action: ModelWorldChatAction, actionId: string, inputs: readonly EnqueueInput[], materialization: unknown, createdAt: string): Promise<void>;
   dispatch?(action: ModelWorldChatAction, actionId: string, inputs: readonly EnqueueInput[], materialization: unknown): Promise<ConversationActionExecutionOutcome>;
-  reconcile?(card: ConversationActionCard, action: ModelWorldChatAction, inputs: readonly EnqueueInput[]): Promise<ConversationActionExecutionOutcome | null>;
+  /** Undefined delegates terminal receipts to the shared job fold. */
+  reconcile?(card: ConversationActionCard, action: ModelWorldChatAction, inputs: readonly EnqueueInput[]): Promise<ConversationActionExecutionOutcome | null | undefined>;
 }
 
 const InputSchema = JobSchema.pick({
@@ -128,7 +129,7 @@ export class GenerationQuotes {
       return existing.body;
     }
     const quote: Quote = { action, actionDigest: conversationActionDigest(action), createdAt: at, fingerprint: compiled.fingerprint,
-      body: compiled.body, inputs: compiled.inputs.map(input => ({ ...input, idempotencyKey: ulid() })), materialization: compiled.materialization, dispatchStarted: false, admissionComplete: false };
+      body: compiled.body, inputs: compiled.inputs.map(input => ({ ...input, idempotencyKey: input.idempotencyKey ?? ulid() })), materialization: compiled.materialization, dispatchStarted: false, admissionComplete: false };
     quote.body.quoteDigest = sealedDigest(quote);
     await this.write(id, quote);
     return quote.body;
@@ -154,7 +155,14 @@ export class GenerationQuotes {
     quote.dispatchStarted = true;
     await this.write(id, quote);
     if (this.source.dispatch) {
-      try { return await this.source.dispatch(action, id, quote.inputs, quote.materialization); }
+      try {
+        const outcome = await this.source.dispatch(action, id, quote.inputs, quote.materialization);
+        if (outcome.status === "queued" || outcome.status === "completed") {
+          quote.admissionComplete = true;
+          await this.write(id, quote);
+        }
+        return outcome;
+      }
       catch { return { status: "running", detail: "Generation admission was interrupted. Existing work needs reconciliation in Activity." }; }
     }
     // The quote's keys survive any partial admission. An uncertain append is never retried by
@@ -172,7 +180,13 @@ export class GenerationQuotes {
   async reconcile(card: ConversationActionCard): Promise<ConversationActionExecutionOutcome | null> {
     const quote = await this.read(card.actionId);
     if (!quote?.dispatchStarted) return null;
-    if (this.source.reconcile) return this.source.reconcile(card, quote.action, quote.inputs);
+    if (this.source.reconcile) {
+      const outcome = await this.source.reconcile(card, quote.action, quote.inputs);
+      if (outcome !== undefined) return outcome;
+      // The owning run/plan proved terminal admission, including a crash before dispatch's
+      // acknowledgement reached this quote. This never re-enqueues an uncertain purchase.
+      if (!quote.admissionComplete) { quote.admissionComplete = true; await this.write(card.actionId, quote); }
+    }
     const jobs = quote.inputs.map(input => this.ports.jobs().find(job => job.worldId === this.store.worldId && job.idempotencyKey === input.idempotencyKey));
     if (!quote.admissionComplete && (quote.admissionIndex === undefined || jobs.some((job, index) => !job && index <= quote.admissionIndex!))) {
       return { status: "running", detail: "Generation admission needs reconciliation in Activity; its uncertain purchase was not resubmitted." };
@@ -188,9 +202,10 @@ export class GenerationQuotes {
       if (!job) return [];
       const take = this.store.getBundle().referenceTakes.find(take => take.jobId === job.id);
       const production = this.store.getBundle().productions.find(production => production.meta.id === job.productionId);
-      const productionTake = job.params.generationQuoteProduction === true ? production?.takes.find(take => take.jobId === job.id && take.media) : undefined;
+      const productionOwned = job.params.generationQuoteProduction === true || typeof job.params.frameRun === "string";
+      const productionTake = productionOwned ? production?.takes.find(take => take.jobId === job.id && take.media) : undefined;
       const owner = take?.reference?.sheetId ?? take?.prop?.propId;
-      const mediaPath = job.params.generationQuoteProduction === true ? productionTake?.media ? `productions/${job.productionId}/takes/${productionTake.id}/${productionTake.media}` : undefined
+      const mediaPath = productionOwned ? productionTake?.media ? `productions/${job.productionId}/takes/${productionTake.id}/${productionTake.media}` : undefined
         : take?.media && owner ? `references/${owner}/takes/${take.id}/${take.media}` : job.landedFiles?.[0];
       return [{ id: productionTake?.id ?? take?.id ?? job.id, medium: job.capability === "video" ? "video" as const : "image" as const,
       status: job.status === "succeeded" && job.finalization?.status !== "failed" && mediaPath ? "completed" as const : job.status === "cancelled" ? "cancelled" as const : "failed" as const,
@@ -202,9 +217,9 @@ export class GenerationQuotes {
     const cancelled = results.filter(result => result.status === "cancelled").length;
     const costs = await Promise.all(jobs.map(job => job ? this.ports.actualCost?.(job.id).catch(() => null) ?? null : null));
     const actualMicroUsd = costs.every(cost => cost !== null) ? costs.reduce<number>((sum, cost) => sum + cost!, 0) : null;
-    return { status: completed > 0 ? "completed" : cancelled === quote.inputs.length ? "cancelled" : "failed",
+    return { status: completed > 0 ? "completed" : cancelled > 0 && cancelled === results.length ? "cancelled" : "failed",
       receipt: { kind: "generation", id: card.actionId, summary: quote.admissionComplete
-        ? completed > 0 ? "Generation settled; results await separate selection." : "Generation settled without a usable result."
+        ? completed > 0 ? quote.inputs.some(input => typeof input.params.frameRun === "string") ? "Generation settled; immutable frames were filed using the approved slot fences." : "Generation settled; results await separate selection." : "Generation settled without a usable result."
         : "Admission was interrupted; missing work was not resubmitted.",
         generation: { authorized: quote.inputs.length, completed, failed: results.length - completed - cancelled, cancelled,
           unattempted: quote.inputs.length - results.length, actualMicroUsd, results } },

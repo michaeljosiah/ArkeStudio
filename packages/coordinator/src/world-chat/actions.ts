@@ -1,3 +1,4 @@
+import type { ProductionBatchControls } from "./production-batch.js";
 import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema, checkPropName, newId } from "@arke-studio/contracts";
 import { createProp, addPropState, renameProp, acceptPropStateReference } from "../references/props.js";
 import { createHash } from "node:crypto";
@@ -61,6 +62,14 @@ import {
   WorldChatProductionBoardCompileActionSchema,
   WorldChatProductionBoardExportActionSchema,
   WorldChatProductionTakeImportActionSchema,
+  WorldChatProductionFrameRunStartActionSchema,
+  WorldChatProductionFrameRunPauseActionSchema,
+  WorldChatProductionFrameRunResumeActionSchema,
+  WorldChatProductionFrameRunCancelActionSchema,
+  WorldChatProductionFrameRunRetryStepActionSchema,
+  WorldChatProductionFrameRunRetryCellActionSchema,
+  WorldChatProductionSceneDispatchActionSchema,
+  WorldChatProductionPlanCancelActionSchema,
   WorldChatProductionTakeGenerationActionSchema,
   WorldChatProductionTakeFileActionSchema,
   WorldChatProductionShotFrameClearActionSchema,
@@ -361,6 +370,8 @@ export interface WorldChatActionAdapterDeps {
   readonly getBuildItems?: () => readonly ArkeBuildItemRead[];
   readonly generationQuotes?: GenerationQuotes;
   readonly productionGenerationQuotes?: GenerationQuotes;
+  readonly productionBatchQuotes?: GenerationQuotes;
+  readonly productionBatchControls?: ProductionBatchControls;
   readonly productionTakeFiling?: ProductionTakeFiling;
   readonly buildGenerationQuotes?: GenerationQuotes;
   readonly benchGenerationQuotes?: GenerationQuotes;
@@ -471,6 +482,14 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-board-compile": ["scenes", "takes", "artifacts"],
   "production-board-export": ["scenes", "takes", "artifacts"],
   "production-take-import": ["scenes", "takes"],
+  "production-frame-run-start": ["scenes", "takes"],
+  "production-frame-run-pause": ["jobs"],
+  "production-frame-run-resume": ["jobs"],
+  "production-frame-run-cancel": ["jobs"],
+  "production-frame-run-retry-step": ["jobs"],
+  "production-frame-run-retry-cell": ["jobs"],
+  "production-scene-dispatch": ["scenes", "takes"],
+  "production-plan-cancel": ["plans"],
   "production-take-generation": ["scenes", "takes"],
   "production-take-file": ["scenes", "takes"],
   "production-shot-frame-clear": ["scenes", "takes"],
@@ -670,10 +689,18 @@ function productionActionTargets(
     case "production-take-import":
     case "production-take-file":
     case "production-shot-frame-clear":
+    case "production-frame-run-start":
+    case "production-scene-dispatch":
     case "production-take-generation": return [
       { requirement: "scenes", target: `${action.productionId}:${action.sceneId}` },
       { requirement: "takes", target: action.productionId },
     ];
+    case "production-frame-run-pause": return [{ requirement: "jobs", target: action.productionId }];
+    case "production-frame-run-resume": return [{ requirement: "jobs", target: action.productionId }];
+    case "production-frame-run-cancel": return [{ requirement: "jobs", target: action.productionId }];
+    case "production-frame-run-retry-step": return [{ requirement: "jobs", target: action.productionId }];
+    case "production-frame-run-retry-cell": return [{ requirement: "jobs", target: action.productionId }];
+    case "production-plan-cancel": return [{ requirement: "plans", target: action.productionId }];
     case "production-take-review":
     case "production-take-trim": return [{ requirement: "takes", target: action.productionId }];
     case "production-stage-construct":
@@ -826,6 +853,14 @@ function preparedWorldPayload(
     case "production-take-import": return WorldChatProductionTakeImportActionSchema.parse({ kind: "world-chat-production-take-import", ...common });
     case "production-take-file": return WorldChatProductionTakeFileActionSchema.parse({ kind: "world-chat-production-take-file", ...common });
     case "production-shot-frame-clear": return WorldChatProductionShotFrameClearActionSchema.parse({ kind: "world-chat-production-shot-frame-clear", ...common });
+    case "production-frame-run-start": return WorldChatProductionFrameRunStartActionSchema.parse({ kind: "world-chat-production-frame-run-start", ...common });
+    case "production-frame-run-pause": return WorldChatProductionFrameRunPauseActionSchema.parse({ kind: "world-chat-production-frame-run-pause", ...common });
+    case "production-frame-run-resume": return WorldChatProductionFrameRunResumeActionSchema.parse({ kind: "world-chat-production-frame-run-resume", ...common });
+    case "production-frame-run-cancel": return WorldChatProductionFrameRunCancelActionSchema.parse({ kind: "world-chat-production-frame-run-cancel", ...common });
+    case "production-frame-run-retry-step": return WorldChatProductionFrameRunRetryStepActionSchema.parse({ kind: "world-chat-production-frame-run-retry-step", ...common });
+    case "production-frame-run-retry-cell": return WorldChatProductionFrameRunRetryCellActionSchema.parse({ kind: "world-chat-production-frame-run-retry-cell", ...common });
+    case "production-scene-dispatch": return WorldChatProductionSceneDispatchActionSchema.parse({ kind: "world-chat-production-scene-dispatch", ...common });
+    case "production-plan-cancel": return WorldChatProductionPlanCancelActionSchema.parse({ kind: "world-chat-production-plan-cancel", ...common });
     case "production-take-generation": return WorldChatProductionTakeGenerationActionSchema.parse({ kind: "world-chat-production-take-generation", ...common });
     case "production-take-review": return WorldChatProductionTakeReviewActionSchema.parse({ kind: "world-chat-production-take-review", ...common });
     case "production-take-trim": return WorldChatProductionTakeTrimActionSchema.parse({ kind: "world-chat-production-take-trim", ...common });
@@ -1157,6 +1192,14 @@ function worldActionTargets(
     case "production-board-compile":
     case "production-board-export": return [{ kind: "scene", id: action.sceneId, label: action.sceneId }];
     case "production-take-import": return [{ kind: "shot", id: action.shotId, label: action.shotId }];
+    case "production-frame-run-start": return [{ kind: "production", id: action.productionId, label: action.productionId }];
+    case "production-frame-run-pause": return [{ kind: "production", id: action.productionId, label: action.productionId }];
+    case "production-frame-run-resume": return [{ kind: "production", id: action.productionId, label: action.productionId }];
+    case "production-frame-run-cancel": return [{ kind: "production", id: action.productionId, label: action.productionId }];
+    case "production-frame-run-retry-step": return [{ kind: "production", id: action.productionId, label: action.productionId }];
+    case "production-frame-run-retry-cell": return [{ kind: "production", id: action.productionId, label: action.productionId }];
+    case "production-scene-dispatch": return [{ kind: "production", id: action.productionId, label: action.productionId }];
+    case "production-plan-cancel": return [{ kind: "production", id: action.productionId, label: action.productionId }];
     case "production-take-generation": return action.target.kind === "shot"
       ? [{ kind: "shot", id: action.target.shotId, label: action.target.shotId }]
       : action.target.memberShotIds.map((shotId) => ({ kind: "shot", id: shotId, label: shotId }));
@@ -2767,6 +2810,26 @@ async function sharedResourceProjection(
       };
       break;
     }
+    case "world-chat-production-frame-run-start":
+    case "world-chat-production-frame-run-resume":
+    case "world-chat-production-frame-run-retry-step":
+    case "world-chat-production-frame-run-retry-cell":
+    case "world-chat-production-scene-dispatch": {
+      authority = { kind: payload.action.kind === "production-scene-dispatch" ? "dispatch-plan" : "frame-run", id: intent.actionId };
+      if (!deps.productionBatchQuotes) throw new Error("Production batch generation is unavailable.");
+      const body = await deps.productionBatchQuotes.prepare(payload.action, intent.actionId, intent.createdAt);
+      shown = { title: body.purpose, consequence: "Runs the quoted production work after approval.", affectedTargets: [...intent.targets], ripples: [], permissionReason: "spend-and-compute", body };
+      break;
+    }
+    case "world-chat-production-frame-run-pause":
+    case "world-chat-production-frame-run-cancel":
+    case "world-chat-production-plan-cancel": {
+      if (!deps.productionBatchControls) throw new Error("Production batch controls are unavailable.");
+      authority = { kind: payload.action.kind === "production-plan-cancel" ? "dispatch-plan" : "frame-run", id: payload.action.kind === "production-plan-cancel" ? payload.action.planId : payload.action.runId };
+      const body = await deps.productionBatchControls.prepare(payload.action);
+      shown = { title: "Review production control", consequence: body.expectedResult, affectedTargets: [...intent.targets], ripples: [], permissionReason: "external-network-action", body };
+      break;
+    }
     case "world-chat-production-take-generation": {
       authority = { kind: "job-queue", id: intent.actionId };
       if (!deps.productionGenerationQuotes) approvalBlockedReason = "The production generation quote source is unavailable.";
@@ -3747,6 +3810,16 @@ async function executeSharedResource(
         ? { status: "completed", receipt: { kind: "take", id: result.id ?? action.actionId, summary: "The image was recorded as an unselected immutable take." } }
         : { status: result.status, detail: result.detail };
     }
+    case "world-chat-production-frame-run-start":
+    case "world-chat-production-frame-run-resume":
+    case "world-chat-production-frame-run-retry-step":
+    case "world-chat-production-frame-run-retry-cell":
+    case "world-chat-production-scene-dispatch":
+      return deps.productionBatchQuotes?.dispatch(payload.action, action.actionId) ?? { status: "failed", detail: "Production batch generation is unavailable." };
+    case "world-chat-production-frame-run-pause":
+    case "world-chat-production-frame-run-cancel":
+    case "world-chat-production-plan-cancel":
+      return deps.productionBatchControls?.execute(payload.action, action.actionId, precondition) ?? { status: "failed", detail: "Production batch controls are unavailable." };
     case "world-chat-production-take-generation":
       return deps.productionGenerationQuotes?.dispatch(payload.action, action.actionId) ?? { status: "failed", detail: "The production generation quote is unavailable." };
     case "world-chat-production-take-file": {
@@ -4376,6 +4449,7 @@ export function worldChatActionAdapters(
     const abandon = async (id: string) => {
       await deps.generationQuotes?.abandon(id);
       await deps.productionGenerationQuotes?.abandon(id);
+      await deps.productionBatchQuotes?.abandon(id);
       await deps.productionTakeFiling?.abandon(id);
       await deps.buildGenerationQuotes?.abandon(id);
       await deps.benchGenerationQuotes?.abandon(id);
@@ -4460,10 +4534,12 @@ export function worldChatActionAdapters(
       },
       deny: (action) => abandon(action.actionId),
       reconcile: async (action) => {
+        if (["world-chat-production-frame-run-pause", "world-chat-production-frame-run-cancel", "world-chat-production-plan-cancel"].includes(action.actionKind)) return deps.productionBatchControls?.reconcile(action) ?? null;
         if (action.actionKind === "world-chat-production-take-file") {
           const filed = await deps.productionTakeFiling?.reconcile(action.actionId);
           if (filed) return { status: "completed", receipt: { kind: "production-take-file", id: filed.productionTakeIds[0]!, summary: "The Bench take was filed and accepted on the reviewed shot." } };
         }
+        if (action.actionKind === "world-chat-production-frame-run-start" || action.actionKind === "world-chat-production-frame-run-resume" || action.actionKind === "world-chat-production-frame-run-retry-step" || action.actionKind === "world-chat-production-frame-run-retry-cell" || action.actionKind === "world-chat-production-scene-dispatch") return deps.productionBatchQuotes?.reconcile(action) ?? null;
         if (action.actionKind === "world-chat-production-take-generation") return deps.productionGenerationQuotes?.reconcile(action) ?? null;
         if (action.actionKind === "world-chat-production-routing-traversal" && action.productionId) {
           if (await hasTraversalRequest(store, action.productionId, action.actionId)) {
@@ -4694,6 +4770,14 @@ export function worldChatActionAdapters(
     "world-chat-production-board-export",
     "world-chat-production-take-import",
     "world-chat-production-take-generation",
+    "world-chat-production-frame-run-start",
+    "world-chat-production-frame-run-pause",
+    "world-chat-production-frame-run-resume",
+    "world-chat-production-frame-run-cancel",
+    "world-chat-production-frame-run-retry-step",
+    "world-chat-production-frame-run-retry-cell",
+    "world-chat-production-scene-dispatch",
+    "world-chat-production-plan-cancel",
     "world-chat-production-take-file",
     "world-chat-production-shot-frame-clear",
     "world-chat-production-take-review",
