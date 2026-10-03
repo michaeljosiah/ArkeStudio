@@ -358,6 +358,13 @@ export const AUDIOBOOK_READING_NOTES_SCHEMA_VERSION = 45;
  * dropped with its take, the book's reading lost — so the world is raised before the first.
  */
 export const AUDIOBOOK_GROUPED_SCHEMA_VERSION = 46;
+/**
+ * Pictures that follow the words (design turn 186, SPEC-047 R-64): `pictures` on the chapter's
+ * strict audiobook record. A build before it reads such a record as unreadable — every take of the
+ * chapter lost to a run that would make them again — so the world is raised before the first
+ * record carrying a picture is written. A record with none is written without the field.
+ */
+export const AUDIOBOOK_PICTURES_SCHEMA_VERSION = 47;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

@@ -9,6 +9,7 @@ import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema, DirectionReadsSchema } from "./audiobook.js";
+import { AudiobookListeningSchema } from "./audiobook-listening.js";
 import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX } from "./cadence.js";
 import { FreePlanShortSchema } from "./provider-plans.js";
 import { z } from "zod";
@@ -1343,6 +1344,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
    * window is never left opening.
    */
   z.object({ ...base, type: z.literal("audiobook.door"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, door: AudiobookDoorSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
+  /** The book as a listener hears it (design turn 186), answered to the window that asked; or none, and why. */
+  z.object({ ...base, type: z.literal("audiobook.listening"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, listening: AudiobookListeningSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
   /**
    * The book read as one run (SPEC-047 R-16..R-18): started under the run's request (a cloned
    * voice's consent is asked under it), priced once for every chapter's cloud blocks, a chapter

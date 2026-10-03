@@ -537,6 +537,9 @@ const CLIENT_COMMAND_METADATA = {
   // The door and the book (SPEC-047 R-29, R-16): a read of every chapter's state, and the
   // chapter's run over the whole book.
   "open-audiobook": readOnly(QUERY),
+  // The book as a listener hears it, and a picture on a block (turn 186): a read, and a command on the record.
+  "open-audiobook-listening": readOnly(QUERY),
+  "set-audiobook-picture": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   "read-audiobook-book": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
   "stop-audiobook-book": action("production", "command", "voice", "external-network-action", ["chapters"]),
   "accept-direction": action("production", "command", "voice", "external-network-action", ["chapters"]),

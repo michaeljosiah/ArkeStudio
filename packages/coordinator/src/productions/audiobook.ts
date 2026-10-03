@@ -38,7 +38,7 @@ import {
 import { clipFor } from "../voice/library.js";
 import { directionPlan } from "../voice/direction.js";
 import { atomicWriteFile } from "../world/atomic.js";
-import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
@@ -135,7 +135,12 @@ async function writeOwned(store: WorldStore, rel: string, value: unknown, supers
  * chapter's paid takes again.
  */
 export async function writeAudiobook(store: WorldStore, productionId: string, chapterFile: string, record: ChapterAudiobook): Promise<void> {
-  const { direction, ...undirected } = record;
+  // A record with no picture is written without the field, in the shape the builds before
+  // pictures read; one with a picture raises the world past them first (design turn 186, R-64).
+  const { pictures, ...unpictured } = record;
+  const pictured = pictures !== undefined && Object.keys(pictures).length > 0;
+  if (pictured) await store.ensureSchemaVersion(AUDIOBOOK_PICTURES_SCHEMA_VERSION, "audiobook-pictures");
+  const { direction, ...undirected } = pictured ? { ...unpictured, pictures } : unpictured;
   const directed = Object.keys(direction).length > 0;
   if (directed) await store.ensureSchemaVersion(AUDIOBOOK_DIRECTION_SCHEMA_VERSION, "audiobook-direction");
   // A marker, or the words a direction was written for, is a field the build before it reads
@@ -159,7 +164,7 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
     onDisk[key] = note !== undefined && fits ? { ...entry, plan: { ...plan, phrase: note } } : entry;
   }
   if (renamed) await store.ensureSchemaVersion(AUDIOBOOK_NOTE_SCHEMA_VERSION, "audiobook-note");
-  await writeOwned(store, audiobookPath(productionId, chapterFile), directed ? { ...record, direction: onDisk } : undirected, chapterFile === "book" ? undefined : legacyAudiobookPath(productionId, chapterFile));
+  await writeOwned(store, audiobookPath(productionId, chapterFile), directed ? { ...undirected, direction: onDisk } : undirected, chapterFile === "book" ? undefined : legacyAudiobookPath(productionId, chapterFile));
 }
 
 /**

@@ -305,6 +305,7 @@ import {
 } from "./productions/audiobook-direction.js";
 import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiobookBook } from "./productions/audiobook-book.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
+import { audiobookListening, setAudiobookPicture } from "./productions/audiobook-listening.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
 import { checkDirection, directionPlan, heldKey } from "./voice/direction.js";
@@ -14843,6 +14844,44 @@ export class Coordinator {
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.door-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: new Date().toISOString(), type: "audiobook.door", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, door: null, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "open-audiobook-listening": {
+        // The book as a listener hears it (turn 186, SPEC-047 R-57..R-62): every chapter planned
+        // as its press would plan it, the made takes on one clock and the pictures placed on it,
+        // answered to the window that asked. Nothing written, nothing asked of a provider.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId };
+        try {
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const listening = await audiobookListening(store, msg.productionId, narrator);
+          this.emit({ at: new Date().toISOString(), type: "audiobook.listening", ...ids, listening });
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.listening-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: new Date().toISOString(), type: "audiobook.listening", ...ids, listening: null, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "set-audiobook-picture": {
+        // A picture set on a block or taken off (turn 186c, R-60): only one the world holds,
+        // written into the chapter's record through its lane and answered as the record.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
+        const at = () => new Date().toISOString();
+        try {
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, msg.picture, narrator);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: at(), type: "audiobook.record", ...ids, record });
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.picture-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
         }
         return;
       }

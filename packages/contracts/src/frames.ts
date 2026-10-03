@@ -9,6 +9,7 @@ import { AccountPageSchema } from "./account.js";
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
 import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema } from "./audiobook.js";
+import { AudiobookPictureSourceSchema } from "./audiobook-pictures.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
@@ -3283,6 +3284,27 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * order, priced once, stopped and resumed like a chapter's.
    */
   z.object({ kind: z.literal("open-audiobook"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /**
+   * The book as a listener hears it (design turn 186, SPEC-047 R-57..R-62): the made chapters in
+   * order with their takes, gaps and pictures, answered as `audiobook.listening`. Nothing written.
+   */
+  z.object({ kind: z.literal("open-audiobook-listening"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /**
+   * A picture set on a block, or taken off it with null (design turn 186c, R-60): a picture the
+   * world holds, by its world-relative path, and the tab it was chosen on. Answered as
+   * `audiobook.record` with the same id.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-picture"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      block: z.string().min(1),
+      picture: z.object({ file: z.string().min(1).max(1000), source: AudiobookPictureSourceSchema }).strict().nullable(),
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("read-audiobook-book"),
