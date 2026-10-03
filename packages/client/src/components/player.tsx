@@ -236,10 +236,13 @@ export function TextActions({
   copyText,
   readLabel = "Read aloud",
   note,
+  onReplay = (made) => void playClip(made),
 }: {
   /** Null while the read has not been generated yet — the speaker still starts it. */
   clip: Clip | null;
   onRead: () => void;
+  /** Plays a read already made; a read's owner passes its own so the replay claims the voice (turn 183). */
+  onReplay?: (clip: Clip) => void;
   copyText: string;
   readLabel?: string;
   /** Replaces the buttons while a decision is pending, e.g. a charged read's cost. */
@@ -256,7 +259,7 @@ export function TextActions({
         aria-label={readLabel}
         title={readLabel}
         onClick={() => {
-          if (clip) void playClip(clip);
+          if (clip) onReplay(clip);
           else onRead();
         }}
       >

@@ -112,11 +112,12 @@ it("navigates the viewer within the filtered shelf and closes Details without cl
 
 it("keeps phone deletion and retirement confirmations before their commands", async () => {
   await mount(`chat/${CHAT_ID}`);
+  // A reply's Listen and Copy are its own action row on a phone (design turn 183), not a copy
+  // of every reply in the options sheet.
+  assert.ok(dom.document.querySelector('.fy-chat__transcript .fy-replyacts [aria-label="Listen"]'));
+  assert.ok(dom.document.querySelector('.fy-chat__transcript .fy-replyacts [aria-label="Copy"]'));
   await click(dom.document.querySelector('[aria-label="Conversation options"]') as unknown as Element);
-  assert.ok(dom.document.querySelector(".fy-chat__reply-actions"));
-  assert.equal(dom.document.querySelector(".fy-chat__transcript .fy-textactions"), null);
-  assert.ok(dom.document.querySelector('.fy-chat__reply-actions [aria-label="Read aloud"]'));
-  assert.ok(dom.document.querySelector('.fy-chat__reply-actions [aria-label="Copy"]'));
+  assert.equal(dom.document.querySelector(".fy-page-sheet .fy-replyacts"), null);
   await click(button("Delete"));
   assert.ok(!sent.some(command => command.kind === "world-chat-delete"));
   assert.match(dom.document.querySelector(".fy-page-sheet")!.textContent!, /go for good/);

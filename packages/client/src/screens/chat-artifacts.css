@@ -226,11 +226,6 @@
 }
 
 @media (max-width: 1099px) {
-  .fy-chat__reply-actions summary { min-height: 44px; padding: 12px 0; font: var(--type-ui); cursor: pointer; }
-  .fy-chat__reply-actions > div { padding-block: 10px; border-top: 1px solid var(--border); }
-  .fy-chat__reply-actions p { margin: 0; font: 400 var(--text-sm)/1.5 var(--font-sans); overflow-wrap: anywhere; }
-  .fy-chat__reply-actions .fy-textactions { opacity: 1; pointer-events: auto; margin: 4px 0 0; }
-  .fy-chat__reply-actions .fy-textactions__btn { width: 44px; height: 44px; }
   .fy-chat__wrap .fy-chat__transcript { gap: 12px; }
   .fy-chat__wrap .fy-chat__bubble { font: 400 var(--text-sm)/1.5 var(--font-sans); border-radius: 16px; padding: 10px 14px; }
   .fy-chat__wrap .fy-chat__turn--user .fy-chat__bubble { border-top-right-radius: 6px; }

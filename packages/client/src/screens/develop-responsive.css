@@ -47,7 +47,6 @@
   :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-chat__turn:has(.fy-actioncard) { width: 100%; max-width: 100%; }
   :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-actioncard { min-width: 0; overflow-wrap: anywhere; }
   :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-actioncard__facts { grid-template-columns: 1fr; }
-  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-chat__turn > .fy-textactions { display: none; }
   :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__side { width: 340px; background: var(--background); padding: 20px 20px 22px; }
   .fy-develop-side { display: flex; flex-direction: column; min-height: 100%; gap: 14px; }
   .fy-develop-side__head { flex-wrap: wrap; }

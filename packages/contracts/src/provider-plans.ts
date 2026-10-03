@@ -2,6 +2,8 @@ import type { ManifestModel, ModelManifest } from "./manifest.js";
 import type { ProviderPlans } from "./settings.js";
 import type { LedgerEntry } from "./job.js";
 import { formatMicroUsd } from "./money.js";
+import { legacyVoiceModel, narratorAppliesTo, supportsVoiceUse } from "./voice.js";
+import { estimateSpeechMicroUsd } from "./speech-pricing.js";
 
 /**
  * A provider's Free plan (design turn 182): what the author's Plan row means for a read.
@@ -74,6 +76,48 @@ export function freeCreditDraw(reads: Iterable<{ model: Pick<ManifestModel, "spe
 /** Whether a draw on the free credit runs past what is left of it this month. */
 export function freeCreditOverrun(drawMicroUsd: number, creditLeftMicroUsd: number): boolean {
   return drawMicroUsd > 0 && drawMicroUsd > creditLeftMicroUsd;
+}
+
+/**
+ * Whether the app narrator, as it resolves in this world, reads a reply without asking (design
+ * turn 183): what decides whether a chat offers Read replies, which reads every reply as it
+ * lands and so must never be the way a priced voice spends unasked.
+ *
+ * The shipped local voice reads for nothing, and so does any narrator that falls to it — no
+ * choice, a choice that cannot narrate, or a clone chosen in another world. A local runtime is
+ * unmetered. A Free plan key reads free; a free credit reads free while there is any left this
+ * month. Everything else asks: a priced reader, a cloned voice through a hosted reader (its
+ * recording is asked about before every read, issue 1215), and a choice the manifest does not
+ * list, because the screen cannot see what it would cost — the coordinator still asks before it
+ * spends, so a wrong "no" here costs a toggle, never money.
+ *
+ * With `text`, the question is about that one read: a free credit with room for something but
+ * not for this reply would ask (codex on PR 1473), so an automatic read weighs the reply's own
+ * estimate against what is left rather than only whether anything is.
+ */
+export function narratorReadsUnasked(
+  stored: { provider: string; model?: string; voiceId: string; worldId?: string } | null,
+  worldId: string | undefined,
+  models: readonly ManifestModel[],
+  creditLeftMicroUsd: number,
+  text?: string,
+): boolean {
+  if (stored === null || !supportsVoiceUse(stored, "narration") || !narratorAppliesTo(stored, worldId)) return true;
+  if (stored.provider === "kokoro") return true;
+  const modelId = stored.model ?? legacyVoiceModel(stored.provider, stored.voiceId);
+  const model = models.find((candidate) => candidate.provider === stored.provider && candidate.id === modelId);
+  if (model === undefined) return false;
+  if (model.pricing.kind === "unmetered") return true;
+  if (stored.worldId !== undefined) return false;
+  if (model.speechPlan === "free-plan") return true;
+  if (model.speechPlan !== "free-credit" || creditLeftMicroUsd <= 0) return false;
+  if (text === undefined) return true;
+  try {
+    return !speechAsks(model, estimateSpeechMicroUsd(model, text), creditLeftMicroUsd);
+  } catch {
+    // A reply the reader cannot price is one it would ask about, not one it reads unasked.
+    return false;
+  }
 }
 
 /** What a reader says where the price was: `free plan` or `free credit`, or null when it is priced. */

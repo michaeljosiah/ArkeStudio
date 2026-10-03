@@ -229,7 +229,7 @@
 }
 @media (max-width: 599px) {
  .fy-app:has(.fy-production-setup) .fy-worldnav, .fy-app:has(.fy-production-setup) .fy-worldnav__sentinel { display: none; }
- .fy-production-setup .fy-chat__turn > .fy-textactions, .fy-production-setup__composer > .fy-set__note { display: none; }
+ .fy-production-setup__composer > .fy-set__note { display: none; }
  .fy-episode-scene { min-height: 64px; height: 64px; }
  .fy-episode-scene .fy-linkbtn { text-decoration: none; }
  .fy-episode-scene > .fy-mono { font-weight: 400; color: var(--muted-foreground); }
@@ -249,7 +249,6 @@
  .fy-season-arke-sheet, .fy-season-arke-sheet .fy-arke { animation: none; }
  .fy-season-arke-sheet .fy-page-sheet__body { position: static; }
  .fy-season-arke-sheet .fy-arke__model-open { position: absolute; }
- .fy-season-arke-sheet .fy-chat__turn > .fy-textactions { display: none; }
  .fy-season-arke-sheet .fy-chat__bubble { font: 400 var(--text-sm)/1.5 var(--font-sans); }
  .fy-season-arke-sheet .fy-arke__log { flex: 0 0 auto; }
  .fy-season-arke-sheet .fy-arke__strip { flex: 1; }

@@ -3,6 +3,8 @@ import { ComposerMic } from "./dictation.js";
 import { cx } from "./ui.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
+import { stopReplyRead } from "../lib/reply-reads.js";
+import { Speaker } from "./icons.js";
 
 /**
  * The composer: one input for every conversation in the studio.
@@ -57,6 +59,18 @@ export interface ComposerProps {
   /** Things the world would not take, from anywhere — shown greyed among the chips. */
   refusals?: readonly Trouble[];
   onDismissRefusal?: (name: string) => void;
+  /** Present in a chat: Read replies among the tools, when the narrator reads unasked (turn 183). */
+  readReplies?: ReadRepliesControl;
+}
+
+/** Read replies as the composer draws it; components/read-replies.ts decides it. */
+export interface ReadRepliesControl {
+  /** The narrator reads without asking, so the toggle is there at all. */
+  offered: boolean;
+  on: boolean;
+  onToggle: () => void;
+  /** Why it switched itself off, said once beside the tools. */
+  notice: string | null;
 }
 
 /** Something that would not go in, and why — a chip states both rather than staying silent. */
@@ -125,7 +139,15 @@ export function Composer(props: ComposerProps) {
     onPromoteAttachment,
     refusals = [],
     onDismissRefusal,
+    readReplies,
   } = props;
+  // Sending a message, or speaking to the composer, stops a reply being read (design turn 183):
+  // the author has moved on from that reply, and a voice reading over dictation is heard by the
+  // microphone as well as by them.
+  const submit = () => {
+    stopReplyRead();
+    onSubmit();
+  };
   const editor = useRef<HTMLDivElement | null>(null);
   const picker = useRef<HTMLInputElement>(null);
   const coarse = useMediaQuery("(pointer: coarse)");
@@ -299,7 +321,7 @@ export function Composer(props: ComposerProps) {
             if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing || coarse) return;
             e.preventDefault();
             if (e.repeat || !canSend) return;
-            onSubmit();
+            submit();
           }}
           onPaste={(e) => {
             // A file on the clipboard is an attachment, not text — a screenshot goes straight
@@ -347,7 +369,19 @@ export function Composer(props: ComposerProps) {
           )}
           {/* Mounted only when asked for, which is what keeps this component free of the store:
               the capture state machine lives inside the child, not here. */}
-          {onDictate && <ComposerMic onText={onDictate} disabled={locked} />}
+          {onDictate && <ComposerMic onText={onDictate} disabled={locked} onListen={stopReplyRead} />}
+          {readReplies?.offered === true && (
+            <button
+              type="button"
+              className={cx("fy-cx__tool", readReplies.on && "fy-cx__tool--on")}
+              aria-pressed={readReplies.on}
+              onClick={readReplies.onToggle}
+            >
+              <Speaker size={13} />
+              <span>Read replies</span>
+            </button>
+          )}
+          {readReplies?.notice != null && <span className="fy-cx__busy">{readReplies.notice}</span>}
           {agentLabel !== undefined && <span className="fy-cx__agent">{agentLabel}</span>}
           {busy && <span className="fy-cx__busy">{busyLabel}</span>}
           {taking > 0 && (
@@ -362,7 +396,7 @@ export function Composer(props: ComposerProps) {
           disabled={!canSend}
           aria-label="Send"
           title={canSend && hover ? "Send  ↵" : undefined}
-          onClick={onSubmit}
+          onClick={submit}
         >
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M12 19V5M5 12l7-7 7 7" />

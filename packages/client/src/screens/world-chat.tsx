@@ -1,11 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { WorldBundle, WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
 import { HeldBar } from "../components/held-bar.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { relativeDate } from "../lib/format.js";
-import { ReadAloud } from "../components/read-aloud.js";
+import { useReadReplies } from "../components/read-replies.js";
 import { Composer } from "../components/composer.js";
 import { FoundingProgressCard } from "../components/genesis-readiness.js";
 import { attachmentChipLabel, ConversationTranscript } from "../components/conversation.js";
@@ -204,14 +204,12 @@ export function RowMenuPanel({
   menu,
   onOpenMenu,
   onCloseMenu,
-  replyActions,
 }: {
   worldId: string;
   row: WorldChatSummary;
   menu: RowMenu;
   onOpenMenu: (menu: RowMenu) => void;
   onCloseMenu: () => void;
-  replyActions?: ReactNode;
 }) {
   const compact = useMediaQuery("(max-width: 1099px)");
   const panel = useRef<HTMLDivElement>(null);
@@ -273,7 +271,7 @@ export function RowMenuPanel({
           </>
         )}
   </div>;
-  if (compact) return <PageSheet open title={row.title} onClose={onCloseMenu}>{actions}{!menu.confirming && replyActions}</PageSheet>;
+  if (compact) return <PageSheet open title={row.title} onClose={onCloseMenu}>{actions}</PageSheet>;
   return <>
     <div className="fy-chatnav__scrim" onClick={onCloseMenu} />
     <div ref={panel} className="fy-chatnav__menu" style={{ left: menu.x, top: menu.y }} role="menu">{actions}</div>
@@ -519,6 +517,7 @@ export function WorldChatScreen() {
   // world snapshot, because opening a world must not cost every conversation ever had.
   const workspace = state?.worldChat ?? null;
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
+  const readReplies = useReadReplies(loaded);
   // Gated on the run's own start so a label from the previous turn is not shown for this one.
   const progress = useWorldChatProgress(conversationId, loaded?.runStartedAt ?? null);
   const opened = workspace?.conversationId ?? null;
@@ -815,20 +814,10 @@ export function WorldChatScreen() {
       </div>
     )}
   </>;
-  const replyActions = loaded && loaded.messages.some(message => message.role === "studio") && (
-    <details className="fy-chat__reply-actions">
-      <summary>Read or copy a reply</summary>
-      {loaded.messages.filter(message => message.role === "studio").map(message => (
-        <div key={message.id}>
-          <p>{message.text}</p>
-          <ReadAloud source={{ of: "reply", conversationId: loaded.conversationId, messageId: message.id }} title="Arke" text={message.text} />
-        </div>
-      ))}
-    </details>
-  );
+  // Listen and Copy sit under each reply on every width now (design turn 183), so the options
+  // sheet's copy of every reply — the phone's only way to them — is gone.
   const rowMenu = menuRow && <RowMenuPanel worldId={worldId!} row={menuRow} menu={menu!}
-    onOpenMenu={setMenu} onCloseMenu={() => setMenu(null)}
-    replyActions={(phone || fold) && menuRow.id === loaded?.conversationId ? replyActions : undefined} />;
+    onOpenMenu={setMenu} onCloseMenu={() => setMenu(null)} />;
   if (phone && !conversationId) return <div data-screen="world-chat" className="fy-chat__listpage">
     <HistoryRail worldId={worldId!} live={live} archived={archived} currentId={undefined} phoneList open onToggle={() => {}}
       onNew={() => hold({ kind: "new" })} menu={menu} onOpenMenu={setMenu} onCloseMenu={() => setMenu(null)} />
@@ -923,7 +912,7 @@ export function WorldChatScreen() {
               <div className="fy-chat__loading">Opening this conversation…</div>
             ) : (
               <ConversationTranscript
-                inlineTextActions={!phone && !fold}
+                autoRead={readReplies.autoRead}
                 workspace={loaded}
                 running={running}
                 progress={progress}
@@ -963,6 +952,7 @@ export function WorldChatScreen() {
               // Appended to whatever is already typed, never sent: speaking gets you to a draft,
               // and the draft is still corrected and sent by hand (SPEC-018 R-2, R-5).
               onDictate={(text) => setDraft((prev) => (prev ? `${prev} ${text}` : text))}
+              readReplies={readReplies.composer}
               {...(worldId && !wrappingUp
                 ? {
                     onAttach: () => {

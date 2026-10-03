@@ -230,3 +230,165 @@
     transition: none;
   }
 }
+
+/* ---- A reply's own actions (design turn 183) -----------------
+   Under every one of Arke's replies, on every width: a reply is read
+   the way it is answered, so Listen sits at the weight of Copy and
+   does not wait for a pointer. On a phone the row is icons, each a
+   44-high target, with the reader and time beside them while it reads. */
+.fy-replyacts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 6px 0 0 -6px;
+}
+
+.fy-replyacts__btn {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: 400 var(--text-xs) var(--font-sans);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+
+.fy-replyacts__btn:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.fy-replyacts__btn:focus-visible,
+.fy-replyplay__stop:focus-visible,
+.fy-cx__tool:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.fy-replyacts__btn--on {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.fy-replyacts[data-phone] {
+  margin-left: -10px;
+  gap: 0;
+}
+
+.fy-replyacts[data-phone] .fy-replyacts__btn {
+  width: 44px;
+  height: 44px;
+  justify-content: center;
+  padding: 0;
+}
+
+.fy-replyacts[data-phone] .fy-replyacts__btn--on {
+  color: var(--primary);
+}
+
+.fy-replyacts__reader {
+  font: var(--type-mono);
+  font-size: var(--text-2xs);
+  color: var(--muted-foreground);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The player under the reply it is reading: one 40-high row — Stop,
+   the reader and its plan over the progress, and the time. */
+.fy-replyplay {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  margin-top: 6px;
+  padding: 0 12px 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  font: 400 10.5px var(--font-mono);
+  color: var(--muted-foreground);
+  max-width: 420px;
+}
+
+.fy-replyplay__stop {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.fy-replyplay__mid {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fy-replyplay__mid > .fy-mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fy-replyplay__bar {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.fy-replyplay__bar > i {
+  display: block;
+  height: 100%;
+  background: var(--foreground);
+}
+
+/* Read replies, among the composer's tools beside Attach and Voice. */
+.fy-cx__tool {
+  height: 26px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  font: 400 var(--text-xs) var(--font-sans);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+
+.fy-cx__tool:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.fy-cx__tool--on,
+.fy-cx__tool--on:hover {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+@media (max-width: 599px) {
+  .fy-cx__tool {
+    min-height: 44px;
+  }
+}
