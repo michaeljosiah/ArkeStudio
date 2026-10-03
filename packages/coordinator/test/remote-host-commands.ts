@@ -74,7 +74,6 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
       "genesis-attach-files": {"genesisId":"new-world"},
       "stage-audiobook-take": {"worldId":"01ARZ3NDEKTSV4RRFFQ69G5FAV","productionId":"pilot","chapterFile":"01-neap.md","block":"p0.0","requestId":"01ARZ3NDEKTSV4RRFFQ69G5FAV"},
       "stage-audiobook-lines": {"worldId":"01ARZ3NDEKTSV4RRFFQ69G5FAV","productionId":"pilot","speaker":"narrator","requestId":"01ARZ3NDEKTSV4RRFFQ69G5FAV"},
-      "probe-grouped-read": {"requestId":"01ARZ3NDEKTSV4RRFFQ69G5FAV","productionId":"pilot","chapterFile":"01-neap.md"},
       "open-exports-folder": {"worldId":"01ARZ3NDEKTSV4RRFFQ69G5FAV"},
       "pick-manuscript": {"worldId":"01ARZ3NDEKTSV4RRFFQ69G5FAV","productionId":"pilot","requestId":"01ARZ3NDEKTSV4RRFFQ69G5FAV"},
       "download-update": {},
