@@ -579,8 +579,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     }
     if (run?.state === "priced" && run.price !== undefined) {
       const price = run.price;
-      // A chapter Google's free day cannot cover asks in its own words: the price is $0, and
-      // what the author is deciding is how far into the chapter the day's reads go.
+      // A chapter Google's free day cannot cover asks in its own words when it costs nothing:
+      // what the author decides is how far the day's reads go. A priced speaker keeps the price
+      // on the button, the day's line beside it (codex on PR 1475).
       const free = price.freePlan !== undefined ? freePlanAskCopy(price.freePlan) : null;
       return (
         <span className="fy-ab__control">
@@ -588,7 +589,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             onClick={() => send({ confirmationToken: price.confirmationToken })}
             title="the words and the voice go to the provider · the text stays in Activity"
           >
-            {free !== null ? free.confirm : <>
+            {free !== null && price.estimatedMicroUsd === 0 ? free.confirm : <>
               Confirm {price.characters.toLocaleString()} characters · up to {formatMicroUsd(price.estimatedMicroUsd)}
               {price.voices.map((voice) => ` · ${voice.label} · ${readerPlace(voice.provider)}`).join("")}
             </>}

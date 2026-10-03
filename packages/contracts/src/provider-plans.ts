@@ -5,6 +5,7 @@ import type { LedgerEntry } from "./job.js";
 import { formatMicroUsd } from "./money.js";
 import { legacyVoiceModel, narratorAppliesTo, supportsVoiceUse } from "./voice.js";
 import { estimateSpeechMicroUsd } from "./speech-pricing.js";
+import { splitSpeechInput } from "./speech-input.js";
 
 /**
  * A provider's Free plan (design turn 182): what the author's Plan row means for a read.
@@ -115,7 +116,17 @@ export function narratorReadsUnasked(
   // A reply read on a free day with nothing left would put the day's question in front of the
   // author unasked, or meet Google's refusal; it is left for Listen. The toggle itself stays:
   // the day comes back at the reset, and the author's choice should come back with it.
-  if (model.speechPlan === "free-plan") return text === undefined || (freePlanLeft?.(model.id) ?? Infinity) > 0;
+  // Weighed in requests, as the read will be made (codex on PR 1475): a reply in two pieces with
+  // one request left would ask.
+  if (model.speechPlan === "free-plan") {
+    if (text === undefined) return true;
+    try {
+      const requests = model.limits.maxSpeechUtf8Bytes !== undefined ? splitSpeechInput(text, model.limits).length : 1;
+      return requests <= (freePlanLeft?.(model.id) ?? Infinity);
+    } catch {
+      return false;
+    }
+  }
   if (model.speechPlan !== "free-credit" || creditLeftMicroUsd <= 0) return false;
   if (text === undefined) return true;
   try {
@@ -168,8 +179,11 @@ export function freePlanStop(error: string | null | undefined, now: Date = new D
   if (error.includes(GOOGLE_FREE_LIMIT)) {
     const reset = /resets (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/.exec(error)?.[1];
     const limit = /(\d+) a day/.exec(error)?.[1];
+    // A reset already past (an old failure read again) rolls to the next midnight, as every
+    // failure without one does, rather than counting down to nothing forever.
+    const named = reset !== undefined ? Date.parse(reset) : NaN;
     return { kind: "free-limit", provider: "google",
-      resetsAt: reset !== undefined && Number.isFinite(Date.parse(reset)) ? new Date(reset).toISOString() : nextPacificMidnight(now).toISOString(),
+      resetsAt: Number.isFinite(named) && named > now.getTime() ? new Date(named).toISOString() : nextPacificMidnight(now).toISOString(),
       ...(limit !== undefined ? { limit: Number(limit) } : {}) };
   }
   if (error.includes(GOOGLE_BILLED)) return { kind: "billed", provider: "google" };
@@ -186,8 +200,9 @@ export function freePlanFailure(error: string | null | undefined): string | null
   if (stop.kind === "billed") return `${GOOGLE_BILLED} · key looks paid`;
   // The reset rides only where Google named one: a failure that said nothing keeps saying the
   // opening alone, and every reader still falls back to midnight Pacific for it.
-  const named = typeof error === "string" && /resets \d{4}-/.test(error);
-  return `${GOOGLE_FREE_LIMIT}${freeLimitDetail({ limit: stop.limit, resetsAt: named ? stop.resetsAt : undefined })}`;
+  // Carried as written, never re-read against the clock: the failure is passed on, not judged.
+  const named = typeof error === "string" ? /resets (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/.exec(error)?.[1] : undefined;
+  return `${GOOGLE_FREE_LIMIT}${freeLimitDetail({ limit: stop.limit, resetsAt: named })}`;
 }
 
 /**
@@ -238,17 +253,16 @@ export function freePlanAllowance(ledger: readonly LedgerEntry[], model: string,
     return { model, allowed, left: 0, resetsAt: new Date(observedReset).toISOString(), reached: true };
   }
   const next = nextPacificMidnight(now);
-  // The midnight before `now`: the one after the same moment a day earlier. Daylight saving
-  // moves it an hour twice a year, which can only count an hour's reads too many or too few.
-  let start = nextPacificMidnight(new Date(now.getTime() - 24 * 60 * 60 * 1000)).getTime();
+  let start = lastPacificMidnight(now).getTime();
   if (Number.isFinite(observedReset) && observedReset > start) start = observedReset;
   let used = 0;
   for (const entry of ledger) {
     if (entry.provider !== "google" || entry.model !== model || entry.speechQuote?.plan !== "free-plan") continue;
     if (Date.parse(entry.ts) < start) continue;
     const taken = entry.outcome === "succeeded" || entry.speechUsage !== undefined;
-    // A retried read keeps its earlier attempts; each one Google answered was a request.
-    used += Math.max(taken ? 1 : 0, entry.speechAttempts?.length ?? 0);
+    // A retried read keeps its earlier answered attempts beside the last one (codex on PR 1475);
+    // each was a request. Where the last is itself archived this counts one over, the safe side.
+    used += (taken ? 1 : 0) + (entry.speechAttempts?.length ?? 0);
   }
   return { model, allowed, left: Math.max(0, allowed - used), resetsAt: next.toISOString(), reached: false };
 }
@@ -273,11 +287,16 @@ export function freePlanShortfall(
     if (read.model?.speechPlan !== "free-plan" || read.requests <= 0) continue;
     needed.set(read.model.id, (needed.get(read.model.id) ?? 0) + read.requests);
   }
+  // A model Google has already refused for the day comes first: that read is refused outright,
+  // and asking about another model's shortfall would send it to meet the queue's refusal.
+  let short: { short: FreePlanShort; allowance: FreePlanAllowance } | null = null;
   for (const [model, requests] of needed) {
     const day = allowance(model);
-    if (requests > day.left) return { short: { requests, allowed: day.allowed, left: day.left }, allowance: day };
+    if (requests <= day.left) continue;
+    if (day.reached) return { short: { requests, allowed: day.allowed, left: day.left }, allowance: day };
+    short ??= { short: { requests, allowed: day.allowed, left: day.left }, allowance: day };
   }
-  return null;
+  return short;
 }
 
 /** A free day already used up, as a read's failure says it, so the free-limit stop and its remedy show. */
@@ -309,18 +328,45 @@ export function freePlanNote(reason: string | null | undefined, now: Date = new 
  * the platform's time zone data, so daylight saving moves it the hour it really moves.
  */
 export function nextPacificMidnight(now: Date): Date {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles", hourCycle: "h23",
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
-  }).formatToParts(now);
+  const day = pacificDay(now);
+  return new Date(pacificMidnightOf(day.year, day.month, day.day + 1));
+}
+
+/** The midnight Pacific that began today's free day: the other end of `nextPacificMidnight`. */
+export function lastPacificMidnight(now: Date): Date {
+  const day = pacificDay(now);
+  return new Date(pacificMidnightOf(day.year, day.month, day.day));
+}
+
+const PACIFIC_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Los_Angeles", hourCycle: "h23",
+  year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+});
+
+function pacificDay(at: Date): { year: number; month: number; day: number } {
+  const parts = PACIFIC_PARTS.formatToParts(at);
   const part = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
-  // Pacific wall-clock now, read as if it were UTC, gives the zone's offset from the real instant.
-  const wall = Date.UTC(part("year"), part("month") - 1, part("day"), part("hour") % 24, part("minute"), part("second"));
-  const offset = wall - Math.floor(now.getTime() / 1000) * 1000;
-  const midnight = Date.UTC(part("year"), part("month") - 1, part("day") + 1, 0, 0, 0) - offset;
-  // An offset that changes between now and midnight (the DST switch happens at 02:00, after
-  // midnight) cannot move this; the guard only keeps the answer in the future.
-  return new Date(midnight > now.getTime() ? midnight : midnight + 24 * 60 * 60 * 1000);
+  return { year: part("year"), month: part("month"), day: part("day") };
+}
+
+/** The Pacific wall clock at an instant, read as if it were UTC, less the instant: the zone's offset then. */
+function pacificOffset(at: number): number {
+  const parts = PACIFIC_PARTS.formatToParts(new Date(at));
+  const part = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return Date.UTC(part("year"), part("month") - 1, part("day"), part("hour") % 24, part("minute"), part("second")) - Math.floor(at / 1000) * 1000;
+}
+
+/**
+ * 00:00 Pacific on a calendar day (the day may overflow its month), with the offset in force at
+ * that midnight rather than now's (codex on PR 1475): an answer computed the evening before a
+ * daylight-saving switch was an hour off, and the day's start computed the morning after one a
+ * whole day off. Two passes: the first lands within the hour, the second on the midnight itself.
+ * Pacific switches at 02:00, so midnight always exists and is never doubled.
+ */
+function pacificMidnightOf(year: number, month: number, day: number): number {
+  const wall = Date.UTC(year, month - 1, day, 0, 0, 0);
+  const near = wall - pacificOffset(wall);
+  return wall - pacificOffset(near);
 }
 
 /** `5 h 12 m` — the time left before a reset, labels only. */

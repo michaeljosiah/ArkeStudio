@@ -220,6 +220,9 @@ it("reads a limit stated per day as the daily limit whatever its code, with the 
   // A genuine short limit still names no day, and is still retried.
   const short = { error: { message: "Rate limit exceeded for model gemini-3.8-flash-tts (limit: 10 requests per minute). Please retry in 21.3s.", code: "too_many_requests" } };
   assert.equal(googleFreeDailyLimit(short), false);
+  // A short limit that merely mentions the day is still short; a token quota's figure is no read count.
+  assert.equal(googleFreeDailyLimit({ error: { code: "too_many_requests", message: "Too many requests per minute; daily quotas are listed at the console." } }), false);
+  assert.deepEqual(googleDailyLimitDetail({ error: { message: "Quota exceeded (limit: 1000000 tokens per day). Please retry in 1h." } }, at), { resetsAt: "2026-10-03T00:14:32.000Z" });
   await assert.rejects(new GoogleClient(async () => Response.json(short, { status: 429 })).submit("test", request), error =>
     error instanceof ProviderBusyError && !(error instanceof ProviderFreeLimitError));
 });

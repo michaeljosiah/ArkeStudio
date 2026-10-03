@@ -83,9 +83,16 @@ function violations(error: Record<string, unknown>): Record<string, unknown>[] {
   return details.flatMap(detail => Array.isArray(detail.violations) ? detail.violations.map(record) : []);
 }
 
-/** "10 requests per day", "per-day", "RPD", "daily quota": the wordings a day's limit has been seen or documented in. */
+/**
+ * "10 requests per day", "per-day", "RPD", "daily quota": the wordings a day's limit has been seen
+ * or documented in. A message that also names a per-minute limit is read as that limit unless it
+ * states its requests per day outright (codex review on PR 1475): "too many requests per minute;
+ * daily quotas are listed at …" is a short limit, and misread it would block a model until midnight.
+ */
 function perDay(message: string): boolean {
-  return /\bper[\s-]?day\b|\brequests?\s+a\s+day\b|\bRPD\b|\bdaily\b/i.test(message);
+  if (/\brequests?\s+(?:per|a)\s+day\b/i.test(message)) return true;
+  if (/\bper[\s-]?minute\b|\bRPM\b/i.test(message)) return false;
+  return /\bper[\s-]day\b|\bRPD\b|\bdaily\s+(?:quota|limit|request)/i.test(message);
 }
 
 /** `45m28s`, `1h2m`, `21.3s`, or a RetryInfo delay of `2728s`, in milliseconds; undefined when there is none. */
@@ -104,8 +111,10 @@ function retryMs(text: string): number | undefined {
 export function googleDailyLimitDetail(body: unknown, now: Date = new Date()): { limit?: number; resetsAt?: string } {
   const error = record(record(body).error);
   const message = typeof error.message === "string" ? error.message : "";
-  const stated = /(\d+)\s+requests?\s+(?:per|a)\s+day/i.exec(message)?.[1] ?? /limit:\s*(\d+)/i.exec(message)?.[1]
-    ?? violations(error).map(violation => violation.quotaValue).find(value => typeof value === "string" && /^\d+$/.test(value)) as string | undefined;
+  // Requests only: a token quota's figure (`limit: 1000000 tokens per day`) is not a count of reads.
+  const stated = /(\d+)\s+requests?\s+(?:per|a)\s+day/i.exec(message)?.[1] ?? /limit:\s*(\d+)\s+requests?\b/i.exec(message)?.[1]
+    ?? violations(error).filter(violation => /request/i.test(`${String(violation.quotaId ?? "")} ${String(violation.quotaMetric ?? "")}`))
+      .map(violation => violation.quotaValue).find(value => typeof value === "string" && /^\d+$/.test(value)) as string | undefined;
   const limit = stated !== undefined && Number(stated) > 0 && Number.isSafeInteger(Number(stated)) ? Number(stated) : undefined;
   const hinted = /retry in\s+([0-9hms.\s]+)/i.exec(message)?.[1];
   const details = Array.isArray(error.details) ? error.details.map(record) : [];

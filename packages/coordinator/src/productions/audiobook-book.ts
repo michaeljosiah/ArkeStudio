@@ -327,6 +327,8 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
           deps.worldId,
           productionId,
           ...toRead.flatMap((entry) => [`${entry.summary.id}:${entry.prepared.plan.chapter.version}:${entry.prepared.plan.chapter.hash}`, ...entry.prepared.misses.map(missIdentity)]),
+          // The free day's question with it (codex on PR 1475): an answer to `Read 1 now` is not one to read ten.
+          ...(freePlan !== null ? [JSON.stringify(freePlan.short)] : []),
         ].join("\n"),
       )
       .digest("hex");

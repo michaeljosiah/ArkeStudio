@@ -38,7 +38,7 @@ export interface PageRead {
   failure: string | null;
   /** Present only while a charged read is waiting to be answered; `voices` names each cloud voice the words would go to, `notices` what a first read through a slot-keeping reader adds, a line a voice (SPEC-046 R-40). */
   /** `free`: a read Google's free day cannot cover, asked in its own words where the price was. */
-  cost: { characters: number; priced: string; voices: string[]; notices: string[]; free: { line: string; confirm: string } | null; confirm: () => void } | null;
+  cost: { characters: number; priced: string; voices: string[]; notices: string[]; free: { line: string; confirm: string; priced: boolean } | null; confirm: () => void } | null;
   /** Present while a cloned voice's recording waits for leave to go to a remote engine (turn 130). */
   upload: { destination: string; notice?: string; confirm: () => void } | null;
   begin: () => void;
@@ -194,7 +194,7 @@ export function usePageRead(input: {
             priced: `up to ${formatMicroUsd(result?.estimatedMicroUsd ?? 0)}`,
             voices: (result?.voices ?? []).map((voice) => `${voice.label} · ${voice.provider}`),
             notices: result?.notices ?? [],
-            free: result?.freePlan !== undefined ? freePlanAskCopy(result.freePlan) : null,
+            free: result?.freePlan !== undefined ? { ...freePlanAskCopy(result.freePlan), priced: (result.estimatedMicroUsd ?? 0) > 0 } : null,
             confirm: () => {
               setConfirmed(run);
               start(run, token, uploadAllowed.current ?? undefined, shipped.current || undefined);
@@ -278,7 +278,7 @@ export function PageReadControl({ read, label }: { read: PageRead; label: ReactN
     return (
       <span style={ROW}>
         <Button onClick={read.cost.confirm}>
-          {read.cost.free !== null ? read.cost.free.confirm : <>
+          {read.cost.free !== null && !read.cost.free.priced ? read.cost.free.confirm : <>
             Confirm {read.cost.characters} characters · {read.cost.priced}
             {read.cost.voices.map((voice) => ` · ${voice}`).join("")}
           </>}

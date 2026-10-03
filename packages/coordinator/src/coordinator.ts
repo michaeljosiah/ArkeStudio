@@ -1488,7 +1488,7 @@ export class Coordinator {
   private async freePlanAllowanceNow(): Promise<(model: string) => FreePlanAllowance> {
     const ledger = this.ledger ? await this.ledger.readAll().catch(() => []) : [];
     const now = new Date();
-    return (model) => freePlanAllowance(ledger, model, now, this.jobQueue?.freeLimitFor("google", model) ?? null);
+    return (model) => freePlanAllowance(ledger, model, now, this.jobQueue?.freeLimitSeen("google", model) ?? null);
   }
 
   /** The book's available reader, or the app's; reading still checks the host's local capability. */
@@ -2019,8 +2019,10 @@ export class Coordinator {
       fail(freeLimitReason(freeDay.allowance), characters);
       return;
     }
+    // The free day's question is part of what is answered (codex on PR 1475): `Read 1 now` left
+    // open across the reset must not send ten on the old answer.
     const token = createHash("sha256")
-      .update([subject.id, String(subject.version), String(estimate), ...misses.flatMap((index) => toMake(index).map(({ piece }) => pieceFile(piece)))].join("\n"))
+      .update([subject.id, String(subject.version), String(estimate), ...misses.flatMap((index) => toMake(index).map(({ piece }) => pieceFile(piece))), ...(freeDay !== null ? [JSON.stringify(freeDay.short)] : [])].join("\n"))
       .digest("hex");
     const enqueued: EnqueueInput[] = misses.flatMap((index) =>
       toMake(index).map(({ piece, at }) => ({
@@ -2386,7 +2388,7 @@ export class Coordinator {
       }
       const asks = misses.some(index => speechAsks(cloud[index]!.model, priceOfIndex(index))) || freeCreditOverrun(creditDraw, await this.freeCreditLeftNow()) || freeDay !== null;
       const token = createHash("sha256")
-        .update(["voiced", subject.id, String(subject.version), String(estimate), ...misses.flatMap((index) => toMake(index).map((piece) => piece.file))].join("\n"))
+        .update(["voiced", subject.id, String(subject.version), String(estimate), ...misses.flatMap((index) => toMake(index).map((piece) => piece.file)), ...(freeDay !== null ? [JSON.stringify(freeDay.short)] : [])].join("\n"))
         .digest("hex");
       queuedInputs = misses.flatMap((index) => {
         const entry = cloud[index]!;

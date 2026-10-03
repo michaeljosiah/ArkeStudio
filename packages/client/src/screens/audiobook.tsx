@@ -451,7 +451,7 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
             Cancel
           </Button>
           <Button variant="primary" onClick={onConfirm} data-testid="read-book-confirm">
-            {free !== null ? free.confirm : `Confirm ${price.characters.toLocaleString()} characters · up to ${formatMicroUsd(price.estimatedMicroUsd)}`}
+            {free !== null && price.estimatedMicroUsd === 0 ? free.confirm : `Confirm ${price.characters.toLocaleString()} characters · up to ${formatMicroUsd(price.estimatedMicroUsd)}`}
           </Button>
         </div>
       </div>

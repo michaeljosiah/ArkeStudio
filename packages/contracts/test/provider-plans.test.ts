@@ -18,6 +18,7 @@ import {
   freePlanStop,
   modelPriceCopy,
   narratorReadsUnasked,
+  lastPacificMidnight,
   nextPacificMidnight,
   PAID_PLANS,
   quoteSpeech,
@@ -270,6 +271,28 @@ describe("a free day Google named", () => {
     assert.deepEqual(freePlanAllowance(ledger, gemini.id, after, { ...observed, limit: 25 }), { model: gemini.id, allowed: 25, left: 24, resetsAt: "2026-10-03T07:00:00.000Z", reached: false });
   });
 
+  // Codex and an adversarial pass on PR 1475: the offset is the target midnight's, not now's.
+  it("finds each end of the free day with the offset in force at that midnight", () => {
+    assert.equal(nextPacificMidnight(new Date("2026-03-08T09:00:00.000Z")).toISOString(), "2026-03-09T07:00:00.000Z"); // 01:00 PST, spring forward ahead
+    assert.equal(lastPacificMidnight(new Date("2026-03-09T07:30:00.000Z")).toISOString(), "2026-03-09T07:00:00.000Z"); // 00:30 PDT the morning after
+    assert.equal(lastPacificMidnight(new Date("2026-11-02T07:30:00.000Z")).toISOString(), "2026-11-01T07:00:00.000Z"); // 23:30 PST, the long day
+    assert.equal(nextPacificMidnight(new Date("2026-11-02T07:30:00.000Z")).toISOString(), "2026-11-02T08:00:00.000Z");
+  });
+
+  it("counts a retried read's earlier answered attempts beside its last, and puts a refused model first", () => {
+    const retried = entry("2026-10-02T09:00:00.000Z", { speechAttempts: [{ attempt: 1, quote: { ...quoteSpeech(gemini, "x", { at: at }), plan: "free-plan" }, usage: {} }] });
+    assert.equal(freePlanAllowance([retried], gemini.id, new Date("2026-10-02T18:00:00.000Z")).left, 8);
+    const models = applyProviderPlans(manifest, free).models;
+    const flash = models.find((model) => model.id === gemini.id)!;
+    const lite = { ...flash, id: "gemini-3.8-flash-lite-tts" };
+    const day = (model: string) => model === lite.id
+      ? { model, allowed: 10, left: 0, resetsAt: "2026-10-03T00:00:00.000Z", reached: true }
+      : { model, allowed: 10, left: 1, resetsAt: "2026-10-03T07:00:00.000Z", reached: false };
+    assert.equal(freePlanShortfall([{ model: flash, requests: 5 }, { model: lite, requests: 1 }], day)?.allowance.reached, true);
+    // An old failure's reset, long past, rolls to the next midnight rather than counting down to nothing.
+    assert.equal((freePlanStop(refusal, new Date("2026-10-03T12:00:00.000Z")) as { resetsAt: string }).resetsAt, "2026-10-04T07:00:00.000Z");
+  });
+
   it("weighs a read whole per model, and asks in plain words", () => {
     const models = applyProviderPlans(manifest, free).models;
     const freeGemini = models.find((model) => model.id === gemini.id)!;
@@ -314,6 +337,11 @@ describe("Read replies' narrator (design turn 183)", () => {
     assert.equal(narratorReadsUnasked(ife, "w1", models, 0, "Tides", () => 1), true);
     assert.equal(narratorReadsUnasked(ife, "w1", models, 0, "Tides", () => 0), false);
     assert.equal(narratorReadsUnasked(ife, "w1", models, 0, undefined, () => 0), true);
+    // Weighed in requests: a reply in two pieces with one request left is left for Listen.
+    const capped = models.map((model) => model.id === gemini.id ? { ...model, limits: { ...model.limits, maxSpeechUtf8Bytes: 40 } } : model);
+    const twoPieces = "The tide went out. The tide came back in again.";
+    assert.equal(narratorReadsUnasked(ife, "w1", capped, 0, twoPieces, () => 1), false);
+    assert.equal(narratorReadsUnasked(ife, "w1", capped, 0, twoPieces, () => 2), true);
   });
   it("asks through a priced reader, a hosted clone, and a choice the manifest does not list", () => {
     assert.equal(narratorReadsUnasked(paul, "w1", manifest.models, Infinity), false);

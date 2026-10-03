@@ -1912,14 +1912,17 @@ export class JobQueue {
 
   /** The day a free tier said is used up for this model, or null once the reset it named has come. */
   freeLimitFor(provider: string, model: string): FreePlanLimit | null {
-    const key = `${provider}\n${model}`;
-    const held = this.freeLimits.get(key);
-    if (held === undefined) return null;
-    if (Date.parse(held.resetsAt) <= this.now()) {
-      this.freeLimits.delete(key);
-      return null;
-    }
-    return held;
+    const held = this.freeLimitSeen(provider, model);
+    return held !== null && Date.parse(held.resetsAt) > this.now() ? held : null;
+  }
+
+  /**
+   * The last refusal for the day, kept past its reset (codex on PR 1475): it no longer refuses,
+   * but where Google named a reset other than midnight Pacific the new day began there, and the
+   * ledger's count starts from it rather than from the midnight before the old day's reads.
+   */
+  freeLimitSeen(provider: string, model: string): FreePlanLimit | null {
+    return this.freeLimits.get(`${provider}\n${model}`) ?? null;
   }
 
   /** Keep what a daily-limit refusal said: its reset, else midnight Pacific, when Google resets the free quota. */

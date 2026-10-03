@@ -548,8 +548,12 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   for (const reader of clones) {
     if (await deps.requireUploadConfirmation(reader)) return;
   }
-  if (asks && deps.priced === undefined && deps.confirmationToken !== token) {
-    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: token, voices: priceLines(misses, priceOf), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}) });
+  // The free day's question is part of what the chapter's own press answers (codex on PR 1475),
+  // so `Read 1 now` left open across the reset is asked again. A book's chapters keep the plain
+  // token: the day moves as the book reads, and the book's answer covered it.
+  const answer = freePlan !== null ? createHash("sha256").update(`${token}\n${JSON.stringify(freePlan.short)}`).digest("hex") : token;
+  if (asks && deps.priced === undefined && deps.confirmationToken !== answer) {
+    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}) });
     return;
   }
 

@@ -114,6 +114,22 @@ describe("the two ways a free plan ends, on the read", () => {
     assert.ok(!text.includes("Confirm 48"), "no price to confirm");
   });
 
+  // Codex on PR 1475: a voiced page with a priced speaker beside the free narrator must never be
+  // confirmed by `Read 10 now` with its price out of sight.
+  it("keeps the price on the button when anything in the read is priced", () => {
+    __setStateForTest(withPlans({ google: "free" }));
+    const text = plain(renderToString(
+      <ReadAloudConfirmation inline title="Maren Kest" onConfirm={() => {}} onCancel={() => {}} result={{
+        at: "2026-10-02T23:14:00.000Z", type: "voice.audio", requestId: "01J8F3K2QW9VZX4N7M0RTYB6R2", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", sheetVersion: 1, purpose: "prose",
+        provider: "google", model: "gemini-3.8-flash-tts", voiceId: "Kore", format: "wav", status: "confirmation-required", file: null, cached: false,
+        characterCount: 48_000, estimatedMicroUsd: 120_000, confirmationToken: "token", freePlan: { requests: 122, allowed: 10, left: 10 },
+      }} />,
+    ));
+    assert.match(text, /122 reads · free plan allows 10 a day/);
+    assert.match(text, /Confirm 48000 characters · (up to )?\$0\.12/);
+    assert.ok(!text.includes("Read 10 now"));
+  });
+
   it("says a billed read and offers to turn the plan off — never turning it off itself", () => {
     const text = plain(renderToString(<FreePlanStop error="Google billed this read · key looks paid" />));
     assert.match(text, /Google billed this read · key looks paid/);

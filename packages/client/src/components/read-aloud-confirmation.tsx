@@ -28,7 +28,8 @@ export function ReadAloudConfirmation({ title, result, onConfirm, onCancel, inli
   // A read over the reader's cap goes as several requests and arrives in as many pieces (issue
   // 1208): said with the price, since each seam is audible and each piece is a call.
   const pieces = result.parts !== undefined && result.parts > 1 ? ` · ${result.parts} parts` : "";
-  // A read Google's free day cannot cover asks in its own words: there is no price to confirm.
+  // A read Google's free day cannot cover asks in its own words when it costs nothing; a priced
+  // voice in it keeps the price on the button, with the day's line above (codex on PR 1475).
   const free = result.freePlan !== undefined ? freePlanAskCopy(result.freePlan) : null;
   if (result.status !== "confirmation-required" || settled === quote) return null;
   const cancel = () => { setSettled(quote); onCancel(); };
@@ -46,7 +47,7 @@ export function ReadAloudConfirmation({ title, result, onConfirm, onCancel, inli
         submitted.current = quote;
         setSettled(quote);
         onConfirm(result.confirmationToken);
-      }}>{free !== null ? free.confirm : `Confirm ${result.characterCount} characters · ${ceiling ? "up to " : ""}${formatMicroUsd(result.estimatedMicroUsd)}`}</Button>
+      }}>{free !== null && result.estimatedMicroUsd === 0 ? free.confirm : `Confirm ${result.characterCount} characters · ${ceiling ? "up to " : ""}${formatMicroUsd(result.estimatedMicroUsd)}`}</Button>
     </div>
   </div>;
   if (inline) return <section className="fy-read-confirmation" aria-labelledby={heading}>{content}</section>;
