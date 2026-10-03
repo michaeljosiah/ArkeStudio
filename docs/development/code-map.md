@@ -213,7 +213,9 @@ The founding composer sends an optional `genesis-chat.modelId`; `harness/genesis
 new session with restored history when that choice changes. Client `chatPending` covers the
 send-to-running interval. `genesis.chat-result` correlates acceptance or refusal to the submitting
 device, preserving a refused message in its composer. The founding picker disables models known
-to lack tools. Readiness remains available for approved predecessors of revised cards.
+to lack tools; coordinator admission rechecks explicit choices against the live catalogue and
+the same availability rules before starting the session. Readiness remains available for
+approved predecessors of revised cards.
 `genesis.review-error` carries content, readiness and voice review
 failures separately from turn status; background reads share the founding serialization lane.
 Checks: client `test/genesis-resume.test.tsx`; coordinator `test/harness/genesis.test.ts`.
@@ -221,7 +223,7 @@ Checks: client `test/genesis-resume.test.tsx`; coordinator `test/harness/genesis
 ### Inspect a recorded speaker's lines
 
 Client `screens/chapter-audiobook.tsx` requests `preview-audiobook-script` on opening the Lines
-sheet and after keeping recordings. Coordinator `productions/audiobook-lines.ts` reads the same
+sheet, after reconnecting and after keeping recordings. Coordinator `productions/audiobook-lines.ts` reads the same
 current cast and takes as script export; `audiobook.script` returns line, chapter, recording,
 awaiting and uncast counts without writing an export or script manifest. Checks: client
 `test/chapter-audiobook.test.tsx`; coordinator `test/productions/audiobook-lines.test.ts`.

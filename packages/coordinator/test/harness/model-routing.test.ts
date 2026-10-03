@@ -162,6 +162,30 @@ async function fixture(options: {
 }
 
 describe("coordinator harness/model routing (#1122)", () => {
+  it("rechecks explicit founding models before opening a tool-using session", async () => {
+    const test = await fixture();
+    const genesisId = "gen-model-admission";
+    const submit = async (modelId: string, requestId: string) => {
+      await test.send({ kind: "genesis-chat", genesisId, text: "A harbour town.", modelId, requestId });
+      return test.events.findLast(event => event.type === "genesis.chat-result" && event.requestId === requestId);
+    };
+    try {
+      // The visible catalogue was valid; a direct submission must read the changed backend.
+      test.adapter.list = async () => MODELS.map(model => ({ ...model, ...(model.id === "spark" ? { tools: false } : {}) }));
+      const noTools = await submit(TEXT, "no-tools");
+      assert.ok(noTools?.type === "genesis.chat-result" && !noTools.accepted);
+      assert.match(noTools.detail ?? "", /cannot use tools/);
+      const absent = await submit("openai/gone", "absent");
+      assert.ok(absent?.type === "genesis.chat-result" && !absent.accepted);
+      assert.equal(test.adapter.sessions.length, 0, "no invalid session is opened");
+      test.adapter.list = async () => MODELS;
+      const valid = await submit(TEXT, "valid");
+      assert.ok(valid?.type === "genesis.chat-result" && valid.accepted);
+      await until(() => test.adapter.sessions.some(session => session.agent === "world-author"), "valid founding session");
+      assert.equal(test.adapter.sessions.find(session => session.agent === "world-author")?.config.model, TEXT);
+    } finally { await test.close(); }
+  });
+
   it("initializes an owned adapter without an OpenCode supervisor and disposes it on shutdown", async () => {
     const adapter = new CaptureAdapter();
     adapter.ready = false;

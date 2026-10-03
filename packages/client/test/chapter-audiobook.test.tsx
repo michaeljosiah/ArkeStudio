@@ -642,7 +642,11 @@ describe("the Audiobook view (turn 146)", () => {
     await act(async () => q(m, '[data-testid="audiobook-lines"]')!.click());
     const dialog = () => dom.document.querySelector('[data-testid="speaker-lines-dialog"]') as HTMLElement | null;
     assert.ok(dialog(), "Lines… opens the sheet");
+    const firstSummary = m.sent.findLast(message => message.kind === "preview-audiobook-script") as Extract<ClientMessage, { kind: "preview-audiobook-script" }>;
+    await act(async () => __connectionStatusForTest("closed"));
+    await act(async () => __connectionStatusForTest("open"));
     const summary = m.sent.findLast(message => message.kind === "preview-audiobook-script") as Extract<ClientMessage, { kind: "preview-audiobook-script" }>;
+    assert.notEqual(summary.requestId, firstSummary.requestId, "a lost summary request is renewed after reconnect");
     assert.equal(summary.speaker, "narrator");
     assert.ok(dialog()!.querySelector(".fy-ab__speaker-dot"));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.script", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: summary.requestId, lines: 31, chapters: 9, recorded: 17, awaiting: 14, notCast: 0 }));

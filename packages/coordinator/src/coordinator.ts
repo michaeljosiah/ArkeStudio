@@ -8119,6 +8119,13 @@ export class Coordinator {
         }
         try {
           if (this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) { failed("A decision is being saved. Try again shortly."); return; }
+          let modelId = msg.modelId;
+          if (modelId !== undefined) {
+            const models = await this.modelCatalog.get(true);
+            const selection = selectHarnessModel(modelId, models, this.readModel.getState().app, false, true);
+            if (selection.reason) { failed(selection.reason); return; }
+            modelId = selection.sessionModel;
+          }
           const dir = await this.opts.provider.genesisDir(msg.genesisId);
           const draft = await loadGenesisConversation(dir, msg.genesisId, this.genesis.isRunning(msg.genesisId));
           if (draft.worldId) { failed("This world has begun. Continue in its world conversation."); return; }
@@ -8129,7 +8136,7 @@ export class Coordinator {
           this.emit(draft);
           result(true);
           // Fire and watch: turns, the draft and the final status arrive as events.
-          this.trackBackground(this.genesis.run(dir, msg.genesisId, msg.text, msg.modelId).catch(err => failed(describeCoordinatorError(err))));
+          this.trackBackground(this.genesis.run(dir, msg.genesisId, msg.text, modelId).catch(err => failed(describeCoordinatorError(err))));
         } catch (err) {
           failed(describeCoordinatorError(err));
         }

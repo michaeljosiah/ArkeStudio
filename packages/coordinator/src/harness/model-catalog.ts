@@ -102,7 +102,7 @@ export interface LanguageModelSelection {
 
 /** Evaluate local readiness and deliberate disablement without consulting media API keys. */
 export function selectHarnessModel(
-  reference: string, models: readonly ModelInfo[], app: ClientState["app"], needsImages = false,
+  reference: string, models: readonly ModelInfo[], app: ClientState["app"], needsImages = false, needsTools = false,
 ): LanguageModelSelection {
   const model = findHarnessModel(reference, models, app.manifest?.models);
   if (!model) return { modelId: reference, reason: `${reference} is unavailable through the running harness. Choose an available model or clear the saved choice.` };
@@ -115,6 +115,7 @@ export function selectHarnessModel(
     return { modelId: reference, reason: `${model.displayName ?? model.id} is unavailable. Check AI models or choose another model.` };
   }
   const missingInput = harnessModelMissingInput(model, needsImages);
+  if (needsTools && model.tools === false) return { modelId: reference, reason: `${model.displayName ?? model.id} cannot use tools. Choose another Writing model above the conversation.` };
   if (missingInput === "text") {
     return { modelId: reference, reason: `${model.displayName ?? model.id} cannot read text. Choose a text-reading model in Settings → Harness → Advanced or the production's Develop conversation.` };
   }

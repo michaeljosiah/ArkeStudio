@@ -2747,6 +2747,7 @@ export function SpeakerLinesDialog({ worldId, productionId, speaker, label, tone
   onClose: () => void;
 }) {
   const all = useSpeakerLines();
+  const connection = useStore().connection;
   const [scope, setScope] = useState<"awaiting" | "all">("awaiting");
   const [scriptId, setScriptId] = useState<string | null>(null);
   const [summaryId, setSummaryId] = useState<string | null>(null);
@@ -2757,7 +2758,9 @@ export function SpeakerLinesDialog({ worldId, productionId, speaker, label, tone
   const script = scriptId === null ? undefined : all[scriptId];
   const files = filesId === null ? undefined : all[filesId];
   const summary = summaryId === null ? undefined : all[summaryId];
-  useEffect(() => { setSummaryId(previewAudiobookScript(worldId, productionId, speaker)); }, [worldId, productionId, speaker, files?.kept]);
+  useEffect(() => {
+    if (connection === "open") setSummaryId(previewAudiobookScript(worldId, productionId, speaker));
+  }, [worldId, productionId, speaker, files?.kept, connection]);
   const hosted = typeof window !== "undefined" && window.arke?.openDataFolder !== undefined;
   const rows = files?.rows ?? [];
   const keepable = rows.filter((row) => row.refused === undefined && !untick.has(row.file));
