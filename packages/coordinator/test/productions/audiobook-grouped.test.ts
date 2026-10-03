@@ -15,7 +15,7 @@ import {
 } from "@arke-studio/contracts";
 import { geminiSpeechModel } from "@arke-studio/providers";
 import { dropRunawayTail, integratedLoudness, normaliseSpeech, readSpeechWav, trimSpeech, writeSpeechWav, type SpeechPcm } from "../../src/audio/speech-wav.js";
-import { judgeSplit, LONG_TAIL, splitAudio, splitRequest } from "../../src/productions/audiobook-split.js";
+import { judgeSplit, LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "../../src/productions/audiobook-split.js";
 import { keepSplitTake, prepareChapter, readBreaks, runAudiobookChapter, type AudiobookRunEvent } from "../../src/productions/audiobook-run.js";
 import { directionEntry, planAudiobook, writeAudiobookBookRaised, writeBlockDirection } from "../../src/productions/audiobook.js";
 import { directionPlan } from "../../src/voice/direction.js";
@@ -97,6 +97,111 @@ describe("word times and the split (design turn 185)", () => {
     assert.equal(judgeSplit("a sound behind his left shoulder, close", "a sound behind his shoulder close", hash).matched, false);
     assert.equal(judgeSplit("Olorun mi. Did you hear yourself?", "Oloroon me, did you hear yourself", hash).matched, true);
     assert.equal(judgeSplit("It is not possible.", "it's not possible", hash).matched, true, "a contraction is the same words written as whisper writes them");
+  });
+});
+
+/**
+ * What whisper heard of chapter 01 of Na Love or Juju, read grouped on 2026-10-03 (Gemini Flash
+ * TTS, Ife's designed voice, `deltas`): 38 of 169 blocks flagged, nearly all a name, Yoruba or
+ * Pidgin heard as English. Each pair is the written block and the words heard in its cut.
+ */
+const NA_LOVE: Array<[string, string]> = [
+  ["Tunde was telling the goat story again.", "Sunday was telling the good story again."],
+  ["“Ade, I am telling you. The goat looked at me like this —”", "Addy. I am telling you. The goats looked at me like this."],
+  ["Tunde said, when the goat had finally been delivered to its owner in Ilesha.", "tunede said. when the good had finally been delivered to its owner in Elesha."],
+  [
+    "Ade had been in the car the first time it happened, on the Ibadan expressway in 2004, and he had heard it told since at two weddings, one naming ceremony and Tunde's fortieth, and every time the goat grew larger and the customs officer more corrupt and Tunde's cousin from Ilesha more heroic. Tonight the goat had learned to open doors.",
+    "I did, I'd been in the car the first time it happened. on the Battle Express Wing 2004. and he had had it told since at two weddings. One name is Sarimune and two days 40 f. and every time they go to grow larger. and the customs office are more corrupt. and soon this causing for me, less sha, more heroic. tonight. The ghost had learnt to open doors.",
+  ],
+  ["“Ah, the bar. Yes. The bar is very fine tonight. The bar's leg is long.”", "Ah. Bye! Yes. The bye is very fine tonight. The last leg is long."],
+  ["“I'm just admiring the bar with you, Ade. Is it a crime?”", "I'm just admiring the bow with you, ID. Is it a crime?"],
+  ["Ade picked up his glass, put it down again without drinking from it, and looked.", "A day pick-top is glass. put it down again without drinking from it. and looked."],
+  ["Tunde stared at him. Then he put a hand flat on the table and laughed until he coughed.", "to this dead atom. then he put a hand flat on the table and laughed until he coughed."],
+  [
+    "“Olorun mi. Did you hear yourself? 'She is very beautiful.' Like a weather report. Adeyemi Akinola, abeg, go and greet her before I die of shame on your behalf.”",
+    "Ooh, Laura, me. Did you hear yourself? She is very beautiful. like a weather report. a te yemi aki no la, a big goangrita. before I die of shame on your behalf.",
+  ],
+  ["He did not know what to do with that, so he laughed. She watched him laugh. It seemed to interest her more than anything he had said.", "He did not know. What to do. with that. He laughed. She watched him laugh. It seemed to interest her more than... anything. He had said."],
+  ["Tunde settled into his seat with immense satisfaction and closed his eyes.", "Two days settled into his seat with immense satisfaction and close to his eyes."],
+  ["He dropped Tunde at his gate in Lekki Phase One. Tunde leaned back in through the passenger window before he went.", "He dropped Twinde at his gate. in Lucky Phase 1. Tunde leaned back in through the passenger window before he went."],
+  [
+    "Ade drove back alone. On the bridge the lights went blue, violet, blue, and the lagoon on either side was so dark it might not have been there at all. The phone lay face up in the cupholder. Then Ikoyi: the quiet streets, the high walls, the gates shut for the night.",
+    "Adejov Bakalon. On the bridge the lights went blue. violate blue. and the lagoon on either side was so dark it might not have been there at all. the phone leave face up in the cup holder. (speaking in foreign language) the quiet streets. the high walls. the gates shot for the night.",
+  ],
+  ["“Ehen,”", "Uh-huh."],
+  ["said Tunde.", "Saitundi."],
+];
+const NAMES = splitLexicon(["Adeyemi \"Ade\" Akinola", "Tunde", "Ife", "Ade's House, Ikoyi"], ["They drove to Ilesha and on to Lekki Phase One, past Ozumba Mbadiwe."]);
+
+describe("names and words not in English (2026-10-03)", () => {
+  const hash = `sha256:${"a".repeat(64)}`;
+
+  it("passes a cut whose words whisper misheard as English, as it heard chapter 01", () => {
+    const flagged = NA_LOVE.filter(([written, heard]) => !judgeSplit(written, heard, hash, { lexicon: NAMES }).matched);
+    assert.deepEqual(flagged, [], "every pair is its block, misheard");
+  });
+
+  it("sets aside whisper's notes, and a sound's “uh-huh” where the direction makes one", () => {
+    assert.equal(judgeSplit("He laughed until he coughed.", "*laughs* He laughed until he coughed.", hash).matched, true);
+    assert.equal(judgeSplit("“No.”", "Haha. Uh-huh. Hmm. Ah. No.", hash).matched, false);
+    assert.equal(judgeSplit("“No.”", "Haha. Uh-huh. Hmm. Ah. No.", hash, { sounds: true }).matched, true);
+  });
+
+  it("still flags a cut in the wrong place: its last sentence or its first missing, or the block beside's words in it", () => {
+    const stared = "Tunde stared at him. Then he put a hand flat on the table and laughed until he coughed.";
+    assert.equal(judgeSplit(stared, "to this dead atom. then he put a hand flat on the table.", hash, { lexicon: NAMES }).matched, false, "its last words are missing");
+    assert.equal(judgeSplit("He sat. Her friends had found somewhere else to look.", "her friends had found somewhere else to look.", hash, { lexicon: NAMES }).matched, false, "its first sentence is missing");
+    const sit = "“Sit, if you are going to stand there.”";
+    const heardSit = "Sit. if you are going to stand there. He's sad.";
+    assert.equal(judgeSplit(sit, heardSit, hash, { lexicon: NAMES }).matched, true, "alone, a hallucinated tail is cheap");
+    assert.equal(judgeSplit(sit, heardSit, hash, { lexicon: NAMES, after: "He sat. Her friends had found somewhere else to look." }).matched, false, "it is the next block's opening words");
+    const kneels = "“E don finally happen. I will tell your mother myself. I want to see her face. I want to be there when she kneels down.”";
+    const heardKneels = "it don't finally happen. I will tell your mother myself, I want to see her face. I want to be there when she kneels down. at a draw.";
+    assert.equal(judgeSplit(kneels, heardKneels, hash, { lexicon: NAMES, after: "Ade drove. Ozumba Mbadiwe was nearly empty at this hour." }).matched, false);
+    assert.equal(judgeSplit("“Goodnight, palm tree.”", "Good night, Tundi. Goodnight, palm tree.", hash, { lexicon: NAMES, before: "“Goodnight, Tunde.”" }).matched, false, "it opens with the block before");
+    // A misheard first word that only reads like the block before is the block's own.
+    assert.equal(judgeSplit(NA_LOVE[0]![0], NA_LOVE[0]![1], hash, { lexicon: NAMES, before: "Chapter 1 · Sunday" }).matched, true);
+  });
+
+  /** Words spoken in stretches, 0.06 s a letter, with 0.4 s of pause between stretches. */
+  const speak = (...stretches: string[]): { words: TimedWord[]; seconds: number } => {
+    const words: TimedWord[] = [];
+    let at = 0.2;
+    for (const stretch of stretches) {
+      for (const text of stretch.split(" ")) {
+        words.push({ text, start: at, end: at + 0.06 * text.length });
+        at += 0.06 * text.length;
+      }
+      at += 0.4;
+    }
+    return { words, seconds: at };
+  };
+
+  it("gives a block whose every word was misheard its own cut, rather than none", () => {
+    // The 2026-10-03 read cut “Ehen,” and said Tunde. to nothing, and "What?" heard all three.
+    const blocks = [{ key: "p17.0", text: "Ade could not help it." }, { key: "p18.0", text: "“Ehen,”" }, { key: "p18.1", text: "said Tunde." }, { key: "p19.0", text: "“What?”" }];
+    const heard = speak("Ade could not help it.", "Uh-huh.", "Saitundi.", "What?");
+    const cuts = splitRequest(blocks, heard.words, heard.seconds, () => hash, undefined, NAMES);
+    assert.deepEqual(cuts.map((cut) => cut.heard), ["Ade could not help it.", "Uh-huh.", "Saitundi.", "What?"]);
+    assert.ok(cuts.every((cut) => cut.matched && cut.end > cut.start), JSON.stringify(cuts.map((cut) => [cut.key, cut.start, cut.end, cut.matched])));
+  });
+
+  it("keeps a word heard as two, and a misheard name, on its own side of a boundary", () => {
+    const night = [{ key: "p80.0", text: "Then she looked at him." }, { key: "p81.0", text: "“Goodnight, Ade.”" }, { key: "p82.0", text: "“Goodnight.”" }];
+    const heardNight = speak("then she looked at him.", "Good night, Adi.", "Good night.");
+    const nightCuts = splitRequest(night, heardNight.words, heardNight.seconds, () => hash, undefined, NAMES);
+    assert.deepEqual(nightCuts.map((cut) => cut.heard), ["then she looked at him.", "Good night, Adi.", "Good night."]);
+    assert.ok(nightCuts.every((cut) => cut.matched));
+    const sat = [{ key: "p43.1", text: "“Sit, if you are going to stand there.”" }, { key: "p44.0", text: "He sat. Her friends had found somewhere else to look." }];
+    const heardSat = speak("Sit. if you are going to stand there.", "He's sad.", "her friends had found somewhere else to look.");
+    const satCuts = splitRequest(sat, heardSat.words, heardSat.seconds, () => hash, undefined, NAMES);
+    assert.deepEqual(satCuts.map((cut) => cut.heard), ["Sit. if you are going to stand there.", "He's sad. her friends had found somewhere else to look."]);
+    assert.ok(satCuts.every((cut) => cut.matched));
+  });
+
+  it("builds the lexicon from the world's names and the chapter's capitalised words", () => {
+    assert.ok(["ade", "adeyemi", "akinola", "tunde", "ife", "ikoyi", "ilesha", "lekki", "ozumba", "mbadiwe"].every((token) => NAMES.has(token)), [...NAMES].join(" "));
+    assert.ok(!NAMES.has("they") && !NAMES.has("i") && !NAMES.has("the"));
   });
 });
 

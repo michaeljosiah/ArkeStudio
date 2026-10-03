@@ -1,5 +1,6 @@
 import { expectedSpeechSeconds, SPEECH_TOKEN_ESTIMATE, type AudioTranscriptComparison } from "@arke-studio/contracts";
 import { runawayTailAt, speechPauses, TAIL_KEEP_SEC, type SpeechPcm } from "../audio/speech-wav.js";
+import { alignWords, annotations, FILLERS, runSimilarity, SIMILAR, SIMILAR_LOOSE, textTokens, tokenSimilarity, wordsTokens } from "../audio/heard-match.js";
 import { compareAudioTranscript } from "../audio/transcript-comparison.js";
 import type { TimedWord } from "../voice/word-times.js";
 
@@ -21,53 +22,189 @@ export interface SplitCut {
   longTail?: true;
 }
 
-/** A word as the split compares it: case, accents' composition and punctuation set aside. */
-export function splitToken(word: string): string {
-  return word.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
-}
-
-const tokens = (text: string): string[] => text.split(/\s+/).map(splitToken).filter((token) => token !== "");
+const tokens = textTokens;
 
 /**
- * Heard words matched to written ones in order (a longest common subsequence): for each heard
- * word, the index of the written word it is, or −1.
+ * What the split knows of a block's words beyond them (2026-10-03): the blocks either side,
+ * whose words in this cut say it is in the wrong place; the chapter's names and the words not in
+ * English, which whisper is expected to mishear; and whether the block's direction makes a sound,
+ * which whisper writes as "uh-huh" or "ah".
  */
-function align(written: readonly string[], heard: readonly string[]): number[] {
-  const matched = heard.map(() => -1);
-  // A request is about five minutes, some 800 words; the table is bounded well past that.
-  if (written.length * heard.length > 16_000_000) return matched;
-  const width = heard.length + 1;
-  const table = new Uint16Array((written.length + 1) * width);
-  for (let i = written.length - 1; i >= 0; i--) {
-    for (let j = heard.length - 1; j >= 0; j--) {
-      table[i * width + j] = written[i] === heard[j] ? table[(i + 1) * width + j + 1]! + 1 : Math.max(table[(i + 1) * width + j]!, table[i * width + j + 1]!);
+export interface SplitContext {
+  before?: string;
+  after?: string;
+  /** Matching tokens (`splitLexicon`). */
+  lexicon?: ReadonlySet<string>;
+  sounds?: boolean;
+}
+
+/**
+ * The words whisper is expected to mishear (2026-10-03): the world's names — every sheet's, and
+ * the chapter cast's speakers — and every word capitalised inside a sentence of the chapter,
+ * which is a name or a place ("Victoria Island", "Ilesha", "Lekki"). A word in the lexicon is
+ * matched more loosely and counts for less when it is missing, never for nothing.
+ */
+export function splitLexicon(names: Iterable<string>, texts: Iterable<string>): Set<string> {
+  const lexicon = new Set<string>();
+  const add = (word: string) => {
+    for (const token of textTokens(word)) if (token.length >= 2 && !NAME_FILLER.has(token)) lexicon.add(token);
+  };
+  for (const name of names) add(name);
+  for (const text of texts) {
+    const words = text.split(/\s+/u).filter((word) => word !== "");
+    words.forEach((word, at) => {
+      // A sentence's first word, a quotation's or a text message's is capitalised whatever it is.
+      if (at === 0 || /[.!?:;·—–]$/u.test(words[at - 1]!.replace(/["'“”‘’)*_]+$/u, ""))) return;
+      if (/^["'“‘(*_]/u.test(word)) return;
+      // "I" and "I'm" are capitalised everywhere and are nobody's name.
+      if (/^I(?:['’]|$)/u.test(word)) return;
+      if (/^\p{Lu}\p{Ll}/u.test(word)) add(word);
+    });
+  }
+  return lexicon;
+}
+
+/** The small words of a place's name ("The Sister's Bungalow, Ibadan"), which are not what whisper mishears. */
+const NAME_FILLER: ReadonlySet<string> = new Set(["the", "of", "and", "in", "on", "at", "to", "by", "de", "la", "le", "von", "van"]);
+
+/** A heard token, or a note of whisper's (`*laughs*`, `(speaking in foreign language)`) as one blank. */
+interface HeardToken {
+  token: string;
+  blank: boolean;
+}
+
+function heardTokens(heard: string, sounds: boolean): HeardToken[] {
+  const words = heard.split(/\s+/u).filter((word) => word !== "");
+  const notes = annotations(words);
+  const out: HeardToken[] = [];
+  wordsTokens(words).forEach((spoken, at) => {
+    if (notes[at]) {
+      if (at === 0 || !notes[at - 1]) out.push({ token: "", blank: true });
+      return;
     }
-  }
-  for (let i = 0, j = 0; i < written.length && j < heard.length;) {
-    if (written[i] === heard[j]) {
-      matched[j] = i;
-      i += 1;
-      j += 1;
-    } else if (table[(i + 1) * width + j]! >= table[i * width + j + 1]!) i += 1;
-    else j += 1;
-  }
-  return matched;
+    for (const token of spoken) if (!(sounds && FILLERS.has(token))) out.push({ token, blank: false });
+  });
+  return out;
 }
 
 /**
- * Whether a cut is its block (design turn 185c): the words heard against the words written by
- * the transcript check, with case and punctuation set aside since whisper writes its own. A word
- * left out or one added — the split in the wrong place, or the reader skipping — is a mismatch;
- * a short run heard as a different short run is whisper mishearing a name or a Yoruba word, and
- * passes, while there are few of them.
+ * What a written word left unheard weighs: a name a quarter, since whisper may have written it as
+ * nothing at all; a short word a half, since whisper drops "so" and "and" where it breaks a
+ * sentence; any other word a whole one.
  */
-export function judgeSplit(written: string, heard: string, audioHash: string): { matched: boolean; comparison: AudioTranscriptComparison } {
+const missingWeight = (token: string, lexicon: ReadonlySet<string>) => (lexicon.has(token) ? 0.25 : token.length <= 3 ? 0.5 : 1);
+
+/** How close a cut's edge must read to its neighbour's words — a name's more loosely — to be taken for them. */
+const NEIGHBOUR = 0.6;
+const NEIGHBOUR_LOOSE = 0.4;
+
+/**
+ * Whether a cut's edge carries the block beside it (2026-10-03): the first heard words (or the
+ * last) read, letter for letter, as the block before's last words (or the block after's first)
+ * — "Good night, Tundi." opening the cut of "Goodnight, palm tree." after "Goodnight, Tunde.";
+ * "He's sad." closing the cut of "Sit, if you are going to stand there." before "He sat." —
+ * and this block's words are heard as well without them. "Sunday" may read as a neighbour's
+ * word, but it is this block's "Tunde", and taking it away loses it. This is what a cut in the
+ * wrong place looks like, and it is a mismatch however well the rest of the words were heard.
+ */
+function carriesNeighbour(want: readonly string[], said: readonly string[], neighbour: readonly string[], lexicon: ReadonlySet<string>, side: "start" | "end"): boolean {
+  if (neighbour.length === 0 || want.length === 0) return false;
+  const coverage = (heard: readonly string[]) => alignWords(want, heard, { loose: (at) => lexicon.has(want[at]!) }).reduce((sum, match) => sum + match.wn * match.similarity, 0);
+  let full: number | undefined;
+  for (let length = 1; length <= Math.min(6, said.length - 1); length++) {
+    const edge = side === "start" ? said.slice(0, length) : said.slice(said.length - length);
+    if (edge.join("").length < 3) continue;
+    // The edge read against the neighbour's edge words and against this block's own, each at its
+    // closest: it is the neighbour's when it reads as them, and plainly better than as its own.
+    const closest = (words: readonly string[], fromEnd: boolean) => {
+      let best = { similarity: 0, loose: false };
+      for (let count = 1; count <= Math.min(words.length, length + 1); count++) {
+        const near = fromEnd ? words.slice(words.length - count) : words.slice(0, count);
+        const similarity = runSimilarity(near, edge);
+        if (similarity > best.similarity) best = { similarity, loose: near.some((token) => lexicon.has(token)) };
+      }
+      return best;
+    };
+    const theirs = closest(neighbour, side === "start");
+    const mine = closest(want, side === "end");
+    if (theirs.similarity < (theirs.loose ? NEIGHBOUR_LOOSE : NEIGHBOUR) || theirs.similarity < mine.similarity + 0.1) continue;
+    full ??= coverage(said);
+    if (coverage(side === "start" ? said.slice(length) : said.slice(0, said.length - length)) >= full - 0.25) return true;
+  }
+  return false;
+}
+
+/** The whole block letter by letter at or past this reads as its words, whatever the word rule says. */
+export const SPLIT_LETTERS_MATCH = 0.75;
+
+/**
+ * Whether the words heard in a cut are its block's (2026-10-03), as an English whisper hears a
+ * book full of Nigerian names, Yoruba and Pidgin.
+ *
+ * The words are aligned by `alignWords` — near spellings and near sounds match, one word may be
+ * heard as two — and what lies between the words heard exactly is read run by run. A run of
+ * written words heard as other words is a mishearing when the two runs' letters are close
+ * ("Adeyemi Akinola, abeg" as "a te yemi aki no la, a big"), or when whisper wrote a note in
+ * their place. What a wrong cut looks
+ * like is kept as a mismatch whatever else passes: a word missing (a name weighs a quarter, a
+ * short word a half, so a whole one is a content word or two short ones) — at the edge, the cut
+ * is early or late; inside, the reader skipped it — or the cut's edge carrying the words of the
+ * block beside it. Short of that, the block passes when what was misheard costs no more than one
+ * word in eight, or when the whole block, letter by letter, is close to its words.
+ */
+export function heardAsWritten(written: string, heard: string, context: SplitContext = {}): boolean {
+  const lexicon = context.lexicon ?? new Set<string>();
+  const want = tokens(written);
+  const got = heardTokens(heard, context.sounds === true);
+  const said = got.filter((token) => !token.blank).map((token) => token.token);
+  if (want.length === 0) return said.length === 0;
+  // Nothing heard but a note: a block wholly of names or Yoruba heard as "(speaking in foreign language)".
+  if (said.length === 0) return got.length > 0 && want.every((token) => lexicon.has(token));
+  if (context.before !== undefined && carriesNeighbour(want, said, tokens(context.before), lexicon, "start")) return false;
+  if (context.after !== undefined && carriesNeighbour(want, said, tokens(context.after), lexicon, "end")) return false;
+  // The runs lie between the words heard exactly: where the near matches fell inside a run of
+  // mishearings is the aligner's guess ("glass" took "is glass", leaving "up his" unheard), and
+  // the run's letters as a whole are the better witness.
+  const anchors = alignWords(want, got.map((token) => token.token), { loose: (at) => lexicon.has(want[at]!), blank: (at) => got[at]!.blank }).filter((match) => match.similarity === 1);
+  let cost = 0;
+  let w = 0;
+  let h = 0;
+  for (const match of [...anchors, { w: want.length, wn: 0, h: got.length, hn: 0 }]) {
+    if (match.w > w || match.h > h) {
+      const runWritten = want.slice(w, match.w);
+      const runSaid = got.slice(h, match.h).filter((token) => !token.blank).map((token) => token.token);
+      const note = got.slice(h, match.h).some((token) => token.blank);
+      const missing = runWritten.reduce((sum, token) => sum + missingWeight(token, lexicon), 0);
+      if (runWritten.length > 0 && runSaid.length === 0 && !note) {
+        if (missing >= 1) return false;
+        cost += missing;
+      } else if (runWritten.length === 0) {
+        cost += 0.25 * runSaid.length;
+      } else if (runSaid.length === 0) {
+        // Whisper's note in place of a few words — a Yoruba phrase it would not write.
+        if (runWritten.length > 4) cost += missing;
+      } else {
+        const loose = runWritten.some((token) => lexicon.has(token));
+        if (runSimilarity(runWritten, runSaid) < (loose ? SIMILAR_LOOSE : SIMILAR)) cost += Math.max(missing, 0.5 * runSaid.length);
+      }
+    }
+    w = match.w + match.wn;
+    h = match.h + match.hn;
+  }
+  if (cost <= Math.max(1, want.length / 8)) return true;
+  return tokenSimilarity(want.join(""), said.join("")) >= SPLIT_LETTERS_MATCH;
+}
+
+/**
+ * Whether a cut is its block (design turn 185c, amended 2026-10-03): the transcript check's exact
+ * comparison is kept as the record of what differs, and the cut matches when it is exact or when
+ * `heardAsWritten` reads the difference as whisper mishearing rather than a cut in the wrong place.
+ */
+export function judgeSplit(written: string, heard: string, audioHash: string, context: SplitContext = {}): { matched: boolean; comparison: AudioTranscriptComparison } {
   const comparison = compareAudioTranscript({ audioHash, authoredText: tokens(written).join(" "), observedText: tokens(heard).join(" "), transcriber: { id: "voxa-whisper", version: "runtime-unreported" } });
   if (comparison.status !== "compared") return { matched: false, comparison };
   if (comparison.result === "exact") return { matched: true, comparison };
-  const words = Math.max(1, tokens(written).length);
-  const misheard = comparison.differences.every((difference) => difference.kind === "changed" && difference.authored.split(" ").length <= 3 && difference.observed.split(" ").length <= 3);
-  return { matched: misheard && comparison.differences.length <= Math.max(1, Math.floor(words / 8)), comparison };
+  return { matched: heardAsWritten(written, heard, context), comparison };
 }
 
 /**
@@ -108,12 +245,100 @@ function endAfter(word: number, audio: SplitAudio, seconds: number): number {
   return Math.max(word, end);
 }
 
+/**
+ * Heard words left between two that matched — a name heard as some other word — given to the
+ * blocks whose words lie between (2026-10-03). Without this a block whose every word was misheard
+ * owned no heard word, every boundary around it found the same last and first words and fell in
+ * the same pause, and it was cut to nothing while its neighbour carried its words: "Ehen," and
+ * "said Tunde." came back empty and the next block heard "Uh-huh. Saitundi. What?". Each boundary
+ * a run spans is put in the run's widest pause, near where the written characters put it: a turn
+ * ends at a pause, and inside a stretch the words have no pause between them to choose.
+ */
+function fillUnmatched(
+  strong: readonly number[],
+  from: readonly number[],
+  to: readonly number[],
+  owner: readonly number[],
+  written: readonly string[],
+  timeOf: (position: number) => TimedWord,
+  seconds: number,
+): number[] {
+  const blockOf = [...strong];
+  const anchors = strong.map((_, at) => at).filter((at) => strong[at]! >= 0);
+  for (let a = -1; a < anchors.length; a++) {
+    const p = a >= 0 ? anchors[a]! : -1;
+    const q = a + 1 < anchors.length ? anchors[a + 1]! : strong.length;
+    const n = q - p - 1;
+    if (n <= 0) continue;
+    const wFrom = p >= 0 ? to[p]! + 1 : 0;
+    const wTo = q < strong.length ? from[q]! - 1 : written.length - 1;
+    // Nothing written between: what was heard there was added, and the boundary rule places it.
+    if (wFrom > wTo) continue;
+    const left = p >= 0 ? owner[to[p]!]! : owner[wFrom]!;
+    const right = q < strong.length ? owner[from[q]!]! : owner[wTo]!;
+    if (left === right) {
+      for (let at = p + 1; at < q; at++) blockOf[at] = left;
+      continue;
+    }
+    // Gap g sits before the run's word g; gap n after its last.
+    const gap = (g: number) => {
+      const end = p + g >= 0 ? timeOf(p + g).end : 0;
+      const start = p + g + 1 < strong.length ? timeOf(p + g + 1).start : seconds;
+      return start - end;
+    };
+    let total = 0;
+    for (let w = wFrom; w <= wTo; w++) total += written[w]!.length;
+    const boundaries = right - left;
+    const expected = Array.from({ length: boundaries }, (_, t) => {
+      let before = 0;
+      for (let w = wFrom; w <= wTo; w++) if (owner[w]! <= left + t) before += written[w]!.length;
+      return (n * before) / Math.max(1, total);
+    });
+    const strict = boundaries <= n + 1;
+    // A pause wins over closeness to the characters' estimate unless it is a few words further.
+    const score = (t: number, g: number) => gap(g) - 0.04 * Math.abs(g - expected[t]!);
+    const value: number[][] = [];
+    const back: number[][] = [];
+    for (let t = 0; t < boundaries; t++) {
+      value.push([]);
+      back.push([]);
+      for (let g = 0; g <= n; g++) {
+        if (t === 0) {
+          value[t]![g] = score(t, g);
+          back[t]![g] = -1;
+          continue;
+        }
+        let best = -Infinity;
+        let at = -1;
+        for (let prior = 0; prior <= (strict ? g - 1 : g); prior++) {
+          if (value[t - 1]![prior]! > best) {
+            best = value[t - 1]![prior]!;
+            at = prior;
+          }
+        }
+        value[t]![g] = at < 0 ? -Infinity : best + score(t, g);
+        back[t]![g] = at;
+      }
+    }
+    let g = 0;
+    for (let candidate = 1; candidate <= n; candidate++) if (value[boundaries - 1]![candidate]! > value[boundaries - 1]![g]!) g = candidate;
+    const placed: number[] = [];
+    for (let t = boundaries - 1; t >= 0; t--) {
+      placed.unshift(g);
+      g = back[t]![g]!;
+    }
+    for (let k = 0; k < n; k++) blockOf[p + 1 + k] = left + placed.filter((at) => at <= k).length;
+  }
+  return blockOf;
+}
+
 export function splitRequest(
-  blocks: ReadonlyArray<{ key: string; text: string }>,
+  blocks: ReadonlyArray<{ key: string; text: string; sounds?: boolean }>,
   words: readonly TimedWord[],
   seconds: number,
   hashOf: (start: number, end: number) => string,
   audio?: SplitAudio,
+  lexicon: ReadonlySet<string> = new Set(),
 ): SplitCut[] {
   const written: string[] = [];
   const owner: number[] = [];
@@ -123,11 +348,34 @@ export function splitRequest(
       owner.push(index);
     }
   });
-  const heard = words.map((word) => splitToken(word.text));
-  const kept = words.map((_, at) => at).filter((at) => heard[at] !== "");
-  const matched = align(written, kept.map((at) => heard[at]!));
-  // Each heard word's block, where it matched one.
-  const blockOf = kept.map((_, at) => (matched[at]! >= 0 ? owner[matched[at]!]! : -1));
+  // The heard words that are speech — not whisper's notes, not empty — and their tokens, each
+  // traced to the word it came from.
+  const notes = annotations(words.map((word) => word.text));
+  const spoken = wordsTokens(words.map((word) => word.text));
+  const kept = words.map((_, at) => at).filter((at) => !notes[at] && spoken[at]!.length > 0);
+  const heard: string[] = [];
+  const wordOf: number[] = [];
+  kept.forEach((at, position) => {
+    for (const token of spoken[at]!) {
+      heard.push(token);
+      wordOf.push(position);
+    }
+  });
+  // Matched as the cut is judged (2026-10-03): a name misheard must not move a boundary.
+  const matches = alignWords(written, heard, { loose: (at) => lexicon.has(written[at]!), joinable: (at) => owner[at] === owner[at + 1] });
+  // Each kept word's written words, where any of its tokens matched: the first and the last.
+  const from = kept.map(() => -1);
+  const to = kept.map(() => -1);
+  for (const match of matches) {
+    for (let h = match.h; h < match.h + match.hn; h++) {
+      const position = wordOf[h]!;
+      if (from[position] === -1) from[position] = match.w;
+      to[position] = match.w + match.wn - 1;
+    }
+  }
+  const strong = kept.map((_, position) => (from[position]! >= 0 ? owner[from[position]!]! : -1));
+  // Each heard word's block: the one it matched, else the one its place gives it.
+  const blockOf = fillUnmatched(strong, from, to, owner, written, (position) => words[kept[position]!]!, seconds);
   const cuts: number[] = [];
   for (let boundary = 0; boundary < blocks.length - 1; boundary++) {
     let last = -1;
@@ -157,32 +405,47 @@ export function splitRequest(
     const total = blocks.reduce((sum, block) => sum + block.text.length, 0);
     cuts.push(Math.max(floor, (seconds * before) / Math.max(1, total)));
   }
-  const judged = (block: { key: string; text: string }, start: number, end: number): SplitCut => {
+  const judged = (index: number, start: number, end: number): SplitCut => {
+    const block = blocks[index]!;
     const inside = words.filter((word) => (word.start + word.end) / 2 >= start && (word.start + word.end) / 2 < end).map((word) => word.text).join(" ");
-    const judgement = end > start ? judgeSplit(block.text, inside, hashOf(start, end)) : { matched: false, comparison: compareAudioTranscript({ audioHash: hashOf(start, start), authoredText: block.text, observedText: "", transcriber: { id: "voxa-whisper", version: "runtime-unreported" } }) };
+    const context: SplitContext = {
+      lexicon,
+      ...(index > 0 ? { before: blocks[index - 1]!.text } : {}),
+      ...(index + 1 < blocks.length ? { after: blocks[index + 1]!.text } : {}),
+      ...(block.sounds === true ? { sounds: true } : {}),
+    };
+    const judgement = end > start ? judgeSplit(block.text, inside, hashOf(start, end), context) : { matched: false, comparison: compareAudioTranscript({ audioHash: hashOf(start, start), authoredText: block.text, observedText: "", transcriber: { id: "voxa-whisper", version: "runtime-unreported" } }) };
     return { key: block.key, start, end, heard: inside, matched: judgement.matched && end > start, comparison: judgement.comparison };
   };
-  const split = blocks.map((block, index) => {
+  const reached = Math.max(-1, ...to);
+  const split = blocks.map((_, index) => {
     const start = index === 0 ? 0 : cuts[index - 1]!;
-    if (index < blocks.length - 1) return judged(block, start, cuts[index]!);
-    if (audio === undefined) return judged(block, start, seconds);
+    if (index < blocks.length - 1) return judged(index, start, cuts[index]!);
+    if (audio === undefined) return judged(index, start, seconds);
     // The last block ends after its last word heard, not at the end of the audio. A written word
     // after that one may have been heard as something else, so the heard words after it are tried
     // too — as many as there are written words left — and the first end whose words match is
     // kept, else the furthest: a cut is never shortened past what might be its own last word.
+    // That last word is one that matched where one did: a word given to the block by its place
+    // may be whatever whisper made of a runaway tail.
     let lastAt = -1;
-    blockOf.forEach((owned, at) => {
+    strong.forEach((owned, at) => {
       if (owned === index) lastAt = at;
     });
-    if (lastAt < 0) return judged(block, start, Math.max(start, audio.tailAt !== null && audio.tailAt > start ? Math.min(seconds, audio.tailAt) : seconds));
-    const left = written.length - 1 - matched[lastAt]!;
+    if (lastAt < 0) {
+      blockOf.forEach((owned, at) => {
+        if (owned === index && (audio.tailAt === null || words[kept[at]!]!.start < audio.tailAt)) lastAt = at;
+      });
+    }
+    if (lastAt < 0) return judged(index, start, Math.max(start, audio.tailAt !== null && audio.tailAt > start ? Math.min(seconds, audio.tailAt) : seconds));
+    const left = written.length - 1 - (to[lastAt]! >= 0 ? to[lastAt]! : reached);
     let furthest: SplitCut | null = null;
     for (let at = lastAt; at <= Math.min(kept.length - 1, lastAt + left); at++) {
       // Whatever whisper made of a runaway tail is not the block's last word.
       if (at > lastAt && audio.tailAt !== null && words[kept[at]!]!.start >= audio.tailAt) break;
       const end = Math.max(start, endAfter(words[kept[at]!]!.end, audio, seconds));
       if (furthest !== null && end <= furthest.end) continue;
-      const candidate = judged(block, start, end);
+      const candidate = judged(index, start, end);
       if (candidate.matched) return candidate;
       furthest = candidate;
     }
