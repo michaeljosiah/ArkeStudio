@@ -6759,7 +6759,7 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-ab__fchip--on .fy-ab__fcount { color: var(--background); opacity: 0.7; }
 .fy-ab__block--selected { background: var(--muted); }
 /* Pictures on blocks (turn 186c): a chip under the speaker in the margin, and the panel's grid. */
-.fy-ab__who { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.fy-ab__picwho { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
 .fy-ab__picchip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px 0 3px; border: 1px solid var(--border); border-radius: 7px; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); background: var(--background); box-sizing: border-box; }
 .fy-ab__picchip img { width: 28px; height: 18px; object-fit: cover; border-radius: 4px; display: block; }
 .fy-ab__picchip--short { border-color: var(--warning); }

@@ -1277,7 +1277,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
               // A picture set on the block (turn 186c): its chip under the speaker, in the margin.
               const picture = pictures?.byKey.get(row.block.key);
               return picture === undefined || slug === undefined ? speaker : (
-                <span className="fy-ab__who">
+                <span className="fy-ab__picwho">
                   {speaker}
                   <PictureChip slug={slug} picture={picture} estimated={pictures?.estimated === true} />
                 </span>

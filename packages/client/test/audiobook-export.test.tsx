@@ -9,6 +9,7 @@ import { AudiobookScreen } from "../src/screens/audiobook.js";
 import { packageCounts, WebPackages } from "../src/components/audiobook-export.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { AudiobookExportSheet } from "../src/components/audiobook-export.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -121,6 +122,21 @@ describe("Export audiobook (turn 186e)", () => {
     const show = [...dom.document.querySelectorAll("button")].find((button) => text(button) === "Show in folder") ?? null;
     await press(show);
     assert.deepEqual(lastAsk(m, "open-exports-folder"), { kind: "open-exports-folder", worldId: FIXTURE_WORLD_ID, dir: "audiobook-inkbound-ab_x" });
+  });
+
+  it("finds its package again when a reconnect lost the export's answer (codex on PR 1498)", async () => {
+    const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
+    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} />);
+    const planAsk = lastAsk(m, "open-audiobook-listening")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: planAsk.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: PLAN }));
+    await press(q(m, '[data-testid="audiobook-export-start"]'));
+    const exportAsk = lastAsk(m, "export-audiobook-player")!;
+    assert.match(exportAsk.exportId ?? "", /^ab_/, "the window names the package");
+    await act(async () => __setStateForTest(inkbound(), { connection: "closed" }));
+    await act(async () => __setStateForTest(inkbound(), { connection: "open" }));
+    const listAsk = lastAsk(m, "list-web-packages")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "web-packages.listed", requestId: listAsk.requestId, worldId: FIXTURE_WORLD_ID, packages: [{ kind: "audiobook", productionId: "inkbound", title: "Inkbound", dir: `exports/audiobook-inkbound-${exportAsk.exportId}`, exportedAt: AT }] }));
+    assert.equal(text(q(m, '[data-testid="audiobook-export-done"]')), `exports/audiobook-inkbound-${exportAsk.exportId}`);
   });
 
   it("lists the world's packages, the audiobook beside the interactive and the visual novel", async () => {

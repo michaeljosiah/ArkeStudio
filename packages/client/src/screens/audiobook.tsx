@@ -320,8 +320,8 @@ export function AudiobookScreen() {
         <span className="fy-h1row__push" />
         {/* Listen (design turn 186): the book as a listener hears it, once a block anywhere is made. */}
         <ListenButton worldId={worldId} production={production} />
-        {/* Export (design turn 186e): the book as the player, once a chapter is read whole. */}
-        <ExportAudiobookButton worldId={worldId} production={production} readWhole={rows.filter((row) => !row.planned && row.total > 0 && row.made === row.total).length} />
+        {/* Export (design turn 186e): the book as the player; the sheet counts what is read whole. */}
+        <ExportAudiobookButton worldId={worldId} production={production} />
         {!phone && primary}
       </div>
       {phone && <HeldBar className="fy-abdoor-held"><span>{totalBlocks} blocks · {price === null ? "price unavailable" : price.estimatedMicroUsd === 0 ? "free" : `${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}`}</span>{primary}</HeldBar>}

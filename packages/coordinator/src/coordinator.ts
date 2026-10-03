@@ -13835,13 +13835,28 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId) return;
         if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId };
-        const result = await exportAudiobookPlayer(store, msg.productionId, { clock: () => new Date().toISOString(), ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), signal: store.closingSignal }).catch(
+        // Registered with the other exports (codex on PR 1498): shutdown aborts every export before
+        // it waits on the messages in flight, and a long join must not hold it. The world closing
+        // aborts it too.
+        const exportId = msg.exportId ?? `ab_${ulid()}`;
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        const run = exportAudiobookPlayer(store, msg.productionId, { clock: () => new Date().toISOString(), ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), signal: control.signal, exportId }).catch(
           (err: unknown): { ok: false; blockers: string[] } => {
             void this.appLog?.append({ kind: "audiobook.export-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
-            return { ok: false, blockers: [describeCoordinatorError(err)] };
+            return { ok: false, blockers: [control.signal.aborted ? "the export was cancelled" : describeCoordinatorError(err)] };
           },
         );
-        this.emit({ at: new Date().toISOString(), type: "audiobook.exported", ...ids, result });
+        const done = run.then((result) => (result.ok ? { status: "done" as const, output: result.dir } : control.signal.aborted ? { status: "cancelled" as const } : { status: "failed" as const, error: result.blockers.join("; ") }));
+        this.exports.set(exportId, { id: exportId, cancel: () => control.abort(), done });
+        try {
+          const result = await run;
+          this.emit({ at: new Date().toISOString(), type: "audiobook.exported", ...ids, result });
+        } finally {
+          this.exports.delete(exportId);
+          store.closingSignal.removeEventListener("abort", onClose);
+        }
         return;
       }
       case "list-web-packages": {

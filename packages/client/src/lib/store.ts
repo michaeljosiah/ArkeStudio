@@ -5440,9 +5440,9 @@ export function openExportsFolder(worldId: string, dir?: string): void {
 }
 
 /** The audiobook as the player (design turn 186e): answered as `audiobook.exported` under the id returned. */
-export function exportAudiobookPlayer(worldId: string, productionId: string): string | null {
+export function exportAudiobookPlayer(worldId: string, productionId: string, exportId?: string): string | null {
   const requestId = ulid();
-  return send({ kind: "export-audiobook-player", worldId, productionId, requestId }) ? requestId : null;
+  return send({ kind: "export-audiobook-player", worldId, productionId, requestId, ...(exportId !== undefined ? { exportId } : {}) }) ? requestId : null;
 }
 
 /** The world's web packages (design turn 186e): answered as `web-packages.listed` under the id returned. */

@@ -279,6 +279,30 @@ describe("the audiobook as the player (turn 186e)", () => {
     }, { ffmpeg });
   });
 
+  it("is registered with the exports, so shutdown and cancel stop a join in progress (codex on PR 1498)", () => {
+    let started!: () => void;
+    const joining = new Promise<void>((resolve) => (started = resolve));
+    const ffmpeg: FfmpegRunner = {
+      slateFont: "",
+      run: (args, _progress, signal) => {
+        if (!args.includes("concat") && !args.some((arg) => arg.endsWith(".wav"))) return writeFile(args[args.length - 1]!, "audio");
+        started();
+        return new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true }));
+      },
+    };
+    return withHarness(async ({ worldDir, events, send }) => {
+      await read(send, "01-neap");
+      const exportId = "ab_01J8G0000000000000000000X1";
+      const running = send({ kind: "export-audiobook-player", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, exportId });
+      await joining;
+      await send({ kind: "cancel-export", worldId: WORLD_ID, exportId });
+      await running;
+      const answer = events.filter((e): e is Exported => e.type === "audiobook.exported").at(-1);
+      assert.deepEqual(answer?.result, { ok: false, blockers: ["the export was cancelled"] });
+      assert.equal(existsSync(join(worldDir, "exports", `audiobook-${LEDGER}-${exportId}`)), false, "nothing named");
+    }, { ffmpeg });
+  });
+
   it("refuses a book with no chapter read whole", () =>
     withHarness(async ({ events, send }) => {
       await read(send, "01-neap", ["title"]);
