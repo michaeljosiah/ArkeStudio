@@ -109,6 +109,40 @@ async function choose(label: string, value: string) {
   });
 }
 
+/** The chat's model is a chip in the composer's row; its menu holds the models and the two presses (design turn 190e). */
+function chip(): HTMLButtonElement {
+  const element = container.querySelector<HTMLButtonElement>("button.fy-mchip__btn");
+  assert.ok(element, "the model chip");
+  return element;
+}
+async function openChip() {
+  if (!container.querySelector(".fy-mchip__menu")) await act(async () => chip().click());
+}
+function modelItems(): HTMLButtonElement[] {
+  return [...container.querySelectorAll<HTMLButtonElement>(".fy-mchip__menu [data-model]")];
+}
+function modelItem(id: string): HTMLButtonElement {
+  const item = modelItems().find((candidate) => candidate.getAttribute("data-model") === id);
+  assert.ok(item, id);
+  return item;
+}
+async function pickModel(id: string) {
+  await openChip();
+  const item = modelItem(id);
+  await act(async () => item.click());
+}
+function menuPress(label: RegExp): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll<HTMLButtonElement>(".fy-mchip__menu button[role=menuitem]")].find((candidate) => label.test(candidate.textContent ?? ""));
+}
+async function chipPress(label: RegExp) {
+  await openChip();
+  const button = menuPress(label);
+  assert.ok(button, String(label));
+  assert.equal(button.disabled, false, `${label} is enabled`);
+  await act(async () => button.click());
+}
+const isSet = () => chip().className.includes("fy-mchip__btn--set");
+
 async function press(label: string) {
   const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find((candidate) => candidate.textContent?.trim() === label);
   assert.ok(button, label);
@@ -228,7 +262,7 @@ describe("live harness model controls (#1123, #1124)", () => {
     );
     state.world!.productions.find(production => production.meta.id === "saltlight")!.meta.models = { llm: "custom/image-only" };
     await mount(state, <><AgentsPanel />{conversation()}</>);
-    for (const label of ["Model for world-builder", "Model for stage-designer", "Language model"]) {
+    for (const label of ["Model for world-builder", "Model for stage-designer"]) {
       const options = [...select(label).options];
       for (const value of ["custom/image-only", "custom/no-inputs"]) {
         const option = options.find(option => option.value === value)!;
@@ -236,21 +270,28 @@ describe("live harness model controls (#1123, #1124)", () => {
         assert.match(option.textContent!, /cannot read text/);
       }
     }
+    await openChip();
+    for (const value of ["custom/image-only", "custom/no-inputs"]) {
+      const item = modelItem(value);
+      assert.equal(item.disabled, true, `chip: ${value}`);
+      assert.match(item.textContent!, /cannot read text/);
+    }
     const prompt = [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.trim() === "Explain the scene")!;
     assert.equal(prompt.disabled, true, "a previously saved model without text input cannot dispatch");
-    await press("Clear production default");
+    await chipPress(/Clear the production/);
     assert.ok(sent.some(message => message.kind === "set-production-model" && message.modelId === null));
   });
 
   it("uses the live production catalog even when no media manifest entry exists", async () => {
     await mount(modelState(), conversation());
-    const values = [...select("Language model").options].map((option) => option.value);
+    await openChip();
+    const values = modelItems().map((item) => item.getAttribute("data-model"));
     assert.ok(values.includes(OPUS));
     assert.ok(values.includes(SPARK));
     assert.ok(!values.includes("seedance-2.0"));
-    await choose("Language model", OPUS);
-    assert.match(container.textContent!, /THIS TURN/);
-    await press("Remember for this production");
+    await pickModel(OPUS);
+    assert.equal(isSet(), true, "this chat's own choice carries the dot");
+    await chipPress(/Every chat in this production/);
     assert.ok(sent.some((message) => message.kind === "set-production-model" && message.modelId === OPUS && message.capability === "llm"));
   });
 
@@ -299,12 +340,13 @@ describe("live harness model controls (#1123, #1124)", () => {
     // Taken, and the thread shows it, before the next is said.
     await act(async () => __applyEventForTest({ at: "2026-09-13T00:00:01Z", type: "world-chat.send-result", conversationId: CV as never, requestId: inherited.requestId, admitted: true }));
     await act(async () => __setStateForTest({ ...modelState(), worldChat: workspaceAt(2) }));
-    await choose("Language model", OPUS);
+    await pickModel(OPUS);
     await press("Explain the scene");
     const explicit = sent.findLast((message) => message.kind === "world-chat-send");
     assert.ok(explicit && explicit.kind === "world-chat-send");
     assert.equal(explicit.modelId, OPUS);
-    assert.match(container.textContent!, /THIS PRODUCTION/);
+    assert.equal(isSet(), false, "the turn override is spent; the production's choice is back");
+    assert.match(chip().textContent ?? "", /Sonnet/);
     assert.equal(sent.some((message) => message.kind === "set-production-model"), false);
   });
 
@@ -324,7 +366,7 @@ describe("live harness model controls (#1123, #1124)", () => {
     state.app.agents[0]!.model = OPUS;
     state.world!.productions.find((production) => production.meta.id === "saltlight")!.meta.models = { llm: "old/removed" };
     await mount(state, conversation());
-    assert.match(container.textContent!, /CHAT AGENT/);
+    assert.match(chip().textContent ?? "", /Opus/, "the chat agent's model, ahead of the unavailable production choice");
     assert.doesNotMatch(container.textContent!, /old\/removed/);
     await press("Explain the scene");
     assert.ok(sent.some((message) => message.kind === "world-chat-send" && message.modelId === undefined));
@@ -335,8 +377,9 @@ describe("live harness model controls (#1123, #1124)", () => {
     state.app.harnessModels = [];
     state.app.harnessModelStatus = { status: "error", reason: "The harness did not answer." };
     await mount(state, conversation());
-    assert.match(container.textContent!, /anthropic\/sonnet · unavailable/);
-    await press("Clear production default");
+    await openChip();
+    assert.match(container.querySelector(".fy-mchip__menu")!.textContent ?? "", /anthropic\/sonnet\s*unavailable/);
+    await chipPress(/Clear the production/);
     assert.ok(sent.some((message) => message.kind === "set-production-model" && message.modelId === null));
     await press("Retry models");
   });
@@ -349,38 +392,42 @@ describe("live harness model controls (#1123, #1124)", () => {
       health: { ...state.app.health, harness: { status: "unavailable", reason: "The harness exited." } },
     } }));
     assert.match(container.textContent!, /The harness exited/);
-    assert.equal([...select("Language model").options].find(option => option.value === OPUS)!.hasAttribute("disabled"), true);
+    await openChip();
+    assert.equal(modelItem(OPUS).disabled, true);
     const prompt = [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.trim() === "Explain the scene")!;
     assert.equal(prompt.disabled, true);
-    await press("Clear production default");
+    await chipPress(/Clear the production/);
   });
 
   it("keeps retained idle models unverified until fresh catalog state arrives", async () => {
     const state = modelState();
     await mount(state, <><AgentsPanel />{conversation()}</>);
-    await choose("Language model", OPUS);
+    await pickModel(OPUS);
     await act(async () => __setStateForTest({ ...state, app: { ...state.app, harnessModelStatus: { status: "idle" } } }));
     assert.match(container.textContent!, /Models need to be refreshed/);
     assert.doesNotMatch(container.textContent!, /3 models from Claude Code/);
-    for (const label of ["Model for world-builder", "Model for stage-designer", "Language model"]) {
+    for (const label of ["Model for world-builder", "Model for stage-designer"]) {
       const options = [...select(label).options];
       assert.equal(options.find(option => option.value === OPUS)!.hasAttribute("disabled"), true, label);
       assert.equal(options.find(option => option.value === "")!.hasAttribute("disabled"), false, "clearing remains available");
     }
+    await openChip();
+    assert.equal(modelItem(OPUS).disabled, true);
+    assert.ok(menuPress(/Use the saved choice/) ?? [...container.querySelectorAll<HTMLButtonElement>(".fy-mchip__menu button")].find((b) => /Use the saved choice/.test(b.textContent ?? "")), "clearing remains available");
     const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.trim() === label)!;
     assert.equal(button("Explain the scene").disabled, true);
-    assert.equal(button("Remember for this production").disabled, true);
-    assert.equal(button("Clear production default").disabled, false);
+    assert.equal(menuPress(/Every chat in this production/), undefined, "a choice that cannot be checked is not offered to the production");
+    assert.equal(menuPress(/Clear the production/)!.disabled, false);
     const requests = sent.filter(message => message.kind === "list-harness-models").length;
     await press("Retry models");
     assert.equal(sent.filter(message => message.kind === "list-harness-models").length, requests + 1);
     await act(async () => __setStateForTest({ ...state, app: { ...state.app,
       harnessModelStatus: { status: "ready" }, harnessModels: [state.app.harnessModels[1]!],
     } }));
-    assert.match(container.textContent!, /1 model from Claude Code/);
-    assert.equal([...select("Language model").options].find(option => option.value === OPUS)!.hasAttribute("disabled"), false);
+    await openChip();
+    assert.equal(modelItem(OPUS).disabled, false);
     assert.equal(button("Explain the scene").disabled, false);
-    await press("Remember for this production");
+    await chipPress(/Every chat in this production/);
     assert.ok(sent.some(message => message.kind === "set-production-model" && message.modelId === OPUS));
   });
 
@@ -519,27 +566,24 @@ describe("round-64 harness regressions (#1154)", () => {
     const state = modelState();
     state.world!.productions[0]!.meta.models = { llm: "claude-sonnet-5" };
     await mount(state, conversation());
-    await choose("Language model", OPUS);
-    // Restore linkedom's getter so the assertion reads React's selected option, not our event shim.
-    Reflect.deleteProperty(select("Language model"), "value");
-    await press("Remember for this production");
-    assert.equal(select("Language model").value, OPUS);
-    assert.match(container.textContent!, /THIS TURN/);
+    await pickModel(OPUS);
+    await chipPress(/Every chat in this production/);
+    assert.match(chip().textContent ?? "", /Opus/, "the replacement stays until its save arrives");
+    assert.equal(isSet(), true);
     const saved = structuredClone(state);
     saved.world!.productions[0]!.meta.models = { llm: OPUS };
     await act(async () => __setStateForTest(saved));
-    assert.equal(select("Language model").value, OPUS);
-    assert.match(container.textContent!, /THIS PRODUCTION/);
+    assert.match(chip().textContent ?? "", /Opus/);
+    assert.equal(isSet(), false, "saved: the production's choice, no longer this chat's alone");
   });
 
   it("retains an explicit turn choice equal to the production default ahead of an agent override", async () => {
     const state = modelState();
     state.app.agents[0]!.model = OPUS;
     await mount(state, conversation());
-    await choose("Language model", CLAUDE);
-    Reflect.deleteProperty(select("Language model"), "value");
-    assert.equal(select("Language model").value, CLAUDE);
-    assert.match(container.textContent!, /THIS TURN/);
+    await pickModel(CLAUDE);
+    assert.match(chip().textContent ?? "", /Sonnet/, "an explicit choice ahead of the agent's override");
+    assert.equal(isSet(), false, "equal to the production's own, so no dot");
   });
 });
 
