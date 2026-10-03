@@ -8806,3 +8806,6 @@ button.fy-abdoor__voice:hover { background: var(--accent); border-color: var(--n
 .fy-tm__soundrow > span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .fy-tm__soundrow--on { background: var(--secondary); font-weight: 500; }
 .fy-tm__reaction { font: italic 400 12px var(--font-sans); color: var(--foreground); }
+/* Propose timing (turn 187b): Arke's bars and beds take a 1.5 dashed outline until accepted, as 184b's markers do. */
+.fy-tm__bar--proposed, .fy-tm__bed--proposed { outline: 1.5px dashed var(--foreground); outline-offset: 1px; }
+.fy-tm__proposal { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; border-style: dashed; }

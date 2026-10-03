@@ -546,6 +546,9 @@ const CLIENT_COMMAND_METADATA = {
   "set-audiobook-bed": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   "set-audiobook-sound": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   "render-audiobook-mix": readOnly(QUERY),
+  // Propose timing (turn 187b): read off the chapter, nothing spent; its acceptance is a command on the record.
+  "propose-audiobook-timing": readOnly(QUERY),
+  "accept-audiobook-timing": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   // The audiobook's web package and the world's packages (turn 186e): a file the host writes, and a read.
   "export-audiobook-player": action("production", "host-action", "export", "export", ["chapters", "artifacts", "exports"]),
   "list-web-packages": readOnly(QUERY),

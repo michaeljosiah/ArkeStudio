@@ -709,6 +709,14 @@ export function subscribeAudiobookMix(listener: (answer: AudiobookMixAnswer) => 
   return () => audiobookMixListeners.delete(listener);
 }
 
+/** Arke's timing for a chapter (design turn 187b): answered to the ask that named it. */
+export type AudiobookTimingProposalAnswer = Extract<DomainEvent, { type: "audiobook.timing-proposal" }>;
+const audiobookTimingProposalListeners = new Set<(answer: AudiobookTimingProposalAnswer) => void>();
+export function subscribeAudiobookTimingProposal(listener: (answer: AudiobookTimingProposalAnswer) => void): () => void {
+  audiobookTimingProposalListeners.add(listener);
+  return () => audiobookTimingProposalListeners.delete(listener);
+}
+
 export type BenchSubjectOpened = Extract<DomainEvent, { type: "bench.subject-opened" }>;
 const benchSubjectOpenedListeners = new Set<(answer: BenchSubjectOpened) => void>();
 export function subscribeBenchSubjectOpened(listener: (answer: BenchSubjectOpened) => void): () => void {
@@ -1634,6 +1642,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "audiobook.mix") {
       for (const listener of audiobookMixListeners) listener(event);
+    }
+    if (event.type === "audiobook.timing-proposal") {
+      for (const listener of audiobookTimingProposalListeners) listener(event);
     }
     if (event.type === "bench.subject-opened") {
       for (const listener of benchSubjectOpenedListeners) listener(event);
@@ -5332,6 +5343,18 @@ export function setAudiobookBed(worldId: string, productionId: string, chapterFi
 export function setAudiobookSound(worldId: string, productionId: string, chapterFile: string, key: string | null, sound: import("@arke-studio/contracts").BlockSoundInput | null): string | null {
   const requestId = ulid();
   return send({ kind: "set-audiobook-sound", worldId, productionId, chapterFile, key, sound, requestId }) ? requestId : null;
+}
+
+/** Propose timing (design turn 187b, R-86): answered as `audiobook.timing-proposal` under the id returned. */
+export function proposeAudiobookTiming(worldId: string, productionId: string, chapterFile: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "propose-audiobook-timing", worldId, productionId, chapterFile, requestId }) ? requestId : null;
+}
+
+/** A proposal accepted whole (R-86): answered as `audiobook.record` under the id returned. */
+export function acceptAudiobookTiming(worldId: string, productionId: string, chapterFile: string, proposal: import("@arke-studio/contracts").TimingProposal): string | null {
+  const requestId = ulid();
+  return send({ kind: "accept-audiobook-timing", worldId, productionId, chapterFile, proposal, requestId }) ? requestId : null;
 }
 
 /** The chapter as it sounds with its timing, or a window of it (R-85): answered as `audiobook.mix` under the id returned. */

@@ -53,7 +53,7 @@ import { ListenButton } from "../components/audiobook-player.js";
 import { BlockPicturePanel, useChapterPictures } from "../components/audiobook-picture.js";
 import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectSheet, DirectionCard, ReadSheet, PerformedSpeaker, ReadingMenu, ReadingNotes, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
-import { BlockTimingPanel, TimingSide, TimingView, betweenClocks, timingLanes } from "./chapter-timing.js";
+import { BlockTimingPanel, TimingProposalCard, TimingSide, TimingView, betweenClocks, chapterTimingOf, proposedView, timingLanes, useTimingProposal } from "./chapter-timing.js";
 import { BedPanel, ReactionsPanel } from "../components/audiobook-beds.js";
 import { dismissPlayback, playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
@@ -1624,6 +1624,16 @@ export function ChapterWorkspace({
   // Timing (design turn 187): one write a change, answered as the record; the same values from
   // the Timing view and from the block panel.
   const timingLocked = locked || record === null || connection !== "open" || audiobook.run?.state === "reading";
+  // Propose timing (design turn 187b): drawn dashed on the view until accepted whole.
+  const timingProposal = useTimingProposal({ worldId, prodId, chapterId: chapter.id, chapterFile: chapter.file, connection });
+  const proposalView = useMemo(
+    () => proposedView(audiobookRecord.record === "unreadable" ? null : audiobookRecord.record, timingProposal.proposal, audiobook.rows.map((row) => row.block)),
+    [audiobookRecord.record, timingProposal.proposal, audiobook.rows],
+  );
+  const shownTiming = useMemo(
+    () => (timingProposal.proposal === null ? audiobook.timing : chapterTimingOf(audiobook.rows, proposalView.record, world.artifacts, production.audiobook?.reading ?? "narrator", "estimate", audiobookRecord.missing)),
+    [timingProposal.proposal, audiobook.timing, audiobook.rows, proposalView.record, world.artifacts, production.audiobook?.reading, audiobookRecord.missing],
+  );
   const onTiming = (key: string, input: BlockTimingInput) => {
     if (timingLocked) return;
     setAudiobookTiming(worldId, prodId, chapter.file, key, input);
@@ -1814,6 +1824,12 @@ export function ChapterWorkspace({
                   onNarrator={() => setNarratorOpen(true)}
                 />
                 <span className="fy-ch__viewpush" />
+                {timingProposal.proposal === null && (
+                  <Button variant="secondary" disabled={timingLocked || timingProposal.pending} onClick={timingProposal.propose} data-testid="timing-propose">
+                    {timingProposal.pending ? "Proposing…" : "Propose timing"}
+                  </Button>
+                )}
+                {timingProposal.proposal === null && timingProposal.refused !== null && <span className="fy-mono fy-ch__who-where--warn">{timingProposal.refused}</span>}
                 {audiobook.mixPlayer.playing ? (
                   <Button variant="ghost" onClick={() => dismissPlayback()} data-testid="timing-stop">Stop</Button>
                 ) : (
@@ -1933,18 +1949,25 @@ export function ChapterWorkspace({
               ) : record === null ? (
                 <p className="fy-bible__empty">Opening…</p>
               ) : (
-                <TimingView
-                  timing={audiobook.timing}
-                  lanes={timingLanes(audiobook.rows)}
-                  rows={audiobook.rows}
-                  selected={audiobook.selected}
-                  onSelect={audiobook.setSelected}
-                  onTiming={onTiming}
-                  playhead={shownPlayhead}
-                  onPlayhead={setPlayhead}
-                  reactionLabels={Object.fromEntries(Object.entries(timedRecord?.reactions ?? {}).map(([key, reaction]) => [key, reaction.sound ?? reaction.words ?? key]))}
-                  locked={timingLocked}
-                />
+                <>
+                  {timingProposal.proposal !== null && (
+                    <TimingProposalCard proposal={timingProposal.proposal} onAccept={timingProposal.accept} onDiscard={timingProposal.discard} refused={timingProposal.refused} locked={timingLocked} />
+                  )}
+                  <TimingView
+                    timing={shownTiming}
+                    lanes={timingLanes(audiobook.rows)}
+                    rows={audiobook.rows}
+                    selected={audiobook.selected}
+                    onSelect={audiobook.setSelected}
+                    onTiming={onTiming}
+                    playhead={shownPlayhead}
+                    onPlayhead={setPlayhead}
+                    reactionLabels={Object.fromEntries(Object.entries(proposalView.record?.reactions ?? {}).map(([key, reaction]) => [key, reaction.sound ?? reaction.words ?? key]))}
+                    proposed={proposalView.proposed}
+                    // A proposal held is looked at, not edited around: accepted or discarded first.
+                    locked={timingLocked || timingProposal.proposal !== null}
+                  />
+                </>
               )}
             </div>
           )}

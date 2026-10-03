@@ -318,6 +318,34 @@ describe("the mix (turn 187, R-85)", () => {
   });
 });
 
+describe("Propose timing (turn 187b, R-86)", () => {
+  type ProposalEvent = Extract<DomainEvent, { type: "audiobook.timing-proposal" }>;
+  it("proposes off the chapter with the takes' ends heard here, and accepted never moves the author's", () =>
+    withHarness(async ({ events, send }) => {
+      await read(send);
+      await send({ kind: "propose-audiobook-timing", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST });
+      const first = events.filter((e): e is ProposalEvent => e.type === "audiobook.timing-proposal").at(-1)!;
+      assert.equal(first.refused, undefined);
+      assert.deepEqual(first.proposal?.starts["p0.0"], { start: 1, why: "heading" }, "the heading is let breathe");
+      assert.ok((first.proposal?.heard ?? 0) > 0, "the takes' ends were heard on this machine");
+      assert.equal(events.some((e) => e.type === "audiobook.record"), false, "nothing written by proposing");
+
+      await setTiming(send, "p0.0", { start: 0.2 });
+      await send({ kind: "propose-audiobook-timing", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST });
+      const second = events.filter((e): e is ProposalEvent => e.type === "audiobook.timing-proposal").at(-1)!;
+      assert.equal(second.proposal?.starts["p0.0"], undefined);
+      assert.equal(second.proposal?.kept, 1, "the author's start is kept and counted");
+
+      // Accepted whole, even a proposal that names the author's block leaves it.
+      const proposal = { ...second.proposal!, starts: { ...second.proposal!.starts, "p0.0": { start: 1, why: "heading" as const }, "p1.0": { start: 0.4, why: "pause" as const } } };
+      await send({ kind: "accept-audiobook-timing", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", proposal, requestId: REQUEST });
+      const record = lastRecord(events).record!;
+      assert.equal(record.timing?.["p0.0"]?.start, 0.2);
+      assert.equal(record.timing?.["p0.0"]?.by, "author");
+      assert.deepEqual([record.timing?.["p1.0"]?.start, record.timing?.["p1.0"]?.by], [0.4, "arke"]);
+    }));
+});
+
 describe("reactions, beds and sounds (turn 187d, R-83, R-84)", () => {
   // The frame's own fields; the world, production, chapter and id are the harness's.
   const set = (send: (message: ClientMessage) => Promise<void>, message: { kind: "set-audiobook-reaction" | "set-audiobook-bed" | "set-audiobook-sound"; key: string | null; [field: string]: unknown }) =>
