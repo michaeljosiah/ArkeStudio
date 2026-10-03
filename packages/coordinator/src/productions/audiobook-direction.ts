@@ -601,7 +601,7 @@ export async function directionReads(store: WorldStore, productionId: string, ch
     ...(context.tone !== undefined ? { tone: context.tone } : {}),
     speakers: context.speakers.map((speaker) => speaker.name),
     narrator: context.narrator,
-    notes: { book: book?.note !== undefined, chapter: context.chapterNote !== undefined, speakers: Object.keys(book?.notes ?? {}).length },
+    notes: { book: book?.note !== undefined, chapter: context.chapterNote !== undefined, speakers: context.speakers.filter((speaker) => speaker.note !== undefined).length },
     before: context.before === null ? null : { order: context.before.order, blocks: context.before.blocks.length },
     ...(refusal !== null ? { cast: refusal } : {}),
     ...(plan.reading === "performed" && refusal === null ? { speakerNotes: { set: speakerKeys.filter((key) => book?.notes?.[key] !== undefined).length, of: speakerKeys.length } } : {}),
@@ -787,21 +787,14 @@ export async function acceptDirections(
   input: DirectionRoom,
   extras: ProposalExtras = {},
 ): Promise<AcceptedDirections> {
-  if (extras.cast !== undefined) {
-    if (extras.cast.hash !== accepted.hash) return { outcome: "refused", reason: "the prose moved · direct again" };
-    const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
-    const summary = production?.chapters.find((c) => c.id === chapterId || c.file === chapterId);
-    if (summary?.bodyHash !== undefined && summary.bodyHash !== accepted.hash) return { outcome: "refused", reason: "the prose moved · direct again" };
-    await writeCast(store, productionId, extras.cast);
-  }
-  if (extras.chapterNote !== undefined || extras.speakerNotes !== undefined) {
-    const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
-    const summary = production?.chapters.find((c) => c.id === chapterId || c.file === chapterId);
-    if (summary !== undefined) await writeProposalNotes(store, productionId, summary.id, extras);
-  }
+  // Everything is judged before anything is written (codex on PR 1476): a card refused for prose
+  // that moved, or a cast that no longer fits, must leave the cast and the book's notes as they
+  // were. The held cast stands in for the record's while the directions are checked against it.
+  if (extras.cast !== undefined && extras.cast.hash !== accepted.hash) return { outcome: "refused", reason: "the prose moved · direct again" };
+  const cast = extras.cast === undefined ? undefined : await composeCast(store, productionId, extras.cast);
   let room: Awaited<ReturnType<typeof directableBlocks>>;
   try {
-    room = await directableBlocks(store, productionId, chapterId, input);
+    room = await directableBlocks(store, productionId, chapterId, input, cast === undefined ? undefined : { cast });
   } catch (err) {
     return { outcome: "refused", reason: err instanceof Error ? err.message : String(err) };
   }
@@ -825,6 +818,9 @@ export async function acceptDirections(
     }
     direction[key] = directionEntry(block.text, plan, at);
   }
+  // The card verified: its cast, with the pins as they stand now, then its notes, then its directions.
+  if (extras.cast !== undefined) await writeCast(store, productionId, extras.cast);
+  if (extras.chapterNote !== undefined || extras.speakerNotes !== undefined) await writeProposalNotes(store, productionId, chapter.id, extras);
   const record = await updateAudiobook(store, productionId, chapter, (current) => ({ ...current, updatedAt: at, direction }));
   return { outcome: "accepted", record, dropped };
 }
@@ -867,7 +863,7 @@ export function makeAdapterSpeakerNotesDeriver(adapter: HarnessAdapter, sessionI
  * only those the author has not given a note. What verifies is written at once, marked as the
  * sheet's; an author's note is never replaced, and a draft is the author's to change.
  */
-export async function draftSpeakerNotes(store: WorldStore, productionId: string, deriver: SpeakerNotesDeriver, signal?: AbortSignal): Promise<{ drafted: number }> {
+export async function draftSpeakerNotes(store: WorldStore, productionId: string, deriver: SpeakerNotesDeriver, signal?: AbortSignal, options: { blocked?: () => string | null } = {}): Promise<{ drafted: number }> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const held = await readAudiobookBook(store, productionId);
@@ -898,6 +894,10 @@ export async function draftSpeakerNotes(store: WorldStore, productionId: string,
     if (note !== "" && note.length <= CADENCE_PHRASE_MAX) drafted[key] = note;
   }
   if (Object.keys(drafted).length === 0) return { drafted: 0 };
+  // A read begun while the model worked was prepared under the notes as they were (codex on PR
+  // 1476): writing now would make its takes stale as they land, so the drafts are refused.
+  const busy = options.blocked?.() ?? null;
+  if (busy !== null) throw new Error(busy);
   // Read again at the write: a note the author typed while the model worked is theirs.
   const now = await readAudiobookBook(store, productionId);
   const current: AudiobookBook = now === null || now === "unreadable" ? base : now;

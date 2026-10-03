@@ -3295,6 +3295,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       /** The prose the directions were made for: a chapter that moved since refuses them. */
       hash: z.string().min(1),
       directions: z.record(z.string().min(1), AudiobookDirectionInputSchema),
+      /** The card accepted, by the name the coordinator gave it (codex on PR 1476): its held cast and drafted notes are written only for that card. */
+      proposalId: z.string().min(1).max(64).optional(),
     })
     .strict(),
   /**

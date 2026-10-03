@@ -14278,6 +14278,7 @@ export class Coordinator {
           });
           this.heldProposals.set(key, { ...(result.cast !== undefined ? { cast: result.cast.derived } : {}), heard: new Set() });
           finished("directed", { directed: result.directed, dropped: result.dropped }, {
+            proposalId: ulid(),
             proposed: result.proposed,
             hash: result.hash,
             chapterVersion: result.chapterVersion,
@@ -14322,7 +14323,7 @@ export class Coordinator {
           // What the card carries besides its directions is the coordinator's own copy, and only
           // for the card it made for these words: a window never sends a cast or a note to write.
           const card = this.heldDirections.get(key);
-          const same = card !== undefined && card.hash === msg.hash;
+          const same = card !== undefined && card.hash === msg.hash && card.proposalId !== undefined && card.proposalId === msg.proposalId;
           const held = same ? this.heldProposals.get(key) : undefined;
           const extras = {
             ...(held?.cast !== undefined ? { cast: held.cast } : {}),
@@ -14506,7 +14507,7 @@ export class Coordinator {
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         try {
-          const { drafted } = await draftSpeakerNotes(store, msg.productionId, deriver, control.signal);
+          const { drafted } = await draftSpeakerNotes(store, msg.productionId, deriver, control.signal, { blocked: () => (this.audiobookBusy(msg.worldId, msg.productionId) ? "the book is being read" : null) });
           if (drafted > 0) this.refreshIfStillOpen(store);
           answer(drafted);
         } catch (err) {

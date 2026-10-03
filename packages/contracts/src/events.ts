@@ -1401,6 +1401,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       /** The model's one or two sentences on what it did, said on the card. */
       summary: z.string().optional(),
       proposed: z.record(z.string().min(1), AudiobookDirectionInputSchema).optional(),
+      /** The proposal's own name (codex on PR 1476): echoed on acceptance, so what it carries besides its directions goes only with it. */
+      proposalId: z.string().min(1).max(64).optional(),
       /** The lines the proposal casts first (design turn 184a, SPEC-047 R-54): written only when it is accepted. */
       cast: z.object({ lines: z.number().int().min(0), speakers: z.number().int().min(0) }).strict().optional(),
       /** The chapter note the director drafted when asked (R-53); written on acceptance. */

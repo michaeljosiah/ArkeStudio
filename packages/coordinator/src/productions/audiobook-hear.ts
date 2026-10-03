@@ -150,6 +150,10 @@ export async function adoptHeardTakes(
     const sourcePath = join(store.dir, fromPortable(cacheFile));
     if (!(await stat(toExtendedLength(sourcePath)).then((s) => s.isFile(), () => false))) continue;
     const estimatedMicroUsd = speaking.local ? 0 : speaking.quotes.reduce((sum, quote) => sum + quote.authorisedMicroUsd, 0);
+    // The heard file is another performance beside a take the block already has (codex on PR
+    // 1476): named for it, as the run names a remake, so the shelf files these bytes rather than
+    // handing back an older take of the same words, voice and direction.
+    const standing = prepared.prepared.record.takes[speaking.block.key];
     const generation: ArtifactAudiobookGeneration = {
       source: "audiobook",
       productionId,
@@ -177,6 +181,7 @@ export async function adoptHeardTakes(
         : speaking.takeHash !== undefined
           ? { directionHash: speaking.takeHash }
           : {}),
+      ...(standing !== undefined ? { remakeOf: standing.artifactId } : {}),
     };
     const artifact = await fileGeneratedArtifact(store, { sourcePath, generation, production: productionId, ...(deps.mediaProbe !== undefined ? { mediaProbe: deps.mediaProbe } : {}) });
     const substituted = speaking.substitutedNow ?? speaking.substituted;

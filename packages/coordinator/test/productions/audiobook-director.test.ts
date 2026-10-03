@@ -16,6 +16,7 @@ import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import {
   DIRECTION_CONTEXT_BOUNDS,
+  acceptDirections,
   directionPromptFor,
   renderDirectionContext,
   spokenAt,
@@ -409,7 +410,7 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
         assert.deepEqual(directed.cast, { lines: 1, speakers: 1 });
         assert.ok(!existsSync(castFile), "the cast is held with the proposal, not written");
         assert.ok(Object.keys(directed.proposed ?? {}).some((key) => key.startsWith("p0.")), "the line the cast makes is directed");
-        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: directed.proposed! });
+        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: directed.proposed!, proposalId: directed.proposalId });
         const accepted = events.find((e): e is Recorded => e.type === "audiobook.record");
         assert.ok(accepted?.record, accepted?.refused);
         assert.ok(existsSync(castFile), "accepted: the cast is written");
@@ -444,7 +445,7 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
         assert.deepEqual(directed.speakerNotes, { "maren-kest": "dry, exact, unhurried" });
         assert.equal(directed.chapterNote, "Night at the rail desk.");
         assert.ok(!existsSync(bookPath(worldDir)) || (await readBook(worldDir)).notes === undefined, "nothing written before acceptance");
-        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: directed.proposed! });
+        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: directed.proposed!, proposalId: directed.proposalId });
         const book = await readBook(worldDir);
         assert.equal(book.notes?.["maren-kest"], "dry, exact, unhurried");
         assert.equal(book.noteSources?.["maren-kest"], "sheet", "said where it came from");
@@ -497,7 +498,7 @@ describe("hear a block before accepting (R-55)", () => {
         assert.ok(heard?.file, heard?.refused);
         assert.equal(spoken.length, 1, "one read of the block");
         assert.ok(!existsSync(recordPath(worldDir)), "hearing writes no record");
-        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: directed.proposed! });
+        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: directed.proposed!, proposalId: directed.proposalId });
         const accepted = events.find((e): e is Recorded => e.type === "audiobook.record");
         assert.ok(accepted?.record?.takes["title"], "the heard read is the title's take");
         await send({ kind: "read-audiobook-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap" });
@@ -517,11 +518,65 @@ describe("hear a block before accepting (R-55)", () => {
         const directed = events.find((e): e is Directed => e.type === "direction.finished")!;
         await send({ kind: "hear-audiobook-line", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, chapterFile: "01-neap", block: "title", proposed: true });
         const changed = { ...directed.proposed!, title: { delivery: "measured" as const, speed: 1, cues: [] } };
-        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: changed });
+        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: changed, proposalId: directed.proposalId });
         const accepted = events.find((e): e is Recorded => e.type === "audiobook.record");
         assert.ok(accepted?.record);
         assert.equal(accepted.record.takes["title"], undefined, "what was heard is not what the block now sends");
       },
     ));
+
+  it("a heard read beside a take the block already has is filed as its own, not the older take handed back (codex on PR 1476)", () =>
+    withDirector(
+      { direction: async (input) => ({ blocks: input.blocks.map((block) => ({ block: block.key, delivery: "measured" })) }) },
+      async ({ events, store, send }) => {
+        await send({ kind: "read-audiobook-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap" });
+        const before = events.filter((e): e is Finished => e.type === "audiobook.finished").at(-1)!;
+        assert.equal(before.outcome, "read", before.reason);
+        const was = before.record?.takes["title"]?.artifactId;
+        assert.ok(was);
+        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap" });
+        const directed = events.find((e): e is Directed => e.type === "direction.finished")!;
+        await send({ kind: "hear-audiobook-line", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, chapterFile: "01-neap", block: "title", proposed: true });
+        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: directed.proposed!, proposalId: directed.proposalId });
+        const accepted = events.find((e): e is Recorded => e.type === "audiobook.record");
+        const now = accepted?.record?.takes["title"]?.artifactId;
+        assert.ok(now !== undefined && now !== was, "the heard bytes are the take");
+        const sidecar = store.getBundle().artifacts.find((artifact) => artifact.id === now);
+        assert.equal(sidecar?.generation?.source === "audiobook" ? sidecar.generation.remakeOf : undefined, was);
+      },
+    ));
+});
+
+describe("a card's extras go only with that card (codex on PR 1476)", () => {
+  it("an acceptance naming another card writes its directions and nothing the held card carries", () =>
+    withDirector(
+      {
+        book: { reading: "performed" },
+        direction: async (input) => ({
+          blocks: input.blocks.map((block) => ({ block: block.key, delivery: "measured" })),
+          speakerNotes: Object.fromEntries((input.asks?.speakerNotes ?? []).map((speaker) => [speaker.key, "dry, exact"])),
+          ...(input.asks?.chapterNote === true ? { chapterNote: "Night at the rail desk." } : {}),
+        }),
+      },
+      async ({ worldDir, events, send }) => {
+        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", speakerNotes: true, chapterNote: true });
+        const directed = events.find((e): e is Directed => e.type === "direction.finished")!;
+        assert.ok(directed.proposalId);
+        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: directed.proposed!, proposalId: "an-older-card" });
+        assert.ok(events.find((e): e is Recorded => e.type === "audiobook.record")?.record, "the directions it named are written");
+        const book = await readBook(worldDir);
+        assert.equal(book.notes, undefined, "not the held card's speaker notes");
+        assert.equal(book.chapterNotes, undefined, "nor its chapter note");
+      },
+    ));
+
+  it("a card refused for prose that moved writes neither its cast nor its notes", () =>
+    withDirector({ uncast: true, book: { reading: "performed" } }, async ({ worldDir, store }) => {
+      const narrator = { provider: "kokoro", model: KOKORO.id, voiceId: "bm_george", label: "George" };
+      const accepted = await acceptDirections(store, LEDGER, "neap", { hash: `sha256:${"0".repeat(64)}`, directions: {} }, { narrator, models: [KOKORO], catalogue: [] }, { chapterNote: "Night.", speakerNotes: { "maren-kest": "dry" } });
+      assert.deepEqual(accepted, { outcome: "refused", reason: "not cast · cast the lines first" });
+      assert.equal((await readBook(worldDir)).chapterNotes, undefined, "nothing of the card is written");
+      assert.equal((await readBook(worldDir)).notes, undefined);
+    }));
 });
 
