@@ -3155,7 +3155,7 @@ export function genesisChat(genesisId: string, text: string, modelId?: string): 
 export function takeRejectedGenesisChat(genesisId: string): string | undefined {
   const draft = current.genesis[genesisId];
   const text = draft?.rejectedChat;
-  if (text !== undefined) emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...draft, rejectedChat: undefined } } });
+  if (draft && text !== undefined) emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...draft, rejectedChat: undefined } } });
   return text;
 }
 
