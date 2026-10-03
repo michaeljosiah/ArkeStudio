@@ -101,6 +101,7 @@ import {
   useStore,
   keepAudiobookSplit,
   setAudiobookRequests,
+  type ReadingVoice,
 } from "../lib/store.js";
 
 /**
@@ -295,6 +296,37 @@ function readerOf(voice: { provider: string; model?: string; voiceId: string; la
   return { provider: voice.provider, model, voiceId: voice.voiceId, ...(voice.label !== undefined ? { label: voice.label } : {}) };
 }
 
+/**
+ * Who narrates the chapter, by the coordinator's rule (`audiobookNarrator`) so the chapter and the
+ * door name the same voice: the book's own reader when it can speak now, else the app's narrator
+ * where it applies to this world, else the shipped voice. A book's reader resolves against the
+ * world's voices only, never the app narrator's copy of another world's (SPEC-049 R-12).
+ *
+ * Until the catalogue answers, the choice is taken as stored. Judging it against no catalogue
+ * named George over Ife's designed voice on every chapter surface — the Voices rail, the Timing
+ * lanes, the block panel and the price — while the door, answered by the coordinator, said Ife.
+ */
+export function chapterNarrator(input: {
+  bookNarrator?: AudiobookReader;
+  stored: { provider: string; model?: string; voiceId: string; label?: string; worldId?: string } | null;
+  worldId: string;
+  catalogue: readonly ReadingVoice[] | null;
+  names?: Parameters<typeof voiceDisplayLabel>[1];
+}): AudiobookReader {
+  const { bookNarrator, stored, worldId, catalogue, names } = input;
+  const applies = stored !== null && narratorAppliesTo(stored, worldId) && supportsVoiceUse(stored, "narration") ? stored : null;
+  const reader = (voice: { provider: string; model: string; voiceId: string; label?: string | undefined }): AudiobookReader =>
+    ({ provider: voice.provider, model: voice.model, voiceId: voice.voiceId, label: voiceDisplayLabel(voice, names) });
+  if (catalogue === null) {
+    if (bookNarrator !== undefined) return reader(bookNarrator);
+    const model = applies === null ? null : (applies.model ?? legacyVoiceModel(applies.provider, applies.voiceId));
+    return applies !== null && model !== null ? reader({ ...applies, model }) : reader(DEFAULT_NARRATOR);
+  }
+  const speakable = catalogue.filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
+  const own = bookNarrator === undefined ? null : narratorFor(bookNarrator, speakable.filter((voice) => voice.narratorCopy !== true));
+  return reader(own !== null && !own.fallback ? own : narratorFor(applies, speakable));
+}
+
 /** The blocks, their states and the counts, from the one rule both ends use. */
 export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const { worldId, prodId, chapter, body, cast, record, missing, reading, connection, locked } = input;
@@ -318,13 +350,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // A cloned app narrator is its own world's (SPEC-046 R-37), and the catalogue marks a clone
   // whose recording is gone, so both fall back here as they do there.
   const bookNarrator = input.bookNarrator;
-  const narrator = useMemo<AudiobookReader>(() => {
-    const speakable = (catalogue ?? []).filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
-    const own = bookNarrator === undefined ? null : narratorFor(bookNarrator, speakable);
-    const stored = state?.app.narrator ?? null;
-    const chosen = own !== null && !own.fallback ? own : narratorFor(narratorAppliesTo(stored, worldId) ? stored : null, speakable);
-    return { provider: chosen.provider, model: chosen.model, voiceId: chosen.voiceId, label: chosen.label ?? DEFAULT_NARRATOR.label };
-  }, [state?.app.narrator, catalogue, bookNarrator, worldId]);
+  const narrator = useMemo<AudiobookReader>(
+    () => chapterNarrator({ ...(bookNarrator !== undefined ? { bookNarrator } : {}), stored: state?.app.narrator ?? null, worldId, catalogue, names: world ?? {} }),
+    [state?.app.narrator, catalogue, bookNarrator, worldId, world],
+  );
   const notes = input.notes;
   const readingNotes = input.readingNotes;
   // A held proposal is drawn on the blocks until it is accepted (design turn 184b): read here so
