@@ -23,7 +23,7 @@ export function ReadAloudConfirmation({ title, result, onConfirm, onCancel, inli
   const quote = `${result.requestId}:${result.confirmationToken ?? ""}`;
   const row = state?.app.manifest?.models.find(model => model.provider === result.provider && model.id === result.model);
   // A token reader's figure is an estimate the read can pass (SPEC-049 R-6): `~`, never `up to`.
-  const estimate = row?.pricing.kind === "perToken" || result.voices?.some(voice => state?.app.manifest?.models.some(model => model.provider === voice.provider && model.pricing.kind === "perToken"));
+  const estimate = row?.pricing.kind === "perToken" || result.voices?.some(voice => state?.app.manifest?.models.some(model => model.provider === voice.provider && model.capability === "voice-tts" && model.pricing.kind === "perToken"));
   const reader = readerName(result, row);
   const local = result.provider === "kokoro" && result.model === "kokoro-82m";
   // A read over the reader's cap goes as several requests and arrives in as many pieces (issue

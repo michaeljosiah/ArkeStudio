@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   audiobookTakeDirectionHash,
   performanceNote,
+  readingNotesLead,
   audiobookTextHash,
   firstReadNotice,
   normalizeSpeechText,
@@ -33,8 +34,8 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
-import { checkDirection, type RenderedPart } from "../voice/direction.js";
-import { audiobookLanding, castRefusal, currentDirection, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock } from "./audiobook.js";
+import { checkDirection, directionPlan, type RenderedPart } from "../voice/direction.js";
+import { audiobookLanding, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
 
 /**
  * A read ended by its free plan — the day's limit, or a billed key — which ends the run with it.
@@ -272,8 +273,8 @@ export interface ReadingRoom {
  * The run, the book's run and the door read the same answer, so a price the door shows is the
  * price the run asks for.
  */
-export async function prepareChapter(store: WorldStore, productionId: string, chapterId: string, room: ReadingRoom, now: () => string, only?: readonly string[]): Promise<ChapterPreparation> {
-  const plan = await planAudiobook(store, productionId, chapterId, { narrator: room.narrator });
+export async function prepareChapter(store: WorldStore, productionId: string, chapterId: string, room: ReadingRoom, now: () => string, only?: readonly string[], override?: ProposalOverride): Promise<ChapterPreparation> {
+  const plan = await planAudiobook(store, productionId, chapterId, { narrator: room.narrator, ...(override !== undefined ? { override } : {}) });
   // Under `cast` a run needs a cast that is current (R-12): a line whose speaker the cast cannot
   // name would otherwise be made in the narrator's voice without the door having said so.
   const castTrouble = castRefusal(plan);
@@ -309,7 +310,12 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     // narrator's row when the narrator stands in (R-12) — so a control that reader cannot
     // express is refused here, in one clause, and never sent (R-9).
     // A direction written for earlier words is carried to these by its anchors (R-43).
-    const held = currentDirection(record, planned.block, store.now());
+    // A held proposal's directions stand whole in place of the record's (design turn 184b): a
+    // block it leaves undirected is read undirected, as accepting it would leave it.
+    const proposed = override?.directions === undefined ? undefined : override.directions[planned.block.key];
+    const held = override?.directions !== undefined
+      ? proposed === undefined ? null : directionEntry(planned.block.text, directionPlan(planned.block.text, proposed), store.now())
+      : currentDirection(record, planned.block, store.now());
     const language = readerLanguage(clonedVoices, reader);
     const cap = model.limits.maxPromptChars;
     let direction: Speaking["direction"] = null;
@@ -322,20 +328,30 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     const note = planned.note;
     const playing = note === undefined ? null : performanceNote(note, model, language);
     const noteHeld = playing?.mode === "unsupported";
-    const capLeft = note !== undefined && !noteHeld && cap !== undefined ? Math.max(1, cap - note.length - 3) : cap;
-    // The performed note is prepended after cadence compilation. Reserve its bytes (and
-    // separator) before packing, just as tag readers reserve their character prefix.
+    // The book note and the chapter note (design turn 184, R-53) lead every block before its
+    // own direction and the speaker's note, so a chapter of separate requests sounds like one
+    // reader: sentences in the style on an instruction row, a tag each on a tag row while
+    // short enough, held otherwise. They name the take whether sent or held, as the note does.
+    const reading = planned.reading;
+    const context = reading === undefined ? { tags: [] as string[], held: [] } : readingNotesLead(reading, model, language);
+    const contextChars = context.tags.reduce((sum, tag) => sum + tag.length + 1, 0);
+    const capLeft = cap === undefined ? cap : (note !== undefined && !noteHeld) || contextChars > 0 ? Math.max(1, cap - (note !== undefined && !noteHeld ? note.length + 3 : 0) - contextChars) : cap;
+    // The performed note and the reading notes are prepended after cadence compilation. Reserve
+    // their bytes (and separators) before packing, just as tag readers reserve their character prefix.
     const byteCap = model.limits.maxSpeechUtf8Bytes;
-    const byteCapLeft = byteCap === undefined ? undefined : byteCap - (playing?.mode === "instruction" ? speechUtf8Bytes(note!) + 1 : playing?.mode === "tag" ? speechUtf8Bytes(playing.tag) + 1 : 0);
+    const contextBytes = context.tags.reduce((sum, tag) => sum + speechUtf8Bytes(tag) + 1, 0) + (context.instructions !== undefined ? speechUtf8Bytes(context.instructions) + 1 : 0);
+    const byteCapLeft = byteCap === undefined ? undefined : byteCap - contextBytes - (playing?.mode === "instruction" ? speechUtf8Bytes(note!) + 1 : playing?.mode === "tag" ? speechUtf8Bytes(playing.tag) + 1 : 0);
     const packingModel = { ...model, limits: { ...model.limits,
       ...(capLeft !== undefined ? { maxPromptChars: capLeft } : {}),
       ...(byteCapLeft !== undefined ? { maxSpeechUtf8Bytes: byteCapLeft } : {}) } };
-    const lead = (part: RenderedPart): RenderedPart =>
-      playing?.mode === "tag"
-        ? { ...part, text: `${playing.tag} ${part.text}` }
-        : playing?.mode === "instruction"
-          ? { ...part, instructions: part.instructions === undefined ? note! : `${note!} ${part.instructions}` }
-          : part;
+    const leadTags = [...context.tags, ...(playing?.mode === "tag" ? [playing.tag] : [])];
+    const leadStyle = [...(context.instructions !== undefined ? [context.instructions] : []), ...(playing?.mode === "instruction" ? [note!] : [])].join(" ");
+    const lead = (part: RenderedPart): RenderedPart => ({
+      ...part,
+      text: leadTags.length > 0 ? `${leadTags.join(" ")} ${part.text}` : part.text,
+      ...(leadStyle !== "" ? { instructions: part.instructions === undefined ? leadStyle : `${leadStyle} ${part.instructions}` } : {}),
+    });
+    const takeHash = audiobookTakeDirectionHash(held?.plan ?? null, note, reading);
     try {
       if (held !== null) {
         // What this reader cannot express is held (R-47): left out of what it is sent, kept on
@@ -345,7 +361,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
         if (check.ok) {
           const rendered = check.parts.map(lead);
           direction = {
-            hash: audiobookTakeDirectionHash(held.plan, note)!,
+            hash: takeHash!,
             delivery: held.plan.delivery,
             rendered: rendered.map((part) => part.text).join(" "),
             voiceSettings: rendered[0]?.voiceSettings ?? check.mapped.voiceSettings,
@@ -357,12 +373,12 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
           refusal = check.reason;
           parts = [text];
         }
-      } else if (note !== undefined) {
-        // A line directed by its note alone: the words as they are, the note ahead, no settings.
+      } else if (note !== undefined || reading !== undefined) {
+        // A block directed by its notes alone: the words as they are, the notes ahead, no settings.
         const words = piecesFor(text, packingModel, voiceFormatForModel(model));
         const rendered = words.map((words) => lead({ text: words, voiceSettings: {} }));
         direction = {
-          hash: audiobookTakeDirectionHash(null, note)!,
+          hash: takeHash!,
           rendered: rendered.map((part) => part.text).join(" "),
           voiceSettings: {},
           ...(rendered[0]?.instructions !== undefined ? { instructions: rendered[0].instructions } : {}),
@@ -395,7 +411,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       ...(substitutedNow !== undefined ? { substitutedNow } : {}),
       ...(refusal !== undefined ? { refusal } : {}),
       ...(noteHeld ? { noteHeld: true as const } : {}),
-      ...(refusal === undefined && audiobookTakeDirectionHash(held?.plan ?? null, note) !== undefined ? { takeHash: audiobookTakeDirectionHash(held?.plan ?? null, note)! } : {}),
+      ...(refusal === undefined && takeHash !== undefined ? { takeHash } : {}),
       reader,
       model,
       local,

@@ -371,18 +371,21 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   );
   // What a press would spend, before the run asks: the cloud blocks not made, by the character
   // as the row bills it (SPEC-046 R-8) — bytes or doubled CJK for the readers that count so.
-  // The cache is not consulted here, so the run's own price can only be lower.
+  // The cache is not consulted here, so a character reader's run can only be lower. A token
+  // reader's is an estimate either way, and the run prices its parts as compiled, each with its
+  // style and lead-in, so the figure is marked `~` once one is in it (SPEC-049 R-6).
   // A free plan's or credit's read is named rather than priced (design turn 182): it asks
   // nothing, so a sum including it would be a price nobody is asked to pay.
-  const { estimate, plan } = useMemo(
+  const { estimate, plan, tokenPriced } = useMemo(
     () =>
-      rows.reduce<{ estimate: number; plan: string | null }>((sum, row) => {
+      rows.reduce<{ estimate: number; plan: string | null; tokenPriced: boolean }>((sum, row) => {
         if (row.state === "made" || row.state === "awaiting" || row.speaker.provider === "kokoro") return sum;
         const model = modelOf(row.speaker);
         if (model === null) return sum;
         const label = speechPlanLabel(model);
-        return label !== null ? { ...sum, plan: sum.plan ?? label } : { ...sum, estimate: sum.estimate + estimateSpeechMicroUsd(model, row.block.text) };
-      }, { estimate: 0, plan: null }),
+        return label !== null ? { ...sum, plan: sum.plan ?? label }
+          : { ...sum, estimate: sum.estimate + estimateSpeechMicroUsd(model, row.block.text), tokenPriced: sum.tokenPriced || model.pricing.kind === "perToken" };
+      }, { estimate: 0, plan: null, tokenPriced: false }),
     [rows, modelOf],
   );
 
@@ -642,7 +645,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         {counts.toMake.length > 0 && (
           <Button variant="primary" disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
             Read the chapter · {counts.toMake.length} block{counts.toMake.length === 1 ? "" : "s"}
-            {estimate > 0 ? ` · ${formatMicroUsd(estimate)}` : plan !== null ? ` · ${plan}` : ""}
+            {estimate > 0 ? ` · ${tokenPriced ? "~" : ""}${formatMicroUsd(estimate)}` : plan !== null ? ` · ${plan}` : ""}
           </Button>
         )}
       </span>

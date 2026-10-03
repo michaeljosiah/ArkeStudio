@@ -415,8 +415,10 @@ describe("a direction held to its block and its reader (SPEC-047 R-10)", () => {
       [line],
     );
     assert.equal(verified.directed, 1);
-    assert.deepEqual(verified.proposed["p1.0"], { delivery: "measured", speed: 1, cues: [] }, "warm is not in this row; the overlapping spans went together");
-    assert.equal(verified.dropped, 4, "the delivery, the speed and the two cues");
+    // Two overlapping spans keep the first and drop the second (design turn 184, R-52), as a
+    // wording change carries them: the plan keeps what still places rather than losing both.
+    assert.deepEqual(verified.proposed["p1.0"], { delivery: "measured", speed: 1, cues: [{ kind: "emphasis", span: { from: 9, to: 16, text: "not how" }, level: "strong" }] }, "warm is not in this row; the second, overlapping span went");
+    assert.equal(verified.dropped, 3, "the delivery, the speed and the overlapping cue");
     const plan = directionPlan(line.text, verified.proposed["p1.0"]!);
     assert.equal(plan.delivery, "measured");
   });

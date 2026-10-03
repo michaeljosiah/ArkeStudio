@@ -527,6 +527,11 @@ const CLIENT_COMMAND_METADATA = {
   "set-audiobook-block": action("production", "command", "voice", "external-network-action", ["chapters"]),
   "direct-chapter": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "discard-direction": action("production", "command", "extraction", "external-network-action", ["chapters"]),
+  // The director reads the book (turn 184): what it would read is a query; the book note and
+  // the chapter notes are commands on the book record; drafting speaker notes asks the model.
+  "preview-direction": readOnly(QUERY),
+  "set-audiobook-reading-note": action("production", "command", "voice", "authored-change", ["chapters"]),
+  "draft-audiobook-speaker-notes": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   // The door and the book (SPEC-047 R-29, R-16): a read of every chapter's state, and the
   // chapter's run over the whole book.
   "open-audiobook": readOnly(QUERY),

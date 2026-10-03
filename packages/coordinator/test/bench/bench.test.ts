@@ -54,6 +54,26 @@ it("refuses oversized Gemini Bench lines before reserving takes, counting delive
   }
 });
 
+// Review of PR 1477: a pre-turn-181 brief's typed tag compiles to Gemini's own tag, longer than
+// the brief the composer priced; the composer's estimate of the brief as typed must still answer.
+it("answers a legacy typed-tag Gemini brief with the composer's estimate of the brief as typed", async () => {
+  const { dir, store } = await open();
+  const opened = await freshBench(dir);
+  const at = "2026-09-27T12:00:00.000Z";
+  const model = SHIPPED_MANIFEST.models.find(m => m.id === "gemini-3.8-flash-tts")!;
+  const brief = "[pause] Go.";
+  await opened.store.append({ type: "composer-set", mode: "voice", provider: model.provider, model: model.id,
+    params: { kind: "voice", count: 1, voiceId: "Charon", voiceProvider: "google", voiceModel: model.id }, brief }, { at });
+  const composer = quoteSpeech(model, brief, { at }).expectedMicroUsd;
+  const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST,
+    { worldId: store.worldId, requestId: "gemini-legacy-tag", at, speechAuthorisation: { confirmedMicroUsd: composer } });
+  assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+  assert.notEqual(plan.inputs[0]!.params.text, brief, "the tag went as the reader's own");
+  const late = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST,
+    { worldId: store.worldId, requestId: "gemini-legacy-tag", at: "2027-01-01T00:00:00.000Z", speechAuthorisation: { confirmedMicroUsd: composer } });
+  assert.equal(late.ok, false, "a rate rise still asks again");
+});
+
 it("adapter quotes and re-runs retain the same recipe identity and refuse changed graphs", async () => {
   const { dir, store } = await open();
   const model = SHIPPED_MANIFEST.models.find(row => row.id === "comfyui-h3-video")!;

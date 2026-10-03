@@ -133,7 +133,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Forty-three is a direction's longer note, sounds and absent delivery (turn 181).
 // Forty-four fences durable conversation inputs and their promotion (SPEC-045, issue 1138): an
 // older build reads the conversation log tolerantly and would skip them, losing queued words.
-export const SUPPORTED_SCHEMA_VERSION = 44;
+// Forty-five is the book note, the chapter notes and where a speaker's note came from (turn 184).
+export const SUPPORTED_SCHEMA_VERSION = 45;
 
 export class WorldOpenError extends Error {
   constructor(
