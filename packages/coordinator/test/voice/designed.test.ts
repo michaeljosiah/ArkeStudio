@@ -94,7 +94,7 @@ it("creates once, keeps a portable audition, assigns a character and a book, and
     assert.deepEqual(book.narrator, target);
     assert.equal(readings, 0, "assignment does not synthesize");
     const audition = { kind: "hear-designed-voice" as const, requestId: ulid(), worldId: WORLD_ID, model: model.id,
-      voiceId: target.voiceId, text: "The tide remembers.", confirmedSpeechMicroUsd: quoteSpeech(model, "The tide remembers.").authorisedMicroUsd };
+      voiceId: target.voiceId, text: "The tide remembers.", confirmedSpeechMicroUsd: quoteSpeech(model, "The tide remembers.").expectedMicroUsd };
     await send(audition);
     await until(() => jobs().some(job => job.params.requestId === audition.requestId && job.status === "succeeded"), "audition", 30000);
     assert.equal(readings, 1);

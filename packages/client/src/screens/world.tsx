@@ -1652,7 +1652,7 @@ function VoiceCard({
           <Button variant="ghost" disabled={busy} onClick={() => start()}>
             {busy
               ? "Preparing…"
-              : `Hear this voice${cloudPrice !== null ? ` · ${speechPlanLabel(models.find(model => model.provider === voice.provider && model.id === voiceModel)) ?? `${models.some(model => model.provider === voice.provider && model.id === voiceModel && model.pricing.kind === "perToken") ? "up to " : ""}${formatMicroUsd(cloudPrice)}`}` : ""}`}
+              : `Hear this voice${cloudPrice !== null ? ` · ${speechPlanLabel(models.find(model => model.provider === voice.provider && model.id === voiceModel)) ?? `${models.some(model => model.provider === voice.provider && model.id === voiceModel && model.pricing.kind === "perToken") ? "~" : ""}${formatMicroUsd(cloudPrice)}`}` : ""}`}
           </Button>
         ) : (
           voice &&

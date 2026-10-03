@@ -22,7 +22,8 @@ export function ReadAloudConfirmation({ title, result, onConfirm, onCancel, inli
   const submitted = useRef<string | null>(null);
   const quote = `${result.requestId}:${result.confirmationToken ?? ""}`;
   const row = state?.app.manifest?.models.find(model => model.provider === result.provider && model.id === result.model);
-  const ceiling = row?.pricing.kind === "perToken" || result.voices?.some(voice => state?.app.manifest?.models.some(model => model.provider === voice.provider && model.pricing.kind === "perToken"));
+  // A token reader's figure is an estimate the read can pass (SPEC-049 R-6): `~`, never `up to`.
+  const estimate = row?.pricing.kind === "perToken" || result.voices?.some(voice => state?.app.manifest?.models.some(model => model.provider === voice.provider && model.pricing.kind === "perToken"));
   const reader = readerName(result, row);
   const local = result.provider === "kokoro" && result.model === "kokoro-82m";
   // A read over the reader's cap goes as several requests and arrives in as many pieces (issue
@@ -43,7 +44,7 @@ export function ReadAloudConfirmation({ title, result, onConfirm, onCancel, inli
         submitted.current = quote;
         setSettled(quote);
         onConfirm(result.confirmationToken);
-      }}>Confirm {result.characterCount} characters · {ceiling ? "up to " : ""}{formatMicroUsd(result.estimatedMicroUsd)}</Button>
+      }}>Confirm {result.characterCount} characters · {estimate ? "~" : ""}{formatMicroUsd(result.estimatedMicroUsd)}</Button>
     </div>
   </div>;
   if (inline) return <section className="fy-read-confirmation" aria-labelledby={heading}>{content}</section>;

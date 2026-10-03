@@ -876,7 +876,7 @@ function ChooseVoiceDialog({
                         picked.local
                           ? " · free"
                           : price !== null && price !== undefined
-                            ? ` · ${speechPlanLabel(pickedRow) ?? `${pickedRow?.pricing.kind === "perToken" ? "up to " : ""}${formatMicroUsd(price)} preview`}`
+                            ? ` · ${speechPlanLabel(pickedRow) ?? `${pickedRow?.pricing.kind === "perToken" ? "~" : ""}${formatMicroUsd(price)} preview`}`
                             : ""
                       }`}
                     </span>

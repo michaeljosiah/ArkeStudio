@@ -294,7 +294,7 @@ describe("the Audiobook door (turn 146)", () => {
     assert.ok(use().disabled, "the press waits for what the switch costs");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.narrator-quote", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: ask.requestId, stale: 40, held: 2, directed: 9, estimatedMicroUsd: 1_200_000, kept: 40 }));
     const facts = ([...dialog.querySelectorAll('[data-testid="narrator-quote"] > div')] as HTMLElement[]).map((f) => f.textContent);
-    assert.deepEqual(facts, ["Blocks40 stale", "Direction2 of 9 held", "Read the bookup to $1.20", "Takeskept · 40"]);
+    assert.deepEqual(facts, ["Blocks40 stale", "Direction2 of 9 held", "Read the book~$1.20", "Takeskept · 40"]);
     assert.ok(!use().disabled);
     await act(async () => use().click());
     const set = m.sent.findLast((message) => message.kind === "set-audiobook-narrator") as Extract<ClientMessage, { kind: "set-audiobook-narrator" }>;
