@@ -19,7 +19,7 @@ import {
 import { createNormalizeState, normalizeClaude, type NormalizeState } from "./normalize.js";
 import { resolveRoot } from "./path-confinement.js";
 import { decideTool, type ToolDecision } from "./tool-intents.js";
-import { confinedOptions, unexpectedSurface, type InitSurface } from "./surface.js";
+import { confinedOptions, sessionSurface, unexpectedSurface, type InitSurface } from "./surface.js";
 import { normalizeClaudeModels, type DiscoverClaudeModels } from "./model-discovery.js";
 
 /**
@@ -376,15 +376,15 @@ export class ClaudeAdapter implements HarnessAdapter {
     const runQuery = this.opts.runQuery;
     if (!runQuery) throw new Error("ClaudeAdapter needs a query implementation");
     try {
-      const surface = confinedOptions(session.confinement);
-      const offered = surface["tools"] as string[];
+      const surface = sessionSurface(session.confinement, session.worldQueryUrl !== undefined);
       const messages = runQuery({
         prompt: session.inbox,
         options: {
           pathToClaudeCodeExecutable: this.opts.command,
-          // `settingSources: []`, the built-in allowlist and both MCP switches — what the session
-          // is SHOWN, which the probe checks with the same function (see `surface.ts`).
-          ...surface,
+          // `settingSources: []`, the built-in allowlist, both MCP switches and the hook that
+          // refuses anything off the surface — what the session is SHOWN, and the refusal for
+          // whatever it is shown anyway. The probe uses the same function (see `surface.ts`).
+          ...confinedOptions(surface, (tool) => this.refuse(session, tool, { allow: false, reason: "unknown" })),
           // No `env` override, and specifically no CLAUDE_CONFIG_DIR redirect, though the SDK
           // takes one. It looks like the analogue of OpenCode's `v2ProfileEnv` and is its
           // opposite: that redirect exists to cut the user's own login OFF, and here the user's
@@ -417,11 +417,12 @@ export class ClaudeAdapter implements HarnessAdapter {
          * The probe checks a binary once per version; this checks every session, because what a
          * session is shown also depends on things the probe never sees — managed settings the
          * CLI reads regardless of `settingSources`, a plugin, a build that changes what `tools`
-         * covers. The init message arrives before the model has answered anything, so ending the
-         * session here ends it before any tool it should not have had could be called.
+         * covers. It is not what stops a call — the init message only comes once the first prompt
+         * is already in, so the hook in `confinedOptions` does that — it is what stops the
+         * SESSION, so a harness that is showing the model the wrong tools is not left running.
          */
         if (isInit(message)) {
-          const unexpected = unexpectedSurface(message, offered);
+          const unexpected = unexpectedSurface(message, surface);
           if (unexpected.length > 0) {
             this.opts.onTrace?.({ at: "claude.surface-refused", sessionId: session.id, unexpected });
             session.refused = `Claude Code offered this session tools outside Arke Studio's confinement: ${unexpected.join(", ")}`;
@@ -465,28 +466,33 @@ export class ClaudeAdapter implements HarnessAdapter {
     return async (toolName: string, input: Record<string, unknown>) => {
       const decision = await decideTool(session.confinement, toolName, { input, root: session.root });
       if (decision.allow) return { behavior: "allow" as const, updatedInput: input };
-      // `tool.refused`, not `tool.activity`. It was the latter, which meant a refusal reached a
-      // World Chat turn as a progress verb and left nothing behind once the turn ended — so an
-      // answer claiming to have run a shell command had nothing on the screen contradicting it
-      // (#506). The distinction is the whole point: this event says nothing happened.
-      this.emit({
-        type: "tool.refused",
-        sessionId: session.id,
-        tool: toolName,
-        summary: REFUSAL_SUMMARY[decision.reason](toolName),
-      });
-      // The path itself goes to the trace, not to the summary or the model: a refusal that
-      // quotes the file it refused hands back the one thing the boundary exists to withhold.
-      this.opts.onTrace?.({
-        at: "claude.tool-refused",
-        sessionId: session.id,
-        tool: toolName,
-        reason: decision.reason,
-        ...(decision.reason === "outside" ? { path: decision.path, root: session.root } : {}),
-        ...(decision.reason === "undeclared-path" ? { argument: decision.argument } : {}),
-      });
+      this.refuse(session, toolName, decision);
       return { behavior: "deny" as const, message: DENIAL_MESSAGE[decision.reason] };
     };
+  }
+
+  /** Says a call was refused, on screen and in the trace — never with the path in the summary. */
+  private refuse(session: ClaudeSession, toolName: string, decision: Exclude<ToolDecision, { allow: true }>): void {
+    // `tool.refused`, not `tool.activity`. It was the latter, which meant a refusal reached a
+    // World Chat turn as a progress verb and left nothing behind once the turn ended — so an
+    // answer claiming to have run a shell command had nothing on the screen contradicting it
+    // (#506). The distinction is the whole point: this event says nothing happened.
+    this.emit({
+      type: "tool.refused",
+      sessionId: session.id,
+      tool: toolName,
+      summary: REFUSAL_SUMMARY[decision.reason](toolName),
+    });
+    // The path itself goes to the trace, not to the summary or the model: a refusal that
+    // quotes the file it refused hands back the one thing the boundary exists to withhold.
+    this.opts.onTrace?.({
+      at: "claude.tool-refused",
+      sessionId: session.id,
+      tool: toolName,
+      reason: decision.reason,
+      ...(decision.reason === "outside" ? { path: decision.path, root: session.root } : {}),
+      ...(decision.reason === "undeclared-path" ? { argument: decision.argument } : {}),
+    });
   }
 
   async *streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> {

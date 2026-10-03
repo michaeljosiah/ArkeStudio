@@ -1,6 +1,6 @@
 import { confinementFor } from "@arke-studio/contracts";
 import { offeredTools } from "./tool-intents.js";
-import { unexpectedSurface, type InitSurface } from "./surface.js";
+import { unexpectedSurface, type InitSurface, type Surface } from "./surface.js";
 
 /**
  * The confinement probe: does this Claude Code build actually honour our tool gate?
@@ -76,7 +76,7 @@ const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
  * The widest confinement a real session is given — an authoring agent with web research on — so
  * a surface that passes here passes for every role.
  */
-export const PROBE_CONFINEMENT = confinementFor({ readOnly: false }, { web: true });
+const PROBE_CONFINEMENT = confinementFor({ readOnly: false }, { web: true });
 
 /**
  * What the probe offers: exactly what a session would be, plus the shell as bait. The shell is
@@ -84,6 +84,9 @@ export const PROBE_CONFINEMENT = confinementFor({ readOnly: false }, { web: true
  * nobody can ask for.
  */
 export const PROBE_TOOLS: readonly string[] = [...offeredTools(PROBE_CONFINEMENT), ...SHELL_TOOLS];
+
+/** No world: the probe configures no arke-world server, so that namespace is not on its surface. */
+export const PROBE_SURFACE: Surface = { tools: PROBE_TOOLS, world: false };
 
 /** A reason has to fit on a settings screen; thirty tool names do not. */
 function nameSome(names: readonly string[]): string {
@@ -128,7 +131,7 @@ export async function probeConfinement(command: string, runTurn: RunProbeTurn): 
       version: result.version,
     };
   }
-  const unexpected = unexpectedSurface(result.surface, PROBE_TOOLS);
+  const unexpected = unexpectedSurface(result.surface, PROBE_SURFACE);
   if (unexpected.length > 0) {
     return {
       ok: false,

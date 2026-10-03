@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { PROBE_CONFINEMENT, PROBE_TOOLS, type ProbeTurnResult, type RunProbeTurn } from "./confinement-probe.js";
+import { PROBE_SURFACE, type ProbeTurnResult, type RunProbeTurn } from "./confinement-probe.js";
 import { confinedOptions, type InitSurface } from "./surface.js";
 
 /**
@@ -73,8 +73,7 @@ export function makeSdkProbe(opts: SdkProbeOptions = {}): RunProbeTurn {
           pathToClaudeCodeExecutable: command,
           // The surface a real session gets, so the tool list the init message reports is a
           // verdict on THAT — with the shell added back as the bait the gate is tested on.
-          ...confinedOptions(PROBE_CONFINEMENT),
-          tools: [...PROBE_TOOLS],
+          ...confinedOptions(PROBE_SURFACE),
           // Ours, never the `claude_code` preset: this is a permission probe, not a coding session.
           systemPrompt: "You are a test fixture for a permission check.",
           cwd,

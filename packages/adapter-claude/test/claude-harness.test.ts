@@ -219,11 +219,14 @@ describe("the probe reads what the model was shown, not only what the gate saw",
     assert.match(verdict.ok === false ? verdict.reason : "", /and 2 more\)$/);
   });
 
-  it("accepts the arke-world surface, which a session is given and the probe is not", async () => {
+  it("refuses an arke-world server it did not configure — a name is not provenance", async () => {
+    // The probe configures no world server, so one appearing under that name came from somewhere
+    // else: a managed config, a plugin, a strict mode that stopped being strict.
     const verdict = await probeConfinement("claude", async () => turn({
       surface: { tools: [...CLEAN_SURFACE.tools, "mcp__arke-world__search_canon"], mcp_servers: [{ name: "arke-world" }] },
     }));
-    assert.equal(verdict.ok, true);
+    assert.equal(verdict.ok, false);
+    assert.match(verdict.ok === false ? verdict.reason : "", /mcp__arke-world__search_canon, MCP server arke-world/);
   });
 
   it("fails closed when no init message said what was offered", async () => {
@@ -257,6 +260,10 @@ describe("the SDK probe runs on the surface a session gets", () => {
     assert.equal(options["strictMcpConfig"], true);
     assert.deepEqual(options["settings"], { disableClaudeAiConnectors: true });
     assert.equal("allowedTools" in options, false);
+    const hooks = options["hooks"] as { PreToolUse: { hooks: ((i: { tool_name: string }) => Promise<unknown>)[] }[] };
+    const hook = hooks.PreToolUse[0]!.hooks[0]!;
+    assert.deepEqual(await hook({ tool_name: "Bash" }), {}, "the bait reaches the gate, or the gate is never tested");
+    assert.notDeepEqual(await hook({ tool_name: "CronCreate" }), {}, "the probe runs under the session's hook too");
     for (const absent of ["ToolSearch", "CronCreate", "Skill", "Task"]) {
       assert.equal(PROBE_TOOLS.includes(absent), false, `${absent} is not offered`);
     }
