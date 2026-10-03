@@ -59,6 +59,18 @@ Close stores, sockets, watchers, timers and supervisors in test cleanup before d
 
 ## Boundary-specific checks
 
+For conversation command reachability and input policy, run contracts
+`test/world-chat-actions.test.ts`, coordinator `test/arke-actions.test.ts`,
+`test/world-chat/action-guide.test.ts`, `test/world-chat/turn-result.test.ts` and
+`test/world-chat/actions.test.ts`. They check that every advertised path has a guide and an
+approval adapter, commands without paths name `no-model-action`, execution-blocked kinds never
+become new cards, and `conversationSchema` excludes unsupported variants such as live-source
+audio detachment and editor placement during plain filing while preserving human transport.
+They also check that old pending visual-facts cards remain readable and deniable but cannot write,
+chat duplicates cannot copy reviewed facts, and obsolete Bench permission labels stale the
+card without execution. Keep `test/world-chat/shape-drift.test.ts` and `test/arke-actions/review-regressions.test.ts`
+in the regression set for stored-card compatibility and decisions made on another surface.
+
 Book/audio standards experiments use the separate [publication interoperability checks](publication-interop.md#reproduce).
 They install their own locked development dependencies and exercise Readium, package closure and EPUBCheck.
 

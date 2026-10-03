@@ -1,6 +1,10 @@
 import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema } from "@arke-studio/contracts";
 import {
   ClientMessageSchema,
+  CanonIdSchema,
+  BIBLE_EDIT_BOUNDS,
+  ChatSceneCommandSchema,
+  ModelEditorRequestSchema,
   BenchGenerationModelActionSchema,
   AudioSpineModelActionSchema,
   WorldChatBibleActionSchema,
@@ -91,10 +95,11 @@ import {
   type ArkeSupportedClientCommand,
   type ClientMessageKind,
   type ClientMessageOfKind,
+  type ModelWorldChatAction,
 } from "@arke-studio/contracts";
 import { z } from "zod";
 
-type SupportedMetadata = Omit<ArkeSupportedClientCommand<ClientMessageKind>, "kind" | "schema">;
+type SupportedMetadata = Omit<ArkeSupportedClientCommand<ClientMessageKind>, "kind" | "schema" | "reachedBy" | "conversationSchema">;
 type ExcludedMetadata = {
   readonly classification: Exclude<ArkeCommandClassification, "supported-by-arke">;
   readonly reason: string;
@@ -635,6 +640,138 @@ export type ArkeClientCommandRegistry = {
   readonly [K in ClientMessageKind]: ArkeClientCommandDescriptor<K>;
 };
 
+// Some authorities predate actions[]: Bible edits, editor requests and authored proposals
+// still arrive in their own typed result channels. Name those paths rather than falsely
+// blocking working controls or inventing model action kinds (SPEC-050 R-7..R-9).
+// A shared authority is not enough: imports that leave candidates unselected do not reach
+// atomic import-and-select commands, and chapter edits cannot restore or retire a chapter.
+type ConversationPath = ModelWorldChatAction["kind"] | "bibleEdits" | "editorRequests" | "sceneEdits" | "candidateOperations";
+const COMMAND_MODEL_PATHS = {
+  "use-world-image": ["reference-world-image-result-use"],
+  "discard-world-image": ["reference-image-discard"],
+  "pick-staged-reference": ["reference-image-import"],
+  "upload-master-look": ["reference-image-import"],
+  "use-master-look": ["reference-master-look-result-use"],
+  "discard-master-look": ["reference-image-discard"],
+  "archive-world": ["world-archive"],
+  "stage-sheet-edit": ["sheet", "candidateOperations"],
+  "restore-sheet-version": ["sheet-restore"],
+  "stage-art-direction-change": ["art-direction", "candidateOperations"],
+  "set-art-direction": ["art-direction"],
+  "stage-canon-entry": ["canon", "candidateOperations"],
+  "stage-canon-amendment": ["canon", "candidateOperations"],
+  "open-thread": ["canon"],
+  "settle-thread": ["canon"],
+  "retire-entity": ["canon-retire", "sheet-retire"],
+  "create-sheet-from-sentence": ["sheet", "candidateOperations"],
+  "promote-guest": ["sheet"],
+  "duplicate-sheet": ["sheet"],
+  "set-sheet-status": ["sheet"],
+  "rename-world": ["world-metadata"],
+  "rename-sheet": ["sheet"],
+  "assign-voice": ["voice-assignment"],
+  "create-prop": ["prop-authoring"],
+  "add-prop-state": ["prop-authoring"],
+  "establish-look": ["reference-generation"],
+  "choose-anchor": ["reference-result-use"],
+  "generate-location-view": ["reference-generation"],
+  "import-location-view-candidate": ["reference-import"],
+  "accept-location-view": ["reference-result-use"],
+  "import-main-photo-candidate": ["reference-import"],
+  "import-main-photo": ["reference-import"],
+  "import-character-sheet": ["reference-import"],
+  "generate-main-photo": ["reference-generation"],
+  "generate-character-sheet": ["reference-generation"],
+  "accept-character-sheet": ["reference-result-use"],
+  "generate-character-looks": ["reference-generation"],
+  "accept-character-look": ["reference-result-use"],
+  "reject-reference-take": ["reference-review"],
+  "promote-character-look": ["reference-change"],
+  "attach-character-look": ["reference-change"],
+  "lock-tile": ["reference-tile-lock"],
+  "generate-missing-tiles": ["reference-generation"],
+  "regenerate-tile": ["reference-generation"],
+  "compile-grid": ["reference-compile"],
+  "designate-compilation": ["reference-change"],
+  "set-style-override": ["reference-style"],
+  "voice-preview": ["voice-audition"],
+  "create-production": ["production-create"],
+  "propose-story-overview": ["production-overview", "candidateOperations"],
+  "propose-season": ["production-season", "candidateOperations"],
+  "create-episode": ["production-episode", "candidateOperations"],
+  "propose-episode": ["production-episode", "candidateOperations"],
+  "reorder-episodes": ["production-episode-order"],
+  "create-scene": ["production-scene"],
+  "restore-scene": ["production-scene-restore"],
+  "delete-scene": ["production-scene-delete"],
+  "scene-command": ["production-scene-command"],
+  "create-chapter": ["production-chapter"],
+  "save-chapter": ["production-chapter"],
+  "edit-chapter-plan": ["production-chapter"],
+  "save-bible": ["bibleEdits"],
+  "reorder-chapters": ["production-chapter-order"],
+  "reorder-scenes": ["production-scene-order"],
+  "set-production-aspect": ["production-metadata"],
+  "set-production-model": ["production-model"],
+  "record-traversal": ["production-routing-traversal"],
+  "propose-branch-canon": ["production-branch-canon"],
+  "export-interactive": ["production-interactive-export"],
+  "compile-scene-board": ["production-board-compile"],
+  "export-scene-board": ["production-board-export"],
+  "accept-take": ["production-take-review"],
+  "stage-playblast": ["production-stage-playblast"],
+  "reject-take": ["production-take-review"],
+  "set-trim": ["production-take-trim"],
+  "timeline-move-picture": ["editorRequests"],
+  "timeline-command": ["editorRequests"],
+  "upload-artifacts": ["artifact-import"],
+  "export-cut": ["production-cut-export"],
+  "cancel-export": ["production-export-cancel"],
+  "export-world": ["world-export"],
+  "file-artifact": ["artifact-import"],
+  "clone-voice": ["voice-clone"],
+  "import-folder": ["artifact-import"],
+  "extract-artifact": ["artifact-extraction"],
+  "stop-extraction": ["artifact-extraction-stop"],
+  "resolve-extraction": ["artifact-extraction-review"],
+  "bench-dispatch": ["bench-generation"],
+  "stage-artifact-reference": ["artifact-reference"],
+} as const satisfies Partial<Record<ClientMessageKind, readonly ConversationPath[]>>;
+
+function commandReachability(kind: ClientMessageKind, metadata: SupportedMetadata) {
+  const reachedBy: readonly ConversationPath[] = COMMAND_MODEL_PATHS[kind as keyof typeof COMMAND_MODEL_PATHS] ?? [];
+  if (reachedBy.length > 0) return { reachedBy, support: metadata.support };
+  const preparation = metadata.support.preparation;
+  return {
+    reachedBy,
+    support: {
+      ...metadata.support,
+      preparation: blocked(
+        preparation.state === "blocked" ? [...preparation.blockingSeams, "no-model-action"] : ["no-model-action"],
+        `${kind} has no model action or typed turn-result channel. Cannot prepare it from conversation.${preparation.state === "blocked" ? ` ${preparation.reason}` : ""}`,
+      ),
+    },
+  };
+}
+
+function conversationCommandSchema(kind: ClientMessageKind, schema: z.ZodDiscriminatedUnionOption<"kind">): z.ZodTypeAny {
+  // Reach can cover fewer variants than the person's control: editor requests cannot detach
+  // live-source audio, and ordinary imports do not place media or choose borrowed paths.
+  switch (kind) {
+    case "timeline-command": return schema.extend({ commands: ModelEditorRequestSchema.shape.commands });
+    case "scene-command": return schema.extend({ command: ChatSceneCommandSchema });
+    case "stage-art-direction-change":
+    case "set-art-direction": return schema.extend({ masterLook: z.null().optional() });
+    case "open-thread": return schema.extend({ candidates: z.array(CanonIdSchema).max(10).default([]) });
+    case "save-bible": return schema.extend({ text: z.string().max(BIBLE_EDIT_BOUNDS.text) });
+    case "upload-artifacts": return schema.omit({ editor: true, sourcePaths: true });
+    case "pick-staged-reference": return schema.omit({ image: true, worldFile: true });
+    case "clone-voice": return schema.omit({ language: true, clipId: true, consent: true });
+    case "bench-dispatch": return schema.omit({ confirmedSpeechMicroUsd: true, voiceUploadConfirmedFor: true });
+    default: return schema;
+  }
+}
+
 function buildClientRegistry(): ArkeClientCommandRegistry {
   const schemas = new Map<ClientMessageKind, z.ZodDiscriminatedUnionOption<"kind">>();
   for (const option of ClientMessageSchema.options) {
@@ -651,7 +788,11 @@ function buildClientRegistry(): ArkeClientCommandRegistry {
   for (const kind of Object.keys(CLIENT_COMMAND_METADATA) as ClientMessageKind[]) {
     const schema = schemas.get(kind);
     if (!schema) throw new Error(`Arke command registry classifies unknown command ${kind}`);
-    built[kind] = { kind, schema, ...CLIENT_COMMAND_METADATA[kind] } as ArkeClientCommandDescriptor;
+    const metadata = CLIENT_COMMAND_METADATA[kind];
+    built[kind] = {
+      kind, schema, ...metadata,
+      ...(metadata.classification === "supported-by-arke" ? { ...commandReachability(kind, metadata), conversationSchema: conversationCommandSchema(kind, schema) } : {}),
+    } as ArkeClientCommandDescriptor;
   }
   for (const kind of schemas.keys()) {
     if (!(kind in built)) throw new Error(`Arke command registry does not classify ${kind}`);
@@ -963,7 +1104,7 @@ const WORLD_CHAT_ACTION_REGISTRY = {
   "world-chat-production-take-generation": {
     kind: "world-chat-production-take-generation",
     schema: WorldChatProductionTakeGenerationActionSchema,
-    ...action("production", "generation", "bench", "spend-and-compute", ["scenes", "takes"]),
+    ...action("production", "generation", "bench", "authored-change", ["scenes", "takes"]),
   },
   "world-chat-production-take-review": {
     kind: "world-chat-production-take-review",
@@ -1136,6 +1277,7 @@ export interface ModelActionCatalogueEntry {
   readonly permissionReason: ArkePermissionReason;
   readonly requiredReads: readonly ArkeReadRequirement[];
   readonly support: ArkeActionSupport;
+  readonly reachedBy?: readonly string[];
   /** Empty while preparation is blocked, so unsafe legacy fields are not advertised to the model. */
   readonly fields: readonly ModelActionField[];
 }
@@ -1258,7 +1400,8 @@ export function modelActionCatalogue(): readonly ModelActionCatalogueEntry[] {
       permissionReason: descriptor.permissionReason,
       requiredReads: descriptor.requiredReads,
       support: descriptor.support,
-      fields: descriptor.support.preparation.state === "available" ? fieldsFor(descriptor.schema) : [],
+      reachedBy: descriptor.reachedBy,
+      fields: descriptor.support.preparation.state === "available" ? fieldsFor(descriptor.conversationSchema) : [],
     });
   }
   for (const descriptor of Object.values(ARKE_AUTHORITY_ACTION_REGISTRY)) {
@@ -1303,7 +1446,8 @@ export function modelActionCatalogueText(): string {
         ? "payload unavailable"
         : entry.fields.map((field) => `${field.name}: ${field.type}${field.optional ? " (optional)" : ""}`).join("; ");
       const reads = entry.requiredReads.length === 0 ? "none" : entry.requiredReads.join(", ");
-      return `- ${entry.kind} [${entry.scope}; ${entry.cardFamily}; ${entry.authority}; ${entry.permissionReason}] reads: ${reads}; ${supportLabel(entry.support)}; ${fields}`;
+      const reach = entry.reachedBy ? ` reached by: ${entry.reachedBy.join(", ") || "none"};` : "";
+      return `- ${entry.kind} [${entry.scope}; ${entry.cardFamily}; ${entry.authority}; ${entry.permissionReason}]${reach} reads: ${reads}; ${supportLabel(entry.support)}; ${fields}`;
     })
     .join("\n");
 }

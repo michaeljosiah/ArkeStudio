@@ -124,6 +124,7 @@ export const ArkeBlockingSeamSchema = z.enum([
   "complete-timeline-read",
   "complete-spine-read",
   "release-target-connector",
+  "no-model-action",
 ]);
 export type ArkeBlockingSeam = z.infer<typeof ArkeBlockingSeamSchema>;
 
@@ -173,6 +174,10 @@ export interface ArkeActionDescriptor<K extends string, TAction extends { kind: 
 export interface ArkeSupportedClientCommand<K extends ClientMessageKind>
   extends ArkeActionDescriptor<K, ClientMessageOfKind<K>> {
   readonly classification: "supported-by-arke";
+  /** Model action kinds, or the existing typed turn-result channels that reach this authority. */
+  readonly reachedBy: readonly string[];
+  /** Reachable catalogue inputs, omitting host-supplied fields; transport owns the complete human command. */
+  readonly conversationSchema: z.ZodType<Partial<ClientMessageOfKind<K>>>;
 }
 
 export interface ArkeExcludedClientCommand<K extends ClientMessageKind> {

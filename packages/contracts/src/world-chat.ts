@@ -2744,7 +2744,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-scene-restore": "Restore a scene to an earlier version.",
   "production-style": "Set the style this production's images and video are made in.",
   "production-prose-style": "Set the story's point of view, tense, voice and samples.",
-  "production-scene-command": "One change to a scene: edit its cast and place, insert, edit, move, duplicate or delete a shot, set a shot's staging or prompt override, or change its boards.",
+  "production-scene-command": "One change to a scene: edit its cast and place, insert, edit, move, duplicate or delete a shot, set a shot's staging or prompt override, or change its boards. Visual facts require the person's review on the shot panel and cannot be set here.",
   "production-board-compile": "Compile a scene's storyboard from its shots and frames.",
   "production-board-export": "Export a scene's storyboard to a file the person chooses.",
   "production-take-import": "Import a take for a shot from a file the person picks.",

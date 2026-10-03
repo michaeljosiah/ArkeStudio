@@ -195,6 +195,7 @@ import {
 } from "../productions/ops.js";
 import { applyProductionSpineCommand, previewAudioSpineCommand } from "../productions/spine.js";
 import { applySceneCommand, sceneCommandFrom } from "../productions/scene-commands.js";
+import { modelActionInputRefusal } from "./model-action-input.js";
 import { filePlayblast } from "../productions/stage-playblast.js";
 import {
   acceptCharacterLook,
@@ -1167,6 +1168,17 @@ function worldActionTargets(
   }
 }
 
+function actionPolicyRefusal(store: WorldStore, action: ModelWorldChatAction): string | null {
+  const refusal = modelActionInputRefusal(action);
+  if (refusal) return refusal;
+  if (action.kind !== "production-scene-command" || action.command.kind !== "duplicate-shot") return null;
+  const { productionId, sceneId, command } = action;
+  const scene = store.getBundle().productions.find((production) => production.meta.id === productionId)?.scenes.find((candidate) => candidate.id === sceneId);
+  const shot = scene && orderedShots(scene).find((candidate) => candidate.id === command.shotId);
+  // The copied assertions belong to the reviewed source shot, not a new shot invented by chat.
+  return shot?.visualFacts ? "Duplicating this shot would copy visual facts. Use the shot panel so the person can review them." : null;
+}
+
 /** Build strict, digest-bound intents. This is pure and runs before `turn.completed` is appended. */
 export function prepareWorldChatActions(
   store: WorldStore,
@@ -1182,6 +1194,12 @@ export function prepareWorldChatActions(
     (turn.actions.length > 0 || turn.candidates.length > 0 || turn.groups.length > 0 || turn.bibleEdits.length > 0 || turn.sceneEdits.length > 0 || turn.editorRequests.length > 0)
   ) {
     throw new Error("This ask was for a reply only; nothing is staged from it. Say what you would change, and the author will ask for it.");
+  }
+  // Check the entire action list before creating any intent, including when a valid sibling
+  // comes first. The runtime input policy also protects callers outside turn-result parsing.
+  for (const action of turn.actions) {
+    const refusal = actionPolicyRefusal(store, action);
+    if (refusal) throw new Error(refusal);
   }
   const prepared: PreparedWorldChatAction[] = [];
   const candidateById = new Map(turn.existingCandidates.map((candidate) => [candidate.id, candidate]));
@@ -2763,8 +2781,8 @@ async function sharedResourceProjection(
         title: payload.action.retakeOf ? "Prepare a retake" : "Prepare take generation",
         consequence: "Opens the exact shot or board in Bench. Provider execution and result selection remain separate decisions.",
         affectedTargets: [...intent.targets],
-        ripples: ["Generated output will arrive as an unselected immutable take."],
-        permissionReason: "spend-and-compute",
+        ripples: ["Opening Bench creates no generated media and selects no take."],
+        permissionReason: "authored-change",
         body: {
           family: "generation",
           medium: payload.action.mode,
@@ -2775,7 +2793,7 @@ async function sharedResourceProjection(
           model: "Chosen in Bench",
           quantity: 1,
           output: "One or more unselected production takes",
-          cost: "Quoted in Bench before provider execution",
+          cost: "Opening Bench has no provider charge; generation is quoted there before it runs.",
         },
       };
       break;
@@ -3675,6 +3693,8 @@ async function executeSharedResource(
       );
       return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: "The production style was updated." } };
     case "world-chat-production-scene-command": {
+      const refusal = actionPolicyRefusal(store, payload.action);
+      if (refusal) return { status: "failed", detail: refusal };
       const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
       const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
       const sceneFile = production?.sceneFiles[payload.action.sceneId];
@@ -4342,6 +4362,7 @@ export function worldChatActionAdapters(
     };
     return {
       actionKind,
+      ...(actionKind === "world-chat-production-take-generation" ? { obsoletePermissionReasons: ["spend-and-compute" as const] } : {}),
       prepare: async ({ intent, payload }) => {
         const current = observationsCurrent(store, intent, deps);
         if (!current.ok) throw new Error(current.detail);
@@ -4358,6 +4379,11 @@ export function worldChatActionAdapters(
       validate: async (action) => {
         const payload = await readPreparation(store, "world", action);
         if (!payload) return { ok: false, reason: "blocked", detail: "The prepared shared-resource action is unavailable." };
+        // A card prepared before this policy was introduced may still be pending on disk.
+        if ("action" in payload) {
+          const refusal = actionPolicyRefusal(store, payload.action);
+          if (refusal) return { ok: false, reason: "blocked", detail: refusal };
+        }
         const current = observationsCurrent(store, action, deps);
         if (!current.ok) {
           await removePreparation(store, "world", action.actionId);

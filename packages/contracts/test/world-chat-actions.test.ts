@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   ModelWorldChatActionSchema,
+  SceneCommandSchema,
+  WorldChatProductionSceneCommandActionSchema,
   WorldAuthoredFieldChangesSchema,
   WorldAuthoredFieldsSchema,
 } from "../src/index.js";
@@ -43,6 +45,24 @@ describe("the craft loop's actions (design turn 128, issue 896)", () => {
 });
 
 describe("World Chat authored action contracts", () => {
+  it("keeps visual facts on the human scene path and rejects chat insert and edit attempts", () => {
+    const visualFacts = { onScreenCharacters: [], composition: "wide", confirmedAt: "2026-10-03T12:00:00Z" };
+    const commands = [
+      { kind: "edit-shot", shotId: "sh_12", change: { visualFacts } },
+      { kind: "insert-shot", at: { after: "sh_12" }, shot: { title: "The lobby", description: "The lobby.", visualFacts } },
+    ];
+    for (const command of commands) {
+      assert.ok(SceneCommandSchema.safeParse(command).success, "the human panel retains its existing vocabulary");
+      const action = { kind: "production-scene-command", productionId: "saltlight", sceneId: "sc_04", command, checkReceiptIds: [CHECK] };
+      const checked = ModelWorldChatActionSchema.safeParse(action);
+      assert.equal(checked.success, false);
+      if (!checked.success) assert.ok(checked.error.issues.some((issue) => issue.code === "unrecognized_keys" && issue.keys.includes("visualFacts")));
+      assert.ok(WorldChatProductionSceneCommandActionSchema.safeParse({
+        kind: "world-chat-production-scene-command", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", action,
+      }).success, "old pending cards remain readable for safe refusal or denial");
+    }
+  });
+
   it("inherits every registered authored world field", () => {
     const changes = Object.fromEntries(
       WorldAuthoredFieldsSchema.keyof().options.map((field) => [field, `Changed ${field}`]),

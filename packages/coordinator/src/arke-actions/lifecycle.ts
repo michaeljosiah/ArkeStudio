@@ -9,6 +9,7 @@ import {
   LOCAL_ACTOR_ID,
   isRemoteHostConversationAction,
   newId,
+  type ArkePermissionReason,
   type ArkeReadObservation,
   type ConversationActionAuthorityBinding,
   type ConversationActionCard,
@@ -61,6 +62,8 @@ export interface ConversationActionExecutionOutcome {
  */
 export interface ConversationActionAuthorityAdapter {
   readonly actionKind: string;
+  /** Recognized obsolete labels stale the card; they never authorize execution. */
+  readonly obsoletePermissionReasons?: readonly ArkePermissionReason[];
   prepare?(input: {
     readonly intent: ConversationActionPrepareIntent;
     readonly payload: unknown;
@@ -548,13 +551,15 @@ export class ConversationActionLifecycle {
 
     const descriptor = findArkeAction(action.actionKind);
     const adapter = this.adapters.get(action.actionKind);
+    const obsoletePermission = descriptor?.classification === "supported-by-arke" && descriptor.permissionReason !== action.shown.permissionReason &&
+      adapter?.obsoletePermissionReasons?.includes(action.shown.permissionReason) === true;
     if (
       !descriptor ||
       descriptor.classification !== "supported-by-arke" ||
       descriptor.scope !== action.scope ||
       descriptor.authority !== action.authority.kind ||
       descriptor.cardFamily !== action.cardFamily ||
-      descriptor.permissionReason !== action.shown.permissionReason
+      (descriptor.permissionReason !== action.shown.permissionReason && !obsoletePermission)
     ) {
       return refuse("authority-mismatch", "The registered authority no longer matches this card.", action.status);
     }
@@ -565,11 +570,13 @@ export class ConversationActionLifecycle {
       return refuse("adapter-unavailable", detail, action.status);
     }
 
-    const validation = await adapter.validate(action).catch(() => ({
-      ok: false as const,
-      reason: "blocked" as const,
-      detail: "The action authority could not validate this action.",
-    }));
+    const validation: ConversationActionValidation = obsoletePermission
+      ? { ok: false, reason: "stale", detail: "The permission on this older card changed. Ask Arke to prepare a new card and review it before approving." }
+      : await adapter.validate(action).catch(() => ({
+        ok: false as const,
+        reason: "blocked" as const,
+        detail: "The action authority could not validate this action.",
+      }));
     if (!validation.ok) {
       if (validation.reason === "stale") {
         const detail = boundedDetail(validation.detail, "The action inputs changed after preparation.");
@@ -595,6 +602,7 @@ export class ConversationActionLifecycle {
           }
           throw error;
         }
+        if (obsoletePermission) await adapter.abandonPreparation?.(action).catch(() => {});
         return refuse("stale", detail, "stale");
       }
       return refuse("validation-refused", validation.detail, action.status);
