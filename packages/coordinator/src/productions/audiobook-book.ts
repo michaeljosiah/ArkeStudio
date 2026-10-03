@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   audiobookDirectionFor,
+  audiobookNoteFor,
   freeCreditOverrun,
   freeLimitReason,
   freePlanShortfall,
@@ -184,19 +185,24 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
         voices.set(key, held);
         continue;
       }
-      if (plan.reading === "performed" && planned.block.speaker !== undefined) {
-        // One narrator performs the cast (R-44): the narrator reads the line, and the speaker's
-        // row carries the note it is played with.
+      if (plan.reading === "performed" && (planned.block.speaker !== undefined || planned.block.rows !== undefined)) {
+        // One narrator performs the cast (R-44): the narrator reads the block once, and each
+        // speaker's row carries the note it is played with. A block that holds several turns
+        // (design turn 190) counts each speaker's lines in it.
         narratorRow.blocks += 1;
-        const key = planned.sheet ?? planned.block.sheet ?? `:${planned.block.speaker}`;
-        const sheet = planned.sheet ?? planned.block.sheet;
-        const held = voices.get(key) ?? { ...(sheet !== undefined ? { sheet } : {}), name: sheet !== undefined ? sheetName(sheet) : planned.block.speaker, state: "narrator" as const, blocks: 0 };
-        held.blocks += 1;
-        if (planned.note !== undefined) {
-          held.note = planned.note;
-          if (narratorModel === null || performanceNote(planned.note, narratorModel, narratorLanguage).mode === "unsupported") held.noteHeld = true;
+        for (const turn of planned.block.rows ?? [planned.block]) {
+          if (turn.speaker === undefined) continue;
+          const key = turn.sheet ?? `:${turn.speaker}`;
+          const sheet = turn.sheet;
+          const held = voices.get(key) ?? { ...(sheet !== undefined ? { sheet } : {}), name: sheet !== undefined ? sheetName(sheet) : turn.speaker, state: "narrator" as const, blocks: 0 };
+          held.blocks += 1;
+          const note = planned.block.rows === undefined ? planned.note : audiobookNoteFor({ reading: "performed", notes: plan.book?.notes ?? {} }, turn);
+          if (note !== undefined) {
+            held.note = note;
+            if (narratorModel === null || performanceNote(note, narratorModel, narratorLanguage).mode === "unsupported") held.noteHeld = true;
+          }
+          voices.set(key, held);
         }
-        voices.set(key, held);
         continue;
       }
       if (planned.block.speaker === undefined || plan.reading !== "cast") {

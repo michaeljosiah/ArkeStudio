@@ -7,6 +7,7 @@ import {
   DeliverySchema,
   SOUNDS,
   SoundSchema,
+  audiobookBlockOptions,
   audiobookBlocks,
   audiobookDirectionFor,
   audiobookHeading,
@@ -104,6 +105,8 @@ export interface DirectionBlockInput {
   reader: string;
   /** Who speaks it, for a spoken line; absent for narration and the title. */
   speaker?: string;
+  /** The block holds narration and the lines of the speakers named (design turn 190), read as one passage. */
+  mixed?: boolean;
   deliveries: readonly string[];
   /** How the reader takes a note: whole, as a tag of at most 60, or not at all. */
   note: "instruction" | "tag" | "none";
@@ -219,7 +222,7 @@ function buildDirectionPrompt(input: DirectionDeriverInput, retryNote?: string):
         block.sounds.length > 0 ? `sounds ${block.sounds.join(", ")}` : "no sounds",
         block.markers ? "turns" : "no turns",
       ].join(" · ");
-      return `[${block.key}] ${block.speaker !== undefined ? `line spoken by ${block.speaker}` : "narration"} · read by ${block.reader} · ${can}\n${block.text}`;
+      return `[${block.key}] ${block.speaker !== undefined ? (block.mixed === true ? `narration with lines spoken by ${block.speaker}` : `line spoken by ${block.speaker}`) : "narration"} · read by ${block.reader} · ${can}\n${block.text}`;
     })
     .join("\n\n");
   const chapterNote = input.asks?.chapterNote === true;
@@ -539,7 +542,7 @@ export async function directableBlocks(
       reader: speaking.reader,
       model: speaking.model,
       ...(language !== undefined ? { language } : {}),
-      ...(planned.block.speaker !== undefined ? { line: true } : {}),
+      ...(planned.block.speaker !== undefined || (planned.block.rows ?? []).some((turn) => turn.speaker !== undefined) ? { line: true } : {}),
     });
   }
   return { chapter: plan.chapter, blocks, planned: plan.blocks, plan };
@@ -565,15 +568,18 @@ export async function directionContext(store: WorldStore, productionId: string, 
   const book: AudiobookBook | null = plan.book;
   const notes = { ...override?.speakerNotes, ...book?.notes };
   const speakers: DirectionContext["speakers"] = [];
-  for (const planned of plan.blocks) {
-    const key = audiobookNoteKey(planned.block);
-    if (key === null || speakers.some((speaker) => speaker.key === key)) continue;
-    if (speakers.length >= DIRECTION_CONTEXT_BOUNDS.speakers) break;
-    const sheet = planned.block.sheet === undefined ? undefined : sheets.find((candidate) => candidate.id === planned.block.sheet);
-    const essence = clip(section(sheet, /^essence/i), DIRECTION_CONTEXT_BOUNDS.section);
-    const voice = clip(section(sheet, /^voice|^speech/i), DIRECTION_CONTEXT_BOUNDS.section);
-    const note = plan.reading === "performed" ? notes[key] : undefined;
-    speakers.push({ key, name: sheet?.name ?? planned.block.speaker ?? key, ...(essence !== undefined ? { essence } : {}), ...(voice !== undefined ? { voice } : {}), ...(note !== undefined ? { note } : {}) });
+  // A block that holds several turns (design turn 190) has each of its speakers read.
+  scan: for (const planned of plan.blocks) {
+    for (const turn of planned.block.rows ?? [planned.block]) {
+      const key = audiobookNoteKey(turn);
+      if (key === null || speakers.some((speaker) => speaker.key === key)) continue;
+      if (speakers.length >= DIRECTION_CONTEXT_BOUNDS.speakers) break scan;
+      const sheet = turn.sheet === undefined ? undefined : sheets.find((candidate) => candidate.id === turn.sheet);
+      const essence = clip(section(sheet, /^essence/i), DIRECTION_CONTEXT_BOUNDS.section);
+      const voice = clip(section(sheet, /^voice|^speech/i), DIRECTION_CONTEXT_BOUNDS.section);
+      const note = plan.reading === "performed" ? notes[key] : undefined;
+      speakers.push({ key, name: sheet?.name ?? turn.speaker ?? key, ...(essence !== undefined ? { essence } : {}), ...(voice !== undefined ? { voice } : {}), ...(note !== undefined ? { note } : {}) });
+    }
   }
   const synopsis = clip(summary?.synopsis, DIRECTION_CONTEXT_BOUNDS.synopsis);
   const pov = summary?.pov === undefined ? undefined : (sheets.find((sheet) => sheet.id === summary.pov)?.name ?? summary.pov);
@@ -609,7 +615,8 @@ async function chapterBefore(store: WorldStore, productionId: string, order: num
     return { order: previous.order, title: previous.title, blocks: [] };
   }
   const cast = await readVoices(store, productionId, previous.file);
-  const derived = audiobookBlocks(body, cast === "unreadable" ? null : cast, audiobookHeading(previous.order, previous.title));
+  const bookFile = await readAudiobookBook(store, productionId);
+  const derived = audiobookBlocks(body, cast === "unreadable" ? null : cast, audiobookHeading(previous.order, previous.title), audiobookBlockOptions(bookFile === null || bookFile === "unreadable" ? null : bookFile));
   const sheets = store.getBundle().sheets;
   const directed = derived.blocks.flatMap((block) => {
     const direction = audiobookDirectionFor(record, block);
@@ -632,7 +639,7 @@ export async function directionReads(store: WorldStore, productionId: string, ch
   const context = await directionContext(store, productionId, plan, room);
   const refusal = castRefusal(plan);
   const book = plan.book;
-  const speakerKeys = plan.reading === "performed" ? [...new Set(plan.blocks.flatMap((planned) => { const key = audiobookNoteKey(planned.block); return key === null ? [] : [key]; }))] : [];
+  const speakerKeys = plan.reading === "performed" ? [...new Set(plan.blocks.flatMap((planned) => (planned.block.rows ?? [planned.block]).flatMap((turn) => { const key = audiobookNoteKey(turn); return key === null ? [] : [key]; })))] : [];
   return {
     chapter: { order: context.chapter.order, version: context.chapter.version, synopsis: context.chapter.synopsis !== undefined, ...(context.chapter.pov !== undefined ? { pov: context.chapter.pov } : {}) },
     ...(context.tone !== undefined ? { tone: context.tone } : {}),
@@ -705,7 +712,14 @@ export async function directChapter(
   const summaries: string[] = [];
   let chapterNote: string | undefined;
   const speakerNotes: Record<string, string> = {};
-  const speakerOf = new Map(plan.blocks.map((planned) => [planned.block.key, planned.block.speaker === undefined ? undefined : (planned.block.sheet === undefined ? planned.block.speaker : (store.getBundle().sheets.find((sheet) => sheet.id === planned.block.sheet)?.name ?? planned.block.speaker))]));
+  // Who speaks a block, by name: a block that holds several turns (design turn 190) names each speaker in it.
+  const nameOf = (turn: { speaker?: string; sheet?: string }): string | undefined =>
+    turn.speaker === undefined ? undefined : (turn.sheet === undefined ? turn.speaker : (store.getBundle().sheets.find((sheet) => sheet.id === turn.sheet)?.name ?? turn.speaker));
+  const mixedKeys = new Set(plan.blocks.filter((planned) => planned.block.rows !== undefined).map((planned) => planned.block.key));
+  const speakerOf = new Map(plan.blocks.map((planned) => {
+    const names = [...new Set((planned.block.rows ?? [planned.block]).flatMap((turn) => { const name = nameOf(turn); return name === undefined ? [] : [name]; }))];
+    return [planned.block.key, names.length === 0 ? undefined : names.join(", ")] as const;
+  }));
   for (const [index, pass] of passes.entries()) {
     if (signal?.aborted) throw new Error("stopped");
     // The drafts are asked of the first pass, which reads the chapter's opening with the
@@ -725,6 +739,7 @@ export async function directChapter(
             text: normalizeSpeechText(block.text),
             reader: `${voiceDisplayLabel(block.reader, store.getBundle())} · ${block.model.displayName}`,
             ...(speaker !== undefined ? { speaker } : {}),
+            ...(mixedKeys.has(block.key) ? { mixed: true } : {}),
             deliveries: AUDIOBOOK_DELIVERIES.filter((delivery) => support.deliveries[delivery]?.status !== "unsupported"),
             note: support.note.status === "unsupported" ? "none" : support.note.method?.startsWith("tag") === true ? "tag" : "instruction",
             pause: support.pause.status !== "unsupported",

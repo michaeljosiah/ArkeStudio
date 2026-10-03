@@ -28,9 +28,33 @@ import { AudiobookBedSchema, AudiobookBlockSoundSchema, AudiobookReactionSchema,
 export const AUDIOBOOK_TITLE_PARAGRAPH = -1;
 export const AUDIOBOOK_TITLE_KEY = "title";
 
+/** One speaker's turn inside a block that holds several: its words, and who speaks them. */
+export interface AudiobookTurn {
+  text: string;
+  speaker?: string;
+  sheet?: string;
+}
+
 export interface AudiobookBlock extends VoicedBlock {
   /** `title`, or `p<paragraph>.<n>` for the n-th block the paragraph splits into. Stable across saves that leave the paragraph's split alone. */
   key: string;
+  /**
+   * The turns a block holds when one reader reads them all (design turn 190): a line and its tag
+   * are one block, read straight through, and the cast's speakers are rows inside it. Absent on a
+   * block that is a single turn. A block with rows has no speaker of its own.
+   */
+  rows?: AudiobookTurn[];
+}
+
+/** How a chapter's turns become its blocks. */
+export interface AudiobookBlockOptions {
+  /**
+   * One reader reads the chapter (the narrator under `narrator` and `performed`), so the turns of
+   * a paragraph are one block; under `cast` a block splits where the reader changes.
+   */
+  merge?: boolean;
+  /** A turn read apart from its neighbours whatever the reading: a speaker a person records. */
+  apart?: (turn: VoicedBlock) => boolean;
 }
 
 /**
@@ -52,18 +76,53 @@ export function audiobookBlocks(
   body: string,
   record: Parameters<typeof voicedBlocks>[1],
   heading: string,
+  options: AudiobookBlockOptions = {},
 ): { blocks: AudiobookBlock[]; ambiguous: number } {
   const paragraphs = chapterParagraphs(body);
   if (paragraphs.every((paragraph) => isSceneBreak(paragraph))) return { blocks: [], ambiguous: 0 };
   const voiced = voicedBlocks(body, record);
   const blocks: AudiobookBlock[] = [{ key: AUDIOBOOK_TITLE_KEY, paragraph: AUDIOBOOK_TITLE_PARAGRAPH, text: heading }];
   const within = new Map<number, number>();
-  for (const block of voiced.blocks) {
-    if (isSceneBreak(block.text)) continue;
+  const push = (block: VoicedBlock, rows?: AudiobookTurn[]): void => {
     const n = within.get(block.paragraph) ?? 0;
     within.set(block.paragraph, n + 1);
-    blocks.push({ ...block, key: `p${block.paragraph}.${n}` });
+    blocks.push({ ...block, key: `p${block.paragraph}.${n}`, ...(rows !== undefined ? { rows } : {}) });
+  };
+  // One reader, one block (design turn 190): the turns of a paragraph that one reader reads are a
+  // run, read as the one passage they are. A line and its tag were two takes with a pause inside
+  // a sentence.
+  let run: VoicedBlock[] = [];
+  const flush = (): void => {
+    if (run.length === 0) return;
+    if (run.length === 1) push(run[0]!);
+    else {
+      const paragraph = run[0]!.paragraph;
+      // The whole paragraph when the run is all of it, so the block is an exact slice of it (a pin
+      // finds its words there); else the turns as they read, one space between.
+      const whole = paragraphs[paragraph];
+      const joined = run.map((turn) => turn.text).join(" ");
+      const covers = whole !== undefined && run.map((turn) => turn.text.trim()).join("").replace(/\s+/g, "") === whole.replace(/\s+/g, "");
+      push(
+        { paragraph, text: covers ? whole : joined },
+        run.map((turn) => ({ text: turn.text, ...(turn.speaker !== undefined ? { speaker: turn.speaker } : {}), ...(turn.sheet !== undefined ? { sheet: turn.sheet } : {}) })),
+      );
+    }
+    run = [];
+  };
+  for (const block of voiced.blocks) {
+    if (isSceneBreak(block.text)) {
+      flush();
+      continue;
+    }
+    if (options.merge !== true || options.apart?.(block) === true) {
+      flush();
+      push(block);
+      continue;
+    }
+    if (run.length > 0 && run[0]!.paragraph !== block.paragraph) flush();
+    run.push(block);
   }
+  flush();
   return { blocks, ambiguous: voiced.ambiguous };
 }
 
@@ -505,9 +564,26 @@ export function audiobookNoteKey(block: Pick<AudiobookBlock, "speaker" | "sheet"
   return block.speaker === undefined ? null : (block.sheet ?? block.speaker);
 }
 
-/** The note a block is played with under the book's reading (R-44): only under `performed`, only on a line. */
-export function audiobookNoteFor(book: Pick<AudiobookBook, "reading" | "notes"> | null, block: Pick<AudiobookBlock, "speaker" | "sheet">): string | undefined {
+/**
+ * The note a block is played with under the book's reading (R-44): only under `performed`, only on
+ * a line. A block that holds several turns (design turn 190) is played with the notes of the
+ * speakers in it: a lone speaker's as it stands, several named by their speaker.
+ */
+export function audiobookNoteFor(book: Pick<AudiobookBook, "reading" | "notes"> | null, block: Pick<AudiobookBlock, "speaker" | "sheet"> & { rows?: readonly AudiobookTurn[] }): string | undefined {
   if (book?.reading !== "performed") return undefined;
+  if (block.rows !== undefined) {
+    const seen = new Set<string>();
+    const noted: Array<{ who: string; note: string }> = [];
+    for (const row of block.rows) {
+      const key = audiobookNoteKey(row);
+      if (key === null || seen.has(key)) continue;
+      seen.add(key);
+      const note = book.notes?.[key];
+      if (note !== undefined) noted.push({ who: row.speaker ?? key, note });
+    }
+    if (noted.length === 0) return undefined;
+    return noted.length === 1 ? noted[0]!.note : noted.map(({ who, note }) => `${who}: ${note}`).join(" ");
+  }
   const key = audiobookNoteKey(block);
   return key === null ? undefined : book.notes?.[key];
 }
@@ -528,6 +604,21 @@ export function audiobookTakeDirectionHash(plan: CadencePlan | null, note?: stri
   return textDigest(`reading-v1:${JSON.stringify({ book: reading.book ?? null, chapter: reading.chapter ?? null, direction: inner ?? null })}`);
 }
 export const DEFAULT_AUDIOBOOK_BOOK: AudiobookBook = { schemaVersion: 1, reading: "narrator" };
+
+/**
+ * How a book's chapters become blocks (design turn 190): one reader reads under `narrator` and
+ * `performed`, so a paragraph is a block; under `cast` a block splits where the reader changes;
+ * and a speaker a person records is read apart whatever the reading. Every caller derives its
+ * blocks with this, so the window and the coordinator name the same ones.
+ */
+export function audiobookBlockOptions(book: Pick<AudiobookBook, "reading" | "recorded"> | null): AudiobookBlockOptions {
+  const reading = book?.reading ?? DEFAULT_AUDIOBOOK_BOOK.reading;
+  const recorded = new Set(book?.recorded ?? []);
+  return {
+    merge: reading !== "cast",
+    ...(recorded.size > 0 ? { apart: (turn: Pick<AudiobookBlock, "speaker" | "sheet">) => recorded.has(audiobookRecordingKey(turn)) } : {}),
+  };
+}
 
 export type AudiobookBlockState = "not made" | "made" | "stale" | "flagged" | "awaiting";
 

@@ -2370,7 +2370,9 @@ export function ChapterWorkspace({
                       const note = production.audiobook?.notes?.[key];
                       const model = audiobook.modelOf(audiobook.narrator);
                       const selectedRow = audiobook.rows.find((row) => row.block.key === audiobook.selected);
-                      const line = selectedRow !== undefined && selectedRow.speakerKey === key ? selectedRow : (audiobook.rows.find((row) => row.speakerKey === key) ?? null);
+                      // A speaker's line may sit inside a block of several turns (design turn 190).
+                      const holds = (row: (typeof audiobook.rows)[number]) => row.speakerKey === key || (row.speakers ?? []).some((turn) => turn.key === key);
+                      const line = selectedRow !== undefined && holds(selectedRow) ? selectedRow : (audiobook.rows.find(holds) ?? null);
                       return (
                         <PerformedSpeaker
                           key={key}

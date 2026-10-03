@@ -817,13 +817,14 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(input.value, "low, clipped");
     assert.match(row.textContent ?? "", /12\/60/, "the note's count");
     assert.match(row.textContent ?? "", /note · not on this reader/, "Kokoro takes no phrase");
-    const line = q(m, '.fy-ab__block[data-speaker="maren-kest"]')!;
+    // One reader, one block (design turn 190): Maren's line is read inside its paragraph.
+    const line = all(m, ".fy-ab__block").find((block) => (block.textContent ?? "").includes("You hear it too"))!;
     assert.equal(line.getAttribute("data-state"), "not made");
 
     await act(async () => row.click());
     const hear = q(m, '[data-testid="performed-hear"]')!;
     assert.equal(hear.textContent, "Hear Maren Kest", "a local narrator is free, so no price");
-    assert.equal(q(m, '[data-testid="performed-sent-as"]')?.textContent, "“You hear it too,”", "held on Kokoro, so sent plain");
+    assert.equal(q(m, '[data-testid="performed-sent-as"]')?.textContent, "“You hear it too,” she said.", "held on Kokoro, so sent plain: the line with its tag, as one passage");
     await act(async () => hear.click());
     const heard = m.sent.findLast((message) => message.kind === "hear-audiobook-line") as Extract<ClientMessage, { kind: "hear-audiobook-line" }>;
     assert.equal(heard.block, line.getAttribute("data-block"));
@@ -1245,11 +1246,14 @@ describe("the director reads the book (design turn 184)", () => {
     const m = await mount(voiced(inkbound("performed")));
     await answerOpen(m);
     assert.equal(q(m, '[data-block="p1.1"]'), null, "uncast, the line's paragraph is one block");
-    await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 5, dropped: 0, hash: HASH, chapterVersion: 4, proposalId: "card-2", cast: { lines: 1, speakers: 1 }, castRecord: CAST, proposed: { "p1.1": { delivery: "cold" as const, speed: 1, cues: [] } } }));
-    assert.equal(q(m, '[data-block="p1.0"]')?.getAttribute("data-speaker"), "maren-kest", "the held cast's line has its speaker");
-    assert.equal(q(m, '[data-block="p1.1"]')?.getAttribute("data-proposed"), "true", "the proposal lands on the block its cast made");
+    assert.doesNotMatch(q(m, '[data-block="p1.0"]')?.textContent ?? "", /Maren Kest/);
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 5, dropped: 0, hash: HASH, chapterVersion: 4, proposalId: "card-2", cast: { lines: 1, speakers: 1 }, castRecord: CAST, proposed: { "p1.0": { delivery: "cold" as const, speed: 1, cues: [] } } }));
+    // One reader, one block (design turn 190): the held cast's line sits inside its paragraph's block,
+    // which names its speaker, and the proposal lands on that block.
+    assert.match(q(m, '[data-block="p1.0"]')?.textContent ?? "", /Maren Kest/, "the held cast's line has its speaker");
+    assert.equal(q(m, '[data-block="p1.0"]')?.getAttribute("data-proposed"), "true", "the proposal lands on the block its cast made");
     await act(async () => all(m, '[data-testid="direction-card"] button').find((b) => b.textContent === "Discard")!.click());
-    assert.equal(q(m, '[data-block="p1.1"]'), null, "discarded, the blocks are the record's again");
+    assert.doesNotMatch(q(m, '[data-block="p1.0"]')?.textContent ?? "", /Maren Kest/, "discarded, the blocks are the record's again");
   });
 
   it("the note fields hold while the book or another chapter is being read, and Direct puts a pressed block down (codex on PR 1479)", async () => {

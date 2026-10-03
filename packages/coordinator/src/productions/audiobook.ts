@@ -5,7 +5,8 @@ import {
   ChapterAudiobookSchema,
   DEFAULT_AUDIOBOOK_BOOK,
   audiobookBlocks,
-  audiobookNoteKey,
+  audiobookBlockOptions,
+  audiobookNoteFor,
   audiobookReadingNotes,
   hasReadingNotes,
   audiobookDirectionFor,
@@ -419,8 +420,7 @@ export function assignReaders(
       // Under `performed` the narrator reads every block, as under `narrator` (R-44); a line
       // carries its speaker's note, and narration none.
       if (reading === "performed") {
-        const key = audiobookNoteKey(block);
-        const note = key === null ? undefined : notes[key];
+        const note = audiobookNoteFor({ reading: "performed", notes }, block);
         return { assigned: narrator, ...(note !== undefined ? { note } : {}) };
       }
       if (reading === "narrator" || block.speaker === undefined) return { assigned: narrator };
@@ -517,10 +517,12 @@ export async function planAudiobook(
   const read = await readAudiobookBook(store, productionId);
   const book = read === null || read === "unreadable" ? null : read;
   const reading = book === null ? DEFAULT_AUDIOBOOK_BOOK.reading : book.reading;
-  const derived = audiobookBlocks(opened.body, cast === "unreadable" ? null : cast, audiobookHeading(summary.order, summary.title));
+  // One reader, one block (design turn 190): under `narrator` and `performed` one voice reads the
+  // chapter, so a paragraph's turns are one block; a speaker a person records is read apart.
+  const recorded = new Set(book === null ? [] : (book.recorded ?? []));
+  const derived = audiobookBlocks(opened.body, cast === "unreadable" ? null : cast, audiobookHeading(summary.order, summary.title), audiobookBlockOptions(book));
   const sheets = store.getBundle().sheets.filter((sheet) => sheet.type === "character" && !sheet.retired);
   const present = await presentTakes(store, record === "unreadable" ? null : record);
-  const recorded = new Set(book === null ? [] : (book.recorded ?? []));
   // A drafted note stands only where the author has none (R-54): the author's always wins.
   const notes = { ...override?.speakerNotes, ...book?.notes };
   const readingNotes = audiobookReadingNotes(

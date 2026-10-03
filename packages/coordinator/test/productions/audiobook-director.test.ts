@@ -245,7 +245,8 @@ describe("the director reads the book (design turn 184, SPEC-047 R-51)", () => {
         assert.equal(maren.note, "low, clipped");
         assert.equal(context.before, null, "the first chapter has none before it");
         const line = asked.blocks.find((block) => block.speaker !== undefined);
-        assert.equal(line?.speaker, "Maren Kest", "a spoken line says who speaks it");
+        assert.equal(line?.speaker, "Maren Kest", "a block with a spoken line says who speaks it");
+        assert.equal(line?.mixed, true, "narration with the line, read as one passage (design turn 190)");
         const prompt = directionPromptFor(asked);
         for (const fact of ["Synopsis: Maren finds", "Point of view: Maren Kest", "Tone: quiet dread", "Book note", "Chapter note", "Speaker Maren Kest [maren-kest]", "essence:", "\"note\""]) {
           assert.ok(prompt.includes(fact), `the prompt says ${fact}`);
