@@ -77,7 +77,10 @@ Generation quote changes also run coordinator `test/world-chat/generation-quotes
 `test/world/founding-build.test.ts`. These cover preparation without jobs, default routing,
 price/expiry/reference changes, pending result filing, frozen Bench reservations and cast audio,
 founding retry authority and interrupted admission without automatic resubmission. Run
-`node --import tsx --test` with those repository-relative test paths; no paid provider is used.
+`node --import tsx --test` with those repository-relative test paths; no paid provider is used. The quote regressions cover concurrent world-image/master-look
+admission, long shared Bench briefs, uncertain queue admission without resubmission, and
+JPEG/WebP prop landing. Background finalization checks use a real prop state and verify that
+chat-generated character sheets remain pending for separate selection.
 
 Book/audio standards experiments use the separate [publication interoperability checks](publication-interop.md#reproduce).
 They install their own locked development dependencies and exercise Readium, package closure and EPUBCheck.

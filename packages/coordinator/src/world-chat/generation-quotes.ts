@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, readdir, rm } from "node:fs/promises";
+import { extname, join } from "node:path";
 import { z } from "zod";
 import {
   ArkeGenerationBodySchema, JobSchema, ModelWorldChatActionSchema, ulid,
@@ -45,6 +45,19 @@ function sealedDigest(quote: Quote): string {
     materialization: quote.materialization ?? null, body });
 }
 
+const admissions = new WeakMap<WorldStore, Map<string, Promise<void>>>();
+async function serialiseAdmission<T>(store: WorldStore, key: string, work: () => Promise<T>): Promise<T> {
+  let pending = admissions.get(store);
+  if (!pending) { pending = new Map(); admissions.set(store, pending); }
+  const previous = pending.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const barrier = new Promise<void>(resolve => { release = resolve; });
+  pending.set(key, barrier);
+  await previous.catch(() => {});
+  try { return await work(); }
+  finally { release(); if (pending.get(key) === barrier) pending.delete(key); }
+}
+
 /** The pending card, rather than a process-local cache, owns the price and the dispatch inputs
  * (SPEC-050 R-11, SPEC-041 R-76). Recompilation never replaces an existing authorization. */
 export class GenerationQuotes {
@@ -69,6 +82,19 @@ export class GenerationQuotes {
   }
   private async compile(action: ModelWorldChatAction, id: string, at: string) {
     const resolved = await this.source.compile(action, id, at);
+    // These screens own one pending candidate set. Keep it until selection/discard, and
+    // serialize quote admissions so two cards cannot buy outputs at the same filenames.
+    for (const kind of new Set(resolved.inputs.map(input => input.target.kind))) {
+      if (kind !== "world-image" && kind !== "master-look") continue;
+      const active = this.ports.jobs().some(job => job.worldId === this.store.worldId && job.target.kind === kind && !["succeeded", "failed", "cancelled"].includes(job.status));
+      const names = await readdir(join(this.store.dir, "incoming", kind)).catch(error => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw error;
+      });
+      if (active || names.some(name => [".png", ".jpg", ".jpeg", ".webp"].includes(extname(name).toLowerCase()))) {
+        throw new Error(`The ${kind} surface already has work or pending candidates. Select, discard or reconcile them before preparing new generation.`);
+      }
+    }
     const inputs: EnqueueInput[] = [];
     for (const input of resolved.inputs) {
       if (input.worldId !== this.store.worldId) throw new Error("The generation quote belongs to another world.");
@@ -109,6 +135,11 @@ export class GenerationQuotes {
     return quote;
   }
   async dispatch(action: ModelWorldChatAction, id: string): Promise<ConversationActionExecutionOutcome> {
+    const quote = await this.read(id);
+    const surface = quote?.inputs.find(input => input.target.kind === "world-image" || input.target.kind === "master-look")?.target.kind;
+    return serialiseAdmission(this.store, surface ? `surface:${surface}` : `action:${id}`, () => this.admit(action, id));
+  }
+  private async admit(action: ModelWorldChatAction, id: string): Promise<ConversationActionExecutionOutcome> {
     const existing = await this.read(id);
     if (existing?.dispatchStarted && existing.actionDigest === conversationActionDigest(action) && existing.body.quoteDigest === sealedDigest(existing)) return { status: "running", detail: "Rejoining the generation already authorized by this card." };
     const quote = await this.validate(action, id);

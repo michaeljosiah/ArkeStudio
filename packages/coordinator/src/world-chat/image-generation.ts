@@ -107,6 +107,7 @@ export function imageGenerationSource(store: WorldStore, ports: {
     if (inputs.some(input => !characterImageEstimateIsUsable(model, input.estimatedMicroUsd))) throw new Error("The image route has no usable published estimate. Choose another model.");
     if (inputs.length === 0) throw new Error("There are no missing images to generate.");
     inputs = inputs.map((input, index) => ports.freeze({ ...input, params: { ...input.params,
+      ...(input.target.kind === "character-sheet" ? { generationQuotePendingSelection: true } : {}),
       ...(input.provider === "comfyui" ? { seed: createHash("sha256").update(`${actionId}/${index}`).digest().readUInt32BE(0) % 0x7fffffff } : {}),
     } }));
     const references = [...new Map(inputs.flatMap(input => (input.params.references as string[] | undefined ?? []).map(file =>
@@ -116,7 +117,7 @@ export function imageGenerationSource(store: WorldStore, ports: {
       prompt: prompts.map((prompt, index) => prompts.length === 1 ? prompt : `${index + 1}. ${prompt}`).join("\n\n"),
       references, provider: model.provider, model: model.id, quantity: inputs.length, output: "Pending image candidates; selection requires a separate card", cost: "Pending quote",
       options: [{ label: "Model choice", value: action.modelId ? "Named in this request" : bundle.meta.models?.image ? "World image default" : "Settings image routing default" },
-        ...inputs.flatMap((input, index) => Object.entries(input.params).filter(([key]) => !["prompt", "references", "referenceRoles", "provenance", "characterName"].includes(key))
+        ...inputs.flatMap((input, index) => Object.entries(input.params).filter(([key]) => !["prompt", "references", "referenceRoles", "provenance", "characterName", "generationQuotePendingSelection"].includes(key))
           .map(([label, value]) => ({ label: inputs.length === 1 ? label : `${index + 1}: ${label}`, value: typeof value === "string" ? value : JSON.stringify(value) })))],
       privacy: [references.length ? "Attached references and the prompt are sent to the configured provider runtime." : "The prompt is sent to the configured provider runtime."],
       cancellationSupported: true,

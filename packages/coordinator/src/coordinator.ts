@@ -5443,12 +5443,12 @@ export class Coordinator {
         if (!take) throw new Error("reference take finalization produced no take");
         // The human's own action rule (frames.ts, assign-voice): a composite the user asked for
         // lands designated — there is no review step for the person who pressed the button.
-        // Sheet generation has no agent path; if one arrives, it must stage instead. A founding
+        // Chat generation stages its composite for a separate selection. A founding
         // build is NOT that path (SPEC-031 D2): the press is a person's, the cap is stated, and
         // the spend is authorized before anything runs — its sheets land designated under the
         // same rule as a user-pressed generation, through this branch and its own landing.
         // Failure leaves the take pending, and the review strip still knows how to offer it.
-        if (job.target.kind === "character-sheet" && take.media) {
+        if (job.target.kind === "character-sheet" && take.media && job.params.generationQuotePendingSelection !== true) {
           const sheetId = job.target.id?.split("/")[0];
           const bundle = store.getBundle();
           const sheet = sheetId ? bundle.sheets.find((s) => s.id === sheetId) : undefined;
@@ -19264,6 +19264,8 @@ export class Coordinator {
     const audioPolicy = params.kind === "video"
       ? params.sound === true ? "Generate picture with provider audio" : params.sound === false ? "Silent output" : "Provider default"
       : action.composer.mode === "voice" ? "Spoken audio" : action.composer.mode === "music" ? "Music audio" : undefined;
+    const prompts = [...new Set(plan.inputs.map(input => [input.params.prompt ?? input.params.text ?? action.composer.brief,
+      input.params.instructions, input.params.lyrics].filter(value => typeof value === "string" && value.length > 0).join("\n\n")))];
     return {
       authorityRevision: revision,
       inputs: plan.inputs.map(input => this.freezeLocalIdentity(input)),
@@ -19273,10 +19275,7 @@ export class Coordinator {
         family: "generation" as const,
         medium,
         purpose: bench.session.subject ? "Production Bench take" : "Bench exploration",
-        prompt: plan.inputs.map((input, index) => {
-          const words = [input.params.prompt ?? input.params.text ?? action.composer.brief, input.params.instructions, input.params.lyrics].filter(value => typeof value === "string" && value.length > 0).join("\n\n");
-          return plan.inputs.length === 1 ? words : `${index + 1}. ${words}`;
-        }).join("\n\n") || "No creative brief",
+        prompt: prompts.map((prompt, index) => prompts.length === 1 ? prompt : `${index + 1}. ${prompt}`).join("\n\n") || "No creative brief",
         exclusions: [],
         references,
         provider: action.composer.provider,
@@ -19339,6 +19338,7 @@ export class Coordinator {
       take.requestId === action.actionId || take.requestId.startsWith(`${action.actionId}/`)) ?? [];
     if (takes.length === 0) return null;
     const active = takes.filter((take) => !["succeeded", "failed", "cancelled"].includes(take.status));
+    if (active.some(take => take.status === "needs-reconciliation")) return { status: "running" as const, detail: "Bench work needs reconciliation in Activity; it was not resubmitted." };
     if (active.length > 0) {
       return { status: "running" as const, detail: `${takes.length - active.length} of ${takes.length} items finished; ${active[0]!.id} is in flight.` };
     }
@@ -19415,9 +19415,31 @@ export class Coordinator {
           if (reserved.length !== inputs.length || reserved.some((take, index) => inputs[index]?.target.id !== `${action.sessionId}/${take.id}`)) throw new Error("The Bench reservation does not match its quote.");
           const reservation = await bench.store.append({ type: "takes-reserved", takes: reserved }, { at: this.nowIso(), requestId: id });
           if (reservation.deduplicated) return { status: "running", detail: "Rejoining the reserved Bench generation." };
-          for (const [index, input] of inputs.entries()) {
-            const job = await quotePorts.enqueue(input);
-            await bench.store.append({ type: "take-job", takeId: reserved[index]!.id, jobId: job.id }, { at: this.nowIso() });
+          let attempted = -1;
+          try {
+            for (const [index, input] of inputs.entries()) {
+              // An absent queue row after an uncertain append is not proof of no purchase.
+              await bench.store.append({ type: "take-status", takeId: reserved[index]!.id, status: "needs-reconciliation",
+                error: "Queue admission is unresolved; inspect Activity before starting new work." }, { at: this.nowIso() });
+              attempted = index;
+              const job = await quotePorts.enqueue(input);
+              await bench.store.append({ type: "take-job", takeId: reserved[index]!.id, jobId: job.id }, { at: this.nowIso() });
+              const session = await bench.store.fold();
+              if (session) await recoverBenchSession({ store: bench.store, session: { ...session, takes: session.takes.filter(take => take.id === reserved[index]!.id) } }, [{
+                jobId: job.id, targetId: input.target.id!, status: job.status, error: job.error,
+              }], () => this.nowIso());
+            }
+          } catch {
+            for (const take of reserved.slice(attempted + 1)) {
+              await bench.store.append({ type: "take-status", takeId: take.id, status: "failed",
+                error: "Not attempted: admission stopped before this take; no provider was called." }, { at: this.nowIso() });
+            }
+            const session = await bench.store.fold();
+            if (session) await recoverBenchSession({ store: bench.store, session }, quotePorts.jobs().filter(job => job.target.kind === "bench-take" && job.target.id).map(job => ({
+              jobId: job.id, targetId: job.target.id!, status: job.status, error: job.error,
+            })), () => this.nowIso());
+            await this.refreshBench(store.worldId, action.sessionId);
+            return { status: "running", detail: "Admission stopped. Unattempted takes were settled; uncertain work needs reconciliation in Activity." };
           }
           await this.refreshBench(store.worldId, action.sessionId);
           return { status: "queued", detail: `${reserved.length} Bench items reserved and queued.` };

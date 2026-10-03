@@ -1018,7 +1018,7 @@ export const BenchEventSchema = z.discriminatedUnion("type", [
       type: z.literal("take-status"),
       takeId: TakeIdSchema,
       status: JobStatusSchema,
-      error: z.string().optional(),
+      error: z.string().nullable().optional(),
     })
     .strict(),
   z
@@ -1232,7 +1232,8 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
         const take = takesById.get(event.takeId);
         if (take) {
           take.status = event.status;
-          if (event.error !== undefined) take.error = event.error;
+          if (event.error === null) delete take.error;
+          else if (event.error !== undefined) take.error = event.error;
         }
         break;
       }

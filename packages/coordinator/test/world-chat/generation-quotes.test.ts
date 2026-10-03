@@ -13,7 +13,7 @@ import { recordReferenceTake } from "../../src/references/takes.js";
 import { createProp, addPropState } from "../../src/references/props.js";
 import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
-import { FakeProvider, pngBytes } from "../queue/fake-provider.js";
+import { FakeProvider, jpegBytes, pngBytes, webpBytes } from "../queue/fake-provider.js";
 import { until } from "../wait.js";
 
 const AT = "2026-10-03T12:00:00.000Z";
@@ -232,3 +232,46 @@ it("carries the staged main-photo image with its role, estimate and content pin"
   await assert.rejects(h.quotes().dispatch(action, id), /changed/);
   assert.equal(h.queue.listJobs().length, 0);
 });
+
+for (const operation of ["world-image", "master-look"] as const) {
+  it(`serializes competing ${operation} cards and preserves pending paid output`, async () => {
+    const h = await setup();
+    const action: ModelWorldChatAction = { kind: "image-generation", modelId: MODEL.id,
+      request: { operation, prompt: "Salt-lit harbour", count: 1 }, checkReceiptIds: [newId("check")] };
+    const ids = [newId("act"), newId("act")];
+    await Promise.all(ids.map(id => h.quotes().prepare(action, id, AT)));
+    const results = await Promise.allSettled(ids.map(id => h.quotes().dispatch(action, id)));
+    assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+    const refused = results.find(result => result.status === "rejected") as PromiseRejectedResult;
+    assert.match(String(refused.reason), /already has work or pending candidates/);
+    assert.equal(h.queue.listJobs().length, 1);
+    await until(() => h.queue.listJobs()[0]?.status === "succeeded", "world image to land", 30_000);
+    const file = h.queue.listJobs()[0]!.landedFiles![0]!;
+    const original = await readFile(join(h.dir, file));
+    await assert.rejects(h.quotes().prepare(action, newId("act"), AT), /pending candidates/);
+    await assert.rejects(h.quotes().dispatch(action, ids[results.findIndex(result => result.status === "rejected")]!), /pending candidates/);
+    assert.deepEqual(await readFile(join(h.dir, file)), original);
+    assert.equal(h.fake.submitCount, 1);
+  });
+}
+
+for (const format of [{ extension: ".jpg", contentType: "image/jpeg", bytes: jpegBytes() }, { extension: ".webp", contentType: "image/webp", bytes: webpBytes() }]) {
+  it(`preserves ${format.extension} prop output through normal queue landing and Take filing`, async () => {
+    const h = await setup();
+    h.fake.inlineArtifacts = [{ name: `image${format.extension}`, contentType: format.contentType, data: format.bytes }];
+    const prop = (await createProp(h.store, "Tide sword"))!;
+    const state = (await addPropState(h.store, prop.id, "Broken"))!;
+    const action: ModelWorldChatAction = { kind: "image-generation", modelId: MODEL.id,
+      request: { operation: "prop-state", propId: prop.id, stateId: state.id, prompt: "Broken at the hilt", count: 1 }, checkReceiptIds: [newId("check")] };
+    const id = newId("act");
+    await h.quotes().prepare(action, id, AT);
+    await h.quotes().dispatch(action, id);
+    await until(() => h.queue.listJobs()[0]?.finalization?.status === "complete", "prop format to finalize", 30_000);
+    await h.store.reload();
+    const take = h.store.getBundle().referenceTakes.find(take => take.jobId === h.queue.listJobs()[0]!.id)!;
+    assert.ok(take.media!.endsWith(format.extension));
+    assert.ok(h.queue.listJobs()[0]!.landedFiles![0]!.endsWith(format.extension));
+    assert.deepEqual(await readFile(join(h.dir, "references", prop.id, "takes", take.id, take.media!)), Buffer.from(format.bytes));
+    assert.equal(h.store.getBundle().props.find(one => one.id === prop.id)!.states[0]!.reference, undefined);
+  });
+}

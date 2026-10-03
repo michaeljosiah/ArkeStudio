@@ -303,6 +303,7 @@ interface DurableInlineArtifacts {
 const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
 const FORMAT_PRESERVING_IMAGE_TARGETS = new Set([
   "main-photo-candidate",
+  "prop-state-candidate",
   "establish-candidate",
   "character-sheet",
   "character-look",
@@ -328,7 +329,7 @@ const FOLLOW_ON_TARGETS = new Set([
  * recording a cloned voice was made from: part of an audiobook part's durable identity
  * (`priorPartJob`, SPEC-046 R-39), not a control of any reader.
  */
-const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation", "voiceClipHash", "designedBinding", "generationQuoteReferences"]);
+const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation", "voiceClipHash", "designedBinding", "generationQuoteReferences", "generationQuotePendingSelection"]);
 
 /** Attempts that count against the retry bound: refusals waited out as busy never reached the engine. */
 function spentAttempts(job: Job): number {
