@@ -222,6 +222,7 @@ Leave it out entirely while the conversation is still finding what the story is.
 export class GenesisService {
   private readonly turns = new Map<string, ActiveTurn>();
   private readonly sessions = new Map<string, string>();
+  private readonly sessionModels = new Map<string, string | undefined>();
   /**
    * Which attachments the agent has already been told about. Handing over a file has to mean
    * something in the conversation — the file is in its working directory, but a model does not
@@ -243,6 +244,7 @@ export class GenesisService {
   /** The conversation is over — begun or abandoned; the sandbox's fate is the caller's. */
   release(genesisId: string): void {
     this.sessions.delete(genesisId);
+    this.sessionModels.delete(genesisId);
     this.announced.delete(genesisId);
   }
 
@@ -258,7 +260,7 @@ export class GenesisService {
   }
 
   /** One conversational turn in the sandbox. Failure is a stated status, never a throw. */
-  async run(dir: string, genesisId: string, text: string): Promise<void> {
+  async run(dir: string, genesisId: string, text: string, modelId?: string): Promise<void> {
     const at = () => new Date().toISOString();
     const status = (
       state: "running" | "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed",
@@ -273,7 +275,6 @@ export class GenesisService {
       });
 
     if (this.turns.has(genesisId)) {
-      status("failed", "a turn is already running in this conversation");
       return;
     }
     const run: ActiveTurn = { sessionId: null, cancelled: false };
@@ -289,6 +290,7 @@ export class GenesisService {
         status("failed", this.adapter.readiness().reason ?? "the harness is not ready");
         return;
       }
+      if (this.sessionModels.get(genesisId) !== modelId) this.release(genesisId);
       let sessionId = this.sessions.get(genesisId);
       const firstTurn = sessionId === undefined;
       if (sessionId === undefined) {
@@ -296,15 +298,16 @@ export class GenesisService {
         // still works here: `web` is a harness tool the confinement grants, not an MCP one, so the
         // door can go and look something up before there is any world to scope a lookup to.
         try {
-          const session = await createPreparedSession(this.adapter, dir, this.opts.sessionInput({ agent: "world-author" }), {
+          const session = await createPreparedSession(this.adapter, dir, this.opts.sessionInput({ agent: "world-author", ...(modelId ? { model: modelId } : {}) }), {
             purpose: "drafting",
             agent: "world-author",
           });
           sessionId = session.sessionId;
           this.sessions.set(genesisId, sessionId);
+          this.sessionModels.set(genesisId, modelId);
         } catch (err) {
           this.turns.delete(genesisId);
-          status("failed", `could not create a session: ${err instanceof Error ? err.message : String(err)}`);
+          status("failed", err instanceof Error ? err.message : String(err));
           return;
         }
       }

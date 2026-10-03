@@ -6,6 +6,7 @@ import { audiobookBlockState, type AudioQcAnalysis, type AudiobookReader } from 
 import { hashAudioFile, type AudioMediaTools } from "../../src/audio/media-tools.js";
 import { readAudioRights } from "../../src/audio/rights.js";
 import { keepRecording, RecordedTakeRefusal, stageRecording } from "../../src/productions/audiobook-recorded.js";
+import { speakerLines } from "../../src/productions/audiobook-lines.js";
 import { planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBook } from "../../src/productions/audiobook.js";
 import { openChapter, saveChapter } from "../../src/productions/ops.js";
 import { RECORDED_TAKE_SCHEMA_VERSION } from "../../src/world/commit.js";
@@ -120,6 +121,9 @@ describe("a speaker a person records (SPEC-047 R-37, R-38)", () => {
     const after = await planAudiobook(store, PRODUCTION, "neap", { narrator: NARRATOR });
     assert.equal(after.blocks.find((planned) => planned.block.key === block.key)!.state, "made");
     assert.equal(after.blocks.filter((planned) => planned.state === "awaiting").length, plan.blocks.length - 1);
+    const lines = await speakerLines(store, PRODUCTION, "narrator", NARRATOR);
+    assert.equal(lines.lines.filter(line => line.recorded).length, 1, "the Lines summary counts only a current recording");
+    assert.equal(lines.lines.find(line => line.chapterId === "neap" && line.block === block.key)?.recorded, true);
   });
 
   it("the book record keeps its reading and its recorded speakers apart: neither write drops the other", async () => {

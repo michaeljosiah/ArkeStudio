@@ -139,10 +139,13 @@ export type HeardLine = { state: "working" } | { state: "done"; file: string } |
 
 /** A script out, or returned files matched and checked, for a recorded speaker (design turn 155d, SPEC-047 R-39). */
 export interface SpeakerLinesState {
-  kind: "script" | "files";
+  kind: "script" | "files" | "summary";
   state: "working" | "done" | "keeping" | "refused";
   output?: string;
   lines?: number;
+  chapters?: number;
+  recorded?: number;
+  awaiting?: number;
   notCast?: number;
   rows?: Extract<import("@arke-studio/contracts").DomainEvent, { type: "audiobook.lines-staged" }>["rows"];
   kept?: number;
@@ -219,6 +222,14 @@ interface StoreState {
       imageError?: string;
       importError?: string;
       reviewPending?: boolean;
+      chatPending?: boolean;
+      chatSubmission?: { requestId: string; text: string };
+      rejectedChat?: string;
+      chatError?: string;
+      writingModel?: string;
+      reviewError?: string;
+      readinessError?: string;
+      voiceError?: string;
       decisionPending?: "image" | "voice" | "import";
       founding?: boolean;
       frozenModels?: ModelChoices;
@@ -1728,16 +1739,30 @@ function handleFrame(json: string): void {
     } else if (event.type === "genesis.images") {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], images: event.images, imageError: undefined, readiness: undefined, decisionPending: genesis[event.genesisId]?.decisionPending === "image" ? undefined : genesis[event.genesisId]?.decisionPending } };
     } else if (event.type === "genesis.voices") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], voices: event.voices, readiness: undefined, decisionPending: genesis[event.genesisId]?.decisionPending === "voice" ? undefined : genesis[event.genesisId]?.decisionPending } };
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], voices: event.voices, voiceError: undefined, readiness: undefined, decisionPending: genesis[event.genesisId]?.decisionPending === "voice" ? undefined : genesis[event.genesisId]?.decisionPending } };
     } else if (event.type === "genesis.readiness") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], readiness: event.review, readinessPending: false } };
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], readiness: event.review, readinessError: undefined, readinessPending: false } };
     } else if (event.type === "genesis.import-error") {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], importError: event.detail, decisionPending: undefined } };
     } else if (event.type === "genesis.imports") {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imports: event.imports, importError: undefined, readiness: undefined, decisionPending: genesis[event.genesisId]?.decisionPending === "import" ? undefined : genesis[event.genesisId]?.decisionPending } };
+    } else if (event.type === "genesis.chat-result") {
+      const draft = genesis[event.genesisId];
+      if (draft?.chatSubmission?.requestId === event.requestId) {
+        genesis = { ...genesis, [event.genesisId]: { ...draft, chatPending: event.accepted ? draft.chatPending : false, chatSubmission: undefined,
+          ...(!event.accepted ? { rejectedChat: draft.chatSubmission.text, chatError: event.detail } : {}),
+        } };
+      }
+    } else if (event.type === "genesis.review-error") {
+      const draft = genesis[event.genesisId] ?? emptyGenesis();
+      if (event.area !== "content" || draft.reviewRequestId === event.requestId) {
+        genesis = { ...genesis, [event.genesisId]: { ...draft,
+          ...(event.area === "content" ? { reviewError: event.detail, reviewPending: false } : event.area === "readiness" ? { readinessError: event.detail, readinessPending: false } : { voiceError: event.detail, decisionPending: draft.decisionPending === "voice" ? undefined : draft.decisionPending }),
+        } };
+      }
     } else if (event.type === "genesis.review") {
       if (genesis[event.genesisId]?.reviewRequestId === event.requestId) {
-        genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review, reviewPending: false, readiness: undefined } };
+        genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review, reviewError: undefined, reviewPending: false, readiness: undefined } };
       }
     } else if (event.type === "genesis.discarded") {
       discardedGenesis.add(event.genesisId);
@@ -1759,7 +1784,7 @@ function handleFrame(json: string): void {
         frozenModels: event.frozenModels,
         frozenGenerateImages: event.frozenGenerateImages,
         review: undefined, reviewRequestId: ulid(), reviewPending: false,
-        ...(event.detail ? { detail: event.detail } : {}),
+        detail: event.detail,
         ...(event.worldId ? { worldId: event.worldId } : {}),
       } };
     } else if (event.type === "genesis.turn") {
@@ -1804,12 +1829,12 @@ function handleFrame(json: string): void {
         ...genesis,
         [event.genesisId]: {
           ...g,
-          status: event.status,
+          status: event.status, chatPending: false,
           ...(event.status === "failed" ? { readinessPending: false, reviewPending: false, decisionPending: undefined } : {}),
           // The clock starts when the turn does; a settled turn takes its working line with it.
           runStartedAt: event.status === "running" ? event.at : g.runStartedAt,
           working: event.status === "running" ? g.working : null,
-          ...(event.detail !== undefined ? { detail: event.detail } : {}),
+          detail: event.detail,
         },
       };
     } else if (event.type === "genesis.progress") {
@@ -2005,8 +2030,8 @@ function handleFrame(json: string): void {
           ...speakerLines,
           [event.requestId]:
             event.refused !== undefined
-              ? { kind: "script", state: "refused", refused: event.refused }
-              : { kind: "script", state: "done", ...(event.output !== undefined ? { output: event.output } : {}), ...(event.lines !== undefined ? { lines: event.lines } : {}), ...(event.notCast !== undefined ? { notCast: event.notCast } : {}) },
+              ? { kind: speakerLines[event.requestId]!.kind, state: "refused", refused: event.refused }
+              : { kind: speakerLines[event.requestId]!.kind, state: "done", chapters: event.chapters, recorded: event.recorded, awaiting: event.awaiting, ...(event.output !== undefined ? { output: event.output } : {}), ...(event.lines !== undefined ? { lines: event.lines } : {}), ...(event.notCast !== undefined ? { notCast: event.notCast } : {}) },
         };
       }
     } else if (event.type === "audiobook.lines-staged") {
@@ -2529,7 +2554,7 @@ function handleFrame(json: string): void {
 
 function handleStatus(status: ConnectionStatus): void {
   if (status !== "open") pendingQueueRequests.clear();
-  emitChange({ ...current, connection: status, ...(status !== "open" ? { genesis: Object.fromEntries(Object.entries(current.genesis).map(([id, draft]) => [id, { ...draft, readinessPending: false, reviewPending: false, decisionPending: undefined }])) } : {}) });
+  emitChange({ ...current, connection: status, ...(status !== "open" ? { genesis: Object.fromEntries(Object.entries(current.genesis).map(([id, draft]) => [id, { ...draft, chatPending: false, readinessPending: false, reviewPending: false, decisionPending: undefined }])) } : {}) });
   if (status === "open") {
     reconnectAttempts = 0;
     rejoining = true;
@@ -3112,9 +3137,26 @@ export function refreshDiagnostics(): void {
   send({ kind: "refresh-diagnostics" });
 }
 
-export function genesisChat(genesisId: string, text: string): void {
+function genesisChatBusy(genesisId: string): boolean {
+  const draft = current.genesis[genesisId];
+  return !!draft?.chatPending || draft?.status === "running";
+}
+export function genesisChat(genesisId: string, text: string, modelId?: string): boolean {
+  const draft = current.genesis[genesisId];
+  if (!bridge || current.connection !== "open" || genesisChatBusy(genesisId) || draft?.decisionPending || draft?.readinessPending || draft?.founding || draft?.worldId) return false;
   discardedGenesis.delete(genesisId);
-  send({ kind: "genesis-chat", genesisId, text });
+  const requestId = ulid();
+  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...draft, writingModel: modelId, chatPending: true, chatSubmission: { requestId, text }, rejectedChat: undefined, chatError: undefined, detail: undefined } } });
+  if (send({ kind: "genesis-chat", genesisId, requestId, text, ...(modelId ? { modelId } : {}) })) return true;
+  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...current.genesis[genesisId]!, chatPending: false } } });
+  return false;
+}
+
+export function takeRejectedGenesisChat(genesisId: string): string | undefined {
+  const draft = current.genesis[genesisId];
+  const text = draft?.rejectedChat;
+  if (draft && text !== undefined) emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...draft, rejectedChat: undefined } } });
+  return text;
 }
 
 export function listGenesisDrafts(): void { send({ kind: "genesis-list" }); }
@@ -3125,15 +3167,16 @@ function genesisReviewRequest(genesisId: string): string {
   return requestId;
 }
 export function reviewGenesisDraft(genesisId: string): void {
-  if (current.genesis[genesisId]?.founding || current.genesis[genesisId]?.worldId) return;
+  if (genesisChatBusy(genesisId) || current.genesis[genesisId]?.founding || current.genesis[genesisId]?.worldId) return;
   send({ kind: "genesis-review", genesisId, requestId: genesisReviewRequest(genesisId) });
 }
 export function reviewGenesisImages(genesisId: string, models?: Partial<Record<import("@arke-studio/contracts").Capability, string>>): void {
+  if (genesisChatBusy(genesisId)) return;
   send({ kind: "genesis-images", genesisId, ...(models ? { models } : {}) });
 }
-export function reviewGenesisVoices(genesisId: string): void { send({ kind: "genesis-voices", genesisId }); }
+export function reviewGenesisVoices(genesisId: string): void { if (genesisChatBusy(genesisId)) return; send({ kind: "genesis-voices", genesisId }); }
 function beginReadinessRequest(genesisId: string): boolean {
-  if (!bridge || current.connection !== "open" || (current.genesis[genesisId]?.decisionPending || current.genesis[genesisId]?.readinessPending || current.genesis[genesisId]?.reviewPending || current.genesis[genesisId]?.founding)) return false;
+  if (!bridge || current.connection !== "open" || genesisChatBusy(genesisId) || (current.genesis[genesisId]?.decisionPending || current.genesis[genesisId]?.readinessPending || current.genesis[genesisId]?.reviewPending || current.genesis[genesisId]?.founding)) return false;
   emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...current.genesis[genesisId], readinessPending: true } } });
   return true;
 }
@@ -3146,7 +3189,7 @@ export function leaveGenesisFinding(genesisId: string, findingId: string, digest
 }
 function beginGenesisDecision(genesisId: string, kind: "image" | "voice" | "import"): boolean {
   const draft = current.genesis[genesisId];
-  if (!bridge || current.connection !== "open" || draft?.decisionPending || draft?.readinessPending || draft?.reviewPending || draft?.founding || draft?.worldId) return false;
+  if (!bridge || current.connection !== "open" || genesisChatBusy(genesisId) || draft?.decisionPending || draft?.readinessPending || draft?.reviewPending || draft?.founding || draft?.worldId) return false;
   emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...draft, decisionPending: kind, readiness: undefined } } });
   return true;
 }
@@ -3159,7 +3202,7 @@ export function decideGenesisVoice(genesisId: string, target: string, decision: 
   send({ kind: "genesis-voice-decide", genesisId, requestId: ulid(), target, decision,
     ...(candidate ? { candidateId: candidate.id, hash: candidate.hash } : {}) });
 }
-export function reviewGenesisImports(genesisId: string): void { send({ kind: "genesis-imports", genesisId }); }
+export function reviewGenesisImports(genesisId: string): void { if (genesisChatBusy(genesisId)) return; send({ kind: "genesis-imports", genesisId }); }
 export function resolveGenesisImport(genesisId: string, resolution: import("@arke-studio/contracts").GenesisImportResolve): void {
   if (!beginGenesisDecision(genesisId, "import")) return;
   send({ kind: "genesis-import-resolve", genesisId, resolution });
@@ -3177,7 +3220,7 @@ export function proposeGenesisWorld(genesisId: string, draft: import("@arke-stud
 }
 export function decideGenesisDraft(genesisId: string, choices: Array<{ key: string; digest: string }>, decision: "approve" | "reject"): void {
   const draft = current.genesis[genesisId];
-  if (draft?.decisionPending || draft?.readinessPending || draft?.reviewPending || draft?.founding || draft?.worldId) return;
+  if (genesisChatBusy(genesisId) || draft?.decisionPending || draft?.readinessPending || draft?.reviewPending || draft?.founding || draft?.worldId) return;
   send({ kind: "genesis-decide", genesisId, choices: choices.slice(0, 300), decision, requestId: genesisReviewRequest(genesisId) });
 }
 
@@ -5266,6 +5309,14 @@ export function keepAudiobookTake(worldId: string, requestId: string, basis: "se
   const { refused: _refused, ...rest } = held;
   emitChange({ ...current, stagedTakes: { ...current.stagedTakes, [requestId]: { ...rest, state: "keeping" } } });
   return true;
+}
+
+/** Current counts for the Lines sheet, without writing an export or script manifest (SPEC-047 R-39). */
+export function previewAudiobookScript(worldId: string, productionId: string, speaker: string): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "preview-audiobook-script", worldId, productionId, speaker, requestId })) return null;
+  emitChange({ ...current, speakerLines: { ...current.speakerLines, [requestId]: { kind: "summary", state: "working" } } });
+  return requestId;
 }
 
 /** A recorded speaker's script as a PDF under exports/ (SPEC-047 R-39); answered under the returned id. */

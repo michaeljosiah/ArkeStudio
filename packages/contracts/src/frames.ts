@@ -917,7 +917,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("genesis-chat"),
       genesisId: GenesisIdSchema,
+      requestId: z.string().min(1).optional(),
       text: z.string().min(1).max(4000),
+      modelId: z.string().min(1).optional(),
     })
     .strict(),
   /** The genesis conversation is over (begun or abandoned) — the sandbox is removed. */
@@ -3222,6 +3224,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
     })
     .strict(),
+  z.object({ kind: z.literal("preview-audiobook-script"), worldId: UlidSchema, productionId: SlugSchema, speaker: z.string().min(1).max(120), requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("stage-audiobook-lines"), worldId: UlidSchema, productionId: SlugSchema, speaker: z.string().min(1).max(120), requestId: UlidSchema }).strict(),
   z
     .object({

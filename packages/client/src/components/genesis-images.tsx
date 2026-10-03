@@ -37,6 +37,7 @@ export function GenesisImageCards({ genesisId, blueprint, images, jobs, busy, on
   const targets = [...blueprint.characters.filter(character => !character.neverDepicted).map(character => ({ key: `character:${character.slug}`, label: `${character.name} — main photo` })),
     ...blueprint.locations.map(location => ({ key: `location:${location.slug}`, label: `${location.name} — establishing view` })),
     ...(blueprint.props ?? []).flatMap(prop => prop.states.map(state => ({ key: `prop:${prop.slug}:${state.slug}`, label: `${prop.name} · ${state.name} — reference` })))];
+  if (!images.plans.length && !images.candidates.length && !images.selections.length && !images.problems.length && !jobs.length) return null;
   return <section aria-label="Images in this conversation" style={{ display: "grid", gap: 14 }}>
     <h2>Images</h2>
     {images.problems.map(problem => <Callout key={problem} title="Image needs attention">{problem}</Callout>)}

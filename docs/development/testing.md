@@ -118,6 +118,12 @@ catalog refreshes temporarily disable those controls.
 
 ## Remembered remote access
 
+`node scripts/smoke-founding-controls.mjs` renders the founding front door and its working
+composer, host Remote access settings and the Lines sheet at 1200×791 and 1600×1000 in
+headless Chrome. It checks empty-section suppression, composer admission, the shared settings
+row geometry and the speaker summary, and retains screenshots in its printed temporary
+directory. It uses disposable state and makes no model, world or hosting changes.
+
 Client `test/remote-session.test.ts`, `test/remote-pairing.test.tsx` and `test/dev-session.test.ts`
 cover stalled worker registration/activation, storage refusal, session-request deadlines,
 network restoration and handshake retries without accepting late socket events. These tests

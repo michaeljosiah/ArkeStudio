@@ -52,14 +52,14 @@ export function GenesisContentCards({ review, busy, onDecide, onRevise }: {
   onDecide(cards: GenesisReviewCard[], decision: "approve" | "reject"): void;
   onRevise(title: string): void;
 }) {
-  const pending = review.cards.filter(card => card.status === "pending");
+  const cards = review.cards.filter(card => card.content.kind !== "world" || card.previous || Object.values(card.content.value).some(value => typeof value === "string" ? value.trim().length > 0 : value != null));
+  const pending = cards.filter(card => card.status === "pending");
+  if (!cards.length && !review.problems.length) return null;
   return <section aria-label="Review world content" style={{ display: "grid", gap: 14 }}>
     <h2>Review world content</h2>
-    <p>Founding saves approved content. Changed or rejected proposals do not replace an earlier approved version.</p>
-    <p>{review.selected.characters.length} characters, {review.selected.locations.length} locations, {review.selected.factions.length} factions and {review.selected.canon?.length ?? 0} canon entries approved.
-      {pending.length > 0 && ` ${pending.length} proposals still await a decision.`}</p>
+    {pending.length > 0 && <p>{pending.length} {pending.length === 1 ? "proposal awaits" : "proposals await"} a decision.</p>}
     {review.problems.length > 0 && <Callout title="Before founding">{review.problems.map(problem => <p key={problem}>{problem}</p>)}</Callout>}
-    {review.cards.map(card => <article className="fy-actioncard" key={card.key} aria-label={card.title} data-status={card.status}>
+    {cards.map(card => <article className="fy-actioncard" key={card.key} aria-label={card.title} data-status={card.status}>
       <div className="fy-actioncard__head"><h3>{card.title}</h3><span>{card.status}</span></div>
       <Content content={card.content} review={review} />
       {card.previous && card.status !== "approved" && <section aria-label="Changes since approval">

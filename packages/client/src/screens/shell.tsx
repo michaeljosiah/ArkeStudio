@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
 import { remoteStudio } from "./launch.js";
+import { HarnessModelOptions, HarnessModelStatus } from "../components/harness-models.js";
+import { languageChoiceReason } from "../components/conversation.js";
 import { Button, Callout, IconButton, Input, Select, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { PageSheet } from "../components/page-sheet.js";
@@ -60,6 +62,7 @@ import {
   createWorld,
   genesisAttachFiles,
   genesisChat,
+  takeRejectedGenesisChat,
   listGenesisDrafts,
   loadGenesisDraft,
   reviewGenesisDraft,
@@ -709,6 +712,13 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   const harnessReady = state?.app.health.harness.status === "healthy";
   const drafts = useGenesis();
   const g = drafts[genesisId];
+  const [writingModel, setWritingModel] = useState<string | undefined>(g?.writingModel);
+  const writingModelReason = languageChoiceReason(state, writingModel, true);
+  useEffect(() => {
+    if (g?.rejectedChat === undefined) return;
+    const text = takeRejectedGenesisChat(genesisId);
+    if (text !== undefined) setMessage(previous => previous ? `${text}\n\n${previous}` : text);
+  }, [g?.rejectedChat, genesisId]);
   useEffect(() => { if (g?.status === "failed") setSubmittedName(null); }, [g?.status]);
   useEffect(() => {
     if (!g?.founding) return;
@@ -726,7 +736,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   }, [connection, genesisId]);
   const canViewChat = harnessReady || Boolean(g?.blueprint || g?.turns.length);
   const turns = g?.turns ?? [];
-  const chatRunning = g?.status === "running";
+  const chatRunning = !!g?.chatPending || g?.status === "running";
   const blueprint = g?.blueprint ?? null;
   useEffect(() => {
     if (g && connection === "open" && !chatRunning && !g.worldId && !g.founding) reviewGenesisImports(genesisId);
@@ -801,7 +811,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   })();
   const sendGenesis = () => {
     if (!harnessReady || chatRunning || myBuild?.status === "running" || g?.worldId || message.trim().length === 0) return;
-    genesisChat(genesisId, message.trim());
+    if (writingModelReason || !genesisChat(genesisId, message.trim(), writingModel)) return;
     if (!params.has("draft")) setParams({ draft: genesisId }, { replace: true });
     setMessage("");
   };
@@ -1121,14 +1131,14 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
           </div>
           <div className="fy-gate__body" style={{ gap: 14 }}>
             {Object.entries(drafts).some(([, draft]) => (draft.turns.length || draft.blueprint?.name || draft.attachments.length) && !draft.worldId) && (
-              <label>
+              <label style={{ display: "grid", gap: 6 }}>
                 Continue a draft
-                <select aria-label="Continue a draft" value={genesisId} disabled={chatRunning || myBuild?.status === "running"}
+                <Select label="Continue a draft" value={genesisId} disabled={chatRunning || myBuild?.status === "running"}
                   onChange={event => setParams({ draft: event.target.value })}>
                   <option value={genesisId}>{blueprint?.name ?? "This conversation"}</option>
                   {Object.entries(drafts).filter(([id, draft]) => id !== genesisId && (draft.turns.length || draft.blueprint?.name || draft.attachments.length) && !draft.worldId)
                     .map(([id, draft]) => <option key={id} value={id}>{draft.blueprint?.name ?? draft.turns[0]?.text.slice(0, 80) ?? "Untitled world"}</option>)}
-                </select>
+                </Select>
               </label>
             )}
             {(turns.length > 0 || blueprint?.name || handed.length > 0) && !g?.worldId && !g?.founding && !myBuild && (
@@ -1151,6 +1161,10 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     {turn.role === "user" ? turn.text : renderInlineMarkdown(turn.text)}
                   </div>
                 ))}
+                {g?.reviewError && <Callout title="Content review needs attention">{g.reviewError}</Callout>}
+                {g?.readinessError && <Callout title="Readiness review needs attention">{g.readinessError}</Callout>}
+                {g?.decisionPending === "voice" && <Loading inline label="working on the voice" />}
+                {g?.voiceError && <Callout title="Voice review needs attention">{g.voiceError}</Callout>}
                 {g?.importError && <Callout title="Import review needs attention">{g.importError}</Callout>}
                 {g?.imports && <GenesisImportCards imports={g.imports} blueprint={blueprint} busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.worldId || !!g.founding}
                   onResolve={resolution => resolveGenesisImport(genesisId, resolution)}
@@ -1159,7 +1173,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 {g?.review && <GenesisContentCards review={g.review} busy={!!g.decisionPending || !!g.readinessPending || !!g.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.worldId || myBuild?.status === "running"}
                   onDecide={(cards, decision) => decideGenesisDraft(genesisId, cards.map(card => ({ key: card.key, digest: card.digest })), decision)}
                   onRevise={title => setMessage(`Please revise ${title}: `)} />}
-                {!g?.worldId && <GenesisReadinessCard review={g?.readiness} busy={!!g?.decisionPending || !!g?.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.readinessPending}
+                {!!g?.review?.cards.some(card => card.status === "approved" || card.previous !== undefined) && !g?.worldId && <GenesisReadinessCard review={g?.readiness} busy={!!g?.decisionPending || !!g?.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.readinessPending}
                   onRefresh={() => reviewGenesisReadiness(genesisId)} onFix={setMessage}
                   onLeave={(id, digest) => leaveGenesisFinding(genesisId, id, digest)} />}
                 {g?.voices && <GenesisVoiceCards genesisId={genesisId} voices={g.voices} jobs={voiceJobs} models={state?.app.manifest?.models} busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.founding || !!g.worldId}
@@ -1266,15 +1280,25 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     A silent stretch while the model reads and writes is indistinguishable from
                     a hang, and this is the first conversation anyone has with the studio. */}
                 {chatRunning && <Working label={g?.working ?? null} startedAt={g?.runStartedAt ?? null} />}
-                {g?.status === "failed" && g.detail && <div className="fy-mono">the last turn failed — {g.detail}</div>}
+                {g?.status === "failed" && g.detail && <Callout title="The conversation needs attention">{g.detail}</Callout>}
+                {g?.chatError && <Callout title="Your message was held">{g.chatError}</Callout>}
                 <div style={{ marginTop: "auto" }}>
+                  <label style={{ display: "grid", gap: 6 }}>Writing model
+                    <Select label="Writing model" value={writingModel ?? ""} disabled={chatRunning || buildPressed || !!g?.founding}
+                      onChange={event => setWritingModel(event.target.value || undefined)}>
+                      <option value="">World author default</option>
+                      <HarnessModelOptions state={state} selected={writingModel} needsTools />
+                    </Select>
+                  </label>
+                  <HarnessModelStatus state={state} />
                   <Composer
                     value={message}
                     onChange={setMessage}
                     onSubmit={sendGenesis}
                     placeholder="Keep going, or ask it to surprise you…"
                     agentLabel="world author"
-                    busy={chatRunning || buildPressed || !!g?.founding || myBuild?.status === "running" || sizingBuild}
+                    disabledReason={writingModelReason}
+                    busy={chatRunning || buildPressed || !!g?.founding || myBuild?.status === "running" || sizingBuild || !!g?.decisionPending || !!g?.readinessPending}
                     busyLabel={buildPressed ? "founding the world…" : sizingBuild ? "sizing the build…" : "shaping the draft…"}
                     onAttach={() => genesisAttachFiles(genesisId)}
                     onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}

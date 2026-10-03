@@ -38,10 +38,15 @@ export class OllamaClient implements ProviderClient {
     // Bounded: this probe is re-run on a timer (issue 462), and a loopback port that accepts a
     // connection and then never answers would hold the pass open indefinitely.
     const probe = await tryProbe(() =>
-      jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/tags`, { signal: AbortSignal.timeout(3_000) }),
+      jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/tags`, { signal: AbortSignal.timeout(8_000) }),
     );
     if (!probe.ok) {
-      return [{ capability: "llm", available: false, reason: "Ollama is not running on this machine" }];
+      const timedOut = /timeout|timed out|abort/i.test(probe.message);
+      return [{ capability: "llm", available: false, transientFailure: !probe.auth,
+        reason: timedOut ? "Ollama did not answer the health check in time. Try again shortly." : "Ollama is not answering on this machine" }];
+    }
+    if (probe.value.status >= 400 || !Array.isArray((probe.value.body as { models?: unknown } | null)?.models)) {
+      return [{ capability: "llm", available: false, transientFailure: true, reason: "Ollama could not report its models. Try again shortly." }];
     }
     const models = ((probe.value.body as { models?: Array<{ name?: string }> } | null)?.models ?? []).length;
     return models > 0

@@ -445,6 +445,57 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
     <div style="font:400 13px/1.65 var(--font-sans);color:var(--dv-ink-body)">Design decisions are recorded below in numbered turns, newest first; earlier explorations remain as history. The original sample world is <strong>The Undersong</strong>, a coastal fantasy where a drowned god still sings beneath the harbour. Its image placeholders accept dropped artwork. Approved image references keep their supplied artwork intact. Chrome stays neutral monochrome so the creator's imagery carries the colour.</div>
   </div>
 </section>
+<section class="dv-turn" id="t189">
+<div class="dv-thd"><a class="dv-tid" href="#t189">189</a><span class="dv-tname">Founding conversation and Remote access — the first minute and the shared settings rows</span></div>
+<p class="dv-next">Correction frames, 2026-10-03, issue 1324. The conversation begins with the model and the words. Review sections enter only when they hold a proposal, an audition, an image or a finding. These frames record the controls shipped in this correction; they do not replace the world's build and art-direction frames in turn 153.</p>
+<style>
+.v189{box-sizing:border-box;padding:32px;background:var(--background);color:var(--foreground);font:var(--type-body)}
+.v189 h2{font:var(--type-h2);margin:0 0 18px}.v189 h3{font:var(--type-h3);margin:0 0 12px}.v189 p{margin:0 0 12px}
+.v189 label,.v189 .label{display:block;font:var(--type-label);color:var(--muted-foreground);margin-bottom:6px}
+.v189 select,.v189 textarea{box-sizing:border-box;width:100%;background:var(--background);color:var(--foreground);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font:var(--type-body)}
+.v189 button{border:1px solid var(--border);border-radius:8px;padding:8px 12px;background:var(--background);color:var(--foreground);font:var(--type-ui)}
+.v189 button.primary{background:var(--foreground);color:var(--background)}.v189 button:disabled{opacity:.5}
+.v189 .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.v189 .meta{font:var(--type-mono);color:var(--muted-foreground)}
+.v189 .chat{max-width:640px;margin:auto;display:grid;gap:18px}.v189 .bubble{padding:14px 16px;border-radius:12px;background:var(--secondary)}
+.v189 .card{border:1px solid var(--border);border-radius:12px;padding:18px}.v189 .card .row{margin-top:14px}
+.v189 .head{display:flex;align-items:center;justify-content:space-between;gap:14px}.v189 .head h3{margin:0}
+.v189 .fact{display:flex;align-items:center;gap:14px;min-height:53px;border-bottom:1px solid var(--border)}
+.v189 .fact .label{width:140px;flex:none;margin:0}.v189 .control{width:300px;flex:none}.v189 .fact .meta{font:var(--type-label)}
+.v189 .switch{width:40px;height:24px;padding:3px;border-radius:99px;background:var(--muted);border:1px solid var(--border);box-sizing:border-box}
+.v189 .switch i{display:block;width:16px;height:16px;border-radius:50%;background:var(--foreground)}
+.v189 details{color:var(--muted-foreground)}.v189 .image{width:100%;height:170px;object-fit:contain;background:var(--secondary);margin-top:12px}
+</style>
+<div class="dv-opts">
+<div class="dv-opt" id="189a"><div class="dv-olabel"><a class="dv-oid" href="#189a">189a</a>The first words — a model before a turn, no empty review scaffolding</div><div class="dv-card" style="width:800px">
+<div class="v189" data-screen-label="189a Founding conversation before the first turn">
+<div class="chat"><div class="head"><h2>What is this world?</h2><span class="meta">Chat · Form</span></div>
+<div style="height:180px"></div><div><label>Writing model</label><select aria-label="Writing model"><option>Local · Gemma 4 · 12B Uncensored Balanced</option></select></div>
+<textarea aria-label="Message" rows="3" placeholder="Keep going, or ask it to surprise you…"></textarea><div class="row"><button>Attach</button><button>Dictate</button><span class="meta" style="flex:1">world author</span><button class="primary">Send</button></div>
+</div></div></div></div>
+<div class="dv-opt" id="189b"><div class="dv-olabel"><a class="dv-oid" href="#189b">189b</a>A proposal beside the conversation — one decision, then readiness</div><div class="dv-card" style="width:800px">
+<div class="v189" data-screen-label="189b Founding content review and readiness"><div class="chat">
+<div><label>Continue a draft</label><select aria-label="Continue a draft"><option>The Undersong</option></select></div>
+<div class="bubble">A coastal town where the drowned god still sings beneath the harbour.</div><p>The Undersong. Its harbour keeps the song; its people have forgotten what they owe.</p>
+<section><h3>Review world content</h3><p>1 proposal awaits a decision.</p><div class="card"><div class="head"><h3>World identity and bible</h3><span class="meta">pending</span></div><p style="margin-top:12px">The Undersong · coastal fantasy</p><p>Its harbour keeps the song; its people have forgotten what they owe.</p><div class="row"><button class="primary">Approve this version</button><button>Reject</button><button>Request changes</button></div></div></section>
+<section class="card"><h3>Review the world</h3><p class="meta">After content approval</p><button>Check readiness</button></section>
+<div class="meta">Thinking…</div><div><label>Writing model</label><select disabled aria-label="Writing model"><option>Local · Gemma 4 · 12B Uncensored Balanced</option></select></div><textarea disabled rows="2" aria-label="Message" placeholder="shaping the draft…"></textarea>
+</div></div></div></div>
+<div class="dv-opt" id="189c"><div class="dv-olabel"><a class="dv-oid" href="#189c">189c</a>Voices and images only when there is something to choose</div><div class="dv-card" style="width:800px">
+<div class="v189" data-screen-label="189c Founding voice and image proposals"><div class="chat">
+<section><h3>Voices</h3><button>Refresh voices</button><details><summary>Available voices (343)</summary></details><div class="card" style="margin-top:12px"><h3>Maren · George</h3><p>The harbour has not forgotten. We have.</p><p class="meta">Kokoro · free</p><div class="row"><button class="primary">Generate audition</button><button>Request changes</button></div></div></section>
+<section><h3>Images</h3><div class="card"><h3>Maren at the harbour</h3><img class="image" src="assets/char-maren.png" alt="Maren at the harbour"><p class="meta" style="margin-top:12px">Uploaded image · not selected</p><label>Use for</label><select aria-label="Image target"><option>Maren</option></select><div class="row"><button class="primary">Use this image</button><button>Reject</button><button>Request changes</button></div></div></section>
+</div></div></div></div>
+<div class="dv-opt" id="189d"><div class="dv-olabel"><a class="dv-oid" href="#189d">189d</a>Remote access — General's label, fixed control, state and rule</div><div class="dv-card" style="width:900px">
+<div class="v189" data-screen-label="189d Remote access settings"><h2>Remote access</h2><details><summary>Set up Tailscale</summary></details>
+<div class="fact"><span class="label">Remote access</span><div class="control"><button>Enable remote access</button></div><span class="meta">off</span></div>
+<div class="fact"><span class="label">Start at sign-in</span><div class="control"><div class="switch" role="switch" aria-checked="false" aria-label="Start Studio when I sign in to this PC"><i></i></div></div><span class="meta">off</span></div>
+<div class="fact"><span class="label">Remember devices</span><div class="control"><select aria-label="Remember approved devices for"><option>90 days</option><option>30 days</option><option>120 days</option><option>Never</option></select></div><span class="meta">new approvals</span></div>
+<p class="meta" style="margin-top:12px">New approvals only. Existing devices keep their expiry.</p><h3 style="margin-top:26px">Paired devices</h3><p>No paired devices.</p>
+</div></div></div>
+</div>
+<p class="dv-rule"><b>Correction.</b> Writing model and Continue a draft use the shared Select. The composer holds immediately on Send and shows working until the turn ends; a review failure belongs to its own Callout, not the turn's status. Content cards retain their exact approved version and digest checks. Voices and Images stay absent until they contain work. Readiness begins after a content approval.</p>
+<p class="dv-rule"><b>Correction.</b> Remote access uses General's 53px ruled rows and 300px control column, then a short state. Startup is the shared Switch. Setup and tray help are disclosures; the pairing and revocation controls remain explicit when hosting runs.</p>
+</section>
 <section class="dv-turn" id="t188">
 <div class="dv-thd"><a class="dv-tid" href="#t188">188</a><span class="dv-tname">Fit on wide screens &#8212; a page stops at its drawn width and centres; the chapter is text plus rail; the workspaces keep the whole width</span></div>
 <p class="dv-next">Decision, 2026-10-03, after an audit of the installed app at 2000 and 2560 wide: the screens are drawn at 1360 and hold to 1440, but past that the production pages, the chapter and the world pages ran edge to edge, with 1,350&#8211;2,200&#8201;px lines of text and a chapter&#8217;s prose 685&#8201;px from its own rail. The owner: cap page content at about 1,080 and centre it beside the left rail; keep the chapter as text plus rail, about 940, centred; let some pages, like Timing and the Bench, use the full width. No new frames: every screen below 1440 is unchanged, and the rule says what the frames already show.</p>

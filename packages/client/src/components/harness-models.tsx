@@ -13,6 +13,11 @@ import { listHarnessModels } from "../lib/store.js";
 import { eligibilityInputs } from "./dispatch-bar.js";
 
 /** The catalog is supplied by the running harness, even while a restart is pending. */
+export function harnessModelLabel(state: ClientState | null, model: ModelInfo): string {
+  return model.displayName && model.displayName !== model.id ? model.displayName :
+    harnessModelManifestEntry(model, state?.app.manifest?.models)?.displayName ?? model.displayName ?? model.id;
+}
+
 export function runningHarnessLabel(state: ClientState | null): string {
   const generation = state?.app.harnessInfo?.generation;
   return generation === "claude" ? "Claude Code" : generation === "codex" ? "Codex" : generation === "arke" ? "Local"
@@ -23,6 +28,7 @@ export function harnessModelUnavailableReason(
   state: ClientState | null,
   model: ModelInfo,
   needsImages = false,
+  needsTools = false,
 ): string | undefined {
   const manifest = state?.app.manifest?.models;
   if (harnessModelDisabled(model, state?.app.models.disabled ?? [], manifest)) {
@@ -31,9 +37,10 @@ export function harnessModelUnavailableReason(
   const entry = harnessModelManifestEntry(model, manifest);
   // A harness's own login is independent of the provider keys used for media generation.
   if (entry && PROVIDERS[entry.provider].local && !modelEligible(entry, eligibilityInputs(state))) {
-    return "local model unavailable";
+    return "unavailable on this machine";
   }
   const missingInput = harnessModelMissingInput(model, needsImages);
+  if (needsTools && model.tools === false) return "cannot use tools";
   if (missingInput === "text") return "cannot read text";
   if (missingInput === "image") {
     return "text only · Stage needs images";
@@ -45,10 +52,12 @@ export function HarnessModelOptions({
   state,
   selected,
   needsImages = false,
+  needsTools = false,
 }: {
   state: ClientState | null;
   selected?: string;
   needsImages?: boolean;
+  needsTools?: boolean;
 }) {
   const models = state?.app.harnessModels ?? [];
   const resolved = selected ? findHarnessModel(selected, models, state?.app.manifest?.models) : undefined;
@@ -60,20 +69,20 @@ export function HarnessModelOptions({
     <>
       {selected && (!resolved || harnessModelReference(resolved) !== selected) && (
         <option value={selected} disabled>
-          {resolved?.displayName ?? selected}{resolved ? " · saved" : " · unavailable"}
+          {resolved ? harnessModelLabel(state, resolved) : selected}{resolved ? " · saved" : " · unavailable"}
         </option>
       )}
       {[...byProvider.entries()].map(([provider, list]) => (
-        <optgroup key={provider} label={provider}>
+        <optgroup key={provider} label={Object.entries(PROVIDERS).find(([id]) => id === provider)?.[1].displayName ?? provider}>
           {[...list].sort((a, b) => Number(b.isDefault ?? false) - Number(a.isDefault ?? false)).map((model) => {
-            const reason = harnessModelUnavailableReason(state, model, needsImages);
+            const reason = harnessModelUnavailableReason(state, model, needsImages, needsTools);
             return (
               <option
                 key={harnessModelReference(model)}
                 value={harnessModelReference(model)}
                 disabled={checking || reason !== undefined}
               >
-                {model.displayName ?? model.id}{reason ? ` · ${reason}` : model.isDefault ? " · provider default" : ""}
+                {harnessModelLabel(state, model)}{reason ? ` · ${reason}` : model.isDefault ? " · provider default" : ""}
                 {needsImages && !model.inputModalities ? " · image support unreported" : ""}
               </option>
             );

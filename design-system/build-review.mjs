@@ -28,6 +28,18 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  { group: "Arrive", screen: "Founding conversation", frame: "189a", route: "#/new", status: "built", checked: "2026-10-03",
+    controls: ["Writing model", "Send"],
+    notes: ["Issue 1324: a writing model before the first turn; no empty content, voices, images or readiness sections. Send immediately holds the composer until the coordinator answers."] },
+  { group: "Arrive", screen: "Founding content review", frame: "189b", route: "#/new?draft=:id", status: "built", checked: "2026-10-03",
+    controls: ["Continue a draft", "Approve this version", "Reject", "Request changes", "Check readiness"],
+    notes: ["Issue 1324: review follows proposed content, readiness follows an approval. The two states are drawn together for the controls; pending content alone does not reveal readiness. Prior approved versions and exact digest approval remain available."] },
+  { group: "Arrive", screen: "Founding media proposals", frame: "189c", route: "#/new?draft=:id", status: "built", checked: "2026-10-03",
+    controls: ["Refresh voices", "Generate audition", "Use this image", "Request changes"],
+    notes: ["Issue 1324: optional Voices and Images enter with work to review. They retain the existing audition, exact candidate and assignment controls."] },
+  { group: "Around it", screen: "Remote access settings", frame: "189d", route: "#/settings/remote-access", status: "built", checked: "2026-10-03",
+    controls: ["Enable remote access", "Start at sign-in", "Remember devices", "Paired devices"],
+    notes: ["Issue 1324: General's ruled rows and fixed control column, with the startup Switch and short state words. Existing pairing, sharing and revocation controls enter when hosting runs."] },
   { group: "Arrive", screen: "World door", frame: "1a", route: "#/worlds", status: "drifted", checked: "2026-09-06",
     controls: ["Pick up where you left off"],
     notes: ["Ships as the world picker with a card per world.", "<code>Archive</code> and <code>Install the sample world</code> were built without a frame."] },

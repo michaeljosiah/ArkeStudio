@@ -237,16 +237,23 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(genesis.isRunning("gen-setup"), true);
     await genesis.run(dir, "gen-setup", "second");
-    assert.ok(
-      events.some(
-        (event) =>
-          event.type === "genesis.status" &&
-          event.genesisId === "gen-setup" &&
-          event.detail === "a turn is already running in this conversation",
-      ),
-    );
+    assert.equal(events.filter(event => event.type === "genesis.status" && event.status === "failed").length, 0, "a duplicate cannot mark the active turn failed");
     release();
     await first;
+  });
+
+  it("uses the chosen writing model and restores history when that choice changes", async () => {
+    const dir = await sandboxDir("genesis-model-");
+    const adapter = talkingAdapter();
+    const configured: Array<string | undefined> = [];
+    const service = new GenesisService(adapter, () => {}, { sessionInput: input => { configured.push(input.model); return input; } });
+    await service.run(dir, "gen-model", "Keep the harbour closed.", "ollama/first");
+    await service.run(dir, "gen-model", "Who has the key?", "ollama/first");
+    await service.run(dir, "gen-model", "Try another view.", "ollama/second");
+    assert.deepEqual(configured, ["ollama/first", "ollama/second"]);
+    const restored = adapter.prompts.find(prompt => prompt.includes("Try another view."))!;
+    assert.match(restored, /Keep the harbour closed/);
+    assert.match(restored, /Who has the key/);
   });
 
   it("runs the world-author in the sandbox, records both turns, and surfaces the draft", async () => {

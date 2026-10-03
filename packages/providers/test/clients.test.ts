@@ -220,11 +220,12 @@ describe("key validation probes what the key unlocks (R-3, D5, §3.2)", () => {
     assert.ok((await fine.validateKey("xi-y")).every((p) => p.available));
   });
 
-  it("ollama: unreachable means not running, never an invalid key", async () => {
+  it("ollama: a missed probe is transient, while a witnessed empty runtime is definitive", async () => {
     const down = new OllamaClient(fakeFetch([]));
     const probes = await down.validateKey();
     assert.equal(probes[0]?.available, false);
-    assert.match(probes[0]!.reason!, /not running/);
+    assert.match(probes[0]!.reason!, /not answering/);
+    assert.equal(probes[0]!.transientFailure, true);
 
     const empty = new OllamaClient(fakeFetch([{ match: /\/api\/tags/, status: 200, body: { models: [] } }]));
     assert.match((await empty.validateKey())[0]!.reason!, /no models pulled/);

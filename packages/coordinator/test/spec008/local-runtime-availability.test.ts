@@ -54,7 +54,7 @@ it("hands the harness the local models when they change, and only then (issue 12
   const ollama: DispatchClient = Object.assign(new FakeProvider(), { listModels: async () => { if (failListing) throw new Error("down"); return pulled; } });
   const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "changes.jsonl"), appVersion: "test", dispatchClients: { ollama },
     publishLocalHarnessModels: async (models) => { published.push(models); } });
-  const seam = coordinator as unknown as { publishLocalHarnessModels(): Promise<void> };
+  const seam = coordinator as unknown as { publishLocalHarnessModels(): Promise<void>; localRuntimeListed: boolean };
   try {
     await seam.publishLocalHarnessModels();
     await seam.publishLocalHarnessModels();
@@ -62,8 +62,11 @@ it("hands the harness the local models when they change, and only then (issue 12
     pulled = [...pulled, { id: "qwen3:8b", contextLength: 262144, tools: true, vision: false }];
     await seam.publishLocalHarnessModels();
     assert.deepEqual((published[1] as Array<{ id: string }>).map((m) => m.id), ["gemma4:12b", "qwen3:8b"]);
-    // Ollama gone is a fact worth publishing: a stale row validates in the picker and fails on the turn.
+    // A catalogue that has caught up keeps a recent listing through one missed answer.
+    seam.localRuntimeListed = true;
     failListing = true;
+    await seam.publishLocalHarnessModels();
+    assert.equal(published.length, 2, "one missed answer does not withdraw the catalogue");
     await seam.publishLocalHarnessModels();
     assert.deepEqual(published[2], []);
   } finally { await coordinator.stop(); await provider.close(); }

@@ -226,6 +226,8 @@ export const CapabilityProbeSchema = z
      * right one: a key that authenticates is not a key to replace.
      */
     authenticated: z.boolean().optional(),
+    /** A local health request failed to answer; a recent success may survive one such miss. */
+    transientFailure: z.boolean().optional(),
   })
   .strict();
 export type CapabilityProbe = z.infer<typeof CapabilityProbeSchema>;
