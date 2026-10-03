@@ -136,6 +136,43 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 .v190-cmp>div{padding:20px 26px}.v190-cmp>div+div{border-left:1px solid var(--border)}
 .v190-cmp h4{margin:0 0 4px;font:var(--type-ui);font-weight:600}
 /* /t190 */
+/* t191 */
+.v191-bk{position:relative;padding-left:14px;margin:8px 0}
+.v191-bk::before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:3px;border-radius:2px;background:var(--neutral-400)}
+.v191-bk.sel::before{background:var(--foreground)}
+.v191-bk.sel .v184-blk:not(.sel){background:color-mix(in srgb,var(--secondary) 55%,transparent);border-radius:10px}
+.v191-chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px 0 3px;border:1px solid var(--border);border-radius:8px;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);background:var(--background);margin:4px 0 2px 0}
+.v191-chip img{width:32px;height:20px;object-fit:cover;border-radius:4px}
+.v191-chip.prop{border-style:dashed;border-color:var(--neutral-400)}
+.v191-chip.prop i{width:32px;height:20px;border-radius:4px;border:1px dashed var(--neutral-400);display:inline-block}
+.v191-sec{display:flex;flex-direction:column;gap:10px}
+.v191-sec h5{margin:0;font:var(--type-label);font-weight:600;color:var(--foreground)}
+.v191-prompt{border:1px dashed var(--neutral-400);border-radius:12px;padding:12px 14px;font-size:var(--text-sm);line-height:1.5;background:var(--background)}
+.v191-refs{display:flex;gap:8px;flex-wrap:wrap}
+.v191-ref{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 12px 0 4px;border:1px solid var(--border);border-radius:10px;font-size:var(--text-sm)}
+.v191-ref img{width:32px;height:32px;border-radius:7px;object-fit:cover}
+.v191-ref.miss{border-style:dashed;color:var(--muted-foreground)}
+.v191-ref.miss i{width:32px;height:32px;border-radius:7px;border:1px dashed var(--neutral-400);display:inline-block}
+.v191-look{border:1px solid var(--border);border-radius:12px}
+.v191-look div{display:flex;gap:12px;padding:9px 12px;font-size:var(--text-sm);border-top:1px solid var(--border)}
+.v191-look div:first-child{border-top:0}
+.v191-look b{width:64px;flex:none;font-weight:500;color:var(--muted-foreground)}
+.v191-meta{display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted-foreground)}
+.v191-prop{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--border);font-size:var(--text-sm)}
+.v191-prop:first-of-type{border-top:0}
+.v191-prop .ph{width:64px;height:40px;border-radius:8px;border:1px dashed var(--neutral-400);flex:none}
+.v191-prop .t{flex:1;min-width:0}.v191-prop .t b{display:block;font-weight:500}.v191-prop .t span{color:var(--muted-foreground);font-size:var(--text-xs)}
+.v191-prop .skip{color:var(--muted-foreground);font-size:var(--text-xs)}
+.v191-prop.off{opacity:.5}
+.v191-sheet{width:720px;margin:26px auto;border:1px solid var(--border);border-radius:14px;padding:20px 22px;display:flex;flex-direction:column;gap:12px;background:var(--background);box-shadow:0 18px 50px color-mix(in srgb,var(--foreground) 10%,transparent)}
+.v191-sheet h3{margin:0;font:var(--type-ui);font-weight:600}
+.v191-lk{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--border)}
+.v191-lk img{width:40px;height:40px;border-radius:9px;object-fit:cover;flex:none}
+.v191-lk .tx{flex:1;font-size:var(--text-sm);line-height:1.5}.v191-lk .tx b{display:block;font-weight:600}
+.v191-lk .src{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);white-space:nowrap;padding-top:2px}
+.v191-bar{height:6px;border-radius:3px;background:color-mix(in srgb,var(--foreground) 14%,transparent);position:relative;overflow:hidden}
+.v191-bar i{position:absolute;left:0;top:0;bottom:0;background:var(--foreground);border-radius:3px}
+/* /t191 */
 /* t187 */
 .v187-tabs{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}.v187-tabs span{height:28px;padding:0 12px;display:inline-flex;align-items:center;font:var(--type-label);color:var(--muted-foreground)}.v187-tabs span.on{background:var(--secondary);color:var(--foreground)}
 .v187-tl{flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--border);overflow:hidden}
