@@ -8049,7 +8049,11 @@ export class Coordinator {
       case "genesis-review":
       case "genesis-decide": {
         if (!this.opts.provider.genesisDir) return;
-        if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) return;
+        if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) {
+          this.emit({ type: "genesis.review-error", at: new Date().toISOString(), genesisId: msg.genesisId, area: "content",
+            ...(msg.requestId ? { requestId: msg.requestId } : {}), detail: "The conversation is still working. Review again when this turn ends." });
+          return;
+        }
         const deciding = msg.kind === "genesis-decide";
         if (deciding) this.genesisDeciding.add(msg.genesisId);
         try {

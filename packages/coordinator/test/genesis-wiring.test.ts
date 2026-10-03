@@ -98,5 +98,6 @@ it("background founding reviews cannot mark an active conversation failed or inv
     }
     assert.equal(events.some(event => event.type === "genesis.status" || event.type === "genesis.import-error"), false);
     assert.ok(events.some(event => event.type === "genesis.review-error" && event.area === "readiness"));
+    assert.ok(events.some(event => event.type === "genesis.review-error" && event.area === "content"), "a raced content read settles its request without changing the turn");
   } finally { seam.genesis = null; await coordinator.stop(); await provider.close(); }
 });
