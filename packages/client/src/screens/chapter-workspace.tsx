@@ -34,6 +34,7 @@ import {
   PASSAGE_KEPT_MAX,
   PASSAGE_SPAN_MAX,
   readerPlace,
+  audiobookReadingNotes,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
@@ -47,7 +48,7 @@ import { continuityStamp } from "../lib/continuity.js";
 import { passageAction, passageActions, type PassageAction } from "../lib/passage-actions.js";
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
-import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectionCard, PerformedSpeaker, ReadingMenu, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
+import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectSheet, DirectionCard, PerformedSpeaker, ReadingMenu, ReadingNotes, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
@@ -1144,6 +1145,7 @@ export function ChapterWorkspace({
     ...(production.audiobook?.recorded !== undefined ? { recorded: production.audiobook.recorded } : {}),
     ...(production.audiobook?.notes !== undefined ? { notes: production.audiobook.notes } : {}),
     ...(production.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {}),
+    readingNotes: audiobookReadingNotes(production.audiobook, chapter.id),
     connection,
     locked: locked || record === null,
     // The press waits out the autosave (turn 126's fourth rule, codex on PR 1180): a read of
@@ -1625,6 +1627,7 @@ export function ChapterWorkspace({
     capturedSelection: blockSelection,
     inSheet: blockSheet,
     ...(pinChoices !== null ? { choices: pinChoices, onPin: pinBlock } : {}),
+    hear: { worldId, chapterFile: chapter.file },
     blockHost: (key) => audiobookColumn.current?.querySelector<HTMLElement>(`[data-block="${key}"] .fy-ab__text`) ?? null,
   };
   return (
@@ -1734,6 +1737,16 @@ export function ChapterWorkspace({
               </>
             )}
           </div>
+          {/* The book note and the chapter note under the narrator line (design turn 184, R-53). */}
+          {view === "audiobook" && (
+            <ReadingNotes
+              worldId={worldId}
+              productionId={prodId}
+              chapterFile={chapter.file}
+              notes={audiobookReadingNotes(production.audiobook, chapter.id)}
+              disabled={connection !== "open" || audiobook.run?.state === "reading"}
+            />
+          )}
         </header>
 
         <div className={cx("fy-ch__body", view === "audiobook" && "fy-ch__body--audiobook")}>
@@ -1999,6 +2012,24 @@ export function ChapterWorkspace({
           </div>
 
           <div className="fy-ch__panels">
+          {/* The Direct sheet (design turn 184a): what the director reads, before it runs. */}
+          {view === "audiobook" && audiobook.directOpen && (
+            <ResponsiveSheet sheet={blockSheet} open title="Direct this chapter" onClose={audiobook.closeDirect} className="fy-chapter-block-sheet">
+              <aside className="fy-ch__side fy-ch__block-side">
+                <DirectSheet
+                  worldId={worldId}
+                  productionId={prodId}
+                  chapterFile={chapter.file}
+                  chapterOrder={chapter.order}
+                  blocks={audiobook.rows.length}
+                  reading={production.audiobook?.reading ?? "narrator"}
+                  chapterNote={production.audiobook?.chapterNotes?.[chapter.id] !== undefined}
+                  onCancel={audiobook.closeDirect}
+                  onDirect={audiobook.direct}
+                />
+              </aside>
+            </ResponsiveSheet>
+          )}
           {view === "audiobook" && <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null} title={`${audiobook.selected === "title" ? "Title" : `Block ${audiobook.rows.findIndex(row => row.block.key === audiobook.selected) + 1}`} · ${audiobook.rows.find(row => row.block.key === audiobook.selected)?.mark ?? "Narrator"}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><AudiobookSide {...blockPanel} /></aside></ResponsiveSheet>}
           <ResponsiveSheet sheet={compact} open={notesOpen} title={`Chapter ${String(chapter.order).padStart(2,"0")} · notes`} onClose={() => setNotesOpen(false)} className="fy-chapter-notes-sheet">
           <aside className="fy-ch__side fy-ch__notes">
@@ -2393,7 +2424,7 @@ export function ChapterWorkspace({
           emptyLine={`Nothing written with Arke for ${chapterLabel} yet.`}
           placeholder={`Ask about ${chapterLabel}`}
           {...(stagedDraft === undefined && view === "audiobook" && audiobook.directionRun !== undefined
-            ? { side: <DirectionCard run={audiobook.directionRun} chapterOrder={chapter.order} onAccept={audiobook.accept} onDiscard={audiobook.discard} /> }
+            ? { side: <DirectionCard run={audiobook.directionRun} chapterOrder={chapter.order} blocks={audiobook.rows.length} onAccept={audiobook.accept} onDiscard={audiobook.discard} /> }
             : stagedDraft === undefined || compact && passageChange !== null
             ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the chapter appears here." }
             : {

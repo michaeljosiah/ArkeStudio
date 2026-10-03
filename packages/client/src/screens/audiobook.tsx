@@ -4,6 +4,7 @@ import { DEFAULT_NARRATOR, freePlanNote, narratorLabelFor, audiobookDoorLine, au
 import { HeldBar } from "../components/held-bar.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
+import { BookReadingPanel } from "./chapter-audiobook.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { ChevronRight, Play, Speaker } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
@@ -193,6 +194,8 @@ export function AudiobookScreen() {
   const engines = JSON.stringify([app?.runtime ?? null, app?.comfyui ?? null]);
   // The book's narrator (R-46): opened from the narrator's chip.
   const [narrating, setNarrating] = useState(false);
+  // The book's reading (design turn 184c): opened from a performed speaker's chip.
+  const [notesOpen, setNotesOpen] = useState(false);
   useEffect(() => {
     if (connection === "open") requestVoiceCatalogue(worldId);
   }, [connection, worldId, engines]);
@@ -330,12 +333,27 @@ export function AudiobookScreen() {
             {...(voice.note !== undefined ? { note: voice.note } : {})}
             {...(voice.noteHeld === true ? { noteHeld: true } : {})}
             {...(voice.book === true ? { book: true } : {})}
-            {...(index === 0 && voice.state === "narrator" ? { onPress: () => setNarrating(true) } : {})}
+            {...(index === 0 && voice.state === "narrator" ? { onPress: () => setNarrating(true) } : index > 0 && voice.state === "narrator" ? { onPress: () => setNotesOpen(true) } : {})}
             to={voice.sheet !== undefined ? `/w/${worldId}/cast/${encodeURIComponent(voice.sheet)}/voice` : undefined}
           />
         ))}
         {door !== null && door.unattributed > 0 && <VoiceChip name="unattributed" state="no voice" blocks={door.unattributed} />}
       </div>
+      {/* The book's reading (design turn 184c): the book note and each performed speaker's note, opened from a speaker's chip. */}
+      {notesOpen && door !== null && reading === "performed" && (
+        <BookReadingPanel
+          worldId={worldId}
+          productionId={prodId}
+          title={`Performed · ${door.voices[0]?.name ?? DEFAULT_NARRATOR.label}`}
+          bookNote={production.audiobook?.note}
+          speakers={door.voices.slice(1).filter((voice) => voice.state === "narrator").map((voice) => {
+            const key = voice.sheet ?? voice.name;
+            const source = production.audiobook?.noteSources?.[key];
+            return { key, name: voice.name, ...(voice.note !== undefined ? { note: voice.note } : {}), ...(source !== undefined ? { source } : {}) };
+          })}
+          onDone={() => setNotesOpen(false)}
+        />
+      )}
       {narrating && door !== null && worldId !== undefined && prodId !== undefined && (
         <NarratorDialog
           worldId={worldId}

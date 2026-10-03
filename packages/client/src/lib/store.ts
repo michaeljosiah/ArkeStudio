@@ -132,6 +132,9 @@ export type NarratorQuote =
   | { state: "refused"; refused: string }
   | { state: "done"; stale: number; held: number; directed: number; estimatedMicroUsd: number; kept: number };
 
+/** What `Direct this chapter` would read, or how many speaker notes were drafted (design turn 184, SPEC-047 R-51, R-54), by request id. */
+export type AudiobookAsk = { state: "working" } | { state: "reads"; reads: import("@arke-studio/contracts").DirectionReads } | { state: "drafted"; drafted: number } | { state: "refused"; refused: string };
+
 export type HeardLine = { state: "working" } | { state: "done"; file: string } | { state: "priced"; token: string; estimatedMicroUsd: number; parts: number } | { state: "refused"; refused: string };
 
 /** A script out, or returned files matched and checked, for a recorded speaker (design turn 155d, SPEC-047 R-39). */
@@ -347,6 +350,14 @@ interface StoreState {
       proposed?: Record<string, import("@arke-studio/contracts").AudiobookDirectionInput>;
       hash?: string;
       chapterVersion?: number;
+      /** What the proposal carries besides its directions (design turn 184): the lines it casts, the notes it drafted. */
+      cast?: { lines: number; speakers: number };
+      /** Of the blocks addressed, those moved off the ordinary reading — kept past acceptance for the tally. */
+      moved?: number;
+      /** The card's own name, echoed on acceptance (codex on PR 1476). */
+      proposalId?: string;
+      chapterNote?: string;
+      speakerNotes?: Record<string, string>;
       reason?: string;
     }
   >;
@@ -362,6 +373,8 @@ interface StoreState {
   narratorQuotes: Record<string, NarratorQuote>;
   /** A line heard as it would be read (R-45, R-46), by request id: waiting, the file to play, or why not. */
   heardLines: Record<string, HeardLine>;
+  /** What the director would read and speaker notes drafted (design turn 184), by request id. */
+  audiobookAsks: Record<string, AudiobookAsk>;
   /**
    * The door (turn 146, SPEC-047 R-29), by production: what every chapter stands at, who
    * reads, and the price of a press, as the coordinator last answered; and `Read the book`,
@@ -554,6 +567,7 @@ let current: StoreState = {
   speakerLines: {},
   narratorQuotes: {},
   heardLines: {},
+  audiobookAsks: {},
   audiobookDoor: {},
   audiobookBook: {},
   audiobookNotes: {},
@@ -1410,6 +1424,7 @@ function handleFrame(json: string): void {
       speakerLines: changedWorld ? {} : current.speakerLines,
       narratorQuotes: changedWorld ? {} : current.narratorQuotes,
       heardLines: changedWorld ? {} : current.heardLines,
+      audiobookAsks: changedWorld ? {} : current.audiobookAsks,
       audiobookDoor: changedWorld ? {} : current.audiobookDoor,
       audiobookBook: changedWorld || rejoined ? {} : current.audiobookBook,
       audiobookNotes: changedWorld ? {} : current.audiobookNotes,
@@ -1445,6 +1460,7 @@ function handleFrame(json: string): void {
     let speakerLines = current.speakerLines;
     let narratorQuotes = current.narratorQuotes;
     let heardLines = current.heardLines;
+    let audiobookAsks = current.audiobookAsks;
     let audiobookDoor = current.audiobookDoor;
     let audiobookBook = current.audiobookBook;
     let audiobookNotes = current.audiobookNotes;
@@ -1936,6 +1952,14 @@ function handleFrame(json: string): void {
       if (heardLines[event.requestId] !== undefined) {
         heardLines = { ...heardLines, [event.requestId]: event.file !== undefined ? { state: "done", file: event.file } : event.quote !== undefined ? { state: "priced", ...event.quote } : { state: "refused", refused: event.refused ?? "could not hear it" } };
       }
+    } else if (event.type === "direction.reads") {
+      if (audiobookAsks[event.requestId] !== undefined) {
+        audiobookAsks = { ...audiobookAsks, [event.requestId]: event.reads !== undefined ? { state: "reads", reads: event.reads } : { state: "refused", refused: event.refused ?? "could not read the book" } };
+      }
+    } else if (event.type === "audiobook.speaker-notes") {
+      if (audiobookAsks[event.requestId] !== undefined) {
+        audiobookAsks = { ...audiobookAsks, [event.requestId]: event.refused !== undefined ? { state: "refused", refused: event.refused } : { state: "drafted", drafted: event.drafted } };
+      }
     } else if (event.type === "audiobook.lines-kept") {
       const held = speakerLines[event.requestId];
       if (held !== undefined) {
@@ -2059,6 +2083,11 @@ function handleFrame(json: string): void {
           ...(event.proposed !== undefined ? { proposed: event.proposed } : {}),
           ...(event.hash !== undefined ? { hash: event.hash } : {}),
           ...(event.chapterVersion !== undefined ? { chapterVersion: event.chapterVersion } : {}),
+          ...(event.cast !== undefined ? { cast: event.cast } : {}),
+          ...(event.proposalId !== undefined ? { proposalId: event.proposalId } : {}),
+          ...(event.proposed !== undefined ? { moved: Object.values(event.proposed).filter((input) => (input.delivery !== undefined && input.delivery !== "measured") || input.note !== undefined || input.speed !== 1 || input.cues.length > 0).length } : {}),
+          ...(event.chapterNote !== undefined ? { chapterNote: event.chapterNote } : {}),
+          ...(event.speakerNotes !== undefined ? { speakerNotes: event.speakerNotes } : {}),
           ...(event.reason !== undefined ? { reason: event.reason } : {}),
         },
       };
@@ -2371,6 +2400,7 @@ function handleFrame(json: string): void {
       speakerLines,
       narratorQuotes,
       heardLines,
+      audiobookAsks,
       audiobookDoor,
       audiobookBook,
       audiobookNotes,
@@ -5053,10 +5083,13 @@ export function quoteAudiobookNarrator(worldId: string, productionId: string, vo
   return requestId;
 }
 
-/** A block heard as it would be read, in the narrator's voice or the one given (R-45, R-46). */
-export function hearAudiobookLine(worldId: string, productionId: string, chapterFile: string, block: string, voice?: AudiobookReader, quoteToken?: string): string | null {
+/**
+ * A block heard as it would be read, in the narrator's voice or the one given (R-45, R-46) — or,
+ * with `proposed`, as the chapter's held proposal would send it (design turn 184b, R-55).
+ */
+export function hearAudiobookLine(worldId: string, productionId: string, chapterFile: string, block: string, voice?: AudiobookReader, quoteToken?: string, proposed?: boolean): string | null {
   const requestId = ulid();
-  if (!send({ kind: "hear-audiobook-line", worldId, productionId, requestId, chapterFile, block, ...(voice !== undefined ? { voice } : {}), ...(quoteToken !== undefined ? { quoteToken } : {}) })) return null;
+  if (!send({ kind: "hear-audiobook-line", worldId, productionId, requestId, chapterFile, block, ...(voice !== undefined ? { voice } : {}), ...(quoteToken !== undefined ? { quoteToken } : {}), ...(proposed === true ? { proposed: true as const } : {}) })) return null;
   emitChange({ ...current, heardLines: { ...current.heardLines, [requestId]: { state: "working" } } });
   return requestId;
 }
@@ -5184,8 +5217,41 @@ export function setAudiobookBlock(worldId: string, productionId: string, chapter
 }
 
 /** `Direct this chapter` (SPEC-047 R-10): the model asked for a direction per block; the card comes back as a run's result. */
-export function directChapter(worldId: string, productionId: string, chapterFile: string): boolean {
-  return send({ kind: "direct-chapter", worldId, productionId, chapterFile });
+export function directChapter(worldId: string, productionId: string, chapterFile: string, also: { cast?: boolean; chapterNote?: boolean; speakerNotes?: boolean } = {}): boolean {
+  return send({
+    kind: "direct-chapter",
+    worldId,
+    productionId,
+    chapterFile,
+    ...(also.cast === true ? { cast: true as const } : {}),
+    ...(also.chapterNote === true ? { chapterNote: true as const } : {}),
+    ...(also.speakerNotes === true ? { speakerNotes: true as const } : {}),
+  });
+}
+
+/** What `Direct this chapter` would read (design turn 184a, R-51), answered under the returned id. */
+export function previewDirection(worldId: string, productionId: string, chapterFile: string): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "preview-direction", worldId, productionId, chapterFile, requestId })) return null;
+  emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
+  return requestId;
+}
+
+/** The book note, or with `chapterFile` that chapter's note (design turn 184, R-53); null takes it away. */
+export function setAudiobookReadingNote(worldId: string, productionId: string, note: string | null, chapterFile?: string): boolean {
+  return send({ kind: "set-audiobook-reading-note", worldId, productionId, note, ...(chapterFile !== undefined ? { chapterFile } : {}) });
+}
+
+/** The missing speaker notes drafted from the sheets (design turn 184c, R-54), answered under the returned id. */
+export function draftAudiobookSpeakerNotes(worldId: string, productionId: string): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "draft-audiobook-speaker-notes", worldId, productionId, requestId })) return null;
+  emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
+  return requestId;
+}
+
+export function useAudiobookAsks(): StoreState["audiobookAsks"] {
+  return useStore().audiobookAsks;
 }
 
 /** The card accepted whole: the coordinator checks every direction once more and writes the record. */
@@ -5194,7 +5260,7 @@ export function acceptDirection(worldId: string, productionId: string, chapterId
   const card = current.direction[key];
   if (card === undefined || card.state !== "directed" || card.proposed === undefined || card.hash === undefined) return false;
   const requestId = ulid();
-  const sent = send({ kind: "accept-direction", worldId, productionId, chapterFile, requestId, hash: card.hash, directions: card.proposed });
+  const sent = send({ kind: "accept-direction", worldId, productionId, chapterFile, requestId, hash: card.hash, directions: card.proposed, ...(card.proposalId !== undefined ? { proposalId: card.proposalId } : {}) });
   if (sent) emitChange({ ...current, direction: { ...current.direction, [key]: { ...card, state: "accepting", requestId } } });
   return sent;
 }
@@ -5518,6 +5584,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     speakerLines: {},
   narratorQuotes: {},
   heardLines: {},
+  audiobookAsks: {},
     audiobookDoor: {},
     audiobookBook: {},
     audiobookNotes: {},
