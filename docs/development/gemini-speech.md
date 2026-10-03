@@ -22,8 +22,10 @@ A standalone host without a local speech service needs an explicitly selected cl
 book, chapter, audition and ordinary/voiced prose reads refuse an unavailable local reader before synthesis.
 Table Read supports both Gemini assignments with model-specific WAV caches, bounded input and
 current-reader validation before preparation. Existing cached reads remain playable offline.
-Token-priced preview, founding audition and performance controls say “up to”; aggregate audiobook and page-read
-confirmations also identify their authorization ceiling, with actual usage settled after generation.
+Token-priced controls and confirmations show an estimate, marked `~`, never “up to”: the service
+limits stay each request's authorisation inside the dispatcher, and actual usage is settled after
+generation. Aggregate audiobook and page-read confirmations keep “up to” only while every reader
+in them is priced by the character.
 
 The client targets the exact `gemini-3.8-flash-tts` and `gemini-3.8-flash-lite-tts` IDs through
 `POST /v1beta/interactions`. Spoken text and `speech_metadata.style` remain separate. Requests
@@ -104,7 +106,14 @@ the API returns one voice per creation. Three candidates require three explicit 
 Closing the dialog keeps jobs and auditions and does not delete remote candidates.
 
 For ordinary synthesis, the pricing foundation uses dated standard rates and the published full service limits to
-bound each request. Duration is not treated as a guaranteed ceiling. The client additionally
+bound each request. Duration is not treated as a guaranteed ceiling. The estimate the author is
+shown and approves comes from the words (`SPEECH_TOKEN_ESTIMATE` in contracts `speech-pricing.ts`):
+input at 4 UTF-8 bytes a token including the style, audio at 150 words a minute plus 2 seconds of
+lead-in and tail per request and a 25% margin, each clamped to the limits and calibrated against
+reported usage. The job and ledger carry that estimate; the quote keeps the service-limit
+authorisation as the cap the dispatcher revalidates. Guards that compare a screen's figure with a
+fresh quote price the words alone, so a style the screen left out never refuses a read. Voice
+design keeps the full limits as its estimate, as decided under R-19. The client additionally
 rejects compiled text plus style over a conservative 7,000-byte request budget; this is not a
 claim that bytes equal Google tokens. The shared speech packer applies this byte bound before
 quoting plain reads and directed audiobook parts, including a performed character's note.

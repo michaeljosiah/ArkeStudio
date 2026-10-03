@@ -1,4 +1,4 @@
-import { estimateSpeechMicroUsd, freeCreditLeft, freePlanAskCopy, freePlanNote, speechPlanLabel, speechPriceCopy } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, freeCreditLeft, freePlanAskCopy, freePlanNote, speechPlanLabel, speechPriceCopy, speechPricePrefix } from "@arke-studio/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   AUDIOBOOK_DELIVERIES,
@@ -579,6 +579,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     }
     if (run?.state === "priced" && run.price !== undefined) {
       const price = run.price;
+      // The author confirms the estimate. `up to` stays only where every reader is priced by
+      // the character, which a cache hit alone can lower; a token reader's estimate can be
+      // passed, so it is `~`, and its service-limit cap is the dispatcher's guard, never shown
+      // (SPEC-049 R-6) — said here as the maximum, it was $18.49 for about $0.40 of speech.
       // A chapter Google's free day cannot cover asks in its own words when it costs nothing:
       // what the author decides is how far the day's reads go. A priced speaker keeps the price
       // on the button, the day's line beside it (codex on PR 1475).
@@ -590,7 +594,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             title="the words and the voice go to the provider · the text stays in Activity"
           >
             {free !== null && price.estimatedMicroUsd === 0 ? free.confirm : <>
-              Confirm {price.characters.toLocaleString()} characters · up to {formatMicroUsd(price.estimatedMicroUsd)}
+              Confirm {price.characters.toLocaleString()} characters · {speechPricePrefix(models, price.voices.map((voice) => voice.provider))}{formatMicroUsd(price.estimatedMicroUsd)}
               {price.voices.map((voice) => ` · ${voice.label} · ${readerPlace(voice.provider)}`).join("")}
             </>}
           </Button>
@@ -1239,7 +1243,7 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
             data-testid="performed-hear"
           >
             Hear {name}
-            {heard?.state === "priced" ? ` · up to ${formatMicroUsd(heard.authorisedMicroUsd)} · ${heard.parts} part${heard.parts === 1 ? "" : "s"}` : speechPlanLabel(model) !== null ? ` · ${speechPlanLabel(model)}` : tokenPriced ? " · get price" : price > 0 ? ` · ${formatMicroUsd(price)}` : ""}
+            {heard?.state === "priced" ? ` · ~${formatMicroUsd(heard.estimatedMicroUsd)} · ${heard.parts} part${heard.parts === 1 ? "" : "s"}` : speechPlanLabel(model) !== null ? ` · ${speechPlanLabel(model)}` : tokenPriced ? " · get price" : price > 0 ? ` · ${formatMicroUsd(price)}` : ""}
           </button>
           {heard?.state === "refused" && <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">{heard.refused}</span>}
           {sent !== null && <span className="fy-ab__sent fy-mono" data-testid="performed-sent-as">{sent}</span>}

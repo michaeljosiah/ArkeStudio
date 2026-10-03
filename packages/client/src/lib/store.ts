@@ -132,7 +132,7 @@ export type NarratorQuote =
   | { state: "refused"; refused: string }
   | { state: "done"; stale: number; held: number; directed: number; estimatedMicroUsd: number; kept: number };
 
-export type HeardLine = { state: "working" } | { state: "done"; file: string } | { state: "priced"; token: string; authorisedMicroUsd: number; parts: number } | { state: "refused"; refused: string };
+export type HeardLine = { state: "working" } | { state: "done"; file: string } | { state: "priced"; token: string; estimatedMicroUsd: number; parts: number } | { state: "refused"; refused: string };
 
 /** A script out, or returned files matched and checked, for a recorded speaker (design turn 155d, SPEC-047 R-39). */
 export interface SpeakerLinesState {

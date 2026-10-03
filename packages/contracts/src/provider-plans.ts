@@ -144,10 +144,11 @@ export function speechPlanLabel(model: Pick<ManifestModel, "speechPlan"> | null 
 
 /**
  * A read's price as a screen shows it: the plan's name where the price was, for a free plan or
- * a free credit (design turn 182), else the price — `up to` for a token ceiling.
+ * a free credit (design turn 182), else the price — `~` for a token reader's estimate, which
+ * the read can pass (SPEC-049 R-6).
  */
 export function speechPriceCopy(model: Pick<ManifestModel, "speechPlan" | "pricing"> | null | undefined, microUsd: number, creditLeftMicroUsd = Infinity): string {
-  const priced = `${model?.pricing.kind === "perToken" ? "up to " : ""}${formatMicroUsd(microUsd)}`;
+  const priced = `${model?.pricing.kind === "perToken" ? "~" : ""}${formatMicroUsd(microUsd)}`;
   // Past the month's credit the read is priced again, and says so where the plan's name was.
   if (model?.speechPlan === "free-credit" && microUsd > creditLeftMicroUsd) return `${priced} · past free credit`;
   return speechPlanLabel(model) ?? priced;

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { DomainEvent, LedgerEntry, ManifestModel, Sheet, WorldBundle } from "@arke-studio/contracts";
+import { quoteSpeech, type DomainEvent, type LedgerEntry, type ManifestModel, type Sheet, type WorldBundle } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { until } from "../wait.js";
 import { JobQueue } from "../../src/queue/dispatcher.js";
@@ -1245,7 +1245,7 @@ describe("a cloned voice previews like any other queued voice", () => {
 });
 
 
-it("requires the displayed speech ceiling for a line and rejects it after a rate increase", () => {
+it("requires the displayed speech estimate for a line and rejects it after a rate increase", () => {
   const model: ManifestModel = { ...ELEVEN_MODEL, pricing: { kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
     speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25, rates: [
       { version: "intro", effectiveFrom: "2026-09-01T00:00:00.000Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 },
@@ -1253,10 +1253,14 @@ it("requires the displayed speech ceiling for a line and rejects it after a rate
     ] } } };
   const input = { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", productionId: "book", shotId: "sh_01", sheet: SHEET,
     text: "Hello", model, at: "2026-12-31T23:59:59.000Z" };
+  // What the line's screen shows: the estimate, which the job carries to the ledger; the ceiling
+  // stays the dispatcher's cap (SPEC-049 R-6).
+  const shown = quoteSpeech(model, "Hello", { at: input.at }).expectedMicroUsd;
+  assert.ok(shown > 0 && shown < 151552);
   assert.throws(() => voiceLineRequest(input), /price needs confirmation/);
-  assert.throws(() => voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151551 }), /price needs confirmation/);
-  assert.equal(voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151552 }).estimatedMicroUsd, 151552);
-  assert.throws(() => voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151552, at: "2027-01-01T00:00:00.000Z" }), /price needs confirmation/);
+  assert.throws(() => voiceLineRequest({ ...input, confirmedSpeechMicroUsd: shown - 1 }), /price needs confirmation/);
+  assert.equal(voiceLineRequest({ ...input, confirmedSpeechMicroUsd: shown }).estimatedMicroUsd, shown);
+  assert.throws(() => voiceLineRequest({ ...input, confirmedSpeechMicroUsd: shown, at: "2027-01-01T00:00:00.000Z" }), /price needs confirmation/);
 });
 
 it("refuses oversized Gemini shot lines including separate delivery bytes before making a queue input", () => {

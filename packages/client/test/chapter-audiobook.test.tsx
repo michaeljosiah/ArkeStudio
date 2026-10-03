@@ -808,8 +808,8 @@ describe("the Audiobook view (turn 146)", () => {
     const first = m.sent.findLast(message => message.kind === "hear-audiobook-line") as Extract<ClientMessage, { kind: "hear-audiobook-line" }>;
     assert.equal(first.quoteToken, undefined);
     await act(async () => __applyEventForTest({ type: "audiobook.heard", at: AT, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: first.requestId,
-      quote: { token: "prepared-three-parts", authorisedMicroUsd: 454656, parts: 3 } }));
-    assert.match(hear().textContent!, /up to \$0\.45.*3 parts/);
+      quote: { token: "prepared-three-parts", estimatedMicroUsd: 4500, parts: 3 } }));
+    assert.match(hear().textContent!, /~\$0\.0045 · 3 parts/, "the estimate, never `up to` a ceiling");
     assert.equal(m.sent.filter(message => message.kind === "hear-audiobook-line").length, 1, "receiving a quote does not authorise a call");
     await act(async () => hear().click());
     const confirmed = m.sent.findLast(message => message.kind === "hear-audiobook-line") as Extract<ClientMessage, { kind: "hear-audiobook-line" }>;

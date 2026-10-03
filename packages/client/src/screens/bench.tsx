@@ -983,12 +983,13 @@ function BenchWorkspace({
       return each * draft.params.count;
     }
     if (draft.params.kind === "voice") {
-      // Character readers price what they are sent — the words with this reader's tags in
-      // (design turn 181); token readers show the authorised ceiling.
+      // Readers price what they are sent — the words with this reader's tags in (design turn
+      // 181), and for a token reader its sentence too: an estimate, never the authorisation
+      // ceiling the dispatcher keeps as its cap (SPEC-049 R-6).
       // An undirected line goes as typed, as the coordinator sends it.
       const direction = benchDirectionOf(draft.params);
       const sent = directionSaysAnything(direction) ? benchSent(draft.brief, direction, candidate, voiceLanguage) : null;
-      return estimateSpeechMicroUsd(candidate, sent?.text ?? draft.brief) * draft.params.count;
+      return estimateSpeechMicroUsd(candidate, sent?.text ?? draft.brief, undefined, undefined, sent?.style) * draft.params.count;
     }
     if (draft.params.kind === "music") {
       // A ceiling, and the only honest kind of number here: the route calls its length an upper

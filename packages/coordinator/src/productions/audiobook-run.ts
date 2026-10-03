@@ -404,7 +404,11 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       text,
       direction,
       parts,
-      quotes: parts.map(part => quoteSpeech(model, part, { at: quotedAt })),
+      // Each part with the style it goes with, as the dispatcher quotes it.
+      quotes: parts.map((part, index) => {
+        const instructions = direction?.perPart[index]?.instructions ?? direction?.instructions;
+        return quoteSpeech(model, part, { at: quotedAt, ...(instructions !== undefined ? { instructions } : {}) });
+      }),
       format,
       remake,
       ...(compiledSpeechHash !== undefined ? { compiledSpeechHash } : {}),
@@ -441,7 +445,10 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
   // readers that count so — `text.length` alone understates a Fish or Breeze block by up to 3×
   // (codex on PR 1180). The counts the card and the job show stay the prose's, as the page
   // read's do; only the money is the vendor's count.
-  const prices = new Map(misses.map(block => [block, block.quotes.reduce((sum, quote) => sum + quote.authorisedMicroUsd, 0)]));
+  // A token reader's part is priced at its estimate: what the card shows and the author answers.
+  // Each part's service-limit authorisation stays on its quote as the dispatcher's cap (SPEC-049
+  // R-6); priced at that cap, a 122-block chapter read as $18.49 for about $0.40 of speech.
+  const prices = new Map(misses.map(block => [block, block.quotes.reduce((sum, quote) => sum + quote.expectedMicroUsd, 0)]));
   const priceOf = (block: Speaking) => prices.get(block) ?? 0;
   const estimate = misses.reduce((sum, block) => sum + priceOf(block), 0);
   const creditDraw = freeCreditDraw(misses.map((block) => ({ model: block.model, microUsd: priceOf(block) })));
@@ -474,7 +481,7 @@ export function chapterPriceToken(worldId: string, productionId: string, chapter
 export function missIdentity(block: Speaking): string {
   // The plan is in it (design turn 182): a free credit's price is the paid price, so without it
   // a book answered on credit would read on, unasked, after the author switched to paid.
-  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}:${JSON.stringify(block.quotes.map(q => [q.rateVersion, q.authorisedMicroUsd, q.tokenLimits, ...(q.plan !== undefined ? [q.plan] : [])]))}${block.compiledSpeechHash !== undefined ? `:${block.compiledSpeechHash}` : ""}${block.reference !== null ? `:${block.reference}` : ""}`;
+  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}:${JSON.stringify(block.quotes.map(q => [q.rateVersion, q.expectedMicroUsd, q.authorisedMicroUsd, q.tokenLimits, ...(q.plan !== undefined ? [q.plan] : [])]))}${block.compiledSpeechHash !== undefined ? `:${block.compiledSpeechHash}` : ""}${block.reference !== null ? `:${block.reference}` : ""}`;
 }
 
 /**
@@ -519,7 +526,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     return;
   }
   const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks, freePlan } = preparation.prepared;
-  const partPrices = new Map(misses.map(block => [block, block.quotes.map(quote => quote.authorisedMicroUsd)]));
+  const partPrices = new Map(misses.map(block => [block, block.quotes.map(quote => quote.expectedMicroUsd)]));
   let record = preparation.prepared.record;
   const chapterFile = plan.chapter.file;
   emit({ type: "started", toMake: toMake.length, blocks: plan.blocks.length });

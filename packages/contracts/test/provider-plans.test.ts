@@ -115,7 +115,7 @@ describe("a read on a free plan", () => {
     assert.equal(speechPriceCopy(row, 0), "free plan");
     assert.equal(readerPriceLabel(row), "free plan");
     assert.equal(modelPriceCopy(row), "free plan");
-    assert.equal(speechPriceCopy(gemini, 151_552), "up to $0.15");
+    assert.equal(speechPriceCopy(gemini, 151_552), "~$0.15", "a token reader's figure is an estimate, never `up to`");
   });
 });
 

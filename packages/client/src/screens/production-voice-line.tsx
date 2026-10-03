@@ -68,7 +68,7 @@ export function VoiceLineDialogScreen() {
   const linePrice = (() => {
     if (voiceModel?.pricing.kind !== "perToken") return { amount: undefined, error: null };
     try {
-      return { amount: quoteSpeech(voiceModel, shot?.audio?.line ?? "", { delivery: delivery || undefined }).authorisedMicroUsd, error: null };
+      return { amount: quoteSpeech(voiceModel, shot?.audio?.line ?? "", { delivery: delivery || undefined }).expectedMicroUsd, error: null };
     } catch (error) { return { amount: undefined, error: error instanceof Error ? error.message : "Speech pricing is unavailable." }; }
   })();
   const pendingPrice = useRef<number | undefined>(undefined);
@@ -246,7 +246,7 @@ export function VoiceLineDialogScreen() {
             }
             onClick={() => generateLine()}
           >
-            {sending ? "Generating…" : speechPlanLabel(voiceModel) !== null ? `Generate line · ${speechPlanLabel(voiceModel)}` : linePrice.amount === undefined ? "Generate line" : `Generate line · up to ${usdPrecise(Math.ceil(linePrice.amount / 100) * 100)}`}
+            {sending ? "Generating…" : speechPlanLabel(voiceModel) !== null ? `Generate line · ${speechPlanLabel(voiceModel)}` : linePrice.amount === undefined ? "Generate line" : `Generate line · ~${usdPrecise(Math.ceil(linePrice.amount / 100) * 100)}`}
           </Button>
           {firstRead !== null && (
             <span className="fy-mono" data-testid="voice-line-first-read" style={{ marginLeft: 12 }}>

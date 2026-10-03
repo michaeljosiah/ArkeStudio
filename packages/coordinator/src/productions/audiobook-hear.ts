@@ -26,7 +26,7 @@ export interface HearDeps {
   waitForJob: (jobId: string) => Promise<Job>;
 }
 
-export async function hearAudiobookLine(store: WorldStore, productionId: string, chapterFile: string, block: string, room: ReadingRoom, deps: HearDeps): Promise<{ file: string; cached: boolean } | { quote: { token: string; authorisedMicroUsd: number; parts: number } }> {
+export async function hearAudiobookLine(store: WorldStore, productionId: string, chapterFile: string, block: string, room: ReadingRoom, deps: HearDeps): Promise<{ file: string; cached: boolean } | { quote: { token: string; estimatedMicroUsd: number; parts: number } }> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   const chapter = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
   if (chapter === undefined) throw new Error("that chapter is no longer in this production");
@@ -53,7 +53,9 @@ export async function hearAudiobookLine(store: WorldStore, productionId: string,
   // A $0 quote — a free plan's (design turn 182) — authorises nothing it could overspend, and a
   // read that costs nothing asks nothing (SPEC-047 R-17).
   if (quotes.some(quote => quote.unit === "token" && quote.authorisedMicroUsd > 0) && deps.quoteToken !== token) {
-    return { quote: { token, authorisedMicroUsd: quotes.reduce((sum, quote) => sum + quote.authorisedMicroUsd, 0), parts: quotes.length } };
+    // The author is asked the estimate; each part's service-limit authorisation stays behind
+    // it as the dispatcher's cap (SPEC-049 R-6), never the figure on the button.
+    return { quote: { token, estimatedMicroUsd: quotes.reduce((sum, quote) => sum + quote.expectedMicroUsd, 0), parts: quotes.length } };
   }
   const pieces: Uint8Array[] = [];
   if (speaking.local) {
@@ -79,7 +81,7 @@ export async function hearAudiobookLine(store: WorldStore, productionId: string,
           ...(perPart !== undefined && Object.keys(perPart.voiceSettings).length > 0 ? { voiceSettings: perPart.voiceSettings } : {}),
           ...(perPart?.instructions !== undefined ? { instructions: perPart.instructions } : {}),
         },
-        estimatedMicroUsd: quotes[index]!.authorisedMicroUsd,
+        estimatedMicroUsd: quotes[index]!.expectedMicroUsd,
         landing: { dir: landingDir, name: `hear-${block.replace(/[^a-z0-9]+/gi, "-")}-${index}.${speaking.format}` },
       });
       const job = await deps.waitForJob(jobId);

@@ -12,6 +12,7 @@ import {
   speechQuoteIsCurrent,
   speechSettlement,
   SpeechUsageSchema,
+  type SpeechQuote,
   type SpeechUsage,
   type ManifestModel,
   credentialKindOf,
@@ -343,6 +344,19 @@ function describeWait(ms: number): string {
   return seconds < 90 ? `${seconds} s` : `${Math.round(seconds / 60)} min`;
 }
 
+/**
+ * The quote a token-priced read is recorded and revalidated under: the words with the style the
+ * reader is sent beside them — the sentence, or the delivery's, as the Google client resolves it.
+ */
+function speechQuoteFor(model: ManifestModel, job: Pick<Job, "target" | "params">, at: string): SpeechQuote {
+  const text = String(job.params.text ?? "");
+  if (job.target.kind === "voice-design") return quoteVoiceDesign(model, text, at);
+  const { instructions, delivery } = job.params;
+  return quoteSpeech(model, text, { at,
+    ...(typeof instructions === "string" ? { instructions } : {}),
+    ...(typeof delivery === "string" ? { delivery } : {}) });
+}
+
 function providerParams(params: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(params).filter(([key]) => !COORDINATOR_ONLY_PARAMS.has(key) && (key !== "audioReferences" || (Array.isArray((params.audioReferences as { references?: unknown })?.references) && ((params.audioReferences as { references: unknown[] }).references.length > 0)))));
 }
@@ -671,9 +685,14 @@ export class JobQueue {
     // here: the quote is the record that it was a credit read, and of the characters it drew
     // (design turn 182). Token-priced speech is quoted and checked, as it always was.
     const speechQuote = model?.pricing.kind === "perToken"
-      ? (input.target.kind === "voice-design" ? quoteVoiceDesign(model, String(input.params.text ?? ""), now) : quoteSpeech(model, String(input.params.text ?? ""), { at: now }))
+      ? speechQuoteFor(model, input, now)
       : model?.speechPlan === "free-credit" && input.target.kind !== "voice-design" ? quoteSpeech(model, String(input.params.text ?? ""), { at: now }) : undefined;
-    if (speechQuote?.unit === "token" && speechQuote.authorisedMicroUsd > input.estimatedMicroUsd) {
+    // What the author approved is the estimate (SPEC-049 R-6): refused when these words now
+    // estimate higher, as at a rate boundary. Priced by the words alone, for the reason
+    // estimateSpeechMicroUsd gives; the quote's service-limit authorisation is the cap the read
+    // can never pass. Voice design approves its allowance, which is that authorisation.
+    if (speechQuote?.unit === "token" && model !== undefined && (input.target.kind === "voice-design"
+      ? speechQuote.authorisedMicroUsd : quoteSpeech(model, String(input.params.text ?? ""), { at: now }).expectedMicroUsd) > input.estimatedMicroUsd) {
       throw new Error("Speech pricing changed. Review the new quote before reading.");
     }
     const job: Job = {
@@ -1153,7 +1172,7 @@ export class JobQueue {
       if (job.speechQuote?.unit === "token") {
         const model = this.opts.speechModel?.(job.provider, job.model);
         if (!model || !speechQuoteIsCurrent(job.speechQuote, this.clock())) throw new Error("Speech quote expired. Review the new price before reading.");
-        const current = job.target.kind === "voice-design" ? quoteVoiceDesign(model, String(job.params.text ?? ""), this.clock()) : quoteSpeech(model, String(job.params.text ?? ""), { at: this.clock() });
+        const current = speechQuoteFor(model, job, this.clock());
         if (current.rateVersion !== job.speechQuote.rateVersion || current.authorisedMicroUsd > job.speechQuote.authorisedMicroUsd) {
           throw new Error("Speech pricing changed. Review the new quote before reading.");
         }

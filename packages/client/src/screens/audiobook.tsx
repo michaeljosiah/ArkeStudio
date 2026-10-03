@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { DEFAULT_NARRATOR, freePlanAskCopy, freePlanNote, narratorLabelFor, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, providerName, readerPlace, type AudiobookPriceLine, type AudiobookRow } from "@arke-studio/contracts";
+import { DEFAULT_NARRATOR, freePlanAskCopy, freePlanNote, narratorLabelFor, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, providerName, readerPlace, speechPricePrefix, type AudiobookPriceLine, type AudiobookRow, type ManifestModel } from "@arke-studio/contracts";
 import { HeldBar } from "../components/held-bar.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
@@ -147,8 +147,8 @@ function VoiceChip({ name, voice, state, blocks, awaiting, to, onPress, performe
   );
 }
 
-function priceLineWords(line: AudiobookPriceLine): { who: string; how: string; cost: string; warn: boolean } {
-  const cost = `${line.characters.toLocaleString()} · ${line.estimatedMicroUsd === 0 ? "free" : `up to ${formatMicroUsd(line.estimatedMicroUsd)}`}`;
+function priceLineWords(line: AudiobookPriceLine, models: readonly ManifestModel[] | undefined): { who: string; how: string; cost: string; warn: boolean } {
+  const cost = `${line.characters.toLocaleString()} · ${line.estimatedMicroUsd === 0 ? "free" : `${speechPricePrefix(models, [line.provider])}${formatMicroUsd(line.estimatedMicroUsd)}`}`;
   if (line.speaker !== undefined) {
     // The narrator stands in (R-12): said as the speaker, and — when that narrator is a cloud
     // voice — the vendor the speaker's words go to, named here as on every paid line (codex on PR 1187).
@@ -241,6 +241,9 @@ export function AudiobookScreen() {
   const reading = door?.reading ?? production.audiobook?.reading ?? "narrator";
   const readingNow = book?.state === "reading";
   const price = door?.price ?? null;
+  // `up to` while every reader is priced by the character; a token reader's share is an
+  // estimate the read can pass, so the whole figure is `~` (SPEC-049 R-6).
+  const priceWord = speechPricePrefix(app?.manifest?.models, (price?.voices ?? []).map((voice) => voice.provider));
   const pad = (order: number) => String(order).padStart(2, "0");
   const bookNote =
     book?.state === "stopped"
@@ -287,7 +290,7 @@ export function AudiobookScreen() {
     return (
       <Button variant="primary" disabled={connection !== "open" || book?.state === "priced"} onClick={begin} data-testid="read-book">
         {phone ? <><Play size={16} />Read the book</> : `Read the book · ${price.chapters} chapter${price.chapters === 1 ? "" : "s"}`}
-        {price.estimatedMicroUsd > 0 ? ` · up to ${formatMicroUsd(price.estimatedMicroUsd)}` : ""}
+        {price.estimatedMicroUsd > 0 ? ` · ${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}` : ""}
       </Button>
     );
   })();
@@ -301,7 +304,7 @@ export function AudiobookScreen() {
         <span className="fy-h1row__push" />
         {!phone && primary}
       </div>
-      {phone && <HeldBar className="fy-abdoor-held"><span>{totalBlocks} blocks · {price === null ? "price unavailable" : price.estimatedMicroUsd === 0 ? "free" : `up to ${formatMicroUsd(price.estimatedMicroUsd)}`}</span>{primary}</HeldBar>}
+      {phone && <HeldBar className="fy-abdoor-held"><span>{totalBlocks} blocks · {price === null ? "price unavailable" : price.estimatedMicroUsd === 0 ? "free" : `${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}`}</span>{primary}</HeldBar>}
       <div className="fy-abdoor__voices" data-testid="audiobook-voices">
         <nav className="fy-seg" aria-label="Reading">
           <button type="button" className={cx("fy-seg__item", reading === "narrator" && "fy-seg__item--active")} disabled={running} onClick={() => setAudiobookReading(worldId, prodId, "narrator")}>
@@ -321,7 +324,7 @@ export function AudiobookScreen() {
             voice={voice.voice}
             state={voice.state}
             blocks={voice.blocks}
-            {...(phone && index === 0 && voice.state === "narrator" && voice.voice ? { compactDetail: `${readerPlace(voice.voice.provider, voice.voice.local)} · ${price === null ? "price unavailable" : price.estimatedMicroUsd === 0 ? "free" : `up to ${formatMicroUsd(price.estimatedMicroUsd)}`}` } : {})}
+            {...(phone && index === 0 && voice.state === "narrator" && voice.voice ? { compactDetail: `${readerPlace(voice.voice.provider, voice.voice.local)} · ${price === null ? "price unavailable" : price.estimatedMicroUsd === 0 ? "free" : `${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}`}` } : {})}
             {...(voice.awaiting !== undefined ? { awaiting: voice.awaiting } : {})}
             {...(index > 0 && voice.state === "narrator" ? { performer: true } : {})}
             {...(voice.note !== undefined ? { note: voice.note } : {})}
@@ -428,12 +431,13 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
   const vendors = [...new Set(price.voices.filter((line) => !line.local).map((line) => providerName(line.provider)))];
   // A book Google's free day cannot cover: the reads it needs against the day's, and how far it goes.
   const free = price.freePlan !== undefined ? freePlanAskCopy(price.freePlan) : null;
+  const models = useStore().state?.app.manifest?.models;
   return (
     <EditorDialog open title="Read the book" subtitle={`${price.chapters} chapter${price.chapters === 1 ? "" : "s"} · ${price.characters.toLocaleString()} characters · ${price.cloudBlocks} cloud line${price.cloudBlocks === 1 ? "" : "s"}`} onClose={onClose} width={460} labelledBy="read-book-title">
       <div className="fy-exsheet" data-testid="read-book-sheet">
         <div className="fy-abdoor__lines">
           {price.voices.map((line, index) => {
-            const words = priceLineWords(line);
+            const words = priceLineWords(line, models);
             return (
               <div key={index} className={cx("fy-abdoor__line", words.warn && "fy-abdoor__line--warn")} data-testid="read-book-line">
                 <span className="fy-abdoor__line-who">{words.who}</span>
@@ -451,7 +455,7 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
             Cancel
           </Button>
           <Button variant="primary" onClick={onConfirm} data-testid="read-book-confirm">
-            {free !== null && price.estimatedMicroUsd === 0 ? free.confirm : `Confirm ${price.characters.toLocaleString()} characters · up to ${formatMicroUsd(price.estimatedMicroUsd)}`}
+            {free !== null && price.estimatedMicroUsd === 0 ? free.confirm : `Confirm ${price.characters.toLocaleString()} characters · ${speechPricePrefix(models, price.voices.map((line) => line.provider))}${formatMicroUsd(price.estimatedMicroUsd)}`}
           </Button>
         </div>
       </div>
