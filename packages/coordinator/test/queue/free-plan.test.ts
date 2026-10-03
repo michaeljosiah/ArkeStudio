@@ -131,6 +131,9 @@ it("fails a read at the day's limit once, and the rest of the batch without send
     assert.ok(Date.parse(limit!.resetsAt) > Date.now() + 45 * 60_000);
     // Google's free quota is per model: another model's day is its own.
     assert.equal(h.queue.freeLimitFor("google", "gemini-3.8-flash-lite-tts"), null);
+    // A new key is another project's quota.
+    h.queue.forgetFreeLimits("google");
+    assert.equal(h.queue.freeLimitFor("google", freeGoogle.models[0]!.id), null);
   } finally { h.queue.dispose(); }
 });
 

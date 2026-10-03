@@ -224,7 +224,7 @@ describe("a provider's Free plan (design turn 182)", () => {
       const chapter = (confirmationToken?: string) => h.send({ kind: "read-audiobook-chapter", worldId: WORLD_ID, productionId: "the-ledger-of-nights", chapterFile: "01-neap",
         ...(confirmationToken !== undefined ? { confirmationToken } : {}) });
       await chapter();
-      // A chapter longer than the day asks first; this one is answered `Read 10 now`.
+      // A chapter longer than the day asks first; this one is answered `Read until the limit`.
       const priced = h.events.find((event) => event.type === "audiobook.priced");
       if (priced?.type === "audiobook.priced") await chapter(priced.confirmationToken);
       const ending = h.events.filter((event) => event.type === "audiobook.finished").at(-1);

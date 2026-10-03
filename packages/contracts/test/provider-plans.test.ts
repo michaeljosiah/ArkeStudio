@@ -9,6 +9,7 @@ import {
   freeCreditLeft,
   freeCreditOverrun,
   freeCreditThisMonth,
+  freeDayRefused,
   freeLimitReason,
   freePlanAllowance,
   freePlanAskCopy,
@@ -293,6 +294,18 @@ describe("a free day Google named", () => {
     assert.equal((freePlanStop(refusal, new Date("2026-10-03T12:00:00.000Z")) as { resetsAt: string }).resetsAt, "2026-10-04T07:00:00.000Z");
   });
 
+  it("holds queued reads' share of the day, and sees a refusal on screen until its reset", () => {
+    const now = new Date("2026-10-02T18:00:00.000Z");
+    assert.equal(freePlanAllowance([entry("2026-10-02T09:00:00.000Z")], gemini.id, now, null, 8).left, 1);
+    const refused = { provider: "google", model: gemini.id, status: "failed" as const, updatedAt: "2026-10-02T17:00:00.000Z",
+      error: "Google free limit reached (HTTP 429 free daily quota · 10 a day · resets 2026-10-02T18:30:00.000Z)" };
+    assert.equal(freeDayRefused([refused], gemini.id, now), true);
+    assert.equal(freeDayRefused([refused], gemini.id, new Date("2026-10-02T18:31:00.000Z")), false, "past the named reset");
+    assert.equal(freeDayRefused([{ ...refused, error: "Google free limit reached (HTTP 429 free daily quota)" }], gemini.id, now), true, "no reset named: since midnight Pacific");
+    assert.equal(freeDayRefused([{ ...refused, error: "Google free limit reached", updatedAt: "2026-10-02T06:00:00.000Z" }], gemini.id, now), false, "yesterday's");
+    assert.equal(freeDayRefused([refused], "gemini-3.8-flash-lite-tts", now), false);
+  });
+
   it("weighs a read whole per model, and asks in plain words", () => {
     const models = applyProviderPlans(manifest, free).models;
     const freeGemini = models.find((model) => model.id === gemini.id)!;
@@ -300,9 +313,8 @@ describe("a free day Google named", () => {
     assert.equal(freePlanShortfall([{ model: freeGemini, requests: 6 }, { model: freeGemini, requests: 4 }], day), null);
     assert.deepEqual(freePlanShortfall([{ model: freeGemini, requests: 61 }, { model: freeGemini, requests: 61 }], day)?.short, { requests: 122, allowed: 10, left: 10 });
     assert.equal(freePlanShortfall([{ model: gemini, requests: 122 }, { model: null, requests: 5 }], day), null, "a paid row is not the free day's");
-    assert.deepEqual(freePlanAskCopy({ requests: 122, allowed: 10, left: 10 }), { line: "122 reads · free plan allows 10 a day", confirm: "Read 10 now" });
-    assert.deepEqual(freePlanAskCopy({ requests: 12, allowed: 10, left: 3 }), { line: "12 reads · free plan allows 10 a day · 3 left", confirm: "Read 3 now" });
-    assert.equal(freePlanAskCopy({ requests: 2, allowed: 10, left: 0 }).confirm, "Read anyway");
+    assert.deepEqual(freePlanAskCopy({ requests: 122, allowed: 10, left: 10 }), { line: "122 reads · free plan allows 10 a day", confirm: "Read until the limit" });
+    assert.deepEqual(freePlanAskCopy({ requests: 12, allowed: 10, left: 3 }), { line: "12 reads · free plan allows 10 a day · 3 left", confirm: "Read until the limit" });
   });
 });
 

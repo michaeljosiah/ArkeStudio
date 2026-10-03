@@ -110,12 +110,12 @@ describe("the two ways a free plan ends, on the read", () => {
       }} />,
     ));
     assert.match(text, /122 reads · free plan allows 10 a day/);
-    assert.match(text, /Read 10 now/);
+    assert.match(text, /Read until the limit/);
     assert.ok(!text.includes("Confirm 48"), "no price to confirm");
   });
 
   // Codex on PR 1475: a voiced page with a priced speaker beside the free narrator must never be
-  // confirmed by `Read 10 now` with its price out of sight.
+  // confirmed by `Read until the limit` with its price out of sight.
   it("keeps the price on the button when anything in the read is priced", () => {
     __setStateForTest(withPlans({ google: "free" }));
     const text = plain(renderToString(
@@ -127,7 +127,7 @@ describe("the two ways a free plan ends, on the read", () => {
     ));
     assert.match(text, /122 reads · free plan allows 10 a day/);
     assert.match(text, /Confirm 48000 characters · (up to )?\$0\.12/);
-    assert.ok(!text.includes("Read 10 now"));
+    assert.ok(!text.includes("Read until the limit"));
   });
 
   it("says a billed read and offers to turn the plan off — never turning it off itself", () => {

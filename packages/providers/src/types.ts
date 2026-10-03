@@ -196,6 +196,20 @@ export class ProviderFreeLimitError extends ProviderRequestRejectedError {
 }
 
 /**
+ * A paid key's own daily quota is used up (codex on PR 1475): terminal like the free tier's,
+ * since minutes cannot clear it, but neither the free plan's words nor its remedy.
+ */
+export class ProviderDailyLimitError extends ProviderRequestRejectedError {
+  readonly failureClass = "terminal" as const;
+  readonly dailyLimit = true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ProviderDailyLimitError";
+  }
+}
+
+/**
  * The provider refused for payment (HTTP 402). On a paid key it is a billing fault, and the
  * message's status classes it so; on a key the author marked free it is the evidence the key is
  * paid, which the queue reads from `paymentRequired` (design turn 182).

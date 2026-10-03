@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ManifestModel, ModelManifest } from "./manifest.js";
 import type { ProviderPlans } from "./settings.js";
-import type { LedgerEntry } from "./job.js";
+import type { Job, LedgerEntry } from "./job.js";
 import { formatMicroUsd } from "./money.js";
 import { legacyVoiceModel, narratorAppliesTo, supportsVoiceUse } from "./voice.js";
 import { estimateSpeechMicroUsd } from "./speech-pricing.js";
@@ -243,9 +243,11 @@ export interface FreePlanAllowance {
  * said is the better evidence. The requests counted are the free-plan reads the ledger holds
  * since then that Google took — succeeded, or answered with usage; a refused request has no
  * usage and is not counted. Reads made from another machine on the same key are invisible here,
- * which is why a refusal outranks the count.
+ * which is why a refusal outranks the count. `pending` is the free-plan reads queued and not yet
+ * settled (codex on PR 1475): they have no ledger line, and two page reads pressed together
+ * would each otherwise see the whole day.
  */
-export function freePlanAllowance(ledger: readonly LedgerEntry[], model: string, now: Date = new Date(), observed?: FreePlanLimit | null): FreePlanAllowance {
+export function freePlanAllowance(ledger: readonly LedgerEntry[], model: string, now: Date = new Date(), observed?: FreePlanLimit | null, pending = 0): FreePlanAllowance {
   // A model with no known figure is not weighed: inventing a limit would ask before every read.
   const allowed = observed?.limit ?? GOOGLE_FREE_DAILY_REQUESTS[model] ?? Infinity;
   const observedReset = observed ? Date.parse(observed.resetsAt) : NaN;
@@ -264,7 +266,7 @@ export function freePlanAllowance(ledger: readonly LedgerEntry[], model: string,
     // each was a request. Where the last is itself archived this counts one over, the safe side.
     used += (taken ? 1 : 0) + (entry.speechAttempts?.length ?? 0);
   }
-  return { model, allowed, left: Math.max(0, allowed - used), resetsAt: next.toISOString(), reached: false };
+  return { model, allowed, left: Math.max(0, allowed - used - pending), resetsAt: next.toISOString(), reached: false };
 }
 
 /** A read the free day cannot cover: how many requests it needs, against what the day allows and has left. Carried on the read's question. */
@@ -299,6 +301,21 @@ export function freePlanShortfall(
   return short;
 }
 
+/**
+ * Whether a job on screen says Google refused this model's free day and the day has not reset
+ * (codex on PR 1475): the queue's memory of the refusal is the coordinator's, but the refused
+ * job is in every window's list, so a screen deciding to read unasked can see it too. A reset
+ * the failure named decides; without one, a refusal since the last midnight Pacific does.
+ */
+export function freeDayRefused(jobs: readonly Pick<Job, "provider" | "model" | "status" | "error" | "updatedAt">[], model: string, now: Date = new Date()): boolean {
+  const since = lastPacificMidnight(now).getTime();
+  return jobs.some((job) => {
+    if (job.provider !== "google" || job.model !== model || job.status !== "failed" || !job.error?.includes(GOOGLE_FREE_LIMIT)) return false;
+    const named = /resets (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/.exec(job.error)?.[1];
+    return named !== undefined ? Date.parse(named) > now.getTime() : Date.parse(job.updatedAt) >= since;
+  });
+}
+
 /** A free day already used up, as a read's failure says it, so the free-limit stop and its remedy show. */
 export function freeLimitReason(allowance: Pick<FreePlanAllowance, "allowed" | "resetsAt">): string {
   return `${GOOGLE_FREE_LIMIT}${freeLimitDetail({ limit: Number.isFinite(allowance.allowed) && allowance.allowed > 0 ? allowance.allowed : undefined, resetsAt: allowance.resetsAt })}`;
@@ -306,14 +323,17 @@ export function freeLimitReason(allowance: Pick<FreePlanAllowance, "allowed" | "
 
 /**
  * The question a read past the free day asks, in the confirm the free credit's overrun already
- * uses: `122 reads · free plan allows 10 a day`, answered `Read 10 now` — or `Read anyway` when
- * Arke counts none left but Google has not said so. Either way the read stops at Google's limit
- * and keeps what it made.
+ * uses: `122 reads · free plan allows 10 a day`, answered `Read until the limit`.
+ *
+ * The answer names no count (codex on PR 1475): the read is not capped at what Arke counts left —
+ * that is an estimate, Flash-Lite's figure a guess, and another machine's reads invisible — but
+ * goes until Google itself refuses, and stops there keeping what it made. `Read 10 now` would
+ * promise ten and could read more, or fewer.
  */
 export function freePlanAskCopy(short: FreePlanShort): { line: string; confirm: string } {
   return {
     line: `${short.requests} read${short.requests === 1 ? "" : "s"} · free plan allows ${short.allowed} a day${short.left < short.allowed ? ` · ${short.left} left` : ""}`,
-    confirm: short.left > 0 ? `Read ${short.left} now` : "Read anyway",
+    confirm: "Read until the limit",
   };
 }
 

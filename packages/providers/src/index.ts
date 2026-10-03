@@ -83,6 +83,7 @@ export {
   ProviderAuthError,
   ProviderBusyError,
   ProviderRequestRejectedError,
+  ProviderDailyLimitError,
   ProviderFreeLimitError,
   ProviderPaymentRequiredError,
   type CommandResult,

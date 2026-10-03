@@ -1488,7 +1488,14 @@ export class Coordinator {
   private async freePlanAllowanceNow(): Promise<(model: string) => FreePlanAllowance> {
     const ledger = this.ledger ? await this.ledger.readAll().catch(() => []) : [];
     const now = new Date();
-    return (model) => freePlanAllowance(ledger, model, now, this.jobQueue?.freeLimitSeen("google", model) ?? null);
+    // Reads already queued on the free plan and not yet settled hold their share of the day: a
+    // job writes its ledger line only when it ends, so a settled one is never counted twice.
+    const pending = new Map<string, number>();
+    for (const job of this.jobQueue?.listJobs() ?? []) {
+      if (job.provider !== "google" || job.speechQuote?.plan !== "free-plan" || ["succeeded", "failed", "cancelled"].includes(job.status)) continue;
+      pending.set(job.model, (pending.get(job.model) ?? 0) + 1);
+    }
+    return (model) => freePlanAllowance(ledger, model, now, this.jobQueue?.freeLimitSeen("google", model) ?? null, pending.get(model) ?? 0);
   }
 
   /** The book's available reader, or the app's; reading still checks the host's local capability. */
@@ -8976,6 +8983,8 @@ export class Coordinator {
         }
         try {
           await this.credentials.set(msg.provider, msg.key);
+          // A free day the old key was refused is not the new key's (design turn 182 follow-up).
+          this.jobQueue?.forgetFreeLimits(msg.provider);
           const fingerprint = this.providerService.setConfigured(msg.provider, true);
           // Admission reads this shared state; publish invalidation before optional I/O yields.
           this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });

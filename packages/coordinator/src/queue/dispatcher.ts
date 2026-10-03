@@ -1302,9 +1302,10 @@ export class JobQueue {
     }
     const message = describeCoordinatorError(err);
     const klass: FailureClass = classifyError(err);
-    // The free tier's daily limit is the key's, not the lane's pace: it must not slow paid reads.
+    // A daily limit, free or paid, is the key's, not the lane's pace: it must not slow other reads.
     const freeLimit = typeof err === "object" && err !== null && (err as { freeLimit?: unknown }).freeLimit === true;
-    if (isRateLimit(err) && !freeLimit) this.noteRateLimit(job.provider);
+    const dailyLimit = freeLimit || (typeof err === "object" && err !== null && (err as { dailyLimit?: unknown }).dailyLimit === true);
+    if (isRateLimit(err) && !dailyLimit) this.noteRateLimit(job.provider);
     if (freeLimit) this.noteFreeLimit(job, err);
     const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
     const submissionRejected =
@@ -1923,6 +1924,12 @@ export class JobQueue {
    */
   freeLimitSeen(provider: string, model: string): FreePlanLimit | null {
     return this.freeLimits.get(`${provider}\n${model}`) ?? null;
+  }
+
+  /** A new key is another project's quota (codex on PR 1475): what the old one was refused says nothing of it. */
+  forgetFreeLimits(provider: string): void {
+    // Deleting the entry being visited is safe for a Map's live iterator.
+    for (const key of this.freeLimits.keys()) if (key.startsWith(`${provider}\n`)) this.freeLimits.delete(key);
   }
 
   /** Keep what a daily-limit refusal said: its reset, else midnight Pacific, when Google resets the free quota. */

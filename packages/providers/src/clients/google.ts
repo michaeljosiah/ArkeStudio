@@ -4,7 +4,7 @@ import { freeLimitDetail, GOOGLE_FREE_LIMIT, speechInputFits } from "@arke-studi
 import { GEMINI_SPEECH_INPUT_BYTES, geminiSpeechModel } from "../gemini-tts-models.js";
 import { googleVoiceDesignBody, googleVoiceDesignResult, googleDesignedVoicePage, requireGoogleVoiceId } from "./google-voices.js";
 import type { VoiceDesignClient, VoiceDesignInput } from "../types.js";
-import { ProviderAuthError, ProviderBusyError, ProviderFreeLimitError, ProviderPaymentRequiredError, ProviderRequestRejectedError,
+import { ProviderAuthError, ProviderBusyError, ProviderDailyLimitError, ProviderFreeLimitError, ProviderPaymentRequiredError, ProviderRequestRejectedError,
   type FetchLike, type PollResult, type SubmitRequest, type SubmitResult, type VoiceCatalogueClient } from "../types.js";
 
 export const GEMINI_TTS_MODELS = ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"] as const;
@@ -76,6 +76,19 @@ export function googleFreeDailyLimit(body: unknown): boolean {
     const free = id.endsWith("-FreeTier") || /free_tier/i.test(metric);
     return free && !/PerMinute/i.test(id) && !/per_minute/i.test(metric);
   });
+}
+
+/**
+ * Whether a daily-limit refusal names the free tier (codex on PR 1475): a paid tier has
+ * requests-per-day quotas too, and a paid key's daily limit must not read as "Google free limit
+ * reached" with the free plan's remedy. `quota_exceeded` keeps turn 182's reading as the free one.
+ */
+export function googleFreeTier(body: unknown): boolean {
+  const error = record(record(body).error);
+  if (error.code === "quota_exceeded") return true;
+  if (typeof error.message === "string" && /free[\s_-]?tier/i.test(error.message)) return true;
+  return violations(error).some(violation => (typeof violation.quotaId === "string" && violation.quotaId.endsWith("-FreeTier"))
+    || (typeof violation.quotaMetric === "string" && /free_tier/i.test(violation.quotaMetric)));
 }
 
 function violations(error: Record<string, unknown>): Record<string, unknown>[] {
@@ -291,7 +304,9 @@ export class GoogleClient implements VoiceCatalogueClient, VoiceDesignClient {
       const body: unknown = await response.json().catch(() => null);
       if (googleFreeDailyLimit(body)) {
         const { limit, resetsAt } = googleDailyLimitDetail(body);
-        throw new ProviderFreeLimitError(`${GOOGLE_FREE_LIMIT} (HTTP 429 free daily quota${freeLimitDetail({ limit, resetsAt })})`, limit, resetsAt);
+        if (googleFreeTier(body)) throw new ProviderFreeLimitError(`${GOOGLE_FREE_LIMIT} (HTTP 429 free daily quota${freeLimitDetail({ limit, resetsAt })})`, limit, resetsAt);
+        // A paid tier's day is as final as the free one's, but it is not the free plan's to name.
+        throw new ProviderDailyLimitError(`Google's daily request limit was reached for this key (HTTP 429 daily quota${freeLimitDetail({ limit, resetsAt })})`);
       }
       throw new ProviderBusyError("Google's project quota was reached (HTTP 429)", { witnessed: true });
     }
