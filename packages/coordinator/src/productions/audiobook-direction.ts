@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   AUDIOBOOK_DELIVERIES,
+  AUDIOBOOK_TITLE_KEY,
   CADENCE_NOTE_MAX,
   CADENCE_PHRASE_MAX,
   DeliverySchema,
@@ -233,7 +234,8 @@ function buildDirectionPrompt(input: DirectionDeriverInput, retryNote?: string):
 Rules — every one is enforced mechanically after you answer:
 - Address every block by its key, in order. A block left out is counted as dropped.
 - Each block says who reads it and what that reader can do. Use only the deliveries listed for that block; give a note only where the reader takes one and within its length; place only the kinds of cue and the sounds the reader takes; set a speed only where it has one. Anything else is dropped.
-- "measured" is the ordinary reading. Leave a block measured unless its words ask for something else; direct sparingly, at the turning points, and never every block the same way for effect.
+- "measured" is the ordinary reading. Keep one delivery across a run of blocks and change it only where the scene turns: at most about one block in four may change delivery from the block before it, and a change closer to the last one than that is held to the delivery before. Never direct every block the same way for effect.
+- The chapter note carries the chapter's mood. Give a block a note only where it reads differently from that; no note is better than one that restates the chapter note or the delivery.
 - A sound goes only inside or right after a spoken line — a block marked as a line, or words inside its quotation marks — never in narration.
 - A "delivery" cue turns part of a block: the block's own delivery reads the rest. Only where the reader takes turns.
 - The book note, the chapter note and the speaker notes are sent with every block already: never repeat them in a block's note.
@@ -443,7 +445,41 @@ export function verifyDirections(raw: RawDirection, blocks: readonly DirectableB
     } else dropped += 1;
   }
   dropped += blocks.filter((block) => !seen.has(block.key)).length;
+  dropped += holdDeliveryRuns(proposed, blocks);
   return { proposed, directed, dropped };
+}
+
+/** How far apart, in blocks, two changes of delivery may be (design turn 185): about one block in four. */
+export const DELIVERY_CHANGE_SPACING = 4;
+
+/**
+ * Direct less often (design turn 185). Read per paragraph, chapter 01 changed delivery on most
+ * blocks, and each line sounded read without the one before it. A delivery is kept across a run:
+ * in reading order a block's delivery may differ from the one before it only once
+ * `DELIVERY_CHANGE_SPACING` blocks have passed since the last change kept; a change sooner is
+ * held to the delivery before it and counted as dropped. The first block's change from the
+ * ordinary reading counts as a change; the title stands apart. Returns how many were held.
+ * Mutates `proposed`.
+ */
+export function holdDeliveryRuns(proposed: Record<string, AudiobookDirectionInput>, blocks: readonly Pick<DirectableBlock, "key">[]): number {
+  let current: AudiobookDirectionInput["delivery"] = "measured";
+  let lastChange = -Infinity;
+  let held = 0;
+  // The title is its own announcement, not part of the reading's runs: neither held nor counted.
+  blocks.filter((block) => block.key !== AUDIOBOOK_TITLE_KEY).forEach((block, index) => {
+    const input = proposed[block.key];
+    if (input === undefined) return;
+    const delivery = input.delivery ?? "measured";
+    if (delivery === current) return;
+    if (index - lastChange >= DELIVERY_CHANGE_SPACING) {
+      current = delivery;
+      lastChange = index;
+      return;
+    }
+    proposed[block.key] = { ...input, delivery: current };
+    held += 1;
+  });
+  return held;
 }
 
 export interface DirectedChapter {
