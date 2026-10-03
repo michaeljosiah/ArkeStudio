@@ -53,7 +53,7 @@ import {
   type ManifestModel,
 } from "@arke-studio/contracts";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
-import { DirectedText, MarkerMenu, VIEW_HASH, cueLabel, heldWords, markerLabel, viewPlan, type MarkerAt } from "../components/voice-direction.js";
+import { DirectedText, type TurnBreak, MarkerMenu, VIEW_HASH, cueLabel, heldWords, markerLabel, viewPlan, type MarkerAt } from "../components/voice-direction.js";
 
 // The marker and cue words moved to the shared direction module (design turn 181); kept here too
 // for the callers and tests that name them from the audiobook.
@@ -177,6 +177,8 @@ export interface BlockRow {
   speakerKey: string | null;
   /** The speakers a block holds when it is one reader's whole paragraph (design turn 190): the lines inside it, by key. */
   speakers?: ReadonlyArray<{ key: string; label: string; colour: number | null }>;
+  /** The turns of a block of several, in order: where each begins in the block's words and who speaks it (design turn 190), drawn as rows. */
+  turnMarks?: ReadonlyArray<TurnBreak>;
   /** The speaker's colour, `--voice-N`, the same in every chapter; null for the narrator and a name no sheet carries. */
   colour: number | null;
   /** The kept take was recorded by a person (SPEC-047 R-34), not made by a voice. */
@@ -431,7 +433,24 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         const sheetOf = turn.sheet === undefined ? undefined : world?.sheets.find((candidate) => candidate.id === turn.sheet);
         return [[key, { key, label: sheetOf?.name ?? turn.speaker ?? key, colour: turn.sheet === undefined ? null : (colours.get(turn.sheet) ?? null) }] as const];
       })).values()];
-      if (inside !== undefined && inside.length > 0) mark = inside.map((who) => who.label).join(", ");
+      // The turns as rows (design turn 190): each found in the block's words in order, so the
+      // rows draw at the offsets the words keep. One not found leaves the block a single row.
+      const turnMarks = ((): TurnBreak[] | undefined => {
+        if (block.rows === undefined) return undefined;
+        const marks: TurnBreak[] = [];
+        let from = 0;
+        for (const turn of block.rows) {
+          const found = block.text.indexOf(turn.text, from);
+          if (found < 0) return undefined;
+          const key = audiobookSpeakerKey(turn);
+          const sheetOf = turn.sheet === undefined ? undefined : world?.sheets.find((candidate) => candidate.id === turn.sheet);
+          const tone = key === null ? "narrator" : turn.sheet === undefined ? "none" : String(colours.get(turn.sheet) ?? "none");
+          marks.push({ at: marks.length === 0 ? 0 : found, label: key === null ? "narrator" : (sheetOf?.name ?? turn.speaker ?? key), tone });
+          from = found + turn.text.length;
+        }
+        return marks;
+      })();
+      if (turnMarks !== undefined) mark = turnMarks[0]!.label;
       const recorded = take?.source === "recorded";
       const byPerson = recordedKeys.has(audiobookRecordingKey(block));
       const direction = rowDirection(recordOrNull, block);
@@ -461,6 +480,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         artifact,
         speakerKey,
         ...(inside !== undefined && inside.length > 0 ? { speakers: inside } : {}),
+        ...(turnMarks !== undefined ? { turnMarks } : {}),
         colour,
         recorded,
         byPerson,
@@ -1335,14 +1355,16 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
   const renderRow = (row: BlockRow) => {
         // The margin names who speaks (R-33): a colour a speaker with a sheet, grey for the
         // narrator, a dashed dot for a name no sheet carries; a line is tinted, narration is not.
-        const tone = row.speakerKey === null ? "narrator" : row.colour === null ? "none" : String(row.colour);
+        const tone = row.turnMarks !== undefined ? row.turnMarks[0]!.tone : row.speakerKey === null ? "narrator" : row.colour === null ? "none" : String(row.colour);
+        // A block of several turns draws them as rows under one bracket (design turn 190); its first row's name is the margin's.
+        const laterTurns = row.turnMarks?.slice(1);
         // A grouped read's cut that did not match (design turn 185c): what was heard, under the block.
         const split = row.state === "flagged" && row.split !== null ? row.split : null;
         return (
           <Fragment key={row.block.key}>
           <div
             key={row.block.key}
-            className={`fy-ab__block fy-voice--${tone}${row.speakerKey !== null ? " fy-ab__block--line" : ""}${sounding?.block.key === row.block.key ? " fy-ab__block--sounding" : ""}${selected === row.block.key ? " fy-ab__block--selected" : ""}${inAudiobookFilter(row, filter) ? "" : " fy-ab__block--dim"}${row.proposed !== null ? " fy-ab__block--proposed" : ""}`}
+            className={`fy-ab__block fy-voice--${tone}${row.speakerKey !== null ? " fy-ab__block--line" : ""}${laterTurns !== undefined ? " fy-ab__block--merged" : ""}${sounding?.block.key === row.block.key ? " fy-ab__block--sounding" : ""}${selected === row.block.key ? " fy-ab__block--selected" : ""}${inAudiobookFilter(row, filter) ? "" : " fy-ab__block--dim"}${row.proposed !== null ? " fy-ab__block--proposed" : ""}`}
             data-state={row.state}
             {...(row.proposed !== null ? { "data-proposed": "true" } : {})}
             data-block={row.block.key}
@@ -1351,7 +1373,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
             onClick={() => { onSelectionChange?.(audiobookSelection(rows) ?? pressedSelection.current); pressedSelection.current = null; onSelect(row.block.key); }}
           >
             {(() => {
-              const speaker = pinnable && row.block.paragraph >= 0 ? (
+              const speaker = pinnable && row.block.paragraph >= 0 && row.turnMarks === undefined ? (
               <button
                 type="button"
                 className={`fy-ab__speaker fy-ab__speaker--press${menu?.key === row.block.key && menu.selection === undefined ? " fy-ab__speaker--open" : ""}`}
@@ -1397,12 +1419,13 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
             >
               {/* A held proposal is drawn in the direction's place, dashed, until it is accepted (design turn 184b). */}
               {row.proposed !== null ? (
-                <DirectedText raw={row.block.text} cues={row.proposed.input.cues} held={new Set(row.proposed.held.flatMap((control) => (control.cueIndex !== undefined ? [control.cueIndex] : [])))} />
+                <DirectedText raw={row.block.text} cues={row.proposed.input.cues} held={new Set(row.proposed.held.flatMap((control) => (control.cueIndex !== undefined ? [control.cueIndex] : [])))} {...(laterTurns !== undefined ? { turns: laterTurns } : {})} />
               ) : (
                 <DirectedText
                   raw={row.block.text}
                   cues={row.direction?.input.cues ?? []}
                   held={new Set(row.held.flatMap((control) => (control.cueIndex !== undefined ? [control.cueIndex] : [])))}
+                  {...(laterTurns !== undefined ? { turns: laterTurns } : {})}
                   {...(markable ? { onPlate: (index: number) => onMarker({ key: row.block.key, span: { from: 0, to: 0 }, edit: index }) } : {})}
                 />
               )}

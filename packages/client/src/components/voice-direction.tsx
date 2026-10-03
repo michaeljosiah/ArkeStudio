@@ -116,17 +116,27 @@ export function sentenceEnd(text: string, from: number): number {
 }
 
 /**
+ * Where a turn begins in a block's words (design turn 190): a block read by one voice is a
+ * paragraph of several speakers' turns. The break holds no text, so a selection's offsets still
+ * count the words alone; the stylesheet draws the rule and the speaker's name from its data.
+ */
+export interface TurnBreak { at: number; label: string; tone: string }
+
+/**
  * The words with their markers in place (R-42): each its word in brackets on a plate — drawn by
  * the stylesheet from `data-mk`, so the plate is no text of the page and a selection's offsets
  * still count the words alone — a delivery filled, a cue dashed, a sound outlined in italic
  * (design turn 181), a delivery marker's span underlined, a held control struck (R-47). A press
  * on a plate opens the menu to change or remove it.
  */
-export function DirectedText({ raw, cues, held, onPlate }: { raw: string; cues: readonly CadenceCue[]; held: ReadonlySet<number>; onPlate?: (index: number) => void }) {
-  if (cues.length === 0) return <>{raw}</>;
+export function DirectedText({ raw, cues, held, onPlate, turns = [] }: { raw: string; cues: readonly CadenceCue[]; held: ReadonlySet<number>; onPlate?: (index: number) => void; turns?: readonly TurnBreak[] }) {
+  if (cues.length === 0 && turns.length === 0) return <>{raw}</>;
   const map = normalisedToRaw(raw);
+  // Where each later turn of a block begins, in the normalised words the cues use.
+  const turnAt = turns.map((turn) => ({ ...turn, at: rawToNormalised(raw, turn.at) }));
   const at = (normalised: number) => map[Math.min(Math.max(normalised, 0), map.length - 1)]!;
   const cuts = new Set<number>([0, map.length - 1]);
+  for (const turn of turnAt) cuts.add(turn.at);
   for (const cue of cues) {
     cuts.add(cueStart(cue));
     if (cue.kind === "emphasis" || cue.kind === "delivery") cuts.add(cue.span.to);
@@ -151,6 +161,9 @@ export function DirectedText({ raw, cues, held, onPlate }: { raw: string; cues: 
   if (at(0) > 0) out.push(raw.slice(0, at(0)));
   for (let index = 0; index < edges.length; index += 1) {
     const from = edges[index]!;
+    for (const turn of turnAt) {
+      if (turn.at === from) out.push(<span key={`turn${from}`} className={`fy-ab__turn fy-voice--${turn.tone}`} data-who={turn.label} aria-hidden="true" />);
+    }
     cues.forEach((cue, cueIndex) => {
       if (cueStart(cue) === from) out.push(plate(cue, cueIndex));
     });

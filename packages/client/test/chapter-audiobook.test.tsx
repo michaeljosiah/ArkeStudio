@@ -1068,6 +1068,20 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(marks[2] === "Maren Kest" || marks[2] === FIXTURE_STATE.world!.sheets.find((s) => s.id === "maren-kest")?.name, `the speaker, not the narrator: ${marks[2]}`);
   });
 
+  it("under one reader a paragraph is one block, its turns rows: the margin names the first, a rule names the next, and the words stay the paragraph's (design turn 190)", async () => {
+    const m = await mount(inkbound("narrator"));
+    await answerOpen(m, { voices: CAST });
+    const rows = all(m, ".fy-ab__block");
+    assert.equal(rows.length, 4, "the line and its tag are one block, not two");
+    const merged = rows.find((row) => row.getAttribute("data-block") === "p1.0")!;
+    assert.ok(merged.className.includes("fy-ab__block--merged"), "bracketed as a block of several turns");
+    assert.equal(merged.querySelector(".fy-ab__mark")!.textContent, FIXTURE_STATE.world!.sheets.find((s) => s.id === "maren-kest")!.name, "the first turn's speaker is the margin's");
+    const breaks = [...merged.querySelectorAll(".fy-ab__turn")] as HTMLElement[];
+    assert.deepEqual(breaks.map((turn) => turn.getAttribute("data-who")), ["narrator"], "each later turn begins at a rule that names its speaker");
+    assert.equal(merged.querySelector(".fy-ab__text")!.textContent, "“You hear it too,” she said.", "a break holds no text, so offsets still count the paragraph's words");
+    assert.equal(rows.filter((row) => row.className.includes("fy-ab__block--merged")).length, 1, "a paragraph of one turn is a block as it was");
+  });
+
   it("the head names the reading and its narrator, and its menu writes the book's reading or opens the narrator (design turn 165a, issue 1324 §3)", async () => {
     const m = await mount(voiced(inkbound("performed")));
     await answerOpen(m, { audiobook: record(NARRATION_KEYS, { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." }) });

@@ -6820,6 +6820,15 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-abexport__radio { width: 16px; height: 16px; flex: none; margin-top: 2px; border-radius: 50%; border: 1px solid var(--border); box-sizing: border-box; }
 .fy-abexport__opt--on .fy-abexport__radio { border: 5px solid var(--foreground); }
 .fy-ab__block--line.fy-ab__block--selected { background: color-mix(in srgb, var(--fy-voice) 7%, transparent); box-shadow: inset 2px 0 0 var(--fy-voice), inset 0 0 0 1px color-mix(in srgb, var(--fy-voice) 45%, transparent); }
+/* A block of several turns (design turn 190): the turns are rows in one block, bracketed at its edge, dark when it is selected. Each later turn begins at a rule with its speaker's name in the margin; the break holds no text, so offsets still count the words. */
+.fy-ab__block--merged { box-shadow: inset 3px 0 0 var(--neutral-400); }
+.fy-ab__block--merged.fy-ab__block--selected { box-shadow: inset 3px 0 0 var(--foreground); }
+.fy-ab__text { position: relative; }
+.fy-ab__turn { display: block; position: relative; height: 0; margin: 8px 0; border-top: 1px solid var(--border); }
+.fy-ab__turn::before { content: attr(data-who); position: absolute; left: -106px; top: 15px; width: 82px; padding-left: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12px/1.2 var(--font-sans); color: var(--fy-voice); }
+.fy-ab__turn::after { content: ""; position: absolute; left: -106px; top: 18px; width: 8px; height: 8px; border-radius: 50%; background: var(--fy-voice); }
+.fy-voice--none.fy-ab__turn::after { background: transparent; border: 1px dashed var(--fy-voice); box-sizing: border-box; }
+.fy-voice--narrator.fy-ab__turn::before, .fy-voice--none.fy-ab__turn::before { color: var(--muted-foreground); }
 .fy-ab__block--sounding { background: var(--secondary); box-shadow: inset 2px 0 0 var(--fy-voice, var(--foreground)); }
 .fy-ab__mark { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fy-ab__mark--warn { color: var(--warning); }
