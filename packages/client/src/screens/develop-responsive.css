@@ -12,7 +12,7 @@
 .fy-develop-model-sheet .fy-set__link { min-height: 44px; }
 .fy-develop-model-sheet .fy-arke__model { align-items: stretch; }
 
-/* The overview's cards (turn 171) at every width since design turn 189: the wide page is the
+/* The overview's cards (turn 171) at every width since design turn 192: the wide page is the
    narrow one, so its rules left the 1099 query. */
 .fy-overview { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: 22px 32px 32px; }
 .fy-overview .fy-eyebrow-sm { font: var(--type-label); letter-spacing: .16em; }

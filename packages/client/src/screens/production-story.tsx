@@ -252,7 +252,7 @@ function OverviewStoryScreen() {
     })),
   ];
   const pageRead = useProsePageRead({ pageId: prodId, title: overviewTitle, blocks: pageBlocks });
-  // One overview at every width (design turn 189): turn 171's cards, which the narrow widths
+  // One overview at every width (design turn 192): turn 171's cards, which the narrow widths
   // already drew, with one empty state. The wide page said "Nothing settled yet" twice, explained
   // itself in a footer and kept an empty "Waiting on you" rail beside it.
   if (!production || !worldId) return <div className="fy-overview fy-prodscroll" data-screen="story-overview" />;
@@ -448,7 +448,7 @@ export function ChapterTreeScreen() {
           <span style={{ width: `${Math.min(100, Math.round((bookWords / target) * 100))}%` }} />
         </div>
       )}
-      {/* Until a chapter is derived the view is one line and its press (design turn 189): a
+      {/* Until a chapter is derived the view is one line and its press (design turn 192): a
           grid of dashes under a sentence explaining them said "not derived" a dozen ways. Derive
           reads the first chapter not derived, as its own panel's press would. */}
       {view === "continuity" && chapters.length > 0 && (derivedCount === 0 ? (

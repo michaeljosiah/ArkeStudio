@@ -89,7 +89,7 @@ export function continuityRowStamp(stamp: ContinuityRow["stamp"]): string {
 
 /**
  * The panel's stamp: what the check dropped or cut. A clean check is the version alone (design
- * turn 189): "every line is the chapter's own words" was true of every record the check let
+ * turn 192): "every line is the chapter's own words" was true of every record the check let
  * through, so it said nothing a reader could act on, and a limit is said only where it can be
  * false.
  */

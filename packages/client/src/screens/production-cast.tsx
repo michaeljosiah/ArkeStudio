@@ -287,7 +287,7 @@ export function ProductionCastScreen() {
         </Card>
       )}
 
-      {/* Guests appear with the first one (design turn 189, 58a): New guest in the head is the
+      {/* Guests appear with the first one (design turn 192, 58a): New guest in the head is the
           way in, so an empty band explaining what a guest is said it twice. */}
       {guests.length + pendingGuests.length > 0 && (
         <div className="fy-eyebrow-sm fy-prodcast__label">

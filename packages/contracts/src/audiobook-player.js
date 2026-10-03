@@ -35,7 +35,7 @@ export function mountAudiobookPlayer(root, options) {
 
   const esc = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const pad = (n) => String(n).padStart(2, "0");
-  // A chapter titled with its own number ("Chapter 1") is named once (design turn 189): the
+  // A chapter titled with its own number ("Chapter 1") is named once (design turn 192): the
   // heading said "Chapter 01 · Chapter 1".
   const ownTitle = (c) => {
     const m = /^chapter\s+0*(\d+)$/i.exec(String(c.title).trim());

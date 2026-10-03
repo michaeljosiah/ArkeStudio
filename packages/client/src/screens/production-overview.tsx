@@ -55,7 +55,7 @@ export function CompactOverview({ worldId, production, staged, read }: {
         {style.voice && <ProseCard label="Voice"><p>{style.voice}</p>{actions("voice", style.voice)}</ProseCard>}
         {style.samples?.map((sample, index) => sample.trim() ? <ProseCard key={`${index}:${sample}`} label={`Sample ${index + 1}`}><p>{sample}</p><ReadAloud source={{ of: "story", productionId: id, field: "samples", sample: index }} title={`Sample ${index + 1}`} text={sample} /></ProseCard> : null)}
       </> : story ? <div className="fy-overview-style-unset"><b>Style</b><span>not set</span><NavLink to={develop}>Develop</NavLink></div> : null}
-      {/* One empty state (design turn 189): the line and where it is settled, not a Style row
+      {/* One empty state (design turn 192): the line and where it is settled, not a Style row
           beside a sentence that both say nothing is. */}
       {!story && !style && <div className="fy-overview-style-unset" data-testid="overview-empty"><b>Nothing settled yet</b><NavLink to={develop}>Develop</NavLink></div>}
     </div>

@@ -441,7 +441,7 @@ describe("the Audiobook door (turn 146)", () => {
     const m = await mount(inkbound(), ROUTE, true);
     const rail = all(m, ".fy-prodrail__item").find((item) => item.textContent?.includes("Audiobook"));
     assert.ok(rail, "Audiobook sits on the story rail");
-    // No door yet: nothing is not a count (design turn 190), so the row shows no dash.
+    // No door yet: nothing is not a count (design turn 192), so the row shows no dash.
     assert.doesNotMatch(rail.textContent ?? "", /—/);
     await answerDoor(m, door("narrator"));
     assert.match(rail.textContent ?? "", /1\/2/);

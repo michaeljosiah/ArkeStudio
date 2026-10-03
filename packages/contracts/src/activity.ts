@@ -5,7 +5,7 @@ import { isReplayableFinalization } from "./job.js";
 import { PROVIDERS } from "./provider.js";
 import { GENERIC_ERROR_COPY } from "./error-copy.js";
 
-/** A provider as a person reads it (turn 189): its display name, its id only when it has none. */
+/** A provider as a person reads it (turn 192): its display name, its id only when it has none. */
 function providerName(provider: string): string {
   return (PROVIDERS as Record<string, { displayName: string } | undefined>)[provider]?.displayName ?? provider;
 }
@@ -181,7 +181,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
     entries.push({
       urgency: 2,
       kind: "provider-paused",
-      // Name, state, one clause (design turn 136a; turn 189): the provider's name, never its id,
+      // Name, state, one clause (design turn 136a; turn 192): the provider's name, never its id,
       // and a reason only when it says something — the generic failure line restated nothing the
       // title had not, and "held, not failed" explained a word the count already carries.
       title: `${providerName(queue.provider)} paused`,

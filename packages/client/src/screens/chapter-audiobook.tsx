@@ -1644,7 +1644,7 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
   onFocus: () => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
-  // The note field waits behind its press until there is a note (design turn 189): three empty
+  // The note field waits behind its press until there is a note (design turn 192): three empty
   // inputs under three speakers read as three things owed.
   const [noteOpen, setNoteOpen] = useState(false);
   const showNote = noteOpen || note !== undefined || draft !== null;

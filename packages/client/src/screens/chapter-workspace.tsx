@@ -118,7 +118,7 @@ const AUTOSAVE_MS = 1200;
 
 /** What an empty chapter says. */
 const PLACEHOLDER = "Start here. It saves as you go.";
-/** Draws on's Add, started in the thread for the author to finish (design turn 189). */
+/** Draws on's Add, started in the thread for the author to finish (design turn 192). */
 const DRAWS_ON_LINE = "This chapter draws on ";
 
 type OpenedRecord = {
@@ -1765,7 +1765,7 @@ export function ChapterWorkspace({
                   and the words on screen are the draft's (codex, PR 879). */}
               {/* In Audiobook the head's presses sit on the view row with the reading (turn 165a). */}
               {/* One outline press reads the chapter (126a); a cast chapter's voiced read is its
-                  menu, not a second button beside it (design turn 189). While either reads, its
+                  menu, not a second button beside it (design turn 192). While either reads, its
                   own controls stand in the press's place. */}
               {view !== "manuscript" || paragraphs.length === 0 || stagedDraft !== undefined ? null : voicedRead.reading ? (
                 <PageReadControl read={readVoiced} label="Voiced" />
@@ -1777,7 +1777,7 @@ export function ChapterWorkspace({
             </div>
           </div>
           {/* The synopsis, typed where it reads (turn 127), the way the scene's is. */}
-          {/* Two lines until it is pressed (design turn 189, 129a's one line under the title):
+          {/* Two lines until it is pressed (design turn 192, 129a's one line under the title):
               a press opens it to type, or, locked, to read whole. */}
           {locked ? (
             chapter.synopsis !== undefined && chapter.synopsis !== "" ? (
@@ -1799,7 +1799,7 @@ export function ChapterWorkspace({
           )}
           <div className="fy-sw__context" aria-label="Chapter state">
             {/* Unset, a mark is a quiet press to set it, and on a narrow screen (where the plan
-                is set in Notes) not drawn at all (design turn 189): an empty pill says nothing. */}
+                is set in Notes) not drawn at all (design turn 192): an empty pill says nothing. */}
             {compact ? (
               chapter.pov ? <span className="fy-ch__mark"><span>{sheetName(chapter.pov)}</span></span> : null
             ) : (
@@ -2286,7 +2286,7 @@ export function ChapterWorkspace({
                 <div className="fy-ch__moved fy-ch__moved--line">chapter moved · derived against v{continuityRecord.version}</div>
               )}
               {deriveNote !== null && !derivingNow && <div className="fy-ch__moved fy-ch__moved--line">{deriveNote}</div>}
-              {/* Not derived is the heading and its Derive press, one line (design turn 189): a
+              {/* Not derived is the heading and its Derive press, one line (design turn 192): a
                   panel says nothing until there is something to say. */}
               {continuityRecord === null ? null : continuityRecord.characters.length === 0 ? (
                 <p className="fy-bible__empty">Nothing placed yet.</p>
@@ -2423,7 +2423,7 @@ export function ChapterWorkspace({
                     `cast · v${voicesRecord.version}`,
                     `${castLinesRead.length} line${castLinesRead.length === 1 ? "" : "s"}`,
                     `${speakers.length} speaker${speakers.length === 1 ? "" : "s"}`,
-                    // A drop is said; a clean check is the count alone (design turn 189).
+                    // A drop is said; a clean check is the count alone (design turn 192).
                     ...(voicesRecord.dropped > 0 ? [`${voicesRecord.dropped} line${voicesRecord.dropped === 1 ? "" : "s"} dropped, not in the chapter`] : []),
                     ...(voicesRecord.omitted > 0 ? [`${voicesRecord.omitted} line${voicesRecord.omitted === 1 ? "" : "s"} over the cap`] : []),
                     ...(voiced.ambiguous > 0 ? [`${voiced.ambiguous} ambiguous`] : []),
@@ -2457,7 +2457,7 @@ export function ChapterWorkspace({
               </section>
             )}
 
-            {/* Implies appears with its first fact (design turn 189; 127b draws it only with items). */}
+            {/* Implies appears with its first fact (design turn 192; 127b draws it only with items). */}
             {implies.length > 0 && (
             <section className="fy-bible__panel">
               <h2 className="fy-bible__paneltitle">
@@ -2511,7 +2511,7 @@ export function ChapterWorkspace({
             )}
 
             <section className="fy-bible__panel" data-testid="chapter-draws">
-              {/* Empty, Draws on is its heading and an Add press, one line (design turn 189,
+              {/* Empty, Draws on is its heading and an Add press, one line (design turn 192,
                   amending 126): Add starts the line in the thread, where draws is changed. */}
               <h2 className="fy-bible__paneltitle fy-ch__paneltitle--row">
                 Draws on
@@ -2553,7 +2553,7 @@ export function ChapterWorkspace({
               )}
             </section>
 
-            {/* Earlier versions appears with the first one kept (design turn 189). */}
+            {/* Earlier versions appears with the first one kept (design turn 192). */}
             {history.length > 0 && (
               <section className="fy-bible__panel">
                 <h2 className="fy-bible__paneltitle">Earlier versions</h2>
@@ -2677,7 +2677,7 @@ export function ChapterWorkspace({
 
 /**
  * Read the chapter, one outline press with its play mark (126a). A cast chapter's voiced read is
- * the press's menu (design turn 189) rather than a second grey button beside it: two presses of
+ * the press's menu (design turn 192) rather than a second grey button beside it: two presses of
  * the same weight made the head ask which, every time, for a choice made once.
  */
 function ReadPress({ read, voiced }: { read: PageRead; voiced: PageRead | null }) {

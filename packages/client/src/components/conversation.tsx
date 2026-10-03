@@ -1595,7 +1595,7 @@ export function ProductionConversation({
   const groups = groupPointsBySubject(points);
   const openCount = points.filter(point => point.kind === "question").length;
   const sideTitle = stagedTitle ?? "What it understood";
-  // What it understood appears with its first note (design turn 189): an empty panel with a
+  // What it understood appears with its first note (design turn 192): an empty panel with a
   // disabled Wrap up beside an empty thread was two things owed and nothing to act on. A thread
   // carried from production setup has its outline to show, so it keeps the panel.
   const understoodEmpty = points.length === 0 && carriedPoints === 0 && loaded?.productionSetup?.status !== "created";
@@ -1628,7 +1628,7 @@ export function ProductionConversation({
         {eyebrow && <div className="fy-eyebrow-sm">{eyebrow}</div>}
         {heading && <h1 className="fy-story__h1">{heading}</h1>}
       </div>}
-      {/* One compact bar at every width (design turn 189, 44a's one line): the model select, its
+      {/* One compact bar at every width (design turn 192, 44a's one line): the model select, its
           scope, the context chips and the Overview link each on a row of their own were the
           desktop's chrome around a composer the narrow widths already said in one line. */}
       {responsive && <button type="button" className="fy-develop-model" aria-haspopup="dialog" onClick={() => setModelsOpen(true)}>

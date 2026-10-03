@@ -321,7 +321,7 @@ export function ProductionLayout() {
     const line = audiobookDoorLine(audiobookDoor.rows);
     return `${line.read}/${line.withProse}`;
   })();
-  // What the Cast page lists (design turn 189, 58a's rail): its guests, the guests staged for
+  // What the Cast page lists (design turn 192, 58a's rail): its guests, the guests staged for
   // review, and the world's cast it shares. Counting the guests alone put "Cast 0" over a page of
   // seven people.
   const castCount = prodId
@@ -438,7 +438,7 @@ export function ProductionLayout() {
           </span>
         )}
         <span className="fy-prodrail__label">{label}</span>
-        {/* Nothing is not a count (design turn 189): "—" and "0" beside a row said only that the
+        {/* Nothing is not a count (design turn 192): "—" and "0" beside a row said only that the
             page behind it is empty, which the page says when it is opened. */}
         {count !== undefined && count !== "—" && count !== "0" && <span className="fy-prodrail__count">{count}</span>}
       </NavLink>
@@ -674,7 +674,7 @@ export function ProductionLayout() {
             <>
               {item("", "Dashboard")}
               {/* Cast is on both formats' rails (SPEC-020 R-9): a story has a cast as much as a
-                  video does, and the count is everyone its page lists (design turn 189). */}
+                  video does, and the count is everyone its page lists (design turn 192). */}
               {item("cast", "Cast", String(castCount))}
               {isStory ? (
                 <>

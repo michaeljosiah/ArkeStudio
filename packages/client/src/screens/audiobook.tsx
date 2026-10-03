@@ -168,7 +168,7 @@ function VoiceChip({ name, voice, state, blocks, awaiting, to, onPress, performe
       {compactDetail !== undefined && <Speaker size={16} />}
       <span className="fy-abdoor__voice-name">{name}</span>
       <span className="fy-abdoor__voice-what fy-mono">
-        {/* A performer with no note is their count alone (design turn 189): "plain" named the
+        {/* A performer with no note is their count alone (design turn 192): "plain" named the
             absence of a note in a word nobody had been taught. */}
         {compactDetail ?? [what, `${blocks} block${blocks === 1 ? "" : "s"}`].filter((part) => part !== "").join(" · ")}
       </span>
@@ -414,7 +414,7 @@ export function AudiobookScreen() {
       )}
       {/* The book's requests (design turn 185d), where its reader can group; inside the book's reading when that is open. */}
       {/* Under Performed the requests are a setting of the book's reading (185d) and wait inside
-          it; under a narrator's reading they are the one setting there is (design turn 189). */}
+          it; under a narrator's reading they are the one setting there is (design turn 192). */}
       {requestsPanel !== null && reading !== "performed" && <BookRequests {...requestsPanel} />}
       {narrating && door !== null && worldId !== undefined && prodId !== undefined && (
         <NarratorDialog

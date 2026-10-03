@@ -48,7 +48,7 @@ import "./screens/develop-responsive.css";
 import "./screens/branch-map.css";
 import "./screens/season-responsive.css";
 import "./screens/chapter-responsive.css";
-// After the screens' own sheets: design turn 189's re-dresses of rules they own.
+// After the screens' own sheets: design turn 192's re-dresses of rules they own.
 import "./screens/quiet.css";
 // After fidelity.css: the panel re-dresses the provider-call inspector with a rule of equal
 // specificity, and the later sheet wins.
