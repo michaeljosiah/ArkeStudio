@@ -224,6 +224,16 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-content--fixed { overflow: hidden; }
 /*
+ * Fit on wide screens (design turn 188): the shared measures. Here rather than in tokens/spacing.css,
+ * which must stay byte for byte the design system's baseline. A page is laid out no wider than in the
+ * 1440 window it was drawn for; past that it centres and the margins grow.
+ */
+:root {
+  --content-max: var(--width-max);   /* a production page's content, beside the rail: 1080 */
+  --content-max-chapter: 940px;      /* the chapter: 640 prose, 28 gap, 250 rail, the head over them */
+  --page-max: 1440px;                /* a world page has no rail: the frame the 1080 sits in */
+}
+/*
  * Fit on wide screens (design turn 188). A world page has no rail, so it stops at the 1440 window
  * it was drawn for (the production's 1080 and the rail beside it) and centres past that. At 2560
  * the Bible ran 2,145px lines and Cast put a row's state 1,100px from its name. The fixed frames,
