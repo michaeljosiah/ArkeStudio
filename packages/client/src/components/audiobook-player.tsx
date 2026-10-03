@@ -105,6 +105,13 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
     return () => clearTimeout(timer);
   }, [worldId, productionId, connection, stamp]);
 
+  /** The book takes the app's one read: the previous owner stopped, the dock's clip let go. */
+  const claimBook = () => {
+    claimRead(READ_KEY, () => handle.current?.pause());
+    clearQueue();
+    dismissPlayback();
+  };
+
   // A modal from the moment it opens, before its plan is answered (codex on PR 1493): focus moves
   // in at once and returns to what opened it, Tab and Shift+Tab stay inside while it is up, and
   // Esc closes it while it waits — past the player's last control is the screen behind it.
@@ -115,9 +122,7 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
     // A read still being made would queue its first piece over the book when it lands, so the book
     // claims the one read the app has, which stops the read's owner outright (codex on PR 1495),
     // and a read started while the book plays pauses the book.
-    claimRead(READ_KEY, () => handle.current?.pause());
-    clearQueue();
-    dismissPlayback();
+    claimBook();
     const opener = element.ownerDocument.activeElement as HTMLElement | null;
     const trap = (event: KeyboardEvent) => {
       if (event.key === "Escape" && handle.current === null) {
@@ -178,6 +183,9 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
       autoplay: true,
       continueFirst: chapterId === undefined,
       onClose: () => closing.current(),
+      // Every play or resume — a press, a key, the lock screen — takes the voice back from a read
+      // that took it meanwhile (codex on PR 1499).
+      onPlay: () => claimBook(),
     });
     element.focus();
     // The options are read once, at the mount; the plan is the one thing pushed in after.
