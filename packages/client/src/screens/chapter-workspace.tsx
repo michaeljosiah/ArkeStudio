@@ -1798,19 +1798,23 @@ export function ChapterWorkspace({
               </select>
               )}
             </span>
-            <span className="fy-ch__mark">
-              {locked || compact ? (
-                <span className="fy-mono">{chapter.when ?? ""}</span>
-              ) : (
-                <EditableText
-                  value={chapter.when ?? ""}
-                  placeholder="When"
-                  className="fy-ch__when"
-                  rows={1}
-                  onCommit={(next) => plan({ when: next.trim() === "" ? null : next.trim() })}
-                />
-              )}
-            </span>
+            {/* Read-only (locked, or the compact head) with no time set, there is nothing to show
+                and nothing to press: the mark stays out rather than standing as an empty pill. */}
+            {(locked || compact) && !chapter.when ? null : (
+              <span className="fy-ch__mark">
+                {locked || compact ? (
+                  <span className="fy-mono">{chapter.when}</span>
+                ) : (
+                  <EditableText
+                    value={chapter.when ?? ""}
+                    placeholder="When"
+                    className="fy-ch__when"
+                    rows={1}
+                    onCommit={(next) => plan({ when: next.trim() === "" ? null : next.trim() })}
+                  />
+                )}
+              </span>
+            )}
             <span>{chapter.status}</span>
             <span>{words.toLocaleString()} words{compact && ` · ${waiting !== null ? `${waiting} waiting` : saveRefusal !== null ? "not saved" : saving ? "saving" : "saved"}`}</span>
             {!compact && <span>{waiting !== null ? `${waiting} waiting` : saveRefusal !== null ? "not saved" : saving ? "saving" : "saved"}</span>}

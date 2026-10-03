@@ -92,3 +92,16 @@ it('compact chapters retain voiced playback whenever a voice record exists',asyn
  await act(async()=>__applyEventForTest({type:'chapter.open-result',at:'2026-09-28T14:00:00Z',requestId:ask.requestId,worldId:ask.worldId,productionId:ask.productionId,chapterId:'neap',disposition:'opened',body:CHAPTER_BODY+'\n\n<br>',version:4,hash:CHAPTER_HASH,versions:[3,2],voices:{version:4,hash:CHAPTER_HASH,derivedAt:'2026-09-28T14:00:00Z',passes:1,dropped:0,omitted:0,lines:[]}}));
  assert.match(find('.fy-ch__compact-actions').textContent!,/Read voiced chapter/);
 });
+it('the phone audiobook door holds no count, price or eyebrow until the door lands',async()=>{
+ await mount('p/ledger/story/audiobook');
+ assert.equal(find('[data-testid="audiobook-line"]').textContent,'','no stray "…" eyebrow over the title');
+ assert.equal(find('.fy-abdoor-held'),null,'"0 blocks · price unavailable" is not held at the foot while the door opens');
+});
+it('a compact read-only chapter with no time set draws no empty When pill',async()=>{
+ await mount('p/ledger/story/chapters/neap',820,'normal',false,false);await openChapter();
+ const marks=()=>[...document.querySelectorAll<HTMLElement>('[aria-label="Chapter state"] .fy-ch__mark')];
+ assert.ok(marks().some(m=>m.textContent==='1820 · March'),'a set time stays');
+ const fresh=chapterLayoutFixture();delete fresh.world!.productions[0]!.chapters[0]!.when;
+ await act(async()=>__setStateForTest(fresh));
+ assert.equal(marks().some(m=>m.textContent===''),false,'no empty mark stands in for an unset time');
+});

@@ -247,3 +247,55 @@
   .fy-swrow__run button { border: 1px solid var(--border); border-radius: 10px; padding: 0 14px; text-decoration: none; background: var(--background); color: var(--foreground); }
   .fy-swrow__band[data-run-state] .fy-swrow__script-read, .fy-swrow__band[data-run-state] .fy-swrow__actions { display: none; }
 }
+
+/* The world's Bench below desktop. Its four bands (46 rail, 410 composer, the wall, a 104 strip)
+   are fixed widths, so at 820 the take had 230 px between the composer and the strip and at 390
+   the composer ran 410 px off the right edge. */
+.fy-bench__sessiontitle { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+@media (max-width: 899px) {
+  /* The subject and spend pills cannot fit beside a centred wordmark here: on the desktop
+     shell, whose right side gives 138 px to the window controls, they ran over "Arke Studio". */
+  .fy-bench__pill { display: none; }
+}
+@media (max-width: 1099px) {
+  /* Under the wordmark's half-width even beside the desktop shell's 138 px of window controls. */
+  .fy-bench__pill { max-width: 160px; }
+  /* Production Generate's grid at this width: a 340 composer, the take, the takes under it. */
+  .fy-bench { grid-template-columns: 46px 340px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .fy-bench__rail, .fy-bench__composer { grid-row: 1 / 3; }
+  .fy-bench__wall { grid-column: 3; grid-row: 1; }
+  .fy-bench__strip { grid-column: 3; grid-row: 2; flex-direction: row; gap: 8px; padding: 8px 14px 10px; overflow-x: auto; overflow-y: hidden; border-left: 0; border-top: 1px solid var(--border); background: var(--muted); }
+  .fy-bench__take { flex: none; flex-direction: column; align-items: stretch; gap: 3px; width: 84px; }
+  .fy-bench__takeframe { flex: none; width: 84px; height: auto; aspect-ratio: 16 / 9; }
+  .fy-bench__taken { order: 1; width: auto; text-align: left; }
+}
+@media (max-width: 599px) {
+  /* The bench lens of 169a: the take, the takes, then what makes the next one, one column. */
+  .fy-bench { display: flex; flex-direction: column; gap: 14px; padding: 14px 20px calc(24px + env(safe-area-inset-bottom, 0px)); overflow-y: auto; scrollbar-width: none; }
+  .fy-bench__rail { display: none; }
+  .fy-bench__wall { order: 0; flex: none; background: transparent; }
+  .fy-bench__wallbar { padding: 0 0 8px; overflow-x: auto; scrollbar-width: none; }
+  .fy-bench__briefrow { padding: 0 0 8px; }
+  /* 16:9 for a picture, and never shorter than a voice take's player card with its chips. */
+  .fy-bench__media { flex: none; margin: 0; aspect-ratio: 16 / 9; min-height: 240px; }
+  .fy-bench__empty { flex: none; margin: 0; min-height: 180px; }
+  .fy-bench__wallactions { padding: 10px 0 0; }
+  .fy-bench__wallactions > span:first-child { display: none; }
+  .fy-bench__wallactions .ui-btn { flex: 1; height: 44px; min-height: 44px; }
+  .fy-bench__strip { order: 1; flex: none; padding: 0 0 2px; border: 0; background: transparent; }
+  .fy-bench__mode button { padding-inline: 9px; }
+  .fy-bench__composer { order: 2; flex: none; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); }
+  .fy-bench__brief { flex: none; }
+  .fy-bench__dispatch { flex-wrap: wrap; }
+  .fy-bench__dispatch .ui-btn { min-height: 44px; }
+  /* The crumb on one line: the back is its chevron, the session's name ends in an ellipsis
+     (four lines of "Na Love or Juju / Untitled session" sat over the bar's icons). */
+  [data-screen="bench"] .fy-titlebar__side:first-child { flex-wrap: nowrap; }
+  [data-screen="bench"] .fy-titlebar .fy-iconbtn--wide { flex: none; width: 44px; height: 44px; padding: 0; justify-content: center; font-size: 0; }
+  [data-screen="bench"] .fy-titlebar .fy-iconbtn--wide > svg { width: 20px; height: 20px; }
+  .fy-bench__crumb { flex: 0 1 auto; min-width: 0; }
+  .fy-bench__crumb > span { min-width: 0; }
+  .fy-bench__crumbsep { display: none; }
+  .fy-bench__session { min-width: 0; max-width: 100%; min-height: 44px; font-size: var(--text-sm); }
+  .fy-bench__sessionmenu { position: fixed; top: calc(52px + env(safe-area-inset-top, 0px)); left: 12px; right: 12px; min-width: 0; }
+}
