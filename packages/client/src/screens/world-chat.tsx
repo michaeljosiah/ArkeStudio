@@ -7,6 +7,7 @@ import { useMediaQuery } from "../lib/media-query.js";
 import { relativeDate } from "../lib/format.js";
 import { useReadReplies } from "../components/read-replies.js";
 import { Composer } from "../components/composer.js";
+import { ModelChip } from "../components/model-chip.js";
 import { FoundingProgressCard } from "../components/genesis-readiness.js";
 import { attachmentChipLabel, ConversationTranscript } from "../components/conversation.js";
 import { EmptyState } from "../components/layout.js";
@@ -953,6 +954,11 @@ export function WorldChatScreen() {
               // and the draft is still corrected and sent by hand (SPEC-018 R-2, R-5).
               onDictate={(text) => setDraft((prev) => (prev ? `${prev} ${text}` : text))}
               readReplies={readReplies.composer}
+              // World Chat's model is the chat agent's, chosen in Settings: the coordinator
+              // refuses a named model outside a production (issue 1403) and there is no world-level
+              // language choice to remember one in, so the chip says which model answers and
+              // offers no menu.
+              modelControl={<ModelChip readOnly state={state} value={state?.app.agents.find((agent) => agent.name === "world-builder")?.model} set={false} onPick={() => {}} />}
               {...(worldId && !wrappingUp
                 ? {
                     onAttach: () => {

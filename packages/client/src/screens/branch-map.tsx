@@ -446,7 +446,7 @@ export function BranchMapScreen() {
     <ProductionConversation
       worldId={worldId}
       productionId={prodId}
-      dock={{ controlsInSheet: true, title: "Arke", subject: `${production.meta.title} · branch map`, ...(compact && putAway ? {onPutAway:putAway} : {}) }}
+      dock={{ title: "Arke", subject: `${production.meta.title} · branch map`, ...(compact && putAway ? {onPutAway:putAway} : {}) }}
       openingNote="opening…"
       emptyLine="Ask about a route, or have Arke draw one."
       placeholder="Ask Arke about this map…"

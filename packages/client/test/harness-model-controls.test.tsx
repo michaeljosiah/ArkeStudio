@@ -13,6 +13,12 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 dom.HTMLElement.prototype.scrollIntoView = () => {};
+// linkedom has no innerText; the composer reads and writes its editor through it.
+Object.defineProperty(dom.HTMLElement.prototype, "innerText", {
+  configurable: true,
+  get() { return this.textContent; },
+  set(value: string) { this.textContent = value; },
+});
 Object.assign(globalThis, {
   window: dom.window,
   document: dom.document,
@@ -158,6 +164,30 @@ function conversation() {
     emptyLine="Nothing said yet"
     dock={{ title: "Arke", subject: "Production", prompts: ["Explain the scene"] }}
   />;
+}
+
+/** The same conversation as a page rather than a dock: Develop's production and episode chats. */
+function pageConversation() {
+  return <ProductionConversation
+    worldId={FIXTURE_STATE.world!.meta.worldId}
+    productionId="saltlight"
+    placeholder="Say something"
+    emptyLine="Nothing said yet"
+    contextSummary="3 scenes"
+    heading="What happens in this one?"
+  />;
+}
+
+const props = (element: HTMLElement) => {
+  const key = Object.keys(element).find((name) => name.startsWith("__reactProps$"))!;
+  return (element as unknown as Record<string, Record<string, (event: never) => void>>)[key]!;
+};
+/** Says a line through the composer, as a person does: type it, then press send. */
+async function say(text: string) {
+  const editor = container.querySelector<HTMLElement>(".fy-cx__editor")!;
+  editor.innerText = text;
+  await act(async () => props(editor).onInput!({ currentTarget: editor } as never));
+  await act(async () => container.querySelector<HTMLButtonElement>(".fy-cx__send")!.click());
 }
 
 describe("live harness model controls (#1123, #1124)", () => {
@@ -584,6 +614,77 @@ describe("round-64 harness regressions (#1154)", () => {
     await pickModel(CLAUDE);
     assert.match(chip().textContent ?? "", /Sonnet/, "an explicit choice ahead of the agent's override");
     assert.equal(isSet(), false, "equal to the production's own, so no dot");
+  });
+});
+
+/**
+ * The page keeps what the dock keeps (design turn 190e): the model a chip in the composer's own
+ * row, this chat's choice apart from the production's, and a word about the catalogue only while
+ * there is trouble with it. The row above the composer, its scope words and its links went from
+ * both.
+ */
+describe("the model chip on a conversation page (turn 190e)", () => {
+  const OLD_ROW = /THIS TURN|CHAT AGENT|THIS PRODUCTION|DEFAULT|Ask the harness|Use saved choice|Remember for this production|Clear production default|models? from Claude Code/;
+
+  it("is a chip in the composer's row, with no select, row or scope word above it", async () => {
+    await mount(modelState(), pageConversation());
+    assert.ok(container.querySelector(".fy-cx__bar button.fy-mchip__btn"), "in the tool row beside attach and voice");
+    assert.equal(container.querySelector('select[aria-label="Language model"]'), null);
+    assert.equal(container.querySelector(".fy-arke__model"), null);
+    assert.doesNotMatch(container.textContent!, OLD_ROW);
+    assert.match(chip().textContent ?? "", /Sonnet/, "the production's remembered choice");
+    assert.equal(isSet(), false);
+  });
+
+  it("sends a pick as this turn's only, and lets the production keep its own", async () => {
+    await mount(modelState(), pageConversation());
+    await say("What changes in scene two?");
+    const inherited = sent.findLast((message) => message.kind === "world-chat-send");
+    assert.ok(inherited && inherited.kind === "world-chat-send");
+    assert.equal(inherited.modelId, undefined, "the coordinator resolves the production's choice");
+    await act(async () => __applyEventForTest({ at: "2026-09-13T00:00:01Z", type: "world-chat.send-result", conversationId: CV as never, requestId: inherited.requestId, admitted: true }));
+    await act(async () => __setStateForTest({ ...modelState(), worldChat: workspaceAt(2) }));
+    await pickModel(OPUS);
+    assert.equal(isSet(), true, "a dot says the choice is this chat's alone");
+    await say("And scene three?");
+    const explicit = sent.findLast((message) => message.kind === "world-chat-send");
+    assert.ok(explicit && explicit.kind === "world-chat-send");
+    assert.equal(explicit.modelId, OPUS);
+    assert.equal(isSet(), false, "spent; the production's choice is back");
+    assert.match(chip().textContent ?? "", /Sonnet/);
+    assert.equal(sent.some((message) => message.kind === "set-production-model"), false);
+  });
+
+  it("remembers a pick for every chat in the production, and lets the production's choice go", async () => {
+    await mount(modelState(), pageConversation());
+    assert.equal(menuPress(/Every chat in this production/), undefined);
+    await pickModel(OPUS);
+    await chipPress(/Every chat in this production/);
+    assert.ok(sent.some((message) => message.kind === "set-production-model" && message.capability === "llm" && message.modelId === OPUS));
+    await chipPress(/Clear the production/);
+    assert.ok(sent.some((message) => message.kind === "set-production-model" && message.modelId === null));
+    assert.equal(isSet(), false);
+  });
+
+  it("shows a saved choice the harness no longer offers, disabled, and keeps it clearable", async () => {
+    const state = modelState();
+    state.app.harnessModels = [];
+    state.app.harnessModelStatus = { status: "error", reason: "The harness did not answer." };
+    await mount(state, pageConversation());
+    await openChip();
+    assert.match(container.querySelector(".fy-mchip__menu")!.textContent ?? "", /anthropic\/sonnet\s*unavailable/);
+    assert.equal(modelItem(CLAUDE).disabled, true);
+    assert.match(container.textContent!, /The harness did not answer/, "the catalogue's trouble is said, below the title and above the composer");
+    await chipPress(/Clear the production/);
+    assert.ok(sent.some((message) => message.kind === "set-production-model" && message.modelId === null));
+  });
+
+  it("says nothing of the catalogue while it is fine, and a word while it loads", async () => {
+    const state = modelState();
+    await mount(state, pageConversation());
+    assert.doesNotMatch(container.textContent!, /models? from |Loading models/);
+    await act(async () => __setStateForTest({ ...state, app: { ...state.app, harnessModelStatus: { status: "loading" } } }));
+    assert.match(container.textContent!, /Loading models from Claude Code/);
   });
 });
 

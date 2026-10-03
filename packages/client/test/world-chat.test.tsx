@@ -741,3 +741,39 @@ describe("a wrap-up that was refused", () => {
     assert.doesNotMatch(render(), /fy-panel__refused/, "a refusal belongs to the conversation it came from");
   });
 });
+
+/**
+ * The model World Chat answers with (design turn 190e). Every chat composer keeps attach, voice
+ * and the model in one row. World Chat's model is the chat agent's, chosen in Settings: the
+ * coordinator refuses a named model outside a production, so the chip names it and offers no menu.
+ */
+describe("the model World Chat answers with", () => {
+  function render(model: string | undefined, models: ClientState["app"]["harnessModels"]): string {
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        harnessModels: models,
+        agents: [{ name: "world-builder", description: "Chat", brief: "b", shippedBrief: "b", edited: false, ...(model ? { model } : {}) }],
+      },
+    });
+    return renderToString(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat`]}>
+        <App />
+      </MemoryRouter>,
+    ).replaceAll("<!-- -->", "");
+  }
+
+  it("names the chat agent's model in the composer's row, as a label with no menu", () => {
+    const html = render("anthropic/sonnet", [{ id: "sonnet", provider: "anthropic", displayName: "Sonnet" }]);
+    const start = html.indexOf("fy-cx__bar");
+    const bar = html.slice(start, html.indexOf("fy-cx__send", start));
+    assert.match(bar, /fy-mchip__btn--fixed[^>]*><span class="fy-mchip__name">Sonnet</, "named beside attach and voice");
+    assert.doesNotMatch(bar, /aria-haspopup/, "nothing here to choose");
+    assert.doesNotMatch(html, /Ask the harness|THIS TURN|CHAT AGENT/);
+  });
+
+  it("says nothing when there is no model to name", () => {
+    assert.doesNotMatch(render(undefined, []), /fy-mchip/);
+  });
+});

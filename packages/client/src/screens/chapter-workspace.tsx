@@ -2597,7 +2597,6 @@ export function ChapterWorkspace({
             title: `Arke · Chapter ${String(chapter.order).padStart(2, "0")}`,
             subject: `${chapter.title} · ${production.meta.title}`,
             conversationFirst: true,
-            controlsInSheet: true,
             onPutAway: () => setDock(false),
             ...(ask !== null ? { ask } : {}),
             onAsk: setAsk,
