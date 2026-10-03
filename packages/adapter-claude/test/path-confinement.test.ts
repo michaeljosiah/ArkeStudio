@@ -214,7 +214,9 @@ describe("what the prompt promises, and what the gate does", () => {
       list: null,
       todo: ["TodoWrite", {}],
       "world-query": ["mcp__arke-world__get_sheet", { id: "maren-kest" }],
-      skill: ["Skill", {}],
+      // Claude Code's Skill tool is not offered on this lane: the session's skill is in its
+      // system prompt, and the tool could only open Claude Code's own skills.
+      skill: null,
       delegate: ["Task", {}],
       web: ["WebSearch", { query: "x" }],
     };

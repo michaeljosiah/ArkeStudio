@@ -14,6 +14,7 @@ import {
   intentOf,
   normalizeClaude,
   toolSummary,
+  unexpectedSurface,
   type RunQuery,
 } from "../src/index.js";
 import { tempDir } from "./tmp.js";
@@ -162,6 +163,179 @@ describe("the options a session is opened with", () => {
     const adapter = new ClaudeAdapter({ command: "claude", runQuery: fakeQuery([]).run });
     await assert.rejects(() => adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "not-an-agent" }), /no roster agent/);
     await adapter.dispose();
+  });
+});
+
+describe("what a session is shown, which the gate alone does not decide", () => {
+  /*
+   * Measured on 2.1.235 and 2.1.288: under a gate that denied everything, a turn loaded CronCreate
+   * through ToolSearch and scheduled a recurring job, and the gate was consulted for neither call.
+   * A tool on offer is a tool that may never reach `canUseTool`, so the offer itself is narrowed.
+   */
+  const init = (tools: string[], servers: string[] = []) => ({
+    type: "system",
+    subtype: "init",
+    tools,
+    mcp_servers: servers.map((name) => ({ name, status: "connected" })),
+  });
+
+  async function optionsFor(agent: string, prep: { researchWeb?: boolean } = {}) {
+    const fake = fakeQuery([result()]);
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
+    adapter.prepareSession({ preparationId: "p", ...prep });
+    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent, preparationId: "p" });
+    await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
+    await adapter.dispose();
+    return fake.options();
+  }
+
+  it("offers only the built-ins the role's confinement permits", async () => {
+    const authoring = await optionsFor("sheet-editor");
+    assert.deepEqual(authoring["tools"], ["Read", "NotebookRead", "Edit", "Write", "NotebookEdit", "Glob", "Grep", "TodoWrite", "TodoRead"]);
+    const worldChat = await optionsFor("world-builder");
+    assert.deepEqual(worldChat["tools"], ["Read", "NotebookRead", "Glob", "Grep", "TodoWrite", "TodoRead"], "read-only: no Edit, no Write");
+    const researching = await optionsFor("world-builder", { researchWeb: true });
+    assert.deepEqual((researching["tools"] as string[]).slice(-2), ["WebSearch", "WebFetch"], "web only when Settings turns it on");
+    for (const options of [authoring, worldChat, researching]) {
+      for (const absent of ["ToolSearch", "CronCreate", "PushNotification", "SendMessage", "Monitor", "Skill", "Task", "Bash"]) {
+        assert.equal((options["tools"] as string[]).includes(absent), false, `${absent} is never offered`);
+      }
+    }
+  });
+
+  it("connects only the MCP servers it passes, and never the claude.ai connectors", async () => {
+    const options = await optionsFor("world-builder");
+    assert.equal(options["strictMcpConfig"], true, "settingSources: [] keeps the user's files out, not plugins or agents");
+    assert.deepEqual(options["settings"], { disableClaudeAiConnectors: true }, "connectors come with the login, not a settings file");
+    assert.deepEqual(options["settingSources"], []);
+  });
+
+  it("ends the session before the model answers when the harness shows it more than that", async () => {
+    let abort: AbortController | undefined;
+    let answered = false;
+    const run: RunQuery = ({ prompt, options }) => {
+      abort = options["abortController"] as AbortController;
+      return (async function* () {
+        await prompt[Symbol.asyncIterator]().next();
+        yield init(["Read", "Glob", "Grep", "CronCreate", "mcp__arke-world__search_canon"], ["arke-world", "claude.ai Claude Docs"]);
+        answered = true;
+        yield assistant([{ type: "text", text: "scheduled it" }]);
+        yield result();
+      })();
+    };
+    const traces: Record<string, unknown>[] = [];
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: run, worldQueryUrl: "http://127.0.0.1:9/mcp", onTrace: (line) => traces.push(line) });
+    let sessionId = "";
+    const events = await collect(adapter, async () => {
+      ({ sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "world-builder" }));
+      await assert.rejects(
+        () => adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] }),
+        /outside Arke Studio's confinement: CronCreate, MCP server claude\.ai Claude Docs$/,
+      );
+      await assert.rejects(
+        () => adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: "again" }] }),
+        /outside Arke Studio's confinement/,
+        "a later message is told why, not queued onto an inbox nothing reads",
+      );
+    });
+    assert.equal(answered, false, "nothing after the init message was read");
+    assert.equal(abort?.signal.aborted, true, "the harness process is stopped, not merely ignored");
+    assert.ok(events.some((e) => e.type === "session.ended" && e.reason === "error"));
+    assert.equal(events.some((e) => e.type === "message.delta"), false);
+    assert.deepEqual(traces.find((t) => t["at"] === "claude.surface-refused")?.["unexpected"], ["CronCreate", "MCP server claude.ai Claude Docs"]);
+  });
+
+  it("carries on when the harness shows exactly what it was given", async () => {
+    const fake = fakeQuery([
+      init(["Glob", "Grep", "Read", "mcp__arke-world__search_canon", "mcp__arke-world__get_entry"], ["arke-world"]),
+      assistant([{ type: "text", text: "answered" }]),
+      result(),
+    ]);
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run, worldQueryUrl: "http://127.0.0.1:9/mcp" });
+    const events = await collect(adapter, async () => {
+      const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "world-builder" });
+      await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
+    });
+    assert.ok(events.some((e) => e.type === "message.completed"));
+    assert.ok(events.some((e) => e.type === "session.ended" && e.reason !== "error"));
+  });
+});
+
+describe("the hook that refuses what the gate never sees", () => {
+  /*
+   * The init check above can only end a session, and only once the first prompt is in — the CLI
+   * sends no init message before then — so it cannot be what stops a call. Measured on 2.1.235 and
+   * 2.1.288: a PreToolUse hook is consulted for ToolSearch and CronCreate, which walked past a
+   * deny-everything `canUseTool`, and its deny stops them before they run.
+   */
+  type Hook = (input: { tool_name?: unknown }) => Promise<{ hookSpecificOutput?: { permissionDecision?: string } }>;
+
+  async function hookFor(opts: { world?: boolean } = {}) {
+    const fake = fakeQuery([result()]);
+    const adapter = new ClaudeAdapter({
+      command: "claude",
+      runQuery: fake.run,
+      ...(opts.world ? { worldQueryUrl: "http://127.0.0.1:9/mcp" } : {}),
+    });
+    const events: HarnessEvent[] = [];
+    const pump = (async () => { for await (const e of adapter.streamEvents()) events.push(e); })();
+    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "world-builder" });
+    await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
+    const hooks = fake.options()["hooks"] as { PreToolUse: { hooks: Hook[] }[] };
+    const hook = hooks.PreToolUse[0]!.hooks[0]!;
+    return { hook, events, done: async () => { await adapter.dispose(); await pump; } };
+  }
+
+  const decision = async (hook: Hook, tool: string) => (await hook({ tool_name: tool })).hookSpecificOutput?.permissionDecision;
+
+  it("denies a built-in that bypasses canUseTool, and says so on screen", async () => {
+    const { hook, events, done } = await hookFor();
+    for (const tool of ["CronCreate", "ToolSearch", "PushNotification", "Bash", "Skill", "mcp__claude_ai_Claude_Docs__read"]) {
+      assert.equal(await decision(hook, tool), "deny", `${tool} is off the surface`);
+    }
+    await done();
+    assert.ok(events.some((e) => e.type === "tool.refused" && e.tool === "CronCreate"));
+  });
+
+  it("makes no decision for a tool on the surface, so the gate still judges where it points", async () => {
+    const { hook, done } = await hookFor();
+    for (const tool of ["Read", "Glob", "Grep"]) {
+      assert.deepEqual(await hook({ tool_name: tool }), {}, `${tool}: "allow" would approve it past the gate`);
+    }
+    await done();
+  });
+
+  it("trusts the arke-world namespace only when Arke configured that server", async () => {
+    const without = await hookFor();
+    assert.equal(await decision(without.hook, "mcp__arke-world__search_canon"), "deny", "a server under that name is not ours by its name");
+    await without.done();
+    const withWorld = await hookFor({ world: true });
+    assert.deepEqual(await withWorld.hook({ tool_name: "mcp__arke-world__search_canon" }), {});
+    await withWorld.done();
+  });
+});
+
+describe("reading the init message's surface", () => {
+  const surface = { tools: ["Read", "Grep"], world: true };
+
+  it("fails closed when the tool list is missing, rather than reading it as nothing offered", () => {
+    assert.deepEqual(unexpectedSurface({ mcp_servers: [] }, surface), ["(no tool list reported)"]);
+  });
+
+  it("refuses arke-world by tool and by server when Arke did not configure it", () => {
+    const init = { tools: ["Read", "mcp__arke-world__get_entry"], mcp_servers: [{ name: "arke-world" }] };
+    assert.deepEqual(unexpectedSurface(init, surface), []);
+    assert.deepEqual(unexpectedSurface(init, { ...surface, world: false }), ["mcp__arke-world__get_entry", "MCP server arke-world"]);
+  });
+
+  it("ends a session whose init message carries no tool list", async () => {
+    const fake = fakeQuery([{ type: "system", subtype: "init" }, assistant([{ type: "text", text: "hi" }]), result()]);
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
+    const events = await collect(adapter, async () => {
+      const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "world-builder" });
+      await assert.rejects(() => adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] }), /no tool list reported/);
+    });
+    assert.equal(events.some((e) => e.type === "message.completed"), false);
   });
 });
 

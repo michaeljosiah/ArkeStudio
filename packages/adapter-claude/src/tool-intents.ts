@@ -34,14 +34,17 @@ const TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
   Grep: { intent: "search", paths: ["path"] },
   TodoWrite: { intent: "todo", paths: [] },
   TodoRead: { intent: "todo", paths: [] },
-  Skill: { intent: "skill", paths: [] },
+  // No `Skill`, though `skill` is an intent authoring agents hold. On this lane the session's
+  // skill is delivered in the system prompt (`agentPromptFor`), so Claude Code's Skill tool could
+  // only ever open Claude Code's own bundled and account-synced skills — `loop`, `update-config`,
+  // `workflow-authoring` were all listed under it — none of which are Arke's craft guidance.
   Task: { intent: "delegate", paths: [] },
   WebSearch: { intent: "web", paths: [] },
   WebFetch: { intent: "web", paths: [] },
 };
 
 /** MCP tools arrive as `mcp__<server>__<tool>`; ours is the only server a session is given. */
-const WORLD_QUERY_PREFIX = "mcp__arke-world__";
+export const WORLD_QUERY_PREFIX = "mcp__arke-world__";
 
 /**
  * The world-query surface takes ids, slugs, queries and one URL — no filesystem paths at all. It
@@ -63,6 +66,18 @@ const UNDECLARED_PATH_ARGUMENT = /(^|_)(path|paths|dir|dirs|directory|directorie
 function policyFor(toolName: string): ToolPolicy | null {
   if (toolName.startsWith(WORLD_QUERY_PREFIX)) return WORLD_QUERY_POLICY;
   return TOOL_POLICIES[toolName] ?? null;
+}
+
+/**
+ * The built-in tools a session is offered: every name in the table whose intent the confinement
+ * permits, and nothing else. The same table the gate judges by, so what is shown and what is
+ * allowed cannot drift apart. Names a given build lacks (`TodoRead`, `NotebookRead` on current
+ * ones) are ignored by the harness rather than rejected, so listing them costs nothing.
+ */
+export function offeredTools(confinement: AgentConfinement): string[] {
+  return Object.entries(TOOL_POLICIES)
+    .filter(([, policy]) => permits(confinement, policy.intent))
+    .map(([name]) => name);
 }
 
 /** The intent a Claude tool serves, or null when we have never heard of it. */
@@ -118,6 +133,11 @@ export interface ToolCall {
  * way out — the fix is measured and ready rather than theoretical: a `PreToolUse` hook was
  * verified on this same build to see calls `canUseTool` never gets, including the in-directory
  * `Read` above, and to be able to deny them.
+ *
+ * And some built-ins never reach this function wherever they point: `ToolSearch` and `CronCreate`
+ * were measured running under a deny-everything gate without consulting it. That is why a
+ * session is only OFFERED what this table permits (`offeredTools`, `surface.ts`); a refusal
+ * here is the second line, not the only one.
  */
 export async function decideTool(
   confinement: AgentConfinement,

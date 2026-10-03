@@ -1,3 +1,7 @@
+import { confinementFor } from "@arke-studio/contracts";
+import { offeredTools } from "./tool-intents.js";
+import { unexpectedSurface, type InitSurface, type Surface } from "./surface.js";
+
 /**
  * The confinement probe: does this Claude Code build actually honour our tool gate?
  *
@@ -9,11 +13,15 @@
  * Claude Code that cannot be verified is not offered at all.
  *
  * Every build tried so far honours the gate. That is not a reason to skip the check — it is
- * the reason the check has to be cheap enough to always run.
+ * the reason the check has to be cheap enough to always run. And honouring the gate turned out
+ * to be half the question: not every tool reaches it (`surface.ts`), so the probe also reads
+ * the one list the harness does publish — the tools the init message says the model was given —
+ * and refuses a build that gives it anything Arke did not ask for.
  *
- * The init message carries a real capability list, but it advertises interrupts and message
- * lifecycle only — nothing about permissions — so there is nothing to read. The check has to
- * be behavioural: run one throwaway turn that provokes a denied tool and see what happened.
+ * That init message carries a real capability list too, but it advertises interrupts and message
+ * lifecycle only — nothing about permissions — so the gate itself cannot be read off it. That
+ * half has to be behavioural: run one throwaway turn that provokes a denied tool and see what
+ * happened.
  *
  * If a `permissions_*` capability ever appears in that list, this collapses to reading a
  * string and every caller keeps working, because they only ever see {@link ConfinementVerdict}.
@@ -39,6 +47,11 @@ export interface ProbeTurnResult {
    * outranked it, which the user may not know they exported.
    */
   apiKeySource: string | null;
+  /**
+   * The tools and MCP servers the init message listed — what the model was SHOWN, deferred tools
+   * included. Null when no init message arrived, which proves nothing and is treated that way.
+   */
+  surface: InitSurface | null;
 }
 
 /**
@@ -60,10 +73,37 @@ export type ConfinementVerdict =
 const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
 
 /**
- * Fail closed, always. Three ways this returns `ok: false`, and only one of them is the
- * dramatic one:
+ * The widest confinement a real session is given — an authoring agent with web research on — so
+ * a surface that passes here passes for every role.
+ */
+const PROBE_CONFINEMENT = confinementFor({ readOnly: false }, { web: true });
+
+/**
+ * What the probe offers: exactly what a session would be, plus the shell as bait. The shell is
+ * the one addition, and it is there to be refused — the gate cannot be shown to work on a tool
+ * nobody can ask for.
+ */
+export const PROBE_TOOLS: readonly string[] = [...offeredTools(PROBE_CONFINEMENT), ...SHELL_TOOLS];
+
+/** No world: the probe configures no arke-world server, so that namespace is not on its surface. */
+export const PROBE_SURFACE: Surface = { tools: PROBE_TOOLS, world: false };
+
+/** A reason has to fit on a settings screen; thirty tool names do not. */
+function nameSome(names: readonly string[]): string {
+  const shown = names.slice(0, 4).join(", ");
+  return names.length > 4 ? `${shown} and ${names.length - 4} more` : shown;
+}
+
+/**
+ * Fail closed, always. Five ways this returns `ok: false`, and only two of them are the
+ * dramatic ones:
  *
  * - the side effect happened — confinement is broken, the interesting case;
+ * - the harness offered a tool Arke did not give it — a scheduler, a claude.ai connector, the
+ *   tool-search tool that loads them. Some of these were measured never reaching the gate at
+ *   all, so a gate that refuses the shell correctly says nothing about them. This is the check
+ *   that would have caught the build offering CronCreate while Settings said "verified";
+ * - no init message, so no tool list — nothing to compare, and nothing compared is no evidence;
  * - the gate was never consulted about a shell tool — we proved NOTHING, which is not the same
  *   as proving safety. A model that declines to try the shell (observed) leaves us with no
  *   evidence either way, and no evidence is a refusal;
@@ -81,6 +121,21 @@ export async function probeConfinement(command: string, runTurn: RunProbeTurn): 
     return {
       ok: false,
       reason: "a denied shell command ran anyway — this build does not honour the tool gate",
+      version: result.version,
+    };
+  }
+  if (result.surface === null) {
+    return {
+      ok: false,
+      reason: "the harness never said which tools it offered, so confinement is unproven",
+      version: result.version,
+    };
+  }
+  const unexpected = unexpectedSurface(result.surface, PROBE_SURFACE);
+  if (unexpected.length > 0) {
+    return {
+      ok: false,
+      reason: `it offers tools Arke Studio did not give it (${nameSome(unexpected)})`,
       version: result.version,
     };
   }
