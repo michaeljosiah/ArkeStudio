@@ -2,17 +2,17 @@
  * The audiobook as a book (design turn 190a): the page's head is the cover. The world's key art is
  * the cover (a spine edge, the title on it) and, blurred, the ground behind the head; the title,
  * who reads it and the presses sit beside. The hero always wears the media overlay colours, as the
- * players do, whatever the app's theme. The chapters follow as one strip, each as wide as it is long.
+ * players do, whatever the app's theme (SPEC-001 R-11). The chapters follow as one strip, each as wide as it is long.
  */
 .fy-abcover { position: relative; overflow: hidden; border-radius: 18px; margin: 0 0 22px; background: var(--media-overlay-bg); color: var(--media-overlay-fg); }
 .fy-abcover__bd { position: absolute; inset: -40px; opacity: 0.5; filter: blur(38px) saturate(120%); pointer-events: none; }
 .fy-abcover__bd .fy-portrait { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 0; }
 .fy-abcover::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to bottom, color-mix(in srgb, var(--media-overlay-bg) 30%, transparent), color-mix(in srgb, var(--media-overlay-bg) 90%, transparent)); pointer-events: none; }
 .fy-abcover__in { position: relative; z-index: 1; display: flex; align-items: flex-end; gap: 40px; padding: 36px 40px; }
-.fy-abcover__art { position: relative; flex: none; width: 200px; aspect-ratio: 2 / 3; border-radius: 4px 10px 10px 4px; overflow: hidden; background: var(--card); box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.65), 0 6px 14px rgba(0, 0, 0, 0.4); }
+.fy-abcover__art { position: relative; flex: none; width: 200px; aspect-ratio: 2 / 3; border-radius: 4px 10px 10px 4px; overflow: hidden; background: var(--card); box-shadow: 0 30px 60px -12px color-mix(in srgb, var(--media-overlay-bg) 65%, transparent), 0 6px 14px color-mix(in srgb, var(--media-overlay-bg) 40%, transparent); }
 .fy-abcover__art .fy-portrait, .fy-abcover__art .fy-portrait--fallback { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 0; font-size: 0; }
-.fy-abcover__art::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 12px; z-index: 2; background: linear-gradient(to right, rgba(0, 0, 0, 0.55), rgba(255, 255, 255, 0.14) 55%, transparent); }
-.fy-abcover__title { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; padding: 64px 16px 18px 24px; background: linear-gradient(to top, rgba(0, 0, 0, 0.85), transparent); font: var(--type-h3); letter-spacing: var(--tracking-tight); color: #fff; }
+.fy-abcover__art::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 12px; z-index: 2; background: linear-gradient(to right, color-mix(in srgb, var(--media-overlay-bg) 55%, transparent), color-mix(in srgb, var(--media-overlay-fg) 14%, transparent) 55%, transparent); }
+.fy-abcover__title { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; padding: 64px 16px 18px 24px; background: linear-gradient(to top, color-mix(in srgb, var(--media-overlay-bg) 85%, transparent), transparent); font: var(--type-h3); letter-spacing: var(--tracking-tight); color: var(--media-overlay-fg); }
 .fy-abcover[data-art="false"] .fy-abcover__title { background: none; color: var(--media-overlay-fg); }
 .fy-abcover__txt { min-width: 0; flex: 1; padding-bottom: 4px; }
 .fy-abcover .fy-h1row { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; animation: none; }
