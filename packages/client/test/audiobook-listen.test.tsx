@@ -146,6 +146,19 @@ describe("Listen (turn 186)", () => {
     assert.equal(m.container.querySelectorAll(".abp-line u").length, 0, "the gap is filled");
   });
 
+  it("is a modal while it waits for its plan: Esc closes it (codex on PR 1493)", async () => {
+    const m = await mount(inkbound(2));
+    await press(q(m, '[data-testid="audiobook-listen"]'));
+    const shell = q(m, '[data-testid="audiobook-player"]');
+    assert.equal(shell?.getAttribute("role"), "dialog");
+    await act(async () => {
+      const event = new dom.Event("keydown", { bubbles: true }) as unknown as KeyboardEvent;
+      Object.assign(event, { key: "Escape" });
+      shell!.dispatchEvent(event);
+    });
+    assert.equal(q(m, '[data-testid="audiobook-player"]'), null);
+  });
+
   it("closes from the player's own Close", async () => {
     const m = await mount(inkbound(2));
     await press(q(m, '[data-testid="audiobook-listen"]'));

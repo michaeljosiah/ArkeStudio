@@ -6,6 +6,7 @@ import {
   type AudiobookPlayerHandle,
   type ProductionBundle,
 } from "@arke-studio/contracts";
+import { clearQueue, dismissPlayback } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import { openAudiobookListening, subscribeAudiobookListening, useAudiobookRecords, useAudiobookRuns, useStore } from "../lib/store.js";
 import { Button } from "./ui.js";
@@ -66,6 +67,7 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
   const productionId = production.meta.id;
   const slug = useStore().state?.world?.meta.slug ?? null;
   const connection = useStore().connection;
+  const shell = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const handle = useRef<AudiobookPlayerHandle | null>(null);
   const asked = useRef<string | null>(null);
@@ -99,13 +101,22 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
     return () => clearTimeout(timer);
   }, [worldId, productionId, connection, stamp]);
 
-  // A modal from the moment it opens: focus returns to what opened it, and Tab and Shift+Tab stay
-  // inside while it is up — past the player's last control is the screen behind it.
+  // A modal from the moment it opens, before its plan is answered (codex on PR 1493): focus moves
+  // in at once and returns to what opened it, Tab and Shift+Tab stay inside while it is up, and
+  // Esc closes it while it waits — past the player's last control is the screen behind it.
   useEffect(() => {
-    const element = host.current;
+    const element = shell.current;
     if (!element) return;
+    // One voice at a time: a chapter read or a clip in the dock stops as the book opens (codex on PR 1493).
+    clearQueue();
+    dismissPlayback();
     const opener = element.ownerDocument.activeElement as HTMLElement | null;
     const trap = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && handle.current === null) {
+        event.preventDefault();
+        closing.current();
+        return;
+      }
       if (event.key !== "Tab") return;
       const shown = (el: HTMLElement) => el.closest("[hidden]") === null && (typeof el.checkVisibility !== "function" || el.checkVisibility());
       const focusable = [element, ...[...element.querySelectorAll<HTMLElement>("button:not([disabled]), [tabindex]:not([tabindex='-1'])")].filter(shown)];
@@ -121,6 +132,7 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
       }
     };
     element.addEventListener("keydown", trap);
+    element.focus();
     return () => {
       element.removeEventListener("keydown", trap);
       handle.current?.destroy();
@@ -157,8 +169,8 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
   }, [plan, slug]);
 
   return (
-    <div className="fy-abplayer" data-testid="audiobook-player" style={{ position: "fixed", inset: 0, zIndex: 60 }}>
-      <div ref={host} role="dialog" aria-modal="true" aria-label="Audiobook" style={{ position: "absolute", inset: 0 }} />
+    <div ref={shell} className="fy-abplayer" data-testid="audiobook-player" role="dialog" aria-modal="true" aria-label="Audiobook" tabIndex={-1} style={{ position: "fixed", inset: 0, zIndex: 60 }}>
+      <div ref={host} style={{ position: "absolute", inset: 0 }} />
       {!ready && (
         <div className="fy-abplayer__wait" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 12, background: "var(--media-overlay-bg)", color: "var(--media-overlay-fg)" }}>
           <span className="fy-mono">{refused ?? "opening…"}</span>
