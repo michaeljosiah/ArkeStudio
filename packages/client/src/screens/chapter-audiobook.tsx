@@ -4,6 +4,12 @@ import {
   AUDIOBOOK_DELIVERIES,
   AUDIOBOOK_TITLE_KEY,
   CADENCE_NOTE_MAX,
+  CADENCE_PHRASE_MAX,
+  NOTE_TAG_HOLD,
+  hasReadingNotes,
+  readingNotesLead,
+  type AudiobookReadingNotes,
+  type HeldReadingNote,
   DEFAULT_NARRATOR,
   audiobookBlockState,
   audiobookBlocks,
@@ -82,6 +88,10 @@ import {
   stopAudiobook,
   subscribeVoiceUploadConfirmations,
   useAudiobookRecords,
+  useAudiobookAsks,
+  previewDirection,
+  setAudiobookReadingNote,
+  draftAudiobookSpeakerNotes,
   useAudiobookRuns,
   useDirectionRuns,
   useStore,
@@ -111,6 +121,8 @@ export interface ChapterAudiobookInput {
   notes?: Readonly<Record<string, string>>;
   /** The book's own narrator (R-46); absent is the app's. */
   bookNarrator?: AudiobookReader;
+  /** The book note and this chapter's note (design turn 184, R-53), which lead every block. */
+  readingNotes?: AudiobookReadingNotes;
   connection: string;
   locked: boolean;
   /**
@@ -122,7 +134,14 @@ export interface ChapterAudiobookInput {
 }
 
 /** What a press asks for once the save lands: the chapter, these blocks alone, a direction, or a card's acceptance. */
-export type AudiobookIntent = { kind: "read"; blocks?: readonly string[] } | { kind: "direct" } | { kind: "accept" };
+export type AudiobookIntent = { kind: "read"; blocks?: readonly string[] } | { kind: "direct"; also?: DirectAlso } | { kind: "accept" };
+
+/** What the Direct sheet's `Also` asks for with the direction (design turn 184a, R-53, R-54). */
+export interface DirectAlso {
+  cast?: boolean;
+  chapterNote?: boolean;
+  speakerNotes?: boolean;
+}
 
 export interface BlockRow {
   block: AudiobookBlock;
@@ -163,6 +182,14 @@ export interface BlockRow {
   note?: string;
   /** The narrator reads it (turn 165's `read by … · narrator`): narration, a line under `narrator` or `performed`, or a stand-in. */
   byNarrator: boolean;
+  /** The book note and the chapter note this reader cannot take (design turn 184d): struck under Sent as. */
+  readingHeld: HeldReadingNote[];
+  /**
+   * The held proposal's direction for this block (design turn 184b, R-55), drawn dashed until
+   * accepted, with what it would be sent as; null when no proposal is held, or it leaves the
+   * block undirected.
+   */
+  proposed: { input: AudiobookDirectionInput; held: HeldControl[]; sentAs: SentPart[] | null; readingHeld: HeldReadingNote[] } | null;
 }
 
 /** The block's direction as it stands for its words (R-43): the record's, or carried from earlier words. */
@@ -181,27 +208,46 @@ export function rowDirection(record: ChapterAudiobook | null, block: Pick<Audiob
  * wrong for the words, which the coordinator refuses and says.
  */
 export interface SentPart { text: string; style?: string }
-export function directionView(text: string, input: AudiobookDirectionInput | null, model: ManifestModel, language?: string, note?: string): { held: HeldControl[]; sentAs: SentPart[] } | null {
+export function directionView(
+  text: string,
+  input: AudiobookDirectionInput | null,
+  model: ManifestModel,
+  language?: string,
+  note?: string,
+  reading?: AudiobookReadingNotes,
+): { held: HeldControl[]; sentAs: SentPart[]; readingHeld: HeldReadingNote[] } | null {
   try {
+    // The book note and the chapter note lead every part, before the speaker's note and the
+    // block's own direction (design turn 184, R-53): sentences in the style on an instruction
+    // row, a tag each on a tag row while short enough, held otherwise — as the coordinator sends.
+    const context = reading === undefined ? { tags: [] as string[], held: [] as HeldReadingNote[] } : readingNotesLead(reading, model, language);
     // The speaker's note leads every part on a row that takes it as a tag (R-45); on a row that
     // takes an instruction it rides beside the words, ahead of the block's own style, and on one
     // that takes neither it is held.
     const playing = note === undefined ? null : performanceNote(note, model, language);
-    const lead = (part: SentPart): SentPart => {
-      if (playing?.mode === "tag") return { ...part, text: `${playing.tag} ${part.text}` };
-      if (playing?.mode === "instruction") return { ...part, style: part.style === undefined ? note! : `${note!} ${part.style}` };
-      return part;
-    };
-    if (input === null) return { held: [], sentAs: [lead({ text: normalizeSpeechText(text) })] };
+    const tags = [...context.tags, ...(playing?.mode === "tag" ? [playing.tag] : [])];
+    const style = [...(context.instructions !== undefined ? [context.instructions] : []), ...(playing?.mode === "instruction" ? [note!] : [])].join(" ");
+    const lead = (part: SentPart): SentPart => ({
+      ...part,
+      text: tags.length > 0 ? `${tags.join(" ")} ${part.text}` : part.text,
+      ...(style !== "" ? { style: part.style === undefined ? style : `${style} ${part.style}` } : {}),
+    });
+    if (input === null) return { held: [], sentAs: [lead({ text: normalizeSpeechText(text) })], readingHeld: context.held };
     const { plan: sent, held } = holdDirection(text, viewPlan(input), model, language);
     const sentAs = markerSegments(text, sent, model, language).map((segment) => {
       const mapped = mapCadence(segment.text, VIEW_HASH, { ...segment.plan, sourceTextHash: VIEW_HASH }, model, language);
       return lead({ text: mapped.providerText, ...(mapped.instructions !== undefined ? { style: mapped.instructions } : {}) });
     });
-    return { held, sentAs };
+    return { held, sentAs, readingHeld: context.held };
   } catch {
     return null;
   }
+}
+
+/** A held book or chapter note in Sent as's words (design turn 184d): `book note · 94 characters · Eleven v3 takes 60 as a tag`. */
+export function readingHeldWords(held: HeldReadingNote, model: ManifestModel | null): string {
+  const why = held.reason === NOTE_TAG_HOLD ? `${model?.displayName ?? "this reader"} takes ${CADENCE_PHRASE_MAX} as a tag` : "held";
+  return `${held.which} note · ${held.length} characters · ${why}`;
 }
 
 /** The filter over the blocks (R-33): everyone, the narrator, or one speaker by key. */
@@ -253,6 +299,11 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     return { provider: chosen.provider, model: chosen.model, voiceId: chosen.voiceId, label: chosen.label ?? DEFAULT_NARRATOR.label };
   }, [state?.app.narrator, catalogue, bookNarrator, worldId]);
   const notes = input.notes;
+  const readingNotes = input.readingNotes;
+  // A held proposal is drawn on the blocks until it is accepted (design turn 184b): read here so
+  // each row can carry its proposed direction and what that would be sent as.
+  const heldRun = useDirectionRuns()[`${worldId}/${prodId}/${chapter.id}`];
+  const proposal = heldRun !== undefined && (heldRun.state === "directed" || heldRun.state === "accepting") && heldRun.proposed !== undefined ? heldRun : null;
   const models = state?.app.manifest?.models ?? [];
   const modelOf = useCallback(
     (reader: AudiobookReader): ManifestModel | null => models.find((m) => m.provider === reader.provider && m.id === reader.model && m.capability === "voice-tts") ?? null,
@@ -313,10 +364,19 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       const direction = rowDirection(recordOrNull, block);
       const speakerModel = modelOf(speaker);
       const note = audiobookNoteFor({ reading, ...(notes !== undefined ? { notes: { ...notes } } : {}) }, block);
-      const view = (direction === null && note === undefined) || speakerModel === null ? null : directionView(block.text, direction?.input ?? null, speakerModel, language, note);
+      const led = hasReadingNotes(readingNotes) ? readingNotes : undefined;
+      const view = (direction === null && note === undefined && led === undefined) || speakerModel === null ? null : directionView(block.text, direction?.input ?? null, speakerModel, language, note, led);
+      // Under the proposal: its direction, the speaker notes and the chapter note it drafted
+      // where none stands, as the coordinator would send them once it is accepted.
+      const proposedInput = proposal?.proposed?.[block.key];
+      const proposedNote = note ?? (reading === "performed" && block.speaker !== undefined ? proposal?.speakerNotes?.[block.sheet ?? block.speaker] : undefined);
+      const proposedReading = proposal?.chapterNote !== undefined ? { ...led, chapter: proposal.chapterNote } : led;
+      const proposedView = proposedInput === undefined || speakerModel === null ? null : directionView(block.text, proposedInput, speakerModel, language, proposedNote, proposedReading);
       return {
         block,
-        state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact, byPerson, note),
+        state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact, byPerson, note, led),
+        readingHeld: view?.readingHeld ?? [],
+        proposed: proposedInput === undefined ? null : { input: proposedInput, held: proposedView?.held ?? [], sentAs: proposedView?.sentAs ?? null, readingHeld: proposedView?.readingHeld ?? [] },
         ...(note !== undefined ? { note } : {}),
         mark,
         markWarn,
@@ -334,7 +394,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         byNarrator: speaker === narrator,
       };
     });
-  }, [derived.blocks, narrator, reading, world, recordOrNull, hasArtifact, catalogue, modelOf, colours, recordedKeys, notes]);
+  }, [derived.blocks, narrator, reading, world, recordOrNull, hasArtifact, catalogue, modelOf, colours, recordedKeys, notes, readingNotes, proposal]);
   // The filter is the page's (R-33): not kept, and gone with the chapter.
   const [filter, setFilter] = useState<AudiobookFilter>(null);
   useEffect(() => setFilter(null), [chapter.id]);
@@ -366,8 +426,13 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         (block) => rows.find((row) => row.block.key === block.key)?.assigned ?? narrator,
         hasArtifact,
         (block) => recordedKeys.has(audiobookRecordingKey(block)),
+        // The notes a block is led by name its take (R-45, R-53): the counts judge it as the row does.
+        (block) => {
+          const row = rows.find((candidate) => candidate.block.key === block.key);
+          return { ...(row?.note !== undefined ? { note: row.note } : {}), ...(hasReadingNotes(readingNotes) ? { reading: readingNotes } : {}) };
+        },
       ),
-    [derived.blocks, recordOrNull, rows, narrator, hasArtifact, recordedKeys],
+    [derived.blocks, recordOrNull, rows, narrator, hasArtifact, recordedKeys, readingNotes],
   );
   // What a press would spend, before the run asks: the cloud blocks not made, by the character
   // as the row bills it (SPEC-046 R-8) — bytes or doubled CJK for the readers that count so.
@@ -474,7 +539,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const resume = useCallback(
     (intent: AudiobookIntent) => {
       if (intent.kind === "direct") {
-        directChapter(worldId, prodId, chapter.file);
+        directChapter(worldId, prodId, chapter.file, intent.also);
         return;
       }
       if (intent.kind === "accept") {
@@ -504,11 +569,21 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
 
   // `Direct this chapter` (R-10): the same saved words the read is made from, so the press
   // waits out the autosave the same way; the card is the run's result, held in the store.
-  const directionRun = useDirectionRuns()[`${worldId}/${prodId}/${chapter.id}`];
+  const directionRun = heldRun;
+  // The dock's press opens the Direct sheet (design turn 184a): what the director reads, and
+  // what else to ask for, before anything runs. The sheet's Direct is the press that sends.
+  const [directOpen, setDirectOpen] = useState(false);
+  useEffect(() => setDirectOpen(false), [chapter.id]);
   const directPress = useCallback(() => {
     if (locked || connection !== "open" || directionRun?.state === "directing" || directionRun?.state === "accepting") return;
-    if (input.beforeRead !== undefined && !input.beforeRead({ kind: "direct" })) return;
-    resume({ kind: "direct" });
+    setDirectOpen(true);
+  }, [locked, connection, directionRun?.state]);
+  const direct = useCallback((also: DirectAlso) => {
+    if (locked || connection !== "open" || directionRun?.state === "directing" || directionRun?.state === "accepting") return;
+    setDirectOpen(false);
+    const intent: AudiobookIntent = { kind: "direct", also };
+    if (input.beforeRead !== undefined && !input.beforeRead(intent)) return;
+    resume(intent);
   }, [locked, connection, directionRun?.state, input, resume]);
   // Accepting waits out the autosave too (codex on PR 1186): a card accepted against words the
   // save is about to replace would be refused by the coordinator only if it saw them first.
@@ -682,6 +757,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     directionRun,
     directedBlocks,
     directPress,
+    directOpen,
+    closeDirect: () => setDirectOpen(false),
+    direct,
     accept,
     discard,
     setDirection,
@@ -957,8 +1035,9 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
         return (
           <div
             key={row.block.key}
-            className={`fy-ab__block fy-voice--${tone}${row.speakerKey !== null ? " fy-ab__block--line" : ""}${sounding?.block.key === row.block.key ? " fy-ab__block--sounding" : ""}${selected === row.block.key ? " fy-ab__block--selected" : ""}${inAudiobookFilter(row, filter) ? "" : " fy-ab__block--dim"}`}
+            className={`fy-ab__block fy-voice--${tone}${row.speakerKey !== null ? " fy-ab__block--line" : ""}${sounding?.block.key === row.block.key ? " fy-ab__block--sounding" : ""}${selected === row.block.key ? " fy-ab__block--selected" : ""}${inAudiobookFilter(row, filter) ? "" : " fy-ab__block--dim"}${row.proposed !== null ? " fy-ab__block--proposed" : ""}`}
             data-state={row.state}
+            {...(row.proposed !== null ? { "data-proposed": "true" } : {})}
             data-block={row.block.key}
             data-speaker={row.speakerKey ?? "narrator"}
             onPointerDown={() => { pressedSelection.current = audiobookSelection(rows); }}
@@ -986,7 +1065,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
               </span>
             )}
             <span
-              className="fy-ab__text"
+              className={`fy-ab__text${row.proposed !== null ? " fy-ab__text--proposed" : ""}`}
               onMouseUp={(event) => {
                 // Words selected in narration can be made a line (SPEC-012 R-63): within one block,
                 // between 1 and 600 characters; the menu opens for the selection.
@@ -999,12 +1078,17 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
                 setMenu({ key: row.block.key, selection: span });
               }}
             >
-              <DirectedText
-                raw={row.block.text}
-                cues={row.direction?.input.cues ?? []}
-                held={new Set(row.held.flatMap((control) => (control.cueIndex !== undefined ? [control.cueIndex] : [])))}
-                {...(markable ? { onPlate: (index: number) => onMarker({ key: row.block.key, span: { from: 0, to: 0 }, edit: index }) } : {})}
-              />
+              {/* A held proposal is drawn in the direction's place, dashed, until it is accepted (design turn 184b). */}
+              {row.proposed !== null ? (
+                <DirectedText raw={row.block.text} cues={row.proposed.input.cues} held={new Set(row.proposed.held.flatMap((control) => (control.cueIndex !== undefined ? [control.cueIndex] : [])))} />
+              ) : (
+                <DirectedText
+                  raw={row.block.text}
+                  cues={row.direction?.input.cues ?? []}
+                  held={new Set(row.held.flatMap((control) => (control.cueIndex !== undefined ? [control.cueIndex] : [])))}
+                  {...(markable ? { onPlate: (index: number) => onMarker({ key: row.block.key, span: { from: 0, to: 0 }, edit: index }) } : {})}
+                />
+              )}
             </span>
             {marker?.key === row.block.key && markable && (
               <MarkerMenu
@@ -1257,7 +1341,9 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
 }
 
 /** The side in the Audiobook view: the block pressed, its direction, then its takes. */
-export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, onUpload, onRecorded, onLines, onMarker, refused, blockHost, capturedSelection, choices, onPin, inSheet = false }: {
+export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, onUpload, onRecorded, onLines, onMarker, refused, blockHost, capturedSelection, choices, onPin, inSheet = false, hear }: {
+  /** Hear a block as the held proposal would send it (design turn 184b): the world and the chapter's file to ask under. */
+  hear?: { worldId: string; chapterFile: string };
   rows: BlockRow[];
   selected: string | null;
   record: ChapterAudiobook | null;
@@ -1328,6 +1414,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
     `read by ${row.speaker.label ?? row.speaker.voiceId}`,
     row.byNarrator || row.speakerKey === null ? "narrator" : row.mark,
     ...(row.speaker !== row.assigned ? ["stands in"] : row.byNarrator && row.note !== undefined ? ["performed"] : []),
+    ...(row.proposed !== null ? ["proposed"] : []),
   ].join(" · ");
   // The direction that stands for these words, and what the reader that will speak does with
   // each control (R-9): read off that reader's row and the line's language, so a delivery the
@@ -1450,6 +1537,9 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
         <Button onClick={() => setLineOpen(true)}>Make this a line</Button>
         {lineOpen && <SpeakerMenu row={row} choices={choices} onClose={() => setLineOpen(false)} onPick={pick => { onPin(row, pick, captured.raw); setLineOpen(false); }} />}
       </div>}
+      {row.proposed !== null ? (
+        <ProposedBlock row={row} proposed={row.proposed} model={model} {...(hear !== undefined ? { hear: { ...hear, productionId, ...(row.block.key !== AUDIOBOOK_TITLE_KEY ? { number: rows.indexOf(row) + 1 } : {}) } } : {})} />
+      ) : (
       <section className="fy-bible__panel fy-ab__direction" data-testid="audiobook-direction">
         {coarse && supportNotice && <p role="status" className="fy-mono">{supportNotice}</p>}
         <div className="fy-ab__row fy-ab__row--stack">
@@ -1619,10 +1709,15 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
                   <span className="fy-vd__sent-k">Held</span> {heldWords(viewPlan(row.direction.input), row.held).join(" · ")} — {model?.displayName ?? "this reader"}
                 </span>
               )}
+              {/* A book or chapter note this reader cannot take, struck and never spoken (design turn 184d). */}
+              {row.readingHeld.map((held) => (
+                <s key={held.which} className="fy-ab__sent-style fy-vd__sent-held fy-mono" data-testid="audiobook-reading-held">{readingHeldWords(held, model)}</s>
+              ))}
             </span>
           </div>
         )}
       </section>
+      )}
       <section className="fy-bible__panel" data-testid="audiobook-takes">
         <h2 className="fy-bible__paneltitle fy-ch__paneltitle--row">
           Takes
@@ -1706,15 +1801,19 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
  * the counts as data, and the whole accepted or discarded. Once accepted, the ✓ line, and the
  * dock's prompt becomes `Direct again`.
  */
-export function DirectionCard({ run, chapterOrder, onAccept, onDiscard }: {
+export function DirectionCard({ run, chapterOrder, blocks, onAccept, onDiscard }: {
   run: NonNullable<ReturnType<typeof useDirectionRuns>[string]>;
   chapterOrder: number;
+  /** The chapter's blocks, for the tally (design turn 184b): `122 blocks · 34 directed`. */
+  blocks?: number;
   onAccept: () => void;
   onDiscard: () => void;
 }) {
   const label = `chapter ${String(chapterOrder).padStart(2, "0")}`;
   const version = run.chapterVersion !== undefined ? ` · direction v${run.chapterVersion}` : "";
   const proposed = run.state === "directed" || run.state === "accepting" || run.state === "accepted";
+  // Of the blocks addressed, those the proposal moves off the ordinary reading (design turn 184b).
+  const moved = run.moved ?? 0;
   return (
     <section className="fy-ab__card" data-testid="direction-card" data-state={run.state}>
       <h3 className="fy-ab__card-title">Direct this chapter</h3>
@@ -1723,9 +1822,13 @@ export function DirectionCard({ run, chapterOrder, onAccept, onDiscard }: {
       {proposed && (
         <p className="fy-mono fy-ab__card-line">
           {run.state === "accepted" ? "✓ directed" : run.state === "accepting" ? "accepting…" : "proposed"} · {label}
-          {version} · {run.directed} block{run.directed === 1 ? "" : "s"} · {run.dropped} dropped · nothing spent
+          {version} · {blocks !== undefined ? `${blocks} blocks · ${moved} directed` : `${run.directed} block${run.directed === 1 ? "" : "s"}`}
+          {run.cast !== undefined ? ` · ${run.cast.lines} line${run.cast.lines === 1 ? "" : "s"} cast` : ""}
+          {run.chapterNote !== undefined ? " · chapter note" : ""}
+          {run.speakerNotes !== undefined ? ` · ${Object.keys(run.speakerNotes).length} speaker note${Object.keys(run.speakerNotes).length === 1 ? "" : "s"}` : ""} · {run.dropped} dropped · nothing spent
         </p>
       )}
+      {run.state === "directed" && run.chapterNote !== undefined && <p className="fy-ab__card-text" data-testid="direction-chapter-note"><span className="fy-vd__sent-k">Chapter note</span> {run.chapterNote}</p>}
       {run.state === "directed" && run.reason !== undefined && <p className="fy-mono fy-ch__who-where--warn">{run.reason}</p>}
       {run.state === "directed" && (
         <span className="fy-ab__control">
@@ -1746,6 +1849,307 @@ export function DirectionCard({ run, chapterOrder, onAccept, onDiscard }: {
         </>
       )}
     </section>
+  );
+}
+
+/** `0:03` — a short clip's place as a player shows it. */
+const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
+
+/**
+ * A block under the held proposal (design turn 184b, SPEC-047 R-55): its proposed direction as
+ * data — the delivery, the note with its count, the markers dashed on the block — what it would
+ * be sent as, with a book or chapter note the reader cannot take struck, and `Hear block`: one
+ * read of the block exactly as it would be sent, priced, free or held as every read is.
+ */
+export function ProposedBlock({ row, proposed, model, hear }: {
+  row: BlockRow;
+  proposed: NonNullable<BlockRow["proposed"]>;
+  model: ManifestModel | null;
+  hear?: { worldId: string; productionId: string; chapterFile: string; number?: number };
+}) {
+  const [hearId, setHearId] = useState<string | null>(null);
+  const heard = useHeardLines()[hearId ?? ""];
+  const slug = useStore().state?.world?.meta.slug;
+  const playback = usePlayback();
+  useEffect(() => setHearId(null), [row.block.key]);
+  useEffect(() => {
+    if (heard?.state !== "done" || slug === undefined) return;
+    void playClip({ id: `hear-${hearId}`, url: mediaUrl(slug, heard.file), title: row.mark, sub: "proposed" });
+  }, [heard?.state]);
+  const sent = proposed.sentAs?.map((part) => part.text).join(" ") ?? normalizeSpeechText(row.block.text);
+  const reads = proposed.sentAs?.length ?? 1;
+  const tokenPriced = model?.pricing.kind === "perToken" && model.speechPlan !== "free-plan";
+  const plan = speechPlanLabel(model);
+  const price = model === null || tokenPriced || plan !== null || row.speaker.provider === "kokoro" ? 0 : estimateSpeechMicroUsd(model, sent);
+  const what = heard?.state === "priced" ? `~${formatMicroUsd(heard.estimatedMicroUsd)}` : plan ?? (row.speaker.provider === "kokoro" ? "free" : tokenPriced ? "get price" : formatMicroUsd(price));
+  const playing = playback.clip?.id === `hear-${hearId}` && playback.status !== "ended" && playback.status !== "idle";
+  const styles = [...new Set((proposed.sentAs ?? []).flatMap((part) => (part.style !== undefined ? [part.style] : [])))];
+  return (
+    <section className="fy-bible__panel fy-ab__direction" data-testid="audiobook-proposed">
+      <div className="fy-ab__row fy-ab__row--stack">
+        <span className="fy-ab__label">Delivery</span>
+        <span className="fy-ab__chips" role="radiogroup" aria-label="Delivery">
+          {AUDIOBOOK_DELIVERIES.map((delivery) => (
+            <span key={delivery} role="radio" aria-checked={proposed.input.delivery === delivery} aria-disabled="true" className={`fy-ab__chip${proposed.input.delivery === delivery ? " fy-ab__chip--on" : ""}`}>
+              {delivery}
+            </span>
+          ))}
+        </span>
+      </div>
+      <div className="fy-ab__row fy-ab__row--top">
+        <span className="fy-ab__label">Note</span>
+        <span className="fy-ab__sentcol">
+          <span className="fy-ab__sent-style">{proposed.input.note ?? "none"}</span>
+        </span>
+        <span className="fy-ab__note-count fy-mono">{`${proposed.input.note?.length ?? 0} / ${CADENCE_NOTE_MAX}`}</span>
+      </div>
+      <div className="fy-ab__row fy-ab__row--top">
+        <span className="fy-ab__label">Sent as</span>
+        <span className="fy-ab__sentcol">
+          {styles.map((style) => (
+            <span key={style} className="fy-ab__sent-style fy-mono" data-testid="proposed-sent-style">
+              <span className="fy-vd__sent-k">style</span> {style}
+            </span>
+          ))}
+          <span className="fy-ab__sent fy-mono" data-testid="proposed-sent-as">
+            <span><span className="fy-vd__sent-k">text</span> {sent}</span>
+          </span>
+          {proposed.held.length > 0 && (
+            <span className="fy-ab__sent-style fy-vd__sent-held fy-mono">
+              <span className="fy-vd__sent-k">Held</span> {heldWords(viewPlan(proposed.input), proposed.held).join(" · ")} — {model?.displayName ?? "this reader"}
+            </span>
+          )}
+          {proposed.readingHeld.map((held) => (
+            <s key={held.which} className="fy-ab__sent-style fy-vd__sent-held fy-mono" data-testid="proposed-reading-held">{readingHeldWords(held, model)}</s>
+          ))}
+        </span>
+      </div>
+      {hear !== undefined && (
+        <div className="fy-ab__hear" data-testid="proposed-hear-row">
+          <button
+            type="button"
+            className="fy-ch__derive"
+            disabled={heard?.state === "working"}
+            data-testid="proposed-hear"
+            onClick={() => setHearId(hearAudiobookLine(hear.worldId, hear.productionId, hear.chapterFile, row.block.key, undefined, heard?.state === "priced" ? heard.token : undefined, true))}
+          >
+            {playing ? "■ " : ""}Hear block{hear.number !== undefined ? ` ${hear.number}` : ""}
+            {` · ${what} · ${reads} read${reads === 1 ? "" : "s"}`}
+          </button>
+          {playing && <span className="fy-mono">{clock(playback.currentTime)} / {clock(playback.duration)}</span>}
+          {heard?.state === "working" && <span className="fy-mono">reading…</span>}
+          {heard?.state === "refused" && <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">{heard.refused}</span>}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The book note and the chapter note (design turn 184, SPEC-047 R-53): two 36-high rows under
+ * the narrator line, as turn 181's note — the label, the words, the count — written when the
+ * field is left.
+ */
+export function ReadingNotes({ worldId, productionId, chapterFile, notes, disabled }: {
+  worldId: string;
+  productionId: string;
+  chapterFile: string;
+  notes: AudiobookReadingNotes;
+  disabled: boolean;
+}) {
+  return (
+    <div className="fy-ab__notes" data-testid="reading-notes">
+      <NoteRow label="Book note" value={notes.book} disabled={disabled} onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note)} />
+      <NoteRow label="Chapter note" value={notes.chapter} disabled={disabled} onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note, chapterFile)} />
+    </div>
+  );
+}
+
+function NoteRow({ label, value, disabled, onCommit, max = CADENCE_NOTE_MAX, multiline = false }: { label: string; value: string | undefined; disabled: boolean; onCommit: (note: string | null) => void; max?: number; multiline?: boolean }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? value ?? "";
+  const commit = () => {
+    if (draft === null) return;
+    const trimmed = draft.trim().slice(0, max);
+    setDraft(null);
+    if (trimmed === (value ?? "")) return;
+    onCommit(trimmed === "" ? null : trimmed);
+  };
+  const props = {
+    className: multiline ? "fy-ab__booknote-input" : "fy-vd__note-input",
+    value: shown,
+    maxLength: max,
+    disabled,
+    "aria-label": label,
+    onBlur: commit,
+  };
+  return (
+    <label className={multiline ? "fy-ab__booknote" : "fy-vd__note"}>
+      <span className="fy-vd__note-k">{label}</span>
+      {multiline ? (
+        <textarea {...props} rows={2} onChange={(event) => setDraft(event.target.value)} />
+      ) : (
+        <input {...props} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }} />
+      )}
+      <span className="fy-vd__note-count fy-mono">{`${shown.length} / ${max}`}</span>
+    </label>
+  );
+}
+
+/**
+ * The Direct sheet (design turn 184a, SPEC-047 R-51, R-54): what the director reads, one row
+ * each in a bordered list, label then value; what else to ask for; and `Direct`. Nothing spent:
+ * the director is the writing service, and nothing it reads goes to a voice.
+ */
+export function DirectSheet({ worldId, productionId, chapterFile, chapterOrder, blocks, reading, chapterNote, onCancel, onDirect }: {
+  worldId: string;
+  productionId: string;
+  chapterFile: string;
+  chapterOrder: number;
+  blocks: number;
+  reading: AudiobookReading;
+  /** A chapter note stands already: drafting one is not offered ticked. */
+  chapterNote: boolean;
+  onCancel: () => void;
+  onDirect: (also: DirectAlso) => void;
+}) {
+  const [askId, setAskId] = useState<string | null>(null);
+  const ask = useAudiobookAsks()[askId ?? ""];
+  useEffect(() => setAskId(previewDirection(worldId, productionId, chapterFile)), [worldId, productionId, chapterFile]);
+  const reads = ask?.state === "reads" ? ask.reads : null;
+  const castNeeded = reading !== "narrator" && reads?.cast !== undefined;
+  const notesSet = reads?.speakerNotes;
+  const allNotes = notesSet === undefined || (notesSet.of > 0 && notesSet.set === notesSet.of);
+  const [cast, setCast] = useState(true);
+  const [draftChapter, setDraftChapter] = useState(!chapterNote);
+  const [draftSpeakers, setDraftSpeakers] = useState(true);
+  const pad = String(chapterOrder).padStart(2, "0");
+  const row = (label: string, value: string) => (
+    <div className="fy-ab__read" key={label}>
+      <b>{label}</b>
+      <span>{value}</span>
+    </div>
+  );
+  const check = (label: string, on: boolean, set: (on: boolean) => void, data?: string, disabled = false) => (
+    <label className="fy-ab__also">
+      <input type="checkbox" checked={on && !disabled} disabled={disabled} onChange={(event) => set(event.target.checked)} />
+      <span>{label}</span>
+      {data !== undefined && <span className="fy-mono fy-ab__also-data">{data}</span>}
+    </label>
+  );
+  return (
+    <section className="fy-bible__panel fy-ab__directsheet" data-testid="direct-sheet" aria-label="Direct this chapter">
+      <div>
+        <h3 className="fy-ab__card-title">Direct this chapter</h3>
+        <p className="fy-mono fy-ab__card-line">Chapter {pad} · {blocks} block{blocks === 1 ? "" : "s"}</p>
+      </div>
+      <span className="fy-ab__label">Reads</span>
+      {ask?.state === "refused" ? (
+        <p className="fy-mono fy-ch__who-where--warn">{ask.refused}</p>
+      ) : reads === null ? (
+        <p className="fy-mono">reading…</p>
+      ) : (
+        <div className="fy-ab__reads" data-testid="direct-reads">
+          {row("Chapter", [reads.chapter.synopsis ? "synopsis" : "no synopsis", ...(reads.chapter.pov !== undefined ? [`point of view ${reads.chapter.pov}`] : []), `v${reads.chapter.version}`].join(" · "))}
+          {row("Tone", reads.tone ?? "none")}
+          {row("Speakers", reads.speakers.length === 0 ? "none" : `${reads.speakers.join(" · ")} — their sheets`)}
+          {row("Narrator", `${reads.narrator.label}${reads.narrator.description !== undefined ? ` — ${reads.narrator.description}` : ""}`)}
+          {row("Notes", [...(reads.notes.book ? ["book note"] : []), ...(reads.notes.chapter ? ["chapter note"] : []), `${reads.notes.speakers} speaker note${reads.notes.speakers === 1 ? "" : "s"}`].join(" · "))}
+          {row("Before", reads.before === null ? "first chapter" : reads.before.blocks === 0 ? "nothing directed yet" : `chapter ${String(reads.before.order).padStart(2, "0")} · ${reads.before.blocks} directed`)}
+        </div>
+      )}
+      <span className="fy-ab__label">Also</span>
+      {castNeeded && check("Cast the lines first", cast, setCast, reads?.cast)}
+      {check("Draft the chapter note", draftChapter, setDraftChapter)}
+      {reading === "performed" && check("Draft speaker notes", draftSpeakers, setDraftSpeakers, notesSet === undefined ? undefined : allNotes ? `all ${notesSet.of} set` : `${notesSet.of - notesSet.set} of ${notesSet.of} missing`, allNotes)}
+      <div className="fy-ab__control fy-ab__directsheet-foot">
+        <span className="fy-mono">nothing spent</span>
+        <span className="fy-ch__panelpush" />
+        <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+        <Button
+          variant="primary"
+          data-testid="direct-sheet-direct"
+          disabled={reads === null || (reading !== "narrator" && reads.cast !== undefined && !cast)}
+          onClick={() => onDirect({ ...(castNeeded && cast ? { cast: true } : {}), ...(draftChapter ? { chapterNote: true } : {}), ...(reading === "performed" && draftSpeakers && !allNotes ? { speakerNotes: true } : {}) })}
+        >
+          Direct
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The book's reading (design turn 184c, SPEC-047 R-53, R-54): the book note, and each speaker's
+ * note with where it came from — `sheet` for one drafted from the speaker's sheet, `you` for the
+ * author's — and `Draft from the sheets` for the speakers with none. An author's note is never
+ * replaced.
+ */
+export function BookReadingPanel({ worldId, productionId, title, bookNote, speakers, onDone }: {
+  worldId: string;
+  productionId: string;
+  /** `Performed · Ife's voice`. */
+  title: string;
+  bookNote: string | undefined;
+  speakers: ReadonlyArray<{ key: string; name: string; note?: string; source?: "sheet" }>;
+  onDone: () => void;
+}) {
+  const connection = useStore().connection;
+  const [askId, setAskId] = useState<string | null>(null);
+  const ask = useAudiobookAsks()[askId ?? ""];
+  const missing = speakers.some((speaker) => speaker.note === undefined);
+  return (
+    <section className="fy-ab__bookreading" data-testid="book-reading" aria-label="The book's reading">
+      <h3 className="fy-ab__card-title">{title}</h3>
+      <NoteRow label="Book note" value={bookNote} disabled={connection !== "open"} multiline onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note)} />
+      <div className="fy-ab__bookreading-lbl">
+        <span className="fy-vd__note-k">Speakers</span>
+        {speakers.some((speaker) => speaker.source === "sheet") && <span className="fy-mono fy-vd__note-count">drafted from the sheets</span>}
+      </div>
+      {speakers.map((speaker) => (
+        <div key={speaker.key} className="fy-ab__who" data-testid="book-reading-speaker">
+          <b>{speaker.name}</b>
+          <SpeakerNoteInput worldId={worldId} productionId={productionId} speaker={speaker} />
+          <small className="fy-mono">{`${speaker.note?.length ?? 0} / ${CADENCE_PHRASE_MAX}${speaker.note === undefined ? "" : speaker.source === "sheet" ? " · sheet" : " · you"}`}</small>
+        </div>
+      ))}
+      {ask?.state === "refused" && <p className="fy-mono fy-ch__who-where--warn">{ask.refused}</p>}
+      {ask?.state === "drafted" && <p className="fy-mono">{ask.drafted} drafted</p>}
+      <div className="fy-ab__control fy-ab__bookreading-foot">
+        <Button
+          variant="ghost"
+          disabled={!missing || connection !== "open" || ask?.state === "working"}
+          data-testid="draft-from-sheets"
+          onClick={() => setAskId(draftAudiobookSpeakerNotes(worldId, productionId))}
+        >
+          {ask?.state === "working" ? "drafting…" : "Draft from the sheets"}
+        </Button>
+        <Button variant="primary" onClick={onDone}>Done</Button>
+      </div>
+    </section>
+  );
+}
+
+function SpeakerNoteInput({ worldId, productionId, speaker }: { worldId: string; productionId: string; speaker: { key: string; name: string; note?: string } }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? speaker.note ?? "";
+  const commit = () => {
+    if (draft === null) return;
+    const trimmed = draft.trim().slice(0, CADENCE_PHRASE_MAX);
+    setDraft(null);
+    if (trimmed === (speaker.note ?? "")) return;
+    setAudiobookNote(worldId, productionId, speaker.key, trimmed === "" ? null : trimmed);
+  };
+  return (
+    <input
+      className="fy-ab__note-input"
+      value={value}
+      maxLength={CADENCE_PHRASE_MAX}
+      aria-label={`Note · ${speaker.name}`}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }}
+    />
   );
 }
 

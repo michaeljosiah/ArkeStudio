@@ -441,4 +441,38 @@ describe("the Audiobook door (turn 146)", () => {
     assert.match(text(m), /the chapter file is gone/);
     assert.doesNotMatch(text(m), /Opening…/);
   });
+
+  it("the book's reading: the book note, each performed speaker's note with where it came from, and Draft from the sheets (design turn 184c)", async () => {
+    const state = inkbound();
+    const book = { schemaVersion: 1 as const, reading: "performed" as const, note: "Harbour English, unhurried and close.", notes: { "maren-kest": "dry, exact", "odile-sarn": "low and amused" }, noteSources: { "maren-kest": "sheet" as const } };
+    const m = await mount({ ...state, world: { ...state.world!, productions: state.world!.productions.map((p) => (p.meta.id === "inkbound" ? { ...p, audiobook: book } : p)) } });
+    await answerDoor(m, {
+      ...door("narrator"),
+      reading: "performed",
+      voices: [
+        { name: "George", voice: { label: "George", provider: "kokoro", local: true }, state: "narrator", blocks: 19 },
+        { sheet: "maren-kest", name: "Maren Kest", state: "narrator", blocks: 4, note: "dry, exact" },
+        { sheet: "odile-sarn", name: "Odile Sarn", state: "narrator", blocks: 3, note: "low and amused" },
+        { sheet: "perrin-tallow", name: "Perrin Tallow", state: "narrator", blocks: 2 },
+      ],
+    });
+    const where = m.where();
+    await act(async () => all(m, '[data-testid="audiobook-voice"]')[1]!.click());
+    assert.equal(m.where(), where, "a performed speaker's chip opens the book's reading, not their voice page");
+    const panel = q(m, '[data-testid="book-reading"]')!;
+    assert.match(panel.querySelector("h3")?.textContent ?? "", /^Performed · George$/);
+    const bookNote = panel.querySelector('textarea[aria-label="Book note"]') as HTMLTextAreaElement;
+    const reactValue = (bookNote as unknown as Record<string, { value?: string }>)[Object.keys(bookNote).find((k) => k.startsWith("__reactProps$"))!]?.value;
+    assert.equal(reactValue, "Harbour English, unhurried and close.");
+    const speakers = [...panel.querySelectorAll('[data-testid="book-reading-speaker"]')].map((row) => `${row.querySelector("b")!.textContent}|${row.querySelector("small")!.textContent}`);
+    assert.deepEqual(speakers, ["Maren Kest|10 / 60 · sheet", "Odile Sarn|14 / 60 · you", "Perrin Tallow|0 / 60"]);
+    assert.match(panel.textContent ?? "", /drafted from the sheets/);
+    await act(async () => (panel.querySelector('[data-testid="draft-from-sheets"]') as HTMLButtonElement).click());
+    const drafted = m.sent.findLast((message) => message.kind === "draft-audiobook-speaker-notes") as Extract<ClientMessage, { kind: "draft-audiobook-speaker-notes" }>;
+    assert.ok(drafted, "the speakers with no note are drafted from their sheets");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.speaker-notes", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: drafted.requestId, drafted: 1 }));
+    assert.match(q(m, '[data-testid="book-reading"]')?.textContent ?? "", /1 drafted/);
+    await act(async () => all(m, '[data-testid="book-reading"] button').find((b) => b.textContent === "Done")!.click());
+    assert.equal(q(m, '[data-testid="book-reading"]'), null);
+  });
 });

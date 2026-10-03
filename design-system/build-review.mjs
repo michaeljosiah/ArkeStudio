@@ -254,6 +254,18 @@ const SCREENS = [
   { group: "Around it", screen: "Export audiobook · on this machine (story)", frame: "165j", route: "#/w/:worldId/p/:prodId/story/audiobook?export=1", status: "drawn", checked: "2026-09-27",
     controls: ["Chapter files", "Read the rest · 2 chapters · $0.31", "Export 13 chapters"],
     notes: ["Turn 165 over 146d: the chosen takes, made on this machine with no provider and no key. Waits for 1336."] },
+  { group: "Around it", screen: "Direct this chapter sheet (story)", frame: "184a", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drifted", checked: "2026-10-03",
+    controls: ["Direct this chapter", "Reads", "Cast the lines first", "Draft the chapter note", "Draft speaker notes", "Book note", "Chapter note", "Cancel", "Direct", "nothing spent"],
+    notes: ["Turn 184: the dock's prompt opens the sheet in the block panel's place; Reads is the coordinator's answer (<code>preview-direction</code>), Also sends the cast, the chapter note and the speaker notes with the direction. The book note and the chapter note are rows under the view line.", "Drift: the Direct press stays in the dock, as turn 146 has it, rather than on the head; <code>Cast the lines first</code> names why the lines are not cast where the frame counts them, since the count is known only once they are."] },
+  { group: "Around it", screen: "Proposal on the blocks (story)", frame: "184b", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "built", checked: "2026-10-03",
+    controls: ["Accept", "Discard", "Hear block", "Sent as", "Delivery", "Note", "proposed"],
+    notes: ["Turn 184: a held proposal's markers on the blocks in a 1.5 dashed outline; the block's panel shows the proposed delivery, note and Sent as, and <code>Hear block</code> reads it as the proposal would send it. The card's tally counts blocks, directed, lines cast and dropped."] },
+  { group: "Around it", screen: "The book's reading (story)", frame: "184c", route: "#/w/:worldId/p/:prodId/story/audiobook", status: "built", checked: "2026-10-03",
+    controls: ["Book note", "Speakers", "drafted from the sheets", "Draft from the sheets", "Done"],
+    notes: ["Turn 184: opened from a performed speaker's chip on the door; each note with <code>sheet</code> or <code>you</code>."] },
+  { group: "Around it", screen: "Sent as on a tag reader (story)", frame: "184d", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "built", checked: "2026-10-03",
+    controls: ["Sent as", "book note", "chapter note"],
+    notes: ["Turn 184: a book or chapter note too long for a tag is struck under Sent as and never sent."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */

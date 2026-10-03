@@ -884,22 +884,29 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(prompt, `the dock offers the direction: ${all(m, ".fy-arke__prompt").map((b) => b.textContent).join(" | ")}`);
     assert.ok(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Which blocks are stale?"));
     await act(async () => prompt.click());
-    assert.ok(m.sent.some((message) => message.kind === "direct-chapter"), "the press directs, and says nothing");
+    // The press opens the Direct sheet (design turn 184a): what the director reads, then Direct.
+    assert.equal(m.sent.some((message) => message.kind === "direct-chapter"), false, "nothing runs before the sheet's Direct");
+    const preview = m.sent.findLast((message) => message.kind === "preview-direction") as Extract<ClientMessage, { kind: "preview-direction" }>;
+    assert.ok(preview, "the sheet asks what the director would read");
     const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.reads", ...ids, requestId: preview.requestId, reads: { chapter: { order: 2, version: 4, synopsis: false }, speakers: [], narrator: { label: "George" }, notes: { book: false, chapter: false, speakers: 0 }, before: null } }));
+    await act(async () => q(m, '[data-testid="direct-sheet-direct"]')!.click());
+    assert.ok(m.sent.some((message) => message.kind === "direct-chapter"), "the sheet's press directs");
     await act(async () => __applyEventForTest({ at: AT, type: "direction.started", ...ids }));
     assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /directing…/);
     const proposed = { title: { delivery: "measured" as const, speed: 1, cues: [] }, "p0.0": { delivery: "urgent" as const, speed: 1, cues: [] } };
     await act(async () =>
-      __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 2, dropped: 1, hash: HASH, chapterVersion: 4, summary: "Two blocks measured but the title, said with urgency.", proposed }),
+      __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 2, dropped: 1, hash: HASH, chapterVersion: 4, summary: "Two blocks measured but the title, said with urgency.", proposed, proposalId: "card-1" }),
     );
     const card = q(m, '[data-testid="direction-card"]')!;
     assert.match(card.textContent ?? "", /Two blocks measured but the title, said with urgency\./);
-    assert.match(card.textContent ?? "", /proposed · chapter 02 · direction v4 · 2 blocks · 1 dropped · nothing spent/);
+    assert.match(card.textContent ?? "", /proposed · chapter 02 · direction v4 · [0-9]+ blocks · 1 directed · 1 dropped · nothing spent/);
     await act(async () => q(m, '[data-testid="direction-accept"]')!.click());
     const accepted = m.sent.findLast((message) => message.kind === "accept-direction") as Extract<ClientMessage, { kind: "accept-direction" }>;
     assert.ok(accepted, "accepted whole");
     assert.equal(accepted.hash, HASH);
     assert.deepEqual(accepted.directions, proposed);
+    assert.equal(accepted.proposalId, "card-1", "the card is named, so only its own extras are written");
     assert.ok(accepted.requestId, "the acceptance is named");
     assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /accepting…/);
     const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells." };
@@ -909,7 +916,7 @@ describe("the Audiobook view (turn 146)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H9", record: { ...written, updatedAt: "2026-09-14T09:30:00.000Z" } }));
     assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /accepting…/, "still on its way");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, requestId: accepted.requestId, record: { ...written, updatedAt: "2026-09-14T10:00:00.000Z" } }));
-    assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /✓ directed · chapter 02 · direction v4 · 2 blocks · 1 dropped/);
+    assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /✓ directed · chapter 02 · direction v4 · [0-9]+ blocks · 1 directed · 1 dropped/);
     assert.ok(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct again"), "a direction stands, so the prompt is Direct again");
     assert.equal(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct this chapter"), false);
   });
@@ -1063,5 +1070,101 @@ describe("the marker list's words (design turn 165, issue 1324 §3)", () => {
     assert.equal(cueLabel(text, { kind: "emphasis", span, level: "moderate" }), "emphasis · moderate · “Whoever cut the tenth key,”");
     assert.equal(cueLabel(text, { kind: "pause", at: 28, length: "short" }), "pause · short · after tenth key,”");
     assert.equal(cueLabel(text, { kind: "breath", at: 29, action: "inhale" }), "inhale · before she");
+  });
+});
+
+/** The book record on the production, as the bundle carries it. */
+function withBook(state: ClientState, book: Record<string, unknown>): ClientState {
+  return { ...state, world: { ...state.world!, productions: state.world!.productions.map((p) => (p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1 as const, reading: "narrator" as const, ...p.audiobook, ...book } } : p)) } };
+}
+
+describe("the director reads the book (design turn 184)", () => {
+  const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+  const BOOK_NOTE = "Harbour English, unhurried and close. Old words said plainly, never quaintly, never rushed.";
+  const props = (element: Element) => (element as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void; onBlur: () => void }>)[Object.keys(element).find((k) => k.startsWith("__reactProps$"))!]!;
+  const RACHEL = { provider: "elevenlabs", model: "eleven-v3", voiceId: "rachel", label: "Rachel" };
+
+  it("the Direct sheet lists what the director reads, offers casting first under Performed, and Direct asks for what is ticked (184a)", async () => {
+    const m = await mount(voiced(inkbound("performed")));
+    await answerOpen(m);
+    await act(async () => all(m, ".fy-arke__prompt").find((b) => b.textContent === "Direct this chapter")!.click());
+    const preview = m.sent.findLast((message) => message.kind === "preview-direction") as Extract<ClientMessage, { kind: "preview-direction" }>;
+    assert.match(text(m), /reading…/, "the rows wait for the coordinator's answer");
+    await act(async () =>
+      __applyEventForTest({
+        at: AT, type: "direction.reads", ...ids, requestId: preview.requestId,
+        reads: { chapter: { order: 2, version: 4, synopsis: true, pov: "Maren Kest" }, tone: "quiet dread", speakers: ["Maren Kest"], narrator: { label: "George", description: "low, warm" }, notes: { book: true, chapter: false, speakers: 1 }, before: { order: 1, blocks: 0 }, cast: "not cast · cast the lines first" },
+      }),
+    );
+    const rows = all(m, '[data-testid="direct-reads"] .fy-ab__read').map((row) => `${row.querySelector("b")!.textContent}|${row.querySelector("span")!.textContent}`);
+    assert.deepEqual(rows, [
+      "Chapter|synopsis · point of view Maren Kest · v4",
+      "Tone|quiet dread",
+      "Speakers|Maren Kest — their sheets",
+      "Narrator|George — low, warm",
+      "Notes|book note · 1 speaker note",
+      "Before|nothing directed yet",
+    ]);
+    const sheet = q(m, '[data-testid="direct-sheet"]')!;
+    assert.match(sheet.textContent ?? "", /Cast the lines first/);
+    assert.match(sheet.textContent ?? "", /nothing spent/);
+    await act(async () => q(m, '[data-testid="direct-sheet-direct"]')!.click());
+    const direct = m.sent.findLast((message) => message.kind === "direct-chapter") as Extract<ClientMessage, { kind: "direct-chapter" }>;
+    assert.equal(direct.cast, true, "the lines are cast in the same proposal");
+    assert.equal(direct.chapterNote, true, "no chapter note stands, so drafting one is ticked");
+    assert.equal(q(m, '[data-testid="direct-sheet"]'), null, "the sheet closes once it is sent");
+  });
+
+  it("the book note and the chapter note are rows under the narrator line, with counts, written when left (R-53)", async () => {
+    const m = await mount(voiced(withBook(inkbound(), { note: BOOK_NOTE, chapterNotes: { neap: "Night at the rail desk." } })));
+    await answerOpen(m);
+    const notes = q(m, '[data-testid="reading-notes"]')!;
+    const inputs = [...notes.querySelectorAll("input")] as HTMLInputElement[];
+    assert.deepEqual(inputs.map((input) => input.getAttribute("aria-label")), ["Book note", "Chapter note"]);
+    assert.equal(inputs[0]!.value, BOOK_NOTE);
+    assert.deepEqual([...notes.querySelectorAll(".fy-vd__note-count")].map((count) => count.textContent), [`${BOOK_NOTE.length} / 300`, "23 / 300"]);
+    await act(async () => props(inputs[1]!).onChange({ target: { value: "Dawn, the empty quay." } }));
+    await act(async () => props(inputs[1]!).onBlur());
+    const set = m.sent.findLast((message) => message.kind === "set-audiobook-reading-note") as Extract<ClientMessage, { kind: "set-audiobook-reading-note" }>;
+    assert.deepEqual({ note: set.note, chapterFile: set.chapterFile }, { note: "Dawn, the empty quay.", chapterFile: "01-neap" });
+  });
+
+  it("a proposal draws dashed on the blocks; its block shows the proposed direction, Sent as with the notes held, and Hear block asks for the proposal's read (184b, 184d)", async () => {
+    const m = await mount(voiced(withBook(inkbound(), { note: BOOK_NOTE, narrator: RACHEL })));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...RACHEL, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    const proposed = { "p0.0": { delivery: "cold" as const, speed: 1, cues: [{ kind: "sound" as const, at: 24, sound: "sighs" as const }], note: "flat" } };
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 4, dropped: 0, hash: HASH, chapterVersion: 4, proposed, chapterNote: "Night at the rail desk." }));
+    const block = all(m, ".fy-ab__block")[1]!;
+    assert.equal(block.getAttribute("data-proposed"), "true");
+    assert.ok(block.querySelector(".fy-ab__text--proposed .fy-ab__mk--sound"), "the proposed sound is drawn, dashed");
+    assert.equal(all(m, ".fy-ab__block")[0]!.getAttribute("data-proposed"), null, "a block the proposal leaves undirected is drawn as it is");
+    assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /chapter note/);
+    await act(async () => block.click());
+    const panel = q(m, '[data-testid="audiobook-proposed"]')!;
+    assert.ok(panel, "the block's panel shows the proposal, not the record's controls");
+    assert.match(q(m, '[data-testid="audiobook-block"]')?.textContent ?? "", /proposed/);
+    assert.equal(panel.querySelector('[aria-checked="true"]')?.textContent, "cold");
+    assert.equal(panel.querySelector('[data-testid="proposed-sent-as"]')?.textContent, "text [Night at the rail desk.] [coldly] [flat] Maren counted the bells. [sighs]", "the drafted chapter note leads as a tag, short enough to be one");
+    assert.deepEqual([...panel.querySelectorAll('[data-testid="proposed-reading-held"]')].map((held) => held.textContent), [`book note · ${BOOK_NOTE.length} characters · Eleven v3 takes 60 as a tag`]);
+    const hear = panel.querySelector('[data-testid="proposed-hear"]') as HTMLButtonElement;
+    assert.match(hear.textContent ?? "", /^Hear block 2 · \$[0-9.]+ · 1 read$/);
+    await act(async () => hear.click());
+    const asked = m.sent.findLast((message) => message.kind === "hear-audiobook-line") as Extract<ClientMessage, { kind: "hear-audiobook-line" }>;
+    assert.deepEqual({ block: asked.block, proposed: asked.proposed }, { block: "p0.0", proposed: true });
+
+    // Discarded: the blocks are drawn as the record has them again.
+    await act(async () => all(m, '[data-testid="direction-card"] button').find((b) => b.textContent === "Discard")!.click());
+    assert.equal(all(m, ".fy-ab__block")[1]!.getAttribute("data-proposed"), null);
+  });
+
+  it("a block on a tag reader strikes a book note too long for a tag under Sent as, never in what is sent (184d)", async () => {
+    const m = await mount(voiced(withBook(inkbound(), { note: BOOK_NOTE, narrator: RACHEL })));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...RACHEL, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    const side = q(m, '[data-testid="audiobook-direction"]')!;
+    assert.equal(side.querySelector('[data-testid="audiobook-sent-as"]')?.textContent, "Maren counted the bells.");
+    assert.equal(side.querySelector('[data-testid="audiobook-reading-held"]')?.textContent, `book note · ${BOOK_NOTE.length} characters · Eleven v3 takes 60 as a tag`);
   });
 });
