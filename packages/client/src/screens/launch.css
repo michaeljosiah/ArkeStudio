@@ -595,6 +595,13 @@
     height: 100%;
     border-right: 1px solid var(--launch-seam);
   }
+  /* Tall split panels otherwise zoom past the film's final logo. Cap the media height,
+     leaving the panel and its controls at the master's geometry. */
+  .fy-launch__media {
+    max-height: calc(49vw / 0.8);
+    top: 50%;
+    transform: translateY(-50%);
+  }
   .fy-launch--typing .fy-launch__hello p { display: block; }
   .fy-launch--typing .fy-launch__way--soon { display: grid; }
   .fy-launch--typing .fy-launch__foot { display: block; }
