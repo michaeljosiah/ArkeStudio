@@ -28,6 +28,7 @@ export function harnessModelUnavailableReason(
   state: ClientState | null,
   model: ModelInfo,
   needsImages = false,
+  needsTools = false,
 ): string | undefined {
   const manifest = state?.app.manifest?.models;
   if (harnessModelDisabled(model, state?.app.models.disabled ?? [], manifest)) {
@@ -39,6 +40,7 @@ export function harnessModelUnavailableReason(
     return "unavailable on this machine";
   }
   const missingInput = harnessModelMissingInput(model, needsImages);
+  if (needsTools && model.tools === false) return "cannot use tools";
   if (missingInput === "text") return "cannot read text";
   if (missingInput === "image") {
     return "text only · Stage needs images";
@@ -50,10 +52,12 @@ export function HarnessModelOptions({
   state,
   selected,
   needsImages = false,
+  needsTools = false,
 }: {
   state: ClientState | null;
   selected?: string;
   needsImages?: boolean;
+  needsTools?: boolean;
 }) {
   const models = state?.app.harnessModels ?? [];
   const resolved = selected ? findHarnessModel(selected, models, state?.app.manifest?.models) : undefined;
@@ -71,7 +75,7 @@ export function HarnessModelOptions({
       {[...byProvider.entries()].map(([provider, list]) => (
         <optgroup key={provider} label={Object.entries(PROVIDERS).find(([id]) => id === provider)?.[1].displayName ?? provider}>
           {[...list].sort((a, b) => Number(b.isDefault ?? false) - Number(a.isDefault ?? false)).map((model) => {
-            const reason = harnessModelUnavailableReason(state, model, needsImages);
+            const reason = harnessModelUnavailableReason(state, model, needsImages, needsTools);
             return (
               <option
                 key={harnessModelReference(model)}

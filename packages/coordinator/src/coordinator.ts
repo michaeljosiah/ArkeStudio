@@ -8099,8 +8099,12 @@ export class Coordinator {
         return;
       }
       case "genesis-chat": {
-        if (this.genesis?.isRunning(msg.genesisId)) return;
-        const failed = (detail: string) =>
+        const result = (accepted: boolean, detail?: string) => {
+          if (msg.requestId) this.emit({ type: "genesis.chat-result", at: this.nowIso(), genesisId: msg.genesisId, requestId: msg.requestId, accepted, ...(detail ? { detail } : {}) });
+        };
+        if (this.genesis?.isRunning(msg.genesisId)) { result(false, "Another turn is running. Your message is still here; send it when that turn ends."); return; }
+        const failed = (detail: string) => {
+          result(false, detail);
           this.emit({
             at: new Date().toISOString(),
             type: "genesis.status",
@@ -8108,6 +8112,7 @@ export class Coordinator {
             status: "failed",
             detail,
           });
+        };
         if (!this.genesis || !this.opts.provider.genesisDir) {
           failed("authoring is not configured");
           return;
@@ -8122,6 +8127,7 @@ export class Coordinator {
           await recoverGenesisImports(dir);
           await atomicWriteFile(join(dir, "voice-catalogue.json"), JSON.stringify(await this.voiceService?.catalogue() ?? [], null, 2));
           this.emit(draft);
+          result(true);
           // Fire and watch: turns, the draft and the final status arrive as events.
           this.trackBackground(this.genesis.run(dir, msg.genesisId, msg.text, msg.modelId).catch(err => failed(describeCoordinatorError(err))));
         } catch (err) {

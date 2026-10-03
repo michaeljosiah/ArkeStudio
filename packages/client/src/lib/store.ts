@@ -223,6 +223,9 @@ interface StoreState {
       importError?: string;
       reviewPending?: boolean;
       chatPending?: boolean;
+      chatSubmission?: { requestId: string; text: string };
+      rejectedChat?: string;
+      chatError?: string;
       writingModel?: string;
       reviewError?: string;
       readinessError?: string;
@@ -1743,6 +1746,13 @@ function handleFrame(json: string): void {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], importError: event.detail, decisionPending: undefined } };
     } else if (event.type === "genesis.imports") {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imports: event.imports, importError: undefined, readiness: undefined, decisionPending: genesis[event.genesisId]?.decisionPending === "import" ? undefined : genesis[event.genesisId]?.decisionPending } };
+    } else if (event.type === "genesis.chat-result") {
+      const draft = genesis[event.genesisId];
+      if (draft?.chatSubmission?.requestId === event.requestId) {
+        genesis = { ...genesis, [event.genesisId]: { ...draft, chatPending: event.accepted ? draft.chatPending : false, chatSubmission: undefined,
+          ...(!event.accepted ? { rejectedChat: draft.chatSubmission.text, chatError: event.detail } : {}),
+        } };
+      }
     } else if (event.type === "genesis.review-error") {
       const draft = genesis[event.genesisId] ?? emptyGenesis();
       if (event.area !== "content" || draft.reviewRequestId === event.requestId) {
@@ -3135,10 +3145,18 @@ export function genesisChat(genesisId: string, text: string, modelId?: string): 
   const draft = current.genesis[genesisId];
   if (!bridge || current.connection !== "open" || genesisChatBusy(genesisId) || draft?.decisionPending || draft?.readinessPending || draft?.founding || draft?.worldId) return false;
   discardedGenesis.delete(genesisId);
-  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...draft, writingModel: modelId, chatPending: true, detail: undefined } } });
-  if (send({ kind: "genesis-chat", genesisId, text, ...(modelId ? { modelId } : {}) })) return true;
+  const requestId = ulid();
+  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...draft, writingModel: modelId, chatPending: true, chatSubmission: { requestId, text }, rejectedChat: undefined, chatError: undefined, detail: undefined } } });
+  if (send({ kind: "genesis-chat", genesisId, requestId, text, ...(modelId ? { modelId } : {}) })) return true;
   emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...current.genesis[genesisId]!, chatPending: false } } });
   return false;
+}
+
+export function takeRejectedGenesisChat(genesisId: string): string | undefined {
+  const draft = current.genesis[genesisId];
+  const text = draft?.rejectedChat;
+  if (text !== undefined) emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...draft, rejectedChat: undefined } } });
+  return text;
 }
 
 export function listGenesisDrafts(): void { send({ kind: "genesis-list" }); }

@@ -917,6 +917,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("genesis-chat"),
       genesisId: GenesisIdSchema,
+      requestId: z.string().min(1).optional(),
       text: z.string().min(1).max(4000),
       modelId: z.string().min(1).optional(),
     })

@@ -99,5 +99,8 @@ it("background founding reviews cannot mark an active conversation failed or inv
     assert.equal(events.some(event => event.type === "genesis.status" || event.type === "genesis.import-error"), false);
     assert.ok(events.some(event => event.type === "genesis.review-error" && event.area === "readiness"));
     assert.ok(events.some(event => event.type === "genesis.review-error" && event.area === "content"), "a raced content read settles its request without changing the turn");
+    await seam.handleClientMessage({ kind: "genesis-chat", genesisId: "gen-running", requestId: "other-device", text: "Keep my words." });
+    assert.ok(events.some(event => event.type === "genesis.chat-result" && event.requestId === "other-device" && !event.accepted));
+    assert.equal(events.some(event => event.type === "genesis.status"), false, "refusing the other device leaves the active turn alone");
   } finally { seam.genesis = null; await coordinator.stop(); await provider.close(); }
 });

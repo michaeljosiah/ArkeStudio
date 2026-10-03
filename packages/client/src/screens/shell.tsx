@@ -62,6 +62,7 @@ import {
   createWorld,
   genesisAttachFiles,
   genesisChat,
+  takeRejectedGenesisChat,
   listGenesisDrafts,
   loadGenesisDraft,
   reviewGenesisDraft,
@@ -712,7 +713,12 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   const drafts = useGenesis();
   const g = drafts[genesisId];
   const [writingModel, setWritingModel] = useState<string | undefined>(g?.writingModel);
-  const writingModelReason = languageChoiceReason(state, writingModel);
+  const writingModelReason = languageChoiceReason(state, writingModel, true);
+  useEffect(() => {
+    if (g?.rejectedChat === undefined) return;
+    const text = takeRejectedGenesisChat(genesisId);
+    if (text !== undefined) setMessage(previous => previous ? `${text}\n\n${previous}` : text);
+  }, [g?.rejectedChat, genesisId]);
   useEffect(() => { if (g?.status === "failed") setSubmittedName(null); }, [g?.status]);
   useEffect(() => {
     if (!g?.founding) return;
@@ -1167,7 +1173,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 {g?.review && <GenesisContentCards review={g.review} busy={!!g.decisionPending || !!g.readinessPending || !!g.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.worldId || myBuild?.status === "running"}
                   onDecide={(cards, decision) => decideGenesisDraft(genesisId, cards.map(card => ({ key: card.key, digest: card.digest })), decision)}
                   onRevise={title => setMessage(`Please revise ${title}: `)} />}
-                {!!g?.review?.cards.some(card => card.status === "approved") && !g?.worldId && <GenesisReadinessCard review={g?.readiness} busy={!!g?.decisionPending || !!g?.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.readinessPending}
+                {!!g?.review?.cards.some(card => card.status === "approved" || card.previous !== undefined) && !g?.worldId && <GenesisReadinessCard review={g?.readiness} busy={!!g?.decisionPending || !!g?.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.readinessPending}
                   onRefresh={() => reviewGenesisReadiness(genesisId)} onFix={setMessage}
                   onLeave={(id, digest) => leaveGenesisFinding(genesisId, id, digest)} />}
                 {g?.voices && <GenesisVoiceCards genesisId={genesisId} voices={g.voices} jobs={voiceJobs} models={state?.app.manifest?.models} busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.founding || !!g.worldId}
@@ -1275,12 +1281,13 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     a hang, and this is the first conversation anyone has with the studio. */}
                 {chatRunning && <Working label={g?.working ?? null} startedAt={g?.runStartedAt ?? null} />}
                 {g?.status === "failed" && g.detail && <Callout title="The conversation needs attention">{g.detail}</Callout>}
+                {g?.chatError && <Callout title="Your message was held">{g.chatError}</Callout>}
                 <div style={{ marginTop: "auto" }}>
                   <label style={{ display: "grid", gap: 6 }}>Writing model
                     <Select label="Writing model" value={writingModel ?? ""} disabled={chatRunning || buildPressed || !!g?.founding}
                       onChange={event => setWritingModel(event.target.value || undefined)}>
                       <option value="">World author default</option>
-                      <HarnessModelOptions state={state} selected={writingModel} />
+                      <HarnessModelOptions state={state} selected={writingModel} needsTools />
                     </Select>
                   </label>
                   <HarnessModelStatus state={state} />
