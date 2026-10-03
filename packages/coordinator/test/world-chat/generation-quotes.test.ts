@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { newId, type ConversationActionCard, type LedgerEntry, type ManifestModel, type ModelManifest, type ModelWorldChatAction } from "@arke-studio/contracts";
@@ -8,6 +8,7 @@ import { imageGenerationSource } from "../../src/world-chat/image-generation.js"
 import { WorldStore } from "../../src/world/store.js";
 import { JobQueue } from "../../src/queue/dispatcher.js";
 import { readContainedImageReferences } from "../../src/world/reference-files.js";
+import { stagedReferenceDir } from "../../src/references/master-look.js";
 import { recordReferenceTake } from "../../src/references/takes.js";
 import { createProp, addPropState } from "../../src/references/props.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -21,8 +22,9 @@ const MODEL: ManifestModel = { id: "test-image", provider: "fal", capability: "i
 const mainPhoto = (count = 1): ModelWorldChatAction => ({ kind: "reference-generation", modelId: MODEL.id,
   request: { operation: "main-photo", sheetId: "maren-kest", prompt: "Salt-lit portrait", count, identityReferenceIds: [] }, checkReceiptIds: [newId("check")] });
 
-async function setup() {
+async function setup(beforeOpen?: (dir: string) => Promise<void>) {
   const dir = await makeTempWorld();
+  await beforeOpen?.(dir);
   let now = AT;
   const store = await WorldStore.open(dir, { clock: () => now });
   closeOnCleanup(() => store.close());
@@ -181,4 +183,52 @@ describe("durable generation quotes (SPEC-050 R-11..20)", () => {
     assert.equal(h.queue.listJobs().length, 0);
     assert.equal(h.fake.submitCount, 0);
   });
+});
+
+it("keeps standing key-art constraints and shows a shared full-length prompt once for eight images", async () => {
+  const h = await setup(async dir => {
+    const path = join(dir, "art-direction/art-direction.json");
+    const direction = JSON.parse(await readFile(path, "utf8"));
+    direction.failureModes = ["No lens flare on harbour lamps."];
+    await writeFile(path, JSON.stringify(direction));
+  });
+  const prompt = "a".repeat(20_000);
+  for (const operation of ["world-image", "master-look"] as const) {
+    const action: ModelWorldChatAction = { kind: "image-generation", modelId: MODEL.id, request: { operation, prompt, count: 8 }, checkReceiptIds: [newId("check")] };
+    const id = newId("act");
+    const body = await h.quotes().prepare(action, id, AT);
+    assert.equal(body.quantity, 8);
+    assert.equal(body.estimatedMicroUsd, 320_000);
+    assert.ok(body.prompt.length < 21_000, "the complete shared prompt is not repeated per result");
+    assert.equal(body.prompt.startsWith(prompt), true);
+    assert.match(body.prompt, /No lens flare on harbour lamps/);
+    if (operation === "world-image") assert.match(body.prompt, /No text, no logos/);
+    const quoted = await h.quotes().validate(action, id);
+    assert.equal(quoted.inputs.length, 8);
+    assert.ok(quoted.inputs.every(input => input.params.prompt === body.prompt));
+  }
+  assert.equal(h.queue.listJobs().length, 0);
+});
+
+it("carries the staged main-photo image with its role, estimate and content pin", async () => {
+  const file = "references/maren-kest/head-front.png";
+  const h = await setup(async dir => {
+    const staged = join(dir, stagedReferenceDir("main-photo--maren-kest"));
+    await mkdir(staged, { recursive: true });
+    await writeFile(join(staged, "world.json"), JSON.stringify({ file }));
+  });
+  h.manifest.models[0]!.pricing = { kind: "perImage", microUsdPerImage: 40_000, microUsdPerReferenceImage: 5_000 };
+  const action = mainPhoto();
+  const id = newId("act");
+  const body = await h.quotes().prepare(action, id, AT);
+  assert.equal(body.references.length, 1);
+  assert.equal(body.references[0]!.role, "identity");
+  assert.equal(body.estimatedMicroUsd, 45_000);
+  const { inputs } = await h.quotes().validate(action, id);
+  assert.deepEqual(inputs[0]!.params.references, [file]);
+  assert.deepEqual(inputs[0]!.params.referenceRoles, [{ file, role: "identity" }]);
+  assert.match((inputs[0]!.params.generationQuoteReferences as Array<{ hash: string }>)[0]!.hash, /^[a-f0-9]{64}$/);
+  await writeFile(join(h.dir, file), pngBytes());
+  await assert.rejects(h.quotes().dispatch(action, id), /changed/);
+  assert.equal(h.queue.listJobs().length, 0);
 });

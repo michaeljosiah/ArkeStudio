@@ -41,7 +41,8 @@ export function imageGenerationSource(store: WorldStore, ports: {
             return `references/${take.reference.sheetId}/takes/${take.id}/${take.media}`;
           });
           inputs = mainPhotoRequests(bundle.meta, bundle.artDirection, sheet, kit, model,
-            { prompt: req.prompt, count: req.count, identityReferences, generationKey: actionId }).map(request => request.input);
+            { prompt: req.prompt, count: req.count, identityReferences, generationKey: actionId,
+              staged: stagedWorldImage(bundle, stagedReferenceKey("main-photo", sheet.id)) }).map(request => request.input);
           break;
         }
         case "character-sheet":
@@ -81,7 +82,7 @@ export function imageGenerationSource(store: WorldStore, ports: {
           const brief = await readKeyArtBrief(store.dir);
           const staged = stagedWorldImage(bundle, stagedReferenceKey("world-image"));
           const assembly = await assembleKeyArt(store, bundle, brief, model, staged?.file);
-          const prompt = req.prompt ?? (brief ? `${keyArtComposition({ meta: bundle.meta, direction: bundle.artDirection,
+          const prompt = req.prompt !== undefined ? `${req.prompt} No text, no logos.${imageConstraintSuffix(bundle.artDirection)}` : (brief ? `${keyArtComposition({ meta: bundle.meta, direction: bundle.artDirection,
             bible: bundle.bible.present ? bundle.bible.text : "", brief, cast: assembly.carried.filter(ref => ref.role === "identity").map(ref => ref.name) })}${imageConstraintSuffix(bundle.artDirection)}` : undefined);
           inputs = Array.from({ length: req.count }, (_, index) => {
             const input = worldImageRequest(bundle.meta, model, bundle.artDirection, { index, count: req.count }, assembly.referenceRoles,
@@ -110,8 +111,9 @@ export function imageGenerationSource(store: WorldStore, ports: {
     } }));
     const references = [...new Map(inputs.flatMap(input => (input.params.references as string[] | undefined ?? []).map(file =>
       [file, { id: `ref_${createHash("sha256").update(file).digest("hex").slice(0, 24)}`, role: (input.params.referenceRoles as Array<{ file: string; role: string }> | undefined)?.find(ref => ref.file === file)?.role ?? "identity" }] as const))).values()];
+    const prompts = [...new Set(inputs.map(input => String(input.params.prompt)))];
     const body: ArkeGenerationBody = { family: "generation", medium: "image", purpose: request.operation.replaceAll("-", " "),
-      prompt: inputs.map((input, index) => inputs.length === 1 ? String(input.params.prompt) : `${index + 1}. ${String(input.params.prompt)}`).join("\n\n"),
+      prompt: prompts.map((prompt, index) => prompts.length === 1 ? prompt : `${index + 1}. ${prompt}`).join("\n\n"),
       references, provider: model.provider, model: model.id, quantity: inputs.length, output: "Pending image candidates; selection requires a separate card", cost: "Pending quote",
       options: [{ label: "Model choice", value: action.modelId ? "Named in this request" : bundle.meta.models?.image ? "World image default" : "Settings image routing default" },
         ...inputs.flatMap((input, index) => Object.entries(input.params).filter(([key]) => !["prompt", "references", "referenceRoles", "provenance", "characterName"].includes(key))
