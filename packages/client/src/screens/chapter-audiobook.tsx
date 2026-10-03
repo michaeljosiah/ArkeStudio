@@ -1644,6 +1644,10 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
   onFocus: () => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
+  // The note field waits behind its press until there is a note (design turn 192): three empty
+  // inputs under three speakers read as three things owed.
+  const [noteOpen, setNoteOpen] = useState(false);
+  const showNote = noteOpen || note !== undefined || draft !== null;
   const value = draft ?? note ?? "";
   const commit = () => {
     if (draft === null) return;
@@ -1669,25 +1673,38 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
           <span>{name}</span>
         </span>
         {noteHeld && note !== undefined && <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">note · not on this reader</span>}
+        {!showNote && (
+          <button type="button" className="fy-ch__derive fy-ab__note-press" onClick={() => setNoteOpen(true)} data-testid="performed-note-press">
+            Note
+          </button>
+        )}
         <span className="fy-ch__who-count fy-mono">
           {lines} line{lines === 1 ? "" : "s"}
         </span>
       </div>
-      <div className="fy-ab__note">
-        <input
-          className="fy-ab__note-input"
-          value={value}
-          maxLength={60}
-          placeholder="note"
-          aria-label={`Note · ${name}`}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") (event.target as HTMLInputElement).blur();
-          }}
-        />
-        <span className="fy-ab__note-count fy-mono">{value.length}/60</span>
-      </div>
+      {showNote && (
+        <div className="fy-ab__note">
+          <input
+            className="fy-ab__note-input"
+            value={value}
+            maxLength={60}
+            placeholder="note"
+            aria-label={`Note · ${name}`}
+            autoFocus={noteOpen && note === undefined}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={() => {
+              // Left empty, it folds back to its press; written, it stays open until the note
+              // the store sends back takes over.
+              if (value.trim() === "") setNoteOpen(false);
+              commit();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+            }}
+          />
+          <span className="fy-ab__note-count fy-mono">{value.length}/60</span>
+        </div>
+      )}
       {focused && line !== null && (
         <div className="fy-ab__note-more">
           <button

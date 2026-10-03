@@ -41,9 +41,9 @@ import {
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
-import { FileText, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
+import { ChevronDown, FileText, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
-import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
+import { PageReadControl, useProsePageRead, type PageRead, type PageReadBlock } from "../components/page-read.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
 import { continuityStamp } from "../lib/continuity.js";
@@ -118,6 +118,8 @@ const AUTOSAVE_MS = 1200;
 
 /** What an empty chapter says. */
 const PLACEHOLDER = "Start here. It saves as you go.";
+/** Draws on's Add, started in the thread for the author to finish (design turn 192). */
+const DRAWS_ON_LINE = "This chapter draws on ";
 
 type OpenedRecord = {
   body: string;
@@ -1133,6 +1135,7 @@ export function ChapterWorkspace({
   const compact = useMediaQuery("(max-width: 1099px)");
   const coarse = useMediaQuery("(pointer: coarse)");
   const [notesOpen, setNotesOpen] = useState(false);
+  const [synopsisOpen, setSynopsisOpen] = useState(false);
   const [blockSheet, setBlockSheet] = useState(compact);
   const [blockSelection, setBlockSelection] = useState<import("./chapter-audiobook.js").BlockSelection | null>(null);
   // The Timing view's playhead (turn 187a), on the view's clock; a new chapter starts at its head.
@@ -1392,6 +1395,12 @@ export function ChapterWorkspace({
   // being answered, and a refusal or a lost answer would then have nowhere to be shown. A line
   // only started, or one shown as not sent, is the author's to replace.
   const asking = ask !== null && ask.draft !== true && ask.declined !== true;
+  // Draws on is changed in the thread (turn 126): Add only starts the line there, for the author
+  // to finish with what the chapter draws on.
+  const askDraws = () => {
+    setDock(true);
+    setAsk({ press: crypto.randomUUID(), line: DRAWS_ON_LINE, text: `${dockPrefix} ${DRAWS_ON_LINE}`, draft: true });
+  };
   const askPassage = (action: PassageAction) => {
     setDock(true);
     setAsk({
@@ -1755,33 +1764,46 @@ export function ChapterWorkspace({
               {/* Not while a draft stands in the prose's place: the read speaks the saved chapter,
                   and the words on screen are the draft's (codex, PR 879). */}
               {/* In Audiobook the head's presses sit on the view row with the reading (turn 165a). */}
-              {view !== "manuscript" ? null : (
-                <>
-                  {paragraphs.length > 0 && stagedDraft === undefined && !voicedRead.reading && <PageReadControl read={read} label="Read the chapter" />}
-                  {paragraphs.length > 0 && stagedDraft === undefined && voicesRecord !== null && !pageRead.reading && (
-                    <PageReadControl read={readVoiced} label="Voiced" />
-                  )}
-                </>
+              {/* One outline press reads the chapter (126a); a cast chapter's voiced read is its
+                  menu, not a second button beside it (design turn 192). While either reads, its
+                  own controls stand in the press's place. */}
+              {view !== "manuscript" || paragraphs.length === 0 || stagedDraft !== undefined ? null : voicedRead.reading ? (
+                <PageReadControl read={readVoiced} label="Voiced" />
+              ) : pageRead.reading ? (
+                <PageReadControl read={read} label="Read the chapter" />
+              ) : (
+                <ReadPress read={read} voiced={voicesRecord !== null ? readVoiced : null} />
               )}
             </div>
           </div>
           {/* The synopsis, typed where it reads (turn 127), the way the scene's is. */}
+          {/* Two lines until it is pressed (design turn 192, 129a's one line under the title):
+              a press opens it to type, or, locked, to read whole. */}
           {locked ? (
             chapter.synopsis !== undefined && chapter.synopsis !== "" ? (
-              <div className="fy-sbsynopsis fy-ch__synopsis--locked">{chapter.synopsis}</div>
+              <div
+                className={cx("fy-sbsynopsis fy-ch__synopsis--locked fy-ch__synopsis-clamp", synopsisOpen && "fy-ch__synopsis-clamp--open")}
+                onClick={() => setSynopsisOpen((open) => !open)}
+              >
+                {chapter.synopsis}
+              </div>
             ) : null
           ) : (
             <EditableText
               value={chapter.synopsis ?? ""}
               placeholder="What this chapter is for."
-              className="fy-sbsynopsis"
+              className="fy-sbsynopsis fy-ch__synopsis-clamp"
               rows={2}
               onCommit={(next) => plan({ synopsis: next.trim() === "" ? null : next.trim() })}
             />
           )}
           <div className="fy-sw__context" aria-label="Chapter state">
-            <span className="fy-ch__mark">
-              {compact ? <span>{chapter.pov ? sheetName(chapter.pov) : "Point of view"}</span> : (
+            {/* Unset, a mark is a quiet press to set it, and on a narrow screen (where the plan
+                is set in Notes) not drawn at all (design turn 192): an empty pill says nothing. */}
+            {compact ? (
+              chapter.pov ? <span className="fy-ch__mark"><span>{sheetName(chapter.pov)}</span></span> : null
+            ) : (
+            <span className={cx("fy-ch__mark", !chapter.pov && "fy-ch__mark--unset")}>
               <select
                 className="fy-ch__pick"
                 aria-label="Point of view"
@@ -1789,15 +1811,15 @@ export function ChapterWorkspace({
                 disabled={locked}
                 onChange={(e) => plan({ pov: e.target.value === "" ? null : e.target.value })}
               >
-                <option value="">Point of view</option>
+                <option value="">+ Point of view</option>
                 {characters.map((sheet) => (
                   <option key={sheet.id} value={sheet.id}>
                     {sheet.name}
                   </option>
                 ))}
               </select>
-              )}
             </span>
+            )}
             {/* Read-only (locked, or the compact head) with no time set, there is nothing to show
                 and nothing to press: the mark stays out rather than standing as an empty pill. */}
             {(locked || compact) && !chapter.when ? null : (
@@ -2259,15 +2281,14 @@ export function ChapterWorkspace({
                   </button>
                 )}
               </h2>
-              <p className="fy-ch__scope fy-mono">where they end up · what they learn here</p>
               {continuity === "unreadable" && <div className="fy-ch__moved fy-ch__moved--line">record unreadable · Derive again replaces it</div>}
               {continuityStale && continuityRecord !== null && (
                 <div className="fy-ch__moved fy-ch__moved--line">chapter moved · derived against v{continuityRecord.version}</div>
               )}
               {deriveNote !== null && !derivingNow && <div className="fy-ch__moved fy-ch__moved--line">{deriveNote}</div>}
-              {continuityRecord === null ? (
-                continuity === "unreadable" ? null : <p className="fy-bible__empty">Not derived yet.</p>
-              ) : continuityRecord.characters.length === 0 ? (
+              {/* Not derived is the heading and its Derive press, one line (design turn 192): a
+                  panel says nothing until there is something to say. */}
+              {continuityRecord === null ? null : continuityRecord.characters.length === 0 ? (
                 <p className="fy-bible__empty">Nothing placed yet.</p>
               ) : (
                 <ul className="fy-ch__who">
@@ -2326,15 +2347,12 @@ export function ChapterWorkspace({
                   </button>
                 )}
               </h2>
-              <p className="fy-ch__scope fy-mono">who speaks · in whose voice</p>
               {voices === "unreadable" && <div className="fy-ch__moved fy-ch__moved--line">record unreadable · Cast again replaces it</div>}
               {voicesStale && voicesRecord !== null && (
                 <div className="fy-ch__moved fy-ch__moved--line">chapter moved · cast against v{voicesRecord.version}</div>
               )}
               {castNote !== null && !castingNow && <div className="fy-ch__moved fy-ch__moved--line">{castNote}</div>}
-              {voicesRecord === null ? (
-                voices === "unreadable" ? null : <p className="fy-bible__empty">Not cast yet.</p>
-              ) : (
+              {voicesRecord === null ? null : (
                 <ul className="fy-ch__who">
                   <li>
                     <div className="fy-ch__who-head">
@@ -2405,7 +2423,8 @@ export function ChapterWorkspace({
                     `cast · v${voicesRecord.version}`,
                     `${castLinesRead.length} line${castLinesRead.length === 1 ? "" : "s"}`,
                     `${speakers.length} speaker${speakers.length === 1 ? "" : "s"}`,
-                    voicesRecord.dropped === 0 ? "every line is the chapter’s own words" : `${voicesRecord.dropped} line${voicesRecord.dropped === 1 ? "" : "s"} dropped, not in the chapter`,
+                    // A drop is said; a clean check is the count alone (design turn 192).
+                    ...(voicesRecord.dropped > 0 ? [`${voicesRecord.dropped} line${voicesRecord.dropped === 1 ? "" : "s"} dropped, not in the chapter`] : []),
                     ...(voicesRecord.omitted > 0 ? [`${voicesRecord.omitted} line${voicesRecord.omitted === 1 ? "" : "s"} over the cap`] : []),
                     ...(voiced.ambiguous > 0 ? [`${voiced.ambiguous} ambiguous`] : []),
                     ...((voicesRecord.pins?.length ?? 0) > 0 ? [`${voicesRecord.pins!.length} set by you`] : []),
@@ -2438,13 +2457,12 @@ export function ChapterWorkspace({
               </section>
             )}
 
+            {/* Implies appears with its first fact (design turn 192; 127b draws it only with items). */}
+            {implies.length > 0 && (
             <section className="fy-bible__panel">
               <h2 className="fy-bible__paneltitle">
                 Implies <span className="fy-mono">{implies.length}</span>
               </h2>
-              {implies.length === 0 ? (
-                <p className="fy-bible__empty">Nothing implied yet.</p>
-              ) : (
                 <ul className="fy-ch__implies">
                   {implies.map((fact, i) => {
                     // The state lives on the item (codex on turn 127): a reload keeps what was
@@ -2489,14 +2507,22 @@ export function ChapterWorkspace({
                     );
                   })}
                 </ul>
-              )}
             </section>
+            )}
 
-            <section className="fy-bible__panel">
-              <h2 className="fy-bible__paneltitle">Draws on</h2>
-              {drawsEmpty ? (
-                <p className="fy-bible__empty">Draws on nothing yet</p>
-              ) : (
+            <section className="fy-bible__panel" data-testid="chapter-draws">
+              {/* Empty, Draws on is its heading and an Add press, one line (design turn 192,
+                  amending 126): Add starts the line in the thread, where draws is changed. */}
+              <h2 className="fy-bible__paneltitle fy-ch__paneltitle--row">
+                Draws on
+                {drawsEmpty && <span className="fy-ch__panelpush" />}
+                {drawsEmpty && (
+                  <button type="button" className="fy-ch__derive" disabled={locked || asking} onClick={askDraws}>
+                    Add
+                  </button>
+                )}
+              </h2>
+              {drawsEmpty ? null : (
                 <ul className="fy-ch__draws">
                   {draws.sheets.map((slug) => {
                     const sheet = world.sheets.find((s) => s.id === slug);
@@ -2527,25 +2553,22 @@ export function ChapterWorkspace({
               )}
             </section>
 
-            <section className="fy-bible__panel">
-              <h2 className="fy-bible__paneltitle">Earlier versions</h2>
-              {history.length === 0 ? (
-                <p className="fy-bible__empty">No earlier version kept.</p>
-              ) : (
-                <>
-                  <ul className="fy-bible__versions">
-                    {history.map((version) => (
-                      <li key={version}>
-                        <span className="fy-mono">v{version}</span>
-                        <Button variant="ghost" disabled={locked} onClick={() => restoreChapter(worldId, prodId, chapter.file, version)}>
-                          Restore
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </section>
+            {/* Earlier versions appears with the first one kept (design turn 192). */}
+            {history.length > 0 && (
+              <section className="fy-bible__panel">
+                <h2 className="fy-bible__paneltitle">Earlier versions</h2>
+                <ul className="fy-bible__versions">
+                  {history.map((version) => (
+                    <li key={version}>
+                      <span className="fy-mono">v{version}</span>
+                      <Button variant="ghost" disabled={locked} onClick={() => restoreChapter(worldId, prodId, chapter.file, version)}>
+                        Restore
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             {compact && <section className="fy-bible__panel fy-ch__plan"><h2 className="fy-bible__paneltitle">Chapter plan</h2>
               <label>Title{locked ? <span>{chapter.title}</span> : <span className="fy-ch__plan-field"><SceneTitle title={chapter.title} label="Chapter title" onCommit={title => plan({ title })} /></span>}</label>
               <label>Synopsis{locked ? <span>{chapter.synopsis}</span> : <EditableText value={chapter.synopsis ?? ""} placeholder="What this chapter is for." className="fy-ch__plan-field" rows={2} onCommit={synopsis => plan({ synopsis: synopsis || null })} />}</label>
@@ -2649,6 +2672,51 @@ export function ChapterWorkspace({
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * Read the chapter, one outline press with its play mark (126a). A cast chapter's voiced read is
+ * the press's menu (design turn 192) rather than a second grey button beside it: two presses of
+ * the same weight made the head ask which, every time, for a choice made once.
+ */
+function ReadPress({ read, voiced }: { read: PageRead; voiced: PageRead | null }) {
+  const [open, setOpen] = useState(false);
+  const menu = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent) => {
+      if (!menu.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [open]);
+  return (
+    <span className="fy-ch__readpress" ref={menu}>
+      <Button variant="outline" onClick={read.begin}>
+        <Play size={13} />
+        Read the chapter
+      </Button>
+      {voiced !== null && (
+        <Button variant="outline" size="icon" aria-label="More ways to read" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((was) => !was)}>
+          <ChevronDown size={14} />
+        </Button>
+      )}
+      {voiced !== null && open && (
+        <span className="fy-ch__readmenu" role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              voiced.begin();
+            }}
+          >
+            Voiced
+          </button>
+        </span>
+      )}
+    </span>
   );
 }
 

@@ -270,6 +270,10 @@ describe("needs-you is derived, never appended to (R-3, D1, §3.2)", () => {
     );
     assert.equal(queue[0]!.kind, "job-needs-reconciliation", "unresolved money first, even when older");
     assert.equal(queue[1]!.kind, "provider-paused", "blocked work second");
+    // Name, state, one clause (design turn 192): the provider's display name, never its id.
+    assert.equal(queue[1]!.title, "FAL paused");
+    assert.equal(queue[1]!.detail, "HTTP 401 · 40 jobs held");
+    assert.equal(queue[0]!.title, "FAL submission needs your answer");
     const takes = queue.filter((e) => e.kind === "unreviewed-take");
     assert.equal(takes.length, 40);
     for (let i = 1; i < takes.length; i++) {

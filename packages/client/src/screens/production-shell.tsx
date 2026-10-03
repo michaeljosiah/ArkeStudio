@@ -4,6 +4,9 @@ import {
   buildRenderPlan,
   deriveCut,
   guestsOf,
+  pendingGuestsOf,
+  pendingSheets,
+  worldSheets,
   isMediaOnly,
   pickableSheets,
   productionShape,
@@ -318,8 +321,15 @@ export function ProductionLayout() {
     const line = audiobookDoorLine(audiobookDoor.rows);
     return `${line.read}/${line.withProse}`;
   })();
-  const guestCount = prodId
-    ? guestsOf(world?.sheets ?? [], prodId).filter((s) => s.retired !== true).length
+  // What the Cast page lists (design turn 192, 58a's rail): its guests, the guests staged for
+  // review, and the world's cast it shares. Counting the guests alone put "Cast 0" over a page of
+  // seven people.
+  const castCount = prodId
+    ? guestsOf(world?.sheets ?? [], prodId).filter((s) => s.retired !== true).length +
+      (["character", "location", "faction"] as const).flatMap((kind) =>
+        pendingGuestsOf(pendingSheets(world?.proposals ?? [], kind, world?.conversations ?? []), prodId),
+      ).length +
+      worldSheets(world?.sheets ?? []).filter((s) => s.retired !== true).length
     : 0;
   const base = `/w/${worldId}/p/${prodId}`;
   /*
@@ -428,7 +438,9 @@ export function ProductionLayout() {
           </span>
         )}
         <span className="fy-prodrail__label">{label}</span>
-        {count !== undefined && <span className="fy-prodrail__count">{count}</span>}
+        {/* Nothing is not a count (design turn 192): "—" and "0" beside a row said only that the
+            page behind it is empty, which the page says when it is opened. */}
+        {count !== undefined && count !== "—" && count !== "0" && <span className="fy-prodrail__count">{count}</span>}
       </NavLink>
     );
   };
@@ -662,9 +674,8 @@ export function ProductionLayout() {
             <>
               {item("", "Dashboard")}
               {/* Cast is on both formats' rails (SPEC-020 R-9): a story has a cast as much as a
-                  video does, and the count is the guests — the number the rail can say something
-                  true about, since the world's cast is shared and belongs to the world's own rail. */}
-              {item("cast", "Cast", String(guestCount))}
+                  video does, and the count is everyone its page lists (design turn 192). */}
+              {item("cast", "Cast", String(castCount))}
               {isStory ? (
                 <>
                   {item("story", "Develop", "chat", true)}

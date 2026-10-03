@@ -134,9 +134,16 @@ describe("the door's continuity view (turn 129)", () => {
     assert.match(html, /derived · v4/);
     assert.match(html, /chapter moved · derived against v4/);
     assert.match(html, /not derived/);
-    assert.match(html, /3 chapters, 2 derived/);
-    assert.match(html, /nothing carries past a chapter not derived/);
+    assert.match(html, /1 of 3 not derived/, "the count, not a sentence about it (design turn 192)");
+    assert.doesNotMatch(html, /nothing carries past/);
     assert.doesNotMatch(html, /role="progressbar"/, "the outline's bar is the outline's");
+
+    // Nothing derived yet: one line and its press, no grid of dashes (design turn 192).
+    const none = render(ROWS.map((row) => ({ ...row, continuity: undefined })) as ChapterSummary[]);
+    assert.match(none, /data-testid="continuity-none"/);
+    assert.match(none, />Not derived<\/span>/);
+    assert.match(none, />Derive<\/button>/);
+    assert.doesNotMatch(none, /continuity-table/);
 
     rememberChaptersView("inkbound", "outline");
     const outline = render(ROWS);
