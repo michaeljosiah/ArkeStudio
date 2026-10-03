@@ -759,6 +759,8 @@ function conversationCommandSchema(kind: ClientMessageKind, schema: z.ZodDiscrim
     case "scene-command": return schema.extend({ command: ChatSceneCommandSchema });
     case "upload-artifacts": return schema.omit({ editor: true, sourcePaths: true });
     case "pick-staged-reference": return schema.omit({ image: true, worldFile: true });
+    case "clone-voice": return schema.omit({ language: true });
+    case "bench-dispatch": return schema.omit({ confirmedSpeechMicroUsd: true, voiceUploadConfirmedFor: true });
     default: return schema;
   }
 }

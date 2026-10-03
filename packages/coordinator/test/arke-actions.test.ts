@@ -175,6 +175,13 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     assert.equal(offeredScene.shape["command"]!.safeParse({ kind: "edit-shot", shotId: "sh_12", change: { visualFacts: { onScreenCharacters: [], composition: "wide", confirmedAt: "2026-09-04T12:00:00.000Z" } } }).success, false);
     const staged = modelActionCatalogue().find((entry) => entry.kind === "pick-staged-reference")!.fields;
     assert.equal(staged.some((field) => field.name === "image" || field.name === "worldFile"), false);
+    const clone = ARKE_CLIENT_COMMAND_REGISTRY["clone-voice"];
+    assert.ok(clone.classification === "supported-by-arke");
+    const frenchClone = { kind: "clone-voice", worldId, clipId: "chosen-clip", name: "Voice", description: "The speaker", consent: true, language: "fr" };
+    assert.equal(clone.schema.safeParse(frenchClone).success, true);
+    assert.equal(clone.conversationSchema.safeParse(frenchClone).success, false, "the current chat clone does not carry a language override");
+    const bench = modelActionCatalogue().find((entry) => entry.kind === "bench-dispatch")!.fields;
+    assert.equal(bench.some((field) => field.name === "confirmedSpeechMicroUsd" || field.name === "voiceUploadConfirmedFor"), false, "direct speech acknowledgements are not fields on bench-generation");
   });
 
   it("names unsafe command seams and exposes strict authority actions", () => {
