@@ -55,6 +55,7 @@ import "./screens/quiet.css";
 import "./components/activity-panel.css";
 import "./components/account-menu.css";
 import "./components/model-chip.css";
+import "./screens/audiobook-cover.css";
 import "./components/design-voice-dialog.css";
 import "./components/free-plan.css";
 import { App } from "./App.js";
