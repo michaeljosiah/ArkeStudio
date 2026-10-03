@@ -7,6 +7,7 @@ import { DeliverySchema } from "./voice.js";
 import { chapterParagraphs, voicedBlocks, type VoicedBlock } from "./prose.js";
 import { textDigest } from "./subtitles.js";
 import { AudiobookGroupedSchema, AudiobookLoudnessSchema, AudiobookSplitFlagSchema } from "./audiobook-grouped.js";
+import { AudiobookPictureSchema } from "./audiobook-pictures.js";
 
 /**
  * The audiobook (design turn 146, SPEC-047): a story production's third export beside `.docx`
@@ -344,6 +345,11 @@ export const ChapterAudiobookSchema = z
     flags: z.record(z.string(), AudiobookFlagSchema),
     /** The direction per block (R-6); absent on a record the first build wrote, which read the same. */
     direction: z.record(z.string(), AudiobookDirectionSchema).default({}),
+    /**
+     * The pictures set on blocks (design turn 186c, SPEC-047 R-60), by block key; absent on a
+     * record with none, which the builds before them read as before (R-64).
+     */
+    pictures: z.record(z.string(), AudiobookPictureSchema).optional(),
   })
   .strict();
 export type ChapterAudiobook = z.infer<typeof ChapterAudiobookSchema>;
