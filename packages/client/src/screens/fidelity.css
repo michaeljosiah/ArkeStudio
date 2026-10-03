@@ -223,6 +223,13 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   position: relative;
 }
 .fy-content--fixed { overflow: hidden; }
+/*
+ * Fit on wide screens (design turn 188). A world page has no rail, so it stops at the 1440 window
+ * it was drawn for (the production's 1080 and the rail beside it) and centres past that. At 2560
+ * the Bible ran 2,145px lines and Cast put a row's state 1,100px from its name. The fixed frames,
+ * art direction and the conversations, are laid out against the column and keep it.
+ */
+.fy-worldapp > .fy-content:not(.fy-content--fill) > [data-screen] { width: 100%; max-width: var(--page-max); margin-inline: auto; }
 
 /* ---- the floating pill nav ------------------------------------------------ */
 
@@ -1507,15 +1514,25 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-prodrail--episodic.fy-prodrail--folded .fy-prodrail__foot { padding: 0; border-top: 0; }
 
+/*
+ * Fit on wide screens (design turn 188). The page's content stops at --content-max and centres
+ * in the room beside the rail; the side padding takes up the rest. It is padding, not a max-width
+ * on the column, so the column stays the full width and its scrollbar stays at the window's edge,
+ * where a page's scrollbar belongs. Below about 1440 the 44px floor wins and nothing moves.
+ * The percentage reads the shell's column, which is this page's own width everywhere except
+ * inside `.fy-arkewrap` — and the pages in there are the wide workspaces, which opt out.
+ */
 .fy-prodmain {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: 30px 44px 28px;
+  padding: 30px max(44px, calc((100% - var(--content-max)) / 2)) 28px;
   display: flex;
   flex-direction: column;
   gap: 22px;
 }
+/* The surfaces that use the whole width: boards, the takes workspace, the stills sheet. */
+.fy-prodmain--wide { padding-inline: 44px; }
 
 .fy-h1row { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; animation: fy-fade-up 0.6s var(--ease-out) both; }
 .fy-h1 { margin: 0; font: 650 28px/1.05 var(--font-sans); letter-spacing: -0.025em; }
@@ -1542,6 +1559,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-threadcard__title { font: 600 15px var(--font-sans); margin-top: 10px; }
 .fy-threadcard__sub { font: 400 12.5px/1.6 var(--font-sans); color: var(--muted-foreground); margin-top: 6px; }
 .fy-threadcard__actions { display: flex; gap: 8px; margin-top: 14px; }
+/* The story's chapter in hand is read, so it keeps the reading measure (53b/166b), not the page's. */
+.fy-threadcard--inhand { max-width: var(--width-text); }
 .fy-nextcard {
   flex: 1;
   min-width: 0;
@@ -2701,7 +2720,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
  * desktop window's 44px title-bar overlay: at the minimum window height the sheet starts 16px
  * down, and a control 12px inside it would lie under the native window buttons.
  */
-.fy-settings__sheet { position: relative; }
+/* 95% stops where the sheet stops reading as a sheet (turn 188): it was 2,432 x 1,026 at 2560. */
+.fy-settings__sheet { position: relative; max-width: 1400px; max-height: 960px; }
 .fy-settings { height: 100%; min-height: 0; display: flex; }
 .fy-settings__close { position: absolute; top: 30px; right: 20px; }
 .fy-settings__rail {
@@ -3674,7 +3694,13 @@ select.fy-set__pill { padding-right: 26px; }
 
 /* location detail (23b) */
 .fy-locdetail { display: flex; min-height: calc(100vh - 132px); }
-.fy-locdetail__hero { flex: 1.25; min-width: 0; padding: 26px 0 26px 44px; animation: fy-fade-up 0.6s var(--ease-out) both; }
+/*
+ * The establishing view at a picture's own shape (23b/57a), held in view while the sheet scrolls
+ * (turn 188). It used to stretch to the sheet's height, 836 x 2,796 at 1440, and cover-cropped a
+ * 3:2 picture to a strip of ceiling.
+ */
+.fy-locdetail__hero { flex: 1.25; min-width: 0; align-self: flex-start; position: sticky; top: 64px; padding: 26px 0 26px 44px; animation: fy-fade-up 0.6s var(--ease-out) both; }
+.fy-locdetail__frame { width: 100%; aspect-ratio: 3 / 2; max-height: calc(100vh - 160px); }
 .fy-locdetail__side { width: 550px; flex: none; padding: 38px 44px 30px 36px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; animation: fy-fade-up 0.7s var(--ease-out) 0.12s both; }
 .fy-locdetail__name { margin: 0; font: 650 34px/1.05 var(--font-sans); letter-spacing: -0.028em; }
 .fy-facet__head { display: flex; align-items: center; gap: 8px; font: 600 13px var(--font-sans); }
@@ -4251,7 +4277,7 @@ select.fy-set__pill { padding-right: 26px; }
   padding: 14px 22px;
   border-bottom: var(--border-1) solid var(--border);
 }
-.fy-proposals__count { font: 600 14px var(--font-sans); }
+.fy-proposals__count { margin: 0; font: 600 14px var(--font-sans); }
 .fy-proposals__meta { font: 400 11.5px var(--font-sans); color: var(--muted-foreground); }
 .fy-proposals__body { display: flex; align-items: stretch; flex: 1; min-height: 0; }
 /* 265px is the design's number: wide enough for a summary line, narrow enough that the
@@ -4710,9 +4736,11 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-looks-composer__note { font: 400 11px/1.6 var(--font-sans); color: var(--muted-foreground); margin-top: 10px; }
 
 /* The Bible (master §4.5): one document, an outline beside it, and the versions behind it. */
+/* The document keeps the reading measure beside its outline, the pair centred (163d, turn 188). */
 .fy-biblegrid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 268px;
+  grid-template-columns: minmax(0, var(--width-text)) 268px;
+  justify-content: center;
   gap: 24px;
   padding: 22px 34px 44px;
   align-items: start;
@@ -6601,6 +6629,10 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
    the book's reading as a panel of notes with where each came from. */
 .fy-ab__notes { display: flex; flex-direction: column; margin-top: 4px; }
 .fy-ab__notes .fy-vd__note-k { width: 84px; }
+/* The chapter note wraps to two lines in the same row (turn 188); label and count sit at its top. */
+.fy-ab__notes .fy-vd__note--area { height: auto; align-items: flex-start; padding: 4px 0; }
+.fy-ab__notes .fy-vd__note--area > .fy-vd__note-k, .fy-ab__notes .fy-vd__note--area > .fy-vd__note-count { padding-top: 6px; }
+.fy-ab__notes .fy-vd__note-input--area { height: auto; min-height: 44px; padding: 5px 8px; font: 400 12px/1.5 var(--font-sans); resize: vertical; }
 .fy-ab__text--proposed .fy-ab__mk, .fy-ab__text--proposed .fy-ab__mks, .fy-ab__text--proposed .fy-ab__emph { outline: 1.5px dashed var(--muted-foreground); outline-offset: 1px; border-radius: 4px; }
 .fy-ab__directsheet { display: flex; flex-direction: column; gap: 10px; }
 .fy-ab__reads { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; }
@@ -6855,7 +6887,8 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-row--inhand { background: var(--secondary); }
 /* The outline (turn 127): the plan under the title, and the mark for an overview that moved. */
 .fy-row__plan { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; text-align: left; }
-.fy-row__syn { font: 400 12px/1.4 var(--font-sans); color: var(--muted-foreground); }
+/* Two lines at a reading measure: at 2000 wide a synopsis ran 1,346px in 12px type (turn 188). */
+.fy-row__syn { max-width: var(--width-text); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font: 400 12px/1.4 var(--font-sans); color: var(--muted-foreground); }
 .fy-row__marks { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
 .fy-row__marks > .fy-mono { font-size: 10px; color: var(--neutral-400); }
 .fy-row__moved, .fy-ch__moved { padding: 2px 8px; border: 1px solid var(--warning); border-radius: 999px; color: var(--warning); font: 400 10px var(--font-mono); }

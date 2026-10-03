@@ -146,3 +146,15 @@
   .fy-artdirection .fy-gendialog .fy-gendialog__commit { flex-wrap: wrap; }
   .fy-artdirection .fy-gendialog .fy-gendialog__make-more { display: flex; justify-content: flex-end; }
 }
+
+/*
+ * One page scroll on a desktop (turn 188). The look's column scrolled inside itself, 616 of its
+ * 776px showing at 2000 x 800, with its own scrollbar and a white corner where two met, and the
+ * Models card clipped at the fold. Now the page scrolls, and the two pictures hold the window's
+ * height beside it, as they did when the row was a fixed frame.
+ */
+@media (min-width: 1100px) {
+  .fy-content--fill > .fy-artdirection { flex-shrink: 0; }
+  .fy-artdirection__detail { overflow: visible; }
+  .fy-artdirection__pictures { position: sticky; top: 76px; align-self: flex-start; height: calc(100dvh - 200px); min-height: 400px; }
+}

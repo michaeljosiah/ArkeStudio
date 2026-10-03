@@ -111,7 +111,7 @@ export function ProductionDashboardScreen() {
           {wordsToday === null ? "Words today unavailable" : `${wordsToday.toLocaleString()} words today`}
           {` · ${totalWords.toLocaleString()}${target === null ? "" : ` / ${target.toLocaleString()}`} words in the book`}
         </div>
-        <div className="fy-threadcard" style={{ flex: "none" }}>
+        <div className="fy-threadcard fy-threadcard--inhand" style={{ flex: "none" }}>
           <div className="fy-threadcard__head">
             <span className="fy-threadcard__label">
               {chapters.length === 0

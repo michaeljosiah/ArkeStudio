@@ -2318,7 +2318,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   return (
     <div className="fy-locdetail" data-screen={screenId}>
       <div className="fy-locdetail__hero">
-        <div style={{ width: "100%", height: "100%" }}>
+        <div className="fy-locdetail__frame">
           <Portrait
             worldSlug={slug}
             path={

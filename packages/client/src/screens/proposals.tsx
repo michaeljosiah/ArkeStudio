@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useParams } from "react-router";
 import { proposalOriginOf, unattendedProposalsOf, type StagedProposal } from "@arke-studio/contracts";
-import { EmptyState } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
@@ -102,7 +101,14 @@ export function ProposalsScreen() {
   return (
     <div data-screen="proposals">
       {proposals.length === 0 ? (
-        <EmptyState title="Nothing waiting" />
+        // The page's head with nothing under it (turn 188): a box edge to edge, with no title and no
+        // gutter, read as a broken page rather than an empty one.
+        <div className="fy-proposals">
+          <div className="fy-proposals__head">
+            <h1 className="fy-proposals__count">Proposals</h1>
+            <span className="fy-proposals__meta">Nothing waiting</span>
+          </div>
+        </div>
       ) : (
         <div className="fy-proposals">
           <div className="fy-proposals__head">

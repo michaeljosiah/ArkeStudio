@@ -558,7 +558,7 @@ function ContactSheet({
   );
   const decisions = production ? takeDecisions(production) : {};
   return (
-    <div className="fy-prodmain" data-screen="stills-contact-sheet">
+    <div className="fy-prodmain fy-prodmain--wide" data-screen="stills-contact-sheet">
       <div className="fy-h1row">
         <span className="fy-seg">
           <button type="button" className="fy-seg__item" onClick={onShotLens}>

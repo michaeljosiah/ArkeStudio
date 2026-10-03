@@ -1694,6 +1694,25 @@ export function ChapterWorkspace({
   // The pictures set on blocks (design turn 186c): the margin's chips and the block's Picture.
   const chapterPictures = useChapterPictures(world, audiobook.rows, audiobookRecord.record === "unreadable" ? null : audiobookRecord.record);
   const pictureRow = audiobook.rows.find((row) => row.block.key === audiobook.selected) ?? null;
+  /*
+   * The Audiobook view's side is the block's panel (165k/146b), and it is never left empty
+   * (turn 188). With nothing chosen it used to show the manuscript's rail, the book and the
+   * chapter's continuity, which is not what this view is about. So entering the view with the panel
+   * beside the blocks chooses the first block, once per chapter, and the rail stays with the
+   * manuscript. Where the panel is a sheet, choosing would open it over the page, so nothing is chosen.
+   */
+  const firstBlock = audiobook.rows[0]?.block.key ?? null;
+  const chosenOnEntry = useRef<string | null>(null);
+  const { selected: chosenBlock, setSelected: chooseBlock } = audiobook;
+  useEffect(() => {
+    if (view !== "audiobook" || blockSheet) {
+      chosenOnEntry.current = null;
+      return;
+    }
+    if (firstBlock === null || chosenOnEntry.current === chapter.id) return;
+    chosenOnEntry.current = chapter.id;
+    if (chosenBlock === null) chooseBlock(firstBlock);
+  }, [view, blockSheet, firstBlock, chapter.id, chosenBlock, chooseBlock]);
   // The block's panel, beside the blocks or, on a phone, in a sheet (turn 165): one set of props.
   const blockPanel: Parameters<typeof AudiobookSide>[0] = {
     rows: audiobook.rows,
@@ -1721,7 +1740,7 @@ export function ChapterWorkspace({
     blockHost: (key) => audiobookColumn.current?.querySelector<HTMLElement>(`[data-block="${key}"] .fy-ab__text`) ?? null,
   };
   return (
-    <div className="fy-sw" data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"}>
+    <div className="fy-sw" data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"} data-view={view}>
       <main className="fy-sw__centre" ref={chapterCentre}>
         {phone && <SceneBackRow context={`${production.meta.title} · Chapters`} title={`${String(chapter.order).padStart(2,"0")} · ${chapter.title}`} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)}><Button onClick={() => setNotesOpen(true)}>Notes</Button><Button onClick={() => setDock(true)}>Ask Arke</Button></SceneBackRow>}
         <header className="fy-sw__head">
@@ -2166,6 +2185,9 @@ export function ChapterWorkspace({
             </div>
           </div>
 
+          {/* In the Audiobook view the side is the block's panel, then Voices (turn 188): the rest of
+              the manuscript's rail is hidden there by chapter-responsive.css, not unmounted, so
+              Voices keeps its speakers' notes and the narrator's dialog. */}
           <div className="fy-ch__panels">
           {/* A grouped read is confirmed in its sheet (design turn 185a): requests beside blocks and the estimate. */}
           {view === "audiobook" && audiobook.readSheet !== null && (

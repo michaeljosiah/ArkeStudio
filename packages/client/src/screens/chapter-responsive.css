@@ -277,3 +277,35 @@
   [data-screen="chapter-tree"] > .fy-season-arke-rail { position: fixed; top: calc(52px + env(safe-area-inset-top, 0px)); right: 0; bottom: 0; height: auto; z-index: 20; }
 }
 .fy-ch__plan-field .fy-sw__title-text, .fy-ch__plan-field .fy-sw__title-input { font: var(--type-ui); min-height: 44px; width: 100%; }
+
+/*
+ * Fit on wide screens (design turn 188). The chapter is text plus rail: 640 of prose, 28 of gap and
+ * the 250 rail, with the head over the same width so its presses sit above the rail. The body used
+ * to take the whole column while the prose stopped at 640, which at 2000 wide left 685px of nothing
+ * between the words and the rail and the presses 725px from the text. Timing keeps the whole width:
+ * its lanes are a timeline, not a page.
+ */
+@media (min-width: 1100px) {
+  [data-screen="chapter"] .fy-sw__centre { overflow-y: auto; }
+  [data-screen="chapter"]:not([data-view="timing"]) :is(.fy-sw__head, .fy-ch__body) { width: 100%; max-width: var(--content-max-chapter); margin-inline: auto; box-sizing: border-box; }
+  /* The Audiobook view's side is the block's panel and Voices; the rest of the rail is the
+     manuscript's (165k/146b). */
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__panels .fy-ch__notes > .fy-bible__panel:not([data-testid="chapter-voices"]) { display: none; }
+}
+/*
+ * The manuscript is the page (126a, 173a: "the page scrolling, not a box inside it"). It was a
+ * bordered box with its own scroll, an 8,424px editor inside a 441px window at 2000 x 800. Now the
+ * column scrolls, the rail holds its place beside the words, and the foot stays at the bottom of
+ * the window. Only while the rail is beside the prose: under 900 the rail follows the manuscript.
+ */
+@media (min-width: 1100px) { @container (min-width: 901px) {
+  [data-screen="chapter"] .fy-ch__body:not(.fy-ch__body--audiobook) { flex: none; align-items: flex-start; }
+  [data-screen="chapter"] .fy-ch__body:not(.fy-ch__body--audiobook) .fy-ch__manuscript { min-height: 0; }
+  [data-screen="chapter"] .fy-ch__body:not(.fy-ch__body--audiobook) .fy-ch__prose { flex: none; overflow: visible; }
+  [data-screen="chapter"] .fy-ch__body:not(.fy-ch__body--audiobook) .fy-rme { border: 0; border-radius: 0; }
+  [data-screen="chapter"] .fy-ch__body:not(.fy-ch__body--audiobook) .fy-rme:focus-within { outline: none; }
+  [data-screen="chapter"] .fy-ch__body:not(.fy-ch__body--audiobook) .fy-rme__doc { padding: 6px 0 24px; }
+  [data-screen="chapter"] .fy-ch__body:not(.fy-ch__body--audiobook) .fy-ch__source { flex: none; field-sizing: content; min-height: 62vh; overflow: hidden; }
+  [data-screen="chapter"] .fy-ch__body:not(.fy-ch__body--audiobook) .fy-ch__foot { position: sticky; bottom: 0; z-index: 2; background: var(--background); }
+  [data-screen="chapter"] .fy-ch__body:not(.fy-ch__body--audiobook) > .fy-ch__panels { position: sticky; top: 0; max-height: calc(100dvh - 72px); }
+} }

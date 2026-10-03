@@ -32,9 +32,14 @@ export interface AudiobookBlock extends VoicedBlock {
   key: string;
 }
 
-/** What the narrator reads at the head of a chapter file (R-24): the number the door shows, then the title. */
+/**
+ * What the narrator reads at the head of a chapter file (R-24): the number the door shows, then the
+ * title. A chapter titled only by its number is read once — "Chapter 1 · Chapter 1" was the number
+ * twice, on the screen and in the narrator's mouth (turn 188).
+ */
 export function audiobookHeading(order: number, title: string): string {
-  return `Chapter ${order} · ${title}`;
+  const number = `Chapter ${order}`;
+  return title.trim().toLowerCase() === number.toLowerCase() ? number : `${number} · ${title}`;
 }
 
 /**

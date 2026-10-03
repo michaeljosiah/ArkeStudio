@@ -248,7 +248,7 @@ export function DevelopmentWorkspace() {
   });
   if (!production) {
     return (
-      <div className="fy-prodmain" data-screen="development">
+      <div className="fy-prodmain fy-prodmain--wide" data-screen="development">
         <EmptyState title="Opening the season…" />
       </div>
     );
@@ -258,7 +258,7 @@ export function DevelopmentWorkspace() {
   const count = Math.max(episodes.length, season?.defaults?.episodeCount ?? episodes.length);
   return (
     <div className="fy-arkewrap">
-    <div className="fy-prodmain" data-screen="development">
+    <div className="fy-prodmain fy-prodmain--wide" data-screen="development">
       {compact && <div className="fy-eyebrow-sm fy-season-eyebrow">Season {series ? series.seasons.indexOf(production.meta.id) + 1 : 1} · {production.meta.kind ?? "season"} · {episodes.length} of {count} written</div>}
       <div className="fy-h1row">
         <h1 className="fy-h1">{production.meta.title}</h1>
@@ -701,11 +701,11 @@ export function EpisodeDetailScreen() {
   const newScene = useSharedNewScene(worldId, prodId);
   const episode: Episode | undefined = production?.episodes.find((e) => e.id === episodeId);
   if (!world) {
-    return <div className="fy-prodmain" data-screen="episode-detail"><Loading label="Opening episode…" /></div>;
+    return <div className="fy-prodmain fy-prodmain--wide" data-screen="episode-detail"><Loading label="Opening episode…" /></div>;
   }
   if (!production || !episode) {
     return (
-      <div className="fy-prodmain" data-screen="episode-detail">
+      <div className="fy-prodmain fy-prodmain--wide" data-screen="episode-detail">
         <EmptyState
           title={production ? "Episode not found" : "Production not found"}
           hint={production ? "This episode is not in the production." : "This production is not in the world."}
@@ -721,7 +721,7 @@ export function EpisodeDetailScreen() {
   );
   return (
     <div className="fy-arkewrap">
-    <div className="fy-prodmain" data-screen="episode-detail">
+    <div className="fy-prodmain fy-prodmain--wide" data-screen="episode-detail">
       {phone && <SceneBackRow context={`${production.meta.title} · Episodes`} title={`Episode ${episode.order} · ${episode.title}`} onBack={() => navigate(`/w/${worldId}/p/${prodId}/season`)}><button type="button" className="ui-btn" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/episodes/${episode.id}`)}>Talk through this episode</button></SceneBackRow>}
       <div className="fy-h1row">
         <h1 className="fy-h1" style={{ fontSize: 32 }}>

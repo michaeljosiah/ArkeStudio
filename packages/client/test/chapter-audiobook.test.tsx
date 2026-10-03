@@ -1155,7 +1155,7 @@ describe("the director reads the book (design turn 184)", () => {
     const m = await mount(voiced(withBook(inkbound(), { note: BOOK_NOTE, chapterNotes: { neap: "Night at the rail desk." } })));
     await answerOpen(m);
     const notes = q(m, '[data-testid="reading-notes"]')!;
-    const inputs = [...notes.querySelectorAll("input")] as HTMLInputElement[];
+    const inputs = [...notes.querySelectorAll("input, textarea")] as HTMLInputElement[];
     assert.deepEqual(inputs.map((input) => input.getAttribute("aria-label")), ["Book note", "Chapter note"]);
     assert.equal(inputs[0]!.value, BOOK_NOTE);
     assert.deepEqual([...notes.querySelectorAll(".fy-vd__note-count")].map((count) => count.textContent), [`${BOOK_NOTE.length} / 300`, "23 / 300"]);
@@ -1224,7 +1224,7 @@ describe("the director reads the book (design turn 184)", () => {
     assert.ok(q(m, '[data-testid="direct-sheet"]'), "the sheet takes the panel");
     assert.equal(q(m, '[data-testid="audiobook-block"]'), null, "the block pressed before is put down");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "slack-water", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H2", toMake: 3, blocks: 3 }));
-    const inputs = [...q(m, '[data-testid="reading-notes"]')!.querySelectorAll("input")] as HTMLInputElement[];
+    const inputs = [...q(m, '[data-testid="reading-notes"]')!.querySelectorAll("input, textarea")] as HTMLInputElement[];
     assert.deepEqual(inputs.map((input) => input.disabled), [true, true], "another chapter being read holds both notes");
   });
 
@@ -1334,7 +1334,8 @@ describe("the director reads the book (design turn 184)", () => {
     await answerOpen(m);
     const head = q(m, '[data-testid="direct-audiobook"]');
     assert.equal(head?.textContent, "Direct this chapter");
-    assert.ok(head?.classList.contains("ui-btn--primary"), "the primary press");
+    assert.equal(head?.classList.contains("ui-btn--primary"), false, "never the primary press (turn 188)");
+    assert.ok(q(m, '[data-testid="read-audiobook"]')?.classList.contains("ui-btn--primary"), "the read is, until a block is made");
     assert.equal(head?.parentElement, q(m, '[data-testid="read-audiobook"]')?.parentElement, "beside Read the chapter");
     await act(async () => head!.click());
     assert.ok(q(m, '[data-testid="direct-sheet"]'), "the dock's sheet");
