@@ -263,6 +263,10 @@ describe("Generate (R-99)", () => {
       assert.equal(picture.source, "generated");
       assert.match(picture.file, /^artifacts\//);
       assert.deepEqual(picture.look?.who, ["maren-kest", "bray-half-hitch"], "it keeps who was in it and the lines it was made under");
+      // Every window learns of the picture as it learns of any record write: the margin and the panel read it there.
+      const written = events.filter((event) => event.type === "audiobook.record" && event.record?.pictures?.["p0.0"] !== undefined);
+      assert.equal(written.length, 1, "the record the picture stands in is sent as a record");
+      assert.equal((written[0] as { requestId?: string }).requestId, "01J00000000000000000000002");
       assert.equal(schemaVersion(), AUDIOBOOK_LOOK_SCHEMA_VERSION);
       // The Bench's own gate planned it: one job, the price of one picture and one reference.
       assert.equal(enqueued.length, 1);
