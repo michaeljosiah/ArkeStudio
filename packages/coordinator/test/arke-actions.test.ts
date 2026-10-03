@@ -188,6 +188,20 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     assert.equal(art.schema.safeParse({ ...direction, masterLook: "references/master-look.png" }).success, true);
     assert.equal(art.conversationSchema.safeParse({ ...direction, masterLook: "references/master-look.png" }).success, false, "chat adopts a named candidate through result-use rather than assigning a path");
     assert.equal(art.conversationSchema.safeParse({ ...direction, masterLook: null }).success, true, "chat can still clear the master look");
+    const stagedArt = ARKE_CLIENT_COMMAND_REGISTRY["stage-art-direction-change"];
+    assert.ok(stagedArt.classification === "supported-by-arke");
+    const stagedDirection = { kind: "stage-art-direction-change", worldId, description: "Quiet" };
+    assert.equal(stagedArt.schema.safeParse({ ...stagedDirection, masterLook: "references/master-look.png" }).success, true);
+    assert.equal(stagedArt.conversationSchema.safeParse({ ...stagedDirection, masterLook: "references/master-look.png" }).success, false);
+    assert.equal(stagedArt.conversationSchema.safeParse({ ...stagedDirection, masterLook: null }).success, true);
+    assert.equal(stagedArt.conversationSchema.safeParse(stagedDirection).success, true);
+    const thread = ARKE_CLIENT_COMMAND_REGISTRY["open-thread"];
+    assert.ok(thread.classification === "supported-by-arke");
+    const question = { kind: "open-thread", worldId, title: "Motive", question: "Why did she leave?" };
+    assert.equal(thread.schema.safeParse({ ...question, candidates: ["To find her sister"] }).success, true);
+    assert.equal(thread.conversationSchema.safeParse({ ...question, candidates: ["To find her sister"] }).success, false);
+    assert.equal(thread.conversationSchema.safeParse({ ...question, candidates: ["CANON-001"] }).success, true);
+    assert.equal(thread.conversationSchema.safeParse(question).success, true);
   });
 
   it("names unsafe command seams and exposes strict authority actions", () => {

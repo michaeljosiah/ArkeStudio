@@ -1,6 +1,7 @@
 import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema } from "@arke-studio/contracts";
 import {
   ClientMessageSchema,
+  CanonIdSchema,
   ChatSceneCommandSchema,
   ModelEditorRequestSchema,
   BenchGenerationModelActionSchema,
@@ -757,7 +758,9 @@ function conversationCommandSchema(kind: ClientMessageKind, schema: z.ZodDiscrim
   switch (kind) {
     case "timeline-command": return schema.extend({ commands: ModelEditorRequestSchema.shape.commands });
     case "scene-command": return schema.extend({ command: ChatSceneCommandSchema });
+    case "stage-art-direction-change":
     case "set-art-direction": return schema.extend({ masterLook: z.null().optional() });
+    case "open-thread": return schema.extend({ candidates: z.array(CanonIdSchema).max(10).default([]) });
     case "upload-artifacts": return schema.omit({ editor: true, sourcePaths: true });
     case "pick-staged-reference": return schema.omit({ image: true, worldFile: true });
     case "clone-voice": return schema.omit({ language: true });
