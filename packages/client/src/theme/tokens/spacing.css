@@ -23,13 +23,6 @@
   --width-text:  780px;    /* prose measure */
   --width-prose: 68ch;     /* lead measure */
 
-  /* ---- Fit on wide screens (design turn 188) --------------
-     A page is laid out no wider than it is in the 1440 window it
-     was drawn for; past that it centres and the margins grow. */
-  --content-max:         var(--width-max); /* a production page's content, beside the rail */
-  --content-max-chapter: 940px;            /* the chapter: 640 prose, 28 gap, 250 rail, and the head over them */
-  --page-max:            1440px;           /* a world page has no rail: the frame the 1080 sits in */
-
   /* ---- Semantic spacing ----------------------------------- */
   --gutter:        var(--space-7);   /* page side padding */
   --stack-tight:   var(--space-2);
