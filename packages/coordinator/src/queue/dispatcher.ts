@@ -1,4 +1,5 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { dirname, extname, join } from "node:path";
 import {
   canDeleteJob,
@@ -327,7 +328,7 @@ const FOLLOW_ON_TARGETS = new Set([
  * recording a cloned voice was made from: part of an audiobook part's durable identity
  * (`priorPartJob`, SPEC-046 R-39), not a control of any reader.
  */
-const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation", "voiceClipHash", "designedBinding"]);
+const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation", "voiceClipHash", "designedBinding", "generationQuoteReferences"]);
 
 /** Attempts that count against the retry bound: refusals waited out as busy never reached the engine. */
 function spentAttempts(job: Job): number {
@@ -1011,6 +1012,12 @@ export class JobQueue {
       }
       if (imageReferences.length !== referencePaths.length || imageReferences.length > 16) {
         await this.terminalize(job, "failed", "not every image reference could be prepared safely");
+        return;
+      }
+      const pins = job.params["generationQuoteReferences"];
+      if (pins !== undefined && (!Array.isArray(pins) || pins.length !== referencePaths.length || pins.some((pin, index) =>
+        !pin || pin.file !== referencePaths[index] || pin.hash !== createHash("sha256").update(imageReferences![index]!.data).digest("hex")))) {
+        await this.terminalize(job, "failed", "Image references changed after generation approval. Prepare a fresh card.");
         return;
       }
     }

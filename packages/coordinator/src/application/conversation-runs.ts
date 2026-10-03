@@ -39,6 +39,7 @@ export interface ConversationRunDependencies {
   query: Pick<WorldQueryServer, "start" | "attachLease" | "detachLease" | "leasedUrl">;
   actions: ConversationActionLifecycle;
   jobs: NonNullable<RetrievalDeps["getJobs"]>;
+  buildItems?: NonNullable<RetrievalDeps["getBuildItems"]>;
   exports: NonNullable<RetrievalDeps["getExports"]>;
   actionExports: NonNullable<NonNullable<Parameters<typeof prepareWorldChatActions>[3]>["getExports"]>;
   researchAllowed: NonNullable<RetrievalDeps["researchAllowed"]>;
@@ -68,6 +69,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     getIndex: () => deps.activeStore()?.getIndex() ?? null,
     getPlans: (productionId) => listPlans(store, productionId),
     getJobs: () => deps.jobs(),
+    getBuildItems: () => deps.buildItems?.() ?? [],
     getExports: () => deps.exports(),
     getChapterBody: async (productionId, chapterFile) => {
       try {
@@ -153,7 +155,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     validateSceneEdits: ({ entryContext, edits, baseVersion }) =>
       applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),
     prepareActions: async (turn) => {
-      const prepared = await prepareWorldChatActions(store, actionLifecycle, turn, { getExports: () => deps.actionExports() });
+      const prepared = await prepareWorldChatActions(store, actionLifecycle, turn, { getExports: () => deps.actionExports(), getJobs: () => deps.jobs(), getBuildItems: () => deps.buildItems?.() ?? [] });
       if (turn.actions.some(action => action.kind === "prop-authoring" || action.kind === "prop-reference")) await store.ensureSchemaVersion(CONVERSATIONAL_PROPS_SCHEMA_VERSION, "world-chat");
       return prepared;
     },

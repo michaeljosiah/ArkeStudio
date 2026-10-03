@@ -74,6 +74,8 @@ import {
   WorldChatReferenceChangeActionSchema,
   WorldChatReferenceCompileActionSchema,
   WorldChatReferenceGenerationActionSchema,
+  WorldChatImageGenerationActionSchema,
+  WorldChatBuildItemRunActionSchema,
   WorldChatReferenceImageDiscardActionSchema,
   WorldChatReferenceImageImportActionSchema,
   WorldChatReferenceImportActionSchema,
@@ -148,6 +150,8 @@ import type {
   PreparedConversationActionAuthority,
 } from "../arke-actions/lifecycle.js";
 import { ConversationActionLifecycle, conversationActionDigest } from "../arke-actions/lifecycle.js";
+import type { GenerationQuotes } from "./generation-quotes.js";
+import { buildItemsFence, type ArkeBuildItemRead } from "./target-reads.js";
 import {
   acceptDecided,
   explainAcceptRefusal,
@@ -357,6 +361,10 @@ export interface WorldChatActionAdapterDeps {
   ) => Promise<{ status: "completed" | "failed"; id?: string; detail?: string }>;
   readonly getExports?: () => readonly ArkeExportReadRecord[];
   readonly getJobs?: () => readonly import("@arke-studio/contracts").Job[];
+  readonly getBuildItems?: () => readonly ArkeBuildItemRead[];
+  readonly generationQuotes?: GenerationQuotes;
+  readonly buildGenerationQuotes?: GenerationQuotes;
+  readonly benchGenerationQuotes?: GenerationQuotes;
   readonly quoteBenchGeneration?: (
     action: WorldChatBenchGenerationAction["action"],
     createdAt: string,
@@ -430,6 +438,8 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "reference-compile": ["sheets", "references"],
   "reference-style": ["sheets", "art-direction", "references"],
   "reference-generation": ["sheets", "art-direction", "references"],
+  "image-generation": ["world-metadata", "sheets", "art-direction", "references"],
+  "build-item-run": ["world-metadata", "sheets", "art-direction", "references", "jobs", "founding-build"],
   "reference-image-import": ["references"],
   "reference-world-image-result-use": ["references", "world-metadata"],
   "reference-master-look-result-use": ["references", "art-direction"],
@@ -565,6 +575,7 @@ function currentWorldObservation(
         fence: jobsFence(deps.getJobs(), store.worldId, targetId === store.worldId ? undefined : targetId),
       };
     }
+    case "founding-build": return { target: store.worldId, fence: buildItemsFence(deps.getBuildItems?.() ?? []) };
     default: return null;
   }
 }
@@ -771,6 +782,8 @@ function preparedWorldPayload(
     case "reference-compile": return WorldChatReferenceCompileActionSchema.parse({ kind: "world-chat-reference-compile", ...common });
     case "reference-style": return WorldChatReferenceStyleActionSchema.parse({ kind: "world-chat-reference-style", ...common });
     case "reference-generation": return WorldChatReferenceGenerationActionSchema.parse({ kind: "world-chat-reference-generation", ...common });
+    case "image-generation": return WorldChatImageGenerationActionSchema.parse({ kind: "world-chat-image-generation", ...common });
+    case "build-item-run": return WorldChatBuildItemRunActionSchema.parse({ kind: "world-chat-build-item-run", ...common });
     case "reference-image-import": return WorldChatReferenceImageImportActionSchema.parse({ kind: "world-chat-reference-image-import", ...common });
     case "reference-world-image-result-use": return WorldChatReferenceWorldImageResultUseActionSchema.parse({ kind: "world-chat-reference-world-image-result-use", ...common });
     case "reference-master-look-result-use": return WorldChatReferenceMasterLookResultUseActionSchema.parse({ kind: "world-chat-reference-master-look-result-use", ...common });
@@ -1058,6 +1071,10 @@ function worldActionTargets(
     case "reference-compile": return [{ kind: "sheet", id: action.sheetId, label: action.sheetId }];
     case "reference-style": return [{ kind: "sheet", id: action.sheetId, label: action.sheetId }];
     case "reference-generation": return [{ kind: "sheet", id: action.request.sheetId, label: action.request.sheetId }];
+    case "image-generation": return action.request.operation === "prop-state"
+      ? [{ kind: "world", id: action.request.propId, label: action.request.propId }]
+      : [{ kind: "world", id: store.worldId, label: "World images" }];
+    case "build-item-run": return [{ kind: "world", id: store.worldId, label: action.itemKey }];
     case "reference-image-import": return [{
       kind: action.target.surface,
       id: action.target.surface === "staged-reference" ? action.target.key : fallbackId,
@@ -1817,14 +1834,6 @@ function semanticVoice(voice: { provider: string; model?: string; voiceId: strin
   return voice.label ?? `${voice.provider} · ${voice.model ?? "default"} · ${voice.voiceId}`;
 }
 
-function generationPrompt(payload: Extract<WorldChatPreparedAction, { kind: "world-chat-reference-generation" }>): string {
-  const request = payload.action.request;
-  if ("prompt" in request && request.prompt) return request.prompt;
-  if (request.operation === "character-sheet" && request.styleOverride) return request.styleOverride;
-  if (request.operation === "location-view") return `${request.name} for ${request.sheetId}`;
-  return `${request.operation.replaceAll("-", " ")} for ${request.sheetId}`;
-}
-
 async function sharedResourceProjection(
   store: WorldStore,
   intent: ConversationActionPrepareIntent,
@@ -2154,29 +2163,18 @@ async function sharedResourceProjection(
       };
       break;
     }
+    case "world-chat-image-generation":
+    case "world-chat-build-item-run":
     case "world-chat-reference-generation": {
       authority = { kind: "job-queue", id: intent.actionId };
-      const request = payload.action.request;
+      const quotes = payload.kind === "world-chat-build-item-run" ? deps.buildGenerationQuotes : deps.generationQuotes;
+      if (!quotes) throw new Error("The coordinator cannot quote this generation.");
+      const body = await quotes.prepare(payload.action, intent.actionId, intent.createdAt);
+      if (body.quoteExpiresAt && Date.parse(body.quoteExpiresAt) <= Date.parse(store.now())) approvalBlockedReason = "This generation quote expired. Prepare a fresh card.";
       shown = {
-        title: `Generate ${request.operation.replaceAll("-", " ")}`,
-        consequence: "Describes generation intent only. A coordinator-owned route and durable quote are required before it can run.",
-        affectedTargets: [...intent.targets],
-        ripples: ["Approving generation will not select any result; result use is a separate typed review action."],
-        permissionReason: "spend-and-compute",
-        body: {
-          family: "generation",
-          medium: "image",
-          purpose: request.operation.replaceAll("-", " "),
-          prompt: generationPrompt(payload),
-          references: "identityReferenceIds" in request
-            ? request.identityReferenceIds.map((id) => ({ id, role: "identity" }))
-            : [],
-          provider: "Pending coordinator-owned route",
-          model: "Pending coordinator-owned route",
-          quantity: "count" in request ? request.count : 1,
-          output: `${request.sheetId} reference candidates`,
-          cost: "Pending durable quote",
-        },
+        title: `Generate ${body.quantity} ${body.medium} ${body.quantity === 1 ? "result" : "results"}`,
+        consequence: payload.kind === "world-chat-build-item-run" ? "Retries this founding item under its existing installation decision." : "Approving queues the quoted generation inputs; results await separate selection.",
+        affectedTargets: [...intent.targets], ripples: [body.output], permissionReason: "spend-and-compute", body,
       };
       break;
     }
@@ -3085,7 +3083,9 @@ async function sharedResourceProjection(
         };
         break;
       }
-      const quote = await deps.quoteBenchGeneration(payload.action, intent.createdAt);
+      const quote = deps.benchGenerationQuotes
+        ? { body: await deps.benchGenerationQuotes.prepare(payload.action, intent.actionId, intent.createdAt), authorityRevision: 0 }
+        : await deps.quoteBenchGeneration(payload.action, intent.createdAt);
       authorityRevision = quote.authorityRevision;
       if (!deps.dispatchBenchGeneration) approvalBlockedReason = "Bench dispatch is unavailable.";
       if (quote.body.quoteExpiresAt && Date.parse(quote.body.quoteExpiresAt) <= Date.parse(store.now())) {
@@ -3502,9 +3502,14 @@ async function executeSharedResource(
       return { status: "completed", receipt: { kind: "reference-image-discard", id: action.actionId, summary: "The pending reference image was removed." } };
     }
     case "world-chat-reference-generation":
+    case "world-chat-image-generation":
+      return deps.generationQuotes?.dispatch(payload.action, action.actionId) ?? { status: "failed", detail: "The generation quote source is unavailable." };
+    case "world-chat-build-item-run":
+      return deps.buildGenerationQuotes?.dispatch(payload.action, action.actionId) ?? { status: "failed", detail: "The founding quote source is unavailable." };
     case "world-chat-voice-audition":
       return { status: "failed", detail: "A durable coordinator-owned generation quote is required." };
     case "world-chat-bench-generation":
+      if (deps.benchGenerationQuotes) return deps.benchGenerationQuotes.dispatch(payload.action, action.actionId);
       return deps.dispatchBenchGeneration?.(payload.action, action.actionId) ?? {
         status: "failed",
         detail: "Bench dispatch is unavailable.",
@@ -4355,6 +4360,12 @@ export function worldChatActionAdapters(
   });
 
   const sharedResource = (actionKind: WorldChatPreparedAction["kind"]): ConversationActionAuthorityAdapter => {
+    const abandon = async (id: string) => {
+      await deps.generationQuotes?.abandon(id);
+      await deps.buildGenerationQuotes?.abandon(id);
+      await deps.benchGenerationQuotes?.abandon(id);
+      await removePreparation(store, "world", id);
+    };
     const parse = (value: unknown): WorldChatPreparedAction => {
       const payload = WorldChatPreparedActionSchema.parse(value);
       if (payload.kind !== actionKind) throw new Error("The prepared shared-resource action has the wrong kind.");
@@ -4375,7 +4386,7 @@ export function worldChatActionAdapters(
         if (!current.ok) throw new Error(current.detail);
         return sharedResourceProjection(store, intent, parse(payload), deps);
       },
-      abandonPreparation: (intent) => removePreparation(store, "world", intent.actionId),
+      abandonPreparation: (intent) => abandon(intent.actionId),
       validate: async (action) => {
         const payload = await readPreparation(store, "world", action);
         if (!payload) return { ok: false, reason: "blocked", detail: "The prepared shared-resource action is unavailable." };
@@ -4432,7 +4443,7 @@ export function worldChatActionAdapters(
           throw error;
         }
       },
-      deny: (action) => removePreparation(store, "world", action.actionId),
+      deny: (action) => abandon(action.actionId),
       reconcile: async (action) => {
         if (action.actionKind === "world-chat-production-take-generation") {
           const sessionId = `sess_${action.actionId.slice(4)}`;
@@ -4496,8 +4507,14 @@ export function worldChatActionAdapters(
           }
         }
         if (action.actionKind === "world-chat-bench-generation") {
+          if (deps.benchGenerationQuotes) {
+            const reconciled = await deps.benchGenerationQuotes.reconcile(action);
+            if (reconciled) return reconciled;
+          }
           return deps.reconcileBenchGeneration?.(action) ?? null;
         }
+        if (action.actionKind === "world-chat-reference-generation" || action.actionKind === "world-chat-image-generation") return deps.generationQuotes?.reconcile(action) ?? null;
+        if (action.actionKind === "world-chat-build-item-run") return deps.buildGenerationQuotes?.reconcile(action) ?? null;
         const committed = await committedAction(store, action.actionId);
         if (committed) await removePreparation(store, "world", action.actionId);
         return committed
@@ -4645,6 +4662,8 @@ export function worldChatActionAdapters(
     "world-chat-reference-compile",
     "world-chat-reference-style",
     "world-chat-reference-generation",
+    "world-chat-image-generation",
+    "world-chat-build-item-run",
     "world-chat-reference-image-import",
     "world-chat-reference-world-image-result-use",
     "world-chat-reference-master-look-result-use",

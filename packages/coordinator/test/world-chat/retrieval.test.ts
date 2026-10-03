@@ -16,7 +16,7 @@ import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { LeaseDeniedError, QueryLeaseRegistry } from "../../src/world-chat/lease.js";
 import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
-import { exportsFence, type ArkeExportReadRecord } from "../../src/world-chat/target-reads.js";
+import { buildItemsFence, exportsFence, type ArkeBuildItemRead, type ArkeExportReadRecord } from "../../src/world-chat/target-reads.js";
 import { fixtureBundle } from "../index-db/helpers.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { tempDir } from "../tmp.js";
@@ -33,6 +33,7 @@ const NOW = () => "2026-08-06T10:00:00Z";
 
 async function harness(options: {
   withIndex?: boolean;
+  buildItems?: () => readonly ArkeBuildItemRead[];
   exports?: (worldId: string) => readonly ArkeExportReadRecord[];
 } = {}) {
   const worldDir = await makeTempWorld();
@@ -61,6 +62,7 @@ async function harness(options: {
     attachments,
     findAttachment: async (_lease, id) => known.get(id) ?? null,
     ...(options.exports ? { getExports: () => options.exports!(bundle.meta.worldId) } : {}),
+    ...(options.buildItems ? { getBuildItems: options.buildItems } : {}),
     now: NOW,
   });
 
@@ -596,4 +598,23 @@ describe("the served surface", () => {
     await server.stop();
     h.index?.close();
   });
+});
+
+it("reads unfinished founding keys completely and fences retry state changes", async () => {
+  const items: ArkeBuildItemRead[] = [{ key: "main-photo/maren-kest", kind: "main-photo", subject: "Maren", state: "failed", detail: "provider unavailable" },
+    { key: "world-image", kind: "world-image", subject: "World", state: "unauthorized", detail: null }];
+  const h = await harness({ buildItems: () => items });
+  try {
+    const token = h.mint().token;
+    const first = await h.retrieval.call(token, "list_build_items", { limit: 1 });
+    const page = first.result as { items: ArkeBuildItemRead[]; nextCursor: string };
+    assert.equal(first.receipt.complete, false);
+    const last = await h.retrieval.call(token, "list_build_items", { cursor: page.nextCursor, limit: 1 });
+    assert.equal(last.receipt.complete, true);
+    assert.deepEqual(last.receipt.target, { requirement: "founding-build", id: h.bundle.meta.worldId });
+    assert.equal(last.receipt.observedRevisionOrDigest, buildItemsFence(items));
+    assert.deepEqual([...page.items, ...(last.result as { items: ArkeBuildItemRead[] }).items], items);
+    items[1] = { ...items[1]!, state: "running" };
+    await assert.rejects(() => h.retrieval.call(token, "list_build_items", { cursor: page.nextCursor }), /changed while it was being read/);
+  } finally { h.index?.close(); }
 });

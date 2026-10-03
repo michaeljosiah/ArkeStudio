@@ -2682,6 +2682,8 @@ const exampleWorldActions = {
     checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "prop-reference": { kind: "prop-reference", propId: `prop_${EXAMPLE_ULID}`, stateId: `pst_${EXAMPLE_ULID}`,
     artifactId: `ar_${EXAMPLE_ULID}`, replace: false, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "image-generation": { kind: "image-generation", request: { operation: "world-image", count: 1 }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "build-item-run": { kind: "build-item-run", itemKey: "main-photo:maren", checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
 } satisfies Record<ModelWorldChatAction["kind"], ModelWorldChatAction>;
 
 /**
@@ -2763,6 +2765,8 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "bench-generation": "Generate image, video, speech or music in an existing Bench session, at the quote shown on the card. Needs the session's id and a provider and model the person has enabled.",
   "prop-authoring": "Create a prop, add a state to it, or rename a prop or state.",
   "prop-reference": "Use a filed artifact image as a prop state's reference; say replace only when the person asked to replace one.",
+  "image-generation": "Generate pending key art, a master look, or a prop-state image at the coordinator's quote. Selection is a separate card. Omit modelId to use the world's image default.",
+  "build-item-run": "Retry one unfinished founding item from list_build_items at the coordinator's quote. The original founding decision installs the result.",
 } as const satisfies Record<ModelWorldChatAction["kind"], string>;
 
 /** Shaped exactly as the coordinator accepts it; the guide prints this object (issue 684). */

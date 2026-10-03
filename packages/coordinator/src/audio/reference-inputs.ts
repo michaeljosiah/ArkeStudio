@@ -66,7 +66,7 @@ export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job,
 
 /** Explicit full-performance references reuse immutable media; no parallel asset store or preparation job. */
 export async function resolvePerformanceAudioReferences(store: WorldStore, productionId: string, sceneId: string,
-  requests: readonly PerformanceAudioRequest[], requestId: string, local = false): Promise<FrozenPerformanceAudio[]> {
+  requests: readonly PerformanceAudioRequest[], requestId: string, local = false, resolution: { acknowledge?: boolean; at?: string } = {}): Promise<FrozenPerformanceAudio[]> {
   const references: FrozenPerformanceAudio[] = [];
   for (const [index, request] of requests.entries()) {
     const performance = await readPerformance(store, productionId, request.performanceId);
@@ -79,6 +79,7 @@ export async function resolvePerformanceAudioReferences(store: WorldStore, produ
     }
     if (requests.slice(0, index).some(r => r.performanceId === request.performanceId)) throw new Error("A performance reference was selected twice.");
     if (performance.kind !== "scratch" && !sameVoiceAssignment(sheet.voice, performance.voiceAssignment)) throw new Error("The performance uses an earlier character voice assignment.");
+    if (resolution.acknowledge === false && request.prepared) throw new Error("Prepared ranges must be accepted before quoting.");
     const prepared = request.prepared ? await acceptPerformanceAudioRange(store, performance, request.prepared, requestId) : undefined;
     const asset = prepared ?? performance;
     const dispatchHash = asset.provenance.outputHash;
@@ -88,18 +89,22 @@ export async function resolvePerformanceAudioReferences(store: WorldStore, produ
     // per-dispatch path is told rather than trusted.
     const acknowledgementId = local ? undefined : `performance-reference/${requestId}/${index}`;
     const prior = acknowledgementId === undefined ? undefined : (await readAudioRights(store)).find(r => r.action === "acknowledge" && r.id === acknowledgementId);
-    const at = prior?.at ?? store.now();
+    const at = prior?.at ?? resolution.at ?? store.now();
     const attestations = (["single-speaker", "no-music"] as const).map(kind => ({ kind, audioHash: dispatchHash,
       statementVersion: 1, acknowledgedAt: at }));
     if (!request.singleSpeaker || !request.noMusic) throw new Error("Confirm a single speaker and no music.");
+    const rights = await readAudioRights(store);
     if (acknowledgementId !== undefined) {
       if (request.cloudBasis === undefined) throw new Error("Confirm the read may be sent to cloud models.");
-      await appendAudioRights(store, { schemaVersion: 1, action: "acknowledge", id: acknowledgementId, audioHash: dispatchHash,
-        basis: request.cloudBasis, scopes: ["cloud-reference-upload"], statementVersion: 1, at });
+      const acknowledgement = { schemaVersion: 1 as const, action: "acknowledge" as const, id: acknowledgementId, audioHash: dispatchHash,
+        basis: request.cloudBasis, scopes: ["cloud-reference-upload" as const], statementVersion: 1, at };
+      // Quoting checks the same evidence without authorizing an upload or writing rights.
+      if (resolution.acknowledge === false) rights.push(acknowledgement);
+      else { await appendAudioRights(store, acknowledgement); rights.push(acknowledgement); }
     }
     const bytes = await readAudioBytes(await audioWorldPath(store.dir,
       prepared ? `productions/${productionId}/${prepared.file}` : `productions/${productionId}/performances/${performance.id}/${performance.file}`), store.closingSignal, 15_000_000);
-    const evidence = { bytes, hash: dispatchHash, report: asset.provenance.qualityReport, rights: await readAudioRights(store), scope: "cloud-reference-upload" as const,
+    const evidence = { bytes, hash: dispatchHash, report: asset.provenance.qualityReport, rights, scope: "cloud-reference-upload" as const,
       warningCodes: request.warningCodes, attestations, requiredAttestations: ["single-speaker", "no-music"] as const, statementVersion: 1 };
     if (acknowledgementId === undefined) checkAudioDispatchEvidence(evidence);
     else clearAudioDispatch({ ...evidence, acknowledgementId });
@@ -129,14 +134,14 @@ function clearanceLabel(error: unknown): string {
  * and `refused` what only the bytes and the rights ledger could. Each read acknowledges rights
  * under its own id, so two reads under one request never share one.
  */
-export async function resolveCastVoices(store: WorldStore, production: ProductionBundle, scene: SceneRecord, requestId: string, shotIds?: readonly string[], local = false):
+export async function resolveCastVoices(store: WorldStore, production: ProductionBundle, scene: SceneRecord, requestId: string, shotIds?: readonly string[], local = false, resolution: { acknowledge?: boolean; at?: string } = {}):
   Promise<{ references: FrozenPerformanceAudio[]; notSent: CastVoiceNotSent[]; refused: CastVoiceNotSent[] }> {
   const { requests, notSent } = castVoiceRequests(store.getBundle().sheets, production, scene, shotIds, local);
   const references: FrozenPerformanceAudio[] = [], refused: CastVoiceNotSent[] = [];
   for (const request of requests) {
     const sheetId = production.performances.find(p => p.id === request.performanceId)!.target.speakerSheetId;
     try {
-      references.push(...await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, [request], `${requestId}/cast-${sheetId}`, local));
+      references.push(...await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, [request], `${requestId}/cast-${sheetId}`, local, resolution));
     } catch (error) {
       refused.push({ sheetId, name: store.getBundle().sheets.find(s => s.id === sheetId)?.name ?? sheetId, reason: clearanceLabel(error) });
     }
@@ -151,13 +156,13 @@ export async function resolveCastVoices(store: WorldStore, production: Productio
  * when the scene is gone.
  */
 export async function resolveSubjectCastVoices(store: WorldStore,
-  subject: { productionId: string; sceneId: string; shotId?: string; members?: readonly { shotId: string }[] }, requestId: string, local = false):
+  subject: { productionId: string; sceneId: string; shotId?: string; members?: readonly { shotId: string }[] }, requestId: string, local = false, resolution: { acknowledge?: boolean; at?: string } = {}):
   Promise<{ references: FrozenPerformanceAudio[]; notSent: CastVoiceNotSent[]; refused: CastVoiceNotSent[] }> {
   const production = store.getBundle().productions.find(p => p.meta.id === subject.productionId);
   const scene = production?.scenes.find(s => s.id === subject.sceneId);
   if (!production || !scene) return { references: [], notSent: [], refused: [] };
   const shotIds = subject.shotId !== undefined ? [subject.shotId] : subject.members?.map(m => m.shotId);
-  return resolveCastVoices(store, production, scene, requestId, shotIds, local);
+  return resolveCastVoices(store, production, scene, requestId, shotIds, local, resolution);
 }
 
 export async function preparePerformanceAudioRange(store: WorldStore, tools: AudioMediaTools,

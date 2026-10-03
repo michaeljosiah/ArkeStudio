@@ -748,7 +748,35 @@ export class FoundingBuildService {
    * wave barrier and the authoring sessions), and serialized per world so a double press
    * joins rather than doubling.
    */
-  async runItems(worldId: string, itemKey?: string, requestId?: string): Promise<void> {
+  async quoteItem(worldId: string, itemKey: string): Promise<{ input?: EnqueueInput; authority: string; description: string; item: BuildItem }> {
+    const store = this.ports.openStore();
+    if (!store || store.worldId !== worldId) throw new Error("The founding world is unavailable.");
+    const active = await this.load(store.dir, worldId);
+    if (!active || active.driving || this.runningItems.has(worldId) || this.fold(active).status === "running") throw new Error("The founding build is unavailable or still running.");
+    const item = active.record.items.find(item => item.key === itemKey);
+    const folded = this.fold(active).items.find(item => item.key === itemKey);
+    if (!item || !folded || !["failed", "skipped", "unauthorized"].includes(folded.state)) throw new Error("This founding item does not need a new attempt.");
+    if (item.kind === "author-sheet" && !active.record.blueprint.reviewed) throw new Error("Historical sheet authoring requires the existing Activity control; its writing route cannot be quoted here.");
+    const authority = conversationActionDigest({ record: active.record, entries: active.entries });
+    if (!buildItemDispatches(item.kind)) return { item, authority, description: `Install the approved founding item ${item.key}; no provider runs.` };
+    const last = [...active.entries].reverse().find(entry => entry.kind === "enqueued" && entry.key === itemKey);
+    if (last?.kind === "enqueued") {
+      const job = this.ports.jobById(last.jobId);
+      if (job && job.status !== "failed" && job.status !== "cancelled") throw new Error("This founding item already has work to reconcile in Activity.");
+    }
+    const { route } = await this.resolveImageRoute(this.worldModels(worldId));
+    if (!route) throw new Error("No founding image model resolves.");
+    return { item, authority, description: `Generate and install the founding ${item.kind} for ${item.subject}.`, input: await this.compileDispatch(active, item, store, route.model) };
+  }
+
+  async quotedItemState(worldId: string, itemKey: string): Promise<{ state: string; running: boolean } | null> {
+    const store = this.ports.openStore();
+    const active = store?.worldId === worldId ? await this.load(store.dir, worldId) : null;
+    const item = active && this.fold(active).items.find(item => item.key === itemKey);
+    return item ? { state: item.state, running: this.runningItems.has(worldId) } : null;
+  }
+
+  async runItems(worldId: string, itemKey?: string, requestId?: string, quoted?: { authority: string; input?: EnqueueInput }): Promise<void> {
     // A replayed frame is the same press, not a second spend (R-16's idempotency, applied here).
     if (requestId !== undefined) {
       if (this.seenRunRequests.has(requestId)) return;
@@ -765,18 +793,19 @@ export class FoundingBuildService {
     const stopGeneration = this.builds.get(worldId)?.stopGeneration ?? 0;
     const work = (this.runningItems.get(worldId) ?? Promise.resolve())
       .catch(() => {})
-      .then(() => this.runItemsWork(worldId, stopGeneration, itemKey));
+      .then(() => this.runItemsWork(worldId, stopGeneration, itemKey, quoted));
     this.runningItems.set(worldId, work);
     void work.finally(() => {
       if (this.runningItems.get(worldId) === work) this.runningItems.delete(worldId);
-    });
+    }).catch(() => {});
     return work;
   }
 
-  private async runItemsWork(worldId: string, stopGeneration: number, itemKey?: string): Promise<void> {
+  private async runItemsWork(worldId: string, stopGeneration: number, itemKey?: string, quoted?: { authority: string; input?: EnqueueInput }): Promise<void> {
     const store = this.ports.openStore();
     if (!store || store.worldId !== worldId) return;
     const active = await this.load(store.dir, worldId);
+    if (quoted && (!active || quoted.authority !== conversationActionDigest({ record: active.record, entries: active.entries }))) throw new Error("The founding item changed after generation approval.");
     if (!active) return;
     // A stopped driver still settles what it had in flight: the fold reads a cancelled job as
     // failed the moment the queue says so, but the driver journals it and stands down a beat
@@ -802,7 +831,7 @@ export class FoundingBuildService {
       if ((active.stopGeneration ?? 0) !== stopGeneration) break;
       const item = active.record.items.find((candidate) => candidate.key === key);
       if (!item) continue;
-      await this.runOne(active, item, route?.model ?? null, stopGeneration).catch((err) => {
+      await this.runOne(active, item, route?.model ?? null, stopGeneration, quoted?.input).catch((err) => {
         this.ports.log({ kind: "build.item-failed", worldId, key, message: err instanceof Error ? err.message : String(err) });
       });
     }
@@ -943,9 +972,9 @@ export class FoundingBuildService {
   // -------------------------------------------------------------------------
 
   /** `pressedUnder` is the stop generation an Activity press was made under; the driver passes none. */
-  private async runOne(active: ActiveBuild, item: BuildItem, model: ManifestModel | null, pressedUnder?: number): Promise<void> {
+  private async runOne(active: ActiveBuild, item: BuildItem, model: ManifestModel | null, pressedUnder?: number, quotedInput?: EnqueueInput): Promise<void> {
     if (buildItemDispatches(item.kind)) {
-      const jobId = await this.dispatchOne(active, item, model, pressedUnder);
+      const jobId = await this.dispatchOne(active, item, model, pressedUnder, quotedInput);
       await this.settleDispatched(active, item, jobId);
       return;
     }
@@ -1316,7 +1345,7 @@ export class FoundingBuildService {
   // Image dispatch and landing (R-19..R-22, R-25..R-28)
   // -------------------------------------------------------------------------
 
-  private async dispatchOne(active: ActiveBuild, item: BuildItem, model: ManifestModel | null, pressedUnder?: number): Promise<string | null> {
+  private async dispatchOne(active: ActiveBuild, item: BuildItem, model: ManifestModel | null, pressedUnder?: number, quotedInput?: EnqueueInput): Promise<string | null> {
     const store = this.ports.openStore();
     if (!store || store.worldId !== active.record.worldId) return null;
     const state = this.fold(active);
@@ -1371,7 +1400,7 @@ export class FoundingBuildService {
 
     let input: EnqueueInput;
     try {
-      input = await this.compileDispatch(active, item, store, model);
+      input = quotedInput ?? await this.compileDispatch(active, item, store, model);
       if (state.status === "running" && input.estimatedMicroUsd > item.estimatedMicroUsd)
         throw new Error("The current image estimate exceeds the approved amount. Review and retry this item in Activity.");
     } catch (err) {
@@ -1410,7 +1439,7 @@ export class FoundingBuildService {
       idempotencyKey = lastForKey.idempotencyKey;
     } else {
       const retried = active.entries.some((entry) => entry.kind === "terminal" && entry.key === item.key);
-      idempotencyKey = retried ? ulid() : (item.idempotencyKey ?? ulid());
+      idempotencyKey = quotedInput?.idempotencyKey ?? (retried ? ulid() : (item.idempotencyKey ?? ulid()));
       const dropped = input.params["droppedReferences"] as Array<{ name: string; reason: string }> | undefined;
       const detail = dropped?.length
         ? `Key art will be made without references for: ${dropped.map(({ name, reason }) => `${name} (${reason})`).join("; ")}.`

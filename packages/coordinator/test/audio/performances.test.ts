@@ -383,6 +383,16 @@ it("the scene's cast resolves into voice references that ride wherever the chara
   // reworded line or another block is not.
   assert.ok(currentPerformanceTarget(store, record.target), "a version bump alone never silences a read");
   assert.equal(currentPerformanceTarget(store, { ...record.target, authoredTextHash: `sha256:${"e".repeat(64)}` }), false, "rewording does");
+  const quoteRequest = ulid(), quoteAt = "2026-10-03T12:00:00.000Z";
+  const beforeQuoteRights = await readAudioRights(store);
+  const quoted = await resolveCastVoices(store, currentProduction, currentScene, quoteRequest, undefined, false, { acknowledge: false, at: quoteAt });
+  assert.equal(quoted.references.length, 1);
+  assert.deepEqual(quoted.refused, []);
+  assert.deepEqual(await readAudioRights(store), beforeQuoteRights, "preparing cast references records no upload acknowledgement");
+  assert.deepEqual(await resolveCastVoices(store, currentProduction, currentScene, quoteRequest, undefined, false, { acknowledge: false, at: quoteAt }), quoted);
+  const approved = await resolveCastVoices(store, currentProduction, currentScene, quoteRequest, undefined, false, { at: quoteAt });
+  assert.deepEqual(approved, quoted, "approval acknowledges the exact frozen cast reference");
+  assert.equal((await readAudioRights(store)).length, beforeQuoteRights.length + 1);
   const resolved = await resolveCastVoices(store, currentProduction, currentScene, ulid());
   assert.deepEqual(resolved.notSent, []);
   assert.deepEqual(resolved.refused, []);

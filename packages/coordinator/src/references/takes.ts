@@ -109,6 +109,7 @@ function kindFor(job: Job): Take["kind"] | null {
   if (job.target.kind === "character-voice-sample") return "voice";
   if (job.target.kind === "character-look") return "look";
   if (job.target.kind === "location-view-candidate") return "location-view";
+  if (job.target.kind === "prop-state-candidate") return "prop-state";
   return null;
 }
 
@@ -126,7 +127,9 @@ export async function recordReferenceTake(store: WorldStore, job: Job, ledgerEnt
     | { canonRevision?: number; sheets?: Record<string, number>; artDirectionVersion?: number; anchorFile?: string; borrowedImages?: Take["provenance"]["borrowedImages"] }
     | undefined;
   const sheetVersion = frozen?.sheets?.[sheetId];
-  if (frozen?.canonRevision === undefined || sheetVersion === undefined) return null;
+  const stateId = job.target.id?.split("/")[1];
+  if (frozen?.canonRevision === undefined || (kind !== "prop-state" && sheetVersion === undefined)) return null;
+  if (kind === "prop-state" && !store.getBundle().props.some(prop => prop.id === sheetId && prop.states.some(state => state.id === stateId))) throw new Error("The generated prop state is unavailable.");
   const id = `tk_${job.id.slice(3)}` as Take["id"];
   const media = basename(landed);
   const artDirection = job.params["artDirection"] as { version?: number } | undefined;
@@ -135,14 +138,14 @@ export async function recordReferenceTake(store: WorldStore, job: Job, ledgerEnt
     jobId: job.id,
     coversShots: [],
     kind,
-    reference: { sheetId },
+    ...(kind === "prop-state" ? { prop: { propId: sheetId, stateId: stateId! } } : { reference: { sheetId } }),
     provider: job.provider,
     model: job.model,
     provenance: {
       ...(job.recipe ? { recipe: job.recipe, recipeVersion: job.recipe.version } : {}),
       canonRevision: frozen.canonRevision,
       ...(frozen.borrowedImages ? { borrowedImages: frozen.borrowedImages } : {}),
-      sheets: { [sheetId]: sheetVersion },
+      sheets: kind === "prop-state" ? {} : { [sheetId]: sheetVersion! },
       ...(frozen.artDirectionVersion ?? artDirection?.version
         ? { artDirectionVersion: frozen.artDirectionVersion ?? artDirection!.version }
         : {}),

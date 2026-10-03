@@ -61,10 +61,12 @@ describe("the action guide", () => {
   it("marks a kind whose approval is blocked as unavailable and gives it no example to copy", () => {
     const blocked = ACTION_GUIDE_ENTRIES.filter((entry) => entry.unavailable !== null).map((entry) => entry.kind);
     // Today these become cards nobody can approve (SPEC-050 G-3); the guide must not invite them.
-    assert.ok(blocked.includes("reference-generation"));
+    assert.ok(!blocked.includes("reference-generation"));
+    assert.ok(!blocked.includes("image-generation"));
+    assert.ok(!blocked.includes("build-item-run"));
     assert.ok(blocked.includes("voice-audition"));
     const text = renderActionGuide(["world"], HUGE).text;
-    const entry = text.slice(text.indexOf("- reference-generation ·"), text.indexOf("\n- ", text.indexOf("- reference-generation ·") + 1));
+    const entry = text.slice(text.indexOf("- voice-audition ·"), text.indexOf("\n- ", text.indexOf("- voice-audition ·") + 1));
     assert.match(entry, /Unavailable: .+ Do not prepare it/);
     assert.doesNotMatch(entry, /example:/);
   });

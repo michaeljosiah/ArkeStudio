@@ -75,6 +75,7 @@ export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
   tool("get_routing", "Read the complete interactive routing graph.", PRODUCTION, ["productionId"]),
   tool("list_plans", "Read complete durable dispatch plans.", PRODUCTION, ["productionId"]),
   tool("list_jobs", "Read every safe job record for this world, optionally narrowed to a production.", { ...PRODUCTION }),
+  tool("list_build_items", "Read the founding items in this world, including unfinished item keys and their current state.", {}),
   tool("list_exports", "Read every currently targetable export for this world, optionally narrowed to a production.", { ...PRODUCTION }),
 ];
 
