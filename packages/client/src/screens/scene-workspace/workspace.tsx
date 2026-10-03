@@ -619,7 +619,7 @@ export function SceneWorkspace({
                 preparing={tableRead.preparing}
                 notice={tableRead.notice}
                 onPrepare={tableRead.prepare}
-                ceiling={tableRead.plan?.items.some((item) => state?.app.manifest?.models.some((model) => model.id === item.model && model.pricing.kind === "perToken")) ?? false}
+                estimate={tableRead.plan?.items.some((item) => state?.app.manifest?.models.some((model) => model.id === item.model && model.pricing.kind === "perToken")) ?? false}
                 planNote={tableReadPlanNote(tableRead.plan, state?.app.manifest?.models ?? [])}
               />
             ) : null}

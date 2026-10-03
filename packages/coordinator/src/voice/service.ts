@@ -590,7 +590,7 @@ export class VoiceService {
         const quote = quoteSpeech(model, text, { at: this.now() });
         const target = voiceTargetKey(candidate);
         previewQuoteByVoice[target] = speechConsentToken(JSON.stringify([target, text]), [quote]);
-        return [[target, quote.authorisedMicroUsd]];
+        return [[target, quote.expectedMicroUsd]];
       }),
     );
     // What a first read through a slot-keeping reader adds, on the row before the circle that
@@ -850,7 +850,7 @@ export class VoiceService {
         ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
         // Unmetered rows estimate at zero, so a local preview states no price where a cloud one
         // states an exact figure (turn 70). No branch needed — the manifest already says which.
-        estimatedMicroUsd: quote.authorisedMicroUsd,
+        estimatedMicroUsd: quote.expectedMicroUsd,
         // Landed under its cache key, so reopening the picker replays without a call (R-10).
         landing: { dir: PREVIEW_CACHE_DIR, name },
       },
@@ -929,8 +929,13 @@ export function voiceLineRequest(input: {
     throw new Error("The line and its direction exceed this model's request limit. Shorten it or use an audiobook read in parts.");
   }
   // The compiled text is priced: its tags are in it, so no delivery is named to count twice.
-  const quote = quoteSpeech(input.model, text, { language: input.language, at: input.at });
-  if (quote.unit === "token" && quote.authorisedMicroUsd > 0 && (input.confirmedSpeechMicroUsd === undefined || input.confirmedSpeechMicroUsd < quote.authorisedMicroUsd)) {
+  // A token reader's estimate counts its sentence; the line's screen is answered by the words
+  // alone, as estimateSpeechMicroUsd says why, and the dispatcher's quote keeps the service-limit
+  // authorisation as the cap (SPEC-049 R-6).
+  const quote = quoteSpeech(input.model, text, { language: input.language, at: input.at,
+    ...(directed?.instructions !== undefined ? { instructions: directed.instructions } : {}) });
+  const asked = quote.unit === "token" ? quoteSpeech(input.model, text, { at: input.at }).expectedMicroUsd : 0;
+  if (quote.unit === "token" && quote.authorisedMicroUsd > 0 && (input.confirmedSpeechMicroUsd === undefined || input.confirmedSpeechMicroUsd < asked)) {
     throw new Error("The speech price needs confirmation. Open the line again and confirm its current price.");
   }
   return {
@@ -948,7 +953,7 @@ export function voiceLineRequest(input: {
       // The direction as compiled, marked by its hash so no client re-derives a tag from a name.
       ...(directed !== null ? { authoredText: input.text, voiceSettings: directed.voiceSettings, directionHash: directed.directionHash, ...(directed.instructions !== undefined ? { instructions: directed.instructions } : {}) } : {}),
     },
-    estimatedMicroUsd: quote.authorisedMicroUsd,
+    estimatedMicroUsd: quote.expectedMicroUsd,
     landing: { dir: `productions/${input.productionId}/audio` },
     ...(input.voiceReference === true ? { voiceReference: true } : {}),
     ...(input.voiceUploadConfirmedFor !== undefined

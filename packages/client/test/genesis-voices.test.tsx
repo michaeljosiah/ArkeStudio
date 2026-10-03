@@ -21,7 +21,7 @@ it("plays the actual audition and keeps generation and assignment decisions sepa
       onGenerate={() => calls.push("generate")} onDecide={(target, decision, heard) => calls.push([target, decision, heard?.hash].join("|"))}
       onRefresh={() => {}} onCancel={() => {}} onRevise={() => {}} />));
     assert.ok(container.querySelector("audio")?.getAttribute("src")?.includes("a".repeat(64)));
-    assert.match(container.textContent!, /up to \$0\.15/);
+    assert.match(container.textContent!, /~\$0\.15/);
     const button = (name: string) => [...container.querySelectorAll("button")].find(button => button.textContent === name)!;
     await act(async () => button("Generate audition").click());
     assert.deepEqual(calls, ["generate"]);

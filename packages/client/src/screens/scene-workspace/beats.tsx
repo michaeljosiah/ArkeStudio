@@ -63,15 +63,15 @@ export function VoiceLinesControl({
   preparing,
   notice,
   onPrepare,
-  ceiling = false,
+  estimate = false,
   planNote = null,
 }: {
   plan: TableReadPlan | null;
   preparing: boolean;
   notice: string;
   onPrepare: () => void;
-  /** A per-token reader's price is a ceiling, said "up to" as Preview's Play lines says it. */
-  ceiling?: boolean;
+  /** A per-token reader's price is an estimate the read can pass, said `~` (SPEC-049 R-6). */
+  estimate?: boolean;
   /** A free plan or credit named where the price was (design turn 182). */
   planNote?: string | null;
 }) {
@@ -94,7 +94,7 @@ export function VoiceLinesControl({
       {missing.length > 0 ? (
         <button type="button" className="fy-swvoice__go" disabled={preparing} onClick={onPrepare}>
           {preparing ? "Voicing…" : `Voice ${missing.length} line${missing.length === 1 ? "" : "s"}`}
-          {planNote !== null ? ` · ${planNote}` : plan.totalEstimatedMicroUsd > 0 ? ` · ${ceiling ? "up to " : ""}${formatMicroUsd(plan.totalEstimatedMicroUsd)}` : ""}
+          {planNote !== null ? ` · ${planNote}` : plan.totalEstimatedMicroUsd > 0 ? ` · ${estimate ? "~" : ""}${formatMicroUsd(plan.totalEstimatedMicroUsd)}` : ""}
         </button>
       ) : null}
       {notice === "" ? null : <span role="status" className="fy-swvoice__notice">{notice}</span>}

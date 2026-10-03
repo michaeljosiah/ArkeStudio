@@ -24,7 +24,7 @@ const creditMistral = applyProviderPlans(manifest, { ...PAID_PLANS, mistral: "fr
 const now = "2026-10-02T09:14:00.000Z";
 const read = (model: ManifestModel, text = "Hello"): EnqueueInput => ({ worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", target: { kind: "voice-preview", id: "free" },
   capability: "voice-tts", provider: model.provider, model: model.id, params: { text },
-  estimatedMicroUsd: quoteSpeech(model, text, { at: now }).authorisedMicroUsd });
+  estimatedMicroUsd: quoteSpeech(model, text, { at: now }).expectedMicroUsd });
 
 async function harness(rows: { models: ManifestModel[] }, submit: () => Promise<Awaited<ReturnType<DispatchClient["submit"]>>>) {
   const dir = await tempDir("arke-free-plan-");

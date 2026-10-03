@@ -651,7 +651,7 @@ export function planBenchDispatch(
     requestId: string;
     at: string;
     /** Present on a dispatch press; absent for a read-only planning request. */
-    speechAuthorisation?: { maximumMicroUsd?: number };
+    speechAuthorisation?: { confirmedMicroUsd?: number };
     /** Re-run: dispatch this take's immutable snapshot instead of the live composer. */
     fromTake?: BenchTake | undefined;
     /** The scene cast's reads, resolved by the caller (SPEC-044 R-29): the plan card and the Bench say the same. */
@@ -1269,7 +1269,10 @@ export function planBenchDispatch(
           // layer consumes that same value.
         },
         // The compiled text is priced: its tags are in it, so no delivery is named to count twice.
-        estimatedMicroUsd: quoteSpeech(model, directed?.text ?? composer.brief, { at: options.at, language: voiceLanguage }).authorisedMicroUsd,
+        // A token reader's estimate counts its sentence too; the authorisation stays on the
+        // dispatcher's quote as its cap, never the figure the composer asked (SPEC-049 R-6).
+        estimatedMicroUsd: quoteSpeech(model, directed?.text ?? composer.brief, { at: options.at, language: voiceLanguage,
+          ...(directed?.instructions !== undefined ? { instructions: directed.instructions } : {}) }).expectedMicroUsd,
         landing: { dir: sessionMediaDir(session.id, takeId) },
         ...(voiceSource.kind === "cloned" ? { voiceReference: true } : {}),
       });
@@ -1302,10 +1305,12 @@ export function planBenchDispatch(
     }
   }
   if (model.capability === "voice-tts" && model.pricing.kind === "perToken" && options.speechAuthorisation !== undefined) {
-    const maximum = options.speechAuthorisation.maximumMicroUsd;
-    const total = inputs.reduce((sum, input) => sum + input.estimatedMicroUsd, 0);
+    const confirmed = options.speechAuthorisation.confirmedMicroUsd;
+    // The composer's estimate, against these words' now (SPEC-049 R-6): by the words alone, as
+    // estimateSpeechMicroUsd says why, so a sentence the screen left out never refuses the take.
+    const total = inputs.reduce((sum, input) => sum + quoteSpeech(model, String(input.params.text ?? ""), { at: options.at }).expectedMicroUsd, 0);
     // A $0 read — a free plan's (design turn 182) — has nothing to authorise.
-    if (total > 0 && (maximum === undefined || total > maximum)) {
+    if (total > 0 && (confirmed === undefined || total > confirmed)) {
       return { ok: false, reason: "The speech price needs confirmation. Review the current price in the composer and press Generate." };
     }
   }
