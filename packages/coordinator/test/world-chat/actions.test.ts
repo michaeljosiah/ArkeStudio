@@ -1256,7 +1256,7 @@ describe("World Chat authority adapters", () => {
 
   it("shows a durable main-photo card and queues only after approval, once", async () => {
     let queued = 0;
-    const deps: { productionTakeFiling?: ProductionTakeFiling } = {};
+    const deps: WorldChatActionAdapterDeps = {};
     const w = await setup({ kind: "world" }, deps);
     Object.assign(deps, { generationQuotes: new GenerationQuotes(w.store, imageGenerationSource(w.store, {
       manifest: { manifestVersion: 1, generated: "2026-09-04", models: [{ id: "test-image", provider: "fal", capability: "image", displayName: "Test Image",
@@ -1928,7 +1928,7 @@ describe("World Chat authority adapters", () => {
 
   it("reviews a Bench result before filing and clears only the approved shot frame", async () => {
     const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
-    const deps: WorldChatActionAdapterDeps = {};
+    const deps: { productionTakeFiling?: ProductionTakeFiling } = {};
     const w = await setup(context, deps);
     const sessionId = newId("sess");
     const takeId = newId("tk");
