@@ -64,6 +64,55 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 @keyframes drift{from{transform:translateY(0)}to{transform:translateY(-7px)}}
 @keyframes barFill{from{width:4%}to{width:78%}}@keyframes kenburns{from{transform:scale(1)}to{transform:scale(1.08)}}@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
 /* Turn 127: settings narrator catalogue. Scoped to these proposed drawings. */
+/* t186 */
+.v186-p{position:relative;width:1280px;height:720px;overflow:hidden;background:var(--media-overlay-bg);color:var(--media-overlay-fg);font:var(--type-body)}
+.v186-p *{box-sizing:border-box}
+.v186-p .pic{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.v186-p .pic.next{opacity:.35}
+.v186-p .scrim-top{position:absolute;left:0;right:0;top:0;height:160px;background:linear-gradient(to bottom,color-mix(in srgb,var(--media-overlay-bg) 72%,transparent),transparent)}
+.v186-p .scrim-bot{position:absolute;left:0;right:0;bottom:0;height:330px;background:linear-gradient(to top,color-mix(in srgb,var(--media-overlay-bg) 90%,transparent) 12%,transparent)}
+.v186-p .top{position:absolute;left:32px;right:24px;top:26px;display:flex;align-items:flex-start;gap:4px}
+.v186-p .top .title{flex:1;min-width:0}
+.v186-p .eyebrow{font:var(--type-label);font-size:var(--text-2xs);letter-spacing:var(--tracking-label);text-transform:uppercase;color:color-mix(in srgb,var(--media-overlay-fg) 68%,transparent)}
+.v186-p .chap{margin-top:5px;font:var(--type-h3);letter-spacing:var(--tracking-tight)}
+.v186-p .ib{width:40px;height:40px;flex:none;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;color:var(--media-overlay-fg)}
+.v186-p .ib.on{background:color-mix(in srgb,var(--media-overlay-fg) 16%,transparent)}
+.v186-p .ib.lab{width:auto;padding:0 14px 0 12px;gap:7px;font:var(--type-ui)}
+.v186-p .follow{position:absolute;left:50%;transform:translateX(-50%);bottom:150px;width:860px;text-align:center;font:var(--type-lead);font-size:var(--text-xl);line-height:1.5;text-wrap:pretty}
+.v186-p .follow .now{color:var(--media-overlay-fg)}.v186-p .follow .rest{color:color-mix(in srgb,var(--media-overlay-fg) 55%,transparent)}
+.v186-p .bar{position:absolute;left:32px;right:32px;bottom:28px}
+.v186-p .track{position:relative;height:4px;border-radius:2px;background:color-mix(in srgb,var(--media-overlay-fg) 24%,transparent)}
+.v186-p .track i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--media-overlay-fg)}
+.v186-p .track b{position:absolute;top:-4px;width:2px;height:12px;border-radius:1px;background:color-mix(in srgb,var(--media-overlay-fg) 70%,transparent)}
+.v186-p .knob{position:absolute;top:-5px;width:14px;height:14px;border-radius:50%;background:var(--media-overlay-fg)}
+.v186-p .row{display:flex;align-items:center;gap:6px;margin-top:14px}
+.v186-p .row .grow{flex:1}
+.v186-p .mono{font:var(--type-mono);font-size:var(--text-xs);color:color-mix(in srgb,var(--media-overlay-fg) 72%,transparent);white-space:nowrap}
+.v186-p .play{width:52px;height:52px;border-radius:50%;background:var(--media-overlay-fg);color:var(--media-overlay-bg);display:inline-flex;align-items:center;justify-content:center}
+.v186-p .book{height:2px;margin-top:12px;border-radius:1px;background:color-mix(in srgb,var(--media-overlay-fg) 16%,transparent);position:relative}
+.v186-p .book i{position:absolute;left:0;top:0;bottom:0;background:color-mix(in srgb,var(--media-overlay-fg) 60%,transparent)}
+.v186-p .sheet{position:absolute;right:24px;top:84px;bottom:160px;width:420px;border-radius:18px;padding:18px 0;background:color-mix(in srgb,var(--media-overlay-bg) 58%,transparent);backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);border:1px solid color-mix(in srgb,var(--media-overlay-fg) 20%,transparent);overflow:hidden}
+.v186-p .sheet h4{margin:0 20px 10px;font:var(--type-label);letter-spacing:var(--tracking-label);text-transform:uppercase;font-size:var(--text-2xs);color:color-mix(in srgb,var(--media-overlay-fg) 68%,transparent)}
+.v186-p .ch{display:flex;align-items:center;gap:12px;padding:9px 20px;font:var(--type-ui)}
+.v186-p .ch.cur{background:color-mix(in srgb,var(--media-overlay-fg) 12%,transparent)}
+.v186-p .ch.off{color:color-mix(in srgb,var(--media-overlay-fg) 40%,transparent)}
+.v186-p .ch .n{width:22px;font:var(--type-mono);font-size:var(--text-xs);color:color-mix(in srgb,var(--media-overlay-fg) 60%,transparent)}
+.v186-p .ch .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v186-p .ch .prog{width:44px;height:3px;border-radius:2px;background:color-mix(in srgb,var(--media-overlay-fg) 18%,transparent);position:relative}
+.v186-p .ch .prog i{position:absolute;left:0;top:0;bottom:0;background:var(--media-overlay-fg);border-radius:2px}
+.v186-phone{width:390px;height:844px;margin:0 auto;border-radius:34px}
+.v186-pick{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.v186-pick img{width:100%;height:64px;object-fit:cover;border-radius:8px;display:block;border:2px solid transparent}
+.v186-pick img.on{border-color:var(--foreground)}
+.v186-chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px 0 3px;border:1px solid var(--border);border-radius:7px;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);background:var(--background)}
+.v186-chip img{width:28px;height:18px;object-fit:cover;border-radius:4px}
+.v186-export{width:620px;margin:22px auto;border:1px solid var(--border);border-radius:14px;padding:20px 22px;display:flex;flex-direction:column;gap:12px;background:var(--background);box-shadow:0 18px 50px color-mix(in srgb,var(--foreground) 10%,transparent)}
+.v186-export h3{margin:0;font:var(--type-ui);font-weight:600}
+.v186-opt{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border:1px solid var(--border);border-radius:12px}
+.v186-opt.on{border-color:var(--foreground)}
+.v186-opt b{font:var(--type-ui);font-weight:600}.v186-opt .mono{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.v186-opt .radio{width:16px;height:16px;border-radius:50%;border:1px solid var(--border);flex:none;margin-top:2px}.v186-opt.on .radio{border:5px solid var(--foreground)}
+/* /t186 */
 /* t185 */
 .v185-grp{position:relative;padding-left:14px}
 .v185-grp::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:2px;background:var(--neutral-400)}
