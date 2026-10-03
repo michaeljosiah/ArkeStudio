@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer } from "node:net";
+import { createServer, type AddressInfo } from "node:net";
 import { request } from "node:http";
 import { it } from "node:test";
 import { RemoteDevices } from "@arke-studio/coordinator";
@@ -10,6 +10,16 @@ import { DesktopRemoteAccess } from "../src/remote-access.js";
 import { ServeCleanupRequired, TailscaleServe, type TailscaleRun } from "../src/tailscale-serve.js";
 
 const origin = "https://studio.example.ts.net";
+// The installed app holds the production gateway port, and Serve forwards a phone to it.
+// Hosts here bind a port the OS reports free instead, so a test run neither collides with
+// nor hangs behind a running Studio.
+async function freePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  const { port } = server.address() as AddressInfo;
+  await new Promise<void>(resolve => server.close(() => resolve()));
+  return port;
+}
 function tailscale() {
   let config: { TCP?: Record<string, unknown>; Web?: Record<string, unknown>; AllowFunnel?: Record<string, boolean> } = {};
   const commands: string[][] = [];
@@ -67,6 +77,7 @@ it("address selection skips TCP, web and Funnel reservations and preserves a sav
   await assert.rejects(fake.client.origin(), /could not find an available remote address/);
 });
 it("desktop automatically shares an alternate address, copies it, and keeps it across restart", async () => {
+  const gatewayPort = await freePort();
   const root = await mkdtemp(join(tmpdir(), "arke-remote-conflict-"));
   await writeFile(join(root, "index.html"), "<head></head>");
   const fake = tailscale();
@@ -76,7 +87,7 @@ it("desktop automatically shares an alternate address, copies it, and keeps it a
   } };
   fake.set(structuredClone(existing));
   const copied: string[] = [];
-  const options = { root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+  const options = { root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
     startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client, writeClipboard: (text: string) => { copied.push(text); } };
   let host = new DesktopRemoteAccess(options);
   try {
@@ -85,7 +96,7 @@ it("desktop automatically shares an alternate address, copies it, and keeps it a
     assert.equal(reply.status.running, true); assert.equal(reply.status.reason, null);
     assert.equal(reply.status.url, origin + ":9443");
     const pageStatus = (host: string) => new Promise<number | undefined>((resolve, reject) => {
-      request({ hostname: "127.0.0.1", port: 8793, path: "/", headers: { Host: host, Origin: origin + ":9443" } }, response => {
+      request({ hostname: "127.0.0.1", port: gatewayPort, path: "/", headers: { Host: host, Origin: origin + ":9443" } }, response => {
         response.resume(); response.on("end", () => resolve(response.statusCode));
       }).on("error", reject).end();
     });
@@ -103,6 +114,7 @@ it("desktop automatically shares an alternate address, copies it, and keeps it a
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("moving from an occupied saved address revokes every proof before publishing, including after Disable", async () => {
+  const gatewayPort = await freePort();
   for (const enabled of [true, false]) {
     const root = await mkdtemp(join(tmpdir(), "arke-remote-move-"));
     await writeFile(join(root, "index.html"), "<head></head>");
@@ -120,7 +132,7 @@ it("moving from an occupied saved address revokes every proof before publishing,
       assert.equal(restored.authenticate(proof), null, "old proofs are durably revoked before the new mapping exists");
       return publish(...args);
     };
-    const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+    const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
       startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
     try {
       await host.initialize(); if (!enabled) await host.command({ kind: "enable" });
@@ -165,10 +177,11 @@ it("a CLI failure after publication rolls back only the verified new mapping", a
   assert.equal(published, false);
 });
 it("desktop hosting persists opt-in, restarts on the same coordinator, and disables startup with access", async () => {
+  const gatewayPort = await freePort();
   const root = await mkdtemp(join(tmpdir(), "arke-desktop-remote-"));
   const clientDirectory = join(root, "client"); await mkdir(clientDirectory); await writeFile(join(clientDirectory, "index.html"), "<head></head>");
   const fake = tailscale(); const login: boolean[] = [];
-  const options = { root, clientDirectory, session: { port: 9999, token: "a".repeat(64) }, startupSupported: true,
+  const options = { root, clientDirectory, session: { port: 9999, token: "a".repeat(64) }, gatewayPort, startupSupported: true,
     setStartOnLogin: (value: boolean) => { login.push(value); }, tailscale: fake.client };
   let host = new DesktopRemoteAccess(options);
   try {
@@ -193,11 +206,12 @@ it("desktop hosting persists opt-in, restarts on the same coordinator, and disab
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("duration migrates to 90, persists while off and across restart, and affects only subsequent approvals", async () => {
+  const gatewayPort = await freePort();
   const root = await mkdtemp(join(tmpdir(), "arke-remote-duration-"));
   await mkdir(join(root, "remote")); await writeFile(join(root, "index.html"), "<head></head>");
   const path = join(root, "remote/settings.json");
   await writeFile(path, JSON.stringify({ enabled: false, startOnLogin: false, origin: null }));
-  const options = { root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+  const options = { root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
     startupSupported: false, setStartOnLogin: () => {}, tailscale: tailscale().client };
   let host = new DesktopRemoteAccess(options);
   try {
@@ -209,7 +223,7 @@ it("duration migrates to 90, persists while off and across restart, and affects 
       const previous = host.status().devices;
       const { pairing } = await host.command({ kind: "pair" });
       await new Promise<void>((resolve, reject) => {
-        const req = request({ hostname: "127.0.0.1", port: 8793, path: "/remote/pair", method: "POST",
+        const req = request({ hostname: "127.0.0.1", port: gatewayPort, path: "/remote/pair", method: "POST",
           headers: { Host: new URL(origin).host, Origin: origin, "Content-Type": "application/json", "x-arke-browser-key": "b".repeat(64) } }, res => {
           res.resume(); res.once("end", () => {
             try { assert.equal(res.statusCode, 202); resolve(); } catch (error) { reject(error); }
@@ -240,8 +254,9 @@ it("duration migrates to 90, persists while off and across restart, and affects 
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("failed duration persistence leaves the active setting unchanged", async () => {
+  const gatewayPort = await freePort();
   const root = await mkdtemp(join(tmpdir(), "arke-remote-duration-failure-"));
-  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
     startupSupported: false, setStartOnLogin: () => {}, tailscale: tailscale().client });
   try {
     await host.initialize();
@@ -251,10 +266,11 @@ it("failed duration persistence leaves the active setting unchanged", async () =
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("copies only the running host's clean origin and reports clipboard failures", async () => {
+  const gatewayPort = await freePort();
   const root = await mkdtemp(join(tmpdir(), "arke-remote-copy-"));
   await writeFile(join(root, "index.html"), "<head></head>");
   const copied: string[] = []; let fail = false;
-  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
     startupSupported: false, setStartOnLogin: () => {}, tailscale: tailscale().client,
     writeClipboard: text => { if (fail) throw new Error("Clipboard busy"); copied.push(text); } });
   try {
@@ -273,6 +289,7 @@ it("copies only the running host's clean origin and reports clipboard failures",
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("persists recoverable ownership before initial and subsequent Serve publication", async () => {
+  const gatewayPort = await freePort();
   const root = await mkdtemp(join(tmpdir(), "arke-remote-publication-intent-"));
   await writeFile(join(root, "index.html"), "<head></head>");
   const fake = tailscale();
@@ -284,7 +301,7 @@ it("persists recoverable ownership before initial and subsequent Serve publicati
     publications++;
     return publish(...args);
   };
-  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
     startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
   try {
     await host.initialize();
@@ -296,10 +313,11 @@ it("persists recoverable ownership before initial and subsequent Serve publicati
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("does not publish when the ownership record cannot be committed", async () => {
+  const gatewayPort = await freePort();
   const root = await mkdtemp(join(tmpdir(), "arke-remote-intent-failure-"));
   await writeFile(join(root, "index.html"), "<head></head>");
   const fake = tailscale();
-  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
     startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
   try {
     await host.initialize();
@@ -310,15 +328,16 @@ it("does not publish when the ownership record cannot be committed", async () =>
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("Quit keeps its port bound if mapping removal fails, then permits a safe retry", async () => {
+  const gatewayPort = await freePort();
   const root = await mkdtemp(join(tmpdir(), "arke-remote-stop-"));
   await writeFile(join(root, "index.html"), "<head></head>");
   const fake = tailscale();
-  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
     startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
   const probePort = () => new Promise<void>((resolve, reject) => {
     const server = createServer();
     server.once("error", reject);
-    server.listen(8793, "127.0.0.1", () => server.close(() => resolve()));
+    server.listen(gatewayPort, "127.0.0.1", () => server.close(() => resolve()));
   });
   const disable = fake.client.disable.bind(fake.client);
   let failRemoval = true;
@@ -338,13 +357,14 @@ it("Quit keeps its port bound if mapping removal fails, then permits a safe retr
   } finally { failRemoval = false; await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("an uncertain failed publication retains its listener until the owner can disable it", async () => {
+  const gatewayPort = await freePort();
   const root = await mkdtemp(join(tmpdir(), "arke-remote-publish-"));
   await writeFile(join(root, "index.html"), "<head></head>");
   const fake = tailscale();
   fake.client.enable = async () => { throw new ServeCleanupRequired("publication could not be rolled back"); };
   let failRemoval = true;
   fake.client.disable = async () => { if (failRemoval) throw new Error("mapping cleanup unavailable"); };
-  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
     startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
   const replacement = createServer();
   try {
@@ -353,7 +373,7 @@ it("an uncertain failed publication retains its listener until the owner can dis
     assert.equal(reply.status.running, false);
     assert.equal(reply.status.enabled, true, "show the Disable control while cleanup is outstanding");
     await assert.rejects(new Promise<void>((resolve, reject) => {
-      replacement.once("error", reject); replacement.listen(8793, "127.0.0.1", resolve);
+      replacement.once("error", reject); replacement.listen(gatewayPort, "127.0.0.1", resolve);
     }), { code: "EADDRINUSE" });
     failRemoval = false;
     assert.equal((await host.command({ kind: "disable" })).status.enabled, false);
@@ -364,9 +384,10 @@ it("an uncertain failed publication retains its listener until the owner can dis
   }
 });
 it("a damaged device registry cannot be overwritten by enabling or pairing", async () => {
+  const gatewayPort = await freePort();
   const root = await mkdtemp(join(tmpdir(), "arke-remote-corrupt-"));
   await mkdir(join(root, "remote")); await writeFile(join(root, "remote/devices.json"), "broken");
-  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
     startupSupported: false, setStartOnLogin: () => {}, tailscale: tailscale().client });
   try {
     await host.initialize(); assert.ok(host.status().reason);
@@ -375,19 +396,21 @@ it("a damaged device registry cannot be overwritten by enabling or pairing", asy
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("first launch does not require Tailscale and releases its temporary reservation", async () => {
+  const gatewayPort = await freePort();
   const root = await mkdtemp(join(tmpdir(), "arke-remote-first-launch-"));
-  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
     startupSupported: false, setStartOnLogin: () => {}, tailscale: new TailscaleServe(async () => { throw new Error("Tailscale must not be needed"); }) });
   const probe = createServer();
   try {
     await host.initialize();
     assert.equal(host.status().reason, null); assert.equal(host.status().enabled, false);
     await new Promise<void>((resolve, reject) => {
-      probe.once("error", reject); probe.listen(8793, "127.0.0.1", () => probe.close(() => resolve()));
+      probe.once("error", reject); probe.listen(gatewayPort, "127.0.0.1", () => probe.close(() => resolve()));
     });
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("unreadable or missing ownership records discover and withdraw exact stale forwarding", async () => {
+  const gatewayPort = await freePort();
   for (const damage of ["malformed", "unreadable", "missing"] as const) {
     const root = await mkdtemp(join(tmpdir(), "arke-remote-damaged-settings-"));
     await mkdir(join(root, "remote"));
@@ -395,16 +418,16 @@ it("unreadable or missing ownership records discover and withdraw exact stale fo
     if (damage === "malformed") await writeFile(path, "broken");
     if (damage === "unreadable") await mkdir(path);
     await writeFile(join(root, "remote/devices.json"), '{"version":1,"devices":[]}');
-    const fake = tailscale(); await fake.client.enable(origin, 8793, false);
+    const fake = tailscale(); await fake.client.enable(origin, gatewayPort, false);
     const disable = fake.client.disable.bind(fake.client);
     fake.client.disable = async (...args) => {
       const probe = createServer();
       await assert.rejects(new Promise<void>((resolve, reject) => {
-        probe.once("error", reject); probe.listen(8793, "127.0.0.1", () => probe.close(() => resolve()));
+        probe.once("error", reject); probe.listen(gatewayPort, "127.0.0.1", () => probe.close(() => resolve()));
       }), { code: "EADDRINUSE" }, "the port is already reserved while unreadable settings are being recovered");
       await disable(...args);
     };
-    const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+    const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
       startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
     try {
       await host.initialize();
@@ -415,19 +438,20 @@ it("unreadable or missing ownership records discover and withdraw exact stale fo
   }
 });
 it("damaged settings keep the port protected through failed cleanup without being overwritten by Disable", async () => {
+  const gatewayPort = await freePort();
   const root = await mkdtemp(join(tmpdir(), "arke-remote-settings-cleanup-"));
   await mkdir(join(root, "remote"));
   await writeFile(join(root, "remote/settings.json"), "broken");
-  const fake = tailscale(); await fake.client.enable(origin, 8793, false);
+  const fake = tailscale(); await fake.client.enable(origin, gatewayPort, false);
   const disable = fake.client.disable.bind(fake.client);
   let failRemoval = true;
   fake.client.disable = async (...args) => { if (failRemoval) throw new Error("Tailscale unavailable"); await disable(...args); };
-  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
     startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
   try {
     await host.initialize();
     assert.equal(host.status().enabled, true);
-    const response = await fetch("http://127.0.0.1:8793/");
+    const response = await fetch(`http://127.0.0.1:${gatewayPort}/`);
     assert.equal(response.status, 503); await response.text();
     assert.match((await host.command({ kind: "disable" })).status.reason!, /Tailscale unavailable/);
     failRemoval = false;
@@ -437,12 +461,13 @@ it("damaged settings keep the port protected through failed cleanup without bein
   } finally { failRemoval = false; await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("a damaged registry withdraws stale HTTPS before reporting recovery, and Disable preserves its records", async () => {
+  const gatewayPort = await freePort();
   const root = await mkdtemp(join(tmpdir(), "arke-remote-stale-registry-"));
   await mkdir(join(root, "remote"));
   await writeFile(join(root, "remote/settings.json"), JSON.stringify({ enabled: true, startOnLogin: false, origin }));
   await writeFile(join(root, "remote/devices.json"), "broken");
-  const fake = tailscale(); await fake.client.enable(origin, 8793, false);
-  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+  const fake = tailscale(); await fake.client.enable(origin, gatewayPort, false);
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
     startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
   try {
     await host.initialize();
@@ -454,15 +479,16 @@ it("a damaged registry withdraws stale HTTPS before reporting recovery, and Disa
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("failed stale-mapping cleanup reserves an inert port until Disable can safely release it", async () => {
+  const gatewayPort = await freePort();
   const root = await mkdtemp(join(tmpdir(), "arke-remote-stale-removal-"));
   await mkdir(join(root, "remote"));
   await writeFile(join(root, "remote/settings.json"), JSON.stringify({ enabled: true, startOnLogin: false, origin }));
   await writeFile(join(root, "remote/devices.json"), "broken");
-  const fake = tailscale(); await fake.client.enable(origin, 8793, false);
+  const fake = tailscale(); await fake.client.enable(origin, gatewayPort, false);
   const disable = fake.client.disable.bind(fake.client);
   let failRemoval = true;
   fake.client.disable = async (...args) => { if (failRemoval) throw new Error("Tailscale unavailable"); await disable(...args); };
-  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
     startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
   const probe = createServer();
   try {
@@ -470,15 +496,15 @@ it("failed stale-mapping cleanup reserves an inert port until Disable can safely
     assert.match(host.status().reason!, /Tailscale unavailable/);
     assert.equal(host.status().running, false);
     await assert.rejects(new Promise<void>((resolve, reject) => {
-      probe.once("error", reject); probe.listen(8793, "127.0.0.1", resolve);
+      probe.once("error", reject); probe.listen(gatewayPort, "127.0.0.1", resolve);
     }), { code: "EADDRINUSE" });
-    const response = await fetch("http://127.0.0.1:8793/");
+    const response = await fetch(`http://127.0.0.1:${gatewayPort}/`);
     assert.equal(response.status, 503); await response.text();
     assert.match((await host.command({ kind: "disable" })).status.reason!, /Tailscale unavailable/);
     failRemoval = false;
     assert.equal((await host.command({ kind: "disable" })).status.enabled, false);
     await new Promise<void>((resolve, reject) => {
-      probe.once("error", reject); probe.listen(8793, "127.0.0.1", () => probe.close(() => resolve()));
+      probe.once("error", reject); probe.listen(gatewayPort, "127.0.0.1", () => probe.close(() => resolve()));
     });
     assert.ok(fake.commands.some(args => args.includes("off")));
     assert.equal(await readFile(join(root, "remote/devices.json"), "utf8"), "broken");
@@ -489,6 +515,7 @@ it("failed stale-mapping cleanup reserves an inert port until Disable can safely
   }
 });
 it("Disable and Quit drain automatic startup before returning, without resurrecting the gateway", async () => {
+  const gatewayPort = await freePort();
   for (const action of ["disable", "stop"] as const) {
     const root = await mkdtemp(join(tmpdir(), "arke-remote-startup-race-"));
     await mkdir(join(root, "remote"));
@@ -500,7 +527,7 @@ it("Disable and Quit drain automatic startup before returning, without resurrect
     const starting = new Promise<void>(resolve => { entered = resolve; });
     const resolveOrigin = fake.client.origin.bind(fake.client);
     fake.client.origin = async () => { entered(); await held; return resolveOrigin(); };
-    const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+    const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) }, gatewayPort,
       startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
     try {
       const initialized = host.initialize(); await starting;
