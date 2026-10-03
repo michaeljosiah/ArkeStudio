@@ -379,7 +379,7 @@ interface StoreState {
       reason?: string;
     }
   >;
-  audiobookRecords: Record<string, { record?: import("@arke-studio/contracts").ChapterAudiobook; refused?: string; seq: number }>;
+  audiobookRecords: Record<string, { record?: import("@arke-studio/contracts").ChapterAudiobook; refused?: string; seq: number; requestId?: string }>;
   /**
    * Recordings on their way to being a block's take (design turn 155c), by the window's request
    * id: the host's picker open, the checks back, the keep on its way, or refused in one clause.
@@ -2103,7 +2103,7 @@ function handleFrame(json: string): void {
       // accepted takes the answer as its own — accepted, or refused and held for another try.
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
       const seq = (audiobookRecords[key]?.seq ?? 0) + 1;
-      audiobookRecords = { ...audiobookRecords, [key]: { seq, ...(event.record !== undefined ? { record: event.record } : {}), ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
+      audiobookRecords = { ...audiobookRecords, [key]: { seq, ...(event.requestId !== undefined ? { requestId: event.requestId } : {}), ...(event.record !== undefined ? { record: event.record } : {}), ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
       // Only its own answer (codex on PR 1186): another window's block write lands as the same
       // event, and would otherwise mark the card accepted while the acceptance itself is still
       // on its way to a refusal it could no longer show.
@@ -5382,6 +5382,18 @@ export function openAudiobookListening(worldId: string, productionId: string): s
 export function setAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, picture: { file: string; source: import("@arke-studio/contracts").AudiobookPictureSource } | null): string | null {
   const requestId = ulid();
   return send({ kind: "set-audiobook-picture", worldId, productionId, chapterFile, block, picture, requestId }) ? requestId : null;
+}
+
+/** The chapter read for its look (design turn 191c, R-98): answered as `audiobook.record` under the id returned, or refused there. Nothing is spent. */
+export function deriveAudiobookLook(worldId: string, productionId: string, chapterFile: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "derive-audiobook-look", worldId, productionId, chapterFile, requestId }) ? requestId : null;
+}
+
+/** One line of the look written (R-98): the place's or one character's; null takes it away. Answered as `audiobook.record`. */
+export function setAudiobookLook(worldId: string, productionId: string, chapterFile: string, target: import("@arke-studio/contracts").LookTarget, text: string | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "set-audiobook-look", worldId, productionId, chapterFile, target, text, requestId }) ? requestId : null;
 }
 
 /** One block's timing (design turn 187, R-81): answered as `audiobook.record` under the id returned, or refused there. */

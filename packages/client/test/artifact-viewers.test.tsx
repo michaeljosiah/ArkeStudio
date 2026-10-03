@@ -15,6 +15,7 @@ import { artifactIsServable, artifactOpenLabel, artifactUses, artifactViewer } f
 import { dismissPlayback, playbackSnapshot, playClip, setAudioFactoryForTest } from "../src/lib/audio.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -74,9 +75,9 @@ it("names current uses, confirms retirement from the card and viewer, and waits 
   try {
     await act(async () => __setStateForTest(state));
     await act(async () => mounted.container.querySelector<HTMLButtonElement>(".fy-artifact-retire")!.click());
-    assert.match(mounted.container.textContent!, /Opening plate \(cl_retirement\)/);
+    assert.match(dialogRoot(mounted.container).textContent!, /Opening plate \(cl_retirement\)/);
     const click = async (text: string) => {
-      const button = [...mounted.container.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === text)!;
+      const button = [...dialogRoot(mounted.container).querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === text)!;
       assert.ok(button, text);
       await act(async () => button.click());
     };
@@ -91,7 +92,7 @@ it("names current uses, confirms retirement from the card and viewer, and waits 
     assert.equal(focused, true, "cancelling after closing the viewer returns focus to its shelf card");
     await open(mounted, PICTURE);
     await click("Remove from shelf");
-    assert.match(mounted.container.textContent!, /No disk space is freed/);
+    assert.match(dialogRoot(mounted.container).textContent!, /No disk space is freed/);
     await click("Remove from shelf");
     assert.deepEqual(sent.filter(message => message.kind === "retire-artifact"), [{ kind: "retire-artifact", worldId: FIXTURE_WORLD_ID, artifactId: PICTURE.id }]);
     assert.ok(mounted.container.querySelector(".fy-gridcard__open"), "no optimistic deletion");

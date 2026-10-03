@@ -5,7 +5,12 @@
   border: 0; border-radius: 999px; background: var(--secondary); color: var(--foreground);
   font: var(--type-ui); font-size: var(--text-sm); cursor: pointer; max-width: 168px;
 }
+/* On a phone the composer's editor and tools share one wrapping row (attach, voice, chip, send);
+   a chip wider than this pushes the tools onto a second line under the text. */
+@media (max-width: 599px) { .fy-mchip__btn { max-width: 120px; } }
 .fy-mchip__btn:disabled { opacity: 0.5; cursor: default; }
+/* Named, not chosen: World Chat's model is Settings'. A label in the chip's own shape. */
+.fy-mchip__btn--fixed { cursor: default; background: none; padding: 0 6px; color: var(--muted-foreground); }
 .fy-mchip__btn:focus-visible { outline: 2px solid var(--ring, var(--foreground)); outline-offset: 2px; }
 .fy-mchip__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-mchip__btn--set::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--foreground); flex: none; }

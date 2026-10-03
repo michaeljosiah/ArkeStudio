@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
 import { remoteStudio } from "./launch.js";
-import { HarnessModelOptions, HarnessModelStatus } from "../components/harness-models.js";
+import { HarnessModelStatus, harnessModelsNeedAWord } from "../components/harness-models.js";
+import { ModelChip } from "../components/model-chip.js";
 import { languageChoiceReason } from "../components/conversation.js";
 import { Button, Callout, IconButton, Input, Select, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
+import { BodyLayer } from "../components/body-layer.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { OnYourPC } from "../components/on-your-pc.js";
 import { DeviceNotifications } from "../components/device-notifications.js";
@@ -511,32 +513,34 @@ function ArchiveSheet({ world, onArchive, onKeep }: { world: WorldCardSummary; o
     return () => window.removeEventListener("keydown", key);
   }, [onKeep]);
   return (
-    <div className="fy-archivesheet__scrim" onClick={onKeep}>
-      <div
-        className="fy-archivesheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="fy-archivesheet-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <span className="fy-archivesheet__grab" aria-hidden />
-        <div className="fy-archivesheet__who">
-          {world.keyArt && (
-            <span className="fy-archivesheet__art">
-              <Portrait worldSlug={world.slug} path={world.keyArt} label={world.name} radius={8} />
-            </span>
-          )}
-          <div>
-            <h2 id="fy-archivesheet-title">Archive {world.name}?</h2>
-            <p>Moves its folder to the archive. Nothing is deleted.</p>
+    <BodyLayer>
+      <div className="fy-archivesheet__scrim" onClick={onKeep}>
+        <div
+          className="fy-archivesheet"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="fy-archivesheet-title"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <span className="fy-archivesheet__grab" aria-hidden />
+          <div className="fy-archivesheet__who">
+            {world.keyArt && (
+              <span className="fy-archivesheet__art">
+                <Portrait worldSlug={world.slug} path={world.keyArt} label={world.name} radius={8} />
+              </span>
+            )}
+            <div>
+              <h2 id="fy-archivesheet-title">Archive {world.name}?</h2>
+              <p>Moves its folder to the archive. Nothing is deleted.</p>
+            </div>
+          </div>
+          <div className="fy-archivesheet__acts">
+            <Button variant="primary" size="lg" onClick={onArchive}>Archive</Button>
+            <Button size="lg" onClick={onKeep}>Keep</Button>
           </div>
         </div>
-        <div className="fy-archivesheet__acts">
-          <Button variant="primary" size="lg" onClick={onArchive}>Archive</Button>
-          <Button size="lg" onClick={onKeep}>Keep</Button>
-        </div>
       </div>
-    </div>
+    </BodyLayer>
   );
 }
 
@@ -1283,14 +1287,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 {g?.status === "failed" && g.detail && <Callout title="The conversation needs attention">{g.detail}</Callout>}
                 {g?.chatError && <Callout title="Your message was held">{g.chatError}</Callout>}
                 <div style={{ marginTop: "auto" }}>
-                  <label style={{ display: "grid", gap: 6 }}>Writing model
-                    <Select label="Writing model" value={writingModel ?? ""} disabled={chatRunning || buildPressed || !!g?.founding}
-                      onChange={event => setWritingModel(event.target.value || undefined)}>
-                      <option value="">World author default</option>
-                      <HarnessModelOptions state={state} selected={writingModel} needsTools />
-                    </Select>
-                  </label>
-                  <HarnessModelStatus state={state} />
+                  {harnessModelsNeedAWord(state) && <HarnessModelStatus state={state} />}
                   <Composer
                     value={message}
                     onChange={setMessage}
@@ -1302,6 +1299,11 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     busyLabel={buildPressed ? "founding the world…" : sizingBuild ? "sizing the build…" : "shaping the draft…"}
                     onAttach={() => genesisAttachFiles(genesisId)}
                     onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
+                    // A world that does not exist yet has nowhere to remember a model, so the chip
+                    // picks for this conversation only, and letting go of it is the author's default.
+                    modelControl={<ModelChip state={state} value={writingModel} set={writingModel !== undefined}
+                      onPick={setWritingModel} needsTools unsetLabel="Use the default"
+                      disabled={chatRunning || buildPressed || !!g?.founding} />}
                     {...(hostCanAttach()
                       ? {
                           onAttachFiles: (files: readonly File[]) => attachHostFiles(attachTarget, files),

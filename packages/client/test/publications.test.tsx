@@ -11,6 +11,7 @@ import { PublicationExport } from "../src/screens/publication-export.js";
 import { ExportSheet } from "../src/screens/editor-export.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { readPublicationPreference, savePublicationPreference } from "../src/lib/publication-preferences.js";
+import { dialogRoot } from "./dialog-root.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 const stored = new Map<string, string>();
@@ -159,7 +160,7 @@ it("uses portrait defaults when production loads and preserves explicit choices 
       production={loaded ? production : null} world={state.world} timelineState={{ status: "absent" }} onMix={() => {}} commandsDisabled={false} /></MemoryRouter>));
   };
   await draw(false, false); await draw(true, true);
-  const group = () => node.querySelector('[aria-label="Resolution"]')!;
+  const group = () => dialogRoot(node).querySelector('[aria-label="Resolution"]')!;
   const selected = () => group().querySelector('[aria-pressed="true"]')!.textContent;
   assert.equal(selected(), "1080 × 1920 · vertical master");
   await act(async () => Array.from(group().querySelectorAll("button")).find(button => button.textContent!.includes("review"))!.click());

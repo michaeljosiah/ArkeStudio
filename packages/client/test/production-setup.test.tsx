@@ -91,22 +91,40 @@ describe("production setup interaction (issue #976)", () => {
     state.app.harnessModels = [{ provider: "anthropic", id: "opus[1m]", displayName: "Opus" }];
     const m = await mount(state);
     assert.ok(m.sent.some(message => message.kind === "list-harness-models"));
-    const picker = m.container.querySelector<HTMLSelectElement>(".fy-production-setup__model select")!;
-    assert.ok([...picker.options].some(option => option.value === "anthropic/opus[1m]"));
-    await act(async () => {
-      Object.defineProperty(picker, "value", { configurable: true, value: "anthropic/opus[1m]" });
-      picker.dispatchEvent(new dom.Event("change", { bubbles: true }));
-    });
+    // The model is a chip in the composer's row, with no row, select or scope word of its own
+    // (design turn 190e). A setup is not yet a production, so the chip has no press that
+    // remembers a choice: it picks for this conversation and lets go of it.
+    assert.equal(m.container.querySelector("select[aria-label='Writing model'], .fy-production-setup__model"), null);
+    const chip = () => m.container.querySelector<HTMLButtonElement>(".fy-cx__bar button.fy-mchip__btn")!;
+    const open = async () => { if (!m.container.querySelector(".fy-mchip__menu")) await act(async () => chip().click()); };
+    await open();
+    const items = [...m.container.querySelectorAll<HTMLButtonElement>(".fy-mchip__menu [data-model]")];
+    assert.ok(items.some(item => item.getAttribute("data-model") === "anthropic/opus[1m]"));
+    assert.deepEqual([...m.container.querySelectorAll(".fy-mchip__menu button[role=menuitem]")].map(item => item.textContent), [], "nothing to remember the choice in");
+    await act(async () => items.find(item => item.getAttribute("data-model") === "anthropic/opus[1m]")!.click());
+    assert.ok(chip().className.includes("fy-mchip__btn--set"), "the choice is this conversation's");
     await act(async () => __setStateForTest({
       ...state, app: { ...state.app, harnessModels: [], harnessModelStatus: { status: "error", reason: "Discovery failed." } },
     }));
-    assert.match(m.container.textContent!, /anthropic\/opus\[1m\] · unavailable/);
-    assert.equal(picker.disabled, false);
-    await act(async () => {
-      Object.defineProperty(picker, "value", { configurable: true, value: "" });
-      picker.dispatchEvent(new dom.Event("change", { bubbles: true }));
-    });
-    assert.doesNotMatch(m.container.textContent!, /anthropic\/opus\[1m\] · unavailable/);
+    assert.equal(chip().disabled, false);
+    await open();
+    assert.match(m.container.querySelector(".fy-mchip__menu")!.textContent!, /anthropic\/opus\[1m\]\s*unavailable/);
+    assert.match(m.container.textContent!, /Discovery failed/, "the catalogue's trouble is said while there is trouble");
+    const reset = [...m.container.querySelectorAll<HTMLButtonElement>(".fy-mchip__menu button[role=menuitem]")].find(item => /Use the default/.test(item.textContent!))!;
+    await act(async () => reset.click());
+    assert.equal(chip().className.includes("fy-mchip__btn--set"), false);
+    await open();
+    assert.doesNotMatch(m.container.querySelector(".fy-mchip__menu")!.textContent!, /unavailable/);
+  });
+
+  it("says nothing of the model catalogue while it is simply fine", async () => {
+    const state = fixture(draft());
+    state.app.health.harness = { status: "healthy" };
+    state.app.harnessInfo = { generation: "claude", source: "path", version: "2.0.0", beta: false };
+    state.app.harnessModelStatus = { status: "ready" };
+    state.app.harnessModels = [{ provider: "anthropic", id: "opus[1m]", displayName: "Opus" }];
+    const m = await mount(state);
+    assert.doesNotMatch(m.container.textContent!, /models? from /);
   });
 
   it("offers Stop for a live turn and Retry and Review after interruption (#1030)", async () => {

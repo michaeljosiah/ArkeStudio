@@ -93,6 +93,17 @@ export function HarnessModelOptions({
   );
 }
 
+/**
+ * Whether the models' own status has anything to say. A chat composer names its model in a chip
+ * and says nothing of the catalogue while it is simply fine (design turn 190e): only a catalogue
+ * still loading, a failed one, an empty one or a harness that is not running earns a line.
+ */
+export function harnessModelsNeedAWord(state: ClientState | null): boolean {
+  return state?.app.harnessModelStatus?.status !== "ready" ||
+    (state?.app.harnessModels ?? []).length === 0 ||
+    state?.app.health.harness.status !== "healthy";
+}
+
 export function HarnessModelStatus({ state }: { state: ClientState | null }) {
   const status = state?.app.harnessModelStatus;
   const healthy = state?.app.health.harness.status === "healthy";

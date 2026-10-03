@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
+import { PictureLookSchema } from "./audiobook-look.js";
 
 /**
  * A picture set on a block (design turn 186c, SPEC-047 R-66): it shows from that block until the
@@ -24,6 +25,12 @@ export const AudiobookPictureSchema = z
     source: AudiobookPictureSourceSchema,
     textHash: z.string().min(1),
     at: IsoDateTimeSchema,
+    /**
+     * The look the picture was made under (design turn 191c, SPEC-047 R-98): who was in it and a
+     * digest of their lines, so a picture made under a look that has since changed is marked and
+     * never remade without asking. Absent on a picture the author chose rather than Arke made.
+     */
+    look: PictureLookSchema.optional(),
   })
   .strict();
 export type AudiobookPicture = z.infer<typeof AudiobookPictureSchema>;

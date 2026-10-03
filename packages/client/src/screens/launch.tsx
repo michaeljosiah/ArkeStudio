@@ -21,17 +21,12 @@ import { reconnectNow, useEnvCheck, useSetup, useStore } from "../lib/store.js";
  */
 
 /**
- * The loop's still. Lives in public/ rather than being imported, so it stays a plain file the
- * bundler copies as-is, and relative because the packaged app opens over file://.
+ * The owner-supplied creation film and its opening frame (SPEC-001 R-8). Public assets stay
+ * plain files, with relative paths because the packaged app opens over file://. The initial
+ * 30-second film keeps its supplied resolution; the upscaled master can replace it in place.
  */
-const LOOP_POSTER = "./launch-harbour.webp";
-/**
- * The loop itself, when it arrives: the owner is supplying it (a 1920×1080 master, 8–15s,
- * seamless and silent; shipped as H.264 MP4 with faststart and no audio, its first frame as the
- * poster above). Until then the still stands in, which is also what every case below that
- * refuses motion shows.
- */
-const LOOP_VIDEO: string | null = null;
+const LOOP_POSTER = "./launch-creation.webp";
+const LOOP_VIDEO = "./launch-creation.mp4";
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
@@ -110,7 +105,7 @@ function LaunchArt({ version, remote }: { version: string | null; remote: boolea
   // Muted, looping, no controls. The still whenever motion is not wanted, when the browser is
   // saving data, and on any session reaching the studio from elsewhere: a phone on a tunnel
   // should not pull video before it can show a button.
-  const still = LOOP_VIDEO === null || remote || stillPreferred() || dataSaver();
+  const still = remote || stillPreferred() || dataSaver();
   return (
     <div className="fy-launch__art">
       {still ? (

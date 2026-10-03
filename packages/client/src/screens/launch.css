@@ -49,8 +49,8 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  /* Keeps the lighthouse in frame from a 390 band to a 49% panel. */
-  object-position: 78% 30%;
+  /* Keeps the central action and the ending's slightly right-aligned logo in view. */
+  object-position: 56% 50%;
   display: block;
 }
 /* Stacked: the band's lower half fades into the column's own colour, so no seam shows. */
@@ -594,6 +594,13 @@
     width: 49%;
     height: 100%;
     border-right: 1px solid var(--launch-seam);
+  }
+  /* Tall split panels otherwise zoom past the film's final logo. Cap the media height,
+     leaving the panel and its controls at the master's geometry. */
+  .fy-launch__media {
+    max-height: calc(49vw / 0.8);
+    top: 50%;
+    transform: translateY(-50%);
   }
   .fy-launch--typing .fy-launch__hello p { display: block; }
   .fy-launch--typing .fy-launch__way--soon { display: grid; }

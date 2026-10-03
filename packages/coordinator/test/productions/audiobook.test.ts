@@ -5,6 +5,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ChapterAudiobookSchema,
+  audiobookBlockOptions,
   audiobookBlocks,
   audiobookDoorLine,
   audiobookHeading,
@@ -571,7 +572,7 @@ describe("the audiobook run (turn 146)", () => {
       const chapter = bundle().productions.find((p) => p.meta.id === LEDGER)!.chapters.find((c) => c.id === "neap")!;
       const raw = await readFile(join(worldDir, "productions", LEDGER, "chapters", "01-neap.md"), "utf8");
       const body = raw.replace(/\r\n/g, "\n").replace(/^---\n[\s\S]*?\n---\n/, "");
-      const texts = audiobookBlocks(body, castRecord(chapter.bodyHash!), audiobookHeading(chapter.order, chapter.title)).blocks.map((block) => normalizeSpeechText(block.text));
+      const texts = audiobookBlocks(body, castRecord(chapter.bodyHash!), audiobookHeading(chapter.order, chapter.title), audiobookBlockOptions(null)).blocks.map((block) => normalizeSpeechText(block.text));
       const characters = texts.reduce((sum, text) => sum + text.length, 0);
       const bytes = texts.reduce((sum, text) => sum + billableCharacters(FISH, text), 0);
       assert.ok(bytes > characters, "the fixture's dashes and quotes are more bytes than characters, or this proves nothing");
@@ -1205,7 +1206,7 @@ describe("the audiobook run (turn 146)", () => {
         const record = await readRecord(worldDir);
         assert.ok(record.takes["title"]);
         // Carried on the next write of the record, with the words it now stands for.
-        await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.1", direction: null });
+        await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.0", direction: null });
         const after = await readRecord(worldDir);
         assert.equal(after.direction["title"]?.text, "Chapter 1 · Neap");
         const marker = after.direction["title"]?.plan.cues[0];
@@ -1776,14 +1777,15 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
         assert.equal(written.record.direction["p0.1"]?.plan.delivery, "whispered");
 
         await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "narrator" });
+        // One reader, one block (design turn 190): under the narrator Maren's line is read inside its
+        // paragraph, so the direction written for the line has no block of its own to re-check against
+        // Kokoro. It stays on the record, inert, for when the cast is back; nothing is held or dropped.
         type Conformed = Extract<DomainEvent, { type: "audiobook.conformed" }>;
         const conformed = events.find((e): e is Conformed => e.type === "audiobook.conformed");
-        assert.ok(conformed, "said how many");
-        assert.equal(conformed.held, 2, "the whisper and the phrase");
-        assert.equal(conformed.dropped, 0);
-        assert.equal(conformed.chapters, 1);
+        assert.equal(conformed?.held ?? 0, 0);
+        assert.equal(conformed?.dropped ?? 0, 0);
         const record = await readRecord(worldDir);
-        assert.equal(record.direction["p0.1"]?.plan.delivery, "whispered", "held on the record, not fallen to what Kokoro reads");
+        assert.equal(record.direction["p0.1"]?.plan.delivery, "whispered", "kept on the record for the cast");
         assert.equal(record.direction["p0.1"]?.plan.note, "under her breath");
       },
     ));
@@ -1815,15 +1817,17 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       assert.deepEqual([maren?.state, maren?.note, maren?.noteHeld], ["narrator", "low, clipped", true], "Kokoro takes no phrase: said before anything is made");
       await read(send);
       const line = normalizeSpeechText(SPAN);
-      assert.ok(requests.some((r) => r.text === line), "read plain, the note held");
+      // One reader, one block (design turn 190): the line is read inside its paragraph, with the
+      // narration around it, as one passage.
+      assert.ok(requests.some((r) => r.text.includes(line) && r.text.length > line.length), "read plain, the note held");
       const record = await readRecord(worldDir);
-      assert.equal(record.takes["p0.1"]?.noteHeld, true, "the take records the note was not played");
-      assert.equal(record.takes["p0.0"]?.noteHeld, undefined, "narration takes no note");
+      assert.equal(record.takes["p0.0"]?.noteHeld, true, "the take records the note was not played");
+      assert.equal(record.takes["p0.1"], undefined, "the line is not a take of its own");
 
       // A narrator that takes a phrase plays it ahead of the line (R-45).
-      const prepared = await prepareChapter(store, LEDGER, "neap", { narrator: { provider: "elevenlabs", model: V3.id, voiceId: "v_8Kq2", label: "Low tide" }, models: [ELEVEN, KOKORO, FISH, V3], catalogue: [{ provider: "elevenlabs", model: V3.id, voiceId: "v_8Kq2", label: "Low tide", attributes: [], local: false, canClone: false }] }, () => CLOCK, ["p0.1"]);
+      const prepared = await prepareChapter(store, LEDGER, "neap", { narrator: { provider: "elevenlabs", model: V3.id, voiceId: "v_8Kq2", label: "Low tide" }, models: [ELEVEN, KOKORO, FISH, V3], catalogue: [{ provider: "elevenlabs", model: V3.id, voiceId: "v_8Kq2", label: "Low tide", attributes: [], local: false, canClone: false }] }, () => CLOCK, ["p0.0"]);
       assert.equal(prepared.kind, "ready");
-      const speaking = prepared.kind === "ready" ? prepared.prepared.speaking.find((block) => block.block.key === "p0.1") : undefined;
+      const speaking = prepared.kind === "ready" ? prepared.prepared.speaking.find((block) => block.block.key === "p0.0") : undefined;
       assert.ok(speaking?.parts[0]?.startsWith("[low, clipped] "), `the note leads: ${speaking?.parts[0]}`);
       assert.equal(speaking?.noteHeld, undefined);
 
@@ -1831,7 +1835,7 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note: "flat, far off" });
       const after = await openDoor(send, events, "01J8F3K2QW9VZX4N7M0RTYB6E2");
       const row = after.rows.find((candidate) => candidate.chapterId === "neap");
-      assert.equal(row?.stale, 1, "Maren's one line");
+      assert.equal(row?.stale, 1, "the one block that holds Maren's line");
     }));
 
   it("takes follow the reader: a narrator switched back makes its kept takes current again without a call (R-46, R-48)", () =>
@@ -1899,12 +1903,12 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       const narrator = { provider: "google", model: model.id, voiceId: "Charon", label: "Charon" };
       const room = { narrator, models: [model], catalogue: [{ ...narrator, attributes: [], local: false, canClone: false }] };
       for (const directed of [false, true]) {
-        if (directed) await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.1", direction: { delivery: "measured", speed: 1, cues: [] } });
-        const made = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.1"]);
+        if (directed) await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.0", direction: { delivery: "measured", speed: 1, cues: [] } });
+        const made = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.0"]);
         assert.equal(made.kind, "ready");
         const block = made.prepared.speaking[0]!;
         assert.equal(block.refusal, undefined);
-        assert.equal(block.parts.join(" "), normalizeSpeechText(SPAN));
+        assert.equal(block.parts.join(" "), normalizeSpeechText(block.text), "the paragraph, read as one block (design turn 190)");
         assert.ok(block.parts.every((part, index) => speechInputFits(part, model.limits, block.direction?.perPart[index]?.instructions)));
         assert.ok(block.direction?.perPart.every(part => part.instructions?.startsWith(note)));
         if (directed) {
@@ -1912,7 +1916,7 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
           assert.ok(block.direction?.perPart.every(part => part.instructions?.includes("Read calmly")));
           const token = chapterPriceToken(WORLD_ID, LEDGER, "neap", made.prepared.plan.chapter, made.prepared.misses);
           model.cadence!.deliveryMappings.measured!.instruction = "Read softly and evenly, at a steady pace.";
-          const changed = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.1"]);
+          const changed = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.0"]);
           assert.equal(changed.kind, "ready");
           assert.equal(changed.prepared.speaking[0]!.parts.length, block.parts.length);
           assert.equal(changed.prepared.estimate, made.prepared.estimate);
@@ -1926,7 +1930,7 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
         assert.ok(block.quotes.every((quote, index) => quote.quantities.inputTextTokens! > quoteSpeech(model, block.parts[index]!, { at: "2026-09-27T12:00:00Z" }).quantities.inputTextTokens!), "the note's sentence is counted");
       }
       model.limits.maxSpeechUtf8Bytes = 8;
-      const refused = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.1"]);
+      const refused = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.0"]);
       assert.equal(refused.kind, "ready");
       if (refused.kind === "ready") {
         assert.ok(refused.prepared.speaking[0]?.refusal);

@@ -55,7 +55,7 @@ export function SettingsAdaptersScreen() {
         {!isRemoteSession() && row.owned && row.installed && <Button disabled={!connected} onClick={() => adapterCommand({ action: "remove", releaseId: row.release.id, deleteOwnedFile: true })}>Remove downloaded file</Button>}
       </article>)}
     </>}
-    <EditorDialog open={acknowledging} onClose={close} labelledBy="adult-content-title" width="32rem">
+    <EditorDialog open={acknowledging} onClose={close} labelledBy="adult-content-title" width="32rem" panelClassName="fy-adapters__ack">
       <h2 id="adult-content-title">Enable adult content?</h2>
       <p>This makes eligible adult image and video tools available on this device.</p>
       {["I am 18 or older and meet the adult-age requirement where I live.", "I choose to access adult images and videos, including nudity and sexually explicit content.", "I have the necessary rights and consent for the material I use."].map((label, index) =>

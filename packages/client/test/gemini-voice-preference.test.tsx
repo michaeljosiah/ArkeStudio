@@ -10,6 +10,7 @@ import { VoicePickerDialog } from "../src/components/voice-picker.js";
 import { NarratorDialog } from "../src/screens/audiobook-narrator.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -41,7 +42,7 @@ async function setup(view: React.ReactNode, disabled: string[] = []) {
   roots.push(root);
   await act(async () => root.render(<MemoryRouter>{view}</MemoryRouter>));
   await act(async () => __applyEventForTest({ type: "voice.catalogue", at: "2026-09-27T12:00:00Z", voices }));
-  return { element, sent };
+  return { element: dialogRoot(element), sent };
 }
 
 it("routine reads recommend Lite while the selected ElevenLabs voice stays selected", async () => {

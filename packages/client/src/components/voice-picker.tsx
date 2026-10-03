@@ -4,6 +4,7 @@ import { cloudSpeechPreference, readerName, filterVoices, formatMicroUsd, speech
 import { requestVoiceCatalogue, requestCataloguePreview, stopCataloguePreview, useStore, type ReadingVoice } from "../lib/store.js";
 import { dismissPlayback, playbackSnapshot, playClip, usePlayback } from "../lib/audio.js";
 import { voicePreviewMediaUrl } from "../lib/media.js";
+import { BodyLayer } from "./body-layer.js";
 import { cx } from "./ui.js";
 import { X } from "./icons.js";
 
@@ -84,7 +85,7 @@ export function VoicePickerDialog({ open, worldId, chosenId, chosenProvider, cho
   };
   const change = (action: () => void) => { stop(); action(); };
   if (!open) return null;
-  return <>
+  return <BodyLayer>
     <div className="fy-bench__scrim" onClick={onClose} />
     <div ref={dialog} className="fy-voices fy-voice-browser" role="dialog" aria-modal="true" aria-label={use === "narration" ? "Choose narrator voice" : "Choose a voice"} data-testid="voice-picker"
       onKeyDown={event => {
@@ -157,5 +158,5 @@ export function VoicePickerDialog({ open, worldId, chosenId, chosenProvider, cho
         <button type="button" className="fy-voices__use" data-testid="voice-use" disabled={!selected || !!selected.unavailableReason} onClick={() => { if (selected && !selected.unavailableReason) onPick(selected); }}>
           {use === "narration" ? selected ? `Use ${selected.label}` : "Use voice" : "Read with this voice"}</button></div>
     </div>
-  </>;
+  </BodyLayer>;
 }

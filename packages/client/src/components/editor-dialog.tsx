@@ -7,6 +7,12 @@ import { BodyLayer } from "./body-layer.js";
  * keyboard reference and the export sheet both use it; neither invents a second dialog — and
  * nor does Settings (design turn 150), which is this sheet at 95% of the window with no head of
  * its own, because its rail already says what it is.
+ *
+ * Always drawn on the body (`BodyLayer`), never where it is opened. A fixed scrim is fixed to the
+ * window only while no ancestor is transformed or contained, and every page head and column here
+ * enters with `fy-fade-up`, whose transform Chrome keeps as the containing block after it
+ * settles: opened from inside one, the sheet was a clipped box over that row (the audiobook
+ * Export, 2026-10-03). The body is the one place that cannot happen, so there is no opt-out.
  */
 export function EditorDialog({
   open,
@@ -18,7 +24,6 @@ export function EditorDialog({
   height,
   labelledBy,
   panelClassName,
-  onBody = false,
 }: {
   open: boolean;
   /** The head's title. Absent, the sheet draws no head and `labelledBy` names it instead. */
@@ -30,12 +35,6 @@ export function EditorDialog({
   height?: string;
   labelledBy?: string;
   panelClassName?: string;
-  /**
-   * Drawn on the body (`BodyLayer`) rather than where it is opened. A fixed scrim is fixed to the
-   * window only while no ancestor is transformed or contained: opened from the audiobook door's
-   * title row, which enters with `fy-fade-up`, the Export sheet sat clipped over the head.
-   */
-  onBody?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
@@ -107,7 +106,7 @@ export function EditorDialog({
       </div>
     </div>
   );
-  return onBody ? <BodyLayer>{sheet}</BodyLayer> : sheet;
+  return <BodyLayer>{sheet}</BodyLayer>;
 }
 
 /** The shortcut reference (R-17): every key the editor answers, beside the control that does the same. */

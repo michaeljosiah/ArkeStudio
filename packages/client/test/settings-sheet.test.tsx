@@ -8,6 +8,7 @@ import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { __resetSettingsReturnForTest } from "../src/lib/settings-return.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -69,7 +70,7 @@ async function mount(path: string): Promise<HTMLElement> {
       </MemoryRouter>,
     );
   });
-  return container;
+  return dialogRoot(container);
 }
 
 const screens = (container: HTMLElement): string[] =>

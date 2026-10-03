@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { WorldBundle } from "./client-state.js";
 import { pickableArtifacts, type ArtifactSidecar } from "./artifact.js";
 import type { Take } from "./take.js";
+import { mainPhotoFor, orderedLocationViews } from "./reference.js";
 
 export const WorldImageReferenceSchema = z.object({
   file: z.string(),
@@ -76,6 +77,22 @@ export function worldImageReferences(world: WorldBundle): WorldImageReference[] 
     add(`artifacts/${artifact.file}`, source?.name ?? artifact.file, source?.group ?? (artifact.generation || artifact.boundaryExtraction ? "Takes and stills" : "Uploads"), source?.role ?? "style", source?.sheetId);
   }
   return [...rows.values()];
+}
+
+/**
+ * The picture that stands for a sheet where a prompt cites it (design turn 191, SPEC-047 R-99): a
+ * character's accepted main photo, a place's establishing view (else its first view, else a main
+ * photo it was given before views). Null where the sheet has none — a prompt then carries the
+ * sheet's words alone, and the card says `no reference` rather than sending a path that is not
+ * there. Always a path `worldImageReferences` lists for the same kit.
+ */
+export function sheetReferencePicture(world: Pick<WorldBundle, "referenceKits" | "sheets">, sheetId: string): string | null {
+  const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
+  if (kit === undefined) return null;
+  const sheet = world.sheets.find((candidate) => candidate.id === sheetId);
+  const view = sheet?.type === "location" ? orderedLocationViews(kit)[0] : undefined;
+  const file = view?.file ?? mainPhotoFor(kit)?.file;
+  return file === undefined ? null : `references/${sheetId}/${file}`;
 }
 
 export function stagedWorldImage(world: WorldBundle, key: string): { file: string; role: WorldImageReference["role"] } | undefined {

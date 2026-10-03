@@ -17,6 +17,7 @@ import {
 } from "@arke-studio/contracts";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
+import { BodyLayer } from "../components/body-layer.js";
 import { AppChrome } from "../components/chrome.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import {
@@ -162,71 +163,73 @@ function ProductionSwitcher({
         <span className="fy-prodrail__switchchevron">{chevron}</span>
       </button>
       {at !== null && !phone && (
-        <div
-          className="fy-switchmenu"
-          role="menu"
-          aria-label="Productions in this world"
-          ref={menu}
-          style={{
-            left: Math.min(at.x, Math.max(0, window.innerWidth - SWITCH_MENU_WIDTH_PX - 8)),
-            top: at.y,
-            maxHeight: Math.max(64, window.innerHeight - at.y - 8),
-            overflowY: "auto",
-          }}
-          // `role="menu"` promises the arrows work, so they do. Without this the role is a
-          // claim the widget does not honour, which is worse than plain buttons would have been.
-          onKeyDown={(event) => {
-            if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-            event.preventDefault();
-            const items = [
-              ...event.currentTarget.querySelectorAll<HTMLElement>("[role='menuitem']"),
-            ];
-            const from = items.indexOf(document.activeElement as HTMLElement);
-            const step = event.key === "ArrowDown" ? 1 : -1;
-            const next = (from + step + items.length) % items.length;
-            items[next]?.focus();
-          }}
-        >
-          {others.map((candidate) => {
-            const shape = productionShape(candidate.meta);
-            const current = candidate.meta.id === production?.meta.id;
-            return (
-              <button
-                key={candidate.meta.id}
-                type="button"
-                role="menuitem"
-                className={cx("fy-switchmenu__item", current && "fy-switchmenu__item--on")}
-                aria-current={current ? "true" : undefined}
-                onClick={() => go(candidate.meta.id)}
-              >
-                <span className="fy-switchmenu__mark" aria-hidden>
-                  {candidate.meta.title.trim().charAt(0).toUpperCase() || "P"}
-                </span>
-                <span className="fy-switchmenu__copy">
-                  <span className="fy-switchmenu__name">{candidate.meta.title}</span>
-                  <span className="fy-switchmenu__sub">{shape.displayLabel.toLowerCase()}</span>
-                </span>
-                {/* Where you are is said the way the rail says it — the selected background and
-                    weight — rather than with a tick this icon set does not have. */}
-                {current && <span className="fy-switchmenu__here">here</span>}
-              </button>
-            );
-          })}
-          <span className="fy-switchmenu__rule" aria-hidden />
-          {/* The old destination keeps a way in: the Productions screen carries the key art and
-              the counts, which a menu row cannot. */}
-          <button
-            type="button"
-            role="menuitem"
-            className="fy-switchmenu__item fy-switchmenu__item--all"
-            onClick={() => {
-              setAt(null);
-              navigate(`/w/${worldId}/productions`);
+        <BodyLayer>
+          <div
+            className="fy-switchmenu"
+            role="menu"
+            aria-label="Productions in this world"
+            ref={menu}
+            style={{
+              left: Math.min(at.x, Math.max(0, window.innerWidth - SWITCH_MENU_WIDTH_PX - 8)),
+              top: at.y,
+              maxHeight: Math.max(64, window.innerHeight - at.y - 8),
+              overflowY: "auto",
+            }}
+            // `role="menu"` promises the arrows work, so they do. Without this the role is a
+            // claim the widget does not honour, which is worse than plain buttons would have been.
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+              event.preventDefault();
+              const items = [
+                ...event.currentTarget.querySelectorAll<HTMLElement>("[role='menuitem']"),
+              ];
+              const from = items.indexOf(document.activeElement as HTMLElement);
+              const step = event.key === "ArrowDown" ? 1 : -1;
+              const next = (from + step + items.length) % items.length;
+              items[next]?.focus();
             }}
           >
-            All productions
-          </button>
-        </div>
+            {others.map((candidate) => {
+              const shape = productionShape(candidate.meta);
+              const current = candidate.meta.id === production?.meta.id;
+              return (
+                <button
+                  key={candidate.meta.id}
+                  type="button"
+                  role="menuitem"
+                  className={cx("fy-switchmenu__item", current && "fy-switchmenu__item--on")}
+                  aria-current={current ? "true" : undefined}
+                  onClick={() => go(candidate.meta.id)}
+                >
+                  <span className="fy-switchmenu__mark" aria-hidden>
+                    {candidate.meta.title.trim().charAt(0).toUpperCase() || "P"}
+                  </span>
+                  <span className="fy-switchmenu__copy">
+                    <span className="fy-switchmenu__name">{candidate.meta.title}</span>
+                    <span className="fy-switchmenu__sub">{shape.displayLabel.toLowerCase()}</span>
+                  </span>
+                  {/* Where you are is said the way the rail says it — the selected background and
+                      weight — rather than with a tick this icon set does not have. */}
+                  {current && <span className="fy-switchmenu__here">here</span>}
+                </button>
+              );
+            })}
+            <span className="fy-switchmenu__rule" aria-hidden />
+            {/* The old destination keeps a way in: the Productions screen carries the key art and
+                the counts, which a menu row cannot. */}
+            <button
+              type="button"
+              role="menuitem"
+              className="fy-switchmenu__item fy-switchmenu__item--all"
+              onClick={() => {
+                setAt(null);
+                navigate(`/w/${worldId}/productions`);
+              }}
+            >
+              All productions
+            </button>
+          </div>
+        </BodyLayer>
       )}
       <PageSheet open={phone && at !== null} title="Productions" className="fy-production-switch-sheet" onClose={() => setAt(null)}
         footer={<Button variant="secondary" onClick={() => { setAt(null); navigate(`/w/${worldId}/productions/new`); }}><Plus size={16} />New production</Button>}>

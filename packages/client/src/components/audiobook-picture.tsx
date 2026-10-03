@@ -18,6 +18,7 @@ import { mediaUrl } from "../lib/media.js";
 import { sendBenchCompose, sendBenchNewSession, setAudiobookPicture, useBench, useStore } from "../lib/store.js";
 import type { BlockRow } from "../screens/chapter-audiobook.js";
 import { Button, Textarea, cx } from "./ui.js";
+import { LookSheet } from "./audiobook-look.js";
 
 /**
  * Pictures that follow the words (design turn 186c, SPEC-047 R-69): in a chapter's Audiobook
@@ -111,7 +112,7 @@ export function pictureBrief(words: string, production: Pick<ProductionBundle, "
   return [`A picture for an audiobook, showing this moment: ${words.replace(/\s+/g, " ").trim()}`, ...(look !== undefined ? [`The look: ${look}`] : [])].join("\n\n");
 }
 
-export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrder, row, rows, pictures }: {
+export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrder, row, rows, pictures, record = null }: {
   worldId: string;
   production: ProductionBundle;
   chapterFile: string;
@@ -119,7 +120,10 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   row: BlockRow;
   rows: readonly BlockRow[];
   pictures: ReturnType<typeof useChapterPictures>;
+  /** The chapter's record, for its look (design turn 191c): the sheet opens from here. */
+  record?: ChapterAudiobook | null;
 }) {
+  const [lookOpen, setLookOpen] = useState(false);
   const store = useStore();
   const world = store.state?.world ?? null;
   const connection = store.connection;
@@ -176,6 +180,9 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
               Remove
             </Button>
           )}
+          <Button variant="ghost" onClick={() => setLookOpen(true)} data-testid="audiobook-look-open">
+            Look
+          </Button>
           <Button variant="secondary" disabled={connection !== "open"} onClick={() => setOpen(true)} data-testid="audiobook-picture-open">
             Picture
           </Button>
@@ -244,6 +251,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
           </div>
         </>
       )}
+      <LookSheet open={lookOpen} onClose={() => setLookOpen(false)} worldId={worldId} productionId={production.meta.id} chapterFile={chapterFile} chapterOrder={chapterOrder} record={record} blockKeys={rows.map((candidate) => candidate.block.key)} />
     </section>
   );
 }

@@ -2241,7 +2241,7 @@ export function ChapterWorkspace({
               </aside>
             </ResponsiveSheet>
           )}
-          {view === "audiobook" && <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null} title={`${audiobook.selected === "title" ? "Title" : `Block ${audiobook.rows.findIndex(row => row.block.key === audiobook.selected) + 1}`} · ${audiobook.rows.find(row => row.block.key === audiobook.selected)?.mark ?? "Narrator"}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><AudiobookSide {...blockPanel} />{timingPanel}{soundsPanel}{pictureRow !== null && <BlockPicturePanel worldId={worldId} production={production} chapterFile={chapter.file} chapterOrder={chapter.order} row={pictureRow} rows={audiobook.rows} pictures={chapterPictures} />}</aside></ResponsiveSheet>}
+          {view === "audiobook" && <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null} title={`${audiobook.selected === "title" ? "Title" : `Block ${audiobook.rows.findIndex(row => row.block.key === audiobook.selected) + 1}`} · ${audiobook.rows.find(row => row.block.key === audiobook.selected)?.mark ?? "Narrator"}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><AudiobookSide {...blockPanel} />{timingPanel}{soundsPanel}{pictureRow !== null && <BlockPicturePanel worldId={worldId} production={production} chapterFile={chapter.file} chapterOrder={chapter.order} row={pictureRow} rows={audiobook.rows} pictures={chapterPictures} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} />}</aside></ResponsiveSheet>}
           {/* The Timing view's side (turn 187a): the bar selected, the same values as the block panel's. */}
           {view === "timing" && <ResponsiveSheet sheet={blockSheet} open={selectedBar !== null} title={`${selectedTimingRow?.mark ?? "Reaction"} · ${audiobook.selected ?? ""}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><TimingSide bar={selectedBar} row={selectedTimingRow} timing={audiobook.timing} rows={audiobook.rows} onTiming={onTiming} onPlayFrom={(at) => { setPlayhead(at); audiobook.mixPlayer.play(betweenClocks(audiobook.timing, audiobook.mixed, at)); }} refused={audiobook.lastRecord?.refused ?? null} locked={timingLocked} revision={audiobook.lastRecord?.seq} /></aside></ResponsiveSheet>}
           <ResponsiveSheet sheet={compact} open={notesOpen} title={`Chapter ${String(chapter.order).padStart(2,"0")} · notes`} onClose={() => setNotesOpen(false)} className="fy-chapter-notes-sheet">
@@ -2370,7 +2370,9 @@ export function ChapterWorkspace({
                       const note = production.audiobook?.notes?.[key];
                       const model = audiobook.modelOf(audiobook.narrator);
                       const selectedRow = audiobook.rows.find((row) => row.block.key === audiobook.selected);
-                      const line = selectedRow !== undefined && selectedRow.speakerKey === key ? selectedRow : (audiobook.rows.find((row) => row.speakerKey === key) ?? null);
+                      // A speaker's line may sit inside a block of several turns (design turn 190).
+                      const holds = (row: (typeof audiobook.rows)[number]) => row.speakerKey === key || (row.speakers ?? []).some((turn) => turn.key === key);
+                      const line = selectedRow !== undefined && holds(selectedRow) ? selectedRow : (audiobook.rows.find(holds) ?? null);
                       return (
                         <PerformedSpeaker
                           key={key}
@@ -2597,7 +2599,6 @@ export function ChapterWorkspace({
             title: `Arke · Chapter ${String(chapter.order).padStart(2, "0")}`,
             subject: `${chapter.title} · ${production.meta.title}`,
             conversationFirst: true,
-            controlsInSheet: true,
             onPutAway: () => setDock(false),
             ...(ask !== null ? { ask } : {}),
             onAsk: setAsk,

@@ -46,8 +46,6 @@
   .fy-season-arke-sheet .fy-arke__log { padding: 16px 20px; }
   .fy-season-arke-sheet .fy-arke__foot { padding: 12px 20px calc(14px + env(safe-area-inset-bottom, 0px)); }
   .fy-season-arke-sheet :is(button, a, summary, select, input) { min-height: 44px; }
-  .fy-season-arke-sheet .fy-arke__model { flex-wrap: wrap; }
-  .fy-season-arke-sheet .fy-arke__model select { min-width: 0; max-width: 100%; }
   .fy-season-arke-sheet .dom-proposal { border-color: var(--warning); background: color-mix(in srgb, var(--warning) 8%, var(--background)); }
   .fy-season-arke-sheet .dom-proposal__actions { flex-wrap: wrap; }
   .fy-season-arke-sheet .dom-proposal__actions button { flex: 1; min-width: 0; }
@@ -104,7 +102,6 @@
   .fy-production-setup__panels { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .fy-production-setup__panels .fy-production-setup__conversation { display: flex !important; }
   .fy-production-setup__panels .fy-production-setup__outline { display: block !important; padding: 16px; }
-  .fy-production-setup__model { flex-wrap: wrap; }
 }
 @media (pointer: coarse) {
   .fy-production-setup :is(button, select), .fy-setup-outline-sheet :is(button, select) { min-height: 44px; }
@@ -208,7 +205,6 @@
  .fy-season-arke-sheet .fy-arke__log { min-height: 72px; flex: 1 0 auto; overflow: visible; }
  .fy-season-arke-sheet .fy-arke__strip { padding: 0 20px 16px; min-width: 0; }
  .fy-season-arke-sheet .fy-arke__foot { position: sticky; bottom: 0; border-top: 1px solid var(--border); background: var(--background); }
- .fy-season-arke-sheet .fy-arke__model-open { position: fixed; top: 22px; right: 52px; display: grid; place-items: center; width: 44px; height: 44px; border: 0; background: transparent; color: var(--muted-foreground); cursor: pointer; }
  .fy-season-arke-sheet .dom-proposal { min-width: 0; padding: 14px; border-radius: 14px; box-shadow: none; gap: 8px; }
  .fy-season-arke-sheet :is(.dom-proposal__head,.dom-review__head,.dom-ripples--none,.dom-review__was,.dom-review__tag,.dom-proposal__send-long) { display: none; }
  .fy-season-arke-sheet .dom-proposal__summary { font: var(--type-label); }
@@ -248,7 +244,6 @@
 @media (max-width: 1099px) {
  .fy-season-arke-sheet, .fy-season-arke-sheet .fy-arke { animation: none; }
  .fy-season-arke-sheet .fy-page-sheet__body { position: static; }
- .fy-season-arke-sheet .fy-arke__model-open { position: absolute; }
  .fy-season-arke-sheet .fy-chat__bubble { font: 400 var(--text-sm)/1.5 var(--font-sans); }
  .fy-season-arke-sheet .fy-arke__log { flex: 0 0 auto; }
  .fy-season-arke-sheet .fy-arke__strip { flex: 1; }

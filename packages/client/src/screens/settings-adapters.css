@@ -18,9 +18,14 @@
 .fy-adapters details { margin: 12px 0; }
 .fy-adapters summary { cursor: pointer; }
 .fy-adapters details p { font-size: 12px; overflow-wrap: anywhere; }
-.fy-adapters .fy-editordialog__panel { padding: 24px; }
-.fy-adapters .fy-editordialog__panel label { display: flex; gap: 12px; align-items: flex-start; color: var(--foreground); }
-.fy-adapters .fy-editordialog__panel input { margin-top: 3px; }
+/* The acknowledgement sheet is drawn on the body, so it no longer sits under .fy-adapters and
+   carries the page's type and paragraph rules itself. */
+.fy-adapters__ack { padding: 24px; color: var(--foreground); font: 400 13px var(--font-sans); }
+.fy-adapters__ack p { max-width: 72ch; margin: 10px 0; line-height: 1.6; color: var(--muted-foreground); }
+.fy-adapters__ack button { margin: 4px 8px 4px 0; }
+.fy-adapters__ack label { display: flex; gap: 12px; align-items: flex-start; color: var(--foreground); }
+.fy-adapters__ack input { margin-top: 3px; }
+.fy-adapters__ack input[type="checkbox"] { flex: none; width: 16px; height: 16px; accent-color: var(--foreground); }
 @media (max-width: 800px) { .fy-adapters { padding: 20px 16px 32px; } }
 
 /* The model, the adapter chip and the sampling chip share one row and wrap when narrow (180c). */

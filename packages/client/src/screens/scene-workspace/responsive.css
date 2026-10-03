@@ -301,7 +301,7 @@
   .fy-swgen__foot { position: sticky; bottom: 0; margin-top: auto; flex: none; padding: 12px 20px calc(14px + env(safe-area-inset-bottom, 0px)); background: var(--background); }
   .fy-swgen button { min-height: 44px; }
   .fy-swgen__models { grid-template-columns: minmax(0, 1fr); }
-  [data-screen="shot"] .fy-shot__confirm, .fy-swrow__confirm { width: calc(100vw - 40px); max-width: 350px; box-sizing: border-box; flex-wrap: wrap; }
+  .fy-shot__confirm, .fy-swrow__confirm { width: calc(100vw - 40px); max-width: 350px; box-sizing: border-box; flex-wrap: wrap; }
 }
 
 .fy-stage-inspector-inline:not([hidden]), .fy-frame-audio-host { display: contents; }

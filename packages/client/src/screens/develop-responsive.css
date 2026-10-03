@@ -8,9 +8,6 @@
 .fy-develop-model b { flex: none; font: var(--type-label); }
 .fy-develop-model span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: var(--type-meta); color: var(--muted-foreground); }
 .fy-develop-model svg { flex: none; }
-.fy-develop-model-sheet .fy-set__pill { min-height: 44px; width: 100%; }
-.fy-develop-model-sheet .fy-set__link { min-height: 44px; }
-.fy-develop-model-sheet .fy-arke__model { align-items: stretch; }
 
 @media (pointer: coarse) {
   .fy-cx { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; border-radius: 16px; }

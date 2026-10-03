@@ -16,7 +16,8 @@ import { Composer } from "../components/composer.js";
 import { useReadReplies } from "../components/read-replies.js";
 import { ProductionSetupOutline } from "../components/production-setup-outline.js";
 import { Button } from "../components/ui.js";
-import { HarnessModelOptions, HarnessModelStatus } from "../components/harness-models.js";
+import { HarnessModelStatus, harnessModelsNeedAWord } from "../components/harness-models.js";
+import { ModelChip } from "../components/model-chip.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES, withModelChoice } from "../components/models-card.js";
 
 /** Same transcript and composer as production chat; the rail is the authoritative setup draft. */
@@ -129,13 +130,12 @@ export function ProductionSetupScreen() {
           </div>
           <HeldBar className="fy-production-setup__composer">
             {phone && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setOutlineOpen(true)}><span><b>Production so far · {draft ? [draft.title,draft.kind,draft.aspect,draft.logline,...draft.scenes.map(scene=>scene.title)].filter(Boolean).length : 0} settled</b><span>{draft ? `${draft.kind} · ${draft.aspect} · ${draft.scenes.length} scenes` : "Opening your draft…"}</span></span><ChevronUp size={18}/></button>}
-            <label className="fy-production-setup__model">Writing model
-              <select value={modelId} onChange={event => setModelId(event.target.value)} disabled={running}>
-                <option value="">Configured writing model</option>
-                <HarnessModelOptions state={state} selected={modelId || undefined} />
-              </select></label>
-            <HarnessModelStatus state={state} />
+            {harnessModelsNeedAWord(state) && <HarnessModelStatus state={state} />}
             <Composer value={message} onChange={setMessage} placeholder="Tell Arke what you have in mind…"
+              // A setup is not yet a production, so there is nowhere to remember a model: the chip
+              // picks for this conversation, and letting go of it is the configured writing model.
+              modelControl={<ModelChip state={state} value={modelId || inheritedModel} set={modelId !== ""}
+                onPick={id => setModelId(id ?? "")} unsetLabel="Use the default" disabled={running} />}
               onSubmit={() => command({ operation: "send", text: message, ...(modelId ? { modelId } : {}) })}
               agentLabel="Arke" busy={running} autoFocus={!phone}
               disabledReason={locked ? "Creation is being resolved." : !draft ? "Opening production setup…" : unavailable}
@@ -146,7 +146,6 @@ export function ProductionSetupScreen() {
         <ResponsiveSheet sheet={phone} open={outlineOpen} onClose={() => setOutlineOpen(false)} title="Production so far" className="fy-setup-outline-sheet">
         <aside id="setup-outline" className="fy-production-setup__outline" aria-label="Production so far">
           <h2>Production so far</h2>
-          {phone && <label className="fy-production-setup__model">Writing model<select aria-label="Writing model" value={modelId} disabled={running} onChange={event=>setModelId(event.target.value)}><option value="">Configured writing model</option><HarnessModelOptions state={state} selected={modelId || undefined}/></select></label>}
           {!draft || !setup ? <p>Opening your draft…</p> : <>
             <p className="fy-mono">Draft · revision {draft.revision}</p>
             <fieldset disabled={!!pending || running || locked} className="fy-production-setup__fields">

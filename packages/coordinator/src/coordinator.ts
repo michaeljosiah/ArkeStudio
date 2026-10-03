@@ -312,6 +312,7 @@ import {
 import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiobookBook } from "./productions/audiobook-book.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
 import { audiobookListening, setAudiobookPicture } from "./productions/audiobook-listening.js";
+import { deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
 import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
@@ -967,6 +968,8 @@ export interface CoordinatorOptions {
   directionDeriver?: DirectionDeriver;
   /** Turn 184: the speaker-notes model seam; every note is held to its speaker and its cap regardless (SPEC-047 R-54). */
   speakerNotesDeriver?: SpeakerNotesDeriver;
+  /** Turn 191c: the look model seam; every line is held to the chapter's people and blocks regardless (SPEC-047 R-98). */
+  lookDeriver?: LookDeriver;
   /** Desktop-owned update commands. Electron APIs remain outside the coordinator. */
   updates?: {
     check: () => Promise<void>;
@@ -1238,6 +1241,8 @@ export class Coordinator {
   private readonly stagedLines = new Map<string, { worldId: string; productionId: string; matched: MatchedFile[] }>();
   /** `Direct this chapter` runs (turn 146), keyed like the cast's: one per chapter, ended with the world. */
   private readonly directingChapters = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
+  /** A chapter being read for its look (turn 191c): one at a time, ended with the world. */
+  private readonly derivingLooks = new Map<string, AbortController>();
   /**
    * A proposal not yet answered (SPEC-047 R-10): held by chapter until it is accepted or
    * discarded and replayed to a window that connects, so a refresh does not lose a card the
@@ -14962,6 +14967,71 @@ export class Coordinator {
         }
         return;
       }
+      case "derive-audiobook-look": {
+        // The chapter read for its look (design turn 191c, SPEC-047 R-98): the writing service
+        // reads the prose, the sheets, the places and the art direction once; what verifies is
+        // laid over the look the chapter holds, the author's lines left as they are. Nothing is
+        // spent, and the answer is the record — or one clause saying why not.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, requestId: msg.requestId };
+        const at = () => new Date().toISOString();
+        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
+        if (this.derivingLooks.has(key)) {
+          this.emit({ at: at(), type: "audiobook.record", ...ids, refused: "reading the look…" });
+          return;
+        }
+        const control = new AbortController();
+        this.derivingLooks.set(key, control);
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        try {
+          let deriver = this.opts.lookDeriver ?? null;
+          if (!deriver && this.opts.adapter?.readiness().ready && this.opts.authoring) {
+            deriver = makeAdapterLookDeriver(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`);
+          }
+          if (!deriver) {
+            this.emit({ at: at(), type: "audiobook.record", ...ids, refused: "the writing service is not running" });
+            return;
+          }
+          const derived = await deriveChapterLook(store, msg.productionId, chapter.id, deriver, control.signal);
+          const written = await writeDerivedLook(store, msg.productionId, chapter.id, derived);
+          if (written === "moved") {
+            this.emit({ at: at(), type: "audiobook.record", ...ids, refused: "the prose moved · read the look again" });
+            return;
+          }
+          this.refreshIfStillOpen(store);
+          this.emit({ at: at(), type: "audiobook.record", ...ids, record: written.record, dropped: derived.dropped });
+        } catch (err) {
+          if (!control.signal.aborted) void this.appLog?.append({ kind: "audiobook.look-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: at(), type: "audiobook.record", ...ids, refused: control.signal.aborted ? "stopped" : describeCoordinatorError(err) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+          this.derivingLooks.delete(key);
+        }
+        return;
+      }
+      case "set-audiobook-look": {
+        // One line of the look written by the author (turn 191c, R-98): the author's for good,
+        // answered as the record.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
+        const at = () => new Date().toISOString();
+        try {
+          const record = await setChapterLook(store, msg.productionId, chapter.id, msg.target, msg.text);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: at(), type: "audiobook.record", ...ids, record });
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.look-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
       case "set-audiobook-timing": {
         // One block's timing (turn 187, SPEC-047 R-81): held to the binding — under Performed a
         // grouped request's inside is the reader's (R-85) — written through the record's lane and
@@ -20068,6 +20138,7 @@ export class Coordinator {
       for (const run of this.derivingContinuity.values()) run.control.abort();
       for (const run of this.castingVoices.values()) run.control.abort();
       for (const run of this.directingChapters.values()) run.control.abort();
+      for (const control of this.derivingLooks.values()) control.abort();
       for (const run of this.readingBooks.values()) run.control.abort();
       for (const run of this.readingAudiobooks.values()) run.control.abort();
       for (const handle of this.exports.values()) handle.cancel();

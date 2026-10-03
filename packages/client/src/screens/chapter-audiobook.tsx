@@ -12,6 +12,7 @@ import {
   type HeldReadingNote,
   DEFAULT_NARRATOR,
   audiobookBlockState,
+  audiobookBlockOptions,
   audiobookBlocks,
   audiobookCounts,
   audiobookDirectionFor,
@@ -174,6 +175,8 @@ export interface BlockRow {
   artifact: ArtifactSidecar | null;
   /** Who speaks the block by the cast (SPEC-047 R-33): the sheet, else the name; null for narration and the title. */
   speakerKey: string | null;
+  /** The speakers a block holds when it is one reader's whole paragraph (design turn 190): the lines inside it, by key. */
+  speakers?: ReadonlyArray<{ key: string; label: string; colour: number | null }>;
   /** The speaker's colour, `--voice-N`, the same in every chapter; null for the narrator and a name no sheet carries. */
   colour: number | null;
   /** The kept take was recorded by a person (SPEC-047 R-34), not made by a voice. */
@@ -283,10 +286,10 @@ export function readingHeldWords(held: HeldReadingNote, model: ManifestModel | n
 export type AudiobookFilter = null | "narrator" | { speaker: string };
 
 /** Whether a row passes the filter. */
-export function inAudiobookFilter(row: Pick<BlockRow, "speakerKey">, filter: AudiobookFilter): boolean {
+export function inAudiobookFilter(row: Pick<BlockRow, "speakerKey" | "speakers">, filter: AudiobookFilter): boolean {
   if (filter === null) return true;
   if (filter === "narrator") return row.speakerKey === null;
-  return row.speakerKey === filter.speaker;
+  return row.speakerKey === filter.speaker || (row.speakers ?? []).some((speaker) => speaker.key === filter.speaker);
 }
 
 const STATE_LABEL: Record<AudiobookBlockState, string> = { "not made": "not made", made: "made", stale: "stale", flagged: "flagged", awaiting: "awaiting recording" };
@@ -370,7 +373,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // A proposal that cast the lines first is drawn on the blocks its cast makes (codex on PR 1479):
   // the record's cast would split the paragraphs elsewhere and give the lines other readers.
   const blockCast = proposal?.castRecord ?? cast;
-  const derived = useMemo(() => audiobookBlocks(body, blockCast, audiobookHeading(chapter.order, chapter.title)), [body, blockCast, chapter.order, chapter.title]);
+  // One reader, one block (design turn 190): the same blocks the coordinator plans, from the same rule.
+  const blockOptions = useMemo(() => audiobookBlockOptions({ reading, ...(recordedList !== undefined ? { recorded: [...recordedList] } : {}) }), [reading, recordedList]);
+  const derived = useMemo(() => audiobookBlocks(body, blockCast, audiobookHeading(chapter.order, chapter.title), blockOptions), [body, blockCast, chapter.order, chapter.title, blockOptions]);
   // A take the record names but the shelf no longer holds is not made (codex on PR 1180): the
   // coordinator plans the same way, so the block is made again rather than shown unplayable.
   // The sidecar this window can see for itself; the media it cannot, so the coordinator says
@@ -383,7 +388,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // chapter's own speakers numbered after them when its stamp has not caught up yet.
   const chapters = world?.productions.find((candidate) => candidate.meta.id === prodId)?.chapters;
   const colours = useMemo(
-    () => audiobookSpeakerColours(chapters ?? [], derived.blocks.flatMap((block) => (block.sheet !== undefined ? [block.sheet] : []))),
+    () => audiobookSpeakerColours(chapters ?? [], derived.blocks.flatMap((block) => (block.rows ?? [block]).flatMap((turn) => (turn.sheet !== undefined ? [turn.sheet] : [])))),
     [chapters, derived.blocks],
   );
   const rows = useMemo<BlockRow[]>(() => {
@@ -419,6 +424,14 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       const language = spokenSource.kind === "cloned" ? spokenSource.voice.language : undefined;
       const speakerKey = audiobookSpeakerKey(block);
       const colour = block.sheet === undefined ? null : (colours.get(block.sheet) ?? null);
+      // Who speaks inside a block of several turns: each once, named as the cast names them.
+      const inside = block.rows === undefined ? undefined : [...new Map(block.rows.flatMap((turn) => {
+        const key = audiobookSpeakerKey(turn);
+        if (key === null) return [];
+        const sheetOf = turn.sheet === undefined ? undefined : world?.sheets.find((candidate) => candidate.id === turn.sheet);
+        return [[key, { key, label: sheetOf?.name ?? turn.speaker ?? key, colour: turn.sheet === undefined ? null : (colours.get(turn.sheet) ?? null) }] as const];
+      })).values()];
+      if (inside !== undefined && inside.length > 0) mark = inside.map((who) => who.label).join(", ");
       const recorded = take?.source === "recorded";
       const byPerson = recordedKeys.has(audiobookRecordingKey(block));
       const direction = rowDirection(recordOrNull, block);
@@ -447,6 +460,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         ...(language !== undefined ? { language } : {}),
         artifact,
         speakerKey,
+        ...(inside !== undefined && inside.length > 0 ? { speakers: inside } : {}),
         colour,
         recorded,
         byPerson,
@@ -464,6 +478,12 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const filters = useMemo(() => {
     const speakers = new Map<string, { key: string; label: string; colour: number | null; count: number }>();
     for (const row of rows) {
+      // A block of several turns counts each speaker in it once (design turn 190).
+      for (const who of row.speakers ?? []) {
+        const held = speakers.get(who.key);
+        if (held !== undefined) held.count += 1;
+        else speakers.set(who.key, { key: who.key, label: who.label, colour: who.colour, count: 1 });
+      }
       if (row.speakerKey === null) continue;
       const held = speakers.get(row.speakerKey);
       if (held !== undefined) held.count += 1;
@@ -2687,7 +2707,7 @@ export function RecordedTakeDialog({ staged, row, onCancel, onReplace, onKeep }:
   ].filter((part) => part !== null).join(" · ");
   const refused = staged.state === "refused" ? staged.refused : undefined;
   return (
-    <EditorDialog open title="Upload a take" subtitle={`${row.mark} · ${row.block.key}`} onClose={onCancel} width={540} onBody>
+    <EditorDialog open title="Upload a take" subtitle={`${row.mark} · ${row.block.key}`} onClose={onCancel} width={540}>
       <div className="fy-rectake" data-testid="recorded-take-dialog">
         <div className={`fy-rectake__quote fy-voice--${tone}`}>{row.block.text}</div>
         {refused !== undefined ? (
@@ -2800,7 +2820,7 @@ export function SpeakerLinesDialog({ worldId, productionId, speaker, label, tone
     return { text: row.words === "match" ? "match" : "unchecked", tone: row.words === "match" ? "pass" : "unavailable" };
   };
   return (
-    <EditorDialog open title={label} onClose={close} width={680} onBody>
+    <EditorDialog open title={label} onClose={close} width={680}>
       <div className={`fy-rectake fy-rectake--lines fy-voice--${tone}`} data-testid="speaker-lines-dialog">
         <div className="fy-rectake__summary" role="status">
           <span className="fy-ab__speaker-dot" aria-hidden="true" />

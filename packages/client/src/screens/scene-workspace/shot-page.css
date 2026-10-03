@@ -27,9 +27,10 @@
 :where([data-screen="shot"]) .fy-shot__menupanel > button:hover:not(:disabled), :where([data-screen="shot"]) .fy-shot__menupanel > button:focus-visible { background: var(--accent); }
 :where([data-screen="shot"]) .fy-shot__menupanel > button:disabled { opacity: .45; cursor: default; }
 :where([data-screen="shot"]) .fy-shot__menupanel > .fy-shot__danger { color: var(--destructive); }
-:where([data-screen="shot"]) .fy-shot__confirm { position: fixed; z-index: 60; left: 50%; top: 40%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-lg); font: 400 var(--text-sm)/1.4 var(--font-sans); }
-:where([data-screen="shot"]) .fy-shot__confirm > button { min-height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); font: 500 var(--text-sm)/1.4 var(--font-sans); cursor: pointer; }
-:where([data-screen="shot"]) .fy-shot__confirm > button:first-of-type { background: var(--foreground); color: var(--background); border-color: var(--foreground); }
+/* Drawn on the body (BodyLayer), so not scoped under the screen. */
+.fy-shot__confirm { position: fixed; z-index: 60; left: 50%; top: 40%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-lg); font: 400 var(--text-sm)/1.4 var(--font-sans); }
+.fy-shot__confirm > button { min-height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); font: 500 var(--text-sm)/1.4 var(--font-sans); cursor: pointer; }
+.fy-shot__confirm > button:first-of-type { background: var(--foreground); color: var(--background); border-color: var(--foreground); }
 
 /* The filmstrip: every shot of the scene at 71px tall in the production's aspect, the open one ringed. */
 :where([data-screen="shot"]) .fy-shot__strip { display: flex; align-items: center; gap: 10px; margin-top: 14px; }

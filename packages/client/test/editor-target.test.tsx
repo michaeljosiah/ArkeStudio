@@ -16,6 +16,7 @@ import {
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { ARTIFACT_DRAG_TYPE, LANE_DRAG_SOUND } from "../src/screens/editor-audio.js";
 import { CutScreen } from "../src/screens/cut.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -46,7 +47,9 @@ Object.assign(globalThis, {
 const BELLS = "ar_01J8G0000000000000000000R1";
 
 interface Mounted {
+  /** The body: where the sheets are drawn. The screen itself is in `host`. */
   container: HTMLElement;
+  host: HTMLElement;
   root: Root;
   sent: ClientMessage[];
 }
@@ -78,12 +81,12 @@ async function mount(state: ClientState, search = ""): Promise<Mounted> {
       </MemoryRouter>,
     );
   });
-  return { container, root, sent };
+  return { container: dialogRoot(container), host: container, root, sent };
 }
 
 async function close(screen: Mounted): Promise<void> {
   await act(async () => screen.root.unmount());
-  screen.container.remove();
+  screen.host.remove();
 }
 
 function commandsSent(screen: Mounted): TimelineCommand[][] {

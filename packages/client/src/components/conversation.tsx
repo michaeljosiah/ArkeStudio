@@ -47,7 +47,7 @@ import {
   wrapUpWorldChat,
 } from "../lib/store.js";
 import { productionModel } from "./dispatch-bar.js";
-import { HarnessModelOptions, HarnessModelStatus, harnessModelLabel, harnessModelUnavailableReason } from "./harness-models.js";
+import { HarnessModelStatus, harnessModelsNeedAWord, harnessModelLabel, harnessModelUnavailableReason } from "./harness-models.js";
 import { ModelChip } from "./model-chip.js";
 import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
@@ -857,7 +857,6 @@ export function ProductionConversation({
     subject: string;
     thumbnail?: { src: string; alt: string };
     conversationFirst?: boolean;
-    controlsInSheet?: boolean;
     /** Puts the assistant away. The head draws its pin only when there is somewhere to go. */
     onPutAway?: () => void;
     /** Flips the subject between the shot and the whole scene; the title is a button when set. */
@@ -1352,60 +1351,10 @@ export function ProductionConversation({
       : {}),
   };
   const sceneDock = dock?.conversationFirst === true && context.kind === "scene";
-  const languageControl = productionId ? (
-    <>
-    <div className="fy-arke__model" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 8 }}>
-      <select
-        className="fy-set__pill"
-        style={{ maxWidth: "100%" }}
-        aria-label="Language model"
-        value={effectiveLanguageModelId ?? ""}
-        onChange={(event) => setLanguageModelId(event.target.value || undefined)}
-      >
-        <option value="">{agentLanguageModel || rememberedLanguageModel ? "Use saved choice" : "Ask the harness"}</option>
-        <HarnessModelOptions state={state} selected={effectiveLanguageModelId} />
-      </select>
-      <span className="fy-mono fy-arke__modelscope">
-        {languageModelId !== undefined
-          ? "THIS TURN"
-          : agentLanguageModel !== undefined
-            ? "CHAT AGENT"
-            : rememberedLanguageModel !== undefined
-              ? "THIS PRODUCTION"
-              : "DEFAULT"}
-      </span>
-      {languageModelId !== undefined && languageModelId !== rememberedLanguageModel && worldId && (
-        <button
-          type="button"
-          className="fy-set__link"
-          disabled={languageUnavailableReason !== undefined}
-          onClick={() => {
-            pendingRemember.current = languageModelId;
-            setProductionModel(worldId, productionId, "llm", languageModelId);
-          }}
-        >
-          Remember for this production
-        </button>
-      )}
-      {rememberedLanguageModel !== undefined && worldId && (
-        <button
-          type="button"
-          className="fy-set__link"
-          onClick={() => {
-            setProductionModel(worldId, productionId, "llm", null);
-            setLanguageModelId(undefined);
-          }}
-        >
-          Clear production default
-        </button>
-      )}
-    </div>
-    <HarnessModelStatus state={state} />
-    </>
-  ) : null;
-  // In a dock the model is a chip in the composer's row, beside attach and voice (design turn 190e);
-  // the models' own status is said only while there is something to say about them.
-  const modelChip = productionId && !sceneDock && !(dock?.controlsInSheet && compact) ? (
+  // The model is a chip in the composer's row, beside attach and voice, in a dock and on the page
+  // alike (design turn 190e); the models' own status is said only while there is something to say
+  // about them. The scene dock has none (turn 143).
+  const modelChip = productionId && !sceneDock ? (
     <ModelChip
       state={state}
       value={effectiveLanguageModelId}
@@ -1419,10 +1368,7 @@ export function ProductionConversation({
         : {})}
     />
   ) : null;
-  const modelStatus = productionId && !sceneDock && !(dock?.controlsInSheet && compact) &&
-    (state?.app.harnessModelStatus?.status !== "ready" || (state?.app.harnessModels ?? []).length === 0 || state?.app.health.harness.status !== "healthy")
-    ? <HarnessModelStatus state={state} />
-    : null;
+  const modelStatus = productionId && !sceneDock && harnessModelsNeedAWord(state) ? <HarnessModelStatus state={state} /> : null;
   const transcript = (
     <ConversationTranscript
       workspace={loaded}
@@ -1467,7 +1413,6 @@ export function ProductionConversation({
         data-dock="conversation"
         data-conversation-first={dock.conversationFirst ? "true" : undefined}
       >
-        {dock.controlsInSheet && compact && <button type="button" className="fy-arke__model-open" aria-label="Story author model" onClick={()=>setModelsOpen(true)}><Sparkle size={16}/></button>}
         <div className="fy-arke__head">
           {/* The slot stays whether or not there is a frame to show in it, so the title does
               not shift left the moment the subject is the scene, a board, or a frameless shot. */}
@@ -1583,9 +1528,8 @@ export function ProductionConversation({
               })}
             </div>
           )}
-          {/* The scene dock has no model select above its composer (design turn 143): the
-              production's language model is chosen in Settings and remembered from the other
-              docks, which keep their control. */}
+          {/* The scene dock has no model chip (design turn 143): the production's language model
+              is chosen in Settings and remembered from the other docks, which keep theirs. */}
           <Composer
             value={message}
             onChange={setMessage}
@@ -1607,7 +1551,6 @@ export function ProductionConversation({
           {dock.note !== undefined && <div className="fy-mono">{dock.note}</div>}
         </div>
       </aside>
-      {dock.controlsInSheet && <PageSheet open={compact && modelsOpen} onClose={()=>setModelsOpen(false)} title="Story author" className="fy-develop-model-sheet">{languageControl}</PageSheet>}
       </>
     );
   }
@@ -1655,10 +1598,11 @@ export function ProductionConversation({
         {responsive && phone && rail && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setSideOpen(true)}>
           <span><b>{sideTitle}{!side && " · " + pointCount + " so far"}</b><span>{side ? "Open the proposed changes" : [...groups.map(group => group.subject), ...(openCount ? [openCount + " still open"] : [])].join(" · ") || "Nothing understood yet"}</span></span><ChevronUp size={18} />
         </button>}
-        {(!responsive || !compact) && languageControl}
+        {modelStatus}
         <Composer value={message} onChange={setMessage} onSubmit={submit} placeholder={responsive && compact ? "Keep shaping the story…" : placeholder}
           agentLabel="story author" busy={running} busyLabel="reading the world…" disabledReason={languageUnavailableReason}
-          onDictate={text => setMessage(prev => prev ? prev + " " + text : text)} readReplies={readReplies.composer} {...attachProps} />
+          onDictate={text => setMessage(prev => prev ? prev + " " + text : text)} readReplies={readReplies.composer}
+          {...(modelChip !== null ? { modelControl: modelChip } : {})} {...attachProps} />
         {(!responsive || !compact) && footer}
       </HeldBar>
     </div>
@@ -1668,7 +1612,7 @@ export function ProductionConversation({
       </ResponsiveSheet>
     </div>}
     <PageSheet open={responsive && compact && modelsOpen} onClose={() => setModelsOpen(false)} title="Story author" className="fy-develop-model-sheet">
-      {languageControl}<p>In context: {contextSummary}</p>
+      <p>In context: {contextSummary}</p>
     </PageSheet>
   </>;
 }
