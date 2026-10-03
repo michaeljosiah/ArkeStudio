@@ -10,6 +10,7 @@ import { ActivityPanel } from "../src/components/activity-panel.js";
 import { ANNOUNCED_KEY, UpdateAnnouncement, __resetUpdateAnnouncementForTest } from "../src/components/update-announcement.js";
 import { __resetActivityPanelForTest, closeActivityPanel, openActivityPanel, openActivityPanelOnArrival } from "../src/lib/activity-panel.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -132,7 +133,7 @@ async function mount(path: string, value: UpdateState, withPanel = false, connec
       </MemoryRouter>,
     );
   });
-  return container;
+  return dialogRoot(container);
 }
 
 /** The update state moves on under the mounted dialog, as a frame from the desktop would move it. */

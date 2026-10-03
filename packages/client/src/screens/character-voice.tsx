@@ -24,6 +24,7 @@ import {
   voiceDisplayLabel,
 } from "@arke-studio/contracts";
 import { CharacterHeader } from "./character-reference.js";
+import { BodyLayer } from "../components/body-layer.js";
 import { CloneVoiceDialog } from "../components/clone-voice-dialog.js";
 import { DesignVoiceDialog } from "../components/design-voice-dialog.js";
 import { VoiceSampleFlow } from "../components/character-voice-sample.js";
@@ -735,7 +736,7 @@ function ChooseVoiceDialog({
     }
   };
   return (
-    <>
+    <BodyLayer>
       <div className="fy-voicescrim" onClick={onClose} />
       <div className="fy-voicesheet" role="dialog" aria-label="Choose a voice" data-testid="voice-catalogue">
         <header className="fy-voicesheet__head">
@@ -961,6 +962,6 @@ function ChooseVoiceDialog({
           </Button>
         </footer>
       </div>
-    </>
+    </BodyLayer>
   );
 }

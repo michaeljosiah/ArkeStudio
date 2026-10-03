@@ -14,6 +14,7 @@ import {
 } from "@arke-studio/contracts";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { CutScreen } from "../src/screens/cut.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -43,7 +44,9 @@ Object.assign(globalThis, {
 });
 
 interface MountedCut {
+  /** The body: where the sheets are drawn. The screen itself is in `host`. */
   container: HTMLElement;
+  host: HTMLElement;
   root: Root;
   sent: ClientMessage[];
 }
@@ -76,12 +79,12 @@ async function mountCut(state: ClientState): Promise<MountedCut> {
       </MemoryRouter>,
     );
   });
-  return { container, root, sent };
+  return { container: dialogRoot(container), host: container, root, sent };
 }
 
 async function close(screen: MountedCut): Promise<void> {
   await act(async () => screen.root.unmount());
-  screen.container.remove();
+  screen.host.remove();
 }
 
 function button(screen: MountedCut, label: string): HTMLButtonElement {

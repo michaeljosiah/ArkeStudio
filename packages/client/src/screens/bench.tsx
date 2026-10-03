@@ -1,6 +1,7 @@
 import { estimateSpeechMicroUsd, freeCreditLeft, SAMPLING_CHOICE_NAMES, samplingSummary, speechPriceCopy } from "@arke-studio/contracts";
 import { castVoiceSummary, planCastCharacterAudio, planSubjectCharacterAudio } from "@arke-studio/contracts";
 import { benchLineLanguage, castNameFor, DEFAULT_REFERENCE_WHO, referenceRouteModel, referenceRouteRefusal, referenceSheetId } from "@arke-studio/contracts";
+import { BodyLayer } from "../components/body-layer.js";
 import { AdapterPicker } from "../components/adapter-picker.js";
 import { SamplingChip, hasSampling } from "../components/local-sampling.js";
 import { benchUpscalePlan, hasAdultAdapter, matchingAdapterBundle, upscaleFrameCopy } from "@arke-studio/contracts";
@@ -2931,122 +2932,126 @@ function BenchWorkspace({
             the song until Use these words is pressed — so a generation never carries words
             nobody read. The draft is shown BESIDE what the author has, never over it. */}
         {lyricsOpen && musicParams !== null && (
-          <div className="fy-bench__briefmodal" role="dialog" aria-label="Write lyrics">
-            <div className="fy-bench__briefmodalpanel" data-testid="lyrics-dialog">
-              <div className="fy-bench__eyebrow">WHAT THE SONG IS ABOUT</div>
-              <textarea
-                autoFocus
-                aria-label="What the song is about"
-                value={lyricsAbout}
-                onChange={(e) => setLyricsAbout(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") setLyricsOpen(false);
-                }}
-                placeholder="A farewell sung on the harbour wall the night the tide-clock stopped."
-              />
-              {lyricsDraft !== null && (
-                <>
-                  <div className="fy-bench__eyebrow">
-                    DRAFT
-                    {/* Names who wrote it and how long it is, the way every other model-backed
-                        control states its model. */}
-                    <span className="fy-bench__lyricsauthor">
-                      {`${lyricsAuthor ?? "the lyricist"} · ${lyricsDraft.length} characters`}
-                    </span>
-                  </div>
-                  <pre className="fy-bench__lyricsdraft" data-testid="lyrics-draft">
-                    {lyricsDraft}
-                  </pre>
-                </>
-              )}
-              {lyricsNote !== null && <span className="fy-bench__enhnote">{lyricsNote}</span>}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <Button
-                  variant="ghost"
-                  data-testid="lyrics-ask"
-                  disabled={drafting || lyricsAbout.trim().length === 0 || model === null}
-                  onClick={() => {
-                    if (model === null) return;
-                    setLyricsNote(null);
-                    const requestId = sendBenchDraftLyrics({
-                      worldId,
-                      sessionId: session.id,
-                      description: lyricsAbout,
-                      ...(draft.brief.trim().length > 0 ? { style: draft.brief } : {}),
-                      provider: model.provider,
-                      model: model.id,
-                    });
-                    if (requestId === null) {
-                      setLyricsNote("not connected - try again");
-                      return;
-                    }
-                    draftingRef.current = requestId;
-                    setLyricsAuthor(model.displayName);
-                    setDrafting(true);
+          <BodyLayer>
+            <div className="fy-bench__briefmodal" role="dialog" aria-label="Write lyrics">
+              <div className="fy-bench__briefmodalpanel" data-testid="lyrics-dialog">
+                <div className="fy-bench__eyebrow">WHAT THE SONG IS ABOUT</div>
+                <textarea
+                  autoFocus
+                  aria-label="What the song is about"
+                  value={lyricsAbout}
+                  onChange={(e) => setLyricsAbout(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setLyricsOpen(false);
                   }}
-                >
-                  {lyricsDraft === null ? "Write" : "Try again"}
-                </Button>
-                <Button variant="ghost" onClick={() => setLyricsOpen(false)}>
-                  Cancel
-                </Button>
-                {/* The only path from a draft into the song. */}
-                <Button
-                  variant="primary"
-                  data-testid="lyrics-accept"
-                  disabled={lyricsDraft === null}
-                  onClick={() => {
-                    if (lyricsDraft === null) return;
-                    compose({ ...draft, params: { ...musicParams, lyrics: lyricsDraft } });
-                    setLyricsOpen(false);
-                  }}
-                >
-                  Use these words
-                </Button>
+                  placeholder="A farewell sung on the harbour wall the night the tide-clock stopped."
+                />
+                {lyricsDraft !== null && (
+                  <>
+                    <div className="fy-bench__eyebrow">
+                      DRAFT
+                      {/* Names who wrote it and how long it is, the way every other model-backed
+                          control states its model. */}
+                      <span className="fy-bench__lyricsauthor">
+                        {`${lyricsAuthor ?? "the lyricist"} · ${lyricsDraft.length} characters`}
+                      </span>
+                    </div>
+                    <pre className="fy-bench__lyricsdraft" data-testid="lyrics-draft">
+                      {lyricsDraft}
+                    </pre>
+                  </>
+                )}
+                {lyricsNote !== null && <span className="fy-bench__enhnote">{lyricsNote}</span>}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <Button
+                    variant="ghost"
+                    data-testid="lyrics-ask"
+                    disabled={drafting || lyricsAbout.trim().length === 0 || model === null}
+                    onClick={() => {
+                      if (model === null) return;
+                      setLyricsNote(null);
+                      const requestId = sendBenchDraftLyrics({
+                        worldId,
+                        sessionId: session.id,
+                        description: lyricsAbout,
+                        ...(draft.brief.trim().length > 0 ? { style: draft.brief } : {}),
+                        provider: model.provider,
+                        model: model.id,
+                      });
+                      if (requestId === null) {
+                        setLyricsNote("not connected - try again");
+                        return;
+                      }
+                      draftingRef.current = requestId;
+                      setLyricsAuthor(model.displayName);
+                      setDrafting(true);
+                    }}
+                  >
+                    {lyricsDraft === null ? "Write" : "Try again"}
+                  </Button>
+                  <Button variant="ghost" onClick={() => setLyricsOpen(false)}>
+                    Cancel
+                  </Button>
+                  {/* The only path from a draft into the song. */}
+                  <Button
+                    variant="primary"
+                    data-testid="lyrics-accept"
+                    disabled={lyricsDraft === null}
+                    onClick={() => {
+                      if (lyricsDraft === null) return;
+                      compose({ ...draft, params: { ...musicParams, lyrics: lyricsDraft } });
+                      setLyricsOpen(false);
+                    }}
+                  >
+                    Use these words
+                  </Button>
+                </div>
               </div>
             </div>
-          </div>
+          </BodyLayer>
         )}
         {briefExpanded && (
-          <div className="fy-bench__briefmodal" role="dialog" aria-label="The brief, large">
-            <div className="fy-bench__briefmodalpanel">
-              <BenchBrief
-                variant="large"
-                autoFocus
-                value={draft.brief}
-                onChange={onBriefChange}
-                options={mentions}
-                worldSlug={worldSlug}
-                underlay={briefWithChips(draft.brief, tokens, attached)}
-                label={speaking ? "Words" : "Brief"}
-                onEscape={() => setBriefExpanded(false)}
-                {...(voiceParams !== null
-                  ? {
-                      // The marker menu lives under the composer's brief: `[` here closes the
-                      // window onto it, at the same words.
-                      onBracket: (start: number, end: number) => {
-                        setBriefExpanded(false);
-                        onBracket(start, end);
-                      },
-                    }
-                  : {})}
-              />
-              <PromptCapabilityNotices text={draft.brief} model={model} />
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                {promptCap !== undefined && (
-                  <span
-                    className={cx("fy-bench__counter", overCap && "fy-bench__counter--over")}
-                    style={{ alignSelf: "center" }}
-                  >
-                    {`${draft.brief.length}/${promptCap}`}
-                  </span>
-                )}
-                <Button variant="ghost" onClick={() => setBriefExpanded(false)}>
-                  Done
-                </Button>
+          <BodyLayer>
+            <div className="fy-bench__briefmodal" role="dialog" aria-label="The brief, large">
+              <div className="fy-bench__briefmodalpanel">
+                <BenchBrief
+                  variant="large"
+                  autoFocus
+                  value={draft.brief}
+                  onChange={onBriefChange}
+                  options={mentions}
+                  worldSlug={worldSlug}
+                  underlay={briefWithChips(draft.brief, tokens, attached)}
+                  label={speaking ? "Words" : "Brief"}
+                  onEscape={() => setBriefExpanded(false)}
+                  {...(voiceParams !== null
+                    ? {
+                        // The marker menu lives under the composer's brief: `[` here closes the
+                        // window onto it, at the same words.
+                        onBracket: (start: number, end: number) => {
+                          setBriefExpanded(false);
+                          onBracket(start, end);
+                        },
+                      }
+                    : {})}
+                />
+                <PromptCapabilityNotices text={draft.brief} model={model} />
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  {promptCap !== undefined && (
+                    <span
+                      className={cx("fy-bench__counter", overCap && "fy-bench__counter--over")}
+                      style={{ alignSelf: "center" }}
+                    >
+                      {`${draft.brief.length}/${promptCap}`}
+                    </span>
+                  )}
+                  <Button variant="ghost" onClick={() => setBriefExpanded(false)}>
+                    Done
+                  </Button>
+                </div>
               </div>
             </div>
-          </div>
+          </BodyLayer>
         )}
         {uploadConfirmation && (
           <RemoteVoiceUploadConfirmation

@@ -9,6 +9,7 @@ import type { ClientState, ManifestModel } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { SettingsGeneralScreen } from "../src/screens/shell.js";
 import { __setStateForTest } from "../src/lib/store.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -329,6 +330,7 @@ describe("AI models holds the switch (SPEC-042 R-4, R-8, R-12, R-13)", () => {
     Object.assign(globalThis, globals);
     __setStateForTest(stateWith({}));
     const host = dom.document.createElement("div") as unknown as HTMLElement;
+    const view = dialogRoot(host);
     dom.document.body.append(host);
     const root = createRoot(host);
     try {
@@ -337,14 +339,14 @@ describe("AI models holds the switch (SPEC-042 R-4, R-8, R-12, R-13)", () => {
           <App />
         </MemoryRouter>,
       ));
-      const section = [...host.querySelectorAll<HTMLElement>('[data-testid="models-section"]')].find((node) => node.textContent?.includes("OpenAI"))!;
+      const section = [...view.querySelectorAll<HTMLElement>('[data-testid="models-section"]')].find((node) => node.textContent?.includes("OpenAI"))!;
       const remedy = section.querySelector<HTMLButtonElement>(".fy-by__fix")!;
       assert.equal(remedy.textContent, "Add a key");
       assert.equal(remedy.getAttribute("aria-expanded"), "false");
       await act(async () => remedy.click());
       assert.equal(remedy.getAttribute("aria-expanded"), "true", "the remedy is a disclosure");
       assert.ok(section.querySelector('input[type="password"], input[aria-label*="key" i]'), "and what it discloses is the key line, here");
-      assert.ok(host.querySelector('[data-screen="settings-models"]'), "the page is still AI models — nothing went to Providers");
+      assert.ok(view.querySelector('[data-screen="settings-models"]'), "the page is still AI models — nothing went to Providers");
     } finally {
       await act(async () => root.unmount());
       __setStateForTest(FIXTURE_STATE);

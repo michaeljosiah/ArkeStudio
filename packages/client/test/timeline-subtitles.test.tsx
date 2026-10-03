@@ -13,6 +13,7 @@ import {
 } from "@arke-studio/contracts";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { CutScreen } from "../src/screens/cut.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -38,7 +39,9 @@ Object.assign(globalThis, {
 });
 
 interface Mounted {
+  /** The body: where the sheets are drawn. The screen itself is in `host`. */
   container: HTMLElement;
+  host: HTMLElement;
   root: Root;
   sent: ClientMessage[];
 }
@@ -72,12 +75,12 @@ async function mount(state: ClientState, search = ""): Promise<Mounted> {
       </MemoryRouter>,
     );
   });
-  return { container, root, sent };
+  return { container: dialogRoot(container), host: container, root, sent };
 }
 
 async function close(mounted: Mounted): Promise<void> {
   await act(async () => mounted.root.unmount());
-  mounted.container.remove();
+  mounted.host.remove();
 }
 
 function byLabel(mounted: Mounted, label: string): HTMLButtonElement {

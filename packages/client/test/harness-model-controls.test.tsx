@@ -9,6 +9,7 @@ import { AgentsPanel } from "../src/screens/agents.js";
 import { SettingsHarnessScreen, SettingsLayout } from "../src/screens/shell.js";
 import { ProductionConversation } from "../src/components/conversation.js";
 import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -693,7 +694,7 @@ it("shows one startup warning and the bundled version on a closed desktop connec
   window.arke = { appVersion: "0.5.49" } as typeof window.arke;
   try {
     await mount(modelState(), <Routes><Route path="/settings" element={<SettingsLayout />}><Route path="harness" element={<SettingsHarnessScreen />} /></Route></Routes>, "/settings/harness", "closed");
-    assert.equal(container.textContent!.split("Starting Arke Studio").length - 1, 1);
-    assert.equal(container.querySelector(".fy-settings__version")?.textContent, "0.5.49", "bare, as the rail is drawn (issue 1216)");
+    assert.equal(dialogRoot(container).textContent!.split("Starting Arke Studio").length - 1, 1);
+    assert.equal(dialogRoot(container).querySelector(".fy-settings__version")?.textContent, "0.5.49", "bare, as the rail is drawn (issue 1216)");
   } finally { window.arke = previous; }
 });

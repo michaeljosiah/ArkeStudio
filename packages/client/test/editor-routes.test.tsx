@@ -7,6 +7,7 @@ import { MemoryRouter } from "react-router";
 import { applyTimelineCommands, seedStoryPictureTimeline, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -36,7 +37,9 @@ Object.assign(globalThis, {
 });
 
 interface Mounted {
+  /** The body: where the sheets are drawn. The screen itself is in `host`. */
   container: HTMLElement;
+  host: HTMLElement;
   root: Root;
   sent: ClientMessage[];
 }
@@ -78,12 +81,12 @@ async function mount(path: string): Promise<Mounted> {
       </MemoryRouter>,
     );
   });
-  return { container, root, sent };
+  return { container: dialogRoot(container), host: container, root, sent };
 }
 
 async function close(screen: Mounted): Promise<void> {
   await act(async () => screen.root.unmount());
-  screen.container.remove();
+  screen.host.remove();
 }
 
 afterEach(() => {

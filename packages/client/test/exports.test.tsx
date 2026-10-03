@@ -17,6 +17,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { CutScreen } from "../src/screens/cut.js";
+import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -135,7 +136,9 @@ function storylessState(): { state: ClientState; production: NonNullable<ClientS
 }
 
 interface Mounted {
+  /** The body: where the sheets are drawn. The screen itself is in `host`. */
   container: HTMLElement;
+  host: HTMLElement;
   root: Root;
   sent: ClientMessage[];
 }
@@ -169,12 +172,12 @@ async function mountSheet(state: ClientState): Promise<Mounted> {
       </MemoryRouter>,
     );
   });
-  return { container, root, sent };
+  return { container: dialogRoot(container), host: container, root, sent };
 }
 
 async function unmount(mounted: Mounted): Promise<void> {
   await act(async () => mounted.root.unmount());
-  mounted.container.remove();
+  mounted.host.remove();
 }
 
 function sheet(mounted: Mounted): HTMLElement {
