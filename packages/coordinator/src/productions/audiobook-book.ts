@@ -22,6 +22,8 @@ import {
   type ChapterSummary,
   type ClonedVoice,
   type FreePlanShort,
+  type VoiceNames,
+  voiceDisplayLabel,
 } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -75,7 +77,7 @@ function runningTime(store: WorldStore, plan: Pick<AudiobookPlan, "blocks">, rec
  * pay, and each speaker the narrator stands in for as a line of its own — said in warning on
  * the card, and counted apart from the narrator's own share so the sum is exact.
  */
-export function bookPriceLines(narrator: ReadingRoom["narrator"], speaking: readonly Speaking[], misses: readonly Speaking[], priceOf: (block: Speaking) => number, sheetName: (sheet: string) => string): AudiobookPriceLine[] {
+export function bookPriceLines(narrator: ReadingRoom["narrator"], speaking: readonly Speaking[], misses: readonly Speaking[], priceOf: (block: Speaking) => number, sheetName: (sheet: string) => string, names: VoiceNames = {}): AudiobookPriceLine[] {
   const stoodIn = new Map<string, AudiobookPriceLine>();
   const own: Speaking[] = [];
   const isNarrator = (reader: Speaking["reader"]) => reader.provider === narrator.provider && reader.model === narrator.model && reader.voiceId === narrator.voiceId;
@@ -91,7 +93,7 @@ export function bookPriceLines(narrator: ReadingRoom["narrator"], speaking: read
     }
     const key = block.sheet ?? `:${speaker}`;
     const held = stoodIn.get(key) ?? {
-      label: block.reader.label ?? block.reader.voiceId,
+      label: voiceDisplayLabel(block.reader, names),
       provider: block.reader.provider,
       speaker,
       substituted,
@@ -110,7 +112,7 @@ export function bookPriceLines(narrator: ReadingRoom["narrator"], speaking: read
     if (!block.local && !misses.includes(block)) continue;
     const key = `${block.reader.provider}\n${block.reader.voiceId}`;
     const held = lines.get(key) ?? {
-      label: block.reader.label ?? block.reader.voiceId,
+      label: voiceDisplayLabel(block.reader, names),
       provider: block.reader.provider,
       ...(isNarrator(block.reader) ? { narrator: true as const } : {}),
       local: block.local,
@@ -132,8 +134,8 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
   const rows: AudiobookRow[] = [];
   const voices = new Map<string, AudiobookVoiceRow>();
   const narratorRow: AudiobookVoiceRow = {
-    name: room.narrator.label ?? room.narrator.voiceId,
-    voice: { label: room.narrator.label ?? room.narrator.voiceId, provider: room.narrator.provider, local: room.narrator.provider === "kokoro" },
+    name: voiceDisplayLabel(room.narrator, store.getBundle()),
+    voice: { label: voiceDisplayLabel(room.narrator, store.getBundle()), provider: room.narrator.provider, local: room.narrator.provider === "kokoro" },
     state: "narrator",
     blocks: 0,
   };
@@ -213,10 +215,10 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
         const speaks = await effectiveReader(store, planned.assigned, room);
         if (speaks !== null && speaks.substitutedNow === undefined) {
           held.state = "reads";
-          held.voice = { label: planned.assigned.label ?? planned.assigned.voiceId, provider: planned.assigned.provider, local: planned.assigned.provider === "kokoro" };
+          held.voice = { label: voiceDisplayLabel(planned.assigned, store.getBundle()), provider: planned.assigned.provider, local: planned.assigned.provider === "kokoro" };
         } else {
           held.state = "voice unavailable";
-          held.voice = { label: planned.assigned.label ?? planned.assigned.voiceId, provider: planned.assigned.provider, local: planned.assigned.provider === "kokoro" };
+          held.voice = { label: voiceDisplayLabel(planned.assigned, store.getBundle()), provider: planned.assigned.provider, local: planned.assigned.provider === "kokoro" };
           narratorRow.blocks += 1;
         }
       } else narratorRow.blocks += 1;
@@ -247,7 +249,7 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
       cloudBlocks: misses.length,
       characters: misses.reduce((sum, block) => sum + block.text.length, 0),
       estimatedMicroUsd: toRead.reduce((sum, prepared) => sum + prepared.estimate, 0),
-      voices: bookPriceLines(room.narrator, speaking, misses, priceOf, sheetName),
+      voices: bookPriceLines(room.narrator, speaking, misses, priceOf, sheetName, store.getBundle()),
       // Requests counted where reads are priced (design turn 185a), when any chapter groups.
       ...(toRead.some((prepared) => prepared.groups.length > 0)
         ? { requests: toRead.reduce((sum, prepared) => sum + prepared.requests, 0), perParagraph: toRead.reduce((sum, prepared) => sum + prepared.perParagraph, 0) }
@@ -352,7 +354,7 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
         characters: misses.reduce((sum, block) => sum + block.text.length, 0),
         estimatedMicroUsd: estimate,
         confirmationToken: token,
-        voices: bookPriceLines(room.narrator, speaking, misses, priceOf, (id) => sheets.find((sheet) => sheet.id === id)?.name ?? id),
+        voices: bookPriceLines(room.narrator, speaking, misses, priceOf, (id) => sheets.find((sheet) => sheet.id === id)?.name ?? id, store.getBundle()),
         // Across the book's chapters, each voice and vendor once (SPEC-046 R-40): the first
         // chapter's read is the one that makes the slot, and the book asks once for all of them.
         notices: firstReadNotices(toRead.flatMap((entry) => entry.prepared.clones)),

@@ -21,6 +21,7 @@ import {
   type Sheet,
   type VoiceCandidate,
   type WorldBundle,
+  voiceDisplayLabel,
 } from "@arke-studio/contracts";
 import { CharacterHeader } from "./character-reference.js";
 import { CloneVoiceDialog } from "../components/clone-voice-dialog.js";
@@ -131,7 +132,7 @@ function readsSource(
   const voice = sheet.voice;
   if (!voice) return null;
   if (!supportsVoiceUse(voice, "line")) {
-    return { label: voice.label ?? voice.voiceId, detail: "reader unavailable", local: null,
+    return { label: voiceDisplayLabel(voice, world), detail: "reader unavailable", local: null,
       clone: (world.clonedVoices ?? []).some(entry => entry.id === voice.voiceId) };
   }
   const model = voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId, world.clonedVoices ?? []);
@@ -139,7 +140,7 @@ function readsSource(
     ? candidates?.ranked.find(({ candidate }) => voiceTargetKey(candidate) === voiceTargetKey({ ...voice, model }))
         ?.candidate
     : undefined;
-  const label = voice.label ?? match?.label ?? voice.voiceId;
+  const label = voiceDisplayLabel({ label: voice.label ?? match?.label, voiceId: voice.voiceId }, world);
   const row = rowFor(models, { provider: voice.provider, model });
   return {
     label,

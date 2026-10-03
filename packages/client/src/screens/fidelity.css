@@ -1521,6 +1521,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-h1 { margin: 0; font: 650 28px/1.05 var(--font-sans); letter-spacing: -0.025em; }
 .fy-h1row__meta { font: 400 11px var(--font-mono); color: var(--neutral-400); }
 .fy-h1row__push { flex: 1; }
+.fy-h1row__actions { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 .fy-mono { font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
 .fy-eyebrow-sm { font: 500 10.5px var(--font-sans); letter-spacing: 0.14em; color: var(--muted-foreground); text-transform: uppercase; }
@@ -6926,6 +6927,14 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-ch__who-head { display: flex; align-items: center; gap: 8px; }
 .fy-ch__who-name { font: 500 12px var(--font-sans); flex: 1; min-width: 0; }
 .fy-ch__who-where { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; }
+/* A speaker and their voice never run under each other (a designed voice's id once did): the
+   name keeps its width, the voice drops to its own line when the panel is narrow, and only text
+   longer than the whole line is cut, with an ellipsis. */
+.fy-ch__who-head { flex-wrap: wrap; row-gap: 2px; }
+.fy-ch__who-head > .fy-ch__who-name { flex: 1 1 auto; }
+.fy-ch__who-head > .fy-ch__who-where { min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; }
+.fy-ch__who-head > .fy-ch__who-where:not(:has(svg)) { display: block; text-overflow: ellipsis; }
+.fy-ch__who-name > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-ch__line { position: relative; padding-left: 14px; margin-top: 3px; font: 400 11px/1.45 var(--font-sans); color: var(--muted-foreground); }
 .fy-ch__line::before { content: "·"; position: absolute; left: 2px; top: 0; color: var(--neutral-400); }
 .fy-ch__line--more { color: var(--neutral-400); }
@@ -8706,7 +8715,7 @@ button.fy-abdoor__voice:hover { background: var(--accent); border-color: var(--n
 .fy-abdoor__voice--warn { border-color: var(--warning); }
 .fy-abdoor__voice--warn .fy-abdoor__voice-what { color: var(--warning); }
 .fy-abdoor__voice-name { font: 500 12px var(--font-sans); color: var(--foreground); }
-.fy-abdoor__voice-what { font-size: 10.5px; color: var(--muted-foreground); }
+.fy-abdoor__voice-what { font-size: 10.5px; color: var(--muted-foreground); overflow-wrap: anywhere; }
 .fy-abdoor__note { display: flex; gap: 16px; align-items: center; margin-top: 10px; font-size: 10.5px; color: var(--muted-foreground); }
 .fy-abdoor__planned { color: var(--neutral-400); }
 .fy-abdoor__lines { display: flex; flex-direction: column; gap: 6px; }

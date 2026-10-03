@@ -8,7 +8,7 @@ import { BookReadingPanel, BookRequests } from "./chapter-audiobook.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { ChevronRight, Play, Speaker } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
-import { ListenButton } from "../components/audiobook-player.js";
+import { ListenButton, listenLeads } from "../components/audiobook-player.js";
 import { ExportAudiobookButton } from "../components/audiobook-export.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { Badge, Button, cx } from "../components/ui.js";
@@ -302,8 +302,9 @@ export function AudiobookScreen() {
       );
     }
     if (price === null || price.chapters === 0) return null;
+    // One primary in the head: once a block is made, Listen leads and the read of the rest stands back.
     return (
-      <Button variant="primary" disabled={connection !== "open" || book?.state === "priced"} onClick={begin} data-testid="read-book">
+      <Button variant={listenLeads(production) ? "secondary" : "primary"} disabled={connection !== "open" || book?.state === "priced"} onClick={begin} data-testid="read-book">
         {phone ? <><Play size={16} />Read the book</> : `Read the book · ${price.chapters} chapter${price.chapters === 1 ? "" : "s"}`}
         {!phone && price.requests !== undefined ? ` · ${price.requests} request${price.requests === 1 ? "" : "s"}` : ""}
         {price.estimatedMicroUsd > 0 ? ` · ${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}` : ""}
@@ -318,11 +319,14 @@ export function AudiobookScreen() {
           {door === null ? "…" : line.line}
         </span>
         <span className="fy-h1row__push" />
-        {/* Listen (design turn 186): the book as a listener hears it, once a block anywhere is made. */}
-        <ListenButton worldId={worldId} production={production} />
-        {/* Export (design turn 186e): the book as the player; the sheet counts what is read whole. */}
-        <ExportAudiobookButton worldId={worldId} production={production} />
-        {!phone && primary}
+        {/* The head's presses as one group (146a), so a narrow window moves them together. */}
+        <span className="fy-h1row__actions">
+          {/* Listen (design turn 186): the book as a listener hears it, the head's primary once a block anywhere is made. */}
+          <ListenButton worldId={worldId} production={production} />
+          {/* Export (design turn 186e): the book as the player; the sheet counts what is read whole. */}
+          <ExportAudiobookButton worldId={worldId} production={production} />
+          {!phone && primary}
+        </span>
       </div>
       {phone && <HeldBar className="fy-abdoor-held"><span>{totalBlocks} blocks · {price === null ? "price unavailable" : price.estimatedMicroUsd === 0 ? "free" : `${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}`}</span>{primary}</HeldBar>}
       <div className="fy-abdoor__voices" data-testid="audiobook-voices">
@@ -473,7 +477,7 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
   const free = price.freePlan !== undefined ? freePlanAskCopy(price.freePlan) : null;
   const models = useStore().state?.app.manifest?.models;
   return (
-    <EditorDialog open title="Read the book" subtitle={`${price.chapters} chapter${price.chapters === 1 ? "" : "s"} · ${price.characters.toLocaleString()} characters · ${price.cloudBlocks} cloud line${price.cloudBlocks === 1 ? "" : "s"}`} onClose={onClose} width={460} labelledBy="read-book-title">
+    <EditorDialog open title="Read the book" subtitle={`${price.chapters} chapter${price.chapters === 1 ? "" : "s"} · ${price.characters.toLocaleString()} characters · ${price.cloudBlocks} cloud line${price.cloudBlocks === 1 ? "" : "s"}`} onClose={onClose} width={460} labelledBy="read-book-title" onBody>
       <div className="fy-exsheet" data-testid="read-book-sheet">
         <div className="fy-abdoor__lines">
           {price.voices.map((line, index) => {
