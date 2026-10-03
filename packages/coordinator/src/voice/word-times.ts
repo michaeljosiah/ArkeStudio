@@ -1,4 +1,4 @@
-import { frameLevels, readSpeechWav, silenceThreshold, sliceSpeech, speechSeconds, writeSpeechWav, type SpeechPcm } from "../audio/speech-wav.js";
+import { frameLevels, PAUSE_SEC, readSpeechWav, runawayTailIndex, sliceSpeech, soundSpans, speechSeconds, writeSpeechWav, type SpeechPcm } from "../audio/speech-wav.js";
 
 /**
  * Word times for a grouped request, on this machine (design turn 185): what the split cuts by.
@@ -16,8 +16,7 @@ export interface TimedWord {
   end: number;
 }
 
-/** A pause long enough to be between sentences or turns, not inside a word. */
-export const PAUSE_SEC = 0.15;
+export { PAUSE_SEC };
 /** Whisper drops shorter stretches as blips, so they ride with a neighbour. */
 export const MIN_STRETCH_SEC = 0.45;
 /** Whisper hears in 30 s windows; a stretch longer than this is cut at its quietest moment near the middle. */
@@ -26,43 +25,39 @@ export const MAX_STRETCH_SEC = 24;
 /** The stretches of speech between pauses, in seconds, each at least long enough to transcribe. */
 export function speechStretches(pcm: SpeechPcm): Array<{ start: number; end: number }> {
   const levels = frameLevels(pcm);
-  const threshold = silenceThreshold(levels);
   const frame = 0.01;
-  const minPause = Math.round(PAUSE_SEC / frame);
+  const raw = soundSpans(pcm);
+  const short = (span: { start: number; end: number }) => span.end - span.start < MIN_STRETCH_SEC;
+  // A blip rides with a neighbour that is speech, across the shorter pause. It used to ride with
+  // any neighbour, blips included, and a runaway tail of blips (the turn 185 probe's 26 s after a
+  // `<chuckle>`) chained itself onto the last words: their times were spread across the tail, and
+  // the last block's cut kept all of it. Blips with no speech beside them stay together instead,
+  // with a neighbour only while they are too short to transcribe alone, and a runaway tail is
+  // one stretch of its own from its first blip.
+  const tail = runawayTailIndex(raw);
+  const group = raw.map((span, i) => (tail >= 0 && i >= tail ? tail : short(span) ? -1 : i));
+  raw.forEach((span, i) => {
+    if (!short(span) || group[i] !== -1) return;
+    const before = i > 0 && !short(raw[i - 1]!) ? span.start - raw[i - 1]!.end : Infinity;
+    const after = i + 1 < raw.length && !short(raw[i + 1]!) ? raw[i + 1]!.start - span.end : Infinity;
+    if (before !== Infinity || after !== Infinity) group[i] = before <= after ? i - 1 : i + 1;
+  });
+  for (let a = 0; a < raw.length; a++) {
+    if (group[a] !== -1) continue;
+    let b = a;
+    while (b + 1 < raw.length && group[b + 1] === -1) b += 1;
+    const before = a > 0 ? raw[a]!.start - raw[a - 1]!.end : Infinity;
+    const after = b + 1 < raw.length && (tail < 0 || b + 1 < tail) ? raw[b + 1]!.start - raw[b]!.end : Infinity;
+    const own = raw[b]!.end - raw[a]!.start >= MIN_STRETCH_SEC || (before === Infinity && after === Infinity);
+    const joined = own ? a : before <= after ? group[a - 1]! : group[b + 1]!;
+    for (let i = a; i <= b; i++) group[i] = joined;
+    a = b;
+  }
   const spans: Array<{ start: number; end: number }> = [];
-  let open = -1;
-  let quiet = 0;
-  for (let i = 0; i < levels.length; i++) {
-    if (levels[i]! >= threshold) {
-      if (open < 0) open = i;
-      quiet = 0;
-    } else if (open >= 0) {
-      quiet += 1;
-      if (quiet >= minPause) {
-        spans.push({ start: open * frame, end: (i - quiet + 1) * frame });
-        open = -1;
-        quiet = 0;
-      }
-    }
-  }
-  if (open >= 0) spans.push({ start: open * frame, end: (levels.length - quiet) * frame });
-  // A blip rides with the neighbour across the shorter pause.
-  for (let i = 0; i < spans.length && spans.length > 1;) {
-    const span = spans[i]!;
-    if (span.end - span.start >= MIN_STRETCH_SEC) {
-      i += 1;
-      continue;
-    }
-    const before = i > 0 ? span.start - spans[i - 1]!.end : Infinity;
-    const after = i + 1 < spans.length ? spans[i + 1]!.start - span.end : Infinity;
-    if (before <= after) {
-      spans[i - 1]!.end = span.end;
-      spans.splice(i, 1);
-    } else {
-      spans[i + 1]!.start = span.start;
-      spans.splice(i, 1);
-    }
-  }
+  raw.forEach((span, i) => {
+    if (i > 0 && group[i] === group[i - 1]) spans[spans.length - 1]!.end = span.end;
+    else spans.push({ ...span });
+  });
   // A stretch past whisper's window is cut at its quietest frame between a third and two thirds.
   const out: Array<{ start: number; end: number }> = [];
   const stack = [...spans].reverse();
