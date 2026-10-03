@@ -251,6 +251,60 @@ describe("the side and the block panel (turn 187a, 187c)", () => {
   });
 });
 
+describe("codex on PR 1500", () => {
+  it("keeps a playhead in authored silence in it on the other clock", () => {
+    const held = record({ "p1.0": { start: 1 } });
+    const shown = timingOf(held, "narrator", "estimate");
+    const mixed = timingOf(held, "narrator", "skip");
+    const p1 = shown.bars.find((bar) => bar.key === "p1.0")!;
+    assert.equal(betweenClocks(shown, mixed, p1.at - 0.5), p1.at - 0.5, "half a second into the second's pause, not at the next block");
+  });
+
+  it("never drags the chapter's first block away from its start", async () => {
+    const writes: Array<[string, BlockTimingInput]> = [];
+    const m = await render(view(record(), writes));
+    await dragBy(m, q(m, `[data-key="title"]`)!, 40);
+    assert.deepEqual(writes, []);
+  });
+
+  it("resets the pause after a block with the block", async () => {
+    const writes: Array<[string, BlockTimingInput]> = [];
+    const held = record({ "p2.0": { start: -0.4 } });
+    const timing = timingOf(held);
+    const m = await render(<TimingSide bar={timing.bars.find((bar) => bar.key === "p1.0")!} row={ROWS[2]!} timing={timing} rows={ROWS} onTiming={(key, input) => writes.push([key, input])} onPlayFrom={() => {}} refused={null} locked={false} />);
+    await act(async () => q(m, "[data-testid=timing-reset]")!.click());
+    assert.deepEqual(writes, [["p1.0", { reset: true, pauseAfter: null }]]);
+  });
+
+  it("selects a reaction's host block when the reaction is pressed", async () => {
+    const chosen: string[] = [];
+    const held: ChapterAudiobook = { ...record(), reactions: { x1: { host: { key: "p3.0", textHash: audiobookTextHash(TEXT["p3.0"]!) }, speaker: "tunde", sound: "laughs", offset: 0.5, by: "author", at: AT } } };
+    const m = await render(view(held, [], { onSelect: (key) => chosen.push(key) }));
+    await act(async () => q(m, `[data-key="x1"]`)!.click());
+    assert.deepEqual(chosen, ["p3.0"]);
+  });
+
+  it("draws a take the coordinator found gone as not read", () => {
+    const { blocks } = timingInputs(ROWS, record(), ARTIFACTS, [ARTIFACTS[2]!.id]);
+    assert.equal(blocks[2]!.take, undefined);
+    assert.ok(blocks[1]!.take !== undefined);
+  });
+
+  it("puts a refused value back when the answer lands", async () => {
+    const held = record();
+    const timing = timingOf(held);
+    const bar = timing.bars.find((candidate) => candidate.key === "p1.0")!;
+    const side = (revision: number) => <TimingSide bar={bar} row={ROWS[2]!} timing={timing} rows={ROWS} onTiming={() => {}} onPlayFrom={() => {}} refused={null} locked={false} revision={revision} />;
+    const m = await render(side(1));
+    const field = q(m, "[data-testid=timing-trim-head]") as HTMLInputElement;
+    field.value = "2.90";
+    await act(async () => field.dispatchEvent(new dom.Event("focusout", { bubbles: true }) as unknown as Event));
+    assert.equal(field.value, "2.90");
+    await act(async () => m.root.render(side(2)));
+    assert.equal((q(m, "[data-testid=timing-trim-head]") as HTMLInputElement).value, "0.00");
+  });
+});
+
 describe("the third view (turn 187a)", () => {
   const HASH = `sha256:${"a".repeat(64)}`;
   // HTML in the body sends the Bible's gate to the source editor, the one that mounts under linkedom.

@@ -1645,6 +1645,7 @@ export function ChapterWorkspace({
       onPlayWindow={(from, to) => audiobook.mixPlayer.play(betweenClocks(audiobook.timing, audiobook.mixed, from), betweenClocks(audiobook.timing, audiobook.mixed, to), true)}
       locked={timingLocked}
       grouped={selectedGroup}
+      revision={audiobook.lastRecord?.seq}
     />
   );
 
@@ -2138,7 +2139,7 @@ export function ChapterWorkspace({
           )}
           {view === "audiobook" && <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null} title={`${audiobook.selected === "title" ? "Title" : `Block ${audiobook.rows.findIndex(row => row.block.key === audiobook.selected) + 1}`} · ${audiobook.rows.find(row => row.block.key === audiobook.selected)?.mark ?? "Narrator"}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><AudiobookSide {...blockPanel} />{timingPanel}{pictureRow !== null && <BlockPicturePanel worldId={worldId} production={production} chapterFile={chapter.file} chapterOrder={chapter.order} row={pictureRow} rows={audiobook.rows} pictures={chapterPictures} />}</aside></ResponsiveSheet>}
           {/* The Timing view's side (turn 187a): the bar selected, the same values as the block panel's. */}
-          {view === "timing" && <ResponsiveSheet sheet={blockSheet} open={selectedBar !== null} title={`${selectedTimingRow?.mark ?? "Reaction"} · ${audiobook.selected ?? ""}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><TimingSide bar={selectedBar} row={selectedTimingRow} timing={audiobook.timing} rows={audiobook.rows} onTiming={onTiming} onPlayFrom={(at) => { setPlayhead(at); audiobook.mixPlayer.play(betweenClocks(audiobook.timing, audiobook.mixed, at)); }} refused={audiobook.lastRecord?.refused ?? null} locked={timingLocked} /></aside></ResponsiveSheet>}
+          {view === "timing" && <ResponsiveSheet sheet={blockSheet} open={selectedBar !== null} title={`${selectedTimingRow?.mark ?? "Reaction"} · ${audiobook.selected ?? ""}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><TimingSide bar={selectedBar} row={selectedTimingRow} timing={audiobook.timing} rows={audiobook.rows} onTiming={onTiming} onPlayFrom={(at) => { setPlayhead(at); audiobook.mixPlayer.play(betweenClocks(audiobook.timing, audiobook.mixed, at)); }} refused={audiobook.lastRecord?.refused ?? null} locked={timingLocked} revision={audiobook.lastRecord?.seq} /></aside></ResponsiveSheet>}
           <ResponsiveSheet sheet={compact} open={notesOpen} title={`Chapter ${String(chapter.order).padStart(2,"0")} · notes`} onClose={() => setNotesOpen(false)} className="fy-chapter-notes-sheet">
           <aside className="fy-ch__side fy-ch__notes">
             <section className="fy-bible__panel">
