@@ -29,11 +29,11 @@ async function setup(mode: "image" | "video" = "image") {
   await mkdir(join(dir, sessionMediaDir(sessionId, takeId)), { recursive: true });
   await writeFile(join(dir, sessionMediaDir(sessionId, takeId), file), bytes);
   await bench.append({ type: "take-completed", takeId, media: { file, hash: "sha256:deadbeefdeadbeef", ...(mode === "video" ? { info: { durationSec: 5, hasAudio: true, hasVideo: true } } : {}) }, completedAt: AT }, { at: AT });
-  const ports = { bench: async () => ({ session: (await bench.fold())!, store: bench }) };
+  const ports: ConstructorParameters<typeof ProductionTakeFiling>[1] = { bench: async () => ({ session: (await bench.fold())!, store: bench }) };
   const service = () => new ProductionTakeFiling(world, ports);
   const action: WorldChatProductionTakeFileAction["action"] = { kind: "production-take-file", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12",
     sessionId, takeId, checkReceiptIds: [newId("check")] };
-  return { dir, world, bench, service, action, file, bytes };
+  return { dir, world, bench, service, action, file, bytes, ports };
 }
 
 describe("Production Chat Bench take filing (SPEC-051 R-7, R-13)", () => {
@@ -121,5 +121,39 @@ describe("Production Chat Bench take filing (SPEC-051 R-7, R-13)", () => {
     const count = (await h.bench.read()).length;
     await h.service().reconcile(id);
     assert.equal((await h.bench.read()).length, count, "the recovery event is idempotent");
+  });
+  for (const recover of ["file", "reconcile"] as const) it(`retries interrupted loose-video boundary extraction through ${recover}`, async t => {
+    const h = await setup("video");
+    assert.equal((await clearShotFrame(h.world, "saltlight", "sh_13")).ok, true);
+    let calls = 0;
+    h.ports.toPng = { write: async (_input, output, atSec) => {
+      assert.equal(atSec, 5, "the frozen source duration is the segment's out-point");
+      if (++calls === 1) return { ok: false, reason: "timeout" };
+      await writeFile(output, encodePng(solidImage(4, 4, [255, 0, 0, 255])));
+      return { ok: true };
+    } };
+    const id = newId("act");
+    await h.service().prepare(h.action, id);
+    const append = h.bench.append.bind(h.bench);
+    let interrupted = false;
+    t.mock.method(h.bench, "append", (...args: Parameters<BenchStore["append"]>) => {
+      if (!interrupted && args[0].type === "take-subject-filed") { interrupted = true; return Promise.reject(new Error("Interrupted filing")); }
+      return append(...args);
+    });
+    const committed = await h.service().file(h.action, id, () => null);
+    assert.equal(committed.benchRecorded, false);
+    assert.equal(committed.boundaryFrame?.ok, false);
+    await rm(join(h.dir, sessionMediaDir(h.action.sessionId, h.action.takeId), h.file));
+    const repaired = recover === "file" ? await h.service().file(h.action, id, () => "Already accepted") : await h.service().reconcile(id);
+    assert.equal(repaired?.boundaryFrame?.ok, true);
+    assert.deepEqual(repaired?.productionTakeIds, committed.productionTakeIds);
+    const production = h.world.getBundle().productions.find(p => p.meta.id === "saltlight")!;
+    const artifactId = production.selections.sh_13!.startFrameArtifactId;
+    assert.ok(artifactId);
+    assert.equal(h.world.getBundle().artifacts.find(a => a.id === artifactId)!.boundaryExtraction!.sourceTakeId, committed.productionTakeIds.at(-1));
+    const before = structuredClone(production);
+    await h.service().reconcile(id);
+    assert.equal(calls, 2, "recovery reuses the committed boundary artifact");
+    assert.deepEqual(h.world.getBundle().productions.find(p => p.meta.id === "saltlight")!, before);
   });
 });

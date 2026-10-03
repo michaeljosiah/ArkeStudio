@@ -7,7 +7,7 @@ import {
   type BenchSession, type WorldChatProductionTakeFileAction,
 } from "@arke-studio/contracts";
 import { conversationActionDigest } from "../arke-actions/lifecycle.js";
-import { existingBenchSubjectFiling, fileBenchSubjectTake, type SubjectFilingOutcome } from "../bench/filing.js";
+import { chainBenchSubjectBoundary, existingBenchSubjectFiling, fileBenchSubjectTake, type SubjectFilingOutcome } from "../bench/filing.js";
 import { BenchStore, sessionMediaDir } from "../bench/store.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "../world/reference-files.js";
@@ -102,9 +102,10 @@ export class ProductionTakeFiling {
     if (!plan || plan.actionDigest !== conversationActionDigest(action)) throw new Error("The prepared filing is unavailable.");
     const recovered = this.existing(action, plan);
     if (recovered) {
+      const filed = await this.recoverBoundary(plan, recovered);
       const benchRecorded = await this.recordFiling(action, id, recovered);
       await this.ports.refresh?.(action.sessionId);
-      return { ...recovered, benchRecorded };
+      return { ...filed, benchRecorded };
     }
     const source = await this.source(action);
     const session = { ...source.bench.session, subject: plan.subject };
@@ -141,10 +142,17 @@ export class ProductionTakeFiling {
     const work = async () => {
       const filed = this.existing(plan.action, plan);
       if (!filed || !await this.recordFiling(plan.action, id, filed)) return null;
+      const recovered = await this.recoverBoundary(plan, filed);
       await this.ports.refresh?.(plan.action.sessionId);
-      return filed;
+      return recovered;
     };
     return this.ports.serialise ? this.ports.serialise(`${plan.action.sessionId}/${plan.action.takeId}`, work) : work();
+  }
+  private async recoverBoundary(plan: Plan, filed: SubjectFilingOutcome): Promise<SubjectFilingOutcome> {
+    // Loose sessions have no subject for generic Bench recovery. Retry the post-commit
+    // continuity work from the frozen plan, respecting current selections and own frames.
+    const boundaryFrame = await chainBenchSubjectBoundary(this.world, { ...plan.take, request: plan.request }, this.ports.toPng);
+    return boundaryFrame === undefined ? filed : { ...filed, boundaryFrame };
   }
   private existing(action: Action, plan: Plan) {
     const session = foldBenchSession({ schemaVersion: 1, id: action.sessionId, createdAt: plan.take.createdAt, subject: plan.subject }, []);
