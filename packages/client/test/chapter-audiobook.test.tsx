@@ -372,6 +372,41 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(q(m, '[data-testid="read-audiobook"]'), "declined, the press is back");
   });
 
+  it("a confirmed price says starting… until the run answers, and cannot be pressed twice (2026-10-03)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    const requestId = "01J8F3K2QW9VZX4N7M0RTYB6H1";
+    const priced = () => act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 36_000, confirmationToken: "tok", voices: [{ label: "Low tide", provider: "elevenlabs", characters: 120, estimatedMicroUsd: 36_000 }] }));
+    const confirm = () => q(m, '[data-testid="audiobook-confirm"]') as HTMLButtonElement | null;
+    const reads = () => m.sent.filter((message) => message.kind === "read-audiobook-chapter").length;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId, toMake: 4, blocks: 4 }));
+    await priced();
+    assert.match(confirm()!.textContent ?? "", /^Confirm 120 characters/);
+    const before = reads();
+    await act(async () => confirm()!.click());
+    assert.equal(reads(), before + 1);
+    assert.equal(confirm()!.textContent, "starting…", "the press shows it was taken");
+    assert.equal(confirm()!.disabled, true);
+    await act(async () => confirm()!.click());
+    assert.equal(reads(), before + 1, "a second press sends nothing");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId, toMake: 4, blocks: 4 }));
+    assert.equal(confirm(), null);
+    assert.match(text(m), /reading… 0 of 4/, "the run's own line takes over");
+
+    // Refused, or asked again: the confirm is never left on starting….
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, outcome: "stopped", made: 0, flagged: 0 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId, toMake: 4, blocks: 4 }));
+    await priced();
+    await act(async () => confirm()!.click());
+    await priced();
+    assert.match(confirm()!.textContent ?? "", /^Confirm 120 characters/, "a price asked again is asked as a price");
+    await act(async () => confirm()!.click());
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, outcome: "refused", made: 0, flagged: 0, reason: "the prose moved" }));
+    assert.equal(confirm(), null);
+    assert.match(text(m), /the prose moved/);
+  });
+
   it("a cloned voice's consent is kept for the price's answer, and declining the consent clears the run (codex on PR 1180)", async () => {
     const m = await mount(inkbound());
     await answerOpen(m);
