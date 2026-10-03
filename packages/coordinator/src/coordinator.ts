@@ -292,7 +292,7 @@ import { makeAdapterExtractor } from "./artifacts/model.js";
 import { deriveContinuity, makeAdapterContinuityDeriver, type ContinuityDeriver } from "./productions/continuity.js";
 import { castLines, makeAdapterVoicesDeriver, readVoices, setVoicePin, VoicePinRefusal, type VoicesDeriver } from "./productions/voices.js";
 import { discardRecording, keepRecording, RECORDED_TAKE_EXTENSIONS, RecordedTakeRefusal, stageRecording, type StagedRecording } from "./productions/audiobook-recorded.js";
-import { exportScript, matchFiles, type MatchedFile } from "./productions/audiobook-lines.js";
+import { exportScript, speakerLines, matchFiles, type MatchedFile } from "./productions/audiobook-lines.js";
 import {
   acceptDirections,
   directChapter,
@@ -1189,6 +1189,8 @@ export class Coordinator {
    * publication: in between, the catalogue on display describes the old rows.
    */
   private localRuntimeListed = false;
+  private localListingMisses = 0;
+  private localListingSucceededAt = 0;
   /** Resolves once the harness's sign-in state has been read for the first time, or once it is known it will not be. */
   private vendorAuthSettled: Promise<void> = Promise.resolve();
   private settleVendorAuth: () => void = () => {};
@@ -4738,9 +4740,12 @@ export class Coordinator {
       // unattended default all see the same set, and a pulled model under the minimum is simply
       // not a writing model rather than one that is listed and then refused.
       const pulled = await list();
+      this.localListingMisses = 0;
+      this.localListingSucceededAt = Date.now();
       models = pulled.filter(meetsLocalModelMinimum);
       this.localModelsBelowMinimum = pulled.length - models.length;
     } catch {
+      if (++this.localListingMisses === 1 && this.localRuntimeListed && Date.now() - this.localListingSucceededAt <= 90_000) return;
       listed = false;
     }
     const fingerprint = JSON.stringify(models);
@@ -5038,6 +5043,7 @@ export class Coordinator {
     // model that calls tools" would send them to replace a model that already does (issue 1289).
     const waiting = this.readModel.getState().app.harnessModels.filter((model) => model.provider === "ollama" && localModelPolicy(model.id)?.explicitChoiceOnly === true);
     if (offered && waiting.length > 0) {
+      if (agent === "world-author") return `Choose ${localModelPolicy(waiting[0]!.id)!.displayName} under Writing model above the conversation.`;
       // Named for the agent it would run (issue 1403): "this agent" sent the person to a list of
       // thirteen agents with nothing to say which one World Chat is.
       const which = agent === "world-builder" ? "World Chat (world-builder)" : agent ?? "this agent";
@@ -6363,7 +6369,7 @@ export class Coordinator {
     benchDispatchHeld = false,
     genesisDecisionHeld = false,
   ): Promise<void> {
-    if (!genesisDecisionHeld && (msg.kind === "genesis-propose-world" || msg.kind === "genesis-import-resolve" || msg.kind === "genesis-voice-generate" || msg.kind === "genesis-voice-decide" || msg.kind === "genesis-image-generate" || msg.kind === "genesis-image-decide" || msg.kind === "generate-look-preview" || msg.kind === "genesis-discard" || msg.kind === "genesis-chat" || msg.kind === "genesis-decide" || msg.kind === "genesis-review" || msg.kind === "begin-founding-build" || msg.kind === "genesis-attach" || msg.kind === "genesis-attach-files" || msg.kind === "create-world") && msg.genesisId) {
+    if (!genesisDecisionHeld && (msg.kind === "genesis-propose-world" || msg.kind === "genesis-import-resolve" || msg.kind === "genesis-voice-generate" || msg.kind === "genesis-voice-decide" || msg.kind === "genesis-image-generate" || msg.kind === "genesis-image-decide" || msg.kind === "generate-look-preview" || msg.kind === "genesis-discard" || msg.kind === "genesis-chat" || msg.kind === "genesis-decide" || msg.kind === "genesis-review" || msg.kind === "genesis-readiness" || msg.kind === "genesis-readiness-leave" || msg.kind === "genesis-voices" || msg.kind === "genesis-images" || msg.kind === "genesis-imports" || msg.kind === "begin-founding-build" || msg.kind === "genesis-attach" || msg.kind === "genesis-attach-files" || msg.kind === "create-world") && msg.genesisId) {
       return serializeFileMutation(`founding-decisions:${msg.genesisId}`, () => this.handleClientMessage(msg, false, false, true));
     }
     // Delete joins Accept, Keep and Not this on one key per take, so a filing and a delete
@@ -7898,7 +7904,7 @@ export class Coordinator {
           await atomicWriteFile(join(dir, "readiness-review.json"), JSON.stringify(review, null, 2));
           this.emit({ type: "genesis.readiness", at: new Date().toISOString(), genesisId: msg.genesisId, review });
         } catch (error) {
-          this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(error) });
+          this.emit({ type: "genesis.review-error", at: new Date().toISOString(), genesisId: msg.genesisId, area: "readiness", detail: describeCoordinatorError(error) });
         } finally { if (held) this.genesisDeciding.delete(msg.genesisId); }
         return;
       }
@@ -7907,6 +7913,7 @@ export class Coordinator {
       case "genesis-voice-decide": {
         let held = false;
         const reading = msg.kind === "genesis-voices";
+        if (reading && (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId))) return;
         try {
           if (!this.opts.provider.genesisDir) throw new Error("Founding conversations are unavailable.");
           if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || (!reading && this.genesisDeciding.has(msg.genesisId))) throw new Error("Another draft operation is running. Try again shortly.");
@@ -7927,12 +7934,10 @@ export class Coordinator {
               if (plan.voice.provider === "kokoro" && plan.voice.model === "kokoro-82m") {
                 const control = new AbortController(), key = "genesis:" + msg.genesisId;
                 this.reading.set(key, control);
-                this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "running", detail: "Generating the voice audition." });
                 try {
                   const work = generateLocalGenesisVoice(dir, plan, msg.requestId, () => this.voiceService!.synthesizePerformance(plan.voice.voiceId, plan.text, {}, control.signal));
                   this.trackBackground(work);
                   await work;
-                  this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "completed" });
                 } finally { if (this.reading.get(key) === control) this.reading.delete(key); }
               } else await this.enqueueBatch(msg.requestId, msg.kind, [genesisVoiceRequest(msg.genesisId, plan, msg.requestId)]);
             }
@@ -7944,7 +7949,7 @@ export class Coordinator {
           this.emit({ type: "genesis.voices", at: new Date().toISOString(), genesisId: msg.genesisId, voices });
         } catch (error) {
           const reason = describeCoordinatorError(error);
-          this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: reason });
+          this.emit({ type: "genesis.review-error", at: new Date().toISOString(), genesisId: msg.genesisId, area: "voices", detail: reason });
           if (!reading) this.emit({ type: "command.failed", at: new Date().toISOString(), command: msg.kind, requestId: msg.requestId, reason });
         } finally { if (held) this.genesisDeciding.delete(msg.genesisId); }
         return;
@@ -7993,6 +7998,7 @@ export class Coordinator {
         if (!this.opts.provider.genesisDir) return;
         let held = false;
         const reading = msg.kind === "genesis-imports";
+        if (reading && (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId))) return;
         try {
           if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || (!reading && this.genesisDeciding.has(msg.genesisId)))
             throw new Error("Another draft operation is still running. Try again shortly.");
@@ -8055,7 +8061,7 @@ export class Coordinator {
             : await reviewGenesisContent(dir);
           this.emit({ type: "genesis.review", at: new Date().toISOString(), genesisId: msg.genesisId, ...(msg.requestId ? { requestId: msg.requestId } : {}), review });
         } catch (err) {
-          this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
+          this.emit({ type: "genesis.review-error", at: new Date().toISOString(), genesisId: msg.genesisId, area: "content", ...(msg.requestId ? { requestId: msg.requestId } : {}), detail: describeCoordinatorError(err) });
         } finally { if (deciding) this.genesisDeciding.delete(msg.genesisId); }
         return;
       }
@@ -8089,6 +8095,7 @@ export class Coordinator {
         return;
       }
       case "genesis-chat": {
+        if (this.genesis?.isRunning(msg.genesisId)) return;
         const failed = (detail: string) =>
           this.emit({
             at: new Date().toISOString(),
@@ -8112,7 +8119,7 @@ export class Coordinator {
           await atomicWriteFile(join(dir, "voice-catalogue.json"), JSON.stringify(await this.voiceService?.catalogue() ?? [], null, 2));
           this.emit(draft);
           // Fire and watch: turns, the draft and the final status arrive as events.
-          this.trackBackground(this.genesis.run(dir, msg.genesisId, msg.text).catch(err => failed(describeCoordinatorError(err))));
+          this.trackBackground(this.genesis.run(dir, msg.genesisId, msg.text, msg.modelId).catch(err => failed(describeCoordinatorError(err))));
         } catch (err) {
           failed(describeCoordinatorError(err));
         }
@@ -14191,6 +14198,7 @@ export class Coordinator {
         }
         return;
       }
+      case "preview-audiobook-script":
       case "export-audiobook-script": {
         // A recorded speaker's script (design turn 155d, SPEC-047 R-39): written under exports/.
         const store = this.opts.provider.openStore?.();
@@ -14199,6 +14207,12 @@ export class Coordinator {
           this.emit({ at: new Date().toISOString(), type: "audiobook.script", worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId, ...extra });
         try {
           const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          if (msg.kind === "preview-audiobook-script") {
+            const found = await speakerLines(store, msg.productionId, msg.speaker, narrator);
+            answer({ lines: found.lines.length, chapters: found.chapters, notCast: found.notCast,
+              recorded: found.lines.filter(line => line.recorded).length, awaiting: found.lines.filter(line => line.state !== "made").length });
+            return;
+          }
           const made = await exportScript(store, msg.productionId, msg.speaker, { scope: msg.scope, label: msg.label, narrator, exportId: ulid(), now: () => store.now() });
           answer({ output: made.output, lines: made.lines, chapters: made.chapters, notCast: made.notCast });
         } catch (err) {

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { RemoteDeviceInfoSchema, type RemoteDeviceInfo, RemotePairingDurationSchema, type RemoteAccessCommand, type RemoteAccessReply, type RemoteAccessStatus } from "@arke-studio/contracts";
-import { Button, Select } from "../components/ui.js";
+import { FactRow } from "./settings-providers.js";
+import { Button, Select, Switch } from "../components/ui.js";
 
 import { isRemoteSession } from "../lib/remote-session.js";
 import { OnYourPC } from "../components/on-your-pc.js";
@@ -71,16 +72,19 @@ function HostRemoteAccessSettings() {
     catch { setError("Studio could not complete that action. Try again."); }
     finally { setBusy(false); }
   };
-  return <div className="fy-set remote-access" data-screen="settings-remote-access">
+  return <div className="fy-set fy-set--general remote-access" data-screen="settings-remote-access">
     <h1 className="fy-pane__name">Remote access</h1>
     {!bridge ? <p>Manage remote access and paired devices in Studio on your PC.</p> : <>
-      <p>Open Studio from your phone through Tailscale. Paired devices have full access to this Studio session. Keep the PC awake and connected.</p>
-      <p>Install and connect Tailscale, and enable MagicDNS and HTTPS certificates in its DNS settings.</p>
+      <details className="fy-set__note"><summary>Set up Tailscale</summary>
+        <p>Install and connect Tailscale, and enable MagicDNS and HTTPS certificates in its DNS settings.</p>
+        <p>Paired devices have full access to this Studio session. Keep the PC awake and connected.</p>
+      </details>
       {(error || status?.reason) && <p role="alert">{error || status?.reason}</p>}
       {status && <>
-        <div className="remote-access__row"><span>{status.running ? "Remote access is running" : status.enabled ? "Remote access needs attention" : "Remote access is off"}</span>
-          <Button disabled={busy} onClick={() => void command({ kind: status.enabled ? "disable" : "enable" })}>{status.enabled ? "Disable remote access" : "Enable remote access"}</Button>
-        </div>
+        <FactRow what="Remote access">
+          <div className="fy-default"><Button disabled={busy} onClick={() => void command({ kind: status.enabled ? "disable" : "enable" })}>{status.enabled ? "Disable remote access" : "Enable remote access"}</Button></div>
+          <span className="fy-fact__state">{status.running ? "running" : status.enabled ? "needs attention" : "off"}</span>
+        </FactRow>
         {status.running && status.url && <div className="remote-access__share">
           <QRCodeSVG value={status.url} size={208} marginSize={4} level="M"
             role="img" aria-label="Scan to open Studio on your phone" title="Open Studio on your phone" />
@@ -93,21 +97,25 @@ function HostRemoteAccessSettings() {
             <p>Choose Pair a device below, enter the code on your phone, then approve it here. After pairing, add Studio to your home screen from your phone’s browser menu.</p>
           </div>
         </div>}
-        <label><input type="checkbox" checked={status.startOnLogin} disabled={busy || !status.running || !status.startupSupported}
-          onChange={event => void command({ kind: "startup", enabled: event.target.checked })} /> Start Studio when I sign in to this PC</label>
-        {!status.startupSupported && <p>Automatic startup is available in the installed Windows and macOS app.</p>}
-        <div className="remote-access__row"><span>Remember approved devices for</span>
-          <Select label="Remember approved devices for" value={status.pairingDuration} disabled={busy}
+        <FactRow what="Start at sign-in">
+          <div className="fy-default"><Switch label="Start Studio when I sign in to this PC" checked={status.startOnLogin}
+            disabled={busy || !status.running || !status.startupSupported} onChange={enabled => void command({ kind: "startup", enabled })} /></div>
+          <span className="fy-fact__state">{status.startupSupported ? status.startOnLogin ? "on" : "off" : "unavailable"}</span>
+        </FactRow>
+        {!status.startupSupported && <p className="fy-set__note">Automatic startup is available in the installed Windows and macOS app.</p>}
+        <FactRow what="Remember devices">
+          <Select wrapClassName="fy-default" label="Remember approved devices for" value={status.pairingDuration} disabled={busy}
             aria-describedby="remote-pairing-duration-help"
             onChange={event => void command({ kind: "duration", duration: RemotePairingDurationSchema.parse(
               event.target.value === "never" ? "never" : Number(event.target.value)) })}>
             <option value={30}>30 days</option><option value={90}>90 days</option>
             <option value={120}>120 days</option><option value="never">Never</option>
           </Select>
-        </div>
-        <p id="remote-pairing-duration-help">Applies to new approvals. Existing devices keep their current expiry. You can revoke any device at any time.</p>
+          <span className="fy-fact__state">new approvals</span>
+        </FactRow>
+        <p className="fy-set__note" id="remote-pairing-duration-help">New approvals only. Existing devices keep their expiry.</p>
         {status.running && <>
-          <p>Closing the window keeps Studio running in the system tray. Use Quit Arke Studio in the tray to stop it.</p>
+          <details className="fy-set__note"><summary>Keep Studio available</summary><p>Closing the window keeps Studio running in the system tray. Use Quit Arke Studio in the tray to stop it.</p></details>
           <Button disabled={busy} onClick={() => void command({ kind: "pair" })}>Pair a device</Button>
           {pairing && pairing.expiresAt > Date.now() && <div role="status"><p>Enter this code on your phone, then approve its request here. It expires in five minutes and works once.</p><strong className="remote-access__code">{pairing.code}</strong></div>}
         </>}

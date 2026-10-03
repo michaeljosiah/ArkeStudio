@@ -41,6 +41,11 @@ it("only the desktop exposes owner pairing and revocation controls", async () =>
   const element = document.createElement("div"); document.body.append(element); const root = createRoot(element);
   try {
     await act(async () => { root.render(<SettingsRemoteAccessScreen />); await flush(); });
+    assert.equal(element.querySelectorAll(".fy-fact").length, 3);
+    const startup = element.querySelector<HTMLButtonElement>('[role="switch"]')!;
+    assert.equal(startup.getAttribute("aria-checked"), "false");
+    await act(async () => { startup.click(); await flush(); });
+    assert.ok(calls.some(command => command.kind === "startup" && command.enabled));
     const buttons = () => [...element.querySelectorAll("button")];
     await act(async () => { buttons().find(button => button.textContent === "Pair a device")!.click(); await flush(); });
     assert.ok(element.textContent?.includes("ABCDEFGH"));
@@ -81,7 +86,7 @@ it("desktop duration offers all four choices, uses saved replies and labels Neve
       assert.equal(select.value, value);
     }
     assert.ok(element.textContent?.includes("My phone · Never expires"));
-    assert.ok(element.textContent?.includes("Existing devices keep their current expiry"));
+    assert.ok(element.textContent?.includes("Existing devices keep their expiry"));
   } finally { await act(async () => root.unmount()); element.remove(); delete window.arke; }
 });
 it("desktop shares a local QR and copies through its bridge, showing success only after a successful write", async () => {

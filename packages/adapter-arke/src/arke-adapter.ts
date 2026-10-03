@@ -183,6 +183,12 @@ export class ArkeAdapter implements HarnessAdapter {
   /** Aborted by dispose, so a check in flight stops rather than outliving the adapter. */
   private readonly lifetime = new AbortController();
   private lastProbe = 0;
+  private catalogueMisses = 0;
+  private catalogueSucceededAt = 0;
+  private lastCatalogue: { models: ModelInfo[]; pulled: PulledModel[]; all: PulledModel[] } | undefined;
+  private retainCatalogue(): boolean {
+    return ++this.catalogueMisses === 1 && this.ready.ready && this.lastCatalogue !== undefined && Date.now() - this.catalogueSucceededAt <= 90_000;
+  }
   /** What each role's tool schemas were estimated at when its last session opened. */
   private readonly toolCost = new Map<string, number>();
 
@@ -251,6 +257,7 @@ export class ArkeAdapter implements HarnessAdapter {
       await listTags(this.fetchImpl, this.baseUrl, AbortSignal.any([signal, AbortSignal.timeout(8_000)]));
       ({ models } = await this.catalog(signal));
     } catch {
+      if (this.retainCatalogue()) return;
       return unready("Ollama is not answering on this machine.");
     }
     // A check that finishes after disposal says nothing about an adapter that no longer exists.
@@ -278,6 +285,7 @@ export class ArkeAdapter implements HarnessAdapter {
     } catch (error) {
       // Ollama stopping is seen here first, by the coordinator's catalogue reads, well before any
       // turn fails. A caller's own cancellation says nothing about Ollama.
+      if (!signal.aborted && this.retainCatalogue()) return this.lastCatalogue!;
       if (!signal.aborted && this.ready.ready) this.markUnready("Ollama is not answering on this machine.");
       throw error;
     }
@@ -301,7 +309,10 @@ export class ArkeAdapter implements HarnessAdapter {
       ...(model.tools !== undefined ? { tools: model.tools } : {}),
       ...(model.id === fallback ? { isDefault: true } : {}),
     }));
-    return { models, pulled, all };
+    this.catalogueMisses = 0;
+    this.catalogueSucceededAt = Date.now();
+    this.lastCatalogue = { models, pulled, all };
+    return this.lastCatalogue;
   }
 
   /** The context window asked of Ollama: the model's own, held to the ceiling. */

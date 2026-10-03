@@ -513,6 +513,7 @@ const CLIENT_COMMAND_METADATA = {
   // kept under the rights given once; nothing leaves the machine.
   "set-audiobook-recorded": action("production", "command", "voice", "authored-change", ["chapters"]),
   "export-audiobook-script": action("production", "command", "voice", "export", ["chapters"]),
+  "preview-audiobook-script": readOnly(QUERY),
   "stage-audiobook-lines": action("production", "command", "voice", "host-file-access", ["chapters"]),
   "keep-audiobook-lines": action("production", "command", "voice", "privacy-sensitive", ["chapters"]),
   "discard-audiobook-lines": action("production", "command", "voice", "host-file-access", []),

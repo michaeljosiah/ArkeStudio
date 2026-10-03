@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { join } from "node:path";
 import WebSocket from "ws";
-import { agentForPurpose, FrameSchema, type Frame, type HarnessAdapter } from "@arke-studio/contracts";
+import { agentForPurpose, FrameSchema, type ClientMessage, type DomainEvent, type Frame, type HarnessAdapter } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { Coordinator } from "../src/coordinator.js";
 import { FsWorldProvider } from "../src/world/provider.js";
@@ -84,4 +84,19 @@ async function genesisStatus(options: { adapter: HarnessAdapter | null; authorin
 it("refuses the door's conversation plainly when either half of authoring is missing", async () => {
   assert.equal(await genesisStatus({ adapter: idleAdapter(), authoring: false }), "failed: authoring is not configured", "an adapter with no roster");
   assert.equal(await genesisStatus({ adapter: null, authoring: true }), "failed: authoring is not configured", "a roster with no adapter");
+});
+
+it("background founding reviews cannot mark an active conversation failed or invent an import error", async () => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root), events: DomainEvent[] = [];
+  const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "changes.jsonl"), appVersion: "test", observeEvent: event => events.push(event) });
+  const seam = coordinator as unknown as { genesis: { isRunning(id: string): boolean } | null; handleClientMessage(message: ClientMessage): Promise<void> };
+  seam.genesis = { isRunning: () => true };
+  try {
+    for (const kind of ["genesis-voices", "genesis-imports", "genesis-images", "genesis-readiness", "genesis-review"] as const) {
+      await seam.handleClientMessage({ kind, genesisId: "gen-running" });
+    }
+    assert.equal(events.some(event => event.type === "genesis.status" || event.type === "genesis.import-error"), false);
+    assert.ok(events.some(event => event.type === "genesis.review-error" && event.area === "readiness"));
+  } finally { seam.genesis = null; await coordinator.stop(); await provider.close(); }
 });

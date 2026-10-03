@@ -97,6 +97,9 @@ export async function streamChat(
   }
   if (!response.ok) {
     const detail = object(await response.json().catch(() => ({}))).error;
+    if (typeof detail === "string" && /timeout|timed out|deadline exceeded/i.test(detail)) {
+      throw new OllamaChatError("The local model took too long to answer. Try a shorter request or another model.");
+    }
     throw new OllamaChatError(typeof detail === "string" && detail ? `Ollama refused the request: ${detail}` : `Ollama refused the request (HTTP ${response.status}).`);
   }
   if (!response.body) throw new OllamaChatError("Ollama returned no response.");

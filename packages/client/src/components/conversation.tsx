@@ -47,7 +47,7 @@ import {
   wrapUpWorldChat,
 } from "../lib/store.js";
 import { productionModel } from "./dispatch-bar.js";
-import { HarnessModelOptions, HarnessModelStatus, harnessModelUnavailableReason } from "./harness-models.js";
+import { HarnessModelOptions, HarnessModelStatus, harnessModelLabel, harnessModelUnavailableReason } from "./harness-models.js";
 import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
@@ -743,7 +743,7 @@ export function languageChoiceReason(
   if (!model) return `${modelId} is no longer available through the running harness. Choose another model or clear the saved choice.`;
   if (state?.app.health.harness.status !== "healthy") return state?.app.health.harness.reason ?? "The harness is not running.";
   const reason = harnessModelUnavailableReason(state, model);
-  return reason ? `${model.displayName ?? model.id} is ${reason}.` : undefined;
+  return reason ? `${harnessModelLabel(state, model)} ${reason.startsWith("cannot") ? "" : "is "}${reason}.` : undefined;
 }
 
 /**

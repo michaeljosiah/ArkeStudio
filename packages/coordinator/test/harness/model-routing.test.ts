@@ -400,6 +400,8 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
         // Each poll creates and sends a conversation: under a full coordinator run that is
         // seconds apiece, and the default ten failed it twice where it passes alone.
       }, "the refusal naming the model and where to choose it", 30_000);
+      const founding = only.coordinator as unknown as { keylessSessionRefusal(needsImages: boolean, agent: string): string | null };
+      assert.match(founding.keylessSessionRefusal(false, "world-author") ?? "", /^Choose .* under Writing model above the conversation\.$/);
     } finally { await only.close(); }
   });
 

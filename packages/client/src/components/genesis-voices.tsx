@@ -10,8 +10,9 @@ export function GenesisVoiceCards({ genesisId, voices, jobs, busy, models, onGen
   onDecide(target: string, decision: "approve" | "reject" | "unassign", candidate?: GenesisVoiceCandidate): void;
   onRevise(text: string): void; onRefresh(): void; onCancel(id: string): void;
 }) {
+  if (!voices.plans.length && !voices.candidates.length && !voices.selections.length && !voices.problems.length && !Object.keys(voices.attempts).length && !jobs.length) return null;
   return <section aria-label="Voices in this conversation" style={{ display: "grid", gap: 12 }}>
-    <h2>Voices</h2><p>Voice casting is optional. Audition first, then choose the voice you hear.</p>
+    <h2>Voices</h2>
     <Button variant="ghost" disabled={busy} onClick={onRefresh}>Refresh voices</Button>
     <details><summary>Available voices ({voices.catalogue.length})</summary>
       {voices.catalogue.map(voice => <p key={JSON.stringify([voice.provider, voice.model, voice.voiceId])}>

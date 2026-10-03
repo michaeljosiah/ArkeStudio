@@ -23,6 +23,7 @@ export class ProviderService {
   private readonly statuses = new Map<ProviderId, ProviderStatus>();
   private readonly credentialGenerations = new Map<ProviderId, number>();
   private readonly validationGenerations = new Map<ProviderId, number>();
+  private readonly localProbeMisses = new Map<ProviderId, number>();
 
   constructor(
     private readonly credentials: CredentialStore | null,
@@ -86,6 +87,15 @@ export class ProviderService {
    * unlocked; the probes themselves are the real answer either way.
    */
   async validate(id: ProviderId): Promise<ProviderStatus> {
+    const previous = this.statuses.get(id);
+    const recentlyHealthy = id === "ollama" && previous?.validation === "valid" && previous.lastValidated !== undefined &&
+      Date.parse(this.clock()) - Date.parse(previous.lastValidated) <= 90_000;
+    const retainAfterMiss = (): ProviderStatus | undefined => {
+      const misses = (this.localProbeMisses.get(id) ?? 0) + 1;
+      this.localProbeMisses.set(id, misses);
+      return recentlyHealthy && misses === 1 && Date.parse(this.clock()) - Date.parse(previous!.lastValidated!) <= 90_000
+        ? this.patch(id, previous!) : undefined;
+    };
     const credentialGeneration = this.credentialGenerations.get(id);
     const validationGeneration = (this.validationGenerations.get(id) ?? 0) + 1;
     this.validationGenerations.set(id, validationGeneration);
@@ -119,11 +129,16 @@ export class ProviderService {
         })),
       });
     }
-    this.patch(id, { validation: "testing" });
+    // A periodic local probe must not disable a model during the request itself.
+    if (!recentlyHealthy) this.patch(id, { validation: "testing" });
     try {
       const probes = await validator.validateKey(key);
       if (!current()) return this.statuses.get(id)!;
       const anyAvailable = probes.some((p) => p.available);
+      if (id === "ollama" && probes.length > 0 && probes.every(probe => !probe.available && probe.transientFailure)) {
+        const retained = retainAfterMiss();
+        if (retained) return retained;
+      } else this.localProbeMisses.delete(id);
       // A key the vendor accepted is a valid key, whatever the account can pay for (issue 1167):
       // "invalid" here is what Settings renders as "key rejected" and remedies with a
       // replacement, which an unfunded account does not need. The capability stays locked —
@@ -141,6 +156,10 @@ export class ProviderService {
       });
     } catch (err) {
       if (!current()) return this.statuses.get(id)!;
+      if (id === "ollama") {
+        const retained = retainAfterMiss();
+        if (retained) return retained;
+      }
       const message = err instanceof Error ? err.message : String(err);
       void this.log?.append({ kind: "provider.validation-failed", provider: id, message });
       return this.patch(id, {

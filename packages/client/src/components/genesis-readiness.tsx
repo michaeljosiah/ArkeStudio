@@ -8,10 +8,8 @@ export function GenesisReadinessCard({ review, busy, onRefresh, onFix, onLeave }
   return <section aria-label="World readiness review">
     <h2>Review the world</h2>
     <Button disabled={busy} onClick={onRefresh}>Check readiness</Button>
-    {!review && <p>Check the current approved content, unresolved choices and references before building.</p>}
     {review && <>
-      <p>{review.canBegin ? "No deterministic content blockers found. Creative choices can remain open." : "Resolve the blockers before founding."}</p>
-      <p>This is a check of known records, not a guarantee of creative consistency.</p>
+      <p>{review.canBegin ? "No content blockers found." : "Resolve the blockers before founding."}</p>
       {review.findings.map(finding => <Callout key={finding.id} title={finding.title}>
         <p>{finding.category === "possible-conflict" ? "Possible conflict" : finding.category}{finding.leftOpen ? " · intentionally left open" : ""}</p>
         <p>{finding.detail}</p>

@@ -73,6 +73,7 @@ import {
   discardAudiobookLines,
   discardAudiobookTake,
   exportAudiobookScript,
+  previewAudiobookScript,
   keepAudiobookLines,
   openExportsFolder,
   stageAudiobookLines,
@@ -2748,12 +2749,15 @@ export function SpeakerLinesDialog({ worldId, productionId, speaker, label, tone
   const all = useSpeakerLines();
   const [scope, setScope] = useState<"awaiting" | "all">("awaiting");
   const [scriptId, setScriptId] = useState<string | null>(null);
+  const [summaryId, setSummaryId] = useState<string | null>(null);
   const [filesId, setFilesId] = useState<string | null>(null);
   const [untick, setUntick] = useState<ReadonlySet<string>>(new Set());
   const [performer, setPerformer] = useState("");
   const [basis, setBasis] = useState<"self" | "authorized" | "licensed" | null>(null);
   const script = scriptId === null ? undefined : all[scriptId];
   const files = filesId === null ? undefined : all[filesId];
+  const summary = summaryId === null ? undefined : all[summaryId];
+  useEffect(() => { setSummaryId(previewAudiobookScript(worldId, productionId, speaker)); }, [worldId, productionId, speaker, files?.kept]);
   const hosted = typeof window !== "undefined" && window.arke?.openDataFolder !== undefined;
   const rows = files?.rows ?? [];
   const keepable = rows.filter((row) => row.refused === undefined && !untick.has(row.file));
@@ -2777,14 +2781,18 @@ export function SpeakerLinesDialog({ worldId, productionId, speaker, label, tone
   };
   return (
     <EditorDialog open title={label} onClose={close} width={680} onBody>
-      <div className="fy-rectake" data-testid="speaker-lines-dialog">
+      <div className={`fy-rectake fy-rectake--lines fy-voice--${tone}`} data-testid="speaker-lines-dialog">
+        <div className="fy-rectake__summary" role="status">
+          <span className="fy-ab__speaker-dot" aria-hidden="true" />
+          {summary?.state === "done" ? `${summary.lines} ${summary.lines === 1 ? "line" : "lines"} · ${summary.chapters} ${summary.chapters === 1 ? "chapter" : "chapters"} · ${summary.recorded} recorded · ${summary.awaiting} awaiting${summary.notCast ? ` · ${summary.notCast} chapters not cast` : ""}` : summary?.refused ?? "Loading lines…"}
+        </div>
         <div className="fy-rectake__sect">
           <span className="fy-rectake__sect-title">Script</span>
           <span className="fy-rectake__push" />
           <span className="fy-seg" role="group" aria-label="Lines">
             {(["awaiting", "all"] as const).map((value) => (
               <button key={value} type="button" className={`fy-seg__item${scope === value ? " fy-seg__item--active" : ""}`} aria-pressed={scope === value} onClick={() => setScope(value)}>
-                {value === "awaiting" ? "Awaiting" : "All"}
+                {value === "awaiting" ? `Awaiting${summary?.awaiting !== undefined ? ` ${summary.awaiting}` : ""}` : `All${summary?.lines !== undefined ? ` ${summary.lines}` : ""}`}
               </button>
             ))}
           </span>

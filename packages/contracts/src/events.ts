@@ -1210,6 +1210,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       output: z.string().min(1).optional(),
       lines: z.number().int().min(0).optional(),
       chapters: z.number().int().min(0).optional(),
+      recorded: z.number().int().min(0).optional(),
+      awaiting: z.number().int().min(0).optional(),
       /** Chapters whose cast is not current, so their lines could not be named. */
       notCast: z.number().int().min(0).optional(),
       refused: z.string().min(1).optional(),
@@ -2057,6 +2059,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   }).strict(),
   z.object({ ...base, type: z.literal("genesis.discarded"), genesisId: z.string().min(1) }).strict(),
   z.object({ ...base, type: z.literal("genesis.review"), genesisId: z.string().min(1), requestId: z.string().min(1).optional(), review: GenesisContentReviewSchema }).strict(),
+  z.object({ ...base, type: z.literal("genesis.review-error"), genesisId: z.string().min(1), area: z.enum(["content", "readiness", "voices"]), requestId: z.string().min(1).optional(), detail: z.string() }).strict(),
   z.object({ ...base, type: z.literal("genesis.image-error"), genesisId: z.string().min(1), detail: z.string() }).strict(),
   z.object({ ...base, type: z.literal("genesis.images"), genesisId: z.string().min(1), images: GenesisImagesSchema }).strict(),
   z.object({ ...base, type: z.literal("genesis.voices"), genesisId: z.string().min(1), voices: GenesisVoicesSchema }).strict(),

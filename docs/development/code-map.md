@@ -209,6 +209,28 @@ for `world/founding-build.ts`. Checks: coordinator `test/harness/genesis-review.
 and client `test/genesis-review.test.tsx`.
 See [founding chat](founding-chat.md) for lifecycle and recovery checks.
 
+The founding composer sends an optional `genesis-chat.modelId`; `harness/genesis.ts` opens a
+new session with restored history when that choice changes. Client `chatPending` covers the
+send-to-running interval. `genesis.review-error` carries content, readiness and voice review
+failures separately from turn status; background reads share the founding serialization lane.
+Checks: client `test/genesis-resume.test.tsx`; coordinator `test/harness/genesis.test.ts`.
+
+### Inspect a recorded speaker's lines
+
+Client `screens/chapter-audiobook.tsx` requests `preview-audiobook-script` on opening the Lines
+sheet and after keeping recordings. Coordinator `productions/audiobook-lines.ts` reads the same
+current cast and takes as script export; `audiobook.script` returns line, chapter, recording,
+awaiting and uncast counts without writing an export or script manifest. Checks: client
+`test/chapter-audiobook.test.tsx`; coordinator `test/productions/audiobook-lines.test.ts`.
+
+### Recover local writing-model health
+
+Providers `clients/ollama.ts` marks health misses as transient. Coordinator `providers/service.ts`,
+the automatic local catalogue publisher and adapter `adapter-arke/src/arke-adapter.ts` retain a
+successful result for one miss within 90 seconds. A second miss or a witnessed empty runtime
+removes availability. HTTP turn timeouts remain turn errors. Checks: coordinator
+`test/spec008/providers.test.ts`; adapter `test/adapter.test.ts`; providers `test/clients.test.ts`.
+
 ### Audition founding voices
 
 Contracts `genesis-voices.ts` defines voice intents and immutable audition candidates.

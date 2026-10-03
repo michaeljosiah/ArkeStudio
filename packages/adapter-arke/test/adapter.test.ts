@@ -671,13 +671,24 @@ test("removing the last usable model while running is seen at the next catalogue
   assert.ok(f.adapter.lifecycleRevision() > revision);
 });
 
-test("Ollama stopping while ready is seen at the next catalogue read, not at the next failed turn", async (t) => {
+test("Ollama retains recent catalogue rows for one miss and becomes unready on a repeated miss", async (t) => {
   const f = await fixture(t);
   await f.adapter.init();
   assert.equal(f.adapter.readiness().ready, true);
   await f.ollama.stop();
+  assert.ok((await f.adapter.listModels()).length > 0);
+  assert.equal(f.adapter.readiness().ready, true);
   await assert.rejects(f.adapter.listModels());
   const readiness = f.adapter.readiness();
   assert.equal(readiness.ready, false);
   assert.match(readiness.reason ?? "", /not answering/);
+});
+
+test("an Ollama HTTP 500 timeout fails the turn without declaring the runtime absent", async (t) => {
+  const f = await fixture(t);
+  await f.adapter.init();
+  const id = await f.session("world-builder");
+  f.ollama.script.push({ status: 500, error: "request timed out" });
+  await assert.rejects(f.adapter.sendMessage({ sessionId: id, parts: [{ type: "text", text: "hi" }] }), /took too long/);
+  assert.equal(f.adapter.readiness().ready, true);
 });

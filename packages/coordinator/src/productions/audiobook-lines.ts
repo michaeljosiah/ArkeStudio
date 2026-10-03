@@ -66,6 +66,7 @@ export interface SpeakerLine {
   /** The line's direction as a performer's note: the delivery, then the note. */
   note?: string;
   state: string;
+  recorded: boolean;
 }
 
 /** Every line a recorded speaker has across the book, in order, and the chapters whose cast could not say. */
@@ -110,6 +111,7 @@ export async function speakerLines(
         ...(context !== undefined ? { context } : {}),
         ...(note !== undefined && note !== "" ? { note } : {}),
         state: planned.state,
+        recorded: planned.state === "made" && record?.takes[planned.block.key]?.source === "recorded",
       });
       chapters.add(plan.chapter.id);
     }

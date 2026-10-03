@@ -46,6 +46,29 @@ async function makeService(probes: CapabilityProbe[] | Error, before?: () => Pro
 }
 
 describe("provider statuses and availability (R-1..R-4, §3.2)", () => {
+  it("keeps recent Ollama availability through one transient miss, then expires it", async () => {
+    let now = "2026-10-03T10:00:00.000Z";
+    let probes: CapabilityProbe[] = [{ capability: "llm", available: false, transientFailure: true }];
+    const service = new ProviderService(null, { ollama: { validateKey: async () => probes } }, null, () => now);
+    await service.init();
+    assert.equal((await service.validate("ollama")).validation, "invalid", "startup has no success to retain");
+    probes = [{ capability: "llm", available: true }];
+    await service.validate("ollama");
+    probes = [{ capability: "llm", available: false, transientFailure: true }];
+    assert.equal((await service.validate("ollama")).validation, "valid");
+    assert.equal(deriveCapabilityAvailability(service.list()).find(row => row.capability === "llm")?.available, true);
+    assert.equal((await service.validate("ollama")).validation, "invalid", "two misses are unavailable");
+    probes = [{ capability: "llm", available: true }];
+    await service.validate("ollama");
+    probes = [{ capability: "llm", available: false, reason: "no models pulled" }];
+    assert.equal((await service.validate("ollama")).validation, "invalid", "a witnessed empty runtime is definitive");
+    probes = [{ capability: "llm", available: true }];
+    await service.validate("ollama");
+    now = "2026-10-03T10:01:31.000Z";
+    probes = [{ capability: "llm", available: false, transientFailure: true }];
+    assert.equal((await service.validate("ollama")).validation, "invalid", "old successes expire");
+  });
+
   it("completes testing and fingerprint refresh in either order for the same saved key", { timeout: 10_000 }, async () => {
     for (const metadataFirst of [true, false]) {
       const dir = await tempDir("arke-provider-concurrent-test-");
