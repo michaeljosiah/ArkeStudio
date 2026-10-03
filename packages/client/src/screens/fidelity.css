@@ -6928,11 +6928,11 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-ch__who-name { font: 500 12px var(--font-sans); flex: 1; min-width: 0; }
 .fy-ch__who-where { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; }
 /* A speaker and their voice never run under each other (a designed voice's id once did): the
-   name keeps its width, the voice drops to its own line when the panel is narrow, and only text
-   longer than the whole line is cut, with an ellipsis. */
-.fy-ch__who-head { flex-wrap: wrap; row-gap: 2px; }
-.fy-ch__who-head > .fy-ch__who-name { flex: 1 1 auto; }
-.fy-ch__who-head > .fy-ch__who-where { min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; }
+   name keeps its width up to half the row, and the voice takes what is left, cut with an
+   ellipsis — its whole text is the title. */
+.fy-ch__who-head > .fy-ch__who-name { flex: 0 0 auto; max-width: 55%; }
+.fy-ch__who-head > .fy-ch__who-name + :is(.fy-ch__who-where, .fy-ch__who-count) { margin-left: auto; }
+.fy-ch__who-head > .fy-ch__who-where { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
 .fy-ch__who-head > .fy-ch__who-where:not(:has(svg)) { display: block; text-overflow: ellipsis; }
 .fy-ch__who-name > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-ch__line { position: relative; padding-left: 14px; margin-top: 3px; font: 400 11px/1.45 var(--font-sans); color: var(--muted-foreground); }
