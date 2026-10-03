@@ -2,9 +2,11 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   audiobookTextHash,
+  DEFAULT_NARRATOR,
   ESTIMATED_CHARACTERS_PER_SECOND,
   isWorldImagePath,
   listeningChapter,
+  placePictures,
   worldImageReferences,
   type AudiobookListening,
   type AudiobookPicture,
@@ -16,14 +18,19 @@ import {
 } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
-import { planAudiobook, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
+import { planAudiobook, readAudiobookBook, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
 
 /**
  * The book as a listener hears it (design turn 186, SPEC-047 R-57..R-62): every chapter of the
- * production in order, retired ones left out, each read as its own press would plan it — the
- * blocks that are made and current play, the rest are the gaps they are — with its pictures on
- * the chapter's clock. The player in the app and the package both play this plan; nothing here
- * writes, and nothing is asked of a provider.
+ * production in order, retired ones left out, each with the takes that say its words now — the
+ * rest are the gaps they are — and its pictures on the chapter's clock. The player in the app
+ * and the package both play this plan; nothing here writes, and nothing is asked of a provider.
+ *
+ * What plays is judged by the words alone, never by who would read the block today (codex on
+ * PR 1491): the reader a block is meant for comes from the live voice catalogue, which is empty
+ * offline, without a key or while the voice sidecar is down, and a book whose every take is on
+ * the shelf must not fall silent because the narrator could not be asked for. A take whose words
+ * are the block's plays whoever read it; a take of other words is a gap.
  */
 
 /** A take's length: as measured when it was filed, else its cut from a grouped request, else its words at the reading rate. */
@@ -35,23 +42,34 @@ function takeSeconds(store: WorldStore, artifactId: string, take: { grouped?: { 
   return Math.max(1, text.length / ESTIMATED_CHARACTERS_PER_SECOND);
 }
 
-/** A chapter's blocks as the plan reads them: each made block with the take that plays it. */
-export function listeningBlocks(store: WorldStore, plan: Pick<AudiobookPlan, "blocks" | "record">): ListeningInputBlock[] {
+/** A chapter's blocks as the plan reads them: each block whose take says its words now, with that take. */
+export function listeningBlocks(store: WorldStore, plan: Pick<AudiobookPlan, "blocks" | "record" | "present">): ListeningInputBlock[] {
   const record = plan.record === "unreadable" ? null : plan.record;
   return plan.blocks.map((planned) => {
     const block = { key: planned.block.key, text: planned.block.text };
     const take = record?.takes[planned.block.key];
-    if (planned.state !== "made" || take === undefined) return block;
+    if (take === undefined || !plan.present.has(take.artifactId) || take.textHash !== audiobookTextHash(planned.block.text)) return block;
     const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === take.artifactId);
     if (artifact === undefined) return block;
-    return { ...block, take: { file: `artifacts/${artifact.file}`, seconds: takeSeconds(store, take.artifactId, take, planned.block.text), grouped: take.grouped !== undefined } };
+    return { ...block, take: { file: `artifacts/${artifact.file}`, seconds: takeSeconds(store, take.artifactId, take, planned.block.text), grouped: take.grouped !== undefined, artifactId: take.artifactId } };
   });
 }
 
-/** Whether a picture's file is an image still in the world: checked on disk, as the picture would be served. */
+/** Whether a file is an image still in the world: checked on disk, as the picture would be served. */
 async function onShelf(store: WorldStore, file: string): Promise<boolean> {
   if (!isWorldImagePath(file)) return false;
   return stat(toExtendedLength(join(store.dir, fromPortable(file)))).then((s) => s.isFile(), () => false);
+}
+
+/**
+ * The pictures a chapter may show: in the world's image catalogue now — a retired or superseded
+ * artifact leaves it though its bytes stay on disk (codex on PR 1491) — and on the shelf.
+ */
+async function usablePictures(store: WorldStore, pictures: Readonly<Record<string, AudiobookPicture>>): Promise<Set<string>> {
+  const listed = new Set(worldImageReferences(store.getBundle()).map((reference) => reference.file));
+  const usable = new Set<string>();
+  for (const picture of Object.values(pictures)) if (listed.has(picture.file) && (await onShelf(store, picture.file))) usable.add(picture.file);
+  return usable;
 }
 
 /** The book's cover (R-60): the world's key art, when it is on the shelf. */
@@ -60,10 +78,21 @@ export async function bookCover(store: WorldStore): Promise<string | null> {
   return keyArt !== null && (await onShelf(store, keyArt)) ? keyArt : null;
 }
 
-export async function audiobookListening(store: WorldStore, productionId: string, narrator: AudiobookReader): Promise<AudiobookListening> {
+/**
+ * Who `planAudiobook` assigns the blocks to: the book's own narrator as written, else the
+ * shipped one. Only the blocks, their words and the record are read from the plan, never its
+ * states, so this asks no catalogue and needs none to be up.
+ */
+async function anyNarrator(store: WorldStore, productionId: string): Promise<AudiobookReader> {
+  const book = await readAudiobookBook(store, productionId).catch(() => null);
+  return book !== null && book !== "unreadable" && book.narrator !== undefined ? book.narrator : { ...DEFAULT_NARRATOR };
+}
+
+export async function audiobookListening(store: WorldStore, productionId: string): Promise<AudiobookListening> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const cover = await bookCover(store);
+  const narrator = await anyNarrator(store, productionId);
   const chapters: ListeningChapter[] = [];
   for (const summary of [...production.chapters].filter((c) => !c.retired).sort((a, b) => a.order - b.order)) {
     let plan: AudiobookPlan;
@@ -76,8 +105,7 @@ export async function audiobookListening(store: WorldStore, productionId: string
     }
     const record = plan.record === "unreadable" ? null : plan.record;
     const pictures = record?.pictures ?? {};
-    const usable = new Set<string>();
-    for (const picture of Object.values(pictures)) if (await onShelf(store, picture.file)) usable.add(picture.file);
+    const usable = await usablePictures(store, pictures);
     chapters.push(listeningChapter({ chapterId: summary.id, order: summary.order, title: summary.title, blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file) }));
   }
   return { productionId, title: production.meta.title, cover, chapters };
@@ -87,6 +115,10 @@ export async function audiobookListening(store: WorldStore, productionId: string
  * A picture set on a block, or taken off (turn 186c, R-60): only a picture the world holds — one
  * `worldImageReferences` lists, as the panel offers it — written into the chapter's record keyed
  * by the block, with the block's words so it can follow them, through the record's own lane.
+ *
+ * The block's picture is the one shown there, wherever it is kept: a picture that followed its
+ * words to this block after a paragraph moved is still kept under its old key, and a Remove or a
+ * replacement that only looked under the block's own key left it standing (codex on PR 1491).
  */
 export async function setAudiobookPicture(
   store: WorldStore,
@@ -94,22 +126,27 @@ export async function setAudiobookPicture(
   chapterFile: string,
   block: string,
   picture: { file: string; source: AudiobookPictureSource } | null,
-  narrator: AudiobookReader,
 ): Promise<ChapterAudiobook> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   const summary = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
   if (summary === undefined) throw new Error("that chapter is no longer in this production");
-  const plan = await planAudiobook(store, productionId, summary.id, { narrator });
+  const plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId) });
   const planned = plan.blocks.find((candidate) => candidate.block.key === block);
   if (planned === undefined) throw new Error("that block is no longer in the chapter");
   if (picture !== null) {
     const listed = worldImageReferences(store.getBundle()).some((reference) => reference.file === picture.file);
     if (!listed || !(await onShelf(store, picture.file))) throw new Error("that picture is not in this world");
   }
+  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text }));
+  const index = blocks.findIndex((candidate) => candidate.key === block);
   return updateAudiobook(store, productionId, plan.chapter, (current) => {
-    const { [block]: _was, ...rest } = current.pictures ?? {};
+    const held = current.pictures ?? {};
+    // Every key whose picture would stand on this block now, its own included — each placed on
+    // its own, so one a second picture shadows there goes too rather than surfacing later.
+    const here = new Set([block, ...Object.entries(held).filter(([key, entry]) => placePictures(blocks, { [key]: entry }).placed[0]?.index === index).map(([key]) => key)]);
+    const rest: Record<string, AudiobookPicture> = Object.fromEntries(Object.entries(held).filter(([key]) => !here.has(key)));
+    if (picture === null && Object.keys(rest).length === Object.keys(held).length) return null;
     const next: Record<string, AudiobookPicture> = picture === null ? rest : { ...rest, [block]: { file: picture.file, source: picture.source, textHash: audiobookTextHash(planned.block.text), at: store.now() } };
-    if (picture === null && _was === undefined) return null;
     const { pictures: _old, ...without } = current;
     return { ...without, updatedAt: store.now(), ...(Object.keys(next).length > 0 ? { pictures: next } : {}) };
   });

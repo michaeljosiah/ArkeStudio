@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AudiobookListeningSchema,
+  audiobookTextHash,
   ChapterAudiobookSchema,
   type ClientMessage,
   type DomainEvent,
@@ -13,6 +14,8 @@ import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { AUDIOBOOK_PICTURES_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { audiobookBookPath, planAudiobook, updateAudiobook } from "../../src/productions/audiobook.js";
+import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 /**
@@ -55,7 +58,7 @@ function wav(): Uint8Array {
 type Listening = Extract<DomainEvent, { type: "audiobook.listening" }>;
 type RecordEvent = Extract<DomainEvent, { type: "audiobook.record" }>;
 
-async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void>; schemaVersion: () => number }) => Promise<void>): Promise<void> {
+async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void>; schemaVersion: () => number; store: () => WorldStore }) => Promise<void>): Promise<void> {
   const { root, worldDir } = await makeTempRoot();
   await mkdir(join(worldDir, "productions", LEDGER, ".voices"), { recursive: true });
   const provider = new FsWorldProvider(root, { clock: () => CLOCK });
@@ -88,7 +91,7 @@ async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; s
     (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
-    await run({ worldDir, events, send, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion });
+    await run({ worldDir, events, send, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!()! });
   } finally {
     await provider.close();
   }
@@ -122,6 +125,7 @@ describe("the book as a listener hears it (turn 186)", () => {
       assert.equal(neap.blocks[0]!.key, "title", "the title first");
       assert.equal(neap.seconds, neap.blocks.length * 3, "the takes back to back, nothing added");
       assert.ok(neap.blocks.every((block, index) => block.at === index * 3 && block.file.startsWith("artifacts/")));
+      assert.ok(neap.blocks.every((block) => block.artifactId !== undefined), "each block's take by its artifact, for a timing layer to address");
       assert.equal(neap.opening, "world-art.png", "no picture on its opening block: the cover");
 
       const part = listening.chapters[1]!;
@@ -165,6 +169,44 @@ describe("the book as a listener hears it (turn 186)", () => {
       assert.equal(answer().record?.pictures, undefined);
       const raw = JSON.parse(await readFile(join(worldDir, "productions", LEDGER, ".audiobook", "chapters", "01-neap.json"), "utf8")) as Record<string, unknown>;
       assert.equal("pictures" in raw, false, "a record with none is written without the field");
+    }));
+
+  it("plays the takes whose words stand whoever would read them now: no voice catalogue is asked (codex on PR 1491)", () =>
+    withHarness(async ({ worldDir, events, send, store }) => {
+      await read(send, "01-neap");
+      // The book now names a cloud narrator this machine has no voice for: every take is stale
+      // to a reader's eye, and none is unplayable.
+      const book = { schemaVersion: 1, reading: "narrator", narrator: { provider: "elevenlabs", model: "eleven_multilingual_v2", voiceId: "gone", label: "Gone" } };
+      await writeFile(join(worldDir, audiobookBookPath(LEDGER)), JSON.stringify(book), "utf8");
+      await store().reload();
+      const neap = AudiobookListeningSchema.parse((await listen(send, events)).listening).chapters[0]!;
+      assert.equal(neap.state, "read");
+      assert.deepEqual(neap.gaps, []);
+    }));
+
+  it("removes a picture that followed its words to the block, wherever it is kept (codex on PR 1491)", () =>
+    withHarness(async ({ worldDir, events, send, store }) => {
+      const plan = await planAudiobook(store(), LEDGER, "neap", { narrator: { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george" } });
+      const words = plan.blocks.find((planned) => planned.block.key === "p1.0")!.block.text;
+      // Kept under a key a paragraph's move left behind, with p1.0's words.
+      await updateAudiobook(store(), LEDGER, plan.chapter, (current) => ({ ...current, pictures: { "p9.0": { file: "world-art.png", source: "world", textHash: audiobookTextHash(words), at: CLOCK } } }));
+      const shown = AudiobookListeningSchema.parse((await listen(send, events)).listening).chapters[0]!.pictures;
+      assert.deepEqual(shown.map((picture) => picture.key), ["p1.0"], "shown on the block that says its words");
+      await send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p1.0", picture: null, requestId: REQUEST });
+      const answer = events.filter((e): e is RecordEvent => e.type === "audiobook.record").at(-1)!;
+      assert.equal(answer.refused, undefined);
+      assert.equal(answer.record?.pictures, undefined, "the old key goes with Remove");
+      const raw = JSON.parse(await readFile(join(worldDir, "productions", LEDGER, ".audiobook", "chapters", "01-neap.json"), "utf8")) as Record<string, unknown>;
+      assert.equal("pictures" in raw, false);
+    }));
+
+  it("stops showing a picture whose artifact is retired, though its bytes stay (codex on PR 1491)", () =>
+    withHarness(async ({ events, send }) => {
+      await read(send, "01-neap");
+      await send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.0", picture: { file: "artifacts/board-v2.png", source: "scenes" }, requestId: REQUEST });
+      assert.equal(AudiobookListeningSchema.parse((await listen(send, events)).listening).chapters[0]!.pictures.length, 1);
+      await send({ kind: "retire-artifact", worldId: WORLD_ID, artifactId: "ar_01J8G0000000000000000000R3" });
+      assert.equal(AudiobookListeningSchema.parse((await listen(send, events)).listening).chapters[0]!.pictures.length, 0);
     }));
 
   it("refuses a block the chapter no longer has", () =>

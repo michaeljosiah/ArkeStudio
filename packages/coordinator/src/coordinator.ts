@@ -14856,8 +14856,8 @@ export class Coordinator {
         if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId };
         try {
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
-          const listening = await audiobookListening(store, msg.productionId, narrator);
+          // No voice is asked for: what plays is judged by the words alone (codex on PR 1491).
+          const listening = await audiobookListening(store, msg.productionId);
           this.emit({ at: new Date().toISOString(), type: "audiobook.listening", ...ids, listening });
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.listening-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
@@ -14875,8 +14875,7 @@ export class Coordinator {
         const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
         const at = () => new Date().toISOString();
         try {
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
-          const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, msg.picture, narrator);
+          const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, msg.picture);
           this.refreshIfStillOpen(store);
           this.emit({ at: at(), type: "audiobook.record", ...ids, record });
         } catch (err) {

@@ -29,6 +29,8 @@ export const ListeningBlockSchema = z
     number: z.number().int().min(1),
     /** The take's media, world-relative; in a package, the package's own file. */
     file: z.string().min(1),
+    /** The take that plays, by its artifact: what a timing layer addresses the block's take by (turn 187). */
+    artifactId: z.string().min(1).optional(),
     at: z.number().min(0),
     seconds: z.number().positive(),
     /** What Text shows: the sentences of a grouped take, or a block read alone whole (R-61). */
@@ -87,7 +89,7 @@ export type AudiobookListening = z.infer<typeof AudiobookListeningSchema>;
 export interface ListeningInputBlock {
   key: string;
   text: string;
-  take?: { file: string; seconds: number; grouped: boolean };
+  take?: { file: string; seconds: number; grouped: boolean; artifactId?: string };
 }
 
 /** A picture placed on one of the chapter's blocks. */
@@ -211,7 +213,7 @@ export function listeningChapter(input: {
       return;
     }
     const sentences = blockSentences(block.text, block.take.seconds, block.take.grouped).map((sentence) => ({ at: round(clock + sentence.at), text: sentence.text }));
-    blocks.push({ key: block.key, number, file: block.take.file, at: round(clock), seconds: block.take.seconds, sentences });
+    blocks.push({ key: block.key, number, file: block.take.file, ...(block.take.artifactId !== undefined ? { artifactId: block.take.artifactId } : {}), at: round(clock), seconds: block.take.seconds, sentences });
     clock += block.take.seconds;
   });
   const seconds = round(clock);
