@@ -441,7 +441,8 @@ describe("the Audiobook door (turn 146)", () => {
     const m = await mount(inkbound(), ROUTE, true);
     const rail = all(m, ".fy-prodrail__item").find((item) => item.textContent?.includes("Audiobook"));
     assert.ok(rail, "Audiobook sits on the story rail");
-    assert.match(rail.textContent ?? "", /—/);
+    // No door yet: nothing is not a count (design turn 190), so the row shows no dash.
+    assert.doesNotMatch(rail.textContent ?? "", /—/);
     await answerDoor(m, door("narrator"));
     assert.match(rail.textContent ?? "", /1\/2/);
     const items = all(m, ".fy-prodrail__item").map((item) => item.textContent?.replace(/[0-9—/]+$/, "").trim());
@@ -453,7 +454,7 @@ describe("the Audiobook door (turn 146)", () => {
     await act(async () => __setStateForTest(renamed, { connection: "open", audiobookDoor: __stateForTest().audiobookDoor }));
     const ask = m.sent.findLast((message) => message.kind === "open-audiobook") as Extract<ClientMessage, { kind: "open-audiobook" }>;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: null, refused: "the chapter file is gone" }));
-    assert.match(rail.textContent ?? "", /—/);
+    assert.doesNotMatch(rail.textContent ?? "", /—/);
     assert.match(text(m), /the chapter file is gone/);
     assert.doesNotMatch(text(m), /Opening…/);
   });
