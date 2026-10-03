@@ -10,6 +10,7 @@ import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema, DirectionReadsSchema } from "./audiobook.js";
 import { AudiobookListeningSchema } from "./audiobook-listening.js";
+import { PictureSuggestionSchema } from "./audiobook-illustrate.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX } from "./cadence.js";
 import { FreePlanShortSchema } from "./provider-plans.js";
@@ -1333,6 +1334,43 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       refused: z.string().min(1).optional(),
       /** How many controls a direction lost to its reader's row, when a whole chapter was accepted (R-10). */
       dropped: z.number().int().min(0).optional(),
+    })
+    .strict(),
+  /**
+   * A picture suggested for a block (design turn 191a, SPEC-047 R-99), answered to the window that
+   * asked: the prompt with who is in it, their look, the model, the ratio and the price — or why
+   * not. Nothing was made or spent.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.picture-suggestion"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      suggestion: PictureSuggestionSchema.optional(),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
+  /**
+   * A suggested picture on its way to its block (R-99): `making` while the Bench works, `made` with
+   * the record it now stands in, or `failed` with its reason — held, never retried unasked.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.picture-made"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      block: z.string().min(1).max(40),
+      state: z.enum(["making", "made", "failed"]),
+      /** The Bench session the picture was made in, so a window can open it. */
+      sessionId: z.string().min(1).optional(),
+      record: ChapterAudiobookSchema.optional(),
+      reason: z.string().min(1).optional(),
     })
     .strict(),
   /**

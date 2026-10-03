@@ -11,6 +11,7 @@ import { isManuscriptLanguage } from "./manuscript.js";
 import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema } from "./audiobook.js";
 import { AudiobookPictureSourceSchema } from "./audiobook-pictures.js";
 import { LOOK_LINE_MAX, LookTargetSchema } from "./audiobook-look.js";
+import { PICTURE_PROMPT_MAX } from "./audiobook-illustrate.js";
 import { BedInputSchema, BlockSoundInputSchema, BlockTimingInputSchema, ReactionInputSchema } from "./audiobook-timing.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
@@ -3309,6 +3310,32 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       block: z.string().min(1),
       picture: z.object({ file: z.string().min(1).max(1000), source: AudiobookPictureSourceSchema }).strict().nullable(),
       requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /**
+   * A picture suggested for a block (design turn 191a, SPEC-047 R-99): the writing service reads
+   * the block, the chapter around it, who is in it and their look, and drafts one editable
+   * prompt, with who rides as a reference, the model, the ratio and the price. Nothing is made
+   * and nothing is spent. Answered as `audiobook.picture-suggestion` under the same id.
+   */
+  z.object({ kind: z.literal("suggest-audiobook-picture"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1).max(40), requestId: UlidSchema }).strict(),
+  /**
+   * A suggestion made (R-99): the prompt as the author left it and who is in it, through the
+   * Bench as any image is, filed on the block as its picture. `confirmedMicroUsd` is the price
+   * the press showed: a price that has moved past it is refused, not spent. Answered as
+   * `audiobook.picture-made` under the same id.
+   */
+  z
+    .object({
+      kind: z.literal("make-audiobook-picture"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      block: z.string().min(1).max(40),
+      prompt: z.string().min(1).max(PICTURE_PROMPT_MAX),
+      who: z.array(z.string().min(1).max(120)).max(24),
+      confirmedMicroUsd: z.number().int().min(0),
+      requestId: UlidSchema,
     })
     .strict(),
   /**

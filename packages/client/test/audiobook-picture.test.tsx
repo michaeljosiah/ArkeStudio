@@ -4,11 +4,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import { audiobookTextHash, type ArtifactSidecar, type ChapterAudiobook, type ClientMessage, type ClientState, type ProductionBundle } from "@arke-studio/contracts";
+import { audiobookTextHash, lookDigest, type ArtifactSidecar, type ChapterAudiobook, type ClientMessage, type ClientState, type PictureSuggestion, type ProductionBundle } from "@arke-studio/contracts";
 import { BlockPicturePanel, pictureBrief, picturesByTab, useChapterPictures } from "../src/components/audiobook-picture.js";
 import { AudiobookBlocks, type BlockRow } from "../src/screens/chapter-audiobook.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { __setBridgeForTest, __setStateForTest, useStore } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest, useStore } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -60,10 +60,11 @@ const rows: BlockRow[] = TEXTS.map((text, index) => ({
   turns: { parts: [{ text }] },
   split: null,
 }) as unknown as BlockRow);
-const record = (pictures: ChapterAudiobook["pictures"]): ChapterAudiobook => ({
+const record = (pictures: ChapterAudiobook["pictures"], look?: ChapterAudiobook["look"]): ChapterAudiobook => ({
   schemaVersion: 1, chapterVersion: 4, hash: "h", updatedAt: AT, flags: {}, direction: {},
   takes: Object.fromEntries(rows.map((row, index) => [row.block.key, { artifactId: `ar_take${index}`, textHash: audiobookTextHash(row.block.text), reader: { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george" }, format: "wav", characters: 1, parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, madeAt: AT }])),
   ...(pictures !== undefined ? { pictures } : {}),
+  ...(look !== undefined ? { look } : {}),
 });
 
 function state(): ClientState {
@@ -89,18 +90,18 @@ function Where() {
   location = useLocation().pathname;
   return null;
 }
-function Panel({ selected, pictures }: { selected: number; pictures?: ChapterAudiobook["pictures"] }) {
+function Panel({ selected, pictures, look }: { selected: number; pictures?: ChapterAudiobook["pictures"]; look?: ChapterAudiobook["look"] }) {
   const world = useStore().state?.world ?? null;
   const production = world?.productions.find((p) => p.meta.id === "saltlight") as ProductionBundle;
-  const placed = useChapterPictures(world, rows, record(pictures));
+  const placed = useChapterPictures(world, rows, record(pictures, look));
   return (
     <>
       <AudiobookBlocks rows={rows} sounding={null} selected={rows[selected]!.block.key} onSelect={() => {}} onPlayOne={() => {}} slug="the-undersong" pictures={placed} />
-      <BlockPicturePanel worldId={FIXTURE_WORLD_ID} production={production} chapterFile="07-the-tenth-key" chapterOrder={7} row={rows[selected]!} rows={rows} pictures={placed} />
+      <BlockPicturePanel worldId={FIXTURE_WORLD_ID} production={production} chapterFile="07-the-tenth-key" chapterOrder={7} row={rows[selected]!} rows={rows} pictures={placed} record={record(pictures, look)} />
     </>
   );
 }
-async function mount(selected: number, pictures?: ChapterAudiobook["pictures"]): Promise<Mounted> {
+async function mount(selected: number, pictures?: ChapterAudiobook["pictures"], look?: ChapterAudiobook["look"]): Promise<Mounted> {
   const sent: ClientMessage[] = [];
   __setBridgeForTest({ appVersion: "test", platform: "test", connect: () => {}, subscribe: () => {}, send: (json: string) => sent.push(JSON.parse(json) as ClientMessage) } as unknown as ArkeBridge);
   const container = dom.document.createElement("div") as unknown as HTMLElement;
@@ -112,7 +113,7 @@ async function mount(selected: number, pictures?: ChapterAudiobook["pictures"]):
       <MemoryRouter initialEntries={["/chapter"]}>
         <Where />
         <Routes>
-          <Route path="/chapter" element={<Panel selected={selected} {...(pictures !== undefined ? { pictures } : {})} />} />
+          <Route path="/chapter" element={<Panel selected={selected} {...(pictures !== undefined ? { pictures } : {})} {...(look !== undefined ? { look } : {})} />} />
           <Route path="*" element={<div data-testid="elsewhere" />} />
         </Routes>
       </MemoryRouter>,
@@ -200,5 +201,131 @@ describe("Picture on a block (turn 186c)", () => {
     assert.equal(compose?.mode, "image");
     assert.match(compose?.brief ?? "", /Odile did not answer\./);
     assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/artifacts/bench/se_01J8G00000000000000000NEW1`);
+  });
+});
+
+/**
+ * Suggest picture (design turn 191a, SPEC-047 R-99, R-100): one editable prompt drafted from the block,
+ * who is in it as chips over their references — dashed with `Make a reference` where they have none —
+ * the look lines it used, the model, the ratio and the price; nothing made until Generate.
+ */
+const SUGGESTION: PictureSuggestion = {
+  block: "p1.0",
+  prompt: "Odile on the flooded stair, holding the lamp low; the water takes its light.",
+  who: [
+    { key: "maren-kest", name: "Maren", sheet: "maren-kest", kind: "character", reference: "references/maren-kest/head-front.png", carried: true },
+    { key: "sereth", name: "Sereth", sheet: "sereth", kind: "character", reference: null, carried: false },
+    { key: "the-vigil", name: "The Vigil", sheet: "the-vigil", kind: "place", reference: "references/the-vigil/head-front.png", carried: false },
+  ],
+  lines: [{ label: "Place", text: "The flooded quarter, dusk." }, { label: "Maren", text: "Oilskin coat." }],
+  model: { provider: "openai", id: "gpt-image-2", name: "GPT Image 2", references: 1 },
+  aspect: "16:9",
+  estimatedMicroUsd: 40_000,
+};
+const asked = <K extends ClientMessage["kind"]>(m: Mounted, kind: K) => m.sent.filter((message): message is Extract<ClientMessage, { kind: K }> => message.kind === kind);
+const answerSuggestion = async (m: Mounted, over: Record<string, unknown> = { suggestion: SUGGESTION }) => {
+  const request = asked(m, "suggest-audiobook-picture").at(-1)!;
+  await act(async () => __applyEventForTest({ at: AT, type: "audiobook.picture-suggestion", requestId: request.requestId, worldId: FIXTURE_WORLD_ID, productionId: "saltlight", chapterId: "07-the-tenth-key", ...over } as never));
+};
+const typeInto = async (el: HTMLTextAreaElement, value: string) => {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value")?.set;
+    if (setter) setter.call(el, value);
+    else el.value = value;
+    const key = Object.keys(el).find((candidate) => candidate.startsWith("__reactProps$"));
+    (el as unknown as Record<string, { onChange?: (event: { target: unknown; currentTarget: unknown }) => void }>)[key!]!.onChange?.({ target: el, currentTarget: el });
+  });
+};
+
+describe("Suggest picture (turn 191a)", () => {
+  it("asks for the block's picture, says it is reading, then draws the prompt with who is in it, their look, the model and the price", async () => {
+    const m = await mount(2);
+    await press(q(m, '[data-testid="suggest-picture"]'));
+    const request = asked(m, "suggest-audiobook-picture")[0]!;
+    assert.deepEqual([request.block, request.chapterFile, request.productionId], ["p1.0", "07-the-tenth-key", "saltlight"]);
+    assert.equal(text(q(m, '[data-testid="suggest-reading"]')), "reading…");
+    await answerSuggestion(m);
+    const field = q(m, '[data-testid="suggest-card"] textarea')!;
+    const held = (field as unknown as Record<string, { value?: string }>)[Object.keys(field).find((key) => key.startsWith("__reactProps$"))!];
+    assert.equal(held?.value, SUGGESTION.prompt);
+    assert.deepEqual(all(m, '[data-testid="suggest-who"]').map((el) => [el.dataset.key, el.dataset.state]), [["maren-kest", "carried"], ["sereth", "none"], ["the-vigil", "over"]]);
+    assert.ok(q(m, '[data-key="maren-kest"] img'), "Maren rides by her picture");
+    assert.equal(text(q(m, '[data-key="sereth"]')), "SerethMake a reference", "no picture: dashed, named, held");
+    assert.equal(q(m, '[data-key="sereth"] img'), null);
+    assert.deepEqual(all(m, '[data-testid="suggest-look"] div').map(text), ["PlaceThe flooded quarter, dusk.", "MarenOilskin coat."]);
+    assert.equal(text(q(m, ".fy-sugg__meta")), "GPT Image 2 · 16:9~$0.04");
+    assert.equal(text(q(m, '[data-testid="suggest-generate"]')), "Generate · ~$0.04");
+    assert.equal(asked(m, "make-audiobook-picture").length, 0, "nothing is made until Generate");
+  });
+
+  it("opens the sheet of a person with no reference", async () => {
+    const m = await mount(2);
+    await press(q(m, '[data-testid="suggest-picture"]'));
+    await answerSuggestion(m);
+    await press(q(m, '[data-key="sereth"] [data-testid="suggest-make-reference"]'));
+    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/cast/sereth`);
+  });
+
+  it("generates the prompt as the author left it, on the price shown, and puts the card away once it is on the block", async () => {
+    const m = await mount(2);
+    await press(q(m, '[data-testid="suggest-picture"]'));
+    await answerSuggestion(m);
+    await typeInto(q(m, '[data-testid="suggest-card"] textarea') as HTMLTextAreaElement, "Odile alone on the stair, dusk.");
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    const make = asked(m, "make-audiobook-picture")[0]!;
+    assert.deepEqual([make.block, make.prompt, make.who, make.confirmedMicroUsd], ["p1.0", "Odile alone on the stair, dusk.", ["maren-kest", "sereth", "the-vigil"], 40_000]);
+    assert.equal(text(q(m, '[data-testid="suggest-generate"]')), "Generating…");
+    assert.equal((q(m, '[data-testid="suggest-generate"]') as HTMLButtonElement).disabled, true);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.picture-made", requestId: make.requestId, worldId: FIXTURE_WORLD_ID, productionId: "saltlight", chapterId: "07-the-tenth-key", block: "p1.0", state: "made", sessionId: "se_01J8G00000000000000000AAA1" } as never));
+    assert.equal(q(m, '[data-testid="suggest-card"]'), null);
+    assert.ok(q(m, '[data-testid="suggest-picture"]'), "Suggest picture is offered again");
+  });
+
+  it("holds a picture that failed with its reason and offers Generate again", async () => {
+    const m = await mount(2);
+    await press(q(m, '[data-testid="suggest-picture"]'));
+    await answerSuggestion(m);
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    const make = asked(m, "make-audiobook-picture")[0]!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.picture-made", requestId: make.requestId, worldId: FIXTURE_WORLD_ID, productionId: "saltlight", chapterId: "07-the-tenth-key", block: "p1.0", state: "failed", reason: "the provider refused the prompt" } as never));
+    assert.equal(text(q(m, '[data-testid="suggest-failed"]')), "the provider refused the prompt");
+    assert.equal((q(m, '[data-testid="suggest-generate"]') as HTMLButtonElement).disabled, false);
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    assert.equal(asked(m, "make-audiobook-picture").length, 2, "asked again, and only because the author pressed");
+  });
+
+  it("takes the same prompt to the Bench with each carried picture attached and cited", async () => {
+    const m = await mount(2);
+    await press(q(m, '[data-testid="suggest-picture"]'));
+    await answerSuggestion(m);
+    await press(q(m, '[data-testid="suggest-edit"]'));
+    assert.ok(m.sent.some((message) => message.kind === "bench-new-session"));
+    const next = state();
+    await act(async () => __setStateForTest({ ...next, bench: { worldId: FIXTURE_WORLD_ID, session: { id: "se_01J8G00000000000000000NEW2", composer: { mode: "image", provider: "", model: "", params: { kind: "image", count: 1 }, brief: "", activeTokens: [] } } } as never }, { connection: "open" }));
+    const compose = asked(m, "bench-compose")[0]!;
+    assert.match(compose.brief, /^Odile on the flooded stair, holding the lamp low/);
+    assert.match(compose.brief, /Maren is shown in @Image 1\./);
+    assert.ok(!/Sereth/.test(compose.brief.split("\n\n")[1] ?? ""), "a person with no picture is not cited");
+    const refs = asked(m, "bench-add-reference")[0]!;
+    assert.deepEqual(refs.picks.map((pick) => pick.source), [{ source: "world-file", path: "references/maren-kest/head-front.png" }]);
+    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/artifacts/bench/se_01J8G00000000000000000NEW2`);
+  });
+
+  it("says in one clause why nothing was suggested and offers Suggest picture again", async () => {
+    const m = await mount(2);
+    await press(q(m, '[data-testid="suggest-picture"]'));
+    await answerSuggestion(m, { refused: "the writing service is not running" });
+    assert.equal(text(q(m, '[data-testid="suggest-refused"] p')), "the writing service is not running");
+    await press(button(m, "Suggest picture"));
+    assert.equal(asked(m, "suggest-audiobook-picture").length, 2);
+  });
+
+  it("marks a picture made under a look that has since changed, and not one whose people kept theirs", async () => {
+    const look = { chapterHash: "h", at: AT, characters: { "maren-kest": { name: "Maren", text: "Oilskin coat." } } };
+    const made = (words: string) => ({ file: "world-art.png", source: "generated" as const, textHash: audiobookTextHash(TEXTS[2]!), at: AT, look: { hash: lookDigest([{ key: "maren-kest", text: words }]), who: ["maren-kest"] } });
+    const same = await mount(2, { "p1.0": made("Oilskin coat.") }, look);
+    assert.equal(q(same, '[data-testid="picture-look-changed"]'), null);
+    const changed = await mount(2, { "p1.0": made("A red coat.") }, look);
+    assert.equal(text(q(changed, '[data-testid="picture-look-changed"]')), "look changed");
   });
 });

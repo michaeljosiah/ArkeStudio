@@ -8,6 +8,7 @@ import {
   mergeLook,
   normalizeSpeechText,
   productionStyleFor,
+  type AudiobookBlock,
   type AudiobookLook,
   type ChapterAudiobook,
   type DerivedLook,
@@ -72,7 +73,7 @@ function mentionAt(body: string, name: string): number {
 }
 
 /** A sheet's whole name or any one part of it long enough to name them, as the prose might. */
-function nameAt(body: string, name: string): number {
+export function nameAt(body: string, name: string): number {
   const whole = mentionAt(body, name);
   if (whole >= 0) return whole;
   const parts = name.split(/\s+/).filter((part) => part.length >= 3 && !/^(the|of|and|von|van|de|la)$/i.test(part));
@@ -120,6 +121,22 @@ export function chapterPeople(store: WorldStore, plan: Pick<AudiobookPlan, "body
   return [...people.values()]
     .sort((a, b) => (a.billing === "lead" ? 0 : 1) - (b.billing === "lead" ? 0 : 1) || a.first - b.first)
     .slice(0, LOOK_BOUNDS.people);
+}
+
+/**
+ * Who speaks in a block, as the sheets name them (design turn 190): a line's speaker, or — in a
+ * block that holds several turns under one reader — each speaker in it, in order. Undefined for
+ * narration and the title.
+ */
+export function blockSpeakers(sheets: readonly Pick<Sheet, "id" | "name">[], block: Pick<AudiobookBlock, "speaker" | "sheet" | "rows">): string | undefined {
+  const turns = block.rows ?? [block];
+  const names: string[] = [];
+  for (const turn of turns) {
+    if (turn.speaker === undefined) continue;
+    const name = sheets.find((sheet) => sheet.id === turn.sheet)?.name ?? turn.speaker;
+    if (!names.includes(name)) names.push(name);
+  }
+  return names.length === 0 ? undefined : names.join(", ");
 }
 
 /** The places a chapter names: location sheets the prose mentions, each with what its sheet says it looks like. */
@@ -256,9 +273,8 @@ export async function deriveChapterLook(store: WorldStore, productionId: string,
   const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId) });
   const people = chapterPeople(store, plan);
   const sheets = store.getBundle().sheets;
-  const speakerOf = (sheetId: string | undefined, speaker: string | undefined): string | undefined => (speaker === undefined ? undefined : (sheets.find((sheet) => sheet.id === sheetId)?.name ?? speaker));
   const blocks = plan.blocks.map((planned) => {
-    const speaker = speakerOf(planned.block.sheet, planned.block.speaker);
+    const speaker = blockSpeakers(sheets, planned.block);
     return { key: planned.block.key, text: normalizeSpeechText(planned.block.text), ...(speaker !== undefined ? { speaker } : {}) };
   });
   const visible = people.filter((person) => !person.neverDepicted);

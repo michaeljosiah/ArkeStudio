@@ -133,7 +133,16 @@ export type NarratorQuote =
   | { state: "done"; stale: number; held: number; directed: number; estimatedMicroUsd: number; kept: number };
 
 /** What `Direct this chapter` would read, or how many speaker notes were drafted (design turn 184, SPEC-047 R-51, R-54), by request id. */
-export type AudiobookAsk = { state: "working" } | { state: "reads"; reads: import("@arke-studio/contracts").DirectionReads } | { state: "drafted"; drafted: number } | { state: "refused"; refused: string };
+export type AudiobookAsk =
+  | { state: "working" }
+  | { state: "reads"; reads: import("@arke-studio/contracts").DirectionReads }
+  | { state: "drafted"; drafted: number }
+  | { state: "refused"; refused: string }
+  /** A picture suggested for a block (design turn 191a, R-99): the prompt, who is in it and the price — nothing made. */
+  | { state: "suggested"; suggestion: import("@arke-studio/contracts").PictureSuggestion }
+  /** A suggested picture on its block (R-99), or held with the reason it was not made. */
+  | { state: "made"; sessionId?: string }
+  | { state: "failed"; reason: string; sessionId?: string };
 
 export type HeardLine = { state: "working" } | { state: "done"; file: string } | { state: "priced"; token: string; estimatedMicroUsd: number; parts: number } | { state: "refused"; refused: string };
 
@@ -2058,6 +2067,14 @@ function handleFrame(json: string): void {
     } else if (event.type === "direction.reads") {
       if (audiobookAsks[event.requestId] !== undefined) {
         audiobookAsks = { ...audiobookAsks, [event.requestId]: event.reads !== undefined ? { state: "reads", reads: event.reads } : { state: "refused", refused: event.refused ?? "could not read the book" } };
+      }
+    } else if (event.type === "audiobook.picture-suggestion") {
+      if (audiobookAsks[event.requestId] !== undefined) {
+        audiobookAsks = { ...audiobookAsks, [event.requestId]: event.suggestion !== undefined ? { state: "suggested", suggestion: event.suggestion } : { state: "refused", refused: event.refused ?? "no picture suggested" } };
+      }
+    } else if (event.type === "audiobook.picture-made") {
+      if (audiobookAsks[event.requestId] !== undefined && event.state !== "making") {
+        audiobookAsks = { ...audiobookAsks, [event.requestId]: event.state === "made" ? { state: "made", ...(event.sessionId !== undefined ? { sessionId: event.sessionId } : {}) } : { state: "failed", reason: event.reason ?? "the picture was not made", ...(event.sessionId !== undefined ? { sessionId: event.sessionId } : {}) } };
       }
     } else if (event.type === "audiobook.speaker-notes") {
       if (audiobookAsks[event.requestId] !== undefined) {
@@ -5468,6 +5485,22 @@ export function setAudiobookReadingNote(worldId: string, productionId: string, n
 export function draftAudiobookSpeakerNotes(worldId: string, productionId: string): string | null {
   const requestId = ulid();
   if (!send({ kind: "draft-audiobook-speaker-notes", worldId, productionId, requestId })) return null;
+  emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
+  return requestId;
+}
+
+/** A picture suggested for a block (design turn 191a): answered under the id returned, held in `audiobookAsks`. Nothing is made or spent. */
+export function suggestAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "suggest-audiobook-picture", worldId, productionId, chapterFile, block, requestId })) return null;
+  emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
+  return requestId;
+}
+
+/** A suggestion made (R-99): the prompt as the author left it and the price the press showed; made through the Bench and filed on the block. */
+export function makeAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, input: { prompt: string; who: readonly string[]; confirmedMicroUsd: number }): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "make-audiobook-picture", worldId, productionId, chapterFile, block, prompt: input.prompt, who: [...input.who], confirmedMicroUsd: input.confirmedMicroUsd, requestId })) return null;
   emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
   return requestId;
 }

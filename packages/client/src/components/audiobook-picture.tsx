@@ -3,11 +3,14 @@ import { useNavigate } from "react-router";
 import {
   audiobookTextHash,
   formatRunningTime,
+  pictureBench,
+  pictureLookChanged,
   pictureSpans,
   productionStyleFor,
   worldImageReferences,
   type AudiobookPictureSource,
   type ChapterAudiobook,
+  type PictureSuggestion,
   type ProductionBundle,
   type WorldBundle,
   type WorldImageReference,
@@ -15,10 +18,11 @@ import {
 import { usableModels } from "./dispatch-bar.js";
 import { setupForMode } from "../lib/composer-mode.js";
 import { mediaUrl } from "../lib/media.js";
-import { sendBenchCompose, sendBenchNewSession, setAudiobookPicture, useBench, useStore } from "../lib/store.js";
+import { sendBenchAddReference, sendBenchCompose, sendBenchNewSession, setAudiobookPicture, useBench, useStore } from "../lib/store.js";
 import type { BlockRow } from "../screens/chapter-audiobook.js";
 import { Button, Textarea, cx } from "./ui.js";
 import { LookSheet } from "./audiobook-look.js";
+import { PictureSuggestionCard, usePictureSuggestion } from "./audiobook-suggest.js";
 
 /**
  * Pictures that follow the words (design turn 186c, SPEC-047 R-69): in a chapter's Audiobook
@@ -124,6 +128,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   record?: ChapterAudiobook | null;
 }) {
   const [lookOpen, setLookOpen] = useState(false);
+  const suggestion = usePictureSuggestion(worldId, production.meta.id, chapterFile, row.block.key);
   const store = useStore();
   const world = store.state?.world ?? null;
   const connection = store.connection;
@@ -148,7 +153,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   // Generate (R-69): a new Bench session in image mode with the brief written in, then the Bench —
   // which prices and confirms the picture as any image, and files it as an artifact kept there.
   const bench = useBench();
-  const pending = useRef<{ before: string | null; brief: string } | null>(null);
+  const pending = useRef<{ before: string | null; brief: string; refs?: readonly string[] } | null>(null);
   useEffect(() => {
     const asked = pending.current;
     const session = bench?.session;
@@ -156,12 +161,25 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
     pending.current = null;
     const setup = setupForMode("image", undefined, usableModels(store.state, "image"));
     sendBenchCompose(worldId, session.id, { mode: "image", provider: setup.provider, model: setup.model, params: setup.params, brief: asked.brief });
+    // Edit prompt (191a): the pictures that were to ride go in as the Bench takes them, one batch, in the order the brief cites them.
+    if (asked.refs !== undefined) sendBenchAddReference(worldId, session.id, asked.refs.map((path) => ({ pick: { source: "world-file" as const, path } })));
     void navigate(`/w/${worldId}/artifacts/bench/${session.id}`);
   }, [bench, worldId, navigate, store.state]);
   const generate = () => {
     pending.current = { before: bench?.session.id ?? null, brief: brief ?? pictureBrief(row.block.text, production, world) };
     sendBenchNewSession(worldId);
   };
+
+  // Edit prompt (R-99): the same prompt in the Bench, each carried reference attached there as `Image n`.
+  const editInBench = (picked: PictureSuggestion, prompt: string) => {
+    const carried = picked.who.filter((who) => who.carried && who.reference !== null);
+    const cited = carried.map((who, order) => ({ name: who.name, kind: who.kind, token: `Image ${order + 1}` }));
+    pending.current = { before: bench?.session.id ?? null, brief: pictureBench(prompt, cited, productionStyleFor(production.meta, world?.artDirection.description)), refs: carried.map((who) => who.reference!) };
+    sendBenchNewSession(worldId);
+  };
+  // A picture Arke made keeps the look it was made under: marked when that has since changed (R-98).
+  const madeUnder = here === null ? undefined : Object.values(record?.pictures ?? {}).find((entry) => entry.file === here.file)?.look;
+  const lookChanged = pictureLookChanged(madeUnder, record?.look);
 
   const shownCaption = here === null
     ? null
@@ -171,6 +189,8 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
     <section className="fy-bible__panel fy-ab__picture" data-testid="audiobook-picture">
       <h2 className="fy-ab__blocktitle">Picture · {blockName}</h2>
       {shownCaption !== null && <p className={cx("fy-mono fy-ab__card-line", here?.short && "fy-ch__who-where--warn")}>{shownCaption}</p>}
+      {lookChanged && <p className="fy-mono fy-ab__card-line fy-ch__who-where--warn" data-testid="picture-look-changed">look changed</p>}
+      {!open && world !== null && <PictureSuggestionCard world={world} worldId={worldId} state={suggestion} onEdit={editInBench} offline={connection !== "open"} />}
       {!open ? (
         <div className="fy-ab__control">
           {here !== null && world !== null && <img className="fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" />}
@@ -183,6 +203,11 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
           <Button variant="ghost" onClick={() => setLookOpen(true)} data-testid="audiobook-look-open">
             Look
           </Button>
+          {suggestion.ask === null && (
+            <Button variant="secondary" disabled={connection !== "open"} onClick={suggestion.suggest} data-testid="suggest-picture">
+              Suggest picture
+            </Button>
+          )}
           <Button variant="secondary" disabled={connection !== "open"} onClick={() => setOpen(true)} data-testid="audiobook-picture-open">
             Picture
           </Button>
