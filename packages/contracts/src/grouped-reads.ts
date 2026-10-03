@@ -28,10 +28,12 @@ export interface SpeechTurn {
  * block's whole style on its turn, as a solo read would; `deltas` sends the shared notes once, on
  * the request's first turn, and each later turn only its own direction; `merged` is `deltas` with
  * consecutive blocks under the same direction joined into one turn. The probe compares the three
- * by ear; `merged` is the default until it says otherwise.
+ * by ear. Heard on 2026-10-03 (chapter 01, five blocks, Ife's designed voice), `deltas` ran on
+ * where `full` restated the notes and reset at every turn, so `deltas` is the default; `merged`
+ * stays for a later listen, since those five blocks had no run under one direction to join.
  */
 export type GroupPacking = "full" | "deltas" | "merged";
-export const DEFAULT_GROUP_PACKING: GroupPacking = "merged";
+export const DEFAULT_GROUP_PACKING: GroupPacking = "deltas";
 
 /**
  * A request's caps with room to spare under Gemini Flash's 8,192 input and 16,384 output tokens:
