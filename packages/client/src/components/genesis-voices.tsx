@@ -23,7 +23,7 @@ export function GenesisVoiceCards({ genesisId, voices, jobs, busy, models, onGen
     {voices.problems.map((problem, index) => <Callout key={index} title="Voice needs attention">{problem}</Callout>)}
     {voices.plans.map(plan => <article className="fy-actioncard" key={plan.intent.id}>
       <h3>{plan.title} · {plan.voice.label}</h3><p style={{ whiteSpace: "pre-wrap" }}>{plan.text}</p>
-      <p>{plan.voice.provider} · {plan.voice.model} · {speechPricePrefix(models, [plan.voice.provider])}{formatMicroUsd(plan.estimatedMicroUsd)}</p>
+      <p>{plan.voice.provider} · {plan.voice.model} · {plan.estimatedMicroUsd === 0 ? "free" : `${speechPricePrefix(models, [plan.voice.provider])}${formatMicroUsd(plan.estimatedMicroUsd)}`}</p>
       <p>{plan.transfer}</p>
       <Button disabled={busy || jobs.some(job => job.target.id === plan.intent.target && !["succeeded", "failed", "cancelled"].includes(job.status))}
         onClick={() => onGenerate(plan.intent.id, plan.digest)}>Generate audition</Button>

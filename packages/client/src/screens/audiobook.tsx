@@ -343,6 +343,8 @@ export function AudiobookScreen() {
           narratorLabel={door.voices[0]?.name ?? DEFAULT_NARRATOR.label}
           {...(production?.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {})}
           appLabel={narratorLabelFor(app?.narrator ?? null, world?.meta.worldId)}
+          {...(app?.narrator ? { appProvider: app.narrator.provider } : {})}
+          castProviders={door.voices.filter((voice) => voice.state === "reads" && voice.voice !== undefined).map((voice) => voice.voice!.provider)}
           trial={door.rows[0] !== undefined ? { chapterFile: door.rows[0].file, block: "title" } : null}
           slug={world?.meta.slug}
           data={line.line}

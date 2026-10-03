@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type KeyboardEvent } from "react";
-import { cloudSpeechPreference, estimateMicroUsd, formatMicroUsd, speechPlanLabel, modelPriceCopy, readerName, readerPlace, supportsVoiceUse, type AudiobookReader, type ManifestModel } from "@arke-studio/contracts";
+import { cloudSpeechPreference, estimateMicroUsd, formatMicroUsd, speechPlanLabel, speechPricePrefix, modelPriceCopy, readerName, readerPlace, supportsVoiceUse, type AudiobookReader, type ManifestModel } from "@arke-studio/contracts";
 import { PageSheet } from "../components/page-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { EditorDialog } from "../components/editor-dialog.js";
@@ -42,7 +42,7 @@ function matches(voice: ReadingVoice, row: ManifestModel | undefined, words: rea
  * the direction the new reader holds, the price of reading the book again, the takes kept —
  * and the press waits for that answer, writes the book record and makes nothing.
  */
-export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarrator, appLabel, trial, slug, data, onClose }: {
+export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarrator, appLabel, appProvider, castProviders, trial, slug, data, onClose }: {
   worldId: string;
   productionId: string;
   /** The narrator the book reads in now, by name. */
@@ -51,6 +51,9 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
   bookNarrator?: AudiobookReader;
   /** The app's narrator by name, for the seg. */
   appLabel: string;
+  /** The app narrator's provider and the cast's, for the book price's word; unknown says `~`. */
+  appProvider?: string;
+  castProviders?: readonly string[];
   /** The block a voice is tried on: the selected one, or the first chapter's title. */
   trial: { chapterFile: string; block: string } | null;
   slug: string | undefined;
@@ -230,14 +233,16 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
       </div>
     </div>
   );
+  const narratorProvider = mode === "app" ? appProvider : target?.provider;
+  const bookPriceWord = narratorProvider === undefined || castProviders === undefined ? "~" : speechPricePrefix(models, [narratorProvider, ...castProviders]);
   const facts: Array<{ k: string; v: string; warn?: boolean }> =
     quote?.state === "done"
       ? [
           { k: "Blocks", v: `${quote.stale.toLocaleString()} stale`, warn: quote.stale > 0 },
           ...(quote.directed > 0 ? [{ k: "Direction", v: quote.held === 0 ? `${quote.directed} · none held` : `${quote.held} of ${quote.directed} held`, warn: quote.held > 0 }] : []),
-          // The whole book under the switch, its cast with it: readers this dialog cannot see may
-          // be priced by the token, so it is said as an estimate (SPEC-049 R-6), never `up to`.
-          { k: "Read the book", v: quote.estimatedMicroUsd === 0 ? "no charge" : `~${formatMicroUsd(quote.estimatedMicroUsd)}` },
+          // The whole book under the switch, its cast with it: `up to` only while every reader in
+          // the book is priced by the character, else an estimate (SPEC-049 R-6).
+          { k: "Read the book", v: quote.estimatedMicroUsd === 0 ? "no charge" : `${bookPriceWord}${formatMicroUsd(quote.estimatedMicroUsd)}` },
           { k: "Takes", v: `kept · ${quote.kept.toLocaleString()}` },
         ]
       : quote?.state === "refused"
