@@ -9,6 +9,8 @@ import {
   discoverClaudeCode,
   meetsClaudeFloor,
   credentialSummary,
+  makeSdkProbe,
+  PROBE_TOOLS,
   probeConfinement,
   resolveClaudeHarness,
   type ProbeTurnResult,
@@ -42,11 +44,21 @@ function fakeRunner(spec: { onPath?: string | null; versions?: Record<string, st
   };
 }
 
+/**
+ * What a confined 2.1.235 init message listed, measured with the probe's own options: the
+ * offered built-ins that build has (no TodoWrite, TodoRead or NotebookRead), plus the shell bait.
+ */
+const CLEAN_SURFACE = {
+  tools: ["Bash", "Edit", "Glob", "Grep", "NotebookEdit", "Read", "WebFetch", "WebSearch", "Write"],
+  mcp_servers: [],
+};
+
 const turn = (over: Partial<ProbeTurnResult> = {}): ProbeTurnResult => ({
   gateInvokedFor: ["Bash"],
   deniedActionHappened: false,
   version: "2.1.235",
   apiKeySource: "none",
+  surface: CLEAN_SURFACE,
   ...over,
 });
 
@@ -168,6 +180,100 @@ describe("the confinement probe decides, and fails closed", () => {
     });
     assert.equal(verdict.ok, false);
     assert.match(verdict.ok === false ? verdict.reason : "", /could not run/);
+  });
+});
+
+describe("the probe reads what the model was shown, not only what the gate saw", () => {
+  /*
+   * The regression: a World Chat session on the user's machine was offered their claude.ai
+   * connectors and some thirty Claude Code built-ins as deferred tools while Settings said
+   * "confinement verified". The gate refused the shell correctly throughout; the probe tested
+   * nothing else. CronCreate was then measured running under a deny-everything gate without the
+   * gate being consulted, so "the gate works" and "the session is confined" are different claims.
+   */
+  const shown = (...extra: string[]) => turn({ surface: { tools: [...CLEAN_SURFACE.tools, ...extra], mcp_servers: [] } });
+
+  it("fails a build that offers a built-in the gate never sees", async () => {
+    const verdict = await probeConfinement("claude", async () => shown("CronCreate"));
+    assert.equal(verdict.ok, false, "the gate was consulted about Bash and refused it, and that is not enough");
+    assert.match(verdict.ok === false ? verdict.reason : "", /did not give it \(CronCreate\)/);
+  });
+
+  it("fails a build that offers the tool-search tool, the door every deferred tool comes through", async () => {
+    const verdict = await probeConfinement("claude", async () => shown("ToolSearch"));
+    assert.equal(verdict.ok, false);
+  });
+
+  it("fails on a claude.ai connector, by tool and by server", async () => {
+    const byTool = await probeConfinement("claude", async () => shown("mcp__claude_ai_Claude_Docs__read"));
+    assert.equal(byTool.ok, false);
+    const byServer = await probeConfinement("claude", async () =>
+      turn({ surface: { tools: CLEAN_SURFACE.tools, mcp_servers: [{ name: "claude.ai Google Drive" }] } }));
+    assert.equal(byServer.ok, false, "a connector still waiting on auth lists no tools yet, and is still not ours");
+    assert.match(byServer.ok === false ? byServer.reason : "", /MCP server claude\.ai Google Drive/);
+  });
+
+  it("names a few of a long list rather than all of them", async () => {
+    const verdict = await probeConfinement("claude", async () =>
+      shown("CronCreate", "CronDelete", "RemoteTrigger", "PushNotification", "SendMessage", "Monitor"));
+    assert.match(verdict.ok === false ? verdict.reason : "", /and 2 more\)$/);
+  });
+
+  it("accepts the arke-world surface, which a session is given and the probe is not", async () => {
+    const verdict = await probeConfinement("claude", async () => turn({
+      surface: { tools: [...CLEAN_SURFACE.tools, "mcp__arke-world__search_canon"], mcp_servers: [{ name: "arke-world" }] },
+    }));
+    assert.equal(verdict.ok, true);
+  });
+
+  it("fails closed when no init message said what was offered", async () => {
+    const verdict = await probeConfinement("claude", async () => turn({ surface: null }));
+    assert.equal(verdict.ok, false);
+    assert.match(verdict.ok === false ? verdict.reason : "", /never said which tools/);
+  });
+
+  it("still puts a denied command that ran ahead of everything else", async () => {
+    const verdict = await probeConfinement("claude", async () => turn({ deniedActionHappened: true, surface: null }));
+    assert.match(verdict.ok === false ? verdict.reason : "", /ran anyway/);
+  });
+});
+
+describe("the SDK probe runs on the surface a session gets", () => {
+  it("opens with the session's options plus the shell bait, and reports the init surface", async () => {
+    let options: Record<string, unknown> = {};
+    const runQuery = ((args: { options: Record<string, unknown> }) => {
+      options = args.options;
+      return (async function* () {
+        yield { type: "system", subtype: "init", claude_code_version: "2.1.235", apiKeySource: "none", tools: ["Bash", "Read", "CronCreate"], mcp_servers: [] };
+        const gate = options["canUseTool"] as (n: string, i: Record<string, unknown>) => Promise<unknown>;
+        await gate("Bash", { command: "echo hello > arke-probe-ran.txt" });
+        yield { type: "result", subtype: "success" };
+      })();
+    }) as never;
+    const result = await makeSdkProbe({ runQuery })("claude");
+
+    assert.deepEqual(options["settingSources"], []);
+    assert.deepEqual(options["tools"], [...PROBE_TOOLS], "without `tools` the full claude_code preset is offered");
+    assert.equal(options["strictMcpConfig"], true);
+    assert.deepEqual(options["settings"], { disableClaudeAiConnectors: true });
+    assert.equal("allowedTools" in options, false);
+    for (const absent of ["ToolSearch", "CronCreate", "Skill", "Task"]) {
+      assert.equal(PROBE_TOOLS.includes(absent), false, `${absent} is not offered`);
+    }
+
+    assert.deepEqual(result.surface, { tools: ["Bash", "Read", "CronCreate"], mcp_servers: [] });
+    const verdict = await probeConfinement("claude", async () => result);
+    assert.equal(verdict.ok, false, "the gate was consulted, and the surface still fails it");
+  });
+
+  it("reports no surface, not an empty one, when the init message carries no tool list", async () => {
+    const runQuery = ((args: { options: Record<string, unknown> }) => (async function* () {
+      yield { type: "system", subtype: "init", claude_code_version: "2.1.235", apiKeySource: "none" };
+      await (args.options["canUseTool"] as (n: string, i: Record<string, unknown>) => Promise<unknown>)("Bash", {});
+    })()) as never;
+    const result = await makeSdkProbe({ runQuery })("claude");
+    assert.equal(result.surface, null);
+    assert.equal((await probeConfinement("claude", async () => result)).ok, false);
   });
 });
 

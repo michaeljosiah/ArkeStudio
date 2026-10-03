@@ -165,6 +165,101 @@ describe("the options a session is opened with", () => {
   });
 });
 
+describe("what a session is shown, which the gate alone does not decide", () => {
+  /*
+   * Measured on 2.1.235 and 2.1.288: under a gate that denied everything, a turn loaded CronCreate
+   * through ToolSearch and scheduled a recurring job, and the gate was consulted for neither call.
+   * A tool on offer is a tool that may never reach `canUseTool`, so the offer itself is narrowed.
+   */
+  const init = (tools: string[], servers: string[] = []) => ({
+    type: "system",
+    subtype: "init",
+    tools,
+    mcp_servers: servers.map((name) => ({ name, status: "connected" })),
+  });
+
+  async function optionsFor(agent: string, prep: { researchWeb?: boolean } = {}) {
+    const fake = fakeQuery([result()]);
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
+    adapter.prepareSession({ preparationId: "p", ...prep });
+    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent, preparationId: "p" });
+    await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
+    await adapter.dispose();
+    return fake.options();
+  }
+
+  it("offers only the built-ins the role's confinement permits", async () => {
+    const authoring = await optionsFor("sheet-editor");
+    assert.deepEqual(authoring["tools"], ["Read", "NotebookRead", "Edit", "Write", "NotebookEdit", "Glob", "Grep", "TodoWrite", "TodoRead"]);
+    const worldChat = await optionsFor("world-builder");
+    assert.deepEqual(worldChat["tools"], ["Read", "NotebookRead", "Glob", "Grep", "TodoWrite", "TodoRead"], "read-only: no Edit, no Write");
+    const researching = await optionsFor("world-builder", { researchWeb: true });
+    assert.deepEqual((researching["tools"] as string[]).slice(-2), ["WebSearch", "WebFetch"], "web only when Settings turns it on");
+    for (const options of [authoring, worldChat, researching]) {
+      for (const absent of ["ToolSearch", "CronCreate", "PushNotification", "SendMessage", "Monitor", "Skill", "Task", "Bash"]) {
+        assert.equal((options["tools"] as string[]).includes(absent), false, `${absent} is never offered`);
+      }
+    }
+  });
+
+  it("connects only the MCP servers it passes, and never the claude.ai connectors", async () => {
+    const options = await optionsFor("world-builder");
+    assert.equal(options["strictMcpConfig"], true, "settingSources: [] keeps the user's files out, not plugins or agents");
+    assert.deepEqual(options["settings"], { disableClaudeAiConnectors: true }, "connectors come with the login, not a settings file");
+    assert.deepEqual(options["settingSources"], []);
+  });
+
+  it("ends the session before the model answers when the harness shows it more than that", async () => {
+    let abort: AbortController | undefined;
+    let answered = false;
+    const run: RunQuery = ({ prompt, options }) => {
+      abort = options["abortController"] as AbortController;
+      return (async function* () {
+        await prompt[Symbol.asyncIterator]().next();
+        yield init(["Read", "Glob", "Grep", "CronCreate", "mcp__arke-world__search_canon"], ["arke-world", "claude.ai Claude Docs"]);
+        answered = true;
+        yield assistant([{ type: "text", text: "scheduled it" }]);
+        yield result();
+      })();
+    };
+    const traces: Record<string, unknown>[] = [];
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: run, onTrace: (line) => traces.push(line) });
+    let sessionId = "";
+    const events = await collect(adapter, async () => {
+      ({ sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "world-builder" }));
+      await assert.rejects(
+        () => adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] }),
+        /outside Arke Studio's confinement: CronCreate, MCP server claude\.ai Claude Docs$/,
+      );
+      await assert.rejects(
+        () => adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: "again" }] }),
+        /outside Arke Studio's confinement/,
+        "a later message is told why, not queued onto an inbox nothing reads",
+      );
+    });
+    assert.equal(answered, false, "nothing after the init message was read");
+    assert.equal(abort?.signal.aborted, true, "the harness process is stopped, not merely ignored");
+    assert.ok(events.some((e) => e.type === "session.ended" && e.reason === "error"));
+    assert.equal(events.some((e) => e.type === "message.delta"), false);
+    assert.deepEqual(traces.find((t) => t["at"] === "claude.surface-refused")?.["unexpected"], ["CronCreate", "MCP server claude.ai Claude Docs"]);
+  });
+
+  it("carries on when the harness shows exactly what it was given", async () => {
+    const fake = fakeQuery([
+      init(["Glob", "Grep", "Read", "mcp__arke-world__search_canon", "mcp__arke-world__get_entry"], ["arke-world"]),
+      assistant([{ type: "text", text: "answered" }]),
+      result(),
+    ]);
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
+    const events = await collect(adapter, async () => {
+      const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "world-builder" });
+      await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
+    });
+    assert.ok(events.some((e) => e.type === "message.completed"));
+    assert.ok(events.some((e) => e.type === "session.ended" && e.reason !== "error"));
+  });
+});
+
 describe("normalising the SDK's messages", () => {
   it("accumulates assistant text, because the contract's delta carries the whole answer", () => {
     const state = createNormalizeState();

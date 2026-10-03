@@ -8,6 +8,7 @@ export {
 } from "./discovery.js";
 export {
   ConfinementCache,
+  PROBE_TOOLS,
   probeConfinement,
   type ConfinementVerdict,
   type ProbeTurnResult,
@@ -22,7 +23,8 @@ export {
 export { makeSdkProbe, type SdkProbeOptions } from "./sdk-probe.js";
 export { ClaudeAdapter, type ClaudeAdapterOptions, type RunQuery } from "./claude-adapter.js";
 export { createNormalizeState, normalizeClaude, toolSummary, type NormalizeOutcome, type NormalizeState } from "./normalize.js";
-export { decideTool, intentOf, type ToolCall, type ToolDecision } from "./tool-intents.js";
+export { decideTool, intentOf, offeredTools, type ToolCall, type ToolDecision } from "./tool-intents.js";
+export { confinedOptions, unexpectedSurface, type InitSurface } from "./surface.js";
 export { confinePath, isWithin, resolveRoot } from "./path-confinement.js";
 export { sdkQuery, sdkModels } from "./sdk-query.js";
 export {

@@ -3,7 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { ProbeTurnResult, RunProbeTurn } from "./confinement-probe.js";
+import { PROBE_CONFINEMENT, PROBE_TOOLS, type ProbeTurnResult, type RunProbeTurn } from "./confinement-probe.js";
+import { confinedOptions, type InitSurface } from "./surface.js";
 
 /**
  * The real {@link RunProbeTurn} — one Agent SDK turn, run to find out whether this build
@@ -59,6 +60,7 @@ export function makeSdkProbe(opts: SdkProbeOptions = {}): RunProbeTurn {
     const gateInvokedFor: string[] = [];
     let version: string | null = null;
     let apiKeySource: string | null = null;
+    let surface: InitSurface | null = null;
 
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), timeoutMs);
@@ -69,7 +71,10 @@ export function makeSdkProbe(opts: SdkProbeOptions = {}): RunProbeTurn {
         prompt: PROBE_PROMPT,
         options: {
           pathToClaudeCodeExecutable: command,
-          settingSources: [],
+          // The surface a real session gets, so the tool list the init message reports is a
+          // verdict on THAT — with the shell added back as the bait the gate is tested on.
+          ...confinedOptions(PROBE_CONFINEMENT),
+          tools: [...PROBE_TOOLS],
           // Ours, never the `claude_code` preset: this is a permission probe, not a coding session.
           systemPrompt: "You are a test fixture for a permission check.",
           cwd,
@@ -87,13 +92,17 @@ export function makeSdkProbe(opts: SdkProbeOptions = {}): RunProbeTurn {
 
       for await (const message of turn) {
         if (message.type === "system" && message.subtype === "init") {
-          const init = message as { claude_code_version?: string; apiKeySource?: string };
+          const init = message as { claude_code_version?: string; apiKeySource?: string } & InitSurface;
           version = init.claude_code_version ?? null;
           apiKeySource = init.apiKeySource ?? null;
+          // A missing list stays null rather than becoming an empty one: "listed nothing" would
+          // pass the surface check, and a build that stopped saying is not a build that offers
+          // nothing.
+          if (Array.isArray(init.tools)) surface = { tools: init.tools, mcp_servers: init.mcp_servers ?? [] };
         }
       }
 
-      return { gateInvokedFor, deniedActionHappened: existsSync(join(cwd, SENTINEL)), version, apiKeySource };
+      return { gateInvokedFor, deniedActionHappened: existsSync(join(cwd, SENTINEL)), version, apiKeySource, surface };
     } finally {
       clearTimeout(timer);
       // The verdict is already decided by the sentinel check above; a temp directory that

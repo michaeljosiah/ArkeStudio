@@ -474,7 +474,7 @@
             <tr><td>Run shell commands</td><td><span class="tag tag--no">No</span></td><td>Blocked. Blocking one shell is not enough, so the rule is a list of what is allowed rather than what is banned.</td></tr>
             <tr><td>Search the public web and read pages</td><td><span class="tag tag--new">When enabled</span></td><td>Off by default. Settings can add this one capability for both drafting and read-only agents; shell and unrestricted network access stay blocked.</td></tr>
             <tr><td>Start its own sub-agents</td><td><span class="tag tag--no">No</span></td><td>A sub-agent escapes the rules set for the original.</td></tr>
-            <tr><td>Anything unrecognised</td><td><span class="tag tag--no">No</span></td><td>A real Claude Code offers about thirty tools and gains more over time. Unknown means refused.</td></tr>
+            <tr><td>Anything unrecognised</td><td><span class="tag tag--no">No</span></td><td>A real Claude Code offers about thirty tools and gains more over time. The AI is shown only the tools above, and anything else is refused.</td></tr>
           </tbody>
         </table>
 
@@ -532,7 +532,7 @@
             <tr><td>You chose it, then removed it</td><td>Runs on OpenCode and says so. Your choice stays saved, so reinstalling restores it.</td></tr>
             <tr><td>Not installed</td><td>Says so plainly, and uses OpenCode. If it IS installed and the Studio cannot see it, <b>Choose…</b> under Where it is points at the file directly.</td></tr>
             <tr><td>Installed but too old</td><td>Names the version you have and the version needed, so the message is something you can act on.</td></tr>
-            <tr><td>Fails the test turn</td><td>Not used. A version that cannot be verified is treated as unusable rather than given the benefit of the doubt.</td></tr>
+            <tr><td>Fails the test turn</td><td>Not used. The test checks that a blocked tool stays blocked and that the AI is shown nothing beyond the Studio's tools. A version that cannot be verified is treated as unusable rather than given the benefit of the doubt.</td></tr>
             <tr><td>Not signed in</td><td>The test turn fails, so this lands in the row above.</td></tr>
             <tr><td>OpenCode is also missing</td><td>Authoring is unavailable and the Studio says so. This was already true before this feature.</td></tr>
           </tbody>
@@ -575,7 +575,8 @@
             <h4>Your own settings are ignored</h4>
             <p>
               The Studio deliberately does not load your personal Claude Code configuration, so your
-              own connected tools and services are never pulled into a Studio job. Your setup is yours;
+              own connected tools and services, including the connectors on your Claude account, are never
+              pulled into a Studio job. Your setup is yours;
               Studio work runs in a clean room.
             </p>
           </div>

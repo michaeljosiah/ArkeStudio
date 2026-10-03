@@ -19,6 +19,7 @@ import {
 import { createNormalizeState, normalizeClaude, type NormalizeState } from "./normalize.js";
 import { resolveRoot } from "./path-confinement.js";
 import { decideTool, type ToolDecision } from "./tool-intents.js";
+import { confinedOptions, unexpectedSurface, type InitSurface } from "./surface.js";
 import { normalizeClaudeModels, type DiscoverClaudeModels } from "./model-discovery.js";
 
 /**
@@ -30,7 +31,9 @@ import { normalizeClaudeModels, type DiscoverClaudeModels } from "./model-discov
  * So the session table, the turn bookkeeping and the multiplexed event stream all live here,
  * and `dispose()` is the only thing standing between an abandoned adapter and a live subprocess.
  *
- * Everything the agent may do comes from {@link confinementFor} and is enforced in `canUseTool`
+ * Everything the agent may do comes from {@link confinementFor} and is enforced twice: in what the
+ * session is offered at all (`surface.ts` — some built-ins never reach the callback, so a tool
+ * left on offer is a tool left open), and in `canUseTool`
  * — a callback we own, rather than a config file the harness is trusted to honour. That is
  * stronger than OpenCode where it applies, and it has to be verified per binary rather than
  * assumed (see `confinement-probe.ts`). It is not total: side-effect-free work inside the
@@ -91,6 +94,18 @@ interface ClaudeSession {
   normalize: NormalizeState;
   started: boolean;
   turn: Turn | null;
+  /**
+   * Set when the harness showed this session more than its confinement, and the query was ended
+   * for it. The session cannot be driven again — its query is gone — so a later message is told
+   * why rather than queued onto an inbox nothing reads.
+   */
+  refused?: string;
+}
+
+/** The `system/init` message, which carries the tool list the model was actually given. */
+function isInit(message: unknown): message is InitSurface {
+  const m = message as { type?: unknown; subtype?: unknown } | null;
+  return m?.type === "system" && m.subtype === "init";
 }
 
 /** A queue an async iterator can drain — the SDK's streaming-input mode wants exactly this. */
@@ -320,6 +335,7 @@ export class ClaudeAdapter implements HarnessAdapter {
   async dispatchAsync(input: SendMessageInput): Promise<SendReceipt> {
     const session = this.sessions.get(input.sessionId);
     if (!session) throw new Error(`unknown session ${input.sessionId}`);
+    if (session.refused) throw new Error(session.refused);
     const correlationId = input.correlationId ?? randomUUID();
     const text = input.parts.map((p) => p.text).join("\n");
 
@@ -360,13 +376,15 @@ export class ClaudeAdapter implements HarnessAdapter {
     const runQuery = this.opts.runQuery;
     if (!runQuery) throw new Error("ClaudeAdapter needs a query implementation");
     try {
+      const surface = confinedOptions(session.confinement);
+      const offered = surface["tools"] as string[];
       const messages = runQuery({
         prompt: session.inbox,
         options: {
           pathToClaudeCodeExecutable: this.opts.command,
-          // Never inherit the user's own config: omitting this loads their settings AND connects
-          // their MCP servers, which an authoring session has no business touching.
-          settingSources: [],
+          // `settingSources: []`, the built-in allowlist and both MCP switches — what the session
+          // is SHOWN, which the probe checks with the same function (see `surface.ts`).
+          ...surface,
           // No `env` override, and specifically no CLAUDE_CONFIG_DIR redirect, though the SDK
           // takes one. It looks like the analogue of OpenCode's `v2ProfileEnv` and is its
           // opposite: that redirect exists to cut the user's own login OFF, and here the user's
@@ -386,7 +404,8 @@ export class ClaudeAdapter implements HarnessAdapter {
           abortController: session.abort,
           ...(session.model !== undefined ? { model: session.model } : {}),
           // No `allowedTools`: a bare entry there auto-approves the tool before canUseTool is
-          // consulted, which would disarm the gate below rather than configure it.
+          // consulted, which would disarm the gate below rather than configure it. `tools` is the
+          // other list, and the safe one: it decides what exists, not what is pre-approved.
           canUseTool: this.gateFor(session),
           ...(session.worldQueryUrl
             ? { mcpServers: { "arke-world": { type: "http", url: session.worldQueryUrl } } }
@@ -394,6 +413,22 @@ export class ClaudeAdapter implements HarnessAdapter {
         },
       });
       for await (const message of messages) {
+        /*
+         * The probe checks a binary once per version; this checks every session, because what a
+         * session is shown also depends on things the probe never sees — managed settings the
+         * CLI reads regardless of `settingSources`, a plugin, a build that changes what `tools`
+         * covers. The init message arrives before the model has answered anything, so ending the
+         * session here ends it before any tool it should not have had could be called.
+         */
+        if (isInit(message)) {
+          const unexpected = unexpectedSurface(message, offered);
+          if (unexpected.length > 0) {
+            this.opts.onTrace?.({ at: "claude.surface-refused", sessionId: session.id, unexpected });
+            session.refused = `Claude Code offered this session tools outside Arke Studio's confinement: ${unexpected.join(", ")}`;
+            session.abort.abort();
+            throw new Error(session.refused);
+          }
+        }
         const outcome = normalizeClaude(message, session.id, session.normalize);
         if (outcome.kind === "dead-letter") {
           this.opts.onTrace?.({ at: "claude.dead-letter", sessionId: session.id, reason: outcome.reason });

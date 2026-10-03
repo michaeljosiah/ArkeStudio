@@ -9,8 +9,15 @@ import { assembleHarness } from "../../src/harness/v2-launch.js";
  * why it is opt-in rather than something every boot pays for.
  */
 
-const verified = async () => ({ gateInvokedFor: ["Bash"], deniedActionHappened: false, version: "2.1.235", apiKeySource: "none" });
-const broken = async () => ({ gateInvokedFor: ["Bash"], deniedActionHappened: true, version: "2.1.235", apiKeySource: "none" });
+/** What a confined init message lists: the offered built-ins and the shell bait, nothing else. */
+const surface = { tools: ["Bash", "Glob", "Grep", "Read", "Write"], mcp_servers: [] };
+const verified = async () => ({ gateInvokedFor: ["Bash"], deniedActionHappened: false, version: "2.1.235", apiKeySource: "none", surface });
+const broken = async () => ({ gateInvokedFor: ["Bash"], deniedActionHappened: true, version: "2.1.235", apiKeySource: "none", surface });
+/** The gate refuses the shell perfectly, and the model is still shown a scheduler and a connector. */
+const overexposed = async () => ({
+  gateInvokedFor: ["Bash"], deniedActionHappened: false, version: "2.1.288", apiKeySource: "none",
+  surface: { tools: [...surface.tools, "ToolSearch", "CronCreate", "mcp__claude_ai_Claude_Docs__read"], mcp_servers: [{ name: "claude.ai Claude Docs" }] },
+});
 
 /** Answers `where`/`which` and `--version` so discovery resolves without a real binary. */
 const runCommand = (version: string | null) => async (command: string, args: string[]) => {
@@ -75,7 +82,7 @@ describe("the bring-your-own Claude lane (SPEC-005 R-1, R-4)", () => {
   });
 
   it("names an environment key when one outranked the subscription", async () => {
-    const keyed = async () => ({ gateInvokedFor: ["Bash"], deniedActionHappened: false, version: "2.1.235", apiKeySource: "ANTHROPIC_API_KEY" });
+    const keyed = async () => ({ gateInvokedFor: ["Bash"], deniedActionHappened: false, version: "2.1.235", apiKeySource: "ANTHROPIC_API_KEY", surface });
     const wiring = await assemble({ enabled: true, runCommand: runCommand("2.1.235"), runTurn: keyed });
     const said = wiring.logLines.find((l) => l.includes("Claude Code 2.1.235"));
     assert.match(said!, /ANTHROPIC_API_KEY/);
@@ -97,6 +104,15 @@ describe("the bring-your-own Claude lane (SPEC-005 R-1, R-4)", () => {
     const said = wiring.logLines.find((l) => l.startsWith("Claude Code unavailable"));
     assert.ok(said, "a refusal is a statement, not a silence");
     assert.match(said!, /does not honour the tool gate/);
+  });
+
+  it("does not say verified for a build that shows the model tools Arke did not give it", async () => {
+    // The 2026-10-02 World Chat transcript: connectors and schedulers offered as deferred tools
+    // while this line read "confinement verified", because the probe only watched the gate.
+    const wiring = await assemble({ enabled: true, runCommand: runCommand("2.1.288"), runTurn: overexposed });
+    assert.equal(wiring.adapter, null);
+    assert.equal(wiring.logLines.some((l) => l.includes("confinement verified")), false);
+    assert.match(wiring.unavailableReason!, /did not give it \(ToolSearch, CronCreate, mcp__claude_ai_Claude_Docs__read, MCP server claude\.ai Claude Docs\)/);
   });
 
   it("says so when it was asked for and nothing is installed", async () => {
