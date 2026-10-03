@@ -9,6 +9,7 @@ import { AudiobookScreen } from "../src/screens/audiobook.js";
 import { bookHasTakes, playerChapters } from "../src/components/audiobook-player.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { claimRead } from "../src/lib/reply-reads.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -157,6 +158,16 @@ describe("Listen (turn 186)", () => {
       shell!.dispatchEvent(event);
     });
     assert.equal(q(m, '[data-testid="audiobook-player"]'), null);
+  });
+
+  it("stops a read still being made as it opens, so its first piece never lands over the book (codex on PR 1495)", async () => {
+    let stopped = false;
+    claimRead("page-read:test", () => {
+      stopped = true;
+    });
+    const m = await mount(inkbound(2));
+    await press(q(m, '[data-testid="audiobook-listen"]'));
+    assert.equal(stopped, true);
   });
 
   it("closes from the player's own Close", async () => {

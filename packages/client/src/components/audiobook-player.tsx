@@ -7,6 +7,7 @@ import {
   type ProductionBundle,
 } from "@arke-studio/contracts";
 import { clearQueue, dismissPlayback } from "../lib/audio.js";
+import { claimRead, releaseRead } from "../lib/reply-reads.js";
 import { mediaUrl } from "../lib/media.js";
 import { openAudiobookListening, subscribeAudiobookListening, useAudiobookRecords, useAudiobookRuns, useStore } from "../lib/store.js";
 import { Button } from "./ui.js";
@@ -21,6 +22,9 @@ import { Button } from "./ui.js";
  * lands or a picture moves while the player is open, and pushed into the running player — which
  * keeps the listener's place by its block, so a chapter being read under it fills in around them.
  */
+
+/** The book's claim on the app's one read (design turn 183's rule). */
+const READ_KEY = "audiobook-player";
 
 /** Where a book's listener's place is kept on this device, in the app. */
 export const audiobookPlaceKey = (worldId: string, productionId: string): string => `arke-ab-${worldId}-${productionId}`;
@@ -108,6 +112,10 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
     const element = shell.current;
     if (!element) return;
     // One voice at a time: a chapter read or a clip in the dock stops as the book opens (codex on PR 1493).
+    // A read still being made would queue its first piece over the book when it lands, so the book
+    // claims the one read the app has, which stops the read's owner outright (codex on PR 1495),
+    // and a read started while the book plays pauses the book.
+    claimRead(READ_KEY, () => handle.current?.pause());
     clearQueue();
     dismissPlayback();
     const opener = element.ownerDocument.activeElement as HTMLElement | null;
@@ -119,11 +127,18 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
       }
       if (event.key !== "Tab") return;
       const shown = (el: HTMLElement) => el.closest("[hidden]") === null && (typeof el.checkVisibility !== "function" || el.checkVisibility());
-      const focusable = [element, ...[...element.querySelectorAll<HTMLElement>("button:not([disabled]), [tabindex]:not([tabindex='-1'])")].filter(shown)];
+      // The boundary is the first and last control Tab actually reaches: the shell itself is out of
+      // the sequence (tabIndex -1), so with it as the first, Shift+Tab left the modal (codex on PR 1495).
+      const focusable = [...element.querySelectorAll<HTMLElement>("button:not([disabled]), [tabindex]:not([tabindex='-1'])")].filter(shown);
+      const at = element.ownerDocument.activeElement;
+      if (focusable.length === 0) {
+        event.preventDefault();
+        element.focus();
+        return;
+      }
       const firstEl = focusable[0]!;
       const last = focusable[focusable.length - 1]!;
-      const at = element.ownerDocument.activeElement;
-      if (event.shiftKey && (at === firstEl || !element.contains(at))) {
+      if (event.shiftKey && (at === firstEl || at === element || !element.contains(at))) {
         event.preventDefault();
         last.focus();
       } else if (!event.shiftKey && (at === last || !element.contains(at))) {
@@ -135,6 +150,7 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
     element.focus();
     return () => {
       element.removeEventListener("keydown", trap);
+      releaseRead(READ_KEY);
       handle.current?.destroy();
       handle.current = null;
       if (opener && opener.isConnected && typeof opener.focus === "function") opener.focus();

@@ -218,6 +218,23 @@ describe("what codex found on PR 1493", () => {
     assert.ok(p.audios().every((audio) => !audio.hasAttribute("src")), "the stale take is let go");
   });
 
+  it("keeps the listener's place through a plan with nothing to play, and returns to it (codex on PR 1495)", () => {
+    const p = mount({ chapterId: "ink" });
+    p.end();
+    p.at(3); // 0:07, three seconds into c2.p2
+    p.handle.update([CH3]);
+    p.handle.update(BOOK);
+    assert.match(p.text(".abp-chap"), /Chapter 02/);
+    assert.equal(p.text(".abp-now"), "0:07");
+  });
+
+  it("pauses when another read takes the app's voice", () => {
+    const p = mount();
+    assert.ok(p.playingAudio());
+    p.handle.pause();
+    assert.ok(p.playingAudio() === null);
+  });
+
   it("lands on the last chapter with takes before the place when none follows it", () => {
     const p = mount({ chapterId: "hand" });
     p.handle.update([CH1, CH2, CH3, { ...CH4, state: "not read", seconds: 0, blocks: [], gaps: [{ at: 0, from: 1, to: 2 }] }]);

@@ -145,6 +145,8 @@ export function mountAudiobookPlayer(root, options) {
   let sleepLeft = null;
   let lastTick = null;
   let gapNote = null;
+  /** The listener's place while a newer plan has nothing to play: kept for when takes come back. */
+  let heldPlace = null;
 
   const icon = (d, size, fill) =>
     '<svg width="' + (size || 18) + '" height="' + (size || 18) + '" viewBox="0 0 24 24" fill="' + (fill ? "currentColor" : "none") + '" stroke="' + (fill ? "none" : "currentColor") + '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + "</svg>";
@@ -874,7 +876,9 @@ export function mountAudiobookPlayer(root, options) {
      * place is kept by its block, and the piece playing plays on unless it is gone.
      */
     update(next) {
-      const place = placeHere();
+      // A place held through a plan with nothing to play is the one to come back to (codex on PR 1495).
+      const place = heldPlace || placeHere();
+      heldPlace = null;
       const playingSrc = holds[cur] >= 0 && chapter() ? (chapter().audio[holds[cur]] || {}).src : null;
       const offsetInPiece = players[cur].currentTime || 0;
       chapters = normalise(next);
@@ -891,7 +895,8 @@ export function mountAudiobookPlayer(root, options) {
         holds[0] = holds[1] = -1;
         playing = false;
         lastTick = null;
-        ci = 0;
+        heldPlace = place;
+        ci = Math.min(ci, Math.max(0, chapters.length - 1));
         t = 0;
         render();
         return;
@@ -911,6 +916,10 @@ export function mountAudiobookPlayer(root, options) {
       }
       holds[0] = holds[1] = -1;
       seek(found && found.index === ci ? found.t : 0);
+    },
+    /** Another read takes the app's voice: the book pauses where it is. */
+    pause() {
+      if (playing) pause();
     },
     destroy() {
       for (const audio of players) {
