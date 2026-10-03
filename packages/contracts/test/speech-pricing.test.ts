@@ -121,6 +121,12 @@ describe("a token reader's estimate", () => {
     const chinese = quoteSpeech(model, "港口记得每一个故事。仔细听，一个新的世界就开始了。", { at });
     const english = quoteSpeech(model, "The", { at });
     assert.ok(chinese.quantities.outputAudioTokens! > english.quantities.outputAudioTokens! * 2);
+    const thai = quoteSpeech(model, "ท่าเรือจำทุกเรื่องราวได้ฟังให้ดีแล้วโลกใหม่จะเริ่มต้นขึ้น", { at });
+    assert.ok(thai.quantities.outputAudioTokens! > english.quantities.outputAudioTokens! * 2);
+    // Long spaced words are still words: the letters count only for an unspaced script (codex on PR 1477).
+    const long = Array.from({ length: 10 }, () => "internationalization").join(" ");
+    const short = Array.from({ length: 10 }, () => "cat").join(" ");
+    assert.equal(quoteSpeech(model, long, { at }).quantities.outputAudioTokens, quoteSpeech(model, short, { at }).quantities.outputAudioTokens);
   });
 
   it("keeps the service limits as the estimate only where asked, for voice design's allowance", () => {

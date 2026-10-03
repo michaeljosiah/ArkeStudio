@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { GenesisVoicesSchema } from "@arke-studio/contracts";
+import { SHIPPED_MANIFEST } from "../../providers/src/manifest-data.js";
 import { GenesisVoiceCards } from "../src/components/genesis-voices.js";
 
 it("plays the actual audition and keeps generation and assignment decisions separate", async () => {
@@ -17,7 +18,7 @@ it("plays the actual audition and keeps generation and assignment decisions sepa
   const container = dom.document.createElement("div"), root = createRoot(container);
   const calls: string[] = [];
   try {
-    await act(async () => root.render(<GenesisVoiceCards genesisId="gen-voice" voices={voices} jobs={[]} busy={false}
+    await act(async () => root.render(<GenesisVoiceCards genesisId="gen-voice" voices={voices} jobs={[]} busy={false} models={SHIPPED_MANIFEST.models}
       onGenerate={() => calls.push("generate")} onDecide={(target, decision, heard) => calls.push([target, decision, heard?.hash].join("|"))}
       onRefresh={() => {}} onCancel={() => {}} onRevise={() => {}} />));
     assert.ok(container.querySelector("audio")?.getAttribute("src")?.includes("a".repeat(64)));

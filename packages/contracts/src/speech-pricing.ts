@@ -138,13 +138,18 @@ export const SPEECH_TOKEN_ESTIMATE = {
 
 const CJK_CHARACTER = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu;
 
+// Thai, Lao, Khmer and Burmese leave out the spaces between words.
+const UNSPACED_CHARACTER = /[\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/gu;
+
 /** Spoken words: a CJK character is half of one, and an unspaced script is read by its letters. */
 function speechWords(text: string): number {
   const cjk = text.match(CJK_CHARACTER)?.length ?? 0;
-  const words = text.replace(CJK_CHARACTER, " ").split(/\s+/).filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
-  // Thai, Lao, Khmer and Burmese leave out the spaces: six letters to a word keeps a long
-  // unspaced line from reading as one word, and never outweighs the spaced count of English.
-  return Math.max(words + cjk / 2, text.replace(/\s+/g, "").length / 6);
+  // Six letters to a word keeps a long unspaced line from reading as one word. Counted for
+  // those scripts alone: over all text, long English words outweighed the words themselves
+  // (codex on PR 1477).
+  const unspaced = text.match(UNSPACED_CHARACTER)?.length ?? 0;
+  const words = text.replace(CJK_CHARACTER, " ").replace(UNSPACED_CHARACTER, " ").split(/\s+/).filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
+  return words + cjk / 2 + unspaced / 6;
 }
 
 /** The estimate's token counts for one request, each clamped to the service limit. */

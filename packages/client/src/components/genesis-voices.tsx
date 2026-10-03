@@ -1,9 +1,11 @@
-import { formatMicroUsd, type GenesisVoices, type GenesisVoiceCandidate, type Job } from "@arke-studio/contracts";
+import { formatMicroUsd, speechPricePrefix, type GenesisVoices, type GenesisVoiceCandidate, type Job, type ManifestModel } from "@arke-studio/contracts";
 import { Button, Callout } from "./ui.js";
 import { genesisMediaUrl } from "../lib/media.js";
 
-export function GenesisVoiceCards({ genesisId, voices, jobs, busy, onGenerate, onDecide, onRevise, onRefresh, onCancel }: {
+export function GenesisVoiceCards({ genesisId, voices, jobs, busy, models, onGenerate, onDecide, onRevise, onRefresh, onCancel }: {
   genesisId: string; voices: GenesisVoices; jobs: Job[]; busy: boolean;
+  /** The manifest, for the price's word: `up to` for a character reader, `~` for a token reader's estimate (SPEC-049 R-6). */
+  models?: readonly ManifestModel[];
   onGenerate(id: string, digest: string): void;
   onDecide(target: string, decision: "approve" | "reject" | "unassign", candidate?: GenesisVoiceCandidate): void;
   onRevise(text: string): void; onRefresh(): void; onCancel(id: string): void;
@@ -21,7 +23,7 @@ export function GenesisVoiceCards({ genesisId, voices, jobs, busy, onGenerate, o
     {voices.problems.map((problem, index) => <Callout key={index} title="Voice needs attention">{problem}</Callout>)}
     {voices.plans.map(plan => <article className="fy-actioncard" key={plan.intent.id}>
       <h3>{plan.title} · {plan.voice.label}</h3><p style={{ whiteSpace: "pre-wrap" }}>{plan.text}</p>
-      <p>{plan.voice.provider} · {plan.voice.model} · ~{formatMicroUsd(plan.estimatedMicroUsd)}</p>
+      <p>{plan.voice.provider} · {plan.voice.model} · {speechPricePrefix(models, [plan.voice.provider])}{formatMicroUsd(plan.estimatedMicroUsd)}</p>
       <p>{plan.transfer}</p>
       <Button disabled={busy || jobs.some(job => job.target.id === plan.intent.target && !["succeeded", "failed", "cancelled"].includes(job.status))}
         onClick={() => onGenerate(plan.intent.id, plan.digest)}>Generate audition</Button>
