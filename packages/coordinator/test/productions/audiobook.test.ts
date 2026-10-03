@@ -154,6 +154,8 @@ async function withHarness(
     models?: readonly ManifestModel[];
     /** The engine's own voices, when a test needs a second local narrator. */
     localVoices?: Array<{ id: string; label: string; attributes: string[] }>;
+    /** Counts every vendor voice list asked for, as a provider would see the calls. */
+    lists?: { count: number };
   },
   run: (h: {
     root: string;
@@ -216,8 +218,8 @@ async function withHarness(
             } as never,
             localPresets: [],
             cloudSources: [
-              { provider: "elevenlabs", list: async () => [...(input.cloud ?? [])] },
-              { provider: "fishaudio", list: async () => [...(input.fish ?? [])] },
+              { provider: "elevenlabs", list: async () => { if (input.lists) input.lists.count += 1; return [...(input.cloud ?? [])]; } },
+              { provider: "fishaudio", list: async () => { if (input.lists) input.lists.count += 1; return [...(input.fish ?? [])]; } },
             ],
             hostedReaders: [{ provider: "fishaudio", model: FISH.id }],
           },
@@ -1314,6 +1316,28 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       // The first chapter's cast line is Maren's under `cast` and was read by the narrator: stale (R-13), so one chapter reads whole.
       assert.match(audiobookDoorLine(cast.rows).line, /^1 of 2 chapters read · \d+:\d\d$/, "the time is the kept takes', whatever the reading");
     }));
+
+  // UI audit A1 (0.5.60): every door, and every catalogue a window asked for, went to every
+  // keyed vendor for its voice list — Google about twenty-eight times a minute — and the door's
+  // answers came back a minute and more late. A door asks a vendor at most once, never a block
+  // at a time, and doors after it read the list it got.
+  it("the door asks each vendor for its voices at most once, never a block at a time, and the doors after it ask none", () => {
+    const lists = { count: 0 };
+    return withHarness({ cloud: [LOW_TIDE], lists }, async ({ events, send }) => {
+      await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
+      await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
+      const before = lists.count;
+      const door = await openDoor(send, events);
+      const blocks = door.rows.reduce((sum, row) => sum + row.total, 0);
+      assert.ok(blocks > 3, "a door over many blocks");
+      assert.ok(lists.count - before <= 1, `one keyed vendor, asked at most once for ${blocks} blocks: ${lists.count - before}`);
+      assert.deepEqual(door.voices.map((v) => [v.name, v.state]), [["George", "narrator"], ["Maren Kest", "reads"]], "the list it read says who can speak");
+      const asked = lists.count;
+      for (const id of ["01J8F3K2QW9VZX4N7M0RTYB6D2", "01J8F3K2QW9VZX4N7M0RTYB6D3", "01J8F3K2QW9VZX4N7M0RTYB6D4"]) await openDoor(send, events, id);
+      await send({ kind: "voice-catalogue", worldId: WORLD_ID });
+      assert.equal(lists.count, asked, "three more doors and a catalogue ask the vendor nothing");
+    });
+  });
 
   it("the book is priced once for every chapter's cloud blocks, and the chapters read on that answer", () =>
     withHarness({ cloud: [LOW_TIDE] }, async ({ events, send }) => {
