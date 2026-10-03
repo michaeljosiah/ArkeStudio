@@ -307,7 +307,7 @@ import {
 import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiobookBook } from "./productions/audiobook-book.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
 import { audiobookListening, setAudiobookPicture } from "./productions/audiobook-listening.js";
-import { chapterTiming, setBlockTiming, TimingRefusal } from "./productions/audiobook-timing.js";
+import { chapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
 import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
@@ -14939,6 +14939,33 @@ export class Coordinator {
         try {
           const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
           const record = await setBlockTiming(store, msg.productionId, chapter.file, msg.block, msg.timing, narrator);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: at(), type: "audiobook.record", ...ids, record });
+        } catch (err) {
+          if (!(err instanceof TimingRefusal)) void this.appLog?.append({ kind: "audiobook.timing-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: at(), type: "audiobook.record", ...ids, refused: err instanceof TimingRefusal ? err.message : describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "set-audiobook-reaction":
+      case "set-audiobook-bed":
+      case "set-audiobook-sound": {
+        // A reaction, a bed or a sound at a block (turn 187, R-83, R-84): held to the chapter's
+        // blocks and, for a bed or a sound, to audio the world holds; written through the record's
+        // lane and answered as the record, or refused there in one clause.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
+        const at = () => new Date().toISOString();
+        try {
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const record = msg.kind === "set-audiobook-reaction"
+            ? await setReaction(store, msg.productionId, chapter.file, msg.key, msg.reaction, narrator)
+            : msg.kind === "set-audiobook-bed"
+              ? await setBed(store, msg.productionId, chapter.file, msg.key, msg.bed, narrator)
+              : await setBlockSound(store, msg.productionId, chapter.file, msg.key, msg.sound, narrator);
           this.refreshIfStillOpen(store);
           this.emit({ at: at(), type: "audiobook.record", ...ids, record });
         } catch (err) {

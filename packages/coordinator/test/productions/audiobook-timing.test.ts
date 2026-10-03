@@ -317,3 +317,65 @@ describe("the mix (turn 187, R-85)", () => {
     assert.ok(whole.file.startsWith(".cache/audiobook-mix/"), "kept in the world's cache, never beside its records");
   });
 });
+
+describe("reactions, beds and sounds (turn 187d, R-83, R-84)", () => {
+  // The frame's own fields; the world, production, chapter and id are the harness's.
+  const set = (send: (message: ClientMessage) => Promise<void>, message: { kind: "set-audiobook-reaction" | "set-audiobook-bed" | "set-audiobook-sound"; key: string | null; [field: string]: unknown }) =>
+    send({ ...message, worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST } as ClientMessage);
+
+  it("reads a reaction of a few words when the chapter is read, and mixes it under its host", () =>
+    withHarness(async ({ events, send, store }) => {
+      await read(send);
+      await set(send, { kind: "set-audiobook-reaction", key: null, reaction: { host: "p1.0", speaker: "narrator", words: "Mm.", offset: 0.25 } });
+      assert.equal(lastRecord(events).refused, undefined);
+      assert.ok(lastRecord(events).record?.reactions?.["x1"], "the first reaction is x1");
+      // Never written into the prose: the chapter's words are as they were.
+      const before = (await planAudiobook(store(), LEDGER, "neap", { narrator: NARRATOR })).body;
+      assert.equal(before.includes("Mm."), false);
+      await read(send);
+      const plan = await planAudiobook(store(), LEDGER, "neap", { narrator: NARRATOR });
+      const record = plan.record === "unreadable" ? null : plan.record;
+      assert.ok(record?.takes["x1"], "read when the chapter is, its take under its own key");
+      const timing = chapterTiming(store(), plan, "skip");
+      const reaction = timing.bars.find((bar) => bar.key === "x1")!;
+      const host = timing.bars.find((bar) => bar.key === "p1.0")!;
+      assert.equal(reaction.made, true);
+      assert.equal(reaction.at, host.at + 0.25, "under its host from its offset");
+      assert.ok(timing.overlaps.length > 0, "and mixed under it");
+    }));
+
+  it("refuses a sound its reader cannot make, rather than reading the word", () =>
+    withHarness(async ({ events, send, store }) => {
+      await read(send);
+      await set(send, { kind: "set-audiobook-reaction", key: null, reaction: { host: "p1.0", speaker: "narrator", sound: "laughs", offset: 0 } });
+      await read(send);
+      const plan = await planAudiobook(store(), LEDGER, "neap", { narrator: NARRATOR });
+      const record = plan.record === "unreadable" ? null : plan.record;
+      assert.equal(record?.takes["x1"], undefined);
+      assert.match(record?.flags["x1"]?.reason ?? "", /makes no laughs/);
+      await set(send, { kind: "set-audiobook-reaction", key: "x1", reaction: null });
+      assert.equal(lastRecord(events).record?.reactions, undefined, "taken away");
+      assert.equal(lastRecord(events).record?.flags["x1"], undefined);
+    }));
+
+  it("sets a bed from the world's sounds from one block to another, and refuses one from outside it", () =>
+    withHarness(async ({ events, send, store }) => {
+      await read(send);
+      const bed = (file: string, to = "p1.0") => ({ from: "p0.0", to, source: { file, origin: "library" as const }, levelDb: -14, fadeInSec: 2, fadeOutSec: 4, duckDb: 10 });
+      await set(send, { kind: "set-audiobook-bed", key: null, bed: bed("../outside.wav") });
+      assert.match(lastRecord(events).refused ?? "", /not in this world/);
+      await set(send, { kind: "set-audiobook-bed", key: null, bed: bed("artifacts/harbour-bells.wav", "title") });
+      assert.match(lastRecord(events).refused ?? "", /ends at or after/);
+      await set(send, { kind: "set-audiobook-bed", key: null, bed: bed("artifacts/harbour-bells.wav") });
+      assert.equal(lastRecord(events).refused, undefined);
+      assert.equal(lastRecord(events).record?.beds?.["b1"]?.source.label, "harbour bells");
+      await set(send, { kind: "set-audiobook-sound", key: null, sound: { block: "p1.0", source: { file: "artifacts/harbour-bells.wav", origin: "library" }, levelDb: -6 } });
+      assert.equal(lastRecord(events).record?.sounds?.["s1"]?.block.key, "p1.0");
+      const timing = chapterTiming(store(), await planAudiobook(store(), LEDGER, "neap", { narrator: NARRATOR }), "skip");
+      assert.equal(timing.beds.length, 1);
+      assert.equal(timing.beds[0]!.at, timing.bars.find((bar) => bar.key === "p0.0")!.at);
+      assert.equal(timing.sounds[0]!.at, timing.bars.find((bar) => bar.key === "p1.0")!.at);
+      await set(send, { kind: "set-audiobook-bed", key: "b1", bed: null });
+      assert.equal(lastRecord(events).record?.beds, undefined);
+    }));
+});

@@ -302,9 +302,9 @@ const SCREENS = [
   { group: "Around it", screen: "The block's timing (story)", frame: "187c", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drifted", checked: "2026-10-03",
     controls: ["Trim", "Pause after", "Cut", "Reset", "Play with neighbours"],
     notes: ["Turn 187c: the block's panel gains the take's waveform with trim handles, Pause after, a grouped cut's nudge and Play with neighbours — the Timing view's values. A chapter with timing plays through the one mix.", "Drift: the timing sits under the block's direction and above its picture; trim is also two seconds fields; Cut shows only between two cuts of one request."] },
-  { group: "Around it", screen: "A bed and a sound (story)", frame: "187d", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-10-03",
-    controls: [],
-    notes: ["Turn 187d: a bed from one block to another, ducked under the voices, and a sound at a block. The record and the mix carry both already; the panel is not built yet."] },
+  { group: "Around it", screen: "A bed and a sound (story)", frame: "187d", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drifted", checked: "2026-10-03",
+    controls: ["Bed", "Sound", "Library", "World", "Generate", "Level", "Fade", "Ends", "Remove", "Done"],
+    notes: ["Turn 187d: the block's panel gains Bed — from this block to the one it Ends on, a Level and a duck under voices, Fade in and out — and Sound at the block's start, each chosen from the world's sounds (Library: brought in; World: made here) or generated through the Bench's music route. Reactions sit above them: a sound from the cadence list or a few words, in a speaker's voice, under the block.", "Drift: the bed is edited from the block it starts on, not drawn on the page as a band; a sound's chips are the cadence list, struck nowhere yet for a reader that makes none — the run refuses it in one clause instead; Generate opens the Bench in music mode, as 186c's pictures do."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */

@@ -204,7 +204,7 @@ type Drag = { key: string; mode: "move" | "head" | "tail" | "pause"; x: number; 
  * Dragging a bar moves its start (or, under another, its offset); its edges trim the take; the
  * grip after it sets the pause after it; dropping it over a bar in another lane plays it under.
  */
-export function TimingView({ timing, lanes, rows, selected, onSelect, onTiming, playhead, onPlayhead, locked }: {
+export function TimingView({ timing, lanes, rows, selected, onSelect, onTiming, playhead, onPlayhead, locked, reactionLabels }: {
   timing: ChapterTiming;
   lanes: readonly TimingLane[];
   rows: readonly TimingRowLike[];
@@ -214,6 +214,8 @@ export function TimingView({ timing, lanes, rows, selected, onSelect, onTiming, 
   playhead: number;
   onPlayhead: (seconds: number) => void;
   locked: boolean;
+  /** What each reaction says, by its key: drawn on its bar in italic (R-88). */
+  reactionLabels?: Readonly<Record<string, string>>;
 }) {
   const [zoom, setZoom] = useState<(typeof ZOOMS)[number]>(40);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -377,7 +379,7 @@ export function TimingView({ timing, lanes, rows, selected, onSelect, onTiming, 
               {timing.bars.map((bar) => {
                 const place = shown(bar);
                 const row = rowOf.get(bar.key);
-                const words = bar.kind === "reaction" ? bar.key : (row?.block.text ?? bar.key);
+                const words = bar.kind === "reaction" ? `${reactionLabels?.[bar.key] ?? bar.key} under` : (row?.block.text ?? bar.key);
                 const reaction = bar.kind === "reaction";
                 return (
                   <div

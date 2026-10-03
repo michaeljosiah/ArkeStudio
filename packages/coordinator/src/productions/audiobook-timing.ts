@@ -5,10 +5,19 @@ import {
   ESTIMATED_CHARACTERS_PER_SECOND,
   formerKeys,
   isReactionKey,
+  isWorldAudioPath,
+  nextReactionKey,
+  nextTimingKey,
   placeAnchor,
   reactionText,
   timeChapter,
+  type AudiobookAudioSource,
+  type AudiobookBed,
+  type AudiobookBlockSound,
   type AudiobookReader,
+  type BedInput,
+  type BlockSoundInput,
+  type ReactionInput,
   type BlockTiming,
   type BlockTimingInput,
   type ChapterAudiobook,
@@ -17,8 +26,11 @@ import {
   type TimingInputReaction,
   type TimingTake,
 } from "@arke-studio/contracts";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
+import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
-import { planAudiobook, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
+import { assignReaders, planAudiobook, updateAudiobook, type AudiobookPlan, type PlannedBlock } from "./audiobook.js";
 
 /**
  * Timing on the blocks (design turn 187, SPEC-047 R-80..R-89): the chapter read as the clock
@@ -91,6 +103,37 @@ export function chapterTiming(store: WorldStore, plan: Pick<AudiobookPlan, "bloc
 }
 
 export class TimingRefusal extends Error {}
+
+/**
+ * The chapter's reactions as blocks a run reads (R-83): each on the paragraph of the block it
+ * plays under, with the reader its speaker is assigned — the narrator's, or the speaker's own
+ * voice under Cast — and a state judged as a block's is, against what the reaction says now. A
+ * reaction whose host is gone is flagged in the view and read by nobody. A sound is read without
+ * the notes, which are style for words; a few words are read as any line.
+ */
+export function plannedReactions(store: WorldStore, plan: Pick<AudiobookPlan, "blocks" | "record" | "present" | "reading" | "book">, narrator: AudiobookReader): PlannedBlock[] {
+  const record = plan.record === "unreadable" ? null : plan.record;
+  if (record === null || record.reactions === undefined) return [];
+  const hashed = plan.blocks.map((planned) => ({ key: planned.block.key, textHash: audiobookTextHash(planned.block.text) }));
+  const former = formerKeys(record.takes);
+  const sheets = store.getBundle().sheets.filter((sheet) => sheet.type === "character" && !sheet.retired);
+  const recorded = new Set(plan.book?.recorded ?? []);
+  const out: PlannedBlock[] = [];
+  for (const [key, reaction] of Object.entries(record.reactions)) {
+    const place = placeAnchor(hashed, reaction.host, former);
+    if (place.state === "gone") continue;
+    const host = plan.blocks[place.index]!;
+    const sheet = reaction.speaker === "narrator" ? undefined : sheets.find((candidate) => candidate.id === reaction.speaker);
+    const speaker = reaction.speaker === "narrator" ? {} : sheet !== undefined ? { speaker: sheet.name, sheet: sheet.id } : { speaker: reaction.speaker };
+    const block = { key, paragraph: host.block.paragraph, text: reactionText(reaction), ...speaker };
+    const notes = reaction.sound !== undefined ? {} : (plan.book?.notes ?? {});
+    const reading = reaction.sound !== undefined ? {} : (host.reading ?? {});
+    const [planned] = assignReaders([block], plan.reading, narrator, sheets, store.getBundle().clonedVoices ?? [], record, (artifactId) => plan.present.has(artifactId), recorded, notes, reading);
+    if (planned === undefined) continue;
+    out.push({ ...planned, ...(reaction.sound !== undefined ? { reaction: { sound: reaction.sound } } : { reaction: {} }) });
+  }
+  return out;
+}
 
 /**
  * The record's timing with each entry on the block it stands on now (R-82): an entry that followed
@@ -218,5 +261,101 @@ export async function setBlockTiming(
     }
     const { timing: _old, ...rest } = current;
     return { ...rest, updatedAt: now, ...(Object.keys(entries).length > 0 ? { timing: entries } : {}) };
+  });
+}
+
+/** The chapter and its plan, for a write that names blocks by key. */
+async function chapterPlan(store: WorldStore, productionId: string, chapterFile: string, narrator: AudiobookReader): Promise<AudiobookPlan> {
+  const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+  const summary = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
+  if (summary === undefined) throw new TimingRefusal("that chapter is no longer in this production");
+  return planAudiobook(store, productionId, summary.id, { narrator });
+}
+
+function anchorOf(plan: AudiobookPlan, key: string): { key: string; textHash: string } {
+  const planned = plan.blocks.find((candidate) => candidate.block.key === key);
+  if (planned === undefined || isReactionKey(key)) throw new TimingRefusal("that block is no longer in the chapter");
+  return { key, textHash: audiobookTextHash(planned.block.text) };
+}
+
+/**
+ * A source a bed or a sound may play (R-84): an audio file the world holds on its shelf, as the
+ * panel offers it — never a path from outside the world, never a take of the audiobook itself.
+ */
+async function audioSource(store: WorldStore, input: { file: string; origin: AudiobookAudioSource["origin"] }): Promise<AudiobookAudioSource> {
+  const artifact = isWorldAudioPath(input.file) ? store.getBundle().artifacts.find((candidate) => `artifacts/${candidate.file}` === input.file && candidate.retiredAt === undefined) : undefined;
+  const there = artifact === undefined ? false : await stat(toExtendedLength(join(store.dir, fromPortable(input.file)))).then((s) => s.isFile(), () => false);
+  if (artifact === undefined || artifact.kind !== "audio" || artifact.generation?.source === "audiobook" || !there) throw new TimingRefusal("that sound is not in this world");
+  const label = artifact.file.split("/").pop()!.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").slice(0, 120) || "sound";
+  const seconds = artifact.mediaInfo?.durationSec;
+  return { file: input.file, origin: input.origin, label, ...(seconds !== undefined && seconds > 0 ? { seconds } : {}) };
+}
+
+/**
+ * A reaction set, changed or taken away (R-83). A new one takes the next free key; taking one
+ * away lets its take go from the record too — the artifact stays on the shelf, as a take always
+ * does. A reaction is never written into the prose.
+ */
+export async function setReaction(store: WorldStore, productionId: string, chapterFile: string, key: string | null, input: ReactionInput | null, narrator: AudiobookReader): Promise<ChapterAudiobook> {
+  const plan = await chapterPlan(store, productionId, chapterFile, narrator);
+  if (key !== null && !isReactionKey(key)) throw new TimingRefusal("that is not a reaction");
+  const host = input === null ? null : anchorOf(plan, input.host);
+  return updateAudiobook(store, productionId, plan.chapter, (current) => {
+    const reactions = { ...current.reactions };
+    const takes = { ...current.takes };
+    const flags = { ...current.flags };
+    const at = key ?? nextReactionKey(reactions);
+    if (input === null || host === null) {
+      if (reactions[at] === undefined) return null;
+      delete reactions[at];
+      delete takes[at];
+      delete flags[at];
+    } else {
+      const was = reactions[at];
+      reactions[at] = { host, speaker: input.speaker, ...(input.sound !== undefined ? { sound: input.sound } : { words: input.words! }), offset: input.offset, by: "author", at: store.now() };
+      // Other words, or another sound, are another take: an old refusal is not this one's.
+      if (was !== undefined && reactionText(was) !== reactionText(reactions[at]!)) delete flags[at];
+    }
+    const { reactions: _old, ...rest } = current;
+    return { ...rest, takes, flags, updatedAt: store.now(), ...(Object.keys(reactions).length > 0 ? { reactions } : {}) };
+  });
+}
+
+/** A bed set, changed or taken away (R-84): from one block to the same or a later one. */
+export async function setBed(store: WorldStore, productionId: string, chapterFile: string, key: string | null, input: BedInput | null, narrator: AudiobookReader): Promise<ChapterAudiobook> {
+  const plan = await chapterPlan(store, productionId, chapterFile, narrator);
+  let value: AudiobookBed | null = null;
+  if (input !== null) {
+    const from = anchorOf(plan, input.from);
+    const to = anchorOf(plan, input.to);
+    const order = (block: string) => plan.blocks.findIndex((planned) => planned.block.key === block);
+    if (order(input.to) < order(input.from)) throw new TimingRefusal("a bed ends at or after the block it starts on");
+    value = { from, to, source: await audioSource(store, input.source), levelDb: input.levelDb, fadeInSec: input.fadeInSec, fadeOutSec: input.fadeOutSec, duckDb: input.duckDb, by: "author", at: store.now() };
+  }
+  return updateAudiobook(store, productionId, plan.chapter, (current) => {
+    const beds = { ...current.beds };
+    const at = key ?? nextTimingKey("b", beds);
+    if (value === null) {
+      if (beds[at] === undefined) return null;
+      delete beds[at];
+    } else beds[at] = value;
+    const { beds: _old, ...rest } = current;
+    return { ...rest, updatedAt: store.now(), ...(Object.keys(beds).length > 0 ? { beds } : {}) };
+  });
+}
+
+/** A sound at a block's start set, changed or taken away (R-84). */
+export async function setBlockSound(store: WorldStore, productionId: string, chapterFile: string, key: string | null, input: BlockSoundInput | null, narrator: AudiobookReader): Promise<ChapterAudiobook> {
+  const plan = await chapterPlan(store, productionId, chapterFile, narrator);
+  const value: AudiobookBlockSound | null = input === null ? null : { block: anchorOf(plan, input.block), source: await audioSource(store, input.source), levelDb: input.levelDb, by: "author", at: store.now() };
+  return updateAudiobook(store, productionId, plan.chapter, (current) => {
+    const sounds = { ...current.sounds };
+    const at = key ?? nextTimingKey("s", sounds);
+    if (value === null) {
+      if (sounds[at] === undefined) return null;
+      delete sounds[at];
+    } else sounds[at] = value;
+    const { sounds: _old, ...rest } = current;
+    return { ...rest, updatedAt: store.now(), ...(Object.keys(sounds).length > 0 ? { sounds } : {}) };
   });
 }

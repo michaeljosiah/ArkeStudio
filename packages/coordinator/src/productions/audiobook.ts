@@ -33,6 +33,7 @@ import {
   type ClonedVoice,
   type ManifestModel,
   type Sheet,
+  type Sound,
   type VoiceCandidate,
 } from "@arke-studio/contracts";
 import { clipFor } from "../voice/library.js";
@@ -372,6 +373,11 @@ export interface PlannedBlock {
   substituted?: AudiobookSubstitution;
   /** The block's speaker is recorded by a person (SPEC-047 R-37): made only by a recording. */
   recorded?: true;
+  /**
+   * A reaction read as a block (design turn 187, SPEC-047 R-83): its key is `x<n>`, its words
+   * are what it says, and a sound is sent as the reader's own tag for it, never as words.
+   */
+  reaction?: { sound?: Sound };
   /** The speaker's performance note under `performed` (R-44): the line's leading phrase. */
   note?: string;
   /** The book note and the chapter note the block is read under (design turn 184, R-53); absent when neither is set. */

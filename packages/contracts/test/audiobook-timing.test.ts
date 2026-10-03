@@ -12,6 +12,7 @@ import {
   mixKey,
   nextReactionKey,
   placeAnchor,
+  reactionsToRead,
   timeChapter,
   type AudiobookBed,
   type AudiobookBlockSound,
@@ -192,6 +193,15 @@ describe("reactions (R-83)", () => {
     assert.equal(at(estimated, "x1").made, false);
     const mixed = chapterMix(timeChapter({ blocks: blocks(ALL), record, reactions: [{ key: "x1", lane: "tunde" }], reading: "narrator", unmade: "skip" }));
     assert.equal(mixed.voices.some((voice) => voice.key === "x1"), false);
+  });
+
+  it("is counted for a press until a take of what it says is on the shelf", () => {
+    const record = { reactions: { x1: reaction(0.5, "mm") }, takes: { x1: { artifactId: "ar_1", textHash: hash("mm") } } };
+    const list = blocks(ALL).map((block) => ({ key: block.key, text: block.text }));
+    assert.deepEqual(reactionsToRead(record, list, () => true), []);
+    assert.deepEqual(reactionsToRead(record, list, () => false), ["x1"], "its file gone");
+    assert.deepEqual(reactionsToRead({ ...record, reactions: { x1: reaction(0.5, "Ehen!") } }, list, () => true), ["x1"], "other words");
+    assert.deepEqual(reactionsToRead(record, list.filter((block) => block.key !== "p3.0"), () => true), [], "nobody reads a reaction whose host is gone");
   });
 
   it("names the next free key", () => {

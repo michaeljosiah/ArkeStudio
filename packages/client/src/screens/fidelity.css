@@ -8798,3 +8798,11 @@ button.fy-abdoor__voice:hover { background: var(--accent); border-color: var(--n
 .fy-tm__trimmed { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--background) 70%, transparent); pointer-events: none; }
 .fy-tm__handle { position: absolute; top: -2px; bottom: -2px; width: 6px; margin: 0 -3px; border-radius: 3px; background: var(--foreground); cursor: ew-resize; }
 @media (max-width: 599px) { .fy-tm__names { width: 88px; } .fy-tm__name { padding: 12px 8px; } }
+/* Beds, sounds and reactions on a block (turn 187d): a list of the world's sounds, a row each. */
+.fy-tm__bedpanel, .fy-tm__reactions { display: flex; flex-direction: column; gap: 8px; }
+.fy-tm__sounds { display: flex; flex-direction: column; max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+.fy-tm__soundrow { display: flex; align-items: center; gap: 8px; justify-content: space-between; min-height: 30px; padding: 0 10px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--foreground); font: 400 12px var(--font-sans); text-align: left; cursor: pointer; }
+.fy-tm__soundrow:last-child { border-bottom: 0; }
+.fy-tm__soundrow > span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fy-tm__soundrow--on { background: var(--secondary); font-weight: 500; }
+.fy-tm__reaction { font: italic 400 12px var(--font-sans); color: var(--foreground); }
