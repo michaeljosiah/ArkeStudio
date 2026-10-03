@@ -8,7 +8,8 @@ import { PerformanceGenerationQuoteSchema } from "./performance.js";
 import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
-import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema } from "./audiobook.js";
+import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema, DirectionReadsSchema } from "./audiobook.js";
+import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX } from "./cadence.js";
 import { z } from "zod";
 import { ModelResidencySchema } from "./local-ai.js";
 import { WorldImageReferenceSchema } from "./world-image-references.js";
@@ -1400,7 +1401,38 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       /** The model's one or two sentences on what it did, said on the card. */
       summary: z.string().optional(),
       proposed: z.record(z.string().min(1), AudiobookDirectionInputSchema).optional(),
+      /** The lines the proposal casts first (design turn 184a, SPEC-047 R-54): written only when it is accepted. */
+      cast: z.object({ lines: z.number().int().min(0), speakers: z.number().int().min(0) }).strict().optional(),
+      /** The chapter note the director drafted when asked (R-53); written on acceptance. */
+      chapterNote: z.string().min(1).max(CADENCE_NOTE_MAX).optional(),
+      /** Speaker notes drafted from the sheets for speakers with none (R-54); written on acceptance, never over an author's. */
+      speakerNotes: z.record(z.string().min(1).max(120), z.string().min(1).max(CADENCE_PHRASE_MAX)).optional(),
       reason: z.string().optional(),
+    })
+    .strict(),
+  /** What `Direct this chapter` would read (design turn 184a, R-51), or why it cannot run. */
+  z
+    .object({
+      ...base,
+      type: z.literal("direction.reads"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      requestId: UlidSchema,
+      reads: DirectionReadsSchema.optional(),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** Speaker notes drafted from the sheets (design turn 184c, R-54): how many, or why not. */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.speaker-notes"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      drafted: z.number().int().min(0),
+      refused: z.string().min(1).optional(),
     })
     .strict(),
 

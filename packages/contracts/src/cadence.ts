@@ -525,6 +525,35 @@ export function performanceNote(note: string, model: Pick<ManifestModel, "cadenc
   return { mode: "unsupported", reason: cap?.phrase === "best-effort-tag" ? UNTAGGED : "no phrase" };
 }
 
+/** A book note or a chapter note a reader could not take (design turn 184d): struck under Sent as, never spoken. */
+export interface HeldReadingNote {
+  which: "book" | "chapter";
+  length: number;
+  reason: string;
+}
+
+/**
+ * How a row takes the book note and the chapter note (design turn 184, SPEC-047 R-53): sent with
+ * every block, before the block's own direction. Whole as sentences beside the words on a row
+ * that takes an instruction (Gemini's `style`, Breeze's `instructions`); each as one tag on a
+ * row that writes tags, while it is short enough to be one; held otherwise, with the reason —
+ * never rendered into words a reader would speak. The block's note rule, applied twice.
+ */
+export function readingNotesLead(notes: { book?: string; chapter?: string }, model: CadenceRow, language?: string): { tags: string[]; instructions?: string; held: HeldReadingNote[] } {
+  const tags: string[] = [];
+  const sentences: string[] = [];
+  const held: HeldReadingNote[] = [];
+  for (const which of ["book", "chapter"] as const) {
+    const note = notes[which];
+    if (note === undefined) continue;
+    const how = noteMode(note, model, language);
+    if (how.mode === "tag") tags.push(how.tag);
+    else if (how.mode === "instruction") sentences.push(noteSentence(note));
+    else held.push({ which, length: note.length, reason: how.reason });
+  }
+  return { tags, ...(sentences.length > 0 ? { instructions: sentences.join(" ") } : {}), held };
+}
+
 export interface HeldControl {
   control: "delivery" | "speed" | "note" | "pause" | "breath" | "emphasis" | "marker" | "sound";
   cueIndex?: number;

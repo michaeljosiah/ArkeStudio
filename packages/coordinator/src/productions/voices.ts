@@ -184,6 +184,68 @@ export async function castLines(
   deriver: VoicesDeriver,
   signal?: AbortSignal,
 ): Promise<CastLines> {
+  const derived = await deriveCast(store, productionId, chapterId, deriver, signal);
+  const record = await writeCast(store, productionId, derived);
+  return { record, lines: derived.lines.length, dropped: derived.dropped, omitted: derived.omitted };
+}
+
+/**
+ * A chapter's lines cast and nothing written (design turn 184a, SPEC-047 R-54): what `castLines`
+ * writes, held instead, so `Direct this chapter` can carry who speaks and how in one proposal
+ * and write the cast only when that proposal is accepted.
+ */
+export interface DerivedCast {
+  file: string;
+  version: number;
+  hash: string;
+  body: string;
+  passes: number;
+  lines: ChapterVoices["lines"];
+  dropped: number;
+  omitted: number;
+}
+
+/**
+ * The record a derived cast makes with the author's pins as they stand now (SPEC-012 R-64):
+ * each pin whose words are still at its occurrence is carried, and the derived lines it overlaps
+ * give way when the record is read (`pinnedLines`); a pin whose words are gone is dropped and
+ * counted, never re-placed. Read at the write, not at the press, so a pin written before the run
+ * is not lost with it.
+ */
+export async function composeCast(store: WorldStore, productionId: string, derived: DerivedCast): Promise<ChapterVoices> {
+  const prior = await readVoices(store, productionId, derived.file);
+  const priorPins = prior !== null && prior !== "unreadable" ? (prior.pins ?? []) : [];
+  const paragraphs = chapterParagraphs(derived.body);
+  const pins = priorPins.filter((pin) => occurrencesOf(paragraphs[pin.paragraph] ?? "", pin.quote)[pin.occurrence] !== undefined);
+  const lost = priorPins.length - pins.length;
+  return {
+    version: derived.version,
+    hash: derived.hash,
+    derivedAt: store.now(),
+    passes: derived.passes,
+    dropped: derived.dropped,
+    omitted: derived.omitted,
+    lines: derived.lines,
+    ...(pins.length > 0 ? { pins } : {}),
+    ...(lost > 0 ? { lost } : {}),
+  };
+}
+
+/** A derived cast written beside its chapter, with the pins as they stand at the write. */
+export async function writeCast(store: WorldStore, productionId: string, derived: DerivedCast): Promise<ChapterVoices> {
+  const record = await composeCast(store, productionId, derived);
+  await writeVoices(store, productionId, derived.file, record);
+  return record;
+}
+
+/** Cast one chapter's lines (turn 130) and hold the result; `castLines` writes it, a proposal holds it. */
+export async function deriveCast(
+  store: WorldStore,
+  productionId: string,
+  chapterId: string,
+  deriver: VoicesDeriver,
+  signal?: AbortSignal,
+): Promise<DerivedCast> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const summary = production.chapters.find((c) => c.id === chapterId || c.file === chapterId);
@@ -206,29 +268,7 @@ export async function castLines(
     verified.push(verifyVoices(raw, body, opened.body, cast, verified.flatMap((pass) => pass.lines)));
   }
   const merged = mergeVoicePasses(verified, opened.body);
-  // The author's corrections outlive a new cast (SPEC-012 R-64): each pin whose words are still
-  // at its occurrence is carried, and the derived lines it overlaps give way when the record is
-  // read (`pinnedLines`); a pin whose words are gone is dropped and counted, never re-placed.
-  // Read at the write, not at the press, so a pin written before the run is not lost with it —
-  // a pin cannot be written while the run goes.
-  const prior = await readVoices(store, productionId, summary.file);
-  const priorPins = prior !== null && prior !== "unreadable" ? (prior.pins ?? []) : [];
-  const paragraphs = chapterParagraphs(opened.body);
-  const pins = priorPins.filter((pin) => occurrencesOf(paragraphs[pin.paragraph] ?? "", pin.quote)[pin.occurrence] !== undefined);
-  const lost = priorPins.length - pins.length;
-  const record: ChapterVoices = {
-    version: opened.version,
-    hash: sha256(opened.body),
-    derivedAt: store.now(),
-    passes: passes.length,
-    dropped: merged.dropped,
-    omitted: merged.omitted,
-    lines: merged.lines,
-    ...(pins.length > 0 ? { pins } : {}),
-    ...(lost > 0 ? { lost } : {}),
-  };
-  await writeVoices(store, productionId, summary.file, record);
-  return { record, lines: merged.lines.length, dropped: merged.dropped, omitted: merged.omitted };
+  return { file: summary.file, version: opened.version, hash: sha256(opened.body), body: opened.body, passes: passes.length, lines: merged.lines, dropped: merged.dropped, omitted: merged.omitted };
 }
 
 /**

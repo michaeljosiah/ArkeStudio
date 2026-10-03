@@ -344,6 +344,13 @@ export const AUDIOBOOK_PERFORMED_SCHEMA_VERSION = 34;
  * that fits the old phrase is written under that key and raises nothing. 35–42 are claimed.
  */
 export const AUDIOBOOK_NOTE_SCHEMA_VERSION = 43;
+/**
+ * The director reads the book (design turn 184, SPEC-047 R-53, R-54): `note`, `chapterNotes`
+ * and `noteSources` on the strict book record. A build before it reads the record as unreadable
+ * — the reading lost, the narrator the app's, every performed note gone — so the world is raised
+ * before the first book record carrying any of them is written. 44 is the conversation inputs'.
+ */
+export const AUDIOBOOK_READING_NOTES_SCHEMA_VERSION = 45;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

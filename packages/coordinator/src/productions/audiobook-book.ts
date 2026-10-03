@@ -455,7 +455,7 @@ export async function followTakes(store: WorldStore, productionId: string, room:
     for (const planned of plan.blocks) {
       if (planned.recorded === true || (planned.state !== "stale" && planned.state !== "not made" && planned.state !== "flagged")) continue;
       const textHash = audiobookTextHash(planned.block.text);
-      const want = audiobookTakeDirectionHash(audiobookDirectionFor(record, planned.block)?.plan ?? null, planned.note);
+      const want = audiobookTakeDirectionHash(audiobookDirectionFor(record, planned.block)?.plan ?? null, planned.note, planned.reading);
       const candidates = store
         .getBundle()
         .artifacts.filter((artifact) => {

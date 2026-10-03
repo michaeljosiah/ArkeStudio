@@ -6,6 +6,8 @@ import {
   DEFAULT_AUDIOBOOK_BOOK,
   audiobookBlocks,
   audiobookNoteKey,
+  audiobookReadingNotes,
+  hasReadingNotes,
   audiobookDirectionFor,
   audiobookRekeyed,
   audiobookBlockState,
@@ -20,7 +22,9 @@ import {
   type AudiobookBlockState,
   type AudiobookBook,
   type AudiobookDirection,
+  type AudiobookDirectionInput,
   type AudiobookReader,
+  type AudiobookReadingNotes,
   type AudiobookReading,
   type AudiobookSubstitution,
   type CadencePlan,
@@ -34,7 +38,7 @@ import {
 import { clipFor } from "../voice/library.js";
 import { directionPlan } from "../voice/direction.js";
 import { atomicWriteFile } from "../world/atomic.js";
-import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
@@ -247,9 +251,20 @@ export async function effectiveReader(
  * without them is written in the shape the earlier build reads.
  */
 export async function writeAudiobookBookRaised(store: WorldStore, productionId: string, book: AudiobookBook): Promise<void> {
-  const { notes, narrator, ...rest } = book;
-  const kept: AudiobookBook = { ...rest, ...(notes !== undefined && Object.keys(notes).length > 0 ? { notes } : {}), ...(narrator !== undefined ? { narrator } : {}) };
+  const { notes, narrator, chapterNotes, noteSources, ...rest } = book;
+  // A source names a note that stands, or nothing (R-54): a note taken away takes its source.
+  const sources = Object.fromEntries(Object.entries(noteSources ?? {}).filter(([key]) => notes?.[key] !== undefined));
+  const kept: AudiobookBook = {
+    ...rest,
+    ...(notes !== undefined && Object.keys(notes).length > 0 ? { notes } : {}),
+    ...(narrator !== undefined ? { narrator } : {}),
+    ...(chapterNotes !== undefined && Object.keys(chapterNotes).length > 0 ? { chapterNotes } : {}),
+    ...(Object.keys(sources).length > 0 ? { noteSources: sources } : {}),
+  };
   if (kept.reading === "performed" || kept.notes !== undefined || kept.narrator !== undefined) await store.ensureSchemaVersion(AUDIOBOOK_PERFORMED_SCHEMA_VERSION, "audiobook-performed");
+  // The book note, the chapter notes and a note's source (design turn 184) are fields the builds
+  // before them read as unreadable: raised before the first record that carries one.
+  if (kept.note !== undefined || kept.chapterNotes !== undefined || kept.noteSources !== undefined) await store.ensureSchemaVersion(AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, "audiobook-reading-notes");
   await writeAudiobookBook(store, productionId, kept);
 }
 
@@ -334,6 +349,8 @@ export interface PlannedBlock {
   recorded?: true;
   /** The speaker's performance note under `performed` (R-44): the line's leading phrase. */
   note?: string;
+  /** The book note and the chapter note the block is read under (design turn 184, R-53); absent when neither is set. */
+  reading?: AudiobookReadingNotes;
   state: AudiobookBlockState;
 }
 
@@ -355,7 +372,10 @@ export function assignReaders(
   recorded: ReadonlySet<string> = new Set(),
   /** The book's performance notes (R-44), by `audiobookNoteKey`. */
   notes: Readonly<Record<string, string>> = {},
+  /** The book note and the chapter's note (R-53), which lead every block of the chapter. */
+  readingNotes: AudiobookReadingNotes = {},
 ): PlannedBlock[] {
+  const reading_ = hasReadingNotes(readingNotes) ? readingNotes : undefined;
   return blocks.map((block) => {
     const planned = ((): Omit<PlannedBlock, "state" | "block"> => {
       // Under `performed` the narrator reads every block, as under `narrator` (R-44); a line
@@ -379,7 +399,13 @@ export function assignReaders(
       };
     })();
     const byPerson = recorded.has(audiobookRecordingKey(block));
-    return { block, ...planned, ...(byPerson ? { recorded: true as const } : {}), state: audiobookBlockState(block, record, planned.assigned, hasArtifact, byPerson, planned.note) };
+    return {
+      block,
+      ...planned,
+      ...(byPerson ? { recorded: true as const } : {}),
+      ...(reading_ !== undefined ? { reading: reading_ } : {}),
+      state: audiobookBlockState(block, record, planned.assigned, hasArtifact, byPerson, planned.note, reading_),
+    };
   });
 }
 
@@ -413,6 +439,21 @@ export interface AudiobookPlan {
   present: Set<string>;
   reading: AudiobookReading;
   blocks: PlannedBlock[];
+  /** The book record as read, or null when it is absent or unreadable. */
+  book: AudiobookBook | null;
+}
+
+/**
+ * A chapter as a held proposal would read it (design turn 184, SPEC-047 R-54, R-55): the cast
+ * it carries before it is written, the chapter note it drafted, the speaker notes it drafted
+ * for speakers with none, and — for a run's preparation — the directions it would put in place
+ * of the record's, whole. Nothing of it is on disk until the proposal is accepted.
+ */
+export interface ProposalOverride {
+  cast?: ChapterVoices;
+  chapterNote?: string;
+  speakerNotes?: Readonly<Record<string, string>>;
+  directions?: Readonly<Record<string, AudiobookDirectionInput>>;
 }
 
 /**
@@ -425,23 +466,30 @@ export async function planAudiobook(
   store: WorldStore,
   productionId: string,
   chapterId: string,
-  input: { narrator: AudiobookReader },
+  input: { narrator: AudiobookReader; override?: ProposalOverride },
 ): Promise<AudiobookPlan> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const summary = production.chapters.find((c) => c.id === chapterId || c.file === chapterId);
   if (!summary) throw new Error("That chapter is no longer in this production.");
   const opened = await openChapter(store, productionId, summary.id);
-  const cast = await readVoices(store, productionId, summary.file);
+  const override = input.override;
+  const cast = override?.cast ?? (await readVoices(store, productionId, summary.file));
   const record = await readAudiobook(store, productionId, summary.file);
-  const book = await readAudiobookBook(store, productionId);
-  const reading = book === null || book === "unreadable" ? DEFAULT_AUDIOBOOK_BOOK.reading : book.reading;
+  const read = await readAudiobookBook(store, productionId);
+  const book = read === null || read === "unreadable" ? null : read;
+  const reading = book === null ? DEFAULT_AUDIOBOOK_BOOK.reading : book.reading;
   const derived = audiobookBlocks(opened.body, cast === "unreadable" ? null : cast, audiobookHeading(summary.order, summary.title));
   const sheets = store.getBundle().sheets.filter((sheet) => sheet.type === "character" && !sheet.retired);
   const present = await presentTakes(store, record === "unreadable" ? null : record);
-  const recorded = new Set(book === null || book === "unreadable" ? [] : (book.recorded ?? []));
-  const notes = book === null || book === "unreadable" ? {} : (book.notes ?? {});
-  const blocks = assignReaders(derived.blocks, reading, input.narrator, sheets, store.getBundle().clonedVoices ?? [], record === "unreadable" ? null : record, (artifactId) => present.has(artifactId), recorded, notes);
+  const recorded = new Set(book === null ? [] : (book.recorded ?? []));
+  // A drafted note stands only where the author has none (R-54): the author's always wins.
+  const notes = { ...override?.speakerNotes, ...book?.notes };
+  const readingNotes = audiobookReadingNotes(
+    override?.chapterNote === undefined ? book : { ...book, chapterNotes: { ...book?.chapterNotes, [summary.id]: override.chapterNote } },
+    summary.id,
+  );
+  const blocks = assignReaders(derived.blocks, reading, input.narrator, sheets, store.getBundle().clonedVoices ?? [], record === "unreadable" ? null : record, (artifactId) => present.has(artifactId), recorded, notes, readingNotes);
   return {
     chapter: { id: summary.id, file: summary.file, title: summary.title, order: summary.order, version: opened.version, hash: sha256(opened.body) },
     body: opened.body,
@@ -451,5 +499,6 @@ export async function planAudiobook(
     present,
     reading,
     blocks,
+    book,
   };
 }

@@ -18,7 +18,7 @@ import { AudioAttestationSchema, AudioRangeSchema, FullSha256Schema } from "./au
 import { RehearsalIdSchema } from "./rehearsal.js";
 import { PerformanceReferenceRoleSchema } from "./performance-bible.js";
 import { PerformanceDeliverySchema } from "./voice.js";
-import { CADENCE_PHRASE_MAX, CadencePlanSchema } from "./cadence.js";
+import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX, CadencePlanSchema } from "./cadence.js";
 import { PerformanceIdSchema } from "./performance.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
@@ -3150,6 +3150,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       chapterFile: z.string().min(1),
       block: z.string().min(1),
       voice: AudiobookReaderSchema.optional(),
+      /**
+       * The block as the chapter's held proposal would send it (design turn 184b, SPEC-047
+       * R-55): its proposed direction, the cast and notes the proposal carries. Kept as the
+       * block's take when the proposal is accepted unchanged.
+       */
+      proposed: z.literal(true).optional(),
     })
     .strict(),
   /**
@@ -3226,7 +3232,40 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema.optional(),
     })
     .strict(),
-  z.object({ kind: z.literal("direct-chapter"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  z
+    .object({
+      kind: z.literal("direct-chapter"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      /**
+       * What the sheet's `Also` asks for (design turn 184a, SPEC-047 R-52, R-54): the lines cast
+       * first, under `performed` or `cast`, so the one proposal carries who speaks and how; the
+       * chapter note drafted; and the missing speaker notes drafted from the sheets.
+       */
+      cast: z.literal(true).optional(),
+      chapterNote: z.literal(true).optional(),
+      speakerNotes: z.literal(true).optional(),
+    })
+    .strict(),
+  /** What `Direct this chapter` would read (design turn 184a, R-51), answered as `direction.reads`; nothing run. */
+  z.object({ kind: z.literal("preview-direction"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema }).strict(),
+  /**
+   * The book note, or with `chapterFile` that chapter's note (design turn 184, SPEC-047 R-53): at
+   * most 300 characters on the book record; null takes it away. Changing either makes the blocks
+   * it leads stale.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-reading-note"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1).optional(),
+      note: z.string().min(1).max(CADENCE_NOTE_MAX).nullable(),
+    })
+    .strict(),
+  /** The missing speaker notes drafted from the speakers' sheets (design turn 184c, R-54), answered as `audiobook.speaker-notes`; an author's note is never replaced. */
+  z.object({ kind: z.literal("draft-audiobook-speaker-notes"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   /**
    * The door (SPEC-047 R-29): a row a chapter with its counts, the voices and the price, answered
    * as `audiobook.door`; and the book read as one run (R-16, R-17) — every chapter with prose in
