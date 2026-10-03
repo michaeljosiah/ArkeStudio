@@ -346,7 +346,9 @@ export function AudiobookScreen() {
       <div className="fy-h1row">
         <h1 className="fy-h1">Audiobook</h1>
         <span className="fy-h1row__meta" data-testid="audiobook-line">
-          {door === null ? "…" : line.line}
+          {/* Nothing until the door lands: a phone sets this line as the eyebrow over the title,
+              where a lone "…" read as a stray mark rather than as waiting. */}
+          {door === null ? null : line.line}
         </span>
         <span className="fy-h1row__push" />
         {/* The head's presses as one group (146a), so a narrow window moves them together. */}
@@ -358,7 +360,9 @@ export function AudiobookScreen() {
           {!phone && primary}
         </span>
       </div>
-      {phone && <HeldBar className="fy-abdoor-held"><span>{totalBlocks} blocks · {price === null ? "price unavailable" : price.estimatedMicroUsd === 0 ? "free" : `${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}`}</span>{primary}</HeldBar>}
+      {/* Held at the foot once the door lands; while it opens there is no count and no price to
+          hold, and "0 blocks · price unavailable" read as an answer. */}
+      {phone && door !== null && <HeldBar className="fy-abdoor-held"><span>{totalBlocks} blocks · {price === null ? "price unavailable" : price.estimatedMicroUsd === 0 ? "free" : `${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}`}</span>{primary}</HeldBar>}
       <div className="fy-abdoor__voices" data-testid="audiobook-voices">
         <nav className="fy-seg" aria-label="Reading">
           <button type="button" className={cx("fy-seg__item", reading === "narrator" && "fy-seg__item--active")} disabled={running} onClick={() => setAudiobookReading(worldId, prodId, "narrator")}>

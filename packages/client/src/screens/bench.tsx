@@ -1414,7 +1414,8 @@ function BenchWorkspace({
                 aria-expanded={sessionsOpen}
                 onClick={() => setSessionsOpen((v) => !v)}
               >
-                {sessionTitle}
+                {/* Its own box, so a narrow bar can end it in an ellipsis on one line. */}
+                <span className="fy-bench__sessiontitle">{sessionTitle}</span>
                 <ChevronDown size={12} />
               </button>
               {sessionsOpen && (

@@ -887,7 +887,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             Never the primary: the read is, until a block is made and Listen takes it (turn 188). */}
         {directable && (
           <Button variant="secondary" disabled={locked || connection !== "open"} onClick={directPress} data-testid="direct-audiobook">
-            {directedBlocks > 0 ? "Direct again" : "Direct this chapter"}
+            {/* The tail is its own box so a tight centre can drop it and keep the head on one row. */}
+            Direct<span className="fy-ab__presstail">{directedBlocks > 0 ? " again" : " this chapter"}</span>
           </Button>
         )}
         {counts.toMake.length > 0 && (

@@ -11,7 +11,7 @@ import {
   type Sheet,
   type WorldBundle,
 } from "@arke-studio/contracts";
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router";
 import { EmptyState, Screen } from "../components/layout.js";
 import {
@@ -58,7 +58,7 @@ function ProductionWardrobe({
   if (rows.length === 0) return null;
   return (
     <>
-      <div className="fy-eyebrow-sm" style={{ padding: "10px 90px 0" }}>
+      <div className="fy-eyebrow-sm fy-prodcast__label">
         WARDROBE · IN {production.meta.title.toUpperCase()} · {rows.length}
       </div>
       <div className="fy-wardrobe">
@@ -182,7 +182,7 @@ export function ProductionCastScreen() {
         navigate(`/w/${worldId}/${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${sheet.id}`)
       }
     >
-      <div className="fy-gridcard__frame" style={{ height: 210 }}>
+      <div className="fy-gridcard__frame fy-prodcast__frame">
         <Portrait worldSlug={world.meta.slug}
           path={sheet.type === "character" ? characterPortraitPath(world, sheet.id)
             : sheet.type === "location" ? locationPortraitPath(world, sheet.id) : sheetPortraitPath(sheet.id)}
@@ -203,15 +203,16 @@ export function ProductionCastScreen() {
     </button>
   );
 
-  const columns = (n: number) => ({
-    gridTemplateColumns: `repeat(${Math.min(Math.max(n, 2), 4)}, minmax(0, 1fr))`,
-  });
+  // Two to four across by how many there are, on a desktop width. The count rides as a custom
+  // property rather than an inline grid template so a narrow window can overrule it: an inline
+  // repeat(4) held four columns at 390 px and drew each card as a 35 px sliver.
+  const columns = (n: number) => ({ "--prodcast-cols": Math.min(Math.max(n, 2), 4) }) as CSSProperties;
 
   return (
     <div className="fy-prodscroll" data-screen="production-cast">
       <div className="fy-hero">
         <div className="fy-eyebrow-sm">CAST · {production.meta.title.toUpperCase()}</div>
-        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+        <h1 className="fy-hero__title">
           Cast
         </h1>
         <Button
@@ -286,18 +287,18 @@ export function ProductionCastScreen() {
         </Card>
       )}
 
-      <div className="fy-eyebrow-sm" style={{ padding: "10px 90px 0" }}>
+      <div className="fy-eyebrow-sm fy-prodcast__label">
         GUESTS · ONLY IN {production.meta.title.toUpperCase()} · {guests.length + pendingGuests.length}
       </div>
       {guests.length + pendingGuests.length === 0 ? (
-        <div style={{ padding: "0 90px" }}>
+        <div className="fy-prodcast__gutter">
           <EmptyState
             title="No guests yet"
             hint="Add characters, locations or factions that belong only to this production."
           />
         </div>
       ) : (
-        <div className="fy-cardgrid" style={columns(guests.length + pendingGuests.length)}>
+        <div className="fy-cardgrid fy-prodcast__grid" style={columns(guests.length + pendingGuests.length)}>
           {pendingGuests.map((p) => (
             <button
               type="button"
@@ -313,7 +314,7 @@ export function ProductionCastScreen() {
                 }
               }}
             >
-              <div className="fy-gridcard__frame" style={{ height: 210 }} />
+              <div className="fy-gridcard__frame fy-prodcast__frame" />
               <div className="fy-gridcard__pad">
                 <div className="fy-gridcard__title">
                   <span className="fy-gridcard__name">{p.name}</span>
@@ -331,7 +332,7 @@ export function ProductionCastScreen() {
       {(() => {
         const staged = world.proposals.find((proposal) => proposal.proposal.id === pendingDecision);
         return staged ? (
-          <div style={{ padding: "0 90px 24px" }}>
+          <div className="fy-prodcast__gutter fy-prodcast__gutter--foot">
             <ConnectedProposalPanel
               key={staged.proposal.id}
               staged={staged}
@@ -341,18 +342,18 @@ export function ProductionCastScreen() {
         ) : null;
       })()}
 
-      <div className="fy-eyebrow-sm" style={{ padding: "10px 90px 0" }}>
+      <div className="fy-eyebrow-sm fy-prodcast__label">
         FROM {world.meta.name.toUpperCase()} · SHARED · {fromWorld.length}
       </div>
       {fromWorld.length === 0 ? (
-        <div style={{ padding: "0 90px" }}>
+        <div className="fy-prodcast__gutter">
           <EmptyState
             title="The world has no cast yet"
             hint="Everything this production cites would be its own."
           />
         </div>
       ) : (
-        <div className="fy-cardgrid" style={columns(fromWorld.length)}>
+        <div className="fy-cardgrid fy-prodcast__grid" style={columns(fromWorld.length)}>
           {fromWorld.map((sheet) => card(sheet, false))}
         </div>
       )}

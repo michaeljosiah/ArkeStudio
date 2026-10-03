@@ -1,5 +1,11 @@
 /* Turn 166: production entry and home. Base declarations replace former inline geometry. */
-.fy-productions-head .fy-hero__title, .fy-production-door .fy-hero__title { font-size: 52px; }
+.fy-productions-head .fy-hero__title, .fy-production-door .fy-hero__title, [data-screen="production-cast"] .fy-hero__title { font-size: 52px; }
+/* Production Cast: the desktop's 90 gutter and two to four across (--prodcast-cols, by count). */
+.fy-prodcast__label { padding: 10px 90px 0; }
+.fy-prodcast__gutter { padding: 0 90px; }
+.fy-prodcast__gutter--foot { padding-bottom: 24px; }
+.fy-prodcast__grid { grid-template-columns: repeat(var(--prodcast-cols, 4), minmax(0, 1fr)); }
+.fy-prodcast__frame { height: 210px; }
 .fy-production-resumes { padding: 0 40px 28px; }
 .fy-prodcard-slot { animation: fy-drift var(--production-drift) ease-in-out infinite alternate; margin-top: var(--production-top); }
 .fy-prodcard-slot--0 { --production-tilt: -1.6deg; --production-top: 0px; --production-drift: 7.6s; }
@@ -138,6 +144,12 @@
   .fy-arkewrap:has(> .fy-season-arke) { position: relative; }
   [data-screen="development"] .fy-seasonrack { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   [data-screen="development"] .fy-seasontile__move button { min-width: 44px; min-height: 44px; }
+  /* Cast: as many 150 cards as the column holds. Four by count beside the 206 rail left each
+     card 90 wide at 820, the names cut to "Bray H…". */
+  .fy-prodcast__label, .fy-prodcast__gutter { padding-inline: 32px; }
+  .fy-prodcast__grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; padding: 20px 32px 32px; }
+  .fy-prodcast__grid .fy-gridcard { min-width: 0; }
+  .fy-prodcast__frame { height: auto; aspect-ratio: 4 / 5; }
 }
 
 @media (max-width: 599px) {
@@ -232,6 +244,19 @@
   [data-screen="development"] .fy-h1row { gap: 8px; }
   [data-screen="development"] .fy-h1 { font-size: var(--text-3xl); }
   .fy-season-arke-sheet .fy-story__log, .fy-season-arke-sheet .fy-arke__log { padding-inline: 20px; }
+  /* Cast two abreast (161a), the head on the left like every other production page. */
+  [data-screen="production-cast"] .fy-hero { padding: 14px 20px 0; text-align: left; animation: none; }
+  [data-screen="production-cast"] .fy-hero__title { margin-top: 8px; font: 650 var(--text-3xl)/1.1 var(--font-sans); letter-spacing: -.025em; }
+  [data-screen="production-cast"] .fy-hero .ui-btn { min-height: 44px; }
+  .fy-prodcast__label { padding: 18px 20px 0; }
+  .fy-prodcast__gutter { padding-inline: 20px; }
+  .fy-prodcast__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 14px 20px 24px; animation: none; }
+  .fy-prodcast__grid .fy-gridcard { padding: 8px 8px 12px; }
+  .fy-prodcast__frame { aspect-ratio: 4 / 3; }
+  .fy-prodcast__grid .fy-gridcard__pad { padding: 0 2px; }
+  .fy-prodcast__grid .fy-gridcard__body { display: none; }
+  .fy-prodcast__grid .fy-gridcard__foot { font: var(--type-meta); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  [data-screen="production-cast"] .fy-wardrobe { padding-inline: 20px; }
 }
 
 @media (min-width: 600px) and (max-width: 767px) {
