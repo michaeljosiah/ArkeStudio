@@ -702,7 +702,7 @@ const COMMAND_MODEL_PATHS = {
   "create-scene": ["production-scene"],
   "restore-scene": ["production-scene-restore"],
   "delete-scene": ["production-scene-delete"],
-  "scene-command": ["production-scene-command", "sceneEdits"],
+  "scene-command": ["production-scene-command"],
   "create-chapter": ["production-chapter"],
   "save-chapter": ["production-chapter"],
   "edit-chapter-plan": ["production-chapter"],
@@ -763,7 +763,7 @@ function conversationCommandSchema(kind: ClientMessageKind, schema: z.ZodDiscrim
     case "open-thread": return schema.extend({ candidates: z.array(CanonIdSchema).max(10).default([]) });
     case "upload-artifacts": return schema.omit({ editor: true, sourcePaths: true });
     case "pick-staged-reference": return schema.omit({ image: true, worldFile: true });
-    case "clone-voice": return schema.omit({ language: true });
+    case "clone-voice": return schema.omit({ language: true, clipId: true, consent: true });
     case "bench-dispatch": return schema.omit({ confirmedSpeechMicroUsd: true, voiceUploadConfirmedFor: true });
     default: return schema;
   }

@@ -80,6 +80,7 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     assert.deepEqual(paths("retire-entity"), ["canon-retire", "sheet-retire"], "chapter edits do not retire an entity");
     assert.deepEqual(paths("save-chapter"), ["production-chapter"], "authored chapter edits remain reachable");
     assert.deepEqual(paths("accept-take"), ["production-take-review"], "accept-and-select remains reachable");
+    assert.deepEqual(paths("scene-command"), ["production-scene-command"], "the scene rename channel cannot perform shot commands");
   });
 
   it("classifies every ClientMessage option exactly once and uses that option's strict schema", () => {
@@ -180,6 +181,12 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     const frenchClone = { kind: "clone-voice", worldId, clipId: "chosen-clip", name: "Voice", description: "The speaker", consent: true, language: "fr" };
     assert.equal(clone.schema.safeParse(frenchClone).success, true);
     assert.equal(clone.conversationSchema.safeParse(frenchClone).success, false, "the current chat clone does not carry a language override");
+    const stagedClone = { kind: "clone-voice", worldId, clipId: "chosen-clip", name: "Voice", description: "The speaker", consent: true };
+    assert.equal(clone.schema.safeParse(stagedClone).success, true);
+    assert.equal(clone.conversationSchema.safeParse(stagedClone).success, false, "the person chooses the recording and consents after approval");
+    assert.equal(clone.conversationSchema.safeParse({ kind: "clone-voice", worldId, name: "Voice", description: "The speaker" }).success, true);
+    const cloneFields = modelActionCatalogue().find((entry) => entry.kind === "clone-voice")!.fields;
+    assert.equal(cloneFields.some((field) => field.name === "clipId" || field.name === "consent" || field.name === "language"), false);
     const bench = modelActionCatalogue().find((entry) => entry.kind === "bench-dispatch")!.fields;
     assert.equal(bench.some((field) => field.name === "confirmedSpeechMicroUsd" || field.name === "voiceUploadConfirmedFor"), false, "direct speech acknowledgements are not fields on bench-generation");
     const art = ARKE_CLIENT_COMMAND_REGISTRY["set-art-direction"];
