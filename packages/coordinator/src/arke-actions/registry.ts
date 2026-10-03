@@ -540,6 +540,9 @@ const CLIENT_COMMAND_METADATA = {
   // The book as a listener hears it, and a picture on a block (turn 186): a read, and a command on the record.
   "open-audiobook-listening": readOnly(QUERY),
   "set-audiobook-picture": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
+  // Timing on the blocks (turn 187): a command on the record, and the chapter's mix rendered into the cache.
+  "set-audiobook-timing": action("production", "command", "voice", "authored-change", ["chapters"]),
+  "render-audiobook-mix": readOnly(QUERY),
   "read-audiobook-book": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
   "stop-audiobook-book": action("production", "command", "voice", "external-network-action", ["chapters"]),
   "accept-direction": action("production", "command", "voice", "external-network-action", ["chapters"]),

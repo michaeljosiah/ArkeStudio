@@ -365,6 +365,13 @@ export const AUDIOBOOK_GROUPED_SCHEMA_VERSION = 46;
  * record carrying a picture is written. A record with none is written without the field.
  */
 export const AUDIOBOOK_PICTURES_SCHEMA_VERSION = 47;
+/**
+ * Timing held to the blocks (design turn 187, SPEC-047 R-89): `timing`, `reactions`, `beds` and
+ * `sounds` on the chapter's strict audiobook record, and a reaction's take under its own key. A
+ * build before it reads such a record as unreadable — every take of the chapter lost to a run that
+ * would make them again — so the world is raised before the first record carrying any of them.
+ */
+export const AUDIOBOOK_TIMING_SCHEMA_VERSION = 48;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
