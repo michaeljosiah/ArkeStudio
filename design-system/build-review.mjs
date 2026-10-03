@@ -293,6 +293,18 @@ const SCREENS = [
   { group: "Around it", screen: "The audiobook player on a phone (story)", frame: "186d", route: "#/w/:worldId/p/:prodId/story/audiobook · Listen (phone)", status: "built", checked: "2026-10-03",
     controls: ["Text", "End of chapter"],
     notes: ["Turn 186: below 600 the picture takes the top, the transport sits under the thumb in three rows, play 64 across, and Text moves to the foot."] },
+  { group: "Around it", screen: "Timing (story)", frame: "187a", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=timing", status: "drifted", checked: "2026-10-03",
+    controls: ["Timing", "Starts", "Pause after", "Trim", "Plays", "After", "Under", "Set by", "Reset", "Play from here", "Play"],
+    notes: ["Turn 187a: the chapter's third view — a lane a voice, Narration then each speaker as they first speak, and Beds &amp; sounds; bars at the clock's places with their words and a mono line, overlaps hatched, a ruler and a playhead; zoom and scroll. A bar dragged sets its start, its edges its trim, the grip after it its pause; dropped over a bar in another lane it plays under it. The side holds the same values; Play runs the one mix from the playhead.", "Drift: zoom is two buttons in the view's own bar; a block not read is drawn dashed at the reading rate; Propose timing arrives with 187b. The Performed lock says <code>the reader's</code> where a field would be."] },
+  { group: "Around it", screen: "Propose timing (story)", frame: "187b", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=timing", status: "drawn", checked: "2026-10-03",
+    controls: [],
+    notes: ["Turn 187b: Arke's starts, pauses, reactions and beds drawn dashed until accepted whole; never the author's. Not built yet."] },
+  { group: "Around it", screen: "The block's timing (story)", frame: "187c", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drifted", checked: "2026-10-03",
+    controls: ["Trim", "Pause after", "Cut", "Reset", "Play with neighbours"],
+    notes: ["Turn 187c: the block's panel gains the take's waveform with trim handles, Pause after, a grouped cut's nudge and Play with neighbours — the Timing view's values. A chapter with timing plays through the one mix.", "Drift: the timing sits under the block's direction and above its picture; trim is also two seconds fields; Cut shows only between two cuts of one request."] },
+  { group: "Around it", screen: "A bed and a sound (story)", frame: "187d", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-10-03",
+    controls: [],
+    notes: ["Turn 187d: a bed from one block to another, ducked under the voices, and a sound at a block. The record and the mix carry both already; the panel is not built yet."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
