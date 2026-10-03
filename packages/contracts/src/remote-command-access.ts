@@ -30,7 +30,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "genesis-attach-files": "host", "import-folder": "host", "stage-audiobook-take": "host",
   "stage-audiobook-lines": "host", "open-exports-folder": "host", "pick-manuscript": "host",
   "download-update": "host", "install-update-and-restart": "host", "install-update-on-close": "host",
-  "generate-diagnostics": "host", "open-data-folder": "host", "bench-upload-references": "host",
+  "generate-diagnostics": "host", "probe-grouped-read": "host", "open-data-folder": "host", "bench-upload-references": "host",
   "attach-files-correlated": "host",
   // payload
   "pick-staged-reference": "payload", "adapter-command": "payload", "stage-voice-clip": "payload",

@@ -14,6 +14,7 @@ import {
   voiceFormatForModel,
   voiceSourceFor,
   type ArtifactAudiobookGeneration,
+  type BlockTurns,
   type ArtifactSidecar,
   type AudiobookReader,
   type AudiobookSubstitution,
@@ -173,6 +174,12 @@ export interface Speaking extends PlannedBlock {
   remake: boolean;
   /** Exact byte-bounded compilation, shared by consent and durable part adoption (SPEC-049 R-25). */
   compiledSpeechHash?: string;
+  /**
+   * The parts as a grouped request takes them (design turn 185): the notes the chapter shares
+   * apart, and each part's words with its own style — its delivery, note and speaker's note.
+   * `soloTurns` of this is exactly what a solo read sends.
+   */
+  turns: Pick<BlockTurns, "shared" | "parts">;
 }
 
 /** The record could not be written: the world's claim is gone, or it closed under the run. Nothing more can be kept. */
@@ -354,6 +361,10 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       ...(leadStyle !== "" ? { instructions: part.instructions === undefined ? leadStyle : `${leadStyle} ${part.instructions}` } : {}),
     });
     const takeHash = audiobookTakeDirectionHash(held?.plan ?? null, note, reading);
+    // Each part's own style apart from the notes the whole chapter shares (design turn 185): a
+    // grouped request sends the notes once and each later turn only this.
+    const playedNote = playing?.mode === "instruction" ? note! : undefined;
+    let own: Array<string | undefined> = [];
     try {
       if (held !== null) {
         // What this reader cannot express is held (R-47): left out of what it is sent, kept on
@@ -371,6 +382,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
             perPart: rendered.map((part) => ({ voiceSettings: part.voiceSettings, ...(part.instructions !== undefined ? { instructions: part.instructions } : {}) })),
           };
           parts = rendered.map((part) => part.text);
+          own = check.parts.map((part) => [playedNote, part.instructions].filter((style) => style !== undefined && style !== "").join(" ") || undefined);
         } else {
           refusal = check.reason;
           parts = [text];
@@ -387,6 +399,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
           perPart: rendered.map((part) => ({ voiceSettings: part.voiceSettings, ...(part.instructions !== undefined ? { instructions: part.instructions } : {}) })),
         };
         parts = rendered.map((part) => part.text);
+        own = words.map(() => playedNote);
       } else parts = piecesFor(text, model, voiceFormatForModel(model));
       if (parts.some((part, index) => !speechInputFits(part, model.limits, direction?.perPart[index]?.instructions))) {
         throw new Error("The words and direction exceed this reader's request limit.");
@@ -430,6 +443,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       format,
       remake,
       ...(compiledSpeechHash !== undefined ? { compiledSpeechHash } : {}),
+      turns: { ...(context.instructions !== undefined ? { shared: context.instructions } : {}), parts: parts.map((part, index) => ({ text: part, ...(own[index] !== undefined ? { style: own[index] } : {}) })) },
       // A whole block already in the cache is adopted without a call (R-19); parts are never
       // cached as a block, so a block over the cap is always made, the cache holds no
       // direction, so a directed block never comes from it, and a block made again unchanged

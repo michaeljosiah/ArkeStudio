@@ -1,7 +1,7 @@
 import type { CapabilityProbe, ClientDeclarations, SpeechUsage, VoiceCandidate } from "@arke-studio/contracts";
 import { randomUUID } from "node:crypto";
-import { freeLimitDetail, GOOGLE_DAILY_LIMIT, GOOGLE_FREE_LIMIT, speechInputFits } from "@arke-studio/contracts";
-import { GEMINI_SPEECH_INPUT_BYTES, geminiSpeechModel } from "../gemini-tts-models.js";
+import { freeLimitDetail, GOOGLE_DAILY_LIMIT, GOOGLE_FREE_LIMIT, speechInputFits, speechUtf8Bytes } from "@arke-studio/contracts";
+import { GEMINI_GROUPED_INPUT_BYTES, GEMINI_GROUPED_TURNS_MAX, GEMINI_SPEECH_INPUT_BYTES, geminiSpeechModel } from "../gemini-tts-models.js";
 import { googleVoiceDesignBody, googleVoiceDesignResult, googleDesignedVoicePage, requireGoogleVoiceId } from "./google-voices.js";
 import type { VoiceDesignClient, VoiceDesignInput } from "../types.js";
 import { ProviderAuthError, ProviderBusyError, ProviderDailyLimitError, ProviderFreeLimitError, ProviderPaymentRequiredError, ProviderRequestRejectedError,
@@ -135,6 +135,31 @@ export function googleDailyLimitDetail(body: unknown, now: Date = new Date()): {
   const wait = (hinted !== undefined ? retryMs(hinted) : undefined) ?? (delay !== undefined ? retryMs(delay) : undefined);
   const resetsAt = wait === undefined ? undefined : new Date(Math.ceil((now.getTime() + wait) / 1000) * 1000).toISOString();
   return { ...(limit !== undefined ? { limit } : {}), ...(resetsAt !== undefined ? { resetsAt } : {}) };
+}
+
+/**
+ * A grouped read's turns (design turn 185): several blocks in one request as content turns, each
+ * with its own `speech_metadata.style` (a run of blocks under one direction may share a turn), read
+ * in one voice and returned as one WAV. A turn is bounded by the request's budget, not a solo
+ * read's: a merged run can be longer than one block. Google's
+ * speech page shows several styled turns in one request; whether a designed voice keeps every
+ * turn's style is what the probe proves, so no reader sends these until its row says `groupable`.
+ * Null for a solo read. The joined words must be the job's `text` — what Activity shows and the
+ * quote priced — so a request can never carry words the author was not shown.
+ */
+export function geminiSpeechTurns(value: unknown, text: unknown): { text: string; instructions?: string }[] | null {
+  if (value === undefined) return null;
+  if (!Array.isArray(value) || value.length === 0 || value.length > GEMINI_GROUPED_TURNS_MAX) throw new ProviderRequestRejectedError("Google: invalid grouped read");
+  const turns = value.map(item => {
+    const turn = record(item);
+    if (typeof turn.text !== "string" || turn.text.trim() === "" || (turn.instructions !== undefined && typeof turn.instructions !== "string")
+      || Object.keys(turn).some(key => key !== "text" && key !== "instructions")) throw new ProviderRequestRejectedError("Google: invalid grouped read");
+    return { text: turn.text, ...(typeof turn.instructions === "string" && turn.instructions !== "" ? { instructions: turn.instructions } : {}) };
+  });
+  if (turns.map(turn => turn.text).join(" ") !== text) throw new ProviderRequestRejectedError("Google: a grouped read's turns are not its words");
+  const bytes = turns.reduce((sum, turn) => sum + speechUtf8Bytes(turn.text) + speechUtf8Bytes(turn.instructions ?? ""), 0);
+  if (bytes > GEMINI_GROUPED_INPUT_BYTES) throw new ProviderRequestRejectedError("Google: this grouped read is over the request's input budget");
+  return turns;
 }
 
 /** Unary only: a complete, validated WAV is the one artifact, never streamed PCM fragments. */
@@ -345,18 +370,21 @@ export class GoogleClient implements VoiceCatalogueClient, VoiceDesignClient {
     if (request.voiceReference !== undefined) throw new ProviderRequestRejectedError("Google: a reference recording requires a separately authorised replication operation");
     if (instructions !== undefined && typeof instructions !== "string") throw new ProviderRequestRejectedError("Google: invalid speech direction");
     if (request.params.voiceSettings !== undefined && Object.keys(record(request.params.voiceSettings)).length > 0) throw new ProviderRequestRejectedError("Google: numeric voice settings are unsupported; use structured speech direction");
+    const turns = geminiSpeechTurns(request.params.turns, text);
+    if (turns !== null && (delivery !== undefined || request.params.instructions !== undefined)) throw new ProviderRequestRejectedError("Google: a grouped read carries its style on each turn");
     // This is a byte budget, not a claim about Google's tokenizer. It deliberately leaves room
     // for metadata; a counted-token compiler can later pack requests closer to the service cap.
-    if (!speechInputFits(text, { maxSpeechUtf8Bytes: GEMINI_SPEECH_INPUT_BYTES }, instructions as string | undefined)) throw new ProviderRequestRejectedError("Google: this read needs smaller parts including its direction");
+    if (turns === null && !speechInputFits(text, { maxSpeechUtf8Bytes: GEMINI_SPEECH_INPUT_BYTES }, instructions as string | undefined)) throw new ProviderRequestRejectedError("Google: this read needs smaller parts including its direction");
     if (!request.designedVoice && !GEMINI_PRESETS.some(([id]) => id === voice)) {
       const library = await this.prebuiltVoices(key, request.signal);
       if (!library.some(candidate => candidate.voiceId === voice)) throw new ProviderRequestRejectedError("Google: this preset is no longer in the voice catalogue");
     }
+    const content = (turns ?? [{ text, ...(typeof instructions === "string" ? { instructions } : {}) }]).map(turn => ({ type: "text", text: turn.text,
+      ...(turn.instructions ? { annotations: [{ type: "speech_metadata", style: turn.instructions }] } : {}) }));
     const response = await this.fetchImpl(`${this.baseUrl}/v1beta/interactions`, {
       method: "POST", headers: this.headers(key), signal: request.signal, redirect: "error",
       body: JSON.stringify({ model: request.model, store: false,
-        input: [{ type: "user_input", content: [{ type: "text", text,
-          ...(instructions ? { annotations: [{ type: "speech_metadata", style: instructions }] } : {}) }] }],
+        input: [{ type: "user_input", content }],
         response_format: { type: "audio", mime_type: "audio/wav", sample_rate: 24000 },
         generation_config: { max_output_tokens: 16384, speech_config: [{ voice }] },
       }),

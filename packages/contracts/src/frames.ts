@@ -3356,6 +3356,25 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * finally looks. Coalesced like any other trigger; never a timer.
    */
   z.object({ kind: z.literal("refresh-diagnostics") }).strict(),
+  /**
+   * The grouped-read probe (design turn 185): the same few consecutive blocks of a chapter read
+   * as one request three ways — every turn its whole style, the notes once with each later turn
+   * its own direction, and that with a run under one direction merged into one turn — in the
+   * book's narrator, and answered `probe.grouped-read` with each file, its length and what this
+   * machine heard. A diagnostic sent from the scripts, never drawn: three real, priced requests
+   * a person runs once to choose how a groupable reader packs.
+   */
+  z
+    .object({
+      kind: z.literal("probe-grouped-read"),
+      requestId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      /** The first block to read; absent picks the first run that holds a line and narration. */
+      from: z.string().min(1).optional(),
+      count: z.number().int().min(2).max(8).optional(),
+    })
+    .strict(),
   /** SPEC-016 R-17: open the data location in the file manager. */
   z.object({ kind: z.literal("open-data-folder") }).strict(),
 

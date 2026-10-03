@@ -264,3 +264,36 @@ it("synthesizes a discovered extended preset but refuses a removed voice before 
   await assert.rejects(client.submit("test", { ...request, params: { ...request.params, voiceId: "RemovedNarrator" } }), /no longer/);
   assert.equal(requests.filter(url => url.endsWith("/interactions")).length, 1);
 });
+
+// Design turn 185: several blocks in one request, each a turn with its own style.
+it("sends a grouped read as one request of styled turns in a designed voice, and refuses one whose turns are not its words", async () => {
+  const target = "designed:dv_01J8F3K2QW9VZX4N7M0RTYB6HC:1";
+  const turns = [{ text: "The first line, whispered.", instructions: "Whisper this." }, { text: "The second line, shouted!", instructions: "Shout this." }, { text: "A third, plain." }];
+  const bodies: unknown[] = [];
+  const client = new GoogleClient(async (url, init) => {
+    if (String(url).includes("/voices/")) return Response.json({ id: "voice_abc123", type: "prompted", model: request.model, display_name: "Ife", prompted: { input: "Warm." }, language_code: "en-NG", expire_time: "2099-01-01T00:00:00Z" });
+    bodies.push(JSON.parse(String(init?.body)));
+    return Response.json(responseBody());
+  });
+  const grouped = { ...request, designedVoice: { target, remoteId: "voice_abc123" }, params: { voiceId: target, text: turns.map(turn => turn.text).join(" "), turns } };
+  const made = await client.submit("test", grouped);
+  assert.deepEqual(made.artifacts?.[0]?.data, wav());
+  assert.equal(bodies.length, 1, "one request for every turn");
+  const body = bodies[0] as { input: unknown; generation_config: unknown };
+  assert.deepEqual(body.input, [{ type: "user_input", content: [
+    { type: "text", text: "The first line, whispered.", annotations: [{ type: "speech_metadata", style: "Whisper this." }] },
+    { type: "text", text: "The second line, shouted!", annotations: [{ type: "speech_metadata", style: "Shout this." }] },
+    { type: "text", text: "A third, plain." },
+  ] }]);
+  assert.deepEqual(body.generation_config, { max_output_tokens: 16384, speech_config: [{ voice: "voice_abc123" }] });
+  const long = Array.from({ length: 30 }, () => ({ text: "w".repeat(900) }));
+  for (const invalid of [
+    { ...grouped, params: { ...grouped.params, text: "Other words." } },
+    { ...grouped, params: { ...grouped.params, instructions: "A request-wide style." } },
+    { ...grouped, params: { ...grouped.params, turns: [] } },
+    { ...grouped, params: { ...grouped.params, turns: [{ text: "  " }], text: "  " } },
+    { ...grouped, params: { ...grouped.params, turns: [{ text: "Words.", speaker: "Ade" }], text: "Words." } },
+    { ...grouped, params: { ...grouped.params, turns: long, text: long.map(turn => turn.text).join(" ") } },
+  ]) await assert.rejects(client.submit("test", invalid), ProviderRequestRejectedError);
+  assert.equal(bodies.length, 1, "a refused grouped read is never sent");
+});

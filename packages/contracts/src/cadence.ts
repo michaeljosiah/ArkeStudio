@@ -146,6 +146,13 @@ export const CadenceCapabilitiesSchema = z.object({
    */
   deliveryMappings: z.record(z.string(), z.object({ settings: z.record(z.string(), z.number()), tag: z.string().optional(),
     instruction: z.string().optional() }).strict()),
+  /**
+   * Several blocks may share one request, each its own turn with its own style, and the audio is
+   * split back into a take a block on this machine (design turn 185). Absent is per paragraph —
+   * every reader, Gemini's included, until a probe on a designed voice shows each turn keeps
+   * its style in one request; only then is a row marked.
+   */
+  groupable: z.literal(true).optional(),
 }).strict();
 export type CadenceCapabilities = z.infer<typeof CadenceCapabilitiesSchema>;
 export const CadenceMappingSchema = z.object({

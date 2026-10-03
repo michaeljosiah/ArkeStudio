@@ -4,6 +4,16 @@ import { GEMINI_SOUNDS } from "./voice-direction.js";
 
 export const GEMINI_SPEECH_INPUT_BYTES = 7000;
 
+/**
+ * A grouped read's whole input, words and every turn's style together (design turn 185): the
+ * coordinator packs a request to about 6,000 estimated tokens at 4 bytes a token, and this guard
+ * sits a little above that and under the service's 8,192 tokens unless the words bill under 3.2
+ * bytes a token — prose measured 4.4, short lines nearer 3.
+ */
+export const GEMINI_GROUPED_INPUT_BYTES = 26_000;
+/** Turns in one grouped read: far past five minutes of blocks, a bound on a malformed job rather than a plan. */
+export const GEMINI_GROUPED_TURNS_MAX = 400;
+
 /** Preset speech rows; custom voices and unqualified controls remain unavailable (SPEC-049). */
 export function geminiSpeechModel(variant: "flash" | "lite"): ManifestModel {
   return {
