@@ -199,6 +199,23 @@ describe("names and words not in English (2026-10-03)", () => {
     assert.ok(satCuts.every((cut) => cut.matched));
   });
 
+  it("charges words a note stands for unless they are a name, and never forgives a negation (codex on PR 1515)", () => {
+    assert.equal(judgeSplit("He took all the money away.", "He (laughs) away.", hash).matched, false);
+    assert.equal(judgeSplit("They walked on. Then Ikoyi: the quiet streets, the high walls.", "They walked on. (speaking in foreign language) the quiet streets. the high walls.", hash, { lexicon: NAMES }).matched, true);
+    assert.equal(judgeSplit("He did not go.", "He did go.", hash).matched, false);
+    assert.equal(judgeSplit("He is alive.", "He is not alive.", hash).matched, false);
+    assert.equal(judgeSplit("I didn't say that.", "I did not say that.", hash).matched, true, "the same negation, written as whisper writes it");
+  });
+
+  it("keeps a word for a block with none matched when nothing anchors the run's far side (codex on PR 1515)", () => {
+    const blocks = [{ key: "p0.0", text: "Olorun mi abeg." }, { key: "p1.0", text: "Oya!" }];
+    // Nothing heard matches a written word: the old placement put the one boundary in the
+    // request's tail, closest to the characters' estimate, and the second block heard nothing.
+    const heard = speak("Kettle.", "Pumpkin seed.");
+    const cuts = splitRequest(blocks, heard.words, heard.seconds, () => hash, undefined, NAMES);
+    assert.ok(cuts.every((cut) => cut.heard !== "" && cut.end > cut.start), JSON.stringify(cuts.map((cut) => [cut.key, cut.heard])));
+  });
+
   it("builds the lexicon from the world's names and the chapter's capitalised words", () => {
     assert.ok(["ade", "adeyemi", "akinola", "tunde", "ife", "ikoyi", "ilesha", "lekki", "ozumba", "mbadiwe"].every((token) => NAMES.has(token)), [...NAMES].join(" "));
     assert.ok(!NAMES.has("they") && !NAMES.has("i") && !NAMES.has("the"));

@@ -94,6 +94,10 @@ function heardTokens(heard: string, sounds: boolean): HeardToken[] {
  */
 const missingWeight = (token: string, lexicon: ReadonlySet<string>) => (lexicon.has(token) ? 0.25 : token.length <= 3 ? 0.5 : 1);
 
+/** A word that turns a line to its opposite, as a matching token: "not", "never", "didn't". */
+const NEGATIONS: ReadonlySet<string> = new Set(["not", "no", "never", "nor", "neither", "none", "nothing", "nobody", "nowhere", "cannot"]);
+const negates = (token: string) => NEGATIONS.has(token) || /^(?:do|does|did|is|are|was|were|has|have|had|ca|can|wo|could|would|should|must|need|ai)nt$/u.test(token);
+
 /** How close a cut's edge must read to its neighbour's words — a name's more loosely — to be taken for them. */
 const NEIGHBOUR = 0.6;
 const NEIGHBOUR_LOOSE = 0.4;
@@ -175,14 +179,20 @@ export function heardAsWritten(written: string, heard: string, context: SplitCon
       const runSaid = got.slice(h, match.h).filter((token) => !token.blank).map((token) => token.token);
       const note = got.slice(h, match.h).some((token) => token.blank);
       const missing = runWritten.reduce((sum, token) => sum + missingWeight(token, lexicon), 0);
-      if (runWritten.length > 0 && runSaid.length === 0 && !note) {
+      // Whisper's note stands for a few words only where they are a name or a word not in
+      // English it would not write ("(speaking in foreign language)" for "Then Ikoyi"), and even
+      // then the English words beside it are charged; a note in place of "took all the money"
+      // is those words left out (codex on PR 1515).
+      const noted = note && runSaid.length === 0 && runWritten.length <= 4 && runWritten.some((token) => lexicon.has(token));
+      // A negation left out or put in reverses the line: never a discount (codex on PR 1515).
+      if ((runSaid.length === 0 && runWritten.some(negates)) || (runWritten.length === 0 && runSaid.some(negates))) return false;
+      if (runWritten.length > 0 && runSaid.length === 0 && !noted) {
         if (missing >= 1) return false;
         cost += missing;
       } else if (runWritten.length === 0) {
         cost += 0.25 * runSaid.length;
       } else if (runSaid.length === 0) {
-        // Whisper's note in place of a few words — a Yoruba phrase it would not write.
-        if (runWritten.length > 4) cost += missing;
+        cost += runWritten.filter((token) => !lexicon.has(token)).reduce((sum, token) => sum + missingWeight(token, lexicon), 0);
       } else {
         const loose = runWritten.some((token) => lexicon.has(token));
         if (runSimilarity(runWritten, runSaid) < (loose ? SIMILAR_LOOSE : SIMILAR)) cost += Math.max(missing, 0.5 * runSaid.length);
@@ -294,9 +304,18 @@ function fillUnmatched(
       for (let w = wFrom; w <= wTo; w++) if (owner[w]! <= left + t) before += written[w]!.length;
       return (n * before) / Math.max(1, total);
     });
-    const strict = boundaries <= n + 1;
+    // A block with no word of its own matched keeps one of the run's where the run has enough:
+    // the edge gaps are the pause to an anchor, or the request's own lead-in or tail when there is
+    // no anchor that side, and that silence must not take a block's only word (codex on PR 1515).
+    let low = p < 0 ? 1 : 0;
+    let high = q >= strong.length ? n - 1 : n;
+    if (high - low + 1 < boundaries) {
+      low = 0;
+      high = n;
+    }
+    const strict = boundaries <= high - low + 1;
     // A pause wins over closeness to the characters' estimate unless it is a few words further.
-    const score = (t: number, g: number) => gap(g) - 0.04 * Math.abs(g - expected[t]!);
+    const score = (t: number, g: number) => (g < low || g > high ? -Infinity : gap(g) - 0.04 * Math.abs(g - expected[t]!));
     const value: number[][] = [];
     const back: number[][] = [];
     for (let t = 0; t < boundaries; t++) {
@@ -320,8 +339,8 @@ function fillUnmatched(
         back[t]![g] = at;
       }
     }
-    let g = 0;
-    for (let candidate = 1; candidate <= n; candidate++) if (value[boundaries - 1]![candidate]! > value[boundaries - 1]![g]!) g = candidate;
+    let g = low;
+    for (let candidate = low + 1; candidate <= high; candidate++) if (value[boundaries - 1]![candidate]! > value[boundaries - 1]![g]!) g = candidate;
     const placed: number[] = [];
     for (let t = boundaries - 1; t >= 0; t--) {
       placed.unshift(g);
