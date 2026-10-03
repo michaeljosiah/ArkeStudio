@@ -9,10 +9,11 @@ import {
   ChildLedger,
   listDescendants,
   ownerStamp,
-  platformProbe,
+  probeProcesses,
   runCollect,
   type ChildRecord,
   type ProcessInfo,
+  type ProcessProbe,
 } from "../src/child-ledger.js";
 
 /** An idle child that lives until killed — the thing a force-killed parent leaves behind. */
@@ -41,6 +42,15 @@ function processGone(pid: number): boolean {
 }
 
 const nodeImage = basename(process.execPath).toLowerCase();
+
+/**
+ * The real platform probe — the same query and the same identities — with the patience of a test
+ * that loses nothing by waiting. On a cold windows-latest shard the PowerShell + CIM query has
+ * gone unanswered for about 90 s (three 30 s timeouts back to back in run 37011486802) before a
+ * fourth answered in 21 s. The app's 30 s budget is not what these cases prove, and a sweep that
+ * cannot probe reports kept/0-reaped, which reads as a pass for a case asserting "nothing killed".
+ */
+const patientProbe: ProcessProbe = (pids) => probeProcesses(pids, { timeoutMs: 120_000 });
 
 describe("bounded process inspection", () => {
   it("terminates a stalled helper when cancelled", async () => {
@@ -161,16 +171,17 @@ describe("ChildLedger", () => {
 
   it("kills a verified orphan whose recorded owner is dead", async () => {
     const path = await tempLedgerPath();
-    const ledger = new ChildLedger(path);
+    // The real kill (taskkill /T) behind a patient real probe: see patientProbe.
+    const ledger = new ChildLedger(path, { probe: patientProbe });
     const orphan = spawnIdle();
     try {
       await ledger.record(
         record(orphan.pid!, { ownerPid: await deadPid(), ownerStartedAt: 1_000 }),
       );
       let report = await ledger.reapStale();
-      // A loaded Windows runner can starve PowerShell past the 30 s inspection budget (issue
-      // 1290). A sweep that cannot probe reaps nothing and keeps the record for the next one —
-      // what the app does at its next start — so the test sweeps again, once.
+      // Should even the patient probe be starved (issue 1290), a sweep that cannot probe reaps
+      // nothing and keeps the record for the next one — what the app does at its next start —
+      // so the test sweeps again, once.
       if (report.skipped !== undefined && /timed out/.test(report.skipped)) report = await ledger.reapStale();
       assert.equal(report.reaped.length, 1, `expected a reap, got ${JSON.stringify(report)}`);
       assert.equal(report.reaped[0]!.pid, orphan.pid);
@@ -185,12 +196,15 @@ describe("ChildLedger", () => {
 
   it("keeps the children of a live owner", async () => {
     const path = await tempLedgerPath();
-    const ledger = new ChildLedger(path);
+    const ledger = new ChildLedger(path, { probe: patientProbe });
     const child = spawnIdle();
     try {
       // The owner on record is this very test process — alive, with a matching start time.
       await ledger.record(record(child.pid!));
       const report = await ledger.reapStale();
+      // A sweep that could not probe keeps everything too; only a completed one proves the
+      // owner was recognised as alive.
+      assert.equal(report.skipped, undefined, "the sweep must have inspected the processes");
       assert.equal(report.reaped.length, 0);
       assert.equal(report.kept, 1);
       assert.ok(!processGone(child.pid!), "the live owner's child must not be touched");
@@ -202,7 +216,7 @@ describe("ChildLedger", () => {
 
   it("never kills a pid whose image no longer matches the record (pid reuse)", async () => {
     const path = await tempLedgerPath();
-    const ledger = new ChildLedger(path);
+    const ledger = new ChildLedger(path, { probe: patientProbe });
     const bystander = spawnIdle();
     try {
       await ledger.record(
@@ -261,8 +275,8 @@ describe("ChildLedger", () => {
     assert.equal((await readChildren(path)).length, 1, "a skipped sweep leaves the file alone");
   });
 
-  it("platformProbe reports this process with a plausible image and start time", async () => {
-    const probed = await platformProbe([process.pid]);
+  it("the platform probe reports this process with a plausible image and start time", async () => {
+    const probed = await patientProbe([process.pid]);
     const me = probed.get(process.pid);
     assert.ok(me, "the probe must find the probing process itself");
     assert.ok(me.image.includes(nodeImage.replace(/\.exe$/, "")), `image was ${me.image}`);
@@ -285,7 +299,7 @@ describe("ChildLedger", () => {
       assert.equal(found.image, nodeImage);
       assert.ok(found.startedAt !== null, "native child identity must include creation time");
       assert.ok(Math.abs(found.startedAt - spawnedAt) < 15_000);
-      const root = (await platformProbe([process.pid])).get(process.pid)!;
+      const root = (await patientProbe([process.pid])).get(process.pid)!;
       assert.deepEqual(await listDescendants(process.pid, undefined, { root: { ...root, startedAt: root.startedAt! + 1 } }), [],
         "a different root lifetime cannot authorize its process tree");
       const beforeBirth = await listDescendants(process.pid, undefined, { root, rootExitedAt: found.startedAt - 1 });
