@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  audiobookDirectionFor,
   audiobookTakeDirectionHash,
   performanceNote,
   readingNotesLead,
@@ -19,6 +20,7 @@ import {
   type ArtifactAudiobookGeneration,
   type BlockTurns,
   type ArtifactSidecar,
+  type AudiobookDirection,
   type AudiobookReader,
   type AudiobookSubstitution,
   type AudiobookTake,
@@ -174,6 +176,13 @@ export interface Speaking extends PlannedBlock {
    * same name the record's state is.
    */
   takeHash?: string;
+  /**
+   * The direction as it was carried to these words (R-43) when the record holds it for earlier
+   * ones. The take is named by it, so keeping the take keeps it too: otherwise the plan, which
+   * reads only a direction written for these exact words, would find none and call the take
+   * it was just made under stale.
+   */
+  carried?: AudiobookDirection;
   /** What the reader is sent, in parts each within its cap (R-5): the rendered text under a direction, the words otherwise. */
   parts: string[];
   /** One preparation's rates: shared by its total, confirmation identity and dispatch. */
@@ -480,6 +489,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       ...(noteHeld ? { noteHeld: true as const } : {}),
       ...(held?.plan.cues.some((cue) => cue.kind === "sound") === true ? { sounds: true as const } : {}),
       ...(refusal === undefined && takeHash !== undefined ? { takeHash } : {}),
+      ...(held !== null && override?.directions === undefined && audiobookDirectionFor(record, planned.block) === null ? { carried: held } : {}),
       reader,
       model,
       local,
@@ -866,7 +876,9 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     };
     await write((current) => {
       const { [block.block.key]: _dropped, ...flags } = current.flags;
-      return { ...current, chapterVersion: plan.chapter.version, hash: plan.chapter.hash, updatedAt: deps.now(), takes: { ...current.takes, [block.block.key]: take }, flags };
+      // A direction carried to these words stays with the take made under it, unless one written for these very words arrived while the run went.
+      const direction = block.carried !== undefined && current.direction[block.block.key]?.textHash !== block.carried.textHash ? { ...current.direction, [block.block.key]: block.carried } : current.direction;
+      return { ...current, chapterVersion: plan.chapter.version, hash: plan.chapter.hash, updatedAt: deps.now(), takes: { ...current.takes, [block.block.key]: take }, flags, direction };
     });
     made += 1;
   };

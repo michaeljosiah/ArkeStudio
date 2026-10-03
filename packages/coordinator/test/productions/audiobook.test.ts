@@ -1205,6 +1205,8 @@ describe("the audiobook run (turn 146)", () => {
         assert.deepEqual(requests.filter((r) => r.text === "Neap").map((r) => r.params?.speed), [1.15], "the marker read where its word now is");
         const record = await readRecord(worldDir);
         assert.ok(record.takes["title"]);
+        // Kept with the take it names, so the plan, which reads a direction only for its exact words, does not call that take stale.
+        assert.equal(record.direction["title"]?.text, "Chapter 1 · Neap");
         // Carried on the next write of the record, with the words it now stands for.
         await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.0", direction: null });
         const after = await readRecord(worldDir);
