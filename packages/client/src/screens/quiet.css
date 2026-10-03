@@ -1,0 +1,43 @@
+/*
+ * Design turn 189: quiet until there is something. A panel appears with its content; what it
+ * would say empty is its heading and one press, on one line.
+ *
+ * Its own sheet, loaded after fidelity.css and the responsive sheets, because every rule here is
+ * a re-dress of a rule those own: scoped under the screen that changes, so nothing it touches
+ * elsewhere moves, and class-collision.test.ts (which reads fidelity.css) has nothing to say.
+ */
+
+/*
+ * The chapter's rail (126a, 129a, 130a): plain headed sections with ruled rows, not boxed cards
+ * under tracked capitals. The narrow notes sheet (chapter-responsive.css) was already drawn this
+ * way; the desktop rail now matches it.
+ */
+.fy-ch__notes { gap: 22px; }
+.fy-ch__notes .fy-bible__panel { border: 0; border-radius: 0; padding: 0; gap: 6px; }
+.fy-ch__notes .fy-bible__paneltitle { font: var(--weight-semibold) var(--text-xs)/1.4 var(--font-sans); letter-spacing: 0; text-transform: none; color: var(--foreground); }
+.fy-ch__notes .fy-bible__paneltitle .fy-mono { color: var(--muted-foreground); font-weight: var(--weight-regular); }
+.fy-ch__notes .fy-ch__derive { font: var(--type-meta); font-weight: var(--weight-medium); }
+.fy-ch__notes .fy-ch__stamp { margin-top: 2px; color: var(--neutral-400); }
+.fy-ch__notes .fy-bible__versions > li { border-bottom: 1px solid var(--border); }
+
+/* A speaker's Note press sits where the note's warning would, before the count. */
+.fy-ab__note-press { margin-left: auto; color: var(--muted-foreground); }
+.fy-ab__note-press + .fy-ch__who-count { margin-left: 0; }
+
+/* Read the chapter: one outline press with its play mark, and a cast chapter's menu beside it. */
+.fy-ch__readpress { position: relative; display: inline-flex; align-items: center; gap: 4px; }
+.fy-ch__readpress > .ui-btn { gap: 6px; }
+.fy-ch__readmenu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; display: flex; flex-direction: column; min-width: 140px; padding: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--popover); box-shadow: var(--shadow-pop); }
+.fy-ch__readmenu > button { border: 0; background: transparent; color: var(--foreground); font: var(--type-ui); text-align: left; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
+.fy-ch__readmenu > button:hover, .fy-ch__readmenu > button:focus-visible { background: var(--accent); }
+
+/* The synopsis in two lines until it is pressed (129a: one line under the title). */
+.fy-sw__head .fy-ch__synopsis-clamp:not(.fy-ch__synopsis-clamp--open) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.fy-sw__head .fy-ch__synopsis--locked { cursor: pointer; }
+
+/* An unset mark is a quiet press to set it: dashed, the placeholder its label. */
+.fy-sw__context > .fy-ch__mark--unset { border-style: dashed; color: var(--neutral-400); }
+.fy-sw__context > .fy-ch__mark--unset .fy-sbscript--blank { color: inherit; }
+
+/* Where everyone is, before a chapter is derived: one line, the state and its press. */
+.fy-cont__none { display: flex; align-items: baseline; gap: 10px; }

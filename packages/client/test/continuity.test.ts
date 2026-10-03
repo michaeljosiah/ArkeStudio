@@ -145,9 +145,9 @@ describe("the continuity table (turn 129)", () => {
 
   it("the panel's stamp says what the check proved and what it dropped or cut", () => {
     const base = { version: 4, hash: "h", derivedAt: "2026-09-06T00:00:00.000Z", passes: 1, dropped: 0, omitted: 0, cut: 0, characters: [] };
-    assert.equal(continuityStamp(base), "derived · v4 · every line is the chapter’s own words");
+    assert.equal(continuityStamp(base), "derived · v4");
     assert.equal(continuityStamp({ ...base, version: 3, dropped: 2 }), "derived · v3 · 2 lines dropped, not in the chapter");
     assert.equal(continuityStamp({ ...base, dropped: 1, passes: 2 }), "derived · v4 · 2 passes · 1 line dropped, not in the chapter");
-    assert.equal(continuityStamp({ ...base, omitted: 2, cut: 1 }), "derived · v4 · every line is the chapter’s own words · 2 characters over the cap · 1 line over the cap");
+    assert.equal(continuityStamp({ ...base, omitted: 2, cut: 1 }), "derived · v4 · 2 characters over the cap · 1 line over the cap");
   });
 });

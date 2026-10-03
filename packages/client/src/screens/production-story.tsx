@@ -62,6 +62,8 @@ import {
   subscribeChapterCreateResults,
   setChapterRetired,
   reorderChapters,
+  deriveContinuity,
+  useDeriving,
 } from "../lib/store.js";
 import { continuityRows, continuityRowStamp, rememberChaptersView, rememberedChaptersView, type ChaptersView } from "../lib/continuity.js";
 import { defaultEpisodeFor } from "../lib/production-navigation.js";
@@ -581,6 +583,10 @@ export function ChapterTreeScreen() {
   );
   const rows = view === "continuity" ? continuityRows(chapters, cast.map((sheet) => sheet.id)) : [];
   const derivedCount = chapters.filter((c) => c.continuity !== undefined && !("unreadable" in c.continuity)).length;
+  const firstUnderived = chapters.find((c) => c.continuity === undefined);
+  const deriving = useDeriving();
+  const connection = useStore().connection;
+  const derivingAny = chapters.some((c) => deriving[`${worldId}/${prodId}/${c.id}`]?.state === "deriving");
   const placeName = (id: string) => world?.sheets.find((sheet) => sheet.id === id)?.name ?? id;
   const pad = (order: number) => String(order).padStart(2, "0");
   return (
@@ -649,13 +655,27 @@ export function ChapterTreeScreen() {
           <span style={{ width: `${Math.min(100, Math.round((bookWords / target) * 100))}%` }} />
         </div>
       )}
-      {view === "continuity" && (
-        <div className="fy-cont__meta">
-          after each chapter · derived from the prose, never written into the world · {chapters.length} chapter{chapters.length === 1 ? "" : "s"}, {derivedCount} derived · a
-          quiet cell is carried from the chapter it names · nothing carries past a chapter not derived
+      {/* Until a chapter is derived the view is one line and its press (design turn 189): a
+          grid of dashes under a sentence explaining them said "not derived" a dozen ways. Derive
+          reads the first chapter not derived, as its own panel's press would. */}
+      {view === "continuity" && chapters.length > 0 && (derivedCount === 0 ? (
+        <div className="fy-cont__meta fy-cont__none" data-testid="continuity-none">
+          <span>Not derived</span>
+          <button
+            type="button"
+            className="fy-ch__derive"
+            disabled={firstUnderived === undefined || connection !== "open" || derivingAny}
+            onClick={() => firstUnderived !== undefined && worldId !== undefined && prodId !== undefined && deriveContinuity(worldId, prodId, firstUnderived.file)}
+          >
+            {derivingAny ? "deriving…" : "Derive"}
+          </button>
         </div>
-      )}
-      {production && chapters.length > 0 && view === "continuity" ? (
+      ) : derivedCount < chapters.length ? (
+        <div className="fy-cont__meta">
+          {chapters.length - derivedCount} of {chapters.length} not derived
+        </div>
+      ) : null)}
+      {production && chapters.length > 0 && view === "continuity" && derivedCount > 0 ? (
         <div className="fy-cont" data-testid="continuity-table">
           {phone && <div className="fy-cont-cards">{rows.map(row => <button type="button" key={row.chapter.id} onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(row.chapter.id)}`)}><strong>{pad(row.chapter.order)} · {row.chapter.title}</strong><span>{continuityRowStamp(row.stamp)}</span>{row.cells.map((cell, i) => <span key={cast[i]!.id}><b>{cast[i]!.name}</b> · {cell?.gone ? `gone since ${pad(cell.since!)}` : cell?.unsure ? "unsure · place dropped" : cell === null ? "not known" : `${placeName(cell.where ?? "")}${cell.since === undefined ? "" : ` · since chapter ${pad(cell.since)}`}`}{cell?.warn ? " · chapter moved" : ""}</span>)}</button>)}</div>}
           <table className="fy-cont__table">

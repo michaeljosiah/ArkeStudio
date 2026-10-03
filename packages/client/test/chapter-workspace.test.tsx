@@ -2121,12 +2121,12 @@ describe("after this chapter (turn 129)", () => {
     ...extra,
   });
 
-  it("not derived yet: the panel says so, and the press asks for a derivation by the chapter's file", async () => {
+  it("not derived yet: the panel is its heading and the press, one line, and the press asks for a derivation by the chapter's file", async () => {
     const m = await mount(inkbound());
     await answerOpen(m);
-    assert.match(text(m), /After this chapter/);
-    assert.match(text(m), /where they end up · what they learn here/);
-    assert.match(text(m), /Not derived yet\./);
+    const panel = q(m, '[data-testid="chapter-continuity"]')!;
+    // Quiet until there is something (design turn 189): no caption, no "Not derived yet."
+    assert.equal(panel.textContent, "After this chapterDerive");
     const press = q(m, ".fy-ch__derive")!;
     assert.match(press.textContent ?? "", /Derive$/);
     await act(async () => {
@@ -2146,7 +2146,8 @@ describe("after this chapter (turn 129)", () => {
     assert.match(text(m), /“Maren counted the bells\.”/);
     assert.match(text(m), /and 1 more/, "three lines shown, the rest counted");
     assert.doesNotMatch(text(m), /a fourth line the panel counts/);
-    assert.match(text(m), /derived · v4 · every line is the chapter’s own words/);
+    assert.match(text(m), /derived · v4/);
+    assert.doesNotMatch(text(m), /every line is the chapter’s own words/, "a clean check is the count alone (design turn 189)");
     assert.match(text(m), /Derive again/);
     assert.match(text(m), /What does Maren Kest learn here\?/);
     assert.match(text(m), /Where is Odile Sarn now\?/, "a name the cast does not know is shown as the chapter gave it");
@@ -2237,7 +2238,7 @@ describe("after this chapter (turn 129)", () => {
       __setStateForTest(withHash(inkbound(), HASH), { connection: "open" });
     });
     await answerOpen(m);
-    assert.match(text(m), /Not derived yet\./, "what the disk holds now is the record");
+    assert.equal(q(m, '[data-testid="chapter-continuity"]')!.textContent, "After this chapterDerive", "what the disk holds now is the record");
     assert.doesNotMatch(text(m), /“Maren counted the bells\.”/);
   });
 
@@ -2245,7 +2246,6 @@ describe("after this chapter (turn 129)", () => {
     const m = await mount(inkbound());
     await answerOpenWith(m, { continuityUnreadable: true });
     assert.match(text(m), /record unreadable · Derive again replaces it/);
-    assert.doesNotMatch(text(m), /Not derived yet/);
     assert.match(q(m, ".fy-ch__derive")?.textContent ?? "", /Derive again/);
   });
 });
@@ -2297,12 +2297,11 @@ describe("the voiced read (turn 130)", () => {
     });
   }
 
-  it("not cast yet: the panel says so, the press casts by the chapter's file, and there is no Voiced press without a cast", async () => {
+  it("not cast yet: the panel is its heading and the press, the press casts by the chapter's file, and there is no Voiced read without a cast", async () => {
     const m = await mount(inkbound());
     await answerOpen(m);
-    assert.match(text(m), /Voices/);
-    assert.match(text(m), /who speaks · in whose voice/);
-    assert.match(text(m), /Not cast yet\./);
+    assert.equal(q(m, '[data-testid="chapter-voices"]')!.textContent, "VoicesCast the lines", "one line (design turn 189)");
+    assert.equal(q(m, '[aria-label="More ways to read"]'), null, "Read the chapter has no menu before a cast");
     const press = [...m.container.querySelectorAll(".fy-ch__derive")].find((button) => button.textContent?.includes("Cast the lines")) as HTMLElement;
     assert.ok(press, "Cast the lines is the press");
     await act(async () => {
@@ -2323,12 +2322,16 @@ describe("the voiced read (turn 130)", () => {
     assert.match(text(m), /Low tide · ElevenLabs · cloud/, "a sheet's assigned voice, by its label and where it reads (turn 165)");
     assert.match(text(m), /no sheet · narrator/, "a name the cast does not know reads in the narrator's");
     assert.match(text(m), /1 line/);
-    assert.match(text(m), /cast · v4 · 2 lines · 2 speakers · every line is the chapter’s own words/);
+    assert.match(text(m), /cast · v4 · 2 lines · 2 speakers/);
+    assert.doesNotMatch(text(m), /every line is the chapter’s own words/);
     assert.match(text(m), /Cast again/);
     assert.match(text(m), /Who speaks in this chapter\?/);
     assert.match(text(m), /Which lines are Maren Kest’s\?/);
-    const voiced = [...m.container.querySelectorAll("button")].find((button) => button.textContent === "Voiced") as HTMLElement;
-    assert.ok(voiced, "Voiced stands beside Read the chapter");
+    // One Read press; the voiced read is its menu (design turn 189).
+    assert.equal([...m.container.querySelectorAll("button")].filter((button) => button.textContent === "Voiced").length, 0, "no second press beside Read the chapter");
+    await act(async () => (q(m, '[aria-label="More ways to read"]') as HTMLElement).click());
+    const voiced = [...m.container.querySelectorAll('[role="menuitem"]')].find((button) => button.textContent === "Voiced") as HTMLElement;
+    assert.ok(voiced, "Voiced is Read the chapter's menu");
     await act(async () => {
       voiced.click();
     });

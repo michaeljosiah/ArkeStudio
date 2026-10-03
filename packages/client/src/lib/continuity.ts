@@ -87,15 +87,16 @@ export function continuityRowStamp(stamp: ContinuityRow["stamp"]): string {
   return stamp.omitted > 0 ? `derived · v${stamp.version} · ${stamp.omitted} over the cap` : `derived · v${stamp.version}`;
 }
 
-/** The panel's stamp: what the check proved, and what it dropped or cut. */
+/**
+ * The panel's stamp: what the check dropped or cut. A clean check is the version alone (design
+ * turn 189): "every line is the chapter's own words" was true of every record the check let
+ * through, so it said nothing a reader could act on, and a limit is said only where it can be
+ * false.
+ */
 export function continuityStamp(record: ChapterContinuity): string {
   const parts = [`derived · v${record.version}`];
   if (record.passes > 1) parts.push(`${record.passes} passes`);
-  parts.push(
-    record.dropped === 0
-      ? "every line is the chapter’s own words"
-      : `${record.dropped} line${record.dropped === 1 ? "" : "s"} dropped, not in the chapter`,
-  );
+  if (record.dropped > 0) parts.push(`${record.dropped} line${record.dropped === 1 ? "" : "s"} dropped, not in the chapter`);
   if (record.omitted > 0) parts.push(`${record.omitted} character${record.omitted === 1 ? "" : "s"} over the cap`);
   if (record.cut > 0) parts.push(`${record.cut} line${record.cut === 1 ? "" : "s"} over the cap`);
   return parts.join(" · ");
