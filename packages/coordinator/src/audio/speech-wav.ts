@@ -97,17 +97,99 @@ export function silenceThreshold(levels: Float32Array): number {
   return Math.min(-40, loudest - 35);
 }
 
+/** A pause long enough to be between sentences or turns, not inside a word (SPEC-047 R-60). */
+export const PAUSE_SEC = 0.15;
+
+/** The runs of sound between pauses, in seconds, as heard: nothing merged, nothing split. */
+export function soundSpans(pcm: SpeechPcm): Array<{ start: number; end: number }> {
+  const levels = frameLevels(pcm);
+  const threshold = silenceThreshold(levels);
+  const frame = 0.01;
+  const minPause = Math.round(PAUSE_SEC / frame);
+  const spans: Array<{ start: number; end: number }> = [];
+  let open = -1;
+  let quiet = 0;
+  for (let i = 0; i < levels.length; i++) {
+    if (levels[i]! >= threshold) {
+      if (open < 0) open = i;
+      quiet = 0;
+    } else if (open >= 0) {
+      quiet += 1;
+      if (quiet >= minPause) {
+        spans.push({ start: open * frame, end: (i - quiet + 1) * frame });
+        open = -1;
+        quiet = 0;
+      }
+    }
+  }
+  if (open >= 0) spans.push({ start: open * frame, end: (levels.length - quiet) * frame });
+  return spans;
+}
+
+/** The quiet between and around the spans of sound, in order, the last running to the end. */
+export function speechPauses(pcm: SpeechPcm): Array<{ start: number; end: number }> {
+  const spans = soundSpans(pcm);
+  const seconds = speechSeconds(pcm);
+  const pauses: Array<{ start: number; end: number }> = [];
+  let at = 0;
+  for (const span of spans) {
+    if (span.start > at) pauses.push({ start: at, end: span.start });
+    at = span.end;
+  }
+  if (seconds > at) pauses.push({ start: at, end: seconds });
+  return pauses;
+}
+
+/** A blip of a runaway tail: Gemini's ran ~0.1 s a blip; a spoken word is longer. */
+const TAIL_BLIP_SEC = 0.25;
+/** As many blips as make a tail, and as long as it runs, so a last short word or a breath is not one. */
+const TAIL_BLIPS = 3;
+const TAIL_RUN_SEC = 1.5;
+/** The most quiet a take keeps after its last word (design turn 185 follow-up): a pause, not a tail. */
+export const TAIL_KEEP_SEC = 0.8;
+
+/**
+ * Where a runaway non-speech tail is cut, or null when the audio has none. A Gemini read can run
+ * on past its words: the turn 185 probe's merged request ended its speech at 27.9 s and then
+ * gave 26 s of short blips, one every 0.7 s, after a `<chuckle>`. A trailing run of at least
+ * three blips of a quarter-second or less, over a second and a half, after sound that is longer,
+ * is that tail; the cut is the middle of the pause before it, held to `TAIL_KEEP_SEC`.
+ */
+export function runawayTailAt(pcm: SpeechPcm): number | null {
+  const spans = soundSpans(pcm);
+  const first = runawayTailIndex(spans);
+  if (first < 0) return null;
+  const speechEnd = spans[first - 1]!.end;
+  return speechEnd + Math.min(TAIL_KEEP_SEC, (spans[first]!.start - speechEnd) / 2);
+}
+
+/** The first of `soundSpans` that is a runaway tail, or −1. */
+export function runawayTailIndex(spans: ReadonlyArray<{ start: number; end: number }>): number {
+  let first = spans.length;
+  while (first > 0 && spans[first - 1]!.end - spans[first - 1]!.start <= TAIL_BLIP_SEC) first -= 1;
+  const blips = spans.length - first;
+  if (first === 0 || blips < TAIL_BLIPS || spans.at(-1)!.end - spans[first]!.start < TAIL_RUN_SEC) return -1;
+  return first;
+}
+
+/** A take with a runaway tail cut off, or the take as it came. */
+export function dropRunawayTail(pcm: SpeechPcm): SpeechPcm {
+  const at = runawayTailAt(pcm);
+  return at === null ? pcm : sliceSpeech(pcm, 0, at);
+}
+
 /**
  * A take alone trimmed to a grouped take's pause (design turn 185): leading and trailing quiet
  * past `keepSec` is cut, so a block re-read without neighbours does not stand out between takes
- * that share their pauses.
+ * that share their pauses. A runaway tail goes first, so its blips do not count as the last sound.
  */
 export function trimSpeech(pcm: SpeechPcm, keepSec = 0.25): SpeechPcm {
+  const tail = runawayTailAt(pcm);
   const levels = frameLevels(pcm);
   const threshold = silenceThreshold(levels);
   const first = levels.findIndex((level) => level >= threshold);
   if (first < 0) return pcm;
-  let last = levels.length - 1;
+  let last = tail === null ? levels.length - 1 : Math.min(levels.length - 1, Math.floor(tail / 0.01));
   while (last > first && levels[last]! < threshold) last -= 1;
   return sliceSpeech(pcm, Math.max(0, first * 0.01 - keepSec), (last + 1) * 0.01 + keepSec);
 }

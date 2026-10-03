@@ -11,9 +11,9 @@ import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
 import { audiobookLanding, recordsLoudness, updateAudiobook, type ProposalOverride } from "./audiobook.js";
 import { prepareChapter, type PreparedGroup, type ReadingRoom, type Speaking } from "./audiobook-run.js";
-import { applyGain, normaliseSpeech, readSpeechWav, sliceSpeech, writeSpeechWav } from "../audio/speech-wav.js";
+import { applyGain, dropRunawayTail, normaliseSpeech, readSpeechWav, sliceSpeech, writeSpeechWav } from "../audio/speech-wav.js";
 import type { TimedWord } from "../voice/word-times.js";
-import { splitRequest } from "./audiobook-split.js";
+import { splitAudio, splitRequest } from "./audiobook-split.js";
 import { speechConsentToken } from "../voice/quote.js";
 
 /**
@@ -65,11 +65,16 @@ export function hearCacheFile(speaking: Speaking, group?: PreparedGroup): string
   });
 }
 
-/** A heard WAV at the take loudness (design turn 185), so a heard block kept as its take matches the rest. */
+/**
+ * A heard WAV at the take loudness (design turn 185), so a heard block kept as its take matches
+ * the rest, and without a runaway tail, which a take made by a run would not keep either.
+ */
 function level(bytes: Uint8Array): Uint8Array {
   try {
-    const normal = normaliseSpeech(readSpeechWav(bytes));
-    return normal.loudness.gainDb === 0 ? bytes : writeSpeechWav(normal.pcm);
+    const source = readSpeechWav(bytes);
+    const untailed = dropRunawayTail(source);
+    const normal = normaliseSpeech(untailed);
+    return normal.loudness.gainDb === 0 && untailed === source ? bytes : writeSpeechWav(normal.pcm);
   } catch {
     return bytes;
   }
@@ -129,7 +134,7 @@ export async function hearAudiobookLine(
     const bytes = new Uint8Array(await readFile(toExtendedLength(landed)));
     const pcm = readSpeechWav(bytes);
     const heard = await deps.wordTimes(bytes, new AbortController().signal);
-    const cuts = splitRequest(group.members.map((member) => ({ key: member.block.key, text: member.text })), heard.words, heard.seconds, (start, end) => audioHash(writeSpeechWav(sliceSpeech(pcm, start, end))));
+    const cuts = splitRequest(group.members.map((member) => ({ key: member.block.key, text: member.text })), heard.words, heard.seconds, (start, end) => audioHash(writeSpeechWav(sliceSpeech(pcm, start, end))), splitAudio(pcm));
     const cut = cuts.find((candidate) => candidate.key === block)!;
     const gain = normaliseSpeech(pcm).loudness.gainDb;
     await atomicWriteFile(cachePath, writeSpeechWav(applyGain(sliceSpeech(pcm, cut.start, cut.end), gain)));

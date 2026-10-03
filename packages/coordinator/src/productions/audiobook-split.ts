@@ -1,4 +1,5 @@
-import type { AudioTranscriptComparison } from "@arke-studio/contracts";
+import { expectedSpeechSeconds, SPEECH_TOKEN_ESTIMATE, type AudioTranscriptComparison } from "@arke-studio/contracts";
+import { runawayTailAt, speechPauses, TAIL_KEEP_SEC, type SpeechPcm } from "../audio/speech-wav.js";
 import { compareAudioTranscript } from "../audio/transcript-comparison.js";
 import type { TimedWord } from "../voice/word-times.js";
 
@@ -16,6 +17,8 @@ export interface SplitCut {
   heard: string;
   matched: boolean;
   comparison: AudioTranscriptComparison;
+  /** The request ran far past its words (`ranLong`). */
+  longTail?: true;
 }
 
 /** A word as the split compares it: case, accents' composition and punctuation set aside. */
@@ -67,11 +70,50 @@ export function judgeSplit(written: string, heard: string, audioHash: string): {
   return { matched: misheard && comparison.differences.length <= Math.max(1, Math.floor(words / 8)), comparison };
 }
 
+/**
+ * What the split reads off the request's audio beyond the words (design turn 185 follow-up): its
+ * pauses, where the last block's cut ends, and where a runaway tail begins.
+ */
+export interface SplitAudio {
+  pauses: ReadonlyArray<{ start: number; end: number }>;
+  tailAt: number | null;
+}
+
+export function splitAudio(pcm: SpeechPcm): SplitAudio {
+  return { pauses: speechPauses(pcm), tailAt: runawayTailAt(pcm) };
+}
+
+/** The note a request that ran far past its words carries (design turn 185 follow-up). */
+export const LONG_TAIL = "long tail";
+
+/**
+ * Whether audio ran far past the speech its words should take: over 1.6 times the estimate's
+ * (SPEC-049 R-6's 150 words a minute and a request's lead-in and tail) and ten seconds more. The
+ * probe's merged request ran 54.2 s on words the other two packings read in about 24.
+ */
+export function ranLong(seconds: number, texts: readonly string[]): boolean {
+  const expected = texts.reduce((sum, text) => sum + expectedSpeechSeconds(text), 0) + SPEECH_TOKEN_ESTIMATE.edgeSeconds;
+  return seconds > 1.6 * expected && seconds - expected > 10;
+}
+
+/**
+ * Where the last block's cut ends: the middle of the first pause after the word, held to
+ * `TAIL_KEEP_SEC` of it, so whatever the reader went on to make after its words — a runaway
+ * nonverbal tail, or a long silence — is not kept in the take. Never past a runaway tail.
+ */
+function endAfter(word: number, audio: SplitAudio, seconds: number): number {
+  const pause = audio.pauses.find((candidate) => candidate.start >= word - 0.02 && candidate.end > word);
+  let end = pause === undefined ? seconds : Math.min(pause.start + TAIL_KEEP_SEC, (pause.start + pause.end) / 2);
+  if (audio.tailAt !== null && audio.tailAt >= word) end = Math.min(end, audio.tailAt);
+  return Math.max(word, end);
+}
+
 export function splitRequest(
   blocks: ReadonlyArray<{ key: string; text: string }>,
   words: readonly TimedWord[],
   seconds: number,
   hashOf: (start: number, end: number) => string,
+  audio?: SplitAudio,
 ): SplitCut[] {
   const written: string[] = [];
   const owner: number[] = [];
@@ -115,11 +157,46 @@ export function splitRequest(
     const total = blocks.reduce((sum, block) => sum + block.text.length, 0);
     cuts.push(Math.max(floor, (seconds * before) / Math.max(1, total)));
   }
-  return blocks.map((block, index) => {
-    const start = index === 0 ? 0 : cuts[index - 1]!;
-    const end = index === blocks.length - 1 ? seconds : cuts[index]!;
+  const judged = (block: { key: string; text: string }, start: number, end: number): SplitCut => {
     const inside = words.filter((word) => (word.start + word.end) / 2 >= start && (word.start + word.end) / 2 < end).map((word) => word.text).join(" ");
-    const judged = end > start ? judgeSplit(block.text, inside, hashOf(start, end)) : { matched: false, comparison: compareAudioTranscript({ audioHash: hashOf(start, start), authoredText: block.text, observedText: "", transcriber: { id: "voxa-whisper", version: "runtime-unreported" } }) };
-    return { key: block.key, start, end, heard: inside, matched: judged.matched && end > start, comparison: judged.comparison };
+    const judgement = end > start ? judgeSplit(block.text, inside, hashOf(start, end)) : { matched: false, comparison: compareAudioTranscript({ audioHash: hashOf(start, start), authoredText: block.text, observedText: "", transcriber: { id: "voxa-whisper", version: "runtime-unreported" } }) };
+    return { key: block.key, start, end, heard: inside, matched: judgement.matched && end > start, comparison: judgement.comparison };
+  };
+  const split = blocks.map((block, index) => {
+    const start = index === 0 ? 0 : cuts[index - 1]!;
+    if (index < blocks.length - 1) return judged(block, start, cuts[index]!);
+    if (audio === undefined) return judged(block, start, seconds);
+    // The last block ends after its last word heard, not at the end of the audio. A written word
+    // after that one may have been heard as something else, so the heard words after it are tried
+    // too — as many as there are written words left — and the first end whose words match is
+    // kept, else the furthest: a cut is never shortened past what might be its own last word.
+    let lastAt = -1;
+    blockOf.forEach((owned, at) => {
+      if (owned === index) lastAt = at;
+    });
+    if (lastAt < 0) return judged(block, start, Math.max(start, audio.tailAt !== null && audio.tailAt > start ? Math.min(seconds, audio.tailAt) : seconds));
+    const left = written.length - 1 - matched[lastAt]!;
+    let furthest: SplitCut | null = null;
+    for (let at = lastAt; at <= Math.min(kept.length - 1, lastAt + left); at++) {
+      // Whatever whisper made of a runaway tail is not the block's last word.
+      if (at > lastAt && audio.tailAt !== null && words[kept[at]!]!.start >= audio.tailAt) break;
+      const end = Math.max(start, endAfter(words[kept[at]!]!.end, audio, seconds));
+      if (furthest !== null && end <= furthest.end) continue;
+      const candidate = judged(block, start, end);
+      if (candidate.matched) return candidate;
+      furthest = candidate;
+    }
+    return furthest!;
   });
+  // A request that ran long says so on every cut; when what is kept still runs long, the extra is
+  // inside the request rather than at its end, and the block that ran furthest past its own words
+  // is held for the author as a split that did not match.
+  const texts = blocks.map((block) => block.text);
+  if (split.length === 0 || !ranLong(seconds, texts)) return split;
+  let worst = -1;
+  if (ranLong(split.at(-1)!.end, texts)) {
+    const over = split.map((cut, index) => cut.end - cut.start - expectedSpeechSeconds(texts[index]!));
+    worst = over.indexOf(Math.max(...over));
+  }
+  return split.map((cut, index) => ({ ...cut, longTail: true as const, ...(index === worst ? { matched: false } : {}) }));
 }

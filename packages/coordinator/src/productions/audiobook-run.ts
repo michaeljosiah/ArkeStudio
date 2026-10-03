@@ -35,9 +35,9 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
-import { applyGain, normaliseSpeech, readSpeechWav, samplePeak, sliceSpeech, trimSpeech, writeSpeechWav } from "../audio/speech-wav.js";
+import { applyGain, dropRunawayTail, normaliseSpeech, readSpeechWav, samplePeak, sliceSpeech, trimSpeech, writeSpeechWav } from "../audio/speech-wav.js";
 import type { TimedWord } from "../voice/word-times.js";
-import { splitRequest } from "./audiobook-split.js";
+import { LONG_TAIL, splitAudio, splitRequest } from "./audiobook-split.js";
 import { checkDirection, directionPlan, type RenderedPart } from "../voice/direction.js";
 import { audiobookLanding, recordsLoudness, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
 
@@ -735,12 +735,13 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     // to the target as it is filed, and a groupable reader's is trimmed to a grouped take's
     // pause first, so a block read alone does not stand out between cuts that share theirs. A
     // grouped cut arrives gained already, by its request's measure. A file this cannot read as
-    // 16-bit PCM is filed as it came.
+    // 16-bit PCM is filed as it came. Any reader's take loses a runaway tail: a solo read can run
+    // on past its words as a grouped one did.
     let leveled: { path: string; loudness: AudiobookLoudness } | null = null;
     if (input.loudness === undefined && block.format === "wav") {
       try {
         const source = readSpeechWav(new Uint8Array(await readFile(toExtendedLength(sourcePath))));
-        const trimmed = readsGrouped(block.model, transcriber, plan.book) ? trimSpeech(source) : source;
+        const trimmed = readsGrouped(block.model, transcriber, plan.book) ? trimSpeech(source) : dropRunawayTail(source);
         const normal = normaliseSpeech(trimmed);
         if (normal.loudness.gainDb === 0 && trimmed === source) leveled = { path: sourcePath, loudness: normal.loudness };
         else {
@@ -946,7 +947,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     const pcm = readSpeechWav(bytes);
     const heard = await deps.wordTimes(bytes, signal);
     if (signal.aborted) return null;
-    const cuts = splitRequest(group.members.map((block) => ({ key: block.block.key, text: block.text })), heard.words, heard.seconds, (start, end) => audioHash(writeSpeechWav(sliceSpeech(pcm, start, end))));
+    const cuts = splitRequest(group.members.map((block) => ({ key: block.block.key, text: block.text })), heard.words, heard.seconds, (start, end) => audioHash(writeSpeechWav(sliceSpeech(pcm, start, end))), splitAudio(pcm));
     // One request is one performance: measured whole and gained as one, so a whisper inside it
     // stays a whisper beside the lines around it.
     const level = normaliseSpeech(pcm);
@@ -967,10 +968,12 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       settled.add(block.block.key);
       if (cut.matched) {
         await keep(block, artifact, provenance);
-        progress(block, "made");
+        // A request that ran long is said on its takes' progress; the record keeps no note, which
+        // would be another strict field and another world schema for what the cut already dropped.
+        progress(block, "made", cut.longTail ? LONG_TAIL : undefined);
       } else {
         const split: AudiobookSplitFlag = { artifactId: artifact.id, heard: cut.heard.slice(0, 4000), request: job.id, offsetSec: grouped.offsetSec, durationSec: grouped.durationSec };
-        const reason = `${SPLIT_DID_NOT_MATCH} · \u201c${cut.heard.length > 80 ? `${cut.heard.slice(0, 79)}\u2026` : cut.heard}\u201d`;
+        const reason = `${SPLIT_DID_NOT_MATCH} · ${cut.longTail ? `${LONG_TAIL} · ` : ""}\u201c${cut.heard.length > 80 ? `${cut.heard.slice(0, 79)}\u2026` : cut.heard}\u201d`;
         await write((current) => ({ ...current, updatedAt: deps.now(), flags: { ...current.flags, [block.block.key]: { reason, at: deps.now(), split } } }));
         flaggedCount += 1;
         progress(block, "flagged", reason);
