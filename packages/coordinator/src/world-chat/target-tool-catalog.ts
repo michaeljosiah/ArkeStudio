@@ -73,8 +73,8 @@ export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
   tool("get_timeline", "Read every timeline track, clip, cue, library item, mix value and available take.", PRODUCTION, ["productionId"]),
   tool("get_spine", "Read the complete production spine: track, markers and anchors.", PRODUCTION, ["productionId"]),
   tool("get_routing", "Read the complete interactive routing graph.", PRODUCTION, ["productionId"]),
-  tool("list_plans", "Read complete durable dispatch plans.", PRODUCTION, ["productionId"]),
-  tool("list_jobs", "Read every safe job record for this world, optionally narrowed to a production.", { ...PRODUCTION }),
+  tool("list_plans", "Read complete durable dispatch plans and their current folded state, including cancellation and human gates.", PRODUCTION, ["productionId"]),
+  tool("list_jobs", "Read every safe job record for this world, optionally narrowed to a production. Frame jobs include frameRun.runId and zero-based frameRun.stepIndex for pause, resume, cancel and retry actions.", { ...PRODUCTION }),
   tool("list_build_items", "Read the founding items in this world, including unfinished item keys and their current state.", {}),
   tool("list_exports", "Read every currently targetable export for this world, optionally narrowed to a production.", { ...PRODUCTION }),
 ];

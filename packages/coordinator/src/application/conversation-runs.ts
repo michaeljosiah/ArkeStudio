@@ -3,7 +3,7 @@ import { createPreparedSession } from "../harness/session-files.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type WorldChatCheckReceipt, applyBibleEdits, CONVERSATIONAL_PROPS_SCHEMA_VERSION } from "@arke-studio/contracts";
-import { listPlans } from "../productions/plans.js";
+import { readPlanRecords } from "../productions/plans.js";
 import { readContinuity } from "../productions/continuity.js";
 import { readVoices } from "../productions/voices.js";
 import { stageEditorRequests } from "../productions/editor-requests.js";
@@ -67,7 +67,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       Math.max(MAX_TEXT_PER_RUN_CHARS, budgetFor(deps.adapter?.knownInputTokenLimit?.() ?? undefined)),
     getBundle: () => deps.activeStore()?.getBundle() ?? null,
     getIndex: () => deps.activeStore()?.getIndex() ?? null,
-    getPlans: (productionId) => listPlans(store, productionId),
+    getPlans: async (productionId) => readPlanRecords(store, productionId, deps.jobs()),
     getJobs: () => deps.jobs(),
     getBuildItems: () => deps.buildItems?.() ?? [],
     getExports: () => deps.exports(),

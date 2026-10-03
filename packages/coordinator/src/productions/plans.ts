@@ -9,6 +9,7 @@ import { readCharacterAudioInputs } from "../audio/reference-inputs.js";
  */
 
 import { mkdir, open as openFile, readdir, readFile } from "node:fs/promises";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -21,6 +22,7 @@ import {
   foldPlan,
   orderedShots,
   resolveCast,
+  SlugSchema,
   shotSpeakers,
   ulid,
   type CompiledPass,
@@ -36,6 +38,7 @@ import {
   type ScenePlan,
   type Take,
   type WorldBundle,
+  type Job,
 } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
@@ -107,6 +110,30 @@ export async function listPlans(store: WorldStore, productionId: string): Promis
     }
   }
   return plans.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+export interface DispatchPlanReadRecord { plan: DispatchPlan; state: PlanState }
+/** Preparation and its synchronous world-gate precondition must observe the same disk truth. */
+export function readPlanRecords(store: WorldStore, productionId: string, jobs: readonly Job[]): DispatchPlanReadRecord[] {
+  SlugSchema.parse(productionId);
+  const dir = plansDir(store, productionId);
+  let files: string[];
+  try { files = readdirSync(toExtendedLength(dir)); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+  return files.filter(file => file.endsWith(".json")).flatMap(file => {
+    let plan: DispatchPlan;
+    try { plan = DispatchPlanSchema.parse(JSON.parse(readFileSync(toExtendedLength(join(dir, file)), "utf8"))); }
+    catch { return []; }
+    let raw = "";
+    try { raw = readFileSync(toExtendedLength(join(dir, `${plan.planId}.events.jsonl`)), "utf8"); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    const events: PlanEventLike[] = raw.split("\n").filter(line => line.trim()).flatMap(line => {
+      try { return [JSON.parse(line) as PlanEventLike]; } catch { return []; }
+    });
+    const jobIds = new Set(events.flatMap(event => event.kind === "pass-enqueued" ? [event.jobId] : []));
+    const facts = jobs.filter(job => job.worldId === store.worldId && jobIds.has(job.id)).map(job => ({ id: job.id, status: job.status }));
+    return [{ plan, state: foldPlan(plan, events, facts) }];
+  }).sort((a, b) => a.plan.createdAt.localeCompare(b.plan.createdAt) || a.plan.planId.localeCompare(b.plan.planId));
 }
 
 export interface CreatePlanInput {

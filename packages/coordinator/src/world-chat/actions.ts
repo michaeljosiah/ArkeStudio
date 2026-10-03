@@ -1,4 +1,5 @@
 import type { ProductionBatchControls } from "./production-batch.js";
+import { readPlanRecords } from "../productions/plans.js";
 import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema, checkPropName, newId } from "@arke-studio/contracts";
 import { createProp, addPropState, renameProp, acceptPropStateReference } from "../references/props.js";
 import { createHash } from "node:crypto";
@@ -282,6 +283,7 @@ import {
   worldMetadataFence,
   exportsFence,
   jobsFence,
+  plansFence,
   type ArkeExportReadRecord,
 } from "./target-reads.js";
 import { foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
@@ -594,6 +596,10 @@ function currentWorldObservation(
         target: targetId,
         fence: jobsFence(deps.getJobs(), store.worldId, targetId === store.worldId ? undefined : targetId),
       };
+    }
+    case "plans": {
+      const productionId = target ?? store.worldId;
+      return { target: productionId, fence: plansFence(readPlanRecords(store, productionId, deps.getJobs?.() ?? [])) };
     }
     case "founding-build": return { target: store.worldId, fence: buildItemsFence(deps.getBuildItems?.() ?? []) };
     default: return null;

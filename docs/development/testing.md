@@ -106,6 +106,11 @@ They check Generate/chat quote parity, read-only preparation, stale shots, durab
 authorization, freshly quoted resume and retries, immutable board parents, late boundary byte
 pins, human continuation gates, live card settlement and cancellation recovery without a
 second purchase. The retired unplanned scene-dispatch command must refuse explicitly.
+The same suite checks real jobs/plan receipts through model-action preparation: frame run/step
+identities are discoverable without exposing job internals, plan cancellation observes current
+folded state, automatic plan policies disclose their authorization, and long prompt display
+does not alter frozen job prompts. A proven pre-authority refusal settles stale; an unreadable
+authority continues to require reconciliation.
 
 Book/audio standards experiments use the separate [publication interoperability checks](publication-interop.md#reproduce).
 They install their own locked development dependencies and exercise Readium, package closure and EPUBCheck.

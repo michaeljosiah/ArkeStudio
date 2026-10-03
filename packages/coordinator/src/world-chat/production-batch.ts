@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
 import {
   CharacterAudioPlanSchema, DispatchPlanSchema, FrameRunQuoteSchema, FrameRunSchema, referenceAudioAsset,
   type ArkeGenerationBody, type ConversationActionBody, type ConversationActionCard, type Job, type ModelWorldChatAction,
@@ -50,8 +52,10 @@ function frameInputs(run: ReturnType<typeof FrameRunSchema.parse>, from: number)
     idempotencyKey: dispatch.idempotencyKey, recipe: dispatch.recipe, engine: dispatch.engine }));
 }
 function generationBody(inputs: readonly EnqueueInput[], purpose: string, output: string, options: NonNullable<ArkeGenerationBody["options"]>): ArkeGenerationBody {
+  const prompt = inputs.map((input, index) => `${index + 1}. ${String(input.params.prompt ?? "")}`).join("\n\n") || "Resume existing work; no further provider requests.";
+  const suffix = "\n[Display truncated; complete prompts remain frozen in the approved jobs.]";
   return { family: "generation", medium: inputs[0]?.capability === "video" ? "video" : "image", purpose,
-    prompt: inputs.map((input, index) => `${index + 1}. ${String(input.params.prompt ?? "")}`).join("\n\n") || "Resume existing work; no further provider requests.",
+    prompt: prompt.length > 100_000 ? prompt.slice(0, 100_000 - suffix.length) + suffix : prompt,
     provider: inputs[0]?.provider ?? "Existing run", model: inputs[0]?.model ?? "Existing run", quantity: Math.max(1, inputs.length),
     references: inputs.flatMap((input, index) => {
       const audio = CharacterAudioPlanSchema.safeParse(input.params.audioReferences);
@@ -66,6 +70,15 @@ function generationBody(inputs: readonly EnqueueInput[], purpose: string, output
 /** Chat quotes reuse the same run/plan compilers and persist the domain authority before enqueue. */
 export function productionBatchSource(store: WorldStore, ports: ProductionBatchPorts): GenerationQuoteSource {
   const productionFor = (id: string) => store.getBundle().productions.find(p => p.meta.id === id);
+  const absentAuthority = async (productionId: string, id: string, kind: "runs" | "plans", inputs: readonly EnqueueInput[]) => {
+    try { await stat(join(store.dir, "productions", productionId, kind, `${id}.json`)); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT" && !inputs.some(input => ports.jobs().some(job => job.idempotencyKey === input.idempotencyKey))) {
+        return { status: "stale" as const, detail: "No durable production authority was created or work admitted. Prepare a fresh card." };
+      }
+    }
+    return { status: "running" as const, detail: "Production admission needs reconciliation in Activity; no purchase was repeated." };
+  };
   return {
     compile: async (action, id, at) => {
       if (action.kind === "production-scene-dispatch") {
@@ -83,7 +96,7 @@ export function productionBatchSource(store: WorldStore, ports: ProductionBatchP
             { label: "Dropped inputs", value: plan.passes.flatMap(pass => pass.compiled.dropped.map(ref => `${ref.sheetId}: ${ref.reason}`)).join("; ") || "None" },
             ...plan.passes.flatMap(pass => (pass.carries?.cast ?? []).map(member => ({ label: `Pass ${pass.passIndex + 1}: ${member.name}`, value: `Look ${member.look}; voice ${member.voice}${member.reason ? `; ${member.reason}` : ""}${member.voiceReason ? `; ${member.voiceReason}` : ""}` }))),
             ...(plan.castNotSent ?? []).map(member => ({ label: `${member.name}: audio not sent`, value: member.reason })),
-            { label: "Human gates", value: "Plan continue and changed-price reconfirmation remain human decisions." },
+            { label: "Continuation policy", value: plan.policy === "pre-authorized" ? "Approval pre-authorizes every quoted pass; later passes advance automatically. Changed-price reconfirmation remains human." : "Later dependent passes require human Continue. Changed-price reconfirmation also remains human." },
           ]) };
       }
       if (!isFrameGeneration(action)) throw new Error("This is not a production batch generation action.");
@@ -170,7 +183,7 @@ export function productionBatchSource(store: WorldStore, ports: ProductionBatchP
     reconcile: async (card, action, inputs) => {
       if (action.kind === "production-scene-dispatch") {
         const plan = (await listPlans(store, action.productionId)).find(p => p.planId === `pl_${card.actionId.slice(4)}`);
-        if (!plan) return { status: "running", detail: "Plan admission needs reconciliation in Activity; no purchase was repeated." };
+        if (!plan) return absentAuthority(action.productionId, `pl_${card.actionId.slice(4)}`, "plans", inputs);
         const state = await planState(store, plan, ports.planDeps());
         if (state.status === "authorized" || state.status === "active") return { status: "running", detail: "Scene plan is active or awaiting its human continuation/reconfirmation gate." };
         return undefined;
@@ -178,7 +191,7 @@ export function productionBatchSource(store: WorldStore, ports: ProductionBatchP
       if (!isFrameGeneration(action)) return null;
       const runId = action.kind === "production-frame-run-start" ? `fr_${card.actionId.slice(4)}` : action.runId;
       const run = runId && await readFrameRun(store, action.productionId, runId);
-      if (!run) return { status: "running", detail: "Frame-run admission needs reconciliation in Activity; no purchase was repeated." };
+      if (!run) return absentAuthority(action.productionId, runId, "runs", inputs);
       const state = await frameRunState(store, action.productionId, run, ports.jobs());
       const ownJobs = inputs.map(input => ports.jobs().find(job => job.idempotencyKey === input.idempotencyKey));
       if ((state.status === "active" || state.status === "paused") && ownJobs.some(job => !job || !["succeeded", "failed", "cancelled"].includes(job.status))) return { status: "running", detail: `Frame run is ${state.status}; its existing authority owns continuation.` };

@@ -2,16 +2,18 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { JobSchema, newId, ulid, type ConversationActionCard, type Job, type ManifestModel, type ModelManifest, type ModelWorldChatAction } from "@arke-studio/contracts";
+import { JobSchema, WorldChatCheckReceiptSchema, newId, ulid, type ConversationActionCard, type Job, type ManifestModel, type ModelManifest, type ModelWorldChatAction } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { productionBatchSource, ProductionBatchControls, type ProductionBatchPorts } from "../../src/world-chat/production-batch.js";
 import { GenerationQuotes } from "../../src/world-chat/generation-quotes.js";
 import { advanceFrameRun, listFrameRuns, quoteFrameRun, readFrameRun, recordBoardSheetFromJob } from "../../src/productions/frame-run.js";
-import { advancePlan, appendPlanEvents, listPlans, planState, readPlanEvents } from "../../src/productions/plans.js";
+import { advancePlan, appendPlanEvents, listPlans, planState, readPlanEvents, readPlanRecords } from "../../src/productions/plans.js";
 import type { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
-import { sceneFence, takesFence } from "../../src/world-chat/target-reads.js";
+import { sceneFence, takesFence, WorldChatTargetReads } from "../../src/world-chat/target-reads.js";
+import { prepareWorldChatActions } from "../../src/world-chat/actions.js";
+import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
@@ -70,6 +72,22 @@ async function setup() {
 }
 
 describe("Production Chat batch authority (SPEC-051 R-8..10)", () => {
+  async function actionRead(h: Awaited<ReturnType<typeof setup>>, tool: "list_jobs" | "list_plans") {
+    const conversationId = newId("cv"), log = new WorldChatStore(conversationDir(h.worldDir, conversationId));
+    const entryContext = { kind: "production" as const, productionId: "saltlight" };
+    await log.create(conversationId, AT);
+    await log.append({ type: "conversation.created", title: "Control production work", entryContext }, { at: AT });
+    const lease = new QueryLeaseRegistry(() => WORLD_ID).mint({ worldId: WORLD_ID, conversationId, runId: newId("run") });
+    const reader = new WorldChatTargetReads({ getJobs: () => h.jobs, getPlans: async id => readPlanRecords(h.store, id, h.jobs) });
+    const read = await reader.call(lease, h.store.getBundle(), tool, { productionId: "saltlight" });
+    const receipt = WorldChatCheckReceiptSchema.parse({ id: newId("check"), runId: lease.runId, tool: "target-read", status: read.status, consulted: [],
+      target: read.result.target, observedRevisionOrDigest: read.result.observedRevisionOrDigest, complete: read.result.complete, nextCursor: read.result.nextCursor, at: AT });
+    const lifecycle = h.internal.conversationActionLifecycle(h.store);
+    const prepare = (action: ModelWorldChatAction) => prepareWorldChatActions(h.store, lifecycle, { conversationId, turnId: newId("turn"), entryContext,
+      existingCandidates: [], existingGroups: [], candidates: [], groups: [], bibleEdits: [], bibleBaseVersion: 1, sceneEdits: [], sceneBaseVersion: null,
+      editorRequests: [], actions: [action], receipts: [receipt], at: AT }, { getJobs: () => h.jobs });
+    return { read: read.result, receipt, prepare, lifecycle, log };
+  }
   for (const mode of ["per-shot", "board"] as const) it(`quotes ${mode} identically to Generate, survives restart and admits only after approval`, async () => {
     const h = await setup(), action = frameAction(mode), id = newId("act");
     const input = await h.ports.frameInput(action, id, AT);
@@ -237,5 +255,80 @@ describe("Production Chat batch authority (SPEC-051 R-8..10)", () => {
     assert.equal((await h.controls.reconcile({ actionId: cancelId, actionKind: "world-chat-production-frame-run-cancel", productionId: "saltlight", authority: { kind: "frame-run", id: runId } } as ConversationActionCard))?.status, "completed");
     await h.quotes().dispatch(action, id);
     assert.equal(h.jobs.length, 1);
+  });
+  it("discovers run controls through a safe jobs receipt and binds their real approval adapter", async () => {
+    const h = await setup(), start = frameAction(), id = newId("act");
+    await h.quotes().prepare(start, id, AT); await h.quotes().dispatch(start, id);
+    const read = await actionRead(h, "list_jobs");
+    const job = read.read.items[0] as { frameRun: { runId: string; stepIndex: number } };
+    assert.deepEqual(job.frameRun, { runId: `fr_${id.slice(4)}`, stepIndex: 0 });
+    assert.doesNotMatch(JSON.stringify(read.read.items), /generationQuoteReferences|idempotencyKey/);
+    const prepared = read.prepare({ kind: "production-frame-run-pause", productionId: "saltlight", runId: job.frameRun.runId, checkReceiptIds: [read.receipt.id] })[0]!;
+    await read.log.append({ type: "action.prepare-intent", intent: prepared.intent }, { at: AT });
+    const card = await read.lifecycle.bindIntent(prepared.intent, prepared.payload);
+    assert.equal(card.authority.id, job.frameRun.runId);
+    assert.equal(card.shown.body.family, "command");
+  });
+  it("prepares cancellation from a fresh plan-state receipt and refuses it after cancellation changes that state", async () => {
+    const h = await setup(), action = planAction(), id = newId("act");
+    await h.quotes().prepare(action, id, AT); await h.quotes().dispatch(action, id);
+    const read = await actionRead(h, "list_plans");
+    const record = read.read.items[0] as { plan: { planId: string }; state: { status: string } };
+    assert.equal(record.state.status, "active");
+    const cancel = { kind: "production-plan-cancel" as const, productionId: "saltlight", planId: record.plan.planId, checkReceiptIds: [read.receipt.id] };
+    const prepared = read.prepare(cancel)[0]!;
+    await read.log.append({ type: "action.prepare-intent", intent: prepared.intent }, { at: AT });
+    const card = await read.lifecycle.bindIntent(prepared.intent, prepared.payload);
+    assert.equal(card.authority.id, cancel.planId);
+    await appendPlanEvents(h.store, "saltlight", cancel.planId, [{ kind: "cancelled", planId: cancel.planId, ts: AT }]);
+    assert.throws(() => read.prepare(cancel), /plans.*no longer current/i);
+  });
+  it("discloses that approval pre-authorizes every pass of an automatic plan", async () => {
+    const h = await setup();
+    const body = await h.quotes().prepare({ ...planAction(), policy: "pre-authorized" }, newId("act"), AT);
+    assert.match(body.options!.find(option => option.label === "Continuation policy")!.value, /pre-authorizes every quoted pass.*automatically/i);
+    assert.equal(h.jobs.length, 0);
+  });
+  it("settles a frame-run admission refused before an authority exists, without replaying that purchase", async () => {
+    const h = await setup(), action = frameAction(), id = newId("act"), competingId = newId("act");
+    await h.quotes().prepare(action, competingId, AT);
+    const quotes = new GenerationQuotes(h.store, { ...h.source, dispatch: async (...args) => {
+      await h.quotes().dispatch(action, competingId);
+      return h.source.dispatch!(...args);
+    } }, { enqueue: async () => { throw new Error("unexpected enqueue"); }, jobs: () => h.jobs });
+    await quotes.prepare(action, id, AT);
+    assert.equal((await quotes.dispatch(action, id)).status, "running");
+    assert.equal((await quotes.reconcile(h.card(id)))?.status, "stale");
+    await quotes.dispatch(action, id);
+    assert.equal(h.jobs.length, 1, "only the competing run purchased work");
+    const dir = join(h.worldDir, "productions/saltlight/runs");
+    await h.store.ownedWrite(() => writeFile(join(dir, `fr_${id.slice(4)}.json`), "{broken"));
+    assert.equal((await quotes.reconcile(h.card(id)))?.status, "running", "an unreadable record is not proof of absence");
+  });
+  it("bounds a large review prompt while retaining every complete quoted provider prompt", async () => {
+    const h = await setup(), action = { ...frameAction(), shotId: "sh_12" }, id = newId("act");
+    const p = h.store.getBundle().productions.find(p => p.meta.id === "saltlight")!, scene = p.scenes.find(s => s.id === "sc_04")!;
+    await applySceneCommand(h.store, { productionId: p.meta.id, sceneId: scene.id, sceneFile: p.sceneFiles[scene.id]!, baseVersion: scene.version,
+      command: { kind: "edit-shot", shotId: "sh_12", change: { description: "A detailed visual direction. ".repeat(4_000) } } });
+    const body = await h.quotes().prepare(action, id, AT);
+    assert.equal(body.prompt.length, 100_000);
+    assert.match(body.prompt, /Display truncated/);
+    assert.ok(String((await h.quotes().validate(action, id)).inputs[0]!.params.prompt).length > body.prompt.length);
+    assert.equal(h.jobs.length, 0);
+  });
+  it("settles a plan refused when its scene changes after quote validation but before authority persistence", async () => {
+    const h = await setup(), action = planAction(), id = newId("act");
+    const quotes = new GenerationQuotes(h.store, { ...h.source, dispatch: async (...args) => {
+      const p = h.store.getBundle().productions.find(p => p.meta.id === "saltlight")!, scene = p.scenes.find(s => s.id === "sc_04")!;
+      await applySceneCommand(h.store, { productionId: p.meta.id, sceneId: scene.id, sceneFile: p.sceneFiles[scene.id]!, baseVersion: scene.version,
+        command: { kind: "edit-shot", shotId: "sh_12", change: { description: "Changed after approval validation." } } });
+      return h.source.dispatch!(...args);
+    } }, { enqueue: async () => { throw new Error("unexpected enqueue"); }, jobs: () => h.jobs });
+    await quotes.prepare(action, id, AT);
+    assert.equal((await quotes.dispatch(action, id)).status, "running");
+    assert.equal((await quotes.reconcile(h.card(id)))?.status, "stale");
+    await quotes.dispatch(action, id);
+    assert.equal(h.jobs.length, 0);
+    assert.equal((await listPlans(h.store, "saltlight")).length, 0);
   });
 });
