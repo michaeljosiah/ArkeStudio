@@ -3385,7 +3385,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * The audiobook as the player (design turn 186e, SPEC-047 R-72): a web package of the chapters
    * read whole, their audio and their pictures, answered as `audiobook.exported`.
    */
-  z.object({ kind: z.literal("export-audiobook-player"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("export-audiobook-player"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      /** The package's id, chosen by the window so it can find the package again after a reconnect lost the answer. */
+      exportId: z.string().regex(/^ab_[0-9A-HJKMNP-TV-Z]{26}$/).optional(),
+    })
+    .strict(),
   /** The world's web packages — interactive, visual novel and audiobook — answered as `web-packages.listed`. */
   z.object({ kind: z.literal("list-web-packages"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("pick-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),

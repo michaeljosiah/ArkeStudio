@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AudiobookListening, ProductionBundle } from "@arke-studio/contracts";
+import { ulid, type AudiobookListening, type ProductionBundle } from "@arke-studio/contracts";
 import {
   exportAudiobookPlayer,
   listWebPackages,
@@ -12,6 +12,7 @@ import {
   type AudiobookExported,
   type WebPackagesListed,
 } from "../lib/store.js";
+import { bookHasTakes } from "./audiobook-player.js";
 import { EditorDialog } from "./editor-dialog.js";
 import { Button } from "./ui.js";
 
@@ -38,6 +39,9 @@ export function AudiobookExportSheet({ worldId, production, onClose }: { worldId
   const connection = useStore().connection;
   const asked = useRef<string | null>(null);
   const exporting = useRef<string | null>(null);
+  /** The package being made, by its id: found again by listing the packages if a reconnect lost the answer. */
+  const making = useRef<string | null>(null);
+  const listing = useRef<string | null>(null);
   const [plan, setPlan] = useState<AudiobookListening | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<AudiobookExported["result"] | null>(null);
@@ -48,21 +52,42 @@ export function AudiobookExportSheet({ worldId, production, onClose }: { worldId
     const offExport = subscribeAudiobookExported((answer) => {
       if (answer.requestId !== exporting.current) return;
       exporting.current = null;
+      making.current = null;
       setBusy(false);
       setResult(answer.result);
+    });
+    // A connection dropped mid-export loses the one answer it would have heard (codex on PR 1498):
+    // on the way back the packages are listed, and the one with this export's id is the answer.
+    const offPackages = subscribeWebPackages((answer) => {
+      if (answer.requestId !== listing.current || making.current === null) return;
+      const id = making.current;
+      const found = answer.packages.find((entry) => entry.dir.endsWith(`-${id}`));
+      if (found === undefined) return;
+      exporting.current = null;
+      making.current = null;
+      setBusy(false);
+      setResult({ ok: true, id, dir: found.dir, file: `${found.dir}/player.html`, chapters: 0, pictures: 0, bytes: 0, joined: false });
     });
     asked.current = openAudiobookListening(worldId, production.meta.id);
     return () => {
       offPlan();
       offExport();
+      offPackages();
     };
   }, [worldId, production.meta.id]);
+  useEffect(() => {
+    if (connection === "open" && making.current !== null) listing.current = listWebPackages(worldId);
+  }, [connection, worldId]);
   const counts = plan === null ? null : packageCounts(plan);
   const start = () => {
     setBusy(true);
     setResult(null);
-    exporting.current = exportAudiobookPlayer(worldId, production.meta.id);
-    if (exporting.current === null) setBusy(false);
+    making.current = `ab_${ulid()}`;
+    exporting.current = exportAudiobookPlayer(worldId, production.meta.id, making.current);
+    if (exporting.current === null) {
+      making.current = null;
+      setBusy(false);
+    }
   };
   const folder = result?.ok === true ? result.dir.slice("exports/".length) : null;
   return (
@@ -91,7 +116,7 @@ export function AudiobookExportSheet({ worldId, production, onClose }: { worldId
         {result?.ok === false && result.blockers.map((blocker) => <div key={blocker} className="fy-ms__line fy-ch__who-where--warn">{blocker}</div>)}
         {result?.ok === true && (
           <div className="fy-ms__line fy-mono" data-testid="audiobook-export-done">
-            {result.dir} · {result.chapters} chapter{result.chapters === 1 ? "" : "s"} · {size(result.bytes)}
+            {result.chapters > 0 ? `${result.dir} · ${result.chapters} chapter${result.chapters === 1 ? "" : "s"} · ${size(result.bytes)}` : result.dir}
           </div>
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
@@ -120,12 +145,16 @@ export function AudiobookExportSheet({ worldId, production, onClose }: { worldId
   );
 }
 
-/** `Export` on the audiobook door (186e): offered once any chapter is read whole. */
-export function ExportAudiobookButton({ worldId, production, readWhole }: { worldId: string; production: ProductionBundle; readWhole: number }) {
+/**
+ * `Export` on the audiobook door (186e): offered once a block anywhere is made. What is whole is the
+ * listening plan's to say, by the words (codex on PR 1498): a chapter whose takes the door calls
+ * stale after a narrator or a direction changed still says its words, and still goes in.
+ */
+export function ExportAudiobookButton({ worldId, production }: { worldId: string; production: ProductionBundle }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button variant="ghost" disabled={readWhole === 0} onClick={() => setOpen(true)} data-testid="audiobook-export-open">
+      <Button variant="ghost" disabled={!bookHasTakes(production)} onClick={() => setOpen(true)} data-testid="audiobook-export-open">
         Export
       </Button>
       {open && <AudiobookExportSheet worldId={worldId} production={production} onClose={() => setOpen(false)} />}
