@@ -75,6 +75,10 @@
   [data-screen="chapter"] .fy-ab__block { grid-template-columns: minmax(0, 1fr) 44px; padding: 12px 8px; border-bottom: 1px solid var(--border); border-radius: 0; gap: 6px; }
   [data-screen="chapter"] .fy-ab__speaker { grid-column: 1; max-width: none; height: auto; }
   [data-screen="chapter"] .fy-ab__text { grid-column: 1 / -1; grid-row: 2; font: 400 15px/1.75 var(--font-sans); }
+  /* A block's later turns name their speaker above them, in the one column. */
+  [data-screen="chapter"] .fy-ab__turn { height: auto; margin: 10px 0 0; padding-top: 8px; }
+  [data-screen="chapter"] .fy-ab__turn::before { position: static; display: block; width: auto; padding: 0 0 2px; }
+  [data-screen="chapter"] .fy-ab__turn::after { display: none; }
   [data-screen="chapter"] .fy-ab__marks { grid-row: 3; grid-column: 1 / -1; display: flex; justify-content: flex-start; }
   [data-screen="chapter"] .fy-ab__state-word { display: inline; color: var(--muted-foreground); font: var(--type-meta); }
   .fy-ab__foot { flex-wrap: wrap; }
