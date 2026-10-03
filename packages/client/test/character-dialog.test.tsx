@@ -109,13 +109,13 @@ const card = (container: HTMLElement, label: string) => container.querySelector(
 const click = async (element: Element | null) => act(async () => (element as HTMLElement).click());
 
 describe("the character dialog (SPEC-044 R-11..R-16)", () => {
-  it("labels Gemini generation prices as upper bounds before quoting and confirming", async () => {
+  it("labels Gemini generation prices as estimates before quoting and confirming (SPEC-049 R-6)", async () => {
     const state = stateFor();
     state.app.manifest = SHIPPED_MANIFEST;
     state.world!.sheets.find(sheet => sheet.id === "maren-kest")!.voice = { provider: "google", model: "gemini-3.8-flash-tts", voiceId: "Charon", assignedAtVersion: 4 };
     const { container, sent } = await mount(state);
     const door = cards(container, "Voice").at(-1)![0]!;
-    assert.match(door, /^Generate a line · up to \$/);
+    assert.match(door, /^Generate a line · ~\$/);
     await click(card(container, door));
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
     await click([...container.querySelectorAll("button")].find(button => button.textContent === "Quote")!);
@@ -127,7 +127,7 @@ describe("the character dialog (SPEC-044 R-11..R-16)", () => {
         voiceAssignment: state.world!.sheets.find(sheet => sheet.id === "maren-kest")!.voice!, cadencePlan: request.cadencePlan,
         cadencePlanHash: HASH1, modelHash: HASH2, local: false, createdAt: AT, audioFormat: "wav", estimatedMicroUsd: 100000,
         mapping: { ...mapCadence(LINE, hashOf(LINE), request.cadencePlan, model), providerTextHash: hashOf(LINE) } } }); });
-    assert.match(container.textContent!, /Generate · up to \$0\.10/);
+    assert.match(container.textContent!, /Generate · ~\$0\.10/);
     // Sent as (design turn 181): the style beside the words, exactly as the reader gets them.
     const sentAs = container.querySelector('[data-testid="sent-as"]')!.textContent!;
     assert.match(sentAs, /style Read calmly and evenly, at a steady pace\./);

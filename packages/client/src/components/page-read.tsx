@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { claimRead, releaseRead } from "../lib/reply-reads.js";
-import { formatMicroUsd, freePlanStop, narratorLabelFor, speechPlanLabel, type NarratorSettings, type ProseReadSource } from "@arke-studio/contracts";
+import { formatMicroUsd, freePlanStop, narratorLabelFor, speechPlanLabel, speechPricePrefix, type NarratorSettings, type ProseReadSource } from "@arke-studio/contracts";
 import {
   clearQueue,
   dismissPlayback,
@@ -190,7 +190,9 @@ export function usePageRead(input: {
       run !== null && token !== undefined && confirmed !== run
         ? {
             characters: result?.characterCount ?? 0,
-            priced: `up to ${formatMicroUsd(result?.estimatedMicroUsd ?? 0)}`,
+            // `up to` while every reader is priced by the character; a token reader's figure
+            // is an estimate the read can pass (SPEC-049 R-6).
+            priced: `${speechPricePrefix(manifest?.models, [result?.provider ?? narrator?.provider ?? "", ...(result?.voices ?? []).map((voice) => voice.provider)])}${formatMicroUsd(result?.estimatedMicroUsd ?? 0)}`,
             voices: (result?.voices ?? []).map((voice) => `${voice.label} · ${voice.provider}`),
             notices: result?.notices ?? [],
             confirm: () => {

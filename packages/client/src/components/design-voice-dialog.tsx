@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { DesignedVoiceModelSchema, VoiceDesignDraftSchema, designedVoiceTarget, formatMicroUsd, quoteSpeech, quoteVoiceDesign, speechPriceCopy,
+import { DesignedVoiceModelSchema, VoiceDesignDraftSchema, designedVoiceTarget, formatMicroUsd, normalizeSpeechText, quoteSpeech, quoteVoiceDesign, speechPriceCopy,
   type VoiceCandidate, type WorldDesignedVoice } from "@arke-studio/contracts";
 import { EditorDialog } from "./editor-dialog.js";
 import { Button, Input, Select, Textarea } from "./ui.js";
@@ -36,7 +36,8 @@ export function DesignVoiceDialog({ worldId, description: initialDescription = "
   const draft = VoiceDesignDraftSchema.safeParse({ model: modelId, name, description, language });
   const quote = model ? quoteVoiceDesign(model, description) : null;
   const readModel = models.find(row => row.id === saved?.model);
-  const readQuote = readModel ? quoteSpeech(readModel, line) : null;
+  // The words as the coordinator prices them, so the estimate it compares is the one shown.
+  const readQuote = readModel ? quoteSpeech(readModel, normalizeSpeechText(line)) : null;
   const jobs = (state?.app.jobs ?? []).filter(job => job.worldId === worldId && job.target.kind === "voice-design").slice().reverse();
   const active = jobs.some(job => !["succeeded", "failed", "cancelled", "needs-reconciliation"].includes(job.status));
   const heard = state?.app.jobs.find(job => job.params.requestId === hearId);
@@ -114,9 +115,9 @@ export function DesignVoiceDialog({ worldId, description: initialDescription = "
         <label className="fy-clone__field"><span>Try your own line</span><Textarea value={line} maxLength={4000} rows={2} onChange={event => setLine(event.target.value)} /></label>
         <Button disabled={!line.trim() || !readQuote || connection !== "open" || hearingBusy} onClick={() => {
           if (!readQuote) return; setTrouble(null); setAuditionFile(null);
-          hearing.current = hearDesignedVoice(worldId, saved.model, designedVoiceTarget(saved), line, readQuote.authorisedMicroUsd);
+          hearing.current = hearDesignedVoice(worldId, saved.model, designedVoiceTarget(saved), line, readQuote.expectedMicroUsd);
           setHearId(hearing.current);
-        }}>{hearingBusy ? "Reading…" : `Hear this line${readQuote ? ` · ${speechPriceCopy(readModel, readQuote.authorisedMicroUsd)}` : ""}`}</Button>
+        }}>{hearingBusy ? "Reading…" : `Hear this line${readQuote ? ` · ${speechPriceCopy(readModel, readQuote.expectedMicroUsd)}` : ""}`}</Button>
         <p>Saved auditions replay free. A new line is a separate read; matching cached reads are reused.</p>
         {heard?.error && <p role="status">{heard.error}</p>}
         {playable && world && <audio controls preload="none" src={mediaUrl(world.meta.slug, playable)} aria-label="Your audition line" />}

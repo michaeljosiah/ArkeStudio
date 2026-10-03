@@ -18,7 +18,7 @@ const model: ManifestModel = { id: "token-reader", provider: "elevenlabs", capab
 const initial = "2026-12-31T23:59:59.000Z";
 const input: EnqueueInput = { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", target: { kind: "voice-preview", id: "test" },
   capability: "voice-tts", provider: model.provider, model: model.id, params: { text: "Hello" },
-  estimatedMicroUsd: quoteSpeech(model, "Hello", { at: initial }).authorisedMicroUsd };
+  estimatedMicroUsd: quoteSpeech(model, "Hello", { at: initial }).expectedMicroUsd };
 
 async function harness(usage?: SpeechUsage, state: "succeeded" | "failed" = "succeeded", inline = false, afterAppend?: (job: Job) => Promise<void>) {
   const dir = await tempDir("arke-speech-price-");
@@ -48,7 +48,8 @@ it("never repeats an uncertain voice creation after restart and retains its esti
   let calls = 0;
   h.client.submit = async (_key, request) => { assert.equal(request.voiceDesign, true); calls++; throw new Error("lost response"); };
   try {
-    await h.queue.enqueue({ ...input, target: { kind: "voice-design" }, params: { text: "A warm storyteller", operation: "voice-design" } });
+    // Voice design approves its allowance, the service limits (R-19), as the coordinator sends it.
+    await h.queue.enqueue({ ...input, target: { kind: "voice-design" }, params: { text: "A warm storyteller", operation: "voice-design" }, estimatedMicroUsd: 151552 });
     await until(() => h.queue.listJobs()[0]?.status === "needs-reconciliation", "uncertain creation", 30000);
     assert.equal(h.queue.listJobs()[0]?.speechQuote?.costBasis, "estimate");
     h.queue.dispose();
@@ -68,6 +69,28 @@ it("refuses under-authorised token speech and rechecks rates after asynchronous 
     assert.equal(h.submissions(), 0);
     assert.match(h.queue.listJobs().find(j => j.id === job.id)!.error!, /quote expired/);
     assert.equal(h.ledger[0]!.actualMicroUsd, null);
+  } finally { h.queue.dispose(); }
+});
+
+// 2026-10-03: a chapter was asked $18.49 because each block's estimate was its service-limit
+// authorisation. The job carries the estimate the author approved; the quote keeps the cap.
+it("carries the approved estimate to the ledger and keeps the service limits as the cap", async () => {
+  const h = await harness({ inputTextTokens: 3, outputAudioTokens: 250 }, "succeeded", true);
+  try {
+    const words = "The harbour remembers every story. Listen closely, and a new world begins.";
+    const estimate = quoteSpeech(model, words, { at: initial }).expectedMicroUsd;
+    assert.ok(estimate > 0 && estimate < 151552 / 20);
+    await assert.rejects(h.queue.enqueue({ ...input, params: { text: words }, estimatedMicroUsd: estimate - 1 }), /pricing changed/);
+    // A sentence the screen left out of its figure never refuses the read: the guard prices the words.
+    const job = await h.queue.enqueue({ ...input, params: { text: words, instructions: "Read warmly and gently." }, estimatedMicroUsd: estimate });
+    assert.equal(job.estimatedMicroUsd, estimate);
+    assert.equal(job.speechQuote!.authorisedMicroUsd, 151552, "the service limits are the cap");
+    assert.ok(job.speechQuote!.expectedMicroUsd >= estimate);
+    assert.ok(job.speechQuote!.quantities.inputTextTokens! > quoteSpeech(model, words, { at: initial }).quantities.inputTextTokens!, "the style is counted in the record");
+    await until(() => h.ledger.length === 1, "settlement", 30000);
+    assert.equal(h.ledger[0]!.estimatedMicroUsd, estimate);
+    assert.equal(h.ledger[0]!.actualMicroUsd, 2252, "the actual is the reported usage, as before");
+    assert.equal(h.ledger[0]!.actualSource, "usage-derived");
   } finally { h.queue.dispose(); }
 });
 

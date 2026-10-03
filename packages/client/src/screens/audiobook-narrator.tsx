@@ -235,7 +235,9 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
       ? [
           { k: "Blocks", v: `${quote.stale.toLocaleString()} stale`, warn: quote.stale > 0 },
           ...(quote.directed > 0 ? [{ k: "Direction", v: quote.held === 0 ? `${quote.directed} · none held` : `${quote.held} of ${quote.directed} held`, warn: quote.held > 0 }] : []),
-          { k: "Read the book", v: quote.estimatedMicroUsd === 0 ? "no charge" : `up to ${formatMicroUsd(quote.estimatedMicroUsd)}` },
+          // The whole book under the switch, its cast with it: readers this dialog cannot see may
+          // be priced by the token, so it is said as an estimate (SPEC-049 R-6), never `up to`.
+          { k: "Read the book", v: quote.estimatedMicroUsd === 0 ? "no charge" : `~${formatMicroUsd(quote.estimatedMicroUsd)}` },
           { k: "Takes", v: `kept · ${quote.kept.toLocaleString()}` },
         ]
       : quote?.state === "refused"
@@ -262,7 +264,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
           const id = hearAudiobookLine(worldId, productionId, trial.chapterFile, trial.block, hearing.reader, heard.token);
           if (id !== null) setHearing({ ...hearing, id });
         }} data-testid="narrator-hear-confirm">
-          Hear {hearing.voice} · up to {formatMicroUsd(heard.authorisedMicroUsd)} · {heard.parts} part{heard.parts === 1 ? "" : "s"}
+          Hear {hearing.voice} · ~{formatMicroUsd(heard.estimatedMicroUsd)} · {heard.parts} part{heard.parts === 1 ? "" : "s"}
         </Button>
       )}
       {facts.length > 0 && (

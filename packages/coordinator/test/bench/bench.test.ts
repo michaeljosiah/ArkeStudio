@@ -7,6 +7,7 @@ import {
   benchSourceKey,
   MUSIC_DURATION_SEC,
   newId,
+  quoteSpeech,
   type BenchTake,
   type JobSampling,
   type ManifestModel,
@@ -46,7 +47,7 @@ it("refuses oversized Gemini Bench lines before reserving takes, counting delive
       await opened.store.append({ type: "composer-set", mode: "voice", provider: model.provider, model: model.id,
         params: { kind: "voice", count: 1, voiceId: "Charon", voiceProvider: "google", voiceModel: model.id, delivery: "warm" }, brief }, { at });
       const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST,
-        { worldId: store.worldId, requestId: "gemini-byte-limit", at, speechAuthorisation: { maximumMicroUsd: 1000000 } });
+        { worldId: store.worldId, requestId: "gemini-byte-limit", at, speechAuthorisation: { confirmedMicroUsd: 1000000 } });
       assert.equal(plan.ok, fits, plan.ok ? undefined : plan.reason);
       if (!plan.ok) assert.match(plan.reason, /request limit/);
     }
@@ -1636,7 +1637,7 @@ describe("reading a line on the bench (design 70)", () => {
     }
   });
 
-  it("refuses a token dispatch whose displayed authorisation is absent or below the current total", async () => {
+  it("refuses a token dispatch whose displayed estimate is absent or below the current total", async () => {
     const { dir, store } = await open();
     const opened = await freshBench(dir);
     const model: ManifestModel = { ...VOICE, pricing: { kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
@@ -1647,14 +1648,18 @@ describe("reading a line on the bench (design 70)", () => {
     await opened.store.append({ type: "composer-set", mode: "voice", provider: model.provider, model: model.id,
       params: { kind: "voice", count: 2, voiceId: "vale", voiceProvider: model.provider, voiceModel: model.id, voiceLabel: "Vale" }, brief: LINE }, { at: CLOCK() });
     const session = (await opened.store.fold())!;
-    const plan = (at: string, maximumMicroUsd?: number) => planBenchDispatch(session, store.getBundle(), { ...MANIFEST_3, models: [model] },
-      { worldId: store.worldId, requestId: "token-consent", at, speechAuthorisation: { maximumMicroUsd } });
+    const plan = (at: string, confirmedMicroUsd?: number) => planBenchDispatch(session, store.getBundle(), { ...MANIFEST_3, models: [model] },
+      { worldId: store.worldId, requestId: "token-consent", at, speechAuthorisation: { confirmedMicroUsd } });
+    // The composer shows the estimate for both takes; each take's quote keeps the service-limit
+    // authorisation as the dispatcher's cap, never the figure asked (SPEC-049 R-6).
+    const each = quoteSpeech(model, LINE, { at: "2026-12-31T23:59:59Z" }).expectedMicroUsd;
+    assert.ok(each < 151552 / 10, "an estimate from the words, not the ceiling");
     assert.equal(plan("2026-12-31T23:59:59Z").ok, false);
-    assert.equal(plan("2026-12-31T23:59:59Z", 151552).ok, false, "one request cannot authorise two takes");
-    const accepted = plan("2026-12-31T23:59:59Z", 303104);
+    assert.equal(plan("2026-12-31T23:59:59Z", each).ok, false, "one take's estimate cannot answer for two");
+    const accepted = plan("2026-12-31T23:59:59Z", each * 2);
     assert.ok(accepted.ok, accepted.ok ? undefined : accepted.reason);
-    assert.equal(accepted.inputs.reduce((sum, input) => sum + input.estimatedMicroUsd, 0), 303104);
-    const expired = plan("2027-01-01T00:00:00Z", 303104);
+    assert.equal(accepted.inputs.reduce((sum, input) => sum + input.estimatedMicroUsd, 0), each * 2);
+    const expired = plan("2027-01-01T00:00:00Z", each * 2);
     assert.equal(expired.ok, false);
     if (!expired.ok) assert.match(expired.reason, /price needs confirmation/);
   });

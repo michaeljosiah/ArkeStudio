@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ManifestModel } from "./manifest.js";
+import { speechUtf8Bytes } from "./speech-input.js";
 import { billableCharacters } from "./speech-units.js";
 
 const Quantity = z.number().int().nonnegative().safe();
@@ -107,13 +108,77 @@ function tokenCost(input: number, output: number, rates: { input: number; output
 
 const FREE_PLAN_ASSUMPTION = "Free plan: the author marked this key free; the read is recorded at $0.";
 
+/**
+ * How a token reader's read is estimated before it is made (SPEC-049 R-6). The estimate is the
+ * figure a screen shows and the author approves; the service limits stay the authorisation, so
+ * no read is billed past them, and the ledger's actual comes from the usage Google reports.
+ * Pricing the estimate at those limits — 16,384 audio tokens for a block of a few seconds —
+ * put $18.49 on a 3,247-word chapter of 122 blocks that reads for about $0.40 (2026-10-03).
+ *
+ * Calibrated on the 34 Flash and Lite reads in the author's ledger from 2026-09-29 to 10-02:
+ * 7,070 words billed 11.4 audio tokens a word overall, and lines under 30 words 13–20, where
+ * the lead-in and tail are a larger share. Prose billed about 4.4 characters an input token,
+ * a short line nearer 3. The September probes billed about 32 audio tokens a second of WAV
+ * against the published 25, which the margin covers. What this gives, 12.5 tokens a word and
+ * 62.5 a request, estimates 1.10 of the audio those 34 reads billed in all; a single read billed
+ * from 0.59 to 1.47 times its estimate, so it is said as an estimate (`~`, never `up to`).
+ */
+export const SPEECH_TOKEN_ESTIMATE = {
+  /** An unhurried narration pace; a CJK character counts as half a word, about 5 a second. */
+  wordsPerMinute: 150,
+  /** Each request's lead-in and tail, which are billed as audio like the words. */
+  edgeSeconds: 2,
+  /** Over the published audio-token rate. */
+  margin: 1.25,
+  /** UTF-8 bytes an input token: under the 4.4 measured for prose, and about one per CJK character. */
+  bytesPerInputToken: 4,
+  /** Each request's turn framing. */
+  inputOverheadTokens: 4,
+} as const;
+
+const CJK_CHARACTER = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu;
+
+// Thai, Lao, Khmer and Burmese leave out the spaces between words.
+const UNSPACED_CHARACTER = /[\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/gu;
+
+/** Spoken words: a CJK character is half of one, and an unspaced script is read by its letters. */
+function speechWords(text: string): number {
+  const cjk = text.match(CJK_CHARACTER)?.length ?? 0;
+  // Six letters to a word keeps a long unspaced line from reading as one word. Counted for
+  // those scripts alone: over all text, long English words outweighed the words themselves
+  // (codex on PR 1477).
+  const unspaced = text.match(UNSPACED_CHARACTER)?.length ?? 0;
+  const words = text.replace(CJK_CHARACTER, " ").replace(UNSPACED_CHARACTER, " ").split(/\s+/).filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
+  return words + cjk / 2 + unspaced / 6;
+}
+
+/** The estimate's token counts for one request, each clamped to the service limit. */
+export function estimateSpeechTokens(speech: Pick<z.infer<typeof SpeechTokenPricingSchema>, "maxInputTokens" | "maxOutputTokens" | "audioTokensPerSecond">,
+  text: string, instructions = ""): { inputTextTokens: number; outputAudioTokens: number } {
+  const e = SPEECH_TOKEN_ESTIMATE;
+  const input = Math.ceil((speechUtf8Bytes(text) + speechUtf8Bytes(instructions)) / e.bytesPerInputToken) + e.inputOverheadTokens;
+  const seconds = speechWords(text) / (e.wordsPerMinute / 60) + e.edgeSeconds;
+  const output = Math.ceil(seconds * speech.audioTokensPerSecond * e.margin);
+  return { inputTextTokens: Math.min(input, speech.maxInputTokens), outputAudioTokens: Math.min(output, speech.maxOutputTokens) };
+}
+
 /** The compiled transcript is priced; callers must not count direction tags twice. */
 export function quoteSpeech(model: ManifestModel, text: string, options: {
   at?: string;
   delivery?: string;
   language?: string;
+  /**
+   * The style sent beside the words, for a token reader's input estimate. A delivery named
+   * without it is looked up as the row's sentence, as the Google client resolves it.
+   */
+  instructions?: string;
   inputTextTokens?: number;
   expectedAudioSeconds?: number;
+  /**
+   * Estimate at the service limits too: for a call whose output is not these words read aloud
+   * — voice design, whose estimate is the explicit R-19 budgeting allowance.
+   */
+  atServiceLimit?: boolean;
 } = {}): SpeechQuote {
   const at = options.at ?? new Date().toISOString();
   if (!Number.isFinite(Date.parse(at))) throw new Error("A speech quote needs a valid date");
@@ -144,17 +209,27 @@ export function quoteSpeech(model: ManifestModel, text: string, options: {
   // rate version names the plan, so a quote made on one plan is never current on the other.
   const rates = free ? { input: 0, output: 0 } : { input: rate.microUsdPerMillionInput, output: rate.microUsdPerMillionOutput };
   const assumptions: string[] = free ? [FREE_PLAN_ASSUMPTION] : [];
-  const input = options.inputTextTokens ?? speech.maxInputTokens;
+  const style = options.instructions ?? (options.delivery !== undefined ? model.cadence?.deliveryMappings[options.delivery]?.instruction : undefined);
+  const estimated = options.atServiceLimit === true
+    ? { inputTextTokens: speech.maxInputTokens, outputAudioTokens: speech.maxOutputTokens }
+    : estimateSpeechTokens(speech, text, style);
+  const input = options.inputTextTokens ?? estimated.inputTextTokens;
   Quantity.parse(input);
   if (input > speech.maxInputTokens) throw new Error("Speech input exceeds the model's token limit");
-  if (options.inputTextTokens === undefined) assumptions.push("Input priced at the service token limit; no token count was reported.");
-  let output = speech.maxOutputTokens;
+  if (options.inputTextTokens === undefined) {
+    assumptions.push(options.atServiceLimit === true ? "Input priced at the service token limit."
+      : "Input tokens estimated from the words and style at 4 UTF-8 bytes a token.");
+  }
+  let output = estimated.outputAudioTokens;
   if (options.expectedAudioSeconds !== undefined) {
     if (!Number.isFinite(options.expectedAudioSeconds) || options.expectedAudioSeconds < 0) throw new Error("Invalid expected speech duration");
     output = Math.ceil(options.expectedAudioSeconds * speech.audioTokensPerSecond);
     if (output > speech.maxOutputTokens) throw new Error("Expected speech exceeds the model's output limit; split the text");
     assumptions.push("Expected audio tokens are estimated from duration; the authorisation uses the service limit.");
-  } else assumptions.push("Output priced at the service token limit; duration is not known before synthesis.");
+  } else {
+    assumptions.push(options.atServiceLimit === true ? "Output priced at the service token limit."
+      : "Audio tokens estimated at 150 words a minute, 2 s of lead-in and tail, plus 25%; the authorisation uses the service limit.");
+  }
   return SpeechQuoteSchema.parse({ ...base, ...planned, validUntil: speech.rates[active + 1]?.effectiveFrom ?? null,
     tier: speech.tier, rateVersion: free ? `free-plan:${rate.version}` : rate.version, unit: "token", quantities: { inputTextTokens: input, outputAudioTokens: output },
     tokenRates: rates, tokenLimits: { input: speech.maxInputTokens, output: speech.maxOutputTokens }, assumptions,
@@ -162,9 +237,27 @@ export function quoteSpeech(model: ManifestModel, text: string, options: {
     authorisedMicroUsd: tokenCost(speech.maxInputTokens, speech.maxOutputTokens, rates) });
 }
 
-/** Existing confirmations show this conservative authorisation, never a duration guess. */
-export function estimateSpeechMicroUsd(model: ManifestModel, text: string, delivery?: string, language?: string): number {
-  return quoteSpeech(model, text, { delivery, language }).authorisedMicroUsd;
+/**
+ * What a screen shows and the author approves: the estimate, never the authorisation ceiling
+ * (SPEC-049 R-6). A guard that compares a screen's figure with a fresh one prices the words
+ * alone and leaves `instructions` out: the style's input tokens, hundredths of a cent, belong in
+ * the recorded quote, but a guard that counted them would refuse a read whose screen priced the
+ * same words without the sentence. The authorisation still caps the read either way.
+ */
+export function estimateSpeechMicroUsd(model: ManifestModel, text: string, delivery?: string, language?: string, instructions?: string): number {
+  return quoteSpeech(model, text, { delivery, language, ...(instructions !== undefined ? { instructions } : {}) }).expectedMicroUsd;
+}
+
+/**
+ * What goes before a read's price where the screen states a bound for character readers: `up
+ * to`, since only a cache hit lowers their figure — or `~` once any reader in it is priced by
+ * the token, whose figure is an estimate the read can pass (SPEC-049 R-6).
+ */
+export function speechPricePrefix(models: readonly Pick<ManifestModel, "provider" | "capability" | "pricing">[] | undefined, providers: Iterable<string>): "~" | "up to " {
+  for (const provider of providers) {
+    if (models?.some((model) => model.provider === provider && model.capability === "voice-tts" && model.pricing.kind === "perToken")) return "~";
+  }
+  return "up to ";
 }
 
 export function speechQuoteIsCurrent(quote: SpeechQuote, at: string): boolean {

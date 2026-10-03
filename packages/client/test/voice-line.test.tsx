@@ -410,12 +410,12 @@ describe("a character's voice", () => {
     assert.match(html, /Kokoro · free/);
   });
 
-  it("states Gemini preview prices as authorization ceilings", () => {
+  it("states Gemini preview prices as estimates, never `up to` (SPEC-049 R-6)", () => {
     const state = structuredClone(FIXTURE_STATE);
     state.app.manifest = SHIPPED_MANIFEST;
     const voice = { ...candidate("Charon", "elevenlabs", false), candidate: { ...candidate("Charon", "elevenlabs", false).candidate, provider: "google", model: "gemini-3.8-flash-tts" } };
     const html = render(`${page}?choose=1`, state, { voiceCandidates: { [sheetId]: { ...candidates[sheetId], ranked: [voice] } } });
-    assert.match(html, /up to \$0\.03 preview/);
+    assert.match(html, /~\$0\.03 preview/);
   });
 
   it("keeps a retired assignment readable without offering it in the picker", () => {
@@ -894,7 +894,7 @@ describe("the Library's audio rows report what exists", () => {
 });
 
 
-it("shows the token-priced line ceiling on the Generate press", () => {
+it("shows the token-priced line estimate on the Generate press, never its ceiling", () => {
   const state = structuredClone(FIXTURE_STATE);
   const prod = state.world!.productions[0]!;
   const shot = prod.scenes.flatMap(orderedShots).find(s => s.audio?.line && s.audio.speaker)!;
@@ -907,5 +907,6 @@ it("shows the token-priced line ceiling on the Generate press", () => {
       speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25,
         rates: [{ version: "test", effectiveFrom: "2020-01-01T00:00:00.000Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 }] } } });
   const html = render(`/w/${FIXTURE_WORLD_ID}/p/${prod.meta.id}/generate/voice-line?shot=${shot.id}`, state);
-  assert.match(html, /Generate line.*up to \$0\.1516/);
+  assert.match(html, /Generate line · ~\$0\.0\d/);
+  assert.doesNotMatch(html, /0\.1516/, "the service-limit authorisation is the dispatcher's cap, not the price");
 });

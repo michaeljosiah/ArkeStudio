@@ -1878,7 +1878,11 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
           assert.notEqual(changed.prepared.speaking[0]!.compiledSpeechHash, block.compiledSpeechHash);
           assert.notEqual(chapterPriceToken(WORLD_ID, LEDGER, "neap", changed.prepared.plan.chapter, changed.prepared.misses), token, "a same-price change of compiled style still needs a new quote");
         }
-        assert.equal(made.prepared.estimate, block.parts.length * 151552);
+        // Each part priced at its estimate, its style counted; the service limits stay its cap.
+        assert.equal(made.prepared.estimate, block.quotes.reduce((sum, quote) => sum + quote.expectedMicroUsd, 0));
+        assert.ok(made.prepared.estimate < block.parts.length * 151552);
+        for (const quote of block.quotes) assert.equal(quote.authorisedMicroUsd, 151552);
+        assert.ok(block.quotes.every((quote, index) => quote.quantities.inputTextTokens! > quoteSpeech(model, block.parts[index]!, { at: "2026-09-27T12:00:00Z" }).quantities.inputTextTokens!), "the note's sentence is counted");
       }
       model.limits.maxSpeechUtf8Bytes = 8;
       const refused = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.1"]);
@@ -1904,10 +1908,13 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       const after = await prepareChapter(store, LEDGER, "neap", room, () => "2027-01-01T00:00:00Z", ["title"]);
       assert.ok(before.kind === "ready" && after.kind === "ready");
       const tokenOf = (prepared: typeof before.prepared) => chapterPriceToken(WORLD_ID, LEDGER, "neap", prepared.plan.chapter, prepared.misses);
-      assert.equal(after.prepared.estimate, before.prepared.estimate * 2);
+      // Twice the rate, twice the estimate, give or take each part's rounding up of a half micro-dollar.
+      assert.ok(Math.abs(after.prepared.estimate - before.prepared.estimate * 2) <= before.prepared.misses.flatMap(block => block.quotes).length);
       assert.notEqual(tokenOf(before.prepared), tokenOf(after.prepared), "each token must encode its own displayed price, regardless of the wall clock when it is hashed");
       for (const prepared of [before.prepared, after.prepared]) {
-        assert.equal(prepared.estimate, prepared.misses.flatMap(block => block.quotes).reduce((sum, quote) => sum + quote.authorisedMicroUsd, 0));
+        // The card asks the estimate; each part keeps the service-limit authorisation as its cap (SPEC-049 R-6).
+        assert.equal(prepared.estimate, prepared.misses.flatMap(block => block.quotes).reduce((sum, quote) => sum + quote.expectedMicroUsd, 0));
+        assert.ok(prepared.estimate < prepared.misses.flatMap(block => block.quotes).reduce((sum, quote) => sum + quote.authorisedMicroUsd, 0));
       }
       const queued: EnqueueInput[] = [];
       const deps = { worldId: WORLD_ID, local: async () => { throw new Error("cloud only"); },
@@ -1917,14 +1924,16 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       const initial = await hear();
       assert.ok("quote" in initial);
       assert.ok(initial.quote.parts > 1);
-      assert.equal(initial.quote.authorisedMicroUsd, initial.quote.parts * quoteSpeech(model, "", { at: CLOCK }).authorisedMicroUsd);
+      const parts = before.prepared.speaking.find(block => block.block.key === "title")!.quotes;
+      assert.equal(initial.quote.estimatedMicroUsd, parts.reduce((sum, quote) => sum + quote.expectedMicroUsd, 0));
+      assert.ok(initial.quote.estimatedMicroUsd < initial.quote.parts * quoteSpeech(model, "", { at: CLOCK }).authorisedMicroUsd, "never the ceiling");
       assert.equal(queued.length, 0);
       assert.ok("quote" in await hear("stale"));
       assert.equal(queued.length, 0);
       const result = await hear(initial.quote.token);
       assert.ok("file" in result);
       assert.equal(queued.length, initial.quote.parts);
-      assert.equal(queued.reduce((sum, job) => sum + job.estimatedMicroUsd, 0), initial.quote.authorisedMicroUsd);
+      assert.equal(queued.reduce((sum, job) => sum + job.estimatedMicroUsd, 0), initial.quote.estimatedMicroUsd);
       assert.ok("file" in await hear(), "a cache hit needs no new paid consent");
       assert.equal(queued.length, initial.quote.parts);
     }));

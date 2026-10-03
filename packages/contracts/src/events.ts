@@ -1252,7 +1252,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       requestId: UlidSchema,
       file: z.string().min(1).optional(),
       cached: z.boolean().optional(),
-      quote: z.object({ token: z.string().min(1), authorisedMicroUsd: z.number().int().nonnegative().safe(), parts: z.number().int().positive() }).strict().optional(),
+      quote: z.object({ token: z.string().min(1), estimatedMicroUsd: z.number().int().nonnegative().safe(), parts: z.number().int().positive() }).strict().optional(),
       refused: z.string().min(1).optional(),
     })
     .strict(),

@@ -47,7 +47,7 @@ export async function preparePerformanceGeneration(store: WorldStore, model: Man
   }
   const quote = PerformanceGenerationQuoteSchema.parse({ operationId: randomUUID(), target, authoredText: text, voiceAssignment: sheet.voice,
     cadencePlan: request.cadencePlan, cadencePlanHash: digest(request.cadencePlan), mapping: { ...mapped, providerTextHash: audioHash(Buffer.from(mapped.providerText)) },
-    modelHash: digest(model), estimatedMicroUsd: estimateSpeechMicroUsd(model, mapped.providerText), local: model.provider === "kokoro",
+    modelHash: digest(model), estimatedMicroUsd: estimateSpeechMicroUsd(model, mapped.providerText, undefined, undefined, mapped.instructions), local: model.provider === "kokoro",
     audioFormat: voiceFormatForModel(model), ...(language !== undefined ? { language } : {}), createdAt: store.now() });
   await store.ownedWrite(async () => atomicWriteFile(await audioWorldPath(store.dir, `.staging/performances/${quote.operationId}/quote.json`, true), JSON.stringify(quote)));
   return quote;

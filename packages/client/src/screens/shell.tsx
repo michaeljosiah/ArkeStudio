@@ -1162,7 +1162,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 {!g?.worldId && <GenesisReadinessCard review={g?.readiness} busy={!!g?.decisionPending || !!g?.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.readinessPending}
                   onRefresh={() => reviewGenesisReadiness(genesisId)} onFix={setMessage}
                   onLeave={(id, digest) => leaveGenesisFinding(genesisId, id, digest)} />}
-                {g?.voices && <GenesisVoiceCards genesisId={genesisId} voices={g.voices} jobs={voiceJobs} busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.founding || !!g.worldId}
+                {g?.voices && <GenesisVoiceCards genesisId={genesisId} voices={g.voices} jobs={voiceJobs} models={state?.app.manifest?.models} busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.founding || !!g.worldId}
                   onGenerate={(intentId, digest) => generateGenesisVoice(genesisId, intentId, digest)}
                   onDecide={(target, decision, candidate) => decideGenesisVoice(genesisId, target, decision, candidate)}
                   onRevise={setMessage} onRefresh={() => reviewGenesisVoices(genesisId)} onCancel={cancelJob} />}
