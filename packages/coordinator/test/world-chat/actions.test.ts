@@ -8,6 +8,7 @@ import { describe, it } from "node:test";
 import {
   newId,
   ModelWorldChatActionSchema,
+  WorldChatProductionSceneCommandActionSchema,
   orderedShots,
   orderedTrackClips,
   stageShot,
@@ -25,6 +26,7 @@ import {
   type WorldChatProductionTakeGenerationAction,
 } from "@arke-studio/contracts";
 import { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
+import { ARKE_CLIENT_COMMAND_REGISTRY, worldChatActionDescriptor } from "../../src/arke-actions/registry.js";
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
 import { readEditorRequest } from "../../src/productions/editor-requests.js";
 import { createEpisode, createProduction } from "../../src/productions/ops.js";
@@ -1212,14 +1214,15 @@ describe("World Chat authority adapters", () => {
     assert.equal(pickerCalls, 0);
   });
 
-  it("shows generation intent but blocks approval until the coordinator owns a durable quote", async () => {
+  it("refuses blocked generation before preparing either it or a valid sibling", async () => {
     const w = await setup();
+    const metadata = currentReceipt(w.store, "world-metadata");
     const sheets = currentReceipt(w.store, "sheets");
     const art = currentReceipt(w.store, "art-direction");
     const references = currentReceipt(w.store, "references");
     const oneTurn = turn(w.conversationId, w.entryContext, {
-      receipts: [sheets, art, references],
-      actions: [{
+      receipts: [metadata, sheets, art, references],
+      actions: [{ kind: "world-metadata", changes: { tone: "Quiet" }, checkReceiptIds: [metadata.id, art.id] }, {
         kind: "reference-generation",
         request: {
           operation: "main-photo",
@@ -1231,17 +1234,10 @@ describe("World Chat authority adapters", () => {
         checkReceiptIds: [sheets.id, art.id, references.id],
       }],
     });
-    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
-    await appendTurn(w.log, oneTurn, prepared);
-    await bindAll(w.lifecycle, prepared);
-
-    const action = (await loaded(w.log)).actions[0]!;
-    assert.equal(action.shown.body.family, "generation");
-    assert.match(action.approvalBlockedReason ?? "", /quote/i);
-    const result = await decide(w.lifecycle, w.log, action);
-    assert.equal(result.disposition, "refused");
-    assert.equal(result.reason, "adapter-unavailable");
-    assert.equal((await loaded(w.log)).actions[0]!.status, "pending");
+    const before = structuredClone(w.store.getBundle().meta);
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, oneTurn), /coordinator-owned.*quote/i);
+    assert.deepEqual((await loaded(w.log)).actions, []);
+    assert.deepEqual(w.store.getBundle().meta, before);
   });
 
   it("creates exactly the precomputed production plan only after approval", async () => {
@@ -1626,6 +1622,46 @@ describe("World Chat authority adapters", () => {
     assert.equal(after.version, before.version + 1);
   });
 
+  it("refuses an old pending visual-facts card at approval without changing the scene", async () => {
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
+    const w = await setup(context);
+    const before = structuredClone(w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!.scenes.find((scene) => scene.id === context.sceneId)!);
+    const receipt = currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`);
+    const oneTurn = turn(w.conversationId, context, {
+      receipts: [receipt], actions: [{ kind: "production-scene-command", productionId: PRODUCTION, sceneId: context.sceneId,
+        command: { kind: "edit-shot", shotId: "sh_12", change: { description: "The lobby." } }, checkReceiptIds: [receipt.id] }],
+    });
+    const { intent, payload } = prepareWorldChatActions(w.store, w.lifecycle, oneTurn)[0]!;
+    const legacy = WorldChatProductionSceneCommandActionSchema.parse({ ...payload, action: { ...oneTurn.actions[0],
+      command: { kind: "edit-shot", shotId: "sh_12", change: { visualFacts: { onScreenCharacters: [], composition: "wide", confirmedAt: AT } } } } });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, { ...oneTurn, actions: [legacy.action] }), /visual facts.*review/i, "a new card cannot be prepared through the same bypass");
+    const oldPrepared = [{ payload: legacy, intent: w.lifecycle.createIntent({
+      conversationId: intent.conversationId, turnId: intent.turnId, worldId: intent.worldId, productionId: intent.productionId,
+      actionKind: intent.actionKind, targets: intent.targets, payload: legacy, baseObservations: intent.baseObservations, createdAt: intent.createdAt,
+    }) }];
+    await appendTurn(w.log, oneTurn, oldPrepared);
+    await bindAll(w.lifecycle, oldPrepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    const refused = await decide(w.lifecycle, w.log, card);
+    assert.equal(refused.disposition, "refused");
+    assert.match(refused.detail ?? "", /visual facts.*review/i);
+    assert.deepEqual(w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!.scenes.find((scene) => scene.id === context.sceneId), before);
+    assert.equal((await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!, "deny")).status, "denied", "the old card can still be dismissed safely");
+  });
+
+  it("has a real approval adapter for each advertised conversation path", async () => {
+    const w = await setup();
+    const adapters = new Set(w.adapters.map((adapter) => adapter.actionKind));
+    const channels: Record<string, string> = { bibleEdits: "world-chat-bible-edit", editorRequests: "world-chat-editor-request", sceneEdits: "world-chat-scene-edit", candidateOperations: "world-chat-proposal" };
+    for (const descriptor of Object.values(ARKE_CLIENT_COMMAND_REGISTRY)) {
+      if (descriptor.classification !== "supported-by-arke") continue;
+      for (const path of descriptor.reachedBy) {
+        const preparedKind = channels[path] ?? worldChatActionDescriptor(path)?.kind;
+        assert.ok(preparedKind && adapters.has(preparedKind), `${descriptor.kind} reaches an adapter through ${path}`);
+      }
+    }
+  });
+
   for (const status of ["authorized", "active"] as const) {
     it(`refuses a chat-driven shot deletion while its scene has an ${status} plan`, async () => {
       const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
@@ -1776,6 +1812,8 @@ describe("World Chat authority adapters", () => {
     await bindAll(w.lifecycle, generationPrepared);
     const generationCard = (await loaded(w.log)).actions.at(-1)!;
     assert.equal(generationCard.shown.body.family, "generation");
+    assert.equal(generationCard.shown.permissionReason, "authored-change", "opening Bench authorizes no spend");
+    if (generationCard.shown.body.family === "generation") assert.match(generationCard.shown.body.cost, /no provider charge/i);
     assert.equal(opened, null);
     assert.equal((await decide(w.lifecycle, w.log, generationCard)).status, "completed");
     assert.deepEqual(opened, generationTurn.actions[0]);

@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import {
   ClientMessageSchema,
   TimelineCommandSchema,
+  ModelWorldChatActionSchema,
+  worldChatResultShapeGuide,
   type ClientMessageKind,
 } from "@arke-studio/contracts";
 import { z } from "zod";
@@ -14,7 +16,9 @@ import {
   findArkeClientCommand,
   modelActionCatalogue,
   modelActionCatalogueText,
+  worldChatActionDescriptor,
 } from "../src/arke-actions/registry.js";
+import { actionGuideEntry } from "../src/world-chat/action-guide.js";
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
   ? true
@@ -29,6 +33,37 @@ function optionKind(option: z.ZodDiscriminatedUnionOption<"kind">): ClientMessag
 }
 
 describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
+  it("names real conversation paths and blocks every command with no model path", () => {
+    const kinds = new Set(ModelWorldChatActionSchema.options.map((option) => option.shape.kind.value));
+    const channels = new Set(["bibleEdits", "editorRequests", "sceneEdits", "candidateOperations"]);
+    const guide = worldChatResultShapeGuide();
+    for (const descriptor of Object.values(ARKE_CLIENT_COMMAND_REGISTRY)) {
+      if (descriptor.classification !== "supported-by-arke") continue;
+      if (descriptor.reachedBy.length === 0) {
+        assert.equal(descriptor.support.preparation.state, "blocked", descriptor.kind);
+        if (descriptor.support.preparation.state === "blocked") {
+          assert.ok(descriptor.support.preparation.blockingSeams.includes("no-model-action"), descriptor.kind);
+          assert.match(descriptor.support.preparation.reason, new RegExp(descriptor.kind));
+        }
+      }
+      for (const path of descriptor.reachedBy) {
+        if (channels.has(path)) assert.ok(guide.includes(path), `${descriptor.kind}'s typed result channel is told`);
+        else {
+          assert.ok(kinds.has(path as (typeof ModelWorldChatActionSchema.options)[number]["shape"]["kind"]["value"]), `${descriptor.kind} names a real model kind`);
+          assert.ok(worldChatActionDescriptor(path), `${path} has a prepared descriptor`);
+          assert.ok(actionGuideEntry(path), `${path} has a guide entry`);
+        }
+      }
+    }
+    for (const kind of ["frame-run-start", "bench-accept", "timeline-assemble", "derive-continuity", "read-audiobook-chapter", "export-manuscript"] as const) {
+      const descriptor = ARKE_CLIENT_COMMAND_REGISTRY[kind];
+      assert.equal(descriptor.classification, "supported-by-arke");
+      if (descriptor.classification === "supported-by-arke") assert.deepEqual(descriptor.reachedBy, [], kind);
+    }
+    assert.match(modelActionCatalogueText(), /timeline-assemble.*no-model-action/);
+    assert.match(modelActionCatalogueText(), /timeline-command.*reached by: editorRequests/);
+  });
+
   it("classifies every ClientMessage option exactly once and uses that option's strict schema", () => {
     assert.equal(ARKE_CLIENT_COMMAND_COMPILE_TIME_PARITY, true);
     const options = new Map(ClientMessageSchema.options.map((option) => [optionKind(option), option]));

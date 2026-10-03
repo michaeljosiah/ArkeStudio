@@ -195,6 +195,7 @@ import {
 } from "../productions/ops.js";
 import { applyProductionSpineCommand, previewAudioSpineCommand } from "../productions/spine.js";
 import { applySceneCommand, sceneCommandFrom } from "../productions/scene-commands.js";
+import { modelActionInputRefusal } from "./model-action-input.js";
 import { filePlayblast } from "../productions/stage-playblast.js";
 import {
   acceptCharacterLook,
@@ -1182,6 +1183,12 @@ export function prepareWorldChatActions(
     (turn.actions.length > 0 || turn.candidates.length > 0 || turn.groups.length > 0 || turn.bibleEdits.length > 0 || turn.sceneEdits.length > 0 || turn.editorRequests.length > 0)
   ) {
     throw new Error("This ask was for a reply only; nothing is staged from it. Say what you would change, and the author will ask for it.");
+  }
+  // Check the entire action list before creating any intent, including when a valid sibling
+  // comes first. The runtime input policy also protects callers outside turn-result parsing.
+  for (const action of turn.actions) {
+    const refusal = modelActionInputRefusal(action);
+    if (refusal) throw new Error(refusal);
   }
   const prepared: PreparedWorldChatAction[] = [];
   const candidateById = new Map(turn.existingCandidates.map((candidate) => [candidate.id, candidate]));
@@ -2763,8 +2770,8 @@ async function sharedResourceProjection(
         title: payload.action.retakeOf ? "Prepare a retake" : "Prepare take generation",
         consequence: "Opens the exact shot or board in Bench. Provider execution and result selection remain separate decisions.",
         affectedTargets: [...intent.targets],
-        ripples: ["Generated output will arrive as an unselected immutable take."],
-        permissionReason: "spend-and-compute",
+        ripples: ["Opening Bench creates no generated media and selects no take."],
+        permissionReason: "authored-change",
         body: {
           family: "generation",
           medium: payload.action.mode,
@@ -2775,7 +2782,7 @@ async function sharedResourceProjection(
           model: "Chosen in Bench",
           quantity: 1,
           output: "One or more unselected production takes",
-          cost: "Quoted in Bench before provider execution",
+          cost: "Opening Bench has no provider charge; generation is quoted there before it runs.",
         },
       };
       break;
@@ -3675,6 +3682,8 @@ async function executeSharedResource(
       );
       return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: "The production style was updated." } };
     case "world-chat-production-scene-command": {
+      const refusal = modelActionInputRefusal(payload.action);
+      if (refusal) return { status: "failed", detail: refusal };
       const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
       const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
       const sceneFile = production?.sceneFiles[payload.action.sceneId];
@@ -4358,6 +4367,11 @@ export function worldChatActionAdapters(
       validate: async (action) => {
         const payload = await readPreparation(store, "world", action);
         if (!payload) return { ok: false, reason: "blocked", detail: "The prepared shared-resource action is unavailable." };
+        // A card prepared before this policy was introduced may still be pending on disk.
+        if ("action" in payload) {
+          const refusal = modelActionInputRefusal(payload.action);
+          if (refusal) return { ok: false, reason: "blocked", detail: refusal };
+        }
         const current = observationsCurrent(store, action, deps);
         if (!current.ok) {
           await removePreparation(store, "world", action.actionId);

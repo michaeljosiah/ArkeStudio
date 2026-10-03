@@ -2,7 +2,6 @@ import { z } from "zod";
 import {
   newId,
   WorldChatEntityRefSchema,
-  WorldChatTurnResultSchema,
   type BibleEdit,
   type ModelEditorRequest,
   type ModelSceneEdit,
@@ -29,6 +28,7 @@ import {
   type EvidenceSources,
 } from "./evidence.js";
 import { findByStructure, payloadDigest, structuralKey, suppressedByTombstone } from "./identity.js";
+import { WorldChatModelTurnResultSchema } from "./model-action-input.js";
 
 /**
  * Turning one model message into propositions, or into nothing at all (#70 §8.3, §8.4).
@@ -267,7 +267,7 @@ export function parseTurnResult(raw: string): { ok: true; value: WorldChatTurnRe
       ],
     };
   }
-  const parsed = WorldChatTurnResultSchema.safeParse(json);
+  const parsed = WorldChatModelTurnResultSchema.safeParse(json);
   if (!parsed.success) {
     /**
      * Bounded where the issues are collected, not where they are printed.

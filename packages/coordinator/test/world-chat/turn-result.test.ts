@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   newId,
+  WORLD_CHAT_SHAPE_EXAMPLES,
+  WorldChatPreparedActionSchema,
   type CandidateChecks,
   type CandidateId,
   type CandidateTombstone,
@@ -142,6 +144,16 @@ function turn(result: Partial<WorldChatTurnResult>): string {
 }
 
 describe("parsing a turn result", () => {
+  it("rejects execution-blocked generation before it can become a dead card", () => {
+    for (const kind of ["reference-generation", "voice-audition"] as const) {
+      const action = WORLD_CHAT_SHAPE_EXAMPLES.worldActions[kind];
+      const parsed = parseTurnResult(turn({ actions: [action] }));
+      assert.equal(parsed.ok, false, kind);
+      if (!parsed.ok) assert.ok(parsed.problems.some((problem) => /coordinator-owned.*quote/i.test(problem.safeMessage)), "the corrective response names the missing quote");
+      assert.ok(WorldChatPreparedActionSchema.safeParse({ kind: `world-chat-${kind}`, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", action }).success, "persisted blocked cards remain readable");
+    }
+  });
+
   it("refuses a message that is not JSON", () => {
     const parsed = parseTurnResult("I've noted that for you!");
     assert.equal(parsed.ok, false);

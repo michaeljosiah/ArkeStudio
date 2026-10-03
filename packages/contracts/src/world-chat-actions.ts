@@ -831,12 +831,26 @@ const ProductionProseStyleModelActionSchema = z
   })
   .strict();
 
+// Visual facts are the person's reviewed assertions (SPEC-051 R-46). Keep the shared scene
+// vocabulary intact for the shot panel, but never offer these fields to a conversation.
+type SceneCommandOption = (typeof SceneCommandSchema.options)[number];
+const insertShotCommand = SceneCommandSchema.options.find((option): option is Extract<SceneCommandOption, { shape: { kind: z.ZodLiteral<"insert-shot"> } }> => option.shape.kind.value === "insert-shot")!;
+const editShotCommand = SceneCommandSchema.options.find((option): option is Extract<SceneCommandOption, { shape: { kind: z.ZodLiteral<"edit-shot"> } }> => option.shape.kind.value === "edit-shot")!;
+const ChatInsertShotCommandSchema = insertShotCommand.extend({ shot: insertShotCommand.shape.shot.omit({ visualFacts: true }) });
+const ChatEditShotCommandSchema = editShotCommand.extend({ change: editShotCommand.shape.change.omit({ visualFacts: true }) });
+type ChatSceneCommandOption = Exclude<SceneCommandOption, typeof insertShotCommand | typeof editShotCommand> | typeof ChatInsertShotCommandSchema | typeof ChatEditShotCommandSchema;
+const ChatSceneCommandSchema = z.discriminatedUnion("kind", SceneCommandSchema.options.map((option): ChatSceneCommandOption => {
+  if (option.shape.kind.value === "insert-shot") return ChatInsertShotCommandSchema;
+  if (option.shape.kind.value === "edit-shot") return ChatEditShotCommandSchema;
+  return option as Exclude<SceneCommandOption, typeof insertShotCommand | typeof editShotCommand>;
+}) as [ChatSceneCommandOption, ...ChatSceneCommandOption[]]);
+
 const ProductionSceneCommandModelActionSchema = z
   .object({
     kind: z.literal("production-scene-command"),
     productionId: SlugSchema,
     sceneId: SceneIdSchema,
-    command: SceneCommandSchema,
+    command: ChatSceneCommandSchema,
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
@@ -1258,7 +1272,8 @@ export const WorldChatProductionSceneOrderActionSchema = preparedAction("world-c
 export const WorldChatProductionSceneDeleteActionSchema = preparedAction("world-chat-production-scene-delete", ProductionSceneDeleteModelActionSchema);
 export const WorldChatProductionSceneRestoreActionSchema = preparedAction("world-chat-production-scene-restore", ProductionSceneRestoreModelActionSchema);
 export const WorldChatProductionStyleActionSchema = preparedAction("world-chat-production-style", ProductionStyleModelActionSchema);
-export const WorldChatProductionSceneCommandActionSchema = preparedAction("world-chat-production-scene-command", ProductionSceneCommandModelActionSchema);
+// Old pending cards remain readable; their executor rechecks the current conversation policy.
+export const WorldChatProductionSceneCommandActionSchema = preparedAction("world-chat-production-scene-command", ProductionSceneCommandModelActionSchema.extend({ command: SceneCommandSchema }));
 export const WorldChatProductionBoardCompileActionSchema = preparedAction("world-chat-production-board-compile", ProductionBoardCompileModelActionSchema);
 export const WorldChatProductionBoardExportActionSchema = preparedAction("world-chat-production-board-export", ProductionBoardExportModelActionSchema);
 export const WorldChatProductionTakeImportActionSchema = preparedAction("world-chat-production-take-import", ProductionTakeImportModelActionSchema);
