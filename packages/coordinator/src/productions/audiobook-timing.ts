@@ -6,6 +6,7 @@ import {
   formerKeys,
   isReactionKey,
   placeAnchor,
+  reactionText,
   timeChapter,
   type AudiobookReader,
   type BlockTiming,
@@ -62,12 +63,17 @@ export function timingBlocks(store: WorldStore, plan: Pick<AudiobookPlan, "block
   });
 }
 
-/** The reactions as the clock reads them: who says each, and its take once it is made. */
-export function timingReactions(store: WorldStore, record: ChapterAudiobook | null): TimingInputReaction[] {
+/**
+ * The reactions as the clock reads them: who says each, and its take once it is made — by the
+ * blocks' rule (codex on PR 1497): on the shelf, and of what the reaction says now.
+ */
+export function timingReactions(store: WorldStore, record: ChapterAudiobook | null, present: ReadonlySet<string>): TimingInputReaction[] {
   return Object.entries(record?.reactions ?? {}).map(([key, reaction]) => {
-    const take = record?.takes[key];
+    const said = reactionText(reaction);
+    const held = record?.takes[key];
+    const take = held !== undefined && present.has(held.artifactId) && held.textHash === audiobookTextHash(said) ? held : undefined;
     const lane = reaction.speaker === "narrator" ? "narration" : reaction.speaker;
-    const timed = take === undefined ? undefined : timingTake(store, take, reaction.words ?? reaction.sound ?? "");
+    const timed = take === undefined ? undefined : timingTake(store, take, said);
     return { key, lane, ...(timed !== undefined ? { take: timed } : {}) };
   });
 }
@@ -77,7 +83,7 @@ export function chapterTiming(store: WorldStore, plan: Pick<AudiobookPlan, "bloc
   const record = plan.record === "unreadable" ? null : plan.record;
   return timeChapter({
     blocks: timingBlocks(store, plan),
-    reactions: timingReactions(store, record),
+    reactions: timingReactions(store, record, plan.present),
     record: record ?? {},
     reading: plan.reading,
     unmade,
@@ -148,7 +154,11 @@ export async function setBlockTiming(
     if (input.pauseAfter !== null && next.locked.start) throw new TimingRefusal("inside a grouped request the pause is the reader's");
     pauseTarget = next.index;
   }
-  if (input.start !== undefined && input.start !== null && bar?.locked.start === true) throw new TimingRefusal("inside a grouped request the start is the reader's");
+  // Playing a block under another is a placement too (codex on PR 1497): inside a grouped
+  // request under Performed, the reader's as its start is.
+  if (((input.start !== undefined && input.start !== null) || (input.under !== undefined && input.under !== null)) && bar?.locked.start === true) {
+    throw new TimingRefusal("inside a grouped request the start is the reader's");
+  }
   if (input.trim !== undefined && input.trim !== null) {
     if (take === undefined) throw new TimingRefusal("a block with no take has nothing to trim");
     if (input.trim.head + input.trim.tail > take.seconds - 0.1) throw new TimingRefusal("the trim would leave nothing to hear");

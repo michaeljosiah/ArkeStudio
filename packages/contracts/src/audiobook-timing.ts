@@ -112,6 +112,21 @@ export function nextReactionKey(reactions: Readonly<Record<string, unknown>> | u
   return `${REACTION_KEY_PREFIX}${n}`;
 }
 
+/**
+ * A portable audio address inside the world: no OS path, no traversal, an audio file (codex on PR
+ * 1497). Checked where a bed or a sound is used, not in the record's schema: a record that fails
+ * to parse is a record whose every take reads as lost, so a bad path is skipped, never fatal.
+ */
+export function isWorldAudioPath(file: string): boolean {
+  return !/[\\:]/.test(file) && ![...file].some((char) => char.charCodeAt(0) < 32) && file.split("/").every((part) => part !== "" && part !== "." && part !== "..")
+    && /\.(wav|mp3|flac|ogg|oga|opus|m4a|aac)$/i.test(file);
+}
+
+/** What a reaction says, as its take is read and keyed: its words, or its sound in brackets. */
+export function reactionText(reaction: Pick<AudiobookReaction, "words" | "sound">): string {
+  return reaction.words ?? `[${reaction.sound ?? ""}]`;
+}
+
 /** Where a bed or a sound comes from (R-84): the world's sounds, a library sound, or one generated for the book. */
 export const AudiobookAudioSourceSchema = z
   .object({
@@ -480,9 +495,12 @@ export function timeChapter(input: {
 
   // Which blocks play under another: placed after the run, at their host's.
   const underOf = new Map<number, { host: number; offset: number }>();
-  blocks.forEach((_, index) => {
+  blocks.forEach((block, index) => {
     const under = entryAt(index)?.under;
     if (under === undefined) return;
+    // Under Performed a block inside a grouped request stays where the reader put it (R-85,
+    // codex on PR 1497): playing it under another would take it out of the reader's turn.
+    if (performed && contiguousCuts(blocks[index - 1]?.take, block.take)) return;
     const host = hostIndex(under.host);
     if (host >= 0 && host !== index) underOf.set(index, { host, offset: under.offset });
   });
@@ -636,6 +654,11 @@ export function timeChapter(input: {
   const blockBars = bars.filter((bar) => bar.kind === "block").sort((a, b) => a.index - b.index);
   const beds: TimedBed[] = [];
   for (const [id, bed] of Object.entries(record.beds ?? {})) {
+    // A source outside the world is never read (codex on PR 1497): flagged, as a bed with nowhere to run.
+    if (!isWorldAudioPath(bed.source.file)) {
+      lost.beds.push(id);
+      continue;
+    }
     const from = placeAnchor(hashed, bed.from, former);
     const to = placeAnchor(hashed, bed.to, former);
     const fromIndex = from.state === "gone" ? from.near : from.index;
@@ -668,7 +691,7 @@ export function timeChapter(input: {
   const sounds: TimedSound[] = [];
   for (const [id, sound] of Object.entries(record.sounds ?? {})) {
     const place = placeAnchor(hashed, sound.block, former);
-    if (place.state === "gone") {
+    if (place.state === "gone" || !isWorldAudioPath(sound.source.file)) {
       lost.sounds.push(id);
       continue;
     }
