@@ -64,8 +64,9 @@ For conversation command reachability and input policy, run contracts
 `test/world-chat/action-guide.test.ts`, `test/world-chat/turn-result.test.ts` and
 `test/world-chat/actions.test.ts`. They check that every advertised path has a guide and an
 approval adapter, commands without paths name `no-model-action`, execution-blocked kinds never
-become new cards, and old pending visual-facts cards remain readable and deniable but cannot
-write. Keep `test/world-chat/shape-drift.test.ts` and `test/arke-actions/review-regressions.test.ts`
+become new cards, old pending visual-facts cards remain readable and deniable but cannot write,
+chat duplicates cannot copy reviewed facts, and obsolete Bench permission labels stale the
+card without execution. Keep `test/world-chat/shape-drift.test.ts` and `test/arke-actions/review-regressions.test.ts`
 in the regression set for stored-card compatibility and decisions made on another surface.
 
 Book/audio standards experiments use the separate [publication interoperability checks](publication-interop.md#reproduce).
