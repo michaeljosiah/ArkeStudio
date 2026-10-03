@@ -523,6 +523,9 @@ export function jobOrigin(job: Job): JobOrigin | null {
     const { segment, label, where } = reference;
     return { path: `/w/${job.worldId}/cast/${sheetId}/${segment}`, label, where };
   }
+  if (job.target.kind === "prop-state-candidate") {
+    return { path: `/w/${job.worldId}`, label: "World Chat", where: "World Chat" };
+  }
   if (job.target.kind === "world-image") {
     return { path: `/w/${job.worldId}`, label: "World", where: "the world's own screen" };
   }

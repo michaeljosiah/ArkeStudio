@@ -1,4 +1,5 @@
 import type { ArkeGenerationBody } from "@arke-studio/contracts";
+import { z } from "zod";
 import { createHash } from "node:crypto";
 import type { FoundingBuildService } from "../world/founding-build.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
@@ -19,14 +20,14 @@ export function buildGenerationSource(worldId: string, build: FoundingBuildServi
           ...inputs.flatMap(input => Object.entries(input.params).filter(([key]) => !["prompt", "references", "referenceRoles", "provenance"].includes(key))
             .map(([label, value]) => ({ label, value: typeof value === "string" ? value : JSON.stringify(value) })))], cancellationSupported: inputs.length > 0,
       };
-      return { body, inputs, authority: quoted.authority };
+      return { body, inputs, authority: quoted.authority, materialization: { authority: quoted.authority } };
     },
-    dispatch: async (action, id, inputs) => {
+    dispatch: async (action, id, inputs, materialization) => {
       if (action.kind !== "build-item-run") throw new Error("The founding action is unavailable.");
-      const current = await build.quoteItem(worldId, action.itemKey);
+      const { authority } = z.object({ authority: z.string() }).strict().parse(materialization);
       // runItems owns shutdown, Stop and durable build recovery. Its quoted input is consumed
       // instead of recompiling a different purchase after this card has been approved.
-      void build.runItems(worldId, action.itemKey, id, { authority: current.authority, ...(inputs[0] ? { input: inputs[0] } : {}) }).catch(() => {});
+      void build.runItems(worldId, action.itemKey, id, { authority, ...(inputs[0] ? { input: inputs[0] } : {}) }).catch(() => {});
       return { status: "queued", detail: "The approved founding item is running." };
     },
     reconcile: async (card, action) => {

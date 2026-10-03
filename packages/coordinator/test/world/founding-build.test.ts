@@ -13,8 +13,10 @@ import {
   type JobStatus,
   type ManifestModel,
   type ModelManifest,
+  type ModelWorldChatAction,
   type QueueStatus,
 } from "@arke-studio/contracts";
+import { buildGenerationSource } from "../../src/world-chat/build-generation.js";
 import { editSheetContent } from "../../src/sheets/authoring.js";
 import { MarkdownFile } from "../../src/world/text-files.js";
 import { tempDir } from "../tmp.js";
@@ -788,6 +790,9 @@ describe("the founding build (SPEC-031)", () => {
     assert.equal(h.queue.jobs.size, 0);
     assert.equal(quote.input?.estimatedMicroUsd, 40_000);
     const other = await next.service.quoteItem(h.worldId(), "main-photo:brother-ellum");
+    const source = buildGenerationSource(h.worldId(), next.service, input => input);
+    const action: ModelWorldChatAction = { kind: "build-item-run", itemKey: "main-photo:brother-ellum", checkReceiptIds: [newId("check")] };
+    const prepared = await source.compile(action, newId("act"), "2026-10-03T12:00:00.000Z");
     const idempotencyKey = ulid();
     const input = { ...quote.input!, idempotencyKey, params: { ...quote.input!.params, seed: 731 } };
     await next.service.runItems(h.worldId(), key, ulid(), { authority: quote.authority, input });
@@ -797,6 +802,12 @@ describe("the founding build (SPEC-031)", () => {
     assert.equal(job.params.seed, 731);
     assert.ok((await readKit(h.provider.openStore()!, "maren-kest"))?.kit.mainPhoto?.file, "founding retains its original installation decision");
     await assert.rejects(next.service.runItems(h.worldId(), "main-photo:brother-ellum", ulid(), { authority: other.authority, input: other.input }), /changed after generation approval/);
+    assert.equal(h.queue.jobs.size, 1);
+    const runItems = next.service.runItems.bind(next.service);
+    let retry!: Promise<void>;
+    next.service.runItems = (...args) => { retry = runItems(...args); return retry; };
+    await source.dispatch!(action, ulid(), prepared.inputs, prepared.materialization);
+    await assert.rejects(retry, /changed after generation approval/, "dispatch retains the quoted authority even if the build changes after validation");
     assert.equal(h.queue.jobs.size, 1);
   });
 
