@@ -31,6 +31,8 @@ import { guardProductionSetupAuthority } from "./productions/setup-authority.js"
 import { StageConstructor } from "./productions/stage-construction.js";
 import { worldImageReferences, stagedWorldImage } from "@arke-studio/contracts";
 import { GenerationQuotes } from "./world-chat/generation-quotes.js";
+import { productionGenerationSource } from "./world-chat/production-generation.js";
+import { ProductionTakeFiling } from "./world-chat/production-take-filing.js";
 import { BenchReservedTakeSchema } from "@arke-studio/contracts";
 import { imageGenerationSource } from "./world-chat/image-generation.js";
 import { buildGenerationSource } from "./world-chat/build-generation.js";
@@ -118,7 +120,6 @@ import {
   type WorldChatReferenceImportAction,
   type WorldChatReferenceResultUseAction,
   type WorldChatProductionTakeImportAction,
-  type WorldChatProductionTakeGenerationAction,
   type WorldChatProductionCutExportAction,
   type WorldChatBenchGenerationAction,
   type ConversationActionCard,
@@ -19305,48 +19306,6 @@ export class Coordinator {
     return { status: "completed", id: take.id };
   }
 
-  private async openProductionTakeGenerationForConversationAction(
-    store: WorldStore,
-    action: WorldChatProductionTakeGenerationAction["action"],
-    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
-  ): Promise<{ status: "completed" | "failed"; id?: string; detail?: string }> {
-    const stale = mutation.precondition();
-    if (stale) return { status: "failed", detail: stale };
-    const settings = this.appSettings ? await this.appSettings.load() : null;
-    const reader = worldFileReader(store.dir);
-    const prepared = await prepareBenchSubject(store.getBundle(), {
-      productionId: action.productionId,
-      sceneId: action.sceneId,
-      subject: action.target,
-      mode: action.mode,
-      settings,
-      manifest: this.opts.manifest ?? null,
-      sources: {
-        read: reader.read,
-        durationSec: (path) =>
-          measureDurationSec(store, path, this.opts.mediaProbe ?? null, { signal: store.closingSignal }),
-      },
-    });
-    if (!prepared.ok) return { status: "failed", detail: prepared.reason };
-    const moved = mutation.precondition();
-    if (moved) return { status: "failed", detail: moved };
-    const brief = [
-      prepared.prefill.composer.brief,
-      ...(action.retakeOf ? [`Retake ${action.retakeOf}.`] : []),
-      ...(action.instruction ? [action.instruction] : []),
-    ].filter((line) => line.trim() !== "").join("\n\n");
-    const sessionId = `sess_${mutation.requestId.slice(4)}` as SessionId;
-    const opened = await openSubjectBenchSession(store.dir, sessionId, this.nowIso(), {
-      ...prepared.prefill,
-      composer: { ...prepared.prefill.composer, brief },
-    });
-    const session = (await opened.store.fold()) ?? opened.session;
-    this.readModel.setBench({ worldId: store.worldId, session });
-    this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
-    this.transport.broadcastSnapshot();
-    return { status: "completed", id: sessionId };
-  }
-
   private async importReferenceImageForConversationAction(
     store: WorldStore,
     target: WorldChatReferenceImageImportAction["action"]["target"],
@@ -19771,6 +19730,22 @@ export class Coordinator {
     }, quotePorts);
     return {
       benchGenerationQuotes: benchQuotes,
+      productionTakeFiling: new ProductionTakeFiling(store, {
+        bench: sessionId => this.benchFor(store.worldId, sessionId),
+        serialise: (key, work) => this.serialiseBenchTakeAction(`${store.worldId}/${key}`, work),
+        toPng: this.opts.boundaryFrameMaker,
+        refresh: async sessionId => { await this.refreshWorldSnapshot(store.worldId); await this.refreshBench(store.worldId, sessionId); },
+      }),
+      productionGenerationQuotes: new GenerationQuotes(store, productionGenerationSource(store, {
+        manifest: this.opts.manifest ?? null,
+        settings: () => this.appSettings ? this.appSettings.load() : Promise.resolve(null),
+        sources: { read: worldFileReader(store.dir).read,
+          durationSec: path => measureDurationSec(store, path, this.opts.mediaProbe ?? null, { signal: store.closingSignal }) },
+        freeze: input => this.freezeLocalIdentity(input),
+        planOptions: { recipeVersionOf: (id, route) => this.recipeVersionOf(id, route),
+          adapterRecipeFor: (id, selections, route) => this.adapterRecipeIdentity(id, selections, route),
+          localFreeze: (id, from) => localTakeFreeze(id, from, recipeId => this.readModel.getState().app.localSampling?.choices[recipeId], () => 0) },
+      }), quotePorts),
       generationQuotes: new GenerationQuotes(store, imageGenerationSource(store, {
         manifest: this.opts.manifest ?? null,
         settings: () => this.appSettings ? this.appSettings.load() : Promise.resolve(null),
@@ -19831,8 +19806,6 @@ export class Coordinator {
       ...(this.opts.boundaryFrameMaker ? { boundaryFrameMaker: this.opts.boundaryFrameMaker } : {}),
       importProductionTake: (action, mutation) =>
         this.importProductionTakeForConversationAction(store, action, mutation),
-      openProductionTakeGeneration: (action, mutation) =>
-        this.openProductionTakeGenerationForConversationAction(store, action, mutation),
       getExports: () => [...this.exportReads.values()].filter((entry) => entry.worldId === store.worldId),
       getJobs: () => this.jobQueue?.listJobs() ?? [],
       getBuildItems: () => this.conversationBuildItems(store.worldId),

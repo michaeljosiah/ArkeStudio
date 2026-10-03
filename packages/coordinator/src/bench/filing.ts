@@ -18,7 +18,7 @@ import { posterNameFor } from "../takes/poster.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
-import type { WorldStore } from "../world/store.js";
+import type { WorldStore, WorldStatePrecondition } from "../world/store.js";
 import { sessionMediaDir } from "./store.js";
 import { boardSubjectIsCurrent } from "./subject.js";
 
@@ -221,11 +221,11 @@ export async function fileBenchSubjectTake(
   store: WorldStore,
   session: BenchSession,
   take: BenchTake,
-  options: { toPng?: BoundaryFrameMaker } = {},
+  options: { toPng?: BoundaryFrameMaker; explicitDestination?: boolean; precondition?: WorldStatePrecondition; expectedMediaHash?: string } = {},
 ): Promise<SubjectFilingOutcome> {
   // Validation, media copies and metadata share the world's mutation gate. Otherwise a scene
   // edit can move a board boundary after validation and before its stale segments are selected.
-  const filed = await store.ownedWrite(() => fileBenchSubjectTakeUnserialised(store, session, take, options));
+  const filed = await store.gateOp(() => fileBenchSubjectTakeUnserialised(store, session, take, options), options.precondition);
   const boundaryFrame = await chainBenchSubjectBoundary(store, take, options.toPng);
   return boundaryFrame === undefined ? filed : { ...filed, boundaryFrame };
 }
@@ -279,7 +279,7 @@ async function fileBenchSubjectTakeUnserialised(
   store: WorldStore,
   session: BenchSession,
   take: BenchTake,
-  options: { toPng?: BoundaryFrameMaker },
+  options: { toPng?: BoundaryFrameMaker; explicitDestination?: boolean; expectedMediaHash?: string },
 ): Promise<SubjectFilingOutcome> {
   if (session.subject === undefined) throw new Error("this Bench session has no production subject");
   if (take.media === undefined || take.status !== "succeeded") throw new Error("that Bench take has no completed media to accept");
@@ -300,7 +300,7 @@ async function fileBenchSubjectTakeUnserialised(
   const boardSubject = session.subject.kind === "board" ? session.subject : null;
   // A shot's clip is held to its own length the way a board is held to its members'.
   const shotSubject = session.subject.kind === "shot" ? session.subject : null;
-  if (filing.kind === "board" && shotSubject !== null) {
+  if (filing.kind === "board" && shotSubject !== null && !options.explicitDestination) {
     const shot = currentShots.find((candidate) => candidate.id === shotSubject.shotId);
     if ((shot?.durationSec ?? 4) !== shotSubject.durationSec) {
       throw new Error("the shot timing changed in this scene; rebuild and generate a current take");
@@ -312,7 +312,7 @@ async function fileBenchSubjectTakeUnserialised(
       throw new Error("the shot timing changed since this take; rebuild and generate a current take");
     }
   }
-  if (filing.kind === "board" && boardSubject !== null) {
+  if (filing.kind === "board" && boardSubject !== null && !options.explicitDestination) {
     const first = currentShots.findIndex((shot) => shot.id === filing.members[0]?.shotId);
     const members = first < 0 ? [] : currentShots.slice(first, first + filing.members.length);
     if (
@@ -369,6 +369,7 @@ async function fileBenchSubjectTakeUnserialised(
   const sourceBytes = await readFile(toExtendedLength(sourcePath));
   if (sourceBytes.byteLength === 0) throw new Error("the Bench take's media is empty");
   const fullHash = createHash("sha256").update(sourceBytes).digest("hex");
+  if (options.expectedMediaHash && fullHash !== options.expectedMediaHash) throw new Error("The reviewed Bench media changed. Prepare a fresh review card.");
   const mediaName = basename(take.media.file);
   const parentMediaPath = join(store.dir, "productions", filing.productionId, "takes", filing.productionTakeId, mediaName);
   await writeIfMissing(parentMediaPath, sourceBytes);

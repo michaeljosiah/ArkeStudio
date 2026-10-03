@@ -784,6 +784,14 @@ describe("a failed finalization always leaves the user a way out", () => {
     assert.deepEqual(entry.actions, ["retry-finalization"]);
     assert.equal(canDeleteJob(job), false);
   });
+
+  for (const kind of ["shot", "scene-pass"]) it(`offers local recovery for a quoted production ${kind}`, () => {
+    const job: Job = { ...failed(kind), params: { generationQuoteProduction: true } };
+    const [entry] = computeNeedsYou({ app: { jobs: [job], queues: [] }, world: null, worlds: [] } as unknown as ClientState)
+      .filter(candidate => candidate.kind === "job-finalization-failed");
+    assert.deepEqual(entry?.actions, ["retry-finalization"]);
+    assert.equal(canDeleteJob(job), false);
+  });
 });
 
 describe("reference kits", () => {
