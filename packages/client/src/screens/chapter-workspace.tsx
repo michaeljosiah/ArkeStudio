@@ -1819,6 +1819,7 @@ export function ChapterWorkspace({
                 ))}
               </select>
             </span>
+            )}
             {/* Read-only (locked, or the compact head) with no time set, there is nothing to show
                 and nothing to press: the mark stays out rather than standing as an empty pill. */}
             {(locked || compact) && !chapter.when ? null : (
