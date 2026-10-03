@@ -251,7 +251,7 @@ export function TakesView({
   }, [production?.takes]);
   if (!production) {
     return (
-      <div className="fy-prodmain" data-screen="generate-workspace">
+      <div className="fy-prodmain fy-prodmain--wide" data-screen="generate-workspace">
         <EmptyState title="Nothing to review yet" hint="Generate a scene and its takes arrive here." />
       </div>
     );
@@ -281,7 +281,7 @@ export function TakesView({
   if (!scene || !shot) {
     return (
       <div className="fy-arkewrap fy-generate-wrap">
-        <div className="fy-prodmain fy-takes" data-screen="generate-workspace">
+        <div className="fy-prodmain fy-prodmain--wide fy-takes" data-screen="generate-workspace">
           <header className="fy-takes__head">
           {compact && !phone && <div className="fy-takes__page-title"><span>{production.meta.title} · Generate</span><h1>Takes</h1></div>}
             <nav className="fy-takes__filters" aria-label="Take filters">{episodeFilter}</nav>
@@ -300,7 +300,7 @@ export function TakesView({
   }
   return (
     <div className="fy-arkewrap fy-generate-wrap">
-      <div className="fy-prodmain fy-takes" data-screen="generate-workspace">
+      <div className="fy-prodmain fy-prodmain--wide fy-takes" data-screen="generate-workspace">
         <header className="fy-takes__head">
           {compact && !phone && <div className="fy-takes__page-title"><span>{production.meta.title} · Generate</span><h1>Takes</h1></div>}
           <nav className="fy-takes__filters" aria-label="Take filters">

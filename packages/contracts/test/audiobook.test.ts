@@ -62,6 +62,13 @@ const take = (text: string, reader: AudiobookReader, extra: Partial<ChapterAudio
 });
 
 describe("audiobook blocks (R-2)", () => {
+  it("reads a chapter titled only by its number once (turn 188)", () => {
+    assert.equal(audiobookHeading(1, "Chapter 1"), "Chapter 1");
+    assert.equal(audiobookHeading(1, " chapter 1 "), "Chapter 1");
+    assert.equal(audiobookHeading(1, "Chapter 12"), "Chapter 1 · Chapter 12");
+    assert.equal(audiobookHeading(3, "Neap"), "Chapter 3 · Neap");
+  });
+
   it("puts the title first, keys blocks by paragraph and split, and drops a scene break", () => {
     const { blocks, ambiguous } = audiobookBlocks(BODY, CAST, audiobookHeading(7, "The counting of bells"));
     assert.equal(ambiguous, 0);

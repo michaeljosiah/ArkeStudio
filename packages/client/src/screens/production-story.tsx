@@ -978,7 +978,7 @@ export function ScenesScreen() {
     production?.scenes.reduce((s, sc) => s + orderedShots(sc).reduce((x, sh) => x + resolvedAuthoredDuration(sh), 0), 0) ??
     0;
   return (
-    <div className="fy-prodmain" data-screen="scenes">
+    <div className="fy-prodmain fy-prodmain--wide" data-screen="scenes">
       <div className="fy-h1row">
         <h1 className="fy-h1">Scenes</h1>
         <span className="fy-h1row__meta">

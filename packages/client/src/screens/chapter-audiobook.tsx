@@ -883,14 +883,15 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         )}
         {mixPlayer.refused !== null && !mixPlaying && <span className="fy-mono fy-ch__who-where--warn">{mixPlayer.refused}</span>}
         {/* Direct this chapter in the head beside the read (design turn 184a), as well as the
-            dock's prompt: the same sheet. A held proposal answers it until accepted or discarded. */}
+            dock's prompt: the same sheet. A held proposal answers it until accepted or discarded.
+            Never the primary: the read is, until a block is made and Listen takes it (turn 188). */}
         {directable && (
-          <Button variant={input.listenLeads === true ? "secondary" : "primary"} disabled={locked || connection !== "open"} onClick={directPress} data-testid="direct-audiobook">
+          <Button variant="secondary" disabled={locked || connection !== "open"} onClick={directPress} data-testid="direct-audiobook">
             {directedBlocks > 0 ? "Direct again" : "Direct this chapter"}
           </Button>
         )}
         {counts.toMake.length > 0 && (
-          <Button variant={directable || input.listenLeads === true ? "secondary" : "primary"} disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
+          <Button variant={input.listenLeads === true ? "secondary" : "primary"} disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
             Read the chapter · {counts.toMake.length} block{counts.toMake.length === 1 ? "" : "s"}
             {grouping.groups.length > 0 ? ` · ${grouping.requests} request${grouping.requests === 1 ? "" : "s"}` : ""}
             {chapterEstimate > 0 ? ` · ${tokenPriced ? "~" : ""}${formatMicroUsd(chapterEstimate)}` : plan !== null ? ` · ${plan}` : ""}
@@ -2333,12 +2334,17 @@ export function ReadingNotes({ worldId, productionId, chapterFile, notes, disabl
   return (
     <div className="fy-ab__notes" data-testid="reading-notes">
       <NoteRow label="Book note" value={notes.book} disabled={disabled} onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note)} />
-      <NoteRow label="Chapter note" value={notes.chapter} disabled={disabled} onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note, chapterFile)} />
+      <NoteRow label="Chapter note" value={notes.chapter} disabled={disabled} area onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note, chapterFile)} />
     </div>
   );
 }
 
-function NoteRow({ label, value, disabled, onCommit, max = CADENCE_NOTE_MAX, multiline = false }: { label: string; value: string | undefined; disabled: boolean; onCommit: (note: string | null) => void; max?: number; multiline?: boolean }) {
+/**
+ * One note, label then field then count. `area` keeps that row but wraps the field to two lines:
+ * a chapter note runs to 300 characters, and on one line it was cut off however wide the window
+ * (turn 188). Enter still leaves the field, as it does on the single line.
+ */
+function NoteRow({ label, value, disabled, onCommit, max = CADENCE_NOTE_MAX, multiline = false, area = false }: { label: string; value: string | undefined; disabled: boolean; onCommit: (note: string | null) => void; max?: number; multiline?: boolean; area?: boolean }) {
   const [draft, setDraft] = useState<string | null>(null);
   const shown = draft ?? value ?? "";
   const commit = () => {
@@ -2349,7 +2355,7 @@ function NoteRow({ label, value, disabled, onCommit, max = CADENCE_NOTE_MAX, mul
     onCommit(trimmed === "" ? null : trimmed);
   };
   const props = {
-    className: multiline ? "fy-ab__booknote-input" : "fy-vd__note-input",
+    className: multiline ? "fy-ab__booknote-input" : area ? "fy-vd__note-input fy-vd__note-input--area" : "fy-vd__note-input",
     value: shown,
     maxLength: max,
     disabled,
@@ -2357,10 +2363,12 @@ function NoteRow({ label, value, disabled, onCommit, max = CADENCE_NOTE_MAX, mul
     onBlur: commit,
   };
   return (
-    <label className={multiline ? "fy-ab__booknote" : "fy-vd__note"}>
+    <label className={multiline ? "fy-ab__booknote" : area ? "fy-vd__note fy-vd__note--area" : "fy-vd__note"}>
       <span className="fy-vd__note-k">{label}</span>
       {multiline ? (
         <textarea {...props} rows={2} onChange={(event) => setDraft(event.target.value)} />
+      ) : area ? (
+        <textarea {...props} rows={2} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); (event.target as HTMLTextAreaElement).blur(); } }} />
       ) : (
         <input {...props} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }} />
       )}
