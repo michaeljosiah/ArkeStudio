@@ -327,7 +327,12 @@ interface StoreState {
       flagged: number;
       /** The last block that landed or was flagged, and why, for the foot. */
       last?: { block: string; outcome: "made" | "adopted" | "flagged"; reason?: string };
-      price?: { characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: import("@arke-studio/contracts").FreePlanShort };
+      price?: { characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: import("@arke-studio/contracts").FreePlanShort; requests?: number; perParagraph?: number };
+      /** A grouped run (design turn 185b): its requests, each grouped request's blocks, and the one being read. */
+      requests?: number;
+      groups?: string[][];
+      request?: number;
+      requestKeys?: string[];
       record?: import("@arke-studio/contracts").ChapterAudiobook;
       reason?: string;
     }
@@ -1879,7 +1884,10 @@ function handleFrame(json: string): void {
       if (event.replayed !== true || audiobook[key] === undefined) {
         audiobook = {
           ...audiobook,
-          [key]: { state: "reading", requestId: event.requestId, toMake: event.toMake, blocks: event.blocks, made: event.made ?? 0, flagged: 0 },
+          [key]: {
+            state: "reading", requestId: event.requestId, toMake: event.toMake, blocks: event.blocks, made: event.made ?? 0, flagged: 0,
+            ...(event.requests !== undefined ? { requests: event.requests, groups: event.groups ?? [], request: event.request ?? 0 } : {}),
+          },
         };
       }
       // The run's request is minted by the coordinator, so it is registered here rather than
@@ -1893,8 +1901,13 @@ function handleFrame(json: string): void {
       const held = audiobook[key] ?? { toMake: 0, blocks: 0, made: 0, flagged: 0 };
       audiobook = {
         ...audiobook,
-        [key]: { ...held, state: "priced", price: { characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, notices: event.notices ?? [], ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}) } },
+        [key]: { ...held, state: "priced", price: { characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, notices: event.notices ?? [], ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}), ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.perParagraph !== undefined ? { perParagraph: event.perParagraph } : {}) } },
       };
+    } else if (event.type === "audiobook.request") {
+      // A grouped request begins (design turn 185b): the margin darkens its bracket.
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const held = audiobook[key];
+      if (held !== undefined) audiobook = { ...audiobook, [key]: { ...held, request: event.index, requests: event.of, requestKeys: event.keys } };
     } else if (event.type === "audiobook.progress") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
       const held = audiobook[key] ?? { state: "reading" as const, toMake: event.toMake, blocks: 0, made: 0, flagged: 0 };
@@ -5067,6 +5080,16 @@ export function stopAudiobook(worldId: string, productionId: string, chapterFile
 /** The book's reading (SPEC-047 R-11): every block the narrator's, or each line its speaker's. */
 export function setAudiobookReading(worldId: string, productionId: string, reading: "narrator" | "performed" | "cast"): boolean {
   return send({ kind: "set-audiobook-reading", worldId, productionId, reading });
+}
+
+/** The book's requests for a groupable reader (design turn 185d): several blocks a request, or one. */
+export function setAudiobookRequests(worldId: string, productionId: string, requests: "grouped" | "per-paragraph"): boolean {
+  return send({ kind: "set-audiobook-requests", worldId, productionId, requests });
+}
+
+/** A grouped read's cut whose words did not match, kept as the block's take (design turn 185c). */
+export function keepAudiobookSplit(worldId: string, productionId: string, chapterFile: string, block: string): boolean {
+  return send({ kind: "keep-audiobook-split", worldId, productionId, chapterFile, block });
 }
 
 /** How the narrator plays a character under `performed` (SPEC-047 R-44); null takes the note away. */

@@ -48,7 +48,7 @@ import { continuityStamp } from "../lib/continuity.js";
 import { passageAction, passageActions, type PassageAction } from "../lib/passage-actions.js";
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
-import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectSheet, DirectionCard, PerformedSpeaker, ReadingMenu, ReadingNotes, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
+import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectSheet, DirectionCard, ReadSheet, PerformedSpeaker, ReadingMenu, ReadingNotes, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
@@ -1146,6 +1146,7 @@ export function ChapterWorkspace({
     ...(production.audiobook?.notes !== undefined ? { notes: production.audiobook.notes } : {}),
     ...(production.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {}),
     readingNotes: audiobookReadingNotes(production.audiobook, chapter.id),
+    ...(production.audiobook?.requests !== undefined ? { requests: production.audiobook.requests } : {}),
     connection,
     locked: locked || record === null,
     // The press waits out the autosave (turn 126's fourth rule, codex on PR 1180): a read of
@@ -1620,6 +1621,8 @@ export function ChapterWorkspace({
     onSetDirection: audiobook.setDirection,
     onMarker: audiobook.setMarker,
     onMakeAgain: audiobook.makeAgain,
+    onKeepSplit: audiobook.keepSplit,
+    reReadPrice: audiobook.reReadPrice,
     refused: audiobook.lastRecord?.refused ?? null,
     onUpload: audiobook.uploadTake,
     onRecorded: (speaker, on) => setAudiobookRecorded(worldId, prodId, speaker, on),
@@ -1767,6 +1770,9 @@ export function ChapterWorkspace({
                 <>
                 <AudiobookFilterRow filters={audiobook.filters} filter={audiobook.filter} onFilter={audiobook.setFilter} />
                 <AudiobookBlocks
+                  brackets={audiobook.brackets}
+                  onReRead={audiobook.makeAgain}
+                  reReadPrice={audiobook.reReadPrice}
                   {...(pinChoices !== null ? { choices: pinChoices, onPin: pinBlock } : {})}
                   filter={audiobook.filter}
                   marker={audiobook.marker}
@@ -2012,6 +2018,14 @@ export function ChapterWorkspace({
           </div>
 
           <div className="fy-ch__panels">
+          {/* A grouped read is confirmed in its sheet (design turn 185a): requests beside blocks and the estimate. */}
+          {view === "audiobook" && audiobook.readSheet !== null && (
+            <ResponsiveSheet sheet={blockSheet} open title="Read the chapter" onClose={audiobook.readSheet.cancel} className="fy-chapter-block-sheet">
+              <aside className="fy-ch__side fy-ch__block-side">
+                <ReadSheet sheet={audiobook.readSheet} />
+              </aside>
+            </ResponsiveSheet>
+          )}
           {/* The Direct sheet (design turn 184a): what the director reads, before it runs. */}
           {view === "audiobook" && audiobook.directOpen && (
             <ResponsiveSheet sheet={blockSheet} open title="Direct this chapter" onClose={audiobook.closeDirect} className="fy-chapter-block-sheet">

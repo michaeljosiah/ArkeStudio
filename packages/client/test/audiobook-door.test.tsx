@@ -476,3 +476,26 @@ describe("the Audiobook door (turn 146)", () => {
     assert.equal(q(m, '[data-testid="book-reading"]'), null);
   });
 });
+
+describe("the book's requests (design turn 185d)", () => {
+  const GROUPED = { name: "Ife's voice", voice: { label: "Ife's voice", provider: "google", local: false }, state: "narrator" as const, blocks: 169 };
+  it("Requests · Grouped · Per paragraph shows only where the reader can group, with the book's counts, and a press writes the book", async () => {
+    const m = await mount(inkbound());
+    await answerDoor(m, door("narrator", { voices: [GROUPED], requests: "grouped", price: { chapters: 1, blocks: 169, cloudBlocks: 169, characters: 18_000, estimatedMicroUsd: 460_000, voices: [], requests: 5, perParagraph: 169 } }));
+    const panel = q(m, '[data-testid="book-requests"]')!;
+    assert.ok(panel, "offered for a groupable reader");
+    assert.match(panel.textContent!, /RequestsGroupedPer paragraphGoogle · up to ~5 min a request/);
+    assert.match(panel.textContent!, /Book5 requests169 per paragraph/);
+    assert.equal(all(m, '[data-testid="book-requests"] [aria-checked="true"]')[0]!.textContent, "Grouped", "grouped by default");
+    assert.match(q(m, '[data-testid="read-book"]')!.textContent!, /Read the book · 1 chapter · 5 requests · (~|up to )\$0\.46/);
+    await act(async () => all(m, '[data-testid="book-requests"] button').find((button) => button.textContent === "Per paragraph")!.click());
+    const written = m.sent.findLast((message) => message.kind === "set-audiobook-requests") as Extract<ClientMessage, { kind: "set-audiobook-requests" }>;
+    assert.equal(written.requests, "per-paragraph");
+  });
+
+  it("is not offered where the coordinator says the reader cannot group here", async () => {
+    const m = await mount(inkbound());
+    await answerDoor(m, door("narrator"));
+    assert.equal(q(m, '[data-testid="book-requests"]'), null);
+  });
+});

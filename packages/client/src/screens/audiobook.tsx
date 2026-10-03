@@ -4,7 +4,7 @@ import { DEFAULT_NARRATOR, freePlanAskCopy, freePlanNote, narratorLabelFor, audi
 import { HeldBar } from "../components/held-bar.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
-import { BookReadingPanel } from "./chapter-audiobook.js";
+import { BookReadingPanel, BookRequests } from "./chapter-audiobook.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { ChevronRight, Play, Speaker } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
@@ -247,6 +247,16 @@ export function AudiobookScreen() {
   // `up to` while every reader is priced by the character; a token reader's share is an
   // estimate the read can pass, so the whole figure is `~` (SPEC-049 R-6).
   const priceWord = speechPricePrefix(app?.manifest?.models, (price?.voices ?? []).map((voice) => voice.provider));
+  // The book's requests (design turn 185d): offered only where the coordinator says its reader can group here.
+  const requestsPanel = door?.requests !== undefined && worldId !== undefined && prodId !== undefined
+    ? {
+        worldId,
+        productionId: prodId,
+        setting: door.requests,
+        reader: door.voices[0]?.voice !== undefined ? providerName(door.voices[0].voice.provider) : "this reader",
+        ...(price?.requests !== undefined ? { counts: { requests: price.requests, perParagraph: price.perParagraph ?? price.cloudBlocks } } : {}),
+      }
+    : null;
   const pad = (order: number) => String(order).padStart(2, "0");
   const bookNote =
     book?.state === "stopped"
@@ -293,6 +303,7 @@ export function AudiobookScreen() {
     return (
       <Button variant="primary" disabled={connection !== "open" || book?.state === "priced"} onClick={begin} data-testid="read-book">
         {phone ? <><Play size={16} />Read the book</> : `Read the book · ${price.chapters} chapter${price.chapters === 1 ? "" : "s"}`}
+        {!phone && price.requests !== undefined ? ` · ${price.requests} request${price.requests === 1 ? "" : "s"}` : ""}
         {price.estimatedMicroUsd > 0 ? ` · ${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}` : ""}
       </Button>
     );
@@ -352,8 +363,11 @@ export function AudiobookScreen() {
             return { key, name: voice.name, ...(voice.note !== undefined ? { note: voice.note } : {}), ...(source !== undefined ? { source } : {}) };
           })}
           onDone={() => setNotesOpen(false)}
+          {...(requestsPanel !== null ? { requests: requestsPanel } : {})}
         />
       )}
+      {/* The book's requests (design turn 185d), where its reader can group; inside the book's reading when that is open. */}
+      {requestsPanel !== null && !(notesOpen && reading === "performed") && <BookRequests {...requestsPanel} />}
       {narrating && door !== null && worldId !== undefined && prodId !== undefined && (
         <NarratorDialog
           worldId={worldId}
@@ -470,12 +484,13 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
         {vendors.length > 0 && <div className="fy-ms__line">words and the voice to {vendors.join(", ")} · text in Activity</div>}
         {(price.notices ?? []).map((notice) => <div key={notice} className="fy-ms__line" data-testid="read-book-notice">{notice}</div>)}
         {free !== null && <div className="fy-ms__line fy-ch__who-where--warn" data-testid="read-book-free-plan">{free.line}</div>}
+        {price.requests !== undefined && <div className="fy-ms__line" data-testid="read-book-requests">{price.requests} request{price.requests === 1 ? "" : "s"} · {price.perParagraph ?? price.cloudBlocks} per paragraph</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
           <Button variant="primary" onClick={onConfirm} data-testid="read-book-confirm">
-            {free !== null && price.estimatedMicroUsd === 0 ? free.confirm : `Confirm ${price.characters.toLocaleString()} characters · ${speechPricePrefix(models, price.voices.map((line) => line.provider))}${formatMicroUsd(price.estimatedMicroUsd)}`}
+            {free !== null && price.estimatedMicroUsd === 0 ? free.confirm : price.requests !== undefined ? `Confirm · ${price.requests} request${price.requests === 1 ? "" : "s"} · ${speechPricePrefix(models, price.voices.map((line) => line.provider))}${formatMicroUsd(price.estimatedMicroUsd)}` : `Confirm ${price.characters.toLocaleString()} characters · ${speechPricePrefix(models, price.voices.map((line) => line.provider))}${formatMicroUsd(price.estimatedMicroUsd)}`}
           </Button>
         </div>
       </div>
