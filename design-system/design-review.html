@@ -64,6 +64,33 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 @keyframes drift{from{transform:translateY(0)}to{transform:translateY(-7px)}}
 @keyframes barFill{from{width:4%}to{width:78%}}@keyframes kenburns{from{transform:scale(1)}to{transform:scale(1.08)}}@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
 /* Turn 127: settings narrator catalogue. Scoped to these proposed drawings. */
+/* t187 */
+.v187-tabs{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}.v187-tabs span{height:28px;padding:0 12px;display:inline-flex;align-items:center;font:var(--type-label);color:var(--muted-foreground)}.v187-tabs span.on{background:var(--secondary);color:var(--foreground)}
+.v187-tl{flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--border);overflow:hidden}
+.v187-ruler{height:28px;flex:none;position:relative;margin-left:120px;border-bottom:1px solid var(--border);font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.v187-ruler span{position:absolute;top:8px}
+.v187-lanes{position:relative;flex:1}
+.v187-lane{position:relative;height:64px;border-bottom:1px solid var(--border)}
+.v187-lane .name{position:absolute;left:0;top:0;bottom:0;width:120px;padding:12px 14px;font:var(--type-label);color:var(--muted-foreground);border-right:1px solid var(--border);background:var(--background)}
+.v187-lane .name small{display:block;font:var(--type-mono);font-size:var(--text-2xs);margin-top:3px}
+.v187-bar{position:absolute;top:12px;height:40px;border-radius:8px;padding:5px 9px;background:var(--secondary);border:1px solid var(--border);font-size:var(--text-xs);line-height:1.35;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--foreground)}
+.v187-bar small{display:block;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.v187-bar.sel{border:2px solid var(--foreground)}
+.v187-bar.rx{top:18px;height:28px;padding:4px 8px;font-style:italic;background:var(--background)}
+.v187-bar.prop{border:1.5px dashed var(--neutral-400);background:var(--background)}
+.v187-bed{position:absolute;top:14px;height:36px;border-radius:8px;background:color-mix(in srgb,var(--foreground) 8%,transparent);border:1px solid var(--border);font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);padding:4px 10px;clip-path:polygon(4% 0,96% 0,100% 100%,0 100%)}
+.v187-head{position:absolute;top:0;bottom:0;width:2px;background:var(--destructive);margin-left:120px}
+.v187-ov{position:absolute;top:6px;height:52px;border-radius:6px;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--foreground) 10%,transparent) 0 4px,transparent 4px 8px)}
+.v187-tag{position:absolute;font:var(--type-mono);font-size:var(--text-2xs);color:var(--foreground);background:var(--background);border:1px dashed var(--neutral-400);border-radius:6px;padding:1px 6px;white-space:nowrap}
+.v187-wave{position:relative;height:64px;border-radius:8px;background:var(--secondary);overflow:hidden}
+.v187-wave .w{position:absolute;inset:8px 0;background:repeating-linear-gradient(90deg,var(--neutral-400) 0 2px,transparent 2px 4px);opacity:.55;clip-path:polygon(0 50%,5% 30%,12% 60%,20% 20%,30% 70%,40% 25%,52% 65%,63% 35%,75% 60%,86% 30%,94% 55%,100% 50%,100% 100%,0 100%)}
+.v187-wave .cut{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--background) 70%,transparent)}
+.v187-wave .h{position:absolute;top:0;bottom:0;width:3px;background:var(--foreground);border-radius:2px}
+.v187-field{display:flex;align-items:center;gap:10px;font-size:var(--text-sm)}
+.v187-field b{width:92px;flex:none;font:var(--type-label);font-weight:500;color:var(--muted-foreground)}
+.v187-field .val{height:28px;padding:0 10px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;font:var(--type-mono);font-size:var(--text-xs)}
+.v187-field .mono{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+/* /t187 */
 /* t186 */
 .v186-p{position:relative;width:1280px;height:720px;overflow:hidden;background:var(--media-overlay-bg);color:var(--media-overlay-fg);font:var(--type-body)}
 .v186-p *{box-sizing:border-box}
