@@ -94,6 +94,10 @@ changes, missing kits, retakes, image boards and video pass segments, candidate-
 recovery after media moves or a segment record is missing, and explicit Bench filing/acceptance.
 Filing preserves the Bench source and refuses changed media, settings or destination selection.
 Clearing a frame retains immutable takes and the accepted video selection.
+Keep `test/arke-actions/review-regressions.test.ts` in this set: finalized quoted jobs settle
+their open conversation cards after filing/ledger settlement, including failure and cancellation.
+Filing recovery repairs the idempotent Bench journal link before completing the card, and a
+first-frame route neither clears cast audio nor records an upload acknowledgement for it.
 
 Book/audio standards experiments use the separate [publication interoperability checks](publication-interop.md#reproduce).
 They install their own locked development dependencies and exercise Readium, package closure and EPUBCheck.
