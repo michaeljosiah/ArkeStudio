@@ -134,7 +134,7 @@ export async function hearAudiobookLine(
     const bytes = new Uint8Array(await readFile(toExtendedLength(landed)));
     const pcm = readSpeechWav(bytes);
     const heard = await deps.wordTimes(bytes, new AbortController().signal);
-    const cuts = splitRequest(group.members.map((member) => ({ key: member.block.key, text: member.text })), heard.words, heard.seconds, (start, end) => audioHash(writeSpeechWav(sliceSpeech(pcm, start, end))), splitAudio(pcm));
+    const cuts = splitRequest(group.members.map((member) => ({ key: member.block.key, text: member.text, ...(member.sounds === true ? { sounds: true } : {}) })), heard.words, heard.seconds, (start, end) => audioHash(writeSpeechWav(sliceSpeech(pcm, start, end))), splitAudio(pcm), prepared.prepared.lexicon);
     const cut = cuts.find((candidate) => candidate.key === block)!;
     const gain = normaliseSpeech(pcm).loudness.gainDb;
     await atomicWriteFile(cachePath, writeSpeechWav(applyGain(sliceSpeech(pcm, cut.start, cut.end), gain)));

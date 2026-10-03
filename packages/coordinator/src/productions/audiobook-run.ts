@@ -37,7 +37,7 @@ import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
 import { applyGain, dropRunawayTail, normaliseSpeech, readSpeechWav, samplePeak, sliceSpeech, trimSpeech, writeSpeechWav } from "../audio/speech-wav.js";
 import type { TimedWord } from "../voice/word-times.js";
-import { LONG_TAIL, splitAudio, splitRequest } from "./audiobook-split.js";
+import { LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "./audiobook-split.js";
 import { checkDirection, directionPlan, type RenderedPart } from "../voice/direction.js";
 import { audiobookLanding, recordsLoudness, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
 
@@ -162,6 +162,8 @@ export interface Speaking extends PlannedBlock {
   refusal?: string;
   /** The speaker's note could not be played on this reader (R-45): the line is read without it, and the take says so. */
   noteHeld?: true;
+  /** The block's direction makes a sound: the grouped split hears "uh-huh" or "ah" there as it, not as a word. */
+  sounds?: true;
   /**
    * The direction the take is made under, as the take names it (R-14, R-45): the plan's and the
    * note's, even when the note is held and nothing of it is sent, so the take is judged by the
@@ -276,6 +278,8 @@ export interface PreparedChapter {
   requests: number;
   /** As many as they would make a block a request. */
   perParagraph: number;
+  /** The names and words not in English the grouped split expects whisper to mishear (`splitLexicon`). */
+  lexicon: ReadonlySet<string>;
 }
 
 export type ChapterPreparation = { kind: "ready"; prepared: PreparedChapter } | { kind: "refused"; reason: string; plan: AudiobookPlan } | { kind: "unavailable"; reason: string };
@@ -452,6 +456,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       ...(substitutedNow !== undefined ? { substitutedNow } : {}),
       ...(refusal !== undefined ? { refusal } : {}),
       ...(noteHeld ? { noteHeld: true as const } : {}),
+      ...(held?.plan.cues.some((cue) => cue.kind === "sound") === true ? { sounds: true as const } : {}),
       ...(refusal === undefined && takeHash !== undefined ? { takeHash } : {}),
       reader,
       model,
@@ -528,7 +533,12 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
   const perParagraph = misses.reduce((sum, block) => sum + block.parts.length, 0);
   const freePlan = room.freePlanAllowance === undefined ? null : freePlanShortfall(freeReads, room.freePlanAllowance);
   const asks = misses.some((block) => speechAsks(block.model, priceOf(block))) || freeCreditOverrun(creditDraw, room.creditLeftMicroUsd ?? Infinity) || freePlan !== null;
-  return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate, asks, creditDraw, freeReads, freePlan, groups, requests, perParagraph } };
+  // The world's names and the chapter's, which whisper is expected to mishear (2026-10-03): every
+  // sheet's name and region, the cast's speakers, and the chapter's capitalised words.
+  const names = store.getBundle().sheets.filter((sheet) => sheet.retired !== true).flatMap((sheet) => [sheet.name, ...(sheet.region !== undefined ? [sheet.region] : [])]);
+  const speakers = plan.cast === null || plan.cast === "unreadable" ? [] : [...new Set(plan.cast.lines.map((line) => line.speaker))];
+  const lexicon = splitLexicon([...names, ...speakers], plan.blocks.map((planned) => planned.block.text));
+  return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate, asks, creditDraw, freeReads, freePlan, groups, requests, perParagraph, lexicon } };
 }
 
 /** A grouped request as a run sends it (design turn 185): its blocks, the ones it keeps, its turns and its one quote. */
@@ -947,7 +957,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     const pcm = readSpeechWav(bytes);
     const heard = await deps.wordTimes(bytes, signal);
     if (signal.aborted) return null;
-    const cuts = splitRequest(group.members.map((block) => ({ key: block.block.key, text: block.text })), heard.words, heard.seconds, (start, end) => audioHash(writeSpeechWav(sliceSpeech(pcm, start, end))), splitAudio(pcm));
+    const cuts = splitRequest(group.members.map((block) => ({ key: block.block.key, text: block.text, ...(block.sounds === true ? { sounds: true } : {}) })), heard.words, heard.seconds, (start, end) => audioHash(writeSpeechWav(sliceSpeech(pcm, start, end))), splitAudio(pcm), preparation.prepared.lexicon);
     // One request is one performance: measured whole and gained as one, so a whisper inside it
     // stays a whisper beside the lines around it.
     const level = normaliseSpeech(pcm);
