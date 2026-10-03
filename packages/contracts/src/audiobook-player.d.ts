@@ -62,6 +62,8 @@ export interface AudiobookPlayerOptions {
 export interface AudiobookPlayerHandle {
   /** A newer plan for the same book: the place kept by its block, the piece playing left playing. */
   update(chapters: AudiobookPlayerChapter[]): void;
+  /** Pause where it is, as when another read takes the app's voice. */
+  pause(): void;
   destroy(): void;
 }
 
