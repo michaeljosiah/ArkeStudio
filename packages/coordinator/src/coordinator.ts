@@ -14325,7 +14325,7 @@ export class Coordinator {
             hash: result.hash,
             chapterVersion: result.chapterVersion,
             ...(result.summary !== undefined ? { summary: result.summary } : {}),
-            ...(result.cast !== undefined ? { cast: { lines: result.cast.lines, speakers: result.cast.speakers } } : {}),
+            ...(result.cast !== undefined ? { cast: { lines: result.cast.lines, speakers: result.cast.speakers }, castRecord: result.cast.record } : {}),
             ...(result.chapterNote !== undefined ? { chapterNote: result.chapterNote } : {}),
             ...(result.speakerNotes !== undefined ? { speakerNotes: result.speakerNotes } : {}),
           });

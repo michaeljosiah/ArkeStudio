@@ -454,7 +454,7 @@ export interface DirectedChapter {
   hash: string;
   chapterVersion: number;
   /** The lines cast first (R-54), held until the proposal is accepted. */
-  cast?: { derived: DerivedCast; lines: number; speakers: number };
+  cast?: { derived: DerivedCast; record: ChapterVoices; lines: number; speakers: number };
   /** The chapter note drafted when asked (R-53). */
   chapterNote?: string;
   /** Speaker notes drafted from the sheets for speakers with none (R-54). */
@@ -643,7 +643,7 @@ export async function directChapter(
       if (signal?.aborted) throw new Error("stopped");
       const record: ChapterVoices = await composeCast(store, productionId, derived);
       override = { cast: record };
-      cast = { derived, lines: derived.lines.length, speakers: new Set(derived.lines.map((line) => line.sheet ?? line.speaker)).size };
+      cast = { derived, record, lines: derived.lines.length, speakers: new Set(derived.lines.map((line) => line.sheet ?? line.speaker)).size };
     }
   }
   const { chapter, blocks, plan } = await directableBlocks(store, productionId, chapterId, input, override);

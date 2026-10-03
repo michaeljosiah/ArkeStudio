@@ -408,6 +408,7 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
         const directed = events.find((e): e is Directed => e.type === "direction.finished");
         assert.equal(directed?.outcome, "directed", directed?.reason);
         assert.deepEqual(directed.cast, { lines: 1, speakers: 1 });
+        assert.equal(directed.castRecord?.lines.length, 1, "the held cast rides with the card, so a window draws the blocks it makes");
         assert.ok(!existsSync(castFile), "the cast is held with the proposal, not written");
         assert.ok(Object.keys(directed.proposed ?? {}).some((key) => key.startsWith("p0.")), "the line the cast makes is directed");
         await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: directed.proposed!, proposalId: directed.proposalId });
