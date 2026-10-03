@@ -41,3 +41,20 @@
 
 /* Where everyone is, before a chapter is derived: one line, the state and its press. */
 .fy-cont__none { display: flex; align-items: baseline; gap: 10px; }
+
+/*
+ * The wide Overview is turn 171's cards (develop-responsive.css holds them now at every width),
+ * at a reading measure, and Develop's compact bar sits where the narrow widths put it.
+ */
+@media (min-width: 1100px) {
+  .fy-overview { padding: 40px 48px 48px; }
+  .fy-overview__head, .fy-overview__cards, .fy-overview-waiting { max-width: 820px; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-develop-model { margin: 0 36px 14px; max-width: 560px; }
+}
+
+/* Production Cast's head (58a): the title at the left, New guest at the right of it. */
+.fy-pcast__head { display: flex; align-items: flex-end; gap: 16px; padding: 40px 90px 0; animation: fy-fade-up 0.6s var(--ease-out) both; }
+.fy-pcast__head .fy-h1 { margin-top: 6px; }
+.fy-pcast__head > .ui-btn { margin-left: auto; }
+@media (max-width: 899px) { .fy-pcast__head { padding: 24px 32px 0; } }
+@media (max-width: 599px) { .fy-pcast__head { padding: 18px 16px 0; } }

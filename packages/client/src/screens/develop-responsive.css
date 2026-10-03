@@ -12,6 +12,40 @@
 .fy-develop-model-sheet .fy-set__link { min-height: 44px; }
 .fy-develop-model-sheet .fy-arke__model { align-items: stretch; }
 
+/* The overview's cards (turn 171) at every width since design turn 189: the wide page is the
+   narrow one, so its rules left the 1099 query. */
+.fy-overview { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: 22px 32px 32px; }
+.fy-overview .fy-eyebrow-sm { font: var(--type-label); letter-spacing: .16em; }
+.fy-overview__read { flex: none; min-width: 0; }
+.fy-overview__read > span { flex-wrap: wrap; }
+.fy-overview__read > span > button { white-space: normal; overflow-wrap: anywhere; }
+.fy-overview__read button { min-height: 44px; }
+.fy-overview__head { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.fy-overview__head h1 { margin: 6px 0 0; font: 650 var(--text-4xl)/1.1 var(--font-sans); letter-spacing: -.025em; }
+.fy-overview__head > button { min-height: 44px; flex: none; }
+.fy-overview__cards { display: grid; gap: 14px; }
+.fy-overview-card, .fy-overview-act { position: relative; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--background); }
+.fy-overview h2 { margin: 0 0 8px; font: var(--type-label); color: var(--muted-foreground); }
+.fy-overview p { margin: 0; white-space: pre-wrap; font: 400 var(--text-md)/1.55 var(--font-sans); overflow-wrap: anywhere; }
+.fy-overview-logline p { font: 500 var(--text-lg)/1.45 var(--font-sans); }
+.fy-overview-prose { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; font: 400 var(--text-md)/1.55 var(--font-sans); }
+.fy-overview-prose[data-expanded] { display: block; }
+.fy-overview-more { position: absolute; bottom: 14px; right: 14px; display: flex; align-items: center; gap: 6px; min-height: 44px; border: 0; background: transparent; color: var(--muted-foreground); font: var(--type-label); cursor: pointer; }
+.fy-overview .fy-textactions { opacity: 1; pointer-events: auto; margin-left: 0; gap: 8px; }
+.fy-overview .fy-textactions__btn { width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 10px; color: var(--foreground); }
+.fy-overview-acts > h2, .fy-overview-act__number, .fy-overview-acts > .fy-textactions { display: none; }
+.fy-overview-acts__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.fy-overview-act__label { display: block; margin-bottom: 10px; color: var(--muted-foreground); font: var(--type-label); }
+.fy-overview-act h3 { margin: 0 0 8px; font: 600 var(--text-md)/1.4 var(--font-sans); }
+.fy-overview-act p { font: 400 var(--text-sm)/1.55 var(--font-sans); color: var(--muted-foreground); }
+.fy-overview-style-head, .fy-overview-style-unset { display: flex; align-items: center; gap: 10px; font: var(--type-label); }
+.fy-overview-style-unset { min-height: 56px; padding: 6px 12px; border: 1px dashed var(--border); border-radius: 14px; }
+.fy-overview-style-unset span, .fy-overview-style-head span { color: var(--muted-foreground); font: var(--type-meta); }
+.fy-overview-style-unset a { display: flex; align-items: center; min-height: 44px; margin-left: auto; padding: 0 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--secondary); color: var(--muted-foreground); text-decoration: none; }
+.fy-overview-waiting { display: flex; align-items: center; width: 100%; min-height: 56px; padding: 12px; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 14px; color: var(--foreground); background: var(--background); font: var(--type-ui); gap: 12px; cursor: pointer; }
+.fy-overview-waiting span { color: var(--muted-foreground); }
+.fy-overview-waiting svg { margin-left: auto; }
+
 @media (pointer: coarse) {
   .fy-cx { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; border-radius: 16px; }
   .fy-cx__editorwrap { min-width: 0; }
@@ -93,37 +127,6 @@
   .fy-develop-sheet .dom-proposal__actions { padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
   :is(.fy-develop-side, .fy-develop-sheet) .dom-proposal__actions .ui-btn { flex: 1; min-width: 0; padding-inline: 8px; min-height: 44px; }
   :is(.fy-develop-side, .fy-develop-sheet) .dom-proposal__actions .ui-btn--primary { order: 3; }
-  .fy-overview { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: 22px 32px 32px; }
-  .fy-overview .fy-eyebrow-sm { font: var(--type-label); letter-spacing: .16em; }
-  .fy-overview__read { flex: none; min-width: 0; }
-  .fy-overview__read > span { flex-wrap: wrap; }
-  .fy-overview__read > span > button { white-space: normal; overflow-wrap: anywhere; }
-  .fy-overview__read button { min-height: 44px; }
-  .fy-overview__head { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
-  .fy-overview__head h1 { margin: 6px 0 0; font: 650 var(--text-4xl)/1.1 var(--font-sans); letter-spacing: -.025em; }
-  .fy-overview__head > button { min-height: 44px; flex: none; }
-  .fy-overview__cards { display: grid; gap: 14px; }
-  .fy-overview-card, .fy-overview-act { position: relative; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--background); }
-  .fy-overview h2 { margin: 0 0 8px; font: var(--type-label); color: var(--muted-foreground); }
-  .fy-overview p { margin: 0; white-space: pre-wrap; font: 400 var(--text-md)/1.55 var(--font-sans); overflow-wrap: anywhere; }
-  .fy-overview-logline p { font: 500 var(--text-lg)/1.45 var(--font-sans); }
-  .fy-overview-prose { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; font: 400 var(--text-md)/1.55 var(--font-sans); }
-  .fy-overview-prose[data-expanded] { display: block; }
-  .fy-overview-more { position: absolute; bottom: 14px; right: 14px; display: flex; align-items: center; gap: 6px; min-height: 44px; border: 0; background: transparent; color: var(--muted-foreground); font: var(--type-label); cursor: pointer; }
-  .fy-overview .fy-textactions { opacity: 1; pointer-events: auto; margin-left: 0; gap: 8px; }
-  .fy-overview .fy-textactions__btn { width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 10px; color: var(--foreground); }
-  .fy-overview-acts > h2, .fy-overview-act__number, .fy-overview-acts > .fy-textactions { display: none; }
-  .fy-overview-acts__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-  .fy-overview-act__label { display: block; margin-bottom: 10px; color: var(--muted-foreground); font: var(--type-label); }
-  .fy-overview-act h3 { margin: 0 0 8px; font: 600 var(--text-md)/1.4 var(--font-sans); }
-  .fy-overview-act p { font: 400 var(--text-sm)/1.55 var(--font-sans); color: var(--muted-foreground); }
-  .fy-overview-style-head, .fy-overview-style-unset { display: flex; align-items: center; gap: 10px; font: var(--type-label); }
-  .fy-overview-style-unset { min-height: 56px; padding: 6px 12px; border: 1px dashed var(--border); border-radius: 14px; }
-  .fy-overview-style-unset span, .fy-overview-style-head span { color: var(--muted-foreground); font: var(--type-meta); }
-  .fy-overview-style-unset a { display: flex; align-items: center; min-height: 44px; margin-left: auto; padding: 0 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--secondary); color: var(--muted-foreground); text-decoration: none; }
-  .fy-overview-waiting { display: flex; align-items: center; width: 100%; min-height: 56px; padding: 12px; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 14px; color: var(--foreground); background: var(--background); font: var(--type-ui); gap: 12px; cursor: pointer; }
-  .fy-overview-waiting span { color: var(--muted-foreground); }
-  .fy-overview-waiting svg { margin-left: auto; }
   .fy-narrative { padding: 22px 32px 32px; gap: 0; }
   .fy-narrative__eyebrow { display: block; }
   .fy-narrative .fy-h1 { margin: 6px 0 12px; font: 650 var(--text-3xl)/1.1 var(--font-sans); }

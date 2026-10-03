@@ -210,14 +210,14 @@ export function ProductionCastScreen() {
 
   return (
     <div className="fy-prodscroll" data-screen="production-cast">
-      <div className="fy-hero">
-        <div className="fy-eyebrow-sm">CAST · {production.meta.title.toUpperCase()}</div>
-        <h1 className="fy-hero__title">
-          Cast
-        </h1>
+      {/* The head at the left with New guest beside it (58a), not a centred hero. */}
+      <div className="fy-pcast__head">
+        <div>
+          <div className="fy-eyebrow-sm">CAST · {production.meta.title.toUpperCase()}</div>
+          <h1 className="fy-h1">Cast</h1>
+        </div>
         <Button
           variant="primary"
-          style={{ marginTop: 16 }}
           onClick={() =>
             setDrafting(drafting === null ? { type: "character", name: "", sentence: "" } : null)
           }
@@ -287,17 +287,14 @@ export function ProductionCastScreen() {
         </Card>
       )}
 
-      <div className="fy-eyebrow-sm fy-prodcast__label">
-        GUESTS · ONLY IN {production.meta.title.toUpperCase()} · {guests.length + pendingGuests.length}
-      </div>
-      {guests.length + pendingGuests.length === 0 ? (
-        <div className="fy-prodcast__gutter">
-          <EmptyState
-            title="No guests yet"
-            hint="Add characters, locations or factions that belong only to this production."
-          />
+      {/* Guests appear with the first one (design turn 189, 58a): New guest in the head is the
+          way in, so an empty band explaining what a guest is said it twice. */}
+      {guests.length + pendingGuests.length > 0 && (
+        <div className="fy-eyebrow-sm fy-prodcast__label">
+          GUESTS · ONLY IN {production.meta.title.toUpperCase()} · {guests.length + pendingGuests.length}
         </div>
-      ) : (
+      )}
+      {guests.length + pendingGuests.length === 0 ? null : (
         <div className="fy-cardgrid fy-prodcast__grid" style={columns(guests.length + pendingGuests.length)}>
           {pendingGuests.map((p) => (
             <button

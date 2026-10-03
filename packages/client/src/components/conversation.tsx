@@ -1595,7 +1595,11 @@ export function ProductionConversation({
   const groups = groupPointsBySubject(points);
   const openCount = points.filter(point => point.kind === "question").length;
   const sideTitle = stagedTitle ?? "What it understood";
-  const rail = side ?? (pointsEmpty === undefined ? null : <>
+  // What it understood appears with its first note (design turn 189): an empty panel with a
+  // disabled Wrap up beside an empty thread was two things owed and nothing to act on. A thread
+  // carried from production setup has its outline to show, so it keeps the panel.
+  const understoodEmpty = points.length === 0 && carriedPoints === 0 && loaded?.productionSetup?.status !== "created";
+  const rail = side ?? (pointsEmpty === undefined || (responsive && understoodEmpty) ? null : <>
     <div className="fy-develop-side__head" style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
       <div style={{ font: "600 15px var(--font-sans)" }}>What it understood</div>
       <span className="fy-mono">{(compact ? pointCount : points.length) > 0 ? (compact ? pointCount : points.length) + " so far" : "no new notes"}</span>
@@ -1624,7 +1628,10 @@ export function ProductionConversation({
         {eyebrow && <div className="fy-eyebrow-sm">{eyebrow}</div>}
         {heading && <h1 className="fy-story__h1">{heading}</h1>}
       </div>}
-      {responsive && compact && <button type="button" className="fy-develop-model" aria-haspopup="dialog" onClick={() => setModelsOpen(true)}>
+      {/* One compact bar at every width (design turn 189, 44a's one line): the model select, its
+          scope, the context chips and the Overview link each on a row of their own were the
+          desktop's chrome around a composer the narrow widths already said in one line. */}
+      {responsive && <button type="button" className="fy-develop-model" aria-haspopup="dialog" onClick={() => setModelsOpen(true)}>
         <Sparkle size={16} /><b>Story author · {authorLocation}</b>
         <span>in context: {contextSummary}</span><ChevronDown size={16} />
       </button>}
@@ -1633,11 +1640,11 @@ export function ProductionConversation({
         {responsive && phone && rail && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setSideOpen(true)}>
           <span><b>{sideTitle}{!side && " · " + pointCount + " so far"}</b><span>{side ? "Open the proposed changes" : [...groups.map(group => group.subject), ...(openCount ? [openCount + " still open"] : [])].join(" · ") || "Nothing understood yet"}</span></span><ChevronUp size={18} />
         </button>}
-        {(!responsive || !compact) && languageControl}
+        {!responsive && languageControl}
         <Composer value={message} onChange={setMessage} onSubmit={submit} placeholder={responsive && compact ? "Keep shaping the story…" : placeholder}
           agentLabel="story author" busy={running} busyLabel="reading the world…" disabledReason={languageUnavailableReason}
           onDictate={text => setMessage(prev => prev ? prev + " " + text : text)} readReplies={readReplies.composer} {...attachProps} />
-        {(!responsive || !compact) && footer}
+        {!responsive && footer}
       </HeldBar>
     </div>
     {rail && <div className="fy-story__side">
@@ -1645,7 +1652,7 @@ export function ProductionConversation({
         <div className={responsive ? "fy-develop-side" : "fy-story-side"}>{rail}</div>
       </ResponsiveSheet>
     </div>}
-    <PageSheet open={responsive && compact && modelsOpen} onClose={() => setModelsOpen(false)} title="Story author" className="fy-develop-model-sheet">
+    <PageSheet open={responsive && modelsOpen} onClose={() => setModelsOpen(false)} title="Story author" className="fy-develop-model-sheet">
       {languageControl}<p>In context: {contextSummary}</p>
     </PageSheet>
   </>;

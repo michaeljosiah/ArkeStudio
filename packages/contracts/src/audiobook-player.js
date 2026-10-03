@@ -35,6 +35,12 @@ export function mountAudiobookPlayer(root, options) {
 
   const esc = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const pad = (n) => String(n).padStart(2, "0");
+  // A chapter titled with its own number ("Chapter 1") is named once (design turn 189): the
+  // heading said "Chapter 01 · Chapter 1".
+  const ownTitle = (c) => {
+    const m = /^chapter\s+0*(\d+)$/i.exec(String(c.title).trim());
+    return m && Number(m[1]) === c.order ? "" : c.title;
+  };
   const time = (sec) => {
     const s = Math.max(0, Math.floor(sec || 0));
     const h = Math.floor(s / 3600);
@@ -208,9 +214,9 @@ export function mountAudiobookPlayer(root, options) {
 .abp.abp-wake[data-mode="playing"]:not([data-paused]):not([data-sheet]) .abp-chrome{animation:abp-rest .35s ease 2.5s forwards}
 .abp[data-mode="playing"]:not([data-paused]):not([data-sheet]):not(.abp-wake) .abp-chrome{opacity:0}
 .abp[data-mode="poster"] .abp-bar,.abp[data-mode="poster"] .abp-top,.abp[data-mode="poster"] .abp-follow{display:none}
-.abp-sheet{position:absolute;right:24px;top:84px;bottom:180px;width:420px;max-width:calc(100% - 48px);border-radius:18px;padding:18px 0;display:flex;flex-direction:column;background:color-mix(in srgb,var(--abp-bg) 58%,transparent);backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);border:1px solid color-mix(in srgb,var(--abp-fg) 20%,transparent)}
+.abp-sheet{position:absolute;right:24px;top:84px;max-height:calc(100% - 264px);width:420px;max-width:calc(100% - 48px);border-radius:18px;padding:18px 0;display:flex;flex-direction:column;background:color-mix(in srgb,var(--abp-bg) 58%,transparent);backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);border:1px solid color-mix(in srgb,var(--abp-fg) 20%,transparent)}
 .abp-sheet h4{margin:0 20px 10px;font-size:var(--text-2xs,11px);font-weight:500;letter-spacing:.05em;text-transform:uppercase;color:color-mix(in srgb,var(--abp-fg) 68%,transparent)}
-.abp-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.abp-list{flex:0 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}
 .abp-ch{width:100%;display:flex!important;align-items:center;gap:12px;padding:9px 20px!important;text-align:left;font-weight:500}
 .abp-ch.cur{background:color-mix(in srgb,var(--abp-fg) 12%,transparent)!important}
 .abp-ch:disabled{color:color-mix(in srgb,var(--abp-fg) 40%,transparent);cursor:default}
@@ -241,7 +247,7 @@ export function mountAudiobookPlayer(root, options) {
 .abp-ctl{grid-area:ctl;justify-content:space-between}
 .abp-labs{grid-area:labs;justify-content:space-between}
 .abp-play{width:64px;height:64px}
-.abp-sheet{left:12px;right:12px;width:auto;top:72px;bottom:200px}
+.abp-sheet{left:12px;right:12px;width:auto;top:72px;max-height:calc(100% - 272px)}
 .abp-poster{padding:0 24px 64px}
 .abp-poster-title{font-size:var(--text-3xl,32px)}
 }
@@ -644,7 +650,7 @@ export function mountAudiobookPlayer(root, options) {
     root.toggleAttribute("data-paused", !playing);
     // A phone says the book and `07 · The Tenth Key` (186d); the long words are the wide window's.
     el.eyebrow.innerHTML = esc(options.title) + '<span class="abp-long"> · audiobook</span>';
-    el.chap.innerHTML = c ? '<span class="abp-long">Chapter </span>' + pad(c.order) + " · " + esc(c.title) : "";
+    el.chap.innerHTML = !c ? "" : ownTitle(c) === "" ? "Chapter " + pad(c.order) : '<span class="abp-long">Chapter </span>' + pad(c.order) + " · " + esc(c.title);
     el.toggle.setAttribute("aria-label", playing ? "Pause" : "Play");
     el.toggle.innerHTML = icon(playing ? I.pause : I.play, 20, true);
     el.prevBtn.disabled = nextPlayable(ci - 1, -1) < 0;
@@ -689,7 +695,7 @@ export function mountAudiobookPlayer(root, options) {
       sessionKey = key;
       try {
         session.metadata = new Metadata({
-          title: c ? "Chapter " + pad(c.order) + " · " + c.title : options.title,
+          title: c ? "Chapter " + pad(c.order) + (ownTitle(c) === "" ? "" : " · " + c.title) : options.title,
           album: options.title,
           artwork: shownSrc ? [{ src: absolute(shownSrc) }] : [],
         });

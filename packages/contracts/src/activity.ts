@@ -3,6 +3,12 @@ import type { Job } from "./job.js";
 import type { LedgerEntry } from "./job.js";
 import { isReplayableFinalization } from "./job.js";
 import { PROVIDERS } from "./provider.js";
+import { GENERIC_ERROR_COPY } from "./error-copy.js";
+
+/** A provider as a person reads it (turn 189): its display name, its id only when it has none. */
+function providerName(provider: string): string {
+  return (PROVIDERS as Record<string, { displayName: string } | undefined>)[provider]?.displayName ?? provider;
+}
 import { formatMicroUsd } from "./money.js";
 import { unattendedProposalsOf } from "./proposal.js";
 import type { Take } from "./take.js";
@@ -160,7 +166,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
     entries.push({
       urgency: 1,
       kind: "job-needs-reconciliation",
-      title: `${job.provider} submission needs your answer`,
+      title: `${providerName(job.provider)} submission needs your answer`,
       detail: job.error ?? "the outcome was not witnessed",
       at: job.updatedAt,
       ...(job.worldId === VOICE_PREVIEW_SCOPE ? {} : { worldId: job.worldId }),
@@ -175,8 +181,14 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
     entries.push({
       urgency: 2,
       kind: "provider-paused",
-      title: `${queue.provider} is paused`,
-      detail: `${queue.reason ?? "paused"} — ${queue.held} job${queue.held === 1 ? "" : "s"} held, not failed`,
+      // Name, state, one clause (design turn 136a; turn 189): the provider's name, never its id,
+      // and a reason only when it says something — the generic failure line restated nothing the
+      // title had not, and "held, not failed" explained a word the count already carries.
+      title: `${providerName(queue.provider)} paused`,
+      detail: [
+        ...(queue.reason !== undefined && queue.reason !== GENERIC_ERROR_COPY && queue.reason !== "paused" ? [queue.reason] : []),
+        `${queue.held} job${queue.held === 1 ? "" : "s"} held`,
+      ].join(" · "),
       at: "9999-12-31T00:00:00Z", // pauses have no timestamp; they sort newest within class
       actions: ["settings"],
       ref: queue.provider,
