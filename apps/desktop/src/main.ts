@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url";
-import { DesktopRemoteAccess } from "./remote-access.js";
+import { DesktopRemoteAccess, remoteGatewayPort } from "./remote-access.js";
 import { createPerformanceSpool } from "./performance-spool.js";
 import { microphoneAllowed } from "./microphone-permission.js";
 import { audioMediaOptions, createMediaProcessRunner } from "./media-tools.js";
@@ -1491,7 +1491,7 @@ async function initialize(): Promise<{ port: number }> {
   const { port } = await studioServer.start(0);
   transportSession = { port, token: transportToken };
   remoteAccess = new DesktopRemoteAccess({ root: appRoot, clientDirectory: dirname(clientIndex), session: transportSession,
-    writeClipboard: text => clipboard.writeText(text), trace: traceDesktop,
+    gatewayPort: remoteGatewayPort, writeClipboard: text => clipboard.writeText(text), trace: traceDesktop,
     startupSupported: app.isPackaged && (process.platform === "win32" || process.platform === "darwin"),
     setStartOnLogin: enabled => app.setLoginItemSettings({ openAtLogin: enabled,
       ...(process.platform === "win32" ? { args: ["--remote-background"] } : {}) }),

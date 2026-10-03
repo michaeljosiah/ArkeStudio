@@ -80,6 +80,7 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
       "install-update-and-restart": {},
       "install-update-on-close": {},
       "generate-diagnostics": {},
+      "probe-grouped-read": {"requestId":"01ARZ3NDEKTSV4RRFFQ69G5FAV","productionId":"pilot","chapterFile":"01-neap.md"},
       "open-data-folder": {},
       "bench-upload-references": {"worldId":"01ARZ3NDEKTSV4RRFFQ69G5FAV","sessionId":"sess_01ARZ3NDEKTSV4RRFFQ69G5FAV","requestId":"01ARZ3NDEKTSV4RRFFQ69G5FAV"},
       "attach-files-correlated": {"worldId":"01ARZ3NDEKTSV4RRFFQ69G5FAV","requestId":"01ARZ3NDEKTSV4RRFFQ69G5FAV"},

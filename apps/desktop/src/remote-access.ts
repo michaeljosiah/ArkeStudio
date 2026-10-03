@@ -10,7 +10,8 @@ import { ServeCleanupRequired, TailscaleServe } from "./tailscale-serve.js";
 const Config = z.object({ enabled: z.boolean(), startOnLogin: z.boolean(), origin: z.string().url().nullable(),
   pairingDuration: RemotePairingDurationSchema.default(90) });
 type Settings = z.infer<typeof Config>;
-const port = 8793;
+/** Fixed so a Serve mapping and every paired phone's bookmark survive restarts; tests pass a free port. */
+export const remoteGatewayPort = 8793;
 
 /** Desktop owns this gateway and the existing coordinator; no second world writer is started. */
 export class DesktopRemoteAccess {
@@ -28,8 +29,8 @@ export class DesktopRemoteAccess {
   private settingsLoaded = false;
   private path: string;
   constructor(private readonly options: { root: string; clientDirectory: string; session: { port: number; token: string };
-    startupSupported: boolean; setStartOnLogin: (enabled: boolean) => void; tailscale?: TailscaleServe;
-    writeClipboard?: (text: string) => void; trace?: RemoteTrace }) {
+    gatewayPort: number; startupSupported: boolean; setStartOnLogin: (enabled: boolean) => void;
+    tailscale?: TailscaleServe; writeClipboard?: (text: string) => void; trace?: RemoteTrace }) {
     this.path = join(options.root, "remote", "settings.json");
     this.devices = new RemoteDevices(join(options.root, "remote", "devices.json"));
   }
@@ -86,7 +87,7 @@ export class DesktopRemoteAccess {
     // must not leave a cookie-bearing origin pointing at a port another process can claim.
     this.reservation = createServer((_req, res) => res.writeHead(503).end("Remote access needs attention on the host."));
     this.reservation.on("upgrade", (_req, socket) => socket.destroy());
-    try { this.reservation.listen(port, "127.0.0.1"); await once(this.reservation, "listening"); }
+    try { this.reservation.listen(this.options.gatewayPort, "127.0.0.1"); await once(this.reservation, "listening"); }
     catch (error) { return error; } // Still attempt mapping withdrawal if another listener got there first.
   }
   private async releaseReservation(): Promise<void> {
@@ -118,13 +119,13 @@ export class DesktopRemoteAccess {
     try {
       // Also withdraw a matching mapping left by an interrupted older host before trying
       // to claim its port; a failed bind must not leave HTTPS pointing at that occupant.
-      if (this.config.enabled) await this.tailscale().disable(origin, port);
-      await gateway.start(port);
+      if (this.config.enabled) await this.tailscale().disable(origin, this.options.gatewayPort);
+      await gateway.start(this.options.gatewayPort);
       const owned = this.config.enabled && this.config.origin === origin;
       // Serve survives this process. Record ownership durably before publishing, including
       // re-enablement, so a crash at any later point enters stale-mapping recovery on restart.
       await this.save({ ...this.config, enabled: true, origin });
-      await this.tailscale().enable(origin, port, owned);
+      await this.tailscale().enable(origin, this.options.gatewayPort, owned);
       published = true;
       this.gateway = gateway;
       this.gatewayOrigin = origin;
@@ -144,7 +145,7 @@ export class DesktopRemoteAccess {
     // Withdraw HTTPS before releasing the port: a replacement local listener must never
     // receive a paired browser's cookie. On cleanup failure retain the bound gateway and
     // fail shutdown, so the owner can retry without creating that impersonation window.
-    if (origin || this.inspectMapping) await this.tailscale().disable(origin, port);
+    if (origin || this.inspectMapping) await this.tailscale().disable(origin, this.options.gatewayPort);
     await this.gateway?.stop();
     await this.releaseReservation();
     this.inspectMapping = false;
