@@ -147,7 +147,9 @@ async function answerDoor(m: Mounted, answer: AudiobookDoor): Promise<void> {
 describe("the Audiobook door (turn 146)", () => {
   it("shows a row a chapter with its state, the count and running time over them, the read bar, and opens a chapter's Audiobook view", async () => {
     const m = await mount(inkbound());
-    assert.match(text(m), /Audiobook/);
+    // The page is the book's cover (design turn 190a): its title, not the word Audiobook, which the rail says.
+    assert.match(text(m), /Inkbound/);
+    assert.equal(q(m, 'section[aria-label="Audiobook"]') !== null, true);
     await answerDoor(m, door("narrator"));
     assert.equal(q(m, '[data-testid="audiobook-line"]')?.textContent, "1 of 2 chapters read · 31:04 · 1 planned");
     const rows = all(m, '[data-testid="audiobook-row"]');

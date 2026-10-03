@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { DEFAULT_NARRATOR, freePlanAskCopy, freePlanNote, narratorLabelFor, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, providerName, readerPlace, speechPricePrefix, type AudiobookPriceLine, type AudiobookRow, type ManifestModel } from "@arke-studio/contracts";
+import { mainPhotoFor, DEFAULT_NARRATOR, freePlanAskCopy, freePlanNote, narratorLabelFor, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, providerName, readerPlace, speechPricePrefix, type AudiobookPriceLine, type AudiobookRow, type ManifestModel } from "@arke-studio/contracts";
 import { HeldBar } from "../components/held-bar.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { BookReadingPanel, BookRequests } from "./chapter-audiobook.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { ChevronRight, Play, Speaker } from "../components/icons.js";
+import { Portrait, characterPortraitPath } from "../components/portrait.js";
 import { EmptyState } from "../components/layout.js";
 import { ListenButton, listenLeads } from "../components/audiobook-player.js";
 import { ExportAudiobookButton } from "../components/audiobook-export.js";
@@ -292,6 +293,14 @@ export function AudiobookScreen() {
       }
     : null;
   const pad = (order: number) => String(order).padStart(2, "0");
+  // The page is the book's cover (design turn 190a): the world's key art, the title, and who reads it.
+  const title = production.meta.title;
+  const art = world?.keyArt ?? null;
+  const slug = world?.meta.slug;
+  const hasArt = art !== null && art !== "" && slug !== undefined;
+  const readers = door?.voices ?? [];
+  const faces = readers.filter((voice) => voice.sheet !== undefined && world?.referenceKits.some((kit) => kit.sheetId === voice.sheet && mainPhotoFor(kit) !== null)).slice(0, 3);
+  const credit = readers.length === 0 ? null : `Read by ${readers[0]!.name}${readers.length > 1 ? ` and ${readers.length - 1} more` : ""}`;
   const bookNote =
     book?.state === "stopped"
       ? "stopped · the takes made stand"
@@ -345,8 +354,32 @@ export function AudiobookScreen() {
   })();
   return (
     <div className="fy-prodmain" data-screen="audiobook">
+      <section className="fy-abcover" aria-label="Audiobook" data-art={hasArt ? "true" : "false"}>
+        {hasArt && (
+          <span className="fy-abcover__bd" aria-hidden="true">
+            <Portrait worldSlug={slug} path={art} label="" radius={0} />
+          </span>
+        )}
+        <div className="fy-abcover__in">
+          <div className="fy-abcover__art" aria-hidden="true">
+            {hasArt && <Portrait worldSlug={slug} path={art} label={title} radius={4} />}
+            <span className="fy-abcover__title">{title}</span>
+          </div>
+          <div className="fy-abcover__txt">
       <div className="fy-h1row">
-        <h1 className="fy-h1">Audiobook</h1>
+        <h1 className="fy-h1">{title}</h1>
+        {credit !== null && (
+          <span className="fy-abcover__credit" data-testid="audiobook-credit">
+            {faces.length > 0 && (
+              <span className="fy-abcover__faces" aria-hidden="true">
+                {faces.map((voice) => (
+                  <Portrait key={voice.sheet} worldSlug={slug} path={characterPortraitPath(world, voice.sheet!)} label={voice.name} radius={999} />
+                ))}
+              </span>
+            )}
+            {credit}
+          </span>
+        )}
         <span className="fy-h1row__meta" data-testid="audiobook-line">
           {/* Nothing until the door lands: a phone sets this line as the eyebrow over the title,
               where a lone "…" read as a stray mark rather than as waiting. */}
@@ -362,6 +395,9 @@ export function AudiobookScreen() {
           {!phone && primary}
         </span>
       </div>
+          </div>
+        </div>
+      </section>
       {/* Held at the foot once the door lands; while it opens there is no count and no price to
           hold, and "0 blocks · price unavailable" read as an answer. */}
       {phone && door !== null && <HeldBar className="fy-abdoor-held"><span>{totalBlocks} blocks · {price === null ? "price unavailable" : price.estimatedMicroUsd === 0 ? "free" : `${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}`}</span>{primary}</HeldBar>}
@@ -451,8 +487,19 @@ export function AudiobookScreen() {
           )}
         </div>
       )}
-      <div className="fy-ch__target fy-ch__target--page" role="progressbar" aria-valuemin={0} aria-valuemax={Math.max(1, totalBlocks)} aria-valuenow={madeBlocks} data-testid="audiobook-bar">
-        <span style={{ width: `${totalBlocks === 0 ? 0 : Math.round((madeBlocks / totalBlocks) * 100)}%` }} />
+      {/* The chapters as one strip (design turn 190a): each chapter as wide as it is long, solid where read, filled to its share where part read, hatched where not. */}
+      <div className="fy-ch__target fy-ch__target--page fy-abstrip" role="progressbar" aria-valuemin={0} aria-valuemax={Math.max(1, totalBlocks)} aria-valuenow={madeBlocks} data-testid="audiobook-bar">
+        {rows.length === 0 ? (
+          <span className="fy-abstrip__seg" style={{ flex: 1 }}>
+            <i style={{ width: "0%" }} />
+          </span>
+        ) : (
+          rows.map((row) => (
+            <span key={row.chapterId} className={cx("fy-abstrip__seg", row.planned && "fy-abstrip__seg--planned")} style={{ flex: Math.max(1, row.total) }} title={`${row.title} · ${audiobookRowLabel(row)}`}>
+              <i style={{ width: `${row.total === 0 ? 0 : Math.round((row.made / row.total) * 100)}%` }} />
+            </span>
+          ))
+        )}
       </div>
       {rows.length > 0 ? (
         <div className="fy-ledger" data-testid="audiobook-rows">
