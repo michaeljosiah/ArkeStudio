@@ -41,7 +41,7 @@ import {
 import { clipFor } from "../voice/library.js";
 import { directionPlan } from "../voice/direction.js";
 import { atomicWriteFile } from "../world/atomic.js";
-import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
@@ -150,6 +150,9 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
   const { pictures, ...unpictured } = record;
   const pictured = pictures !== undefined && Object.keys(pictures).length > 0;
   if (pictured) await store.ensureSchemaVersion(AUDIOBOOK_PICTURES_SCHEMA_VERSION, "audiobook-pictures");
+  // The chapter's look, or a picture that keeps the lines it was made under (design turn 191c,
+  // R-98): fields the builds before it read as unreadable, so the world is raised first.
+  if (record.look !== undefined || Object.values(pictures ?? {}).some((picture) => picture.look !== undefined)) await store.ensureSchemaVersion(AUDIOBOOK_LOOK_SCHEMA_VERSION, "audiobook-look");
   const { direction, ...undirected } = pictured ? { ...unpictured, pictures } : unpictured;
   const directed = Object.keys(direction).length > 0;
   if (directed) await store.ensureSchemaVersion(AUDIOBOOK_DIRECTION_SCHEMA_VERSION, "audiobook-direction");

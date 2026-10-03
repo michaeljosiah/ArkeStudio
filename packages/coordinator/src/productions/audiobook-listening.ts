@@ -88,7 +88,7 @@ export async function bookCover(store: WorldStore): Promise<string | null> {
  * shipped one. Only the blocks, their words and the record are read from the plan, never its
  * states, so this asks no catalogue and needs none to be up.
  */
-async function anyNarrator(store: WorldStore, productionId: string): Promise<AudiobookReader> {
+export async function anyNarrator(store: WorldStore, productionId: string): Promise<AudiobookReader> {
   const book = await readAudiobookBook(store, productionId).catch(() => null);
   return book !== null && book !== "unreadable" && book.narrator !== undefined ? book.narrator : { ...DEFAULT_NARRATOR };
 }

@@ -58,6 +58,7 @@ import "./components/model-chip.css";
 import "./screens/audiobook-cover.css";
 import "./components/design-voice-dialog.css";
 import "./components/free-plan.css";
+import "./components/audiobook-look.css";
 import { App } from "./App.js";
 import { initStore } from "./lib/store.js";
 import { isRemoteSession } from "./lib/remote-session.js";

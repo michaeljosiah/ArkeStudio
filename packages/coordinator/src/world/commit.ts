@@ -372,6 +372,13 @@ export const AUDIOBOOK_PICTURES_SCHEMA_VERSION = 47;
  * would make them again — so the world is raised before the first record carrying any of them.
  */
 export const AUDIOBOOK_TIMING_SCHEMA_VERSION = 48;
+/**
+ * The chapter's look (design turn 191c, SPEC-047 R-98): `look` on the chapter's strict audiobook
+ * record, and `look` on a picture that keeps the lines it was made under. A build before it reads
+ * such a record as unreadable — every take of the chapter lost to a run that would make them
+ * again — so the world is raised before the first record carrying either.
+ */
+export const AUDIOBOOK_LOOK_SCHEMA_VERSION = 49;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
