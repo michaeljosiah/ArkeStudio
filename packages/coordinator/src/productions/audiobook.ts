@@ -38,7 +38,7 @@ import {
 import { clipFor } from "../voice/library.js";
 import { directionPlan } from "../voice/direction.js";
 import { atomicWriteFile } from "../world/atomic.js";
-import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
@@ -144,6 +144,8 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
   if (marked) await store.ensureSchemaVersion(AUDIOBOOK_MARKERS_SCHEMA_VERSION, "audiobook-markers");
   // A take that records its note was not played (R-45) is a field the build before it cannot read.
   if (Object.values(record.takes).some((take) => take.noteHeld !== undefined)) await store.ensureSchemaVersion(AUDIOBOOK_PERFORMED_SCHEMA_VERSION, "audiobook-performed");
+  // A grouped take, a take's loudness or a mismatched split's flag (design turn 185).
+  if (Object.values(record.takes).some((take) => take.grouped !== undefined || take.loudness !== undefined) || Object.values(record.flags).some((flag) => flag.split !== undefined)) await store.ensureSchemaVersion(AUDIOBOOK_GROUPED_SCHEMA_VERSION, "audiobook-grouped");
   // The note (design turn 181) is written under the phrase's old key while it is one — sixty
   // characters or fewer — so a block directed before the rename, or since within the old
   // bounds, stays readable by the builds before it and raises nothing. A longer note, a sound
@@ -265,12 +267,23 @@ export async function writeAudiobookBookRaised(store: WorldStore, productionId: 
   // The book note, the chapter notes and a note's source (design turn 184) are fields the builds
   // before them read as unreadable: raised before the first record that carries one.
   if (kept.note !== undefined || kept.chapterNotes !== undefined || kept.noteSources !== undefined) await store.ensureSchemaVersion(AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, "audiobook-reading-notes");
+  // A book read a block a request (design turn 185d).
+  if (kept.requests !== undefined) await store.ensureSchemaVersion(AUDIOBOOK_GROUPED_SCHEMA_VERSION, "audiobook-grouped");
   await writeAudiobookBook(store, productionId, kept);
 }
 
 export async function writeAudiobookBook(store: WorldStore, productionId: string, book: AudiobookBook): Promise<void> {
   await writeOwned(store, audiobookBookPath(productionId), book);
   await store.reload();
+}
+
+/**
+ * Whether a take alone may record its loudness (design turn 185): only in a world already raised
+ * for grouped reads. The take is gained either way; the measured values are a field the builds
+ * before cannot read, and one solo take must not raise a world that otherwise stays in their shape.
+ */
+export function recordsLoudness(store: WorldStore): boolean {
+  return ((store.getBundle().meta as { schemaVersion?: number }).schemaVersion ?? 1) >= AUDIOBOOK_GROUPED_SCHEMA_VERSION;
 }
 
 export function emptyAudiobook(chapterVersion: number, hash: string, now: string): ChapterAudiobook {

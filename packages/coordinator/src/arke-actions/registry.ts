@@ -505,6 +505,7 @@ const CLIENT_COMMAND_METADATA = {
   "read-audiobook-chapter": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
   "stop-audiobook": action("production", "command", "voice", "external-network-action", ["chapters"]),
   "set-audiobook-reading": action("production", "command", "voice", "external-network-action", ["chapters"]),
+  "set-audiobook-requests": action("production", "command", "voice", "external-network-action", ["chapters"]),
   // Direction beside the prose (SPEC-047 R-6..R-10): a block's plan set by hand and a card
   // accepted whole are commands on the record; directing a chapter is the cast's derivation
   // turned on performance — a model run over the prose that writes nothing.
@@ -517,6 +518,7 @@ const CLIENT_COMMAND_METADATA = {
   "discard-audiobook-lines": action("production", "command", "voice", "host-file-access", []),
   "stage-audiobook-take": action("production", "command", "voice", "host-file-access", ["chapters"]),
   "keep-audiobook-take": action("production", "command", "voice", "privacy-sensitive", ["chapters"]),
+  "keep-audiobook-split": action("production", "command", "voice", "authored-change", ["chapters"]),
   "discard-audiobook-take": action("production", "command", "voice", "host-file-access", []),
   // One narrator performs the cast, and a narrator for the book (turn 155g/h): notes and the
   // narrator are commands on the book record; the quote reads; hearing a line may leave the machine.

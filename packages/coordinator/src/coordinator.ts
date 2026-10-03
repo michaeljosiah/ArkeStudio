@@ -1,5 +1,5 @@
 import { estimateSpeechMicroUsd, samplingProblems, speechInputFits } from "@arke-studio/contracts";
-import { applyProviderPlans, freeCreditDraw, freeCreditLeft, freeCreditOverrun, freeLimitReason, freePlanAllowance, freePlanFailure, freePlanPending, freePlanShortfall, GOOGLE_DAILY_LIMIT, PAID_PLANS, speechAsks, type FreePlanAllowance, type ProviderPlans } from "@arke-studio/contracts";
+import { applyProviderPlans, localTranscriberAvailable, freeCreditDraw, freeCreditLeft, freeCreditOverrun, freeLimitReason, freePlanAllowance, freePlanFailure, freePlanPending, freePlanShortfall, GOOGLE_DAILY_LIMIT, PAID_PLANS, speechAsks, type FreePlanAllowance, type ProviderPlans } from "@arke-studio/contracts";
 import { designedVoiceTarget, isDesignedVoiceTarget, narratorDesignedRecord, resolveDesignedVoice, VoiceDesignDraftSchema, quoteVoiceDesign, type NarratorDesignedVoice, type NarratorSettings, type WorldDesignedVoice } from "@arke-studio/contracts";
 import type { VoiceDesignClient } from "@arke-studio/providers";
 import { saveDesignedVoice } from "./voice/designed-library.js";
@@ -308,7 +308,8 @@ import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
 import { checkDirection, directionPlan, heldKey } from "./voice/direction.js";
-import { prepareChapter, runAudiobookChapter } from "./productions/audiobook-run.js";
+import { keepSplitTake, prepareChapter, runAudiobookChapter } from "./productions/audiobook-run.js";
+import { timeWords, type TimedWord } from "./voice/word-times.js";
 import { exportManuscript, importManuscript, readManuscript } from "./productions/manuscript.js";
 import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
 import { voicedBlocks, type ChapterContinuity, type ChapterVoices } from "@arke-studio/contracts";
@@ -1238,7 +1239,7 @@ export class Coordinator {
    */
   private readonly heldProposals = new Map<string, { cast?: DerivedCast; heard: Set<string> }>();
   /** A chapter being read into kept takes (turn 146, SPEC-047 R-16), keyed and ended as the cast's runs are. */
-  private readonly readingAudiobooks = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string; toMake?: number; blocks?: number; made?: number }>();
+  private readonly readingAudiobooks = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string; toMake?: number; blocks?: number; made?: number; requests?: number; groups?: string[][]; request?: number }>();
   /** The request each audiobook run is asked under, by run key, so a replayed start names the same one. */
   private readonly audiobookRequests = new Map<string, string>();
   /** `Read the book` runs (turn 146, SPEC-047 R-16), one per production, under the chapters' own runs. */
@@ -1510,6 +1511,16 @@ export class Coordinator {
       freePlanPending(jobs, ledger, model, now), this.providerPlans.googleKeySetAt);
   }
 
+  /**
+   * Word times on this machine for a grouped request (design turn 185): whisper through Voxa, a
+   * stretch between pauses at a time. Undefined when no local transcriber answers, and then no
+   * read is grouped and no block is heard with its neighbours.
+   */
+  private wordTimer(voice: VoiceService | null): ((wav: Uint8Array, signal: AbortSignal) => Promise<{ words: TimedWord[]; seconds: number }>) | undefined {
+    if (voice === null || !voice.localSpeechConfigured || !localTranscriberAvailable(this.providerService.list())) return undefined;
+    return (wav, signal) => timeWords(wav, (bytes, contentType) => voice.transcribe(bytes, contentType), signal);
+  }
+
   /** The book's available reader, or the app's; reading still checks the host's local capability. */
   private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[]; designedBinding?: DesignedBinding }> {
     const { chosen, narrationCatalogue, catalogue, designedBinding } = await this.appNarrator(store, voice);
@@ -1622,6 +1633,7 @@ export class Coordinator {
       },
       findJobs: () => this.jobQueue?.listJobs() ?? [],
       actualCost: async (jobId) => (this.ledger ? ((await this.ledger.readAll()).find((entry) => entry.jobId === jobId)?.actualMicroUsd ?? null) : null),
+      ...(this.wordTimer(voice) !== undefined ? { wordTimes: this.wordTimer(voice)! } : {}),
       ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
       now: () => store.now(),
       emit: (event) => {
@@ -1629,11 +1641,15 @@ export class Coordinator {
         const held = [...this.readingAudiobooks.values()].find((run) => run.worldId === ids.worldId && run.productionId === ids.productionId && run.chapterId === ids.chapterId);
         switch (event.type) {
           case "started":
-            if (held !== undefined) Object.assign(held, { toMake: event.toMake, blocks: event.blocks, made: 0 });
-            this.emit({ at: at(), type: "audiobook.started", ...ids, requestId, toMake: event.toMake, blocks: event.blocks });
+            if (held !== undefined) Object.assign(held, { toMake: event.toMake, blocks: event.blocks, made: 0, ...(event.requests !== undefined ? { requests: event.requests, groups: event.groups ?? [], request: 0 } : {}) });
+            this.emit({ at: at(), type: "audiobook.started", ...ids, requestId, toMake: event.toMake, blocks: event.blocks, ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.groups !== undefined ? { groups: event.groups } : {}) });
             return;
           case "priced":
-            this.emit({ at: at(), type: "audiobook.priced", ...ids, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}), ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}) });
+            this.emit({ at: at(), type: "audiobook.priced", ...ids, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}), ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}), ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.perParagraph !== undefined ? { perParagraph: event.perParagraph } : {}) });
+            return;
+          case "request":
+            if (held !== undefined) held.request = event.index;
+            this.emit({ at: at(), type: "audiobook.request", ...ids, index: event.index, of: event.of, keys: event.keys });
             return;
           case "progress":
             if (held !== undefined) held.made = event.made;
@@ -3340,7 +3356,7 @@ export class Coordinator {
           replayed.push({ at: new Date().toISOString(), type: "audiobook.book-started", worldId: run.worldId, productionId: run.productionId, requestId: run.requestId, chapters: run.chapters ?? 0, blocks: run.blocks ?? 0, done: run.done ?? 0, replayed: true });
         }
         for (const [key, run] of this.readingAudiobooks) {
-          replayed.push({ at: new Date().toISOString(), type: "audiobook.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId, requestId: this.audiobookRequests.get(key) ?? ulid(), toMake: run.toMake ?? 0, blocks: run.blocks ?? 0, made: run.made ?? 0, replayed: true });
+          replayed.push({ at: new Date().toISOString(), type: "audiobook.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId, requestId: this.audiobookRequests.get(key) ?? ulid(), toMake: run.toMake ?? 0, blocks: run.blocks ?? 0, made: run.made ?? 0, replayed: true, ...(run.requests !== undefined ? { requests: run.requests, groups: run.groups ?? [], request: run.request ?? 0 } : {}) });
         }
         // The browser's download controls must survive reload and process restart.
         const worldId = this.readModel.getState().world?.meta.worldId;
@@ -14432,6 +14448,7 @@ export class Coordinator {
           if (held !== undefined && held.heard.size > 0) {
             const kept = await adoptHeardTakes(store, msg.productionId, chapter.id, [...held.heard], room, {
               now: () => store.now(),
+              transcriber: this.wordTimer(this.voiceService) !== undefined,
               ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
             }).catch((err: unknown) => {
               void this.appLog?.append({ kind: "audiobook.direction-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
@@ -14480,6 +14497,45 @@ export class Coordinator {
           this.refreshIfStillOpen(store);
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.reading-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+      case "set-audiobook-requests": {
+        // The book's requests for a groupable reader (design turn 185d): grouped, the default, or
+        // a block a request. Held while the book is being read, as the reading is.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        if (this.audiobookBusy(msg.worldId, msg.productionId)) {
+          void this.appLog?.append({ kind: "audiobook.reading-refused", production: msg.productionId, message: "the book is being read" });
+          return;
+        }
+        try {
+          const held = await readAudiobookBook(store, msg.productionId);
+          const base = held === null || held === "unreadable" ? DEFAULT_AUDIOBOOK_BOOK : held;
+          const { requests: _was, ...rest } = base;
+          await writeAudiobookBookRaised(store, msg.productionId, { ...rest, ...(msg.requests === "per-paragraph" ? { requests: "per-paragraph" as const } : {}) });
+          this.refreshIfStillOpen(store);
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.reading-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+      case "keep-audiobook-split": {
+        // A cut whose words did not match, kept as the block's take because the author heard it
+        // and keeps it (design turn 185c). Only while the flag and the words it was cut for stand.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
+        try {
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const record = await keepSplitTake(store, msg.productionId, chapter.id, msg.block, narrator, () => store.now());
+          this.refreshIfStillOpen(store);
+          this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record });
+        } catch (err) {
+          this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
         }
         return;
       }
@@ -14704,6 +14760,7 @@ export class Coordinator {
             },
             waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
             worldId: msg.worldId,
+            ...(this.wordTimer(voice) !== undefined ? { wordTimes: this.wordTimer(voice)! } : {}),
           }, override);
           // A block heard under the proposal is a take in waiting: kept if the card is accepted
           // with what it was heard as (R-55). Only the book's own narrator's reading, never a trial voice.
@@ -14781,7 +14838,7 @@ export class Coordinator {
         if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
         try {
           const room = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
-          const door = await audiobookDoor(store, msg.productionId, { ...room, models: this.opts.manifest?.models ?? [] }, () => store.now());
+          const door = await audiobookDoor(store, msg.productionId, { ...room, models: this.opts.manifest?.models ?? [], transcriber: this.wordTimer(this.voiceService) !== undefined }, () => store.now());
           this.emit({ at: new Date().toISOString(), type: "audiobook.door", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, door });
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.door-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
@@ -14812,7 +14869,7 @@ export class Coordinator {
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         let ended = false;
         try {
-          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [], creditLeftMicroUsd: await this.freeCreditLeftNow(), freePlanAllowance: await this.freePlanAllowanceNow() };
+          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [], creditLeftMicroUsd: await this.freeCreditLeftNow(), freePlanAllowance: await this.freePlanAllowanceNow(), transcriber: this.wordTimer(voice) !== undefined };
           if (room.narrator.provider === "kokoro" && !voice.localSpeechConfigured) {
             this.emit({ at: at(), type: "audiobook.book-finished", ...ids, outcome: "unavailable", chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0,
               reason: "Local narration is unavailable on this host. Choose a configured cloud narrator." });
@@ -14880,7 +14937,7 @@ export class Coordinator {
                   this.emit({ at: at(), type: "audiobook.book-started", ...ids, requestId, chapters: event.chapters, blocks: event.blocks });
                   return;
                 case "priced":
-                  this.emit({ at: at(), type: "audiobook.book-priced", ...ids, chapters: event.chapters, blocks: event.blocks, cloudBlocks: event.cloudBlocks, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}), ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}) });
+                  this.emit({ at: at(), type: "audiobook.book-priced", ...ids, chapters: event.chapters, blocks: event.blocks, cloudBlocks: event.cloudBlocks, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}), ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}), ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.perParagraph !== undefined ? { perParagraph: event.perParagraph } : {}) });
                   return;
                 case "progress":
                   if (held !== undefined) held.done = event.done;

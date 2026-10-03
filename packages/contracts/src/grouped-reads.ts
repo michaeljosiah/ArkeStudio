@@ -1,4 +1,7 @@
 import type { ManifestModel } from "./manifest.js";
+import { deriveCapabilityAvailability, type ProviderStatus } from "./provider.js";
+import { AUDIOBOOK_TITLE_KEY } from "./audiobook.js";
+import { isSceneBreak } from "./manuscript.js";
 import { expectedSpeechSeconds, quoteSpeech, SPEECH_TOKEN_ESTIMATE, type SpeechQuote } from "./speech-pricing.js";
 import { speechUtf8Bytes } from "./speech-input.js";
 
@@ -54,6 +57,30 @@ export interface BlockTurns {
   parts: ReadonlyArray<{ text: string; style?: string }>;
   /** Where a request may close after this block; absent is inside a paragraph or an exchange. */
   breakAfter?: ReadBreak;
+}
+
+/**
+ * Where a request may close after each block (design turn 185): after the title, before a scene
+ * break and at the chapter's end, a scene; after the last block of a paragraph that is narration
+ * alone, a paragraph; nowhere else — not between a line and its tag, not inside an exchange.
+ * `paragraphs` are the chapter's, as `chapterParagraphs` splits them.
+ */
+export function readBreaksFor(blocks: ReadonlyArray<{ key: string; paragraph: number; speaker?: string }>, paragraphs: readonly string[]): Map<string, ReadBreak> {
+  const breaks = new Map<string, ReadBreak>();
+  blocks.forEach((block, index) => {
+    const next = blocks[index + 1];
+    if (block.key === AUDIOBOOK_TITLE_KEY || next === undefined) {
+      breaks.set(block.key, "scene");
+      return;
+    }
+    if (next.paragraph === block.paragraph) return;
+    if (paragraphs.slice(block.paragraph + 1, next.paragraph).some((between) => isSceneBreak(between))) {
+      breaks.set(block.key, "scene");
+      return;
+    }
+    if (blocks.every((other) => other.paragraph !== block.paragraph || other.speaker === undefined)) breaks.set(block.key, "paragraph");
+  });
+  return breaks;
 }
 
 /** A turn sent, with the blocks whose words it carries in order. */
@@ -214,4 +241,24 @@ export function shareByCharacters(total: number | null, characters: readonly num
 /** Whether a reader's row may group (design turn 185): its cadence says so, and its price is the token's, which one request a group pays. */
 export function readerGroups(model: Pick<ManifestModel, "cadence" | "pricing"> | null | undefined): boolean {
   return model?.cadence?.groupable === true && model.pricing.kind === "perToken";
+}
+
+/**
+ * Whether this machine can split a grouped request (design turn 185): the local transcriber —
+ * whisper.cpp through Voxa — answers that it can transcribe. Without it grouping is not offered.
+ */
+export function localTranscriberAvailable(statuses: readonly ProviderStatus[]): boolean {
+  const local = statuses.filter((status) => status.id === "whispercpp");
+  return deriveCapabilityAvailability([...local]).find((entry) => entry.capability === "voice-stt")?.available === true;
+}
+
+/**
+ * Whether a book's blocks in this reader are sent grouped (design turn 185d): the reader groups,
+ * this machine can split, and the book has not chosen one block a request.
+ */
+export function groupingOffered(model: Pick<ManifestModel, "cadence" | "pricing"> | null | undefined, transcriber: boolean): boolean {
+  return readerGroups(model) && transcriber;
+}
+export function readsGrouped(model: Pick<ManifestModel, "cadence" | "pricing"> | null | undefined, transcriber: boolean, book: { requests?: "per-paragraph" } | null | undefined): boolean {
+  return groupingOffered(model, transcriber) && book?.requests !== "per-paragraph";
 }

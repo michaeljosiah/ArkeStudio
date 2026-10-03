@@ -1117,6 +1117,28 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
        */
       replayed: z.literal(true).optional(),
       made: z.number().int().min(0).optional(),
+      /**
+       * The requests the run makes (design turn 185): every request, grouped or one block's part,
+       * and the blocks of each grouped one in reading order — the margin's brackets. Absent on a
+       * run whose reader reads per paragraph.
+       */
+      requests: z.number().int().min(0).optional(),
+      groups: z.array(z.array(z.string().min(1)).min(2).max(400)).max(2000).optional(),
+      /** The request the run has reached, on a replay. */
+      request: z.number().int().min(0).optional(),
+    })
+    .strict(),
+  /** A grouped request begins (design turn 185b): its place among the run's requests and its blocks, so the margin darkens its bracket. */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.request"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      index: z.number().int().min(1),
+      of: z.number().int().min(1),
+      keys: z.array(z.string().min(1)).min(1).max(400),
     })
     .strict(),
   z
@@ -1137,6 +1159,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       notices: z.array(z.string().min(1).max(512)).optional(),
       /** A chapter on Google's free plan the day cannot cover, as on `voice.audio`. */
       freePlan: FreePlanShortSchema.optional(),
+      /** The requests the read makes, and as many as it would make a block a request (design turn 185a). */
+      requests: z.number().int().min(0).optional(),
+      perParagraph: z.number().int().min(0).optional(),
     })
     .strict(),
   z
@@ -1355,6 +1380,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       notices: z.array(z.string().min(1).max(512)).optional(),
       /** As on `audiobook.priced`: the book weighed whole against Google's free day. */
       freePlan: FreePlanShortSchema.optional(),
+      /** As on `audiobook.priced`: the requests the book makes, and a block a request. */
+      requests: z.number().int().min(0).optional(),
+      perParagraph: z.number().int().min(0).optional(),
     })
     .strict(),
   z

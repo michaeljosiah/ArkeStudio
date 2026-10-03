@@ -136,6 +136,7 @@ export * from "./speech-pricing.js";
 export * from "./provider-plans.js";
 export * from "./speech-input.js";
 export * from "./grouped-reads.js";
+export * from "./audiobook-grouped.js";
 
 // The interactive player (design turn 156): the module the app mounts, and its text for the exporter.
 export * from "./interactive-player.js";
