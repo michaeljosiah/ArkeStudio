@@ -774,6 +774,32 @@ describe("the founding build (SPEC-031)", () => {
     );
   });
 
+  it("quotes a retry without jobs, consumes its frozen input and refuses a stale build authority", async t => {
+    const h = await makeHarness(t, { manifest: null });
+    await makeSandbox(h.root, "gen-quoted-retry");
+    await h.service.begin("gen-quoted-retry", ulid());
+    await until(() => h.lastState()?.status === "completed", "founding without an image route", BUILD_MS);
+    const next = await makeHarness(t, {
+      genesisDir: id => h.provider.genesisDir(id), openStore: () => h.provider.openStore(), gate: () => h.provider.gate(),
+      enqueue: input => h.queue.enqueue(input), jobById: id => h.queue.jobs.get(id),
+    });
+    const key = "main-photo:maren-kest";
+    const quote = await next.service.quoteItem(h.worldId(), key);
+    assert.equal(h.queue.jobs.size, 0);
+    assert.equal(quote.input?.estimatedMicroUsd, 40_000);
+    const other = await next.service.quoteItem(h.worldId(), "main-photo:brother-ellum");
+    const idempotencyKey = ulid();
+    const input = { ...quote.input!, idempotencyKey, params: { ...quote.input!.params, seed: 731 } };
+    await next.service.runItems(h.worldId(), key, ulid(), { authority: quote.authority, input });
+    assert.equal(h.queue.jobs.size, 1);
+    const job = [...h.queue.jobs.values()][0]!;
+    assert.equal(job.idempotencyKey, idempotencyKey);
+    assert.equal(job.params.seed, 731);
+    assert.ok((await readKit(h.provider.openStore()!, "maren-kest"))?.kit.mainPhoto?.file, "founding retains its original installation decision");
+    await assert.rejects(next.service.runItems(h.worldId(), "main-photo:brother-ellum", ulid(), { authority: other.authority, input: other.input }), /changed after generation approval/);
+    assert.equal(h.queue.jobs.size, 1);
+  });
+
   it("an Activity re-run cut off by a restart still lands — and never buys twice", async (t) => {
     // The crash dimension of R-49: a text-only build completed, a provider appeared, the
     // author pressed run — and the app died between the enqueue and the landing. Resume

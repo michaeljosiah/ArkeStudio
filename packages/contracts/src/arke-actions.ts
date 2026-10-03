@@ -103,6 +103,7 @@ export const ArkeReadRequirementSchema = z.enum([
   "routing",
   "plans",
   "jobs",
+  "founding-build",
   "exports",
   "bench",
 ]);

@@ -60,6 +60,7 @@ const READ_TOOLS: Record<ArkeReadRequirement, readonly ArkeTargetReadTool[]> = {
   routing: ["get_routing"],
   plans: ["list_plans"],
   jobs: ["list_jobs"],
+  "founding-build": ["list_build_items"],
   exports: ["list_exports"],
   bench: [],
 };

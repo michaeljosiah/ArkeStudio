@@ -1,4 +1,6 @@
 import { stageReferenceFrames } from "@arke-studio/contracts";
+import { GenerationQuotes } from "../../src/world-chat/generation-quotes.js";
+import { imageGenerationSource } from "../../src/world-chat/image-generation.js";
 import { createProp, addPropState } from "../../src/references/props.js";
 import { fileArtifact } from "../../src/artifacts/filing.js";
 import assert from "node:assert/strict";
@@ -56,6 +58,7 @@ import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { assembleStory } from "../productions/assemble.js";
 import {
+  buildItemsFence,
   artDirectionFence,
   artifactsFence,
   bibleFence,
@@ -255,7 +258,7 @@ function currentReceipt(
   exportRecords: readonly ArkeExportReadRecord[] = [],
 ): WorldChatCheckReceipt {
   const bundle = store.getBundle();
-  const fence = requirement === "world-metadata"
+  const fence = requirement === "founding-build" ? buildItemsFence([]) : requirement === "world-metadata"
     ? worldMetadataFence(bundle)
     : requirement === "canon"
       ? canonFence(bundle)
@@ -1224,14 +1227,9 @@ describe("World Chat authority adapters", () => {
     const oneTurn = turn(w.conversationId, w.entryContext, {
       receipts: [metadata, sheets, art, references],
       actions: [{ kind: "world-metadata", changes: { tone: "Quiet" }, checkReceiptIds: [metadata.id, art.id] }, {
-        kind: "reference-generation",
-        request: {
-          operation: "main-photo",
-          sheetId: "maren-kest",
-          prompt: "Salt-lit portrait",
-          count: 2,
-          identityReferenceIds: [],
-        },
+        kind: "voice-audition",
+        sheetId: "maren-kest",
+        voice: { provider: "voxa", model: "kokoro", voiceId: "test" },
         checkReceiptIds: [sheets.id, art.id, references.id],
       }],
     });
@@ -1239,6 +1237,33 @@ describe("World Chat authority adapters", () => {
     assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, oneTurn), /coordinator-owned.*quote/i);
     assert.deepEqual((await loaded(w.log)).actions, []);
     assert.deepEqual(w.store.getBundle().meta, before);
+  });
+
+  it("shows a durable main-photo card and queues only after approval, once", async () => {
+    let queued = 0;
+    const deps: WorldChatActionAdapterDeps = {};
+    const w = await setup({ kind: "world" }, deps);
+    Object.assign(deps, { generationQuotes: new GenerationQuotes(w.store, imageGenerationSource(w.store, {
+      manifest: { manifestVersion: 1, generated: "2026-09-04", models: [{ id: "test-image", provider: "fal", capability: "image", displayName: "Test Image",
+        accepts: { referenceImages: 4, startFrame: false, endFrame: false }, limits: {}, pricing: { kind: "perImage", microUsdPerImage: 40_000 } }] },
+      settings: async () => null, freeze: input => input,
+    }), { enqueue: async () => { queued++; }, jobs: () => [] }) });
+    const receipts = ["sheets", "art-direction", "references"].map(read => currentReceipt(w.store, read as ArkeReadRequirement));
+    const one = turn(w.conversationId, w.entryContext, { receipts, actions: [{ kind: "reference-generation", modelId: "test-image",
+      request: { operation: "main-photo", sheetId: "maren-kest", prompt: "Salt-lit portrait", count: 1, identityReferenceIds: [] }, checkReceiptIds: receipts.map(receipt => receipt.id) }] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one, deps);
+    await appendTurn(w.log, one, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions.at(-1)!;
+    assert.equal(queued, 0);
+    assert.equal(card.shown.body.family, "generation");
+    if (card.shown.body.family !== "generation") return;
+    assert.equal(card.shown.body.estimatedMicroUsd, 40_000);
+    assert.ok(card.shown.body.quoteDigest);
+    assert.match(card.shown.body.prompt, /Salt-lit portrait/);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "queued");
+    await decide(w.lifecycle, w.log, card);
+    assert.equal(queued, 1);
   });
 
   it("creates exactly the precomputed production plan only after approval", async () => {

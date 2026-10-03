@@ -398,8 +398,21 @@ const ReferenceStyleActionSchema = z
   .object({ kind: z.literal("reference-style"), sheetId: SlugSchema, style: z.string().trim().min(1).max(500).nullable(), checkReceiptIds: CompleteReadIdsSchema })
   .strict();
 const ReferenceGenerationActionSchema = z
-  .object({ kind: z.literal("reference-generation"), request: ReferenceGenerationSchema, checkReceiptIds: CompleteReadIdsSchema })
+  .object({ kind: z.literal("reference-generation"), request: ReferenceGenerationSchema, modelId: z.string().min(1).max(300).optional(), checkReceiptIds: CompleteReadIdsSchema })
   .strict();
+const ImageGenerationActionSchema = z.object({
+  kind: z.literal("image-generation"),
+  modelId: z.string().min(1).max(300).optional(),
+  request: z.discriminatedUnion("operation", [
+    z.object({ operation: z.literal("world-image"), prompt: z.string().trim().min(1).max(20_000).optional(), count: z.number().int().min(1).max(8) }).strict(),
+    z.object({ operation: z.literal("master-look"), prompt: z.string().trim().min(1).max(20_000).optional(), count: z.number().int().min(1).max(8), aspect: z.string().min(1).max(20).optional() }).strict(),
+    z.object({ operation: z.literal("prop-state"), propId: PropIdSchema, stateId: PropStateIdSchema, prompt: z.string().trim().min(1).max(2_000), count: z.number().int().min(1).max(8) }).strict(),
+  ]),
+  checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+const BuildItemRunActionSchema = z.object({
+  kind: z.literal("build-item-run"), itemKey: z.string().min(1).max(300), checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
 const ReferenceImageTargetSchema = z.discriminatedUnion("surface", [
   z.object({ surface: z.literal("world-image") }).strict(),
   z.object({ surface: z.literal("master-look") }).strict(),
@@ -1204,6 +1217,8 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   BenchGenerationModelActionSchema,
   PropAuthoringModelActionSchema,
   PropReferenceModelActionSchema,
+  ImageGenerationActionSchema,
+  BuildItemRunActionSchema,
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
 
@@ -1239,6 +1254,8 @@ export const WorldChatReferenceTileLockActionSchema = preparedAction("world-chat
 export const WorldChatReferenceCompileActionSchema = preparedAction("world-chat-reference-compile", ReferenceCompileActionSchema);
 export const WorldChatReferenceStyleActionSchema = preparedAction("world-chat-reference-style", ReferenceStyleActionSchema);
 export const WorldChatReferenceGenerationActionSchema = preparedAction("world-chat-reference-generation", ReferenceGenerationActionSchema);
+export const WorldChatImageGenerationActionSchema = preparedAction("world-chat-image-generation", ImageGenerationActionSchema);
+export const WorldChatBuildItemRunActionSchema = preparedAction("world-chat-build-item-run", BuildItemRunActionSchema);
 export const WorldChatReferenceImageImportActionSchema = preparedAction("world-chat-reference-image-import", ReferenceImageImportActionSchema);
 export const WorldChatReferenceWorldImageResultUseActionSchema = preparedAction("world-chat-reference-world-image-result-use", ReferenceWorldImageResultUseActionSchema);
 export const WorldChatReferenceMasterLookResultUseActionSchema = preparedAction("world-chat-reference-master-look-result-use", ReferenceMasterLookResultUseActionSchema);
@@ -1314,6 +1331,8 @@ export type WorldChatReferenceTileLockAction = z.infer<typeof WorldChatReference
 export type WorldChatReferenceCompileAction = z.infer<typeof WorldChatReferenceCompileActionSchema>;
 export type WorldChatReferenceStyleAction = z.infer<typeof WorldChatReferenceStyleActionSchema>;
 export type WorldChatReferenceGenerationAction = z.infer<typeof WorldChatReferenceGenerationActionSchema>;
+export type WorldChatImageGenerationAction = z.infer<typeof WorldChatImageGenerationActionSchema>;
+export type WorldChatBuildItemRunAction = z.infer<typeof WorldChatBuildItemRunActionSchema>;
 export type WorldChatReferenceImageImportAction = z.infer<typeof WorldChatReferenceImageImportActionSchema>;
 export type WorldChatReferenceWorldImageResultUseAction = z.infer<typeof WorldChatReferenceWorldImageResultUseActionSchema>;
 export type WorldChatReferenceMasterLookResultUseAction = z.infer<typeof WorldChatReferenceMasterLookResultUseActionSchema>;
@@ -1430,6 +1449,8 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatReferenceCompileActionSchema,
   WorldChatReferenceStyleActionSchema,
   WorldChatReferenceGenerationActionSchema,
+  WorldChatImageGenerationActionSchema,
+  WorldChatBuildItemRunActionSchema,
   WorldChatReferenceImageImportActionSchema,
   WorldChatReferenceWorldImageResultUseActionSchema,
   WorldChatReferenceMasterLookResultUseActionSchema,

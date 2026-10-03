@@ -71,6 +71,14 @@ chat duplicates cannot copy reviewed facts, and obsolete Bench permission labels
 card without execution. Keep `test/world-chat/shape-drift.test.ts` and `test/arke-actions/review-regressions.test.ts`
 in the regression set for stored-card compatibility and decisions made on another surface.
 
+Generation quote changes also run coordinator `test/world-chat/generation-quotes.test.ts`,
+`test/bench/conversation-quotes.test.ts`, `test/world-chat/retrieval.test.ts`,
+`test/audio/performances.test.ts`, `test/references/takes.test.ts` and
+`test/world/founding-build.test.ts`. These cover preparation without jobs, default routing,
+price/expiry/reference changes, pending result filing, frozen Bench reservations and cast audio,
+founding retry authority and interrupted admission without automatic resubmission. Run
+`node --import tsx --test` with those repository-relative test paths; no paid provider is used.
+
 Book/audio standards experiments use the separate [publication interoperability checks](publication-interop.md#reproduce).
 They install their own locked development dependencies and exercise Readium, package closure and EPUBCheck.
 
