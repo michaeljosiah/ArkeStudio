@@ -701,6 +701,14 @@ export function subscribeAudiobookListening(listener: (answer: AudiobookListenin
   return () => audiobookListeningListeners.delete(listener);
 }
 
+/** A chapter's mix rendered (design turn 187): answered to the ask that named it. */
+export type AudiobookMixAnswer = Extract<DomainEvent, { type: "audiobook.mix" }>;
+const audiobookMixListeners = new Set<(answer: AudiobookMixAnswer) => void>();
+export function subscribeAudiobookMix(listener: (answer: AudiobookMixAnswer) => void): () => void {
+  audiobookMixListeners.add(listener);
+  return () => audiobookMixListeners.delete(listener);
+}
+
 export type BenchSubjectOpened = Extract<DomainEvent, { type: "bench.subject-opened" }>;
 const benchSubjectOpenedListeners = new Set<(answer: BenchSubjectOpened) => void>();
 export function subscribeBenchSubjectOpened(listener: (answer: BenchSubjectOpened) => void): () => void {
@@ -1623,6 +1631,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "web-packages.listed") {
       for (const listener of webPackagesListeners) listener(event);
+    }
+    if (event.type === "audiobook.mix") {
+      for (const listener of audiobookMixListeners) listener(event);
     }
     if (event.type === "bench.subject-opened") {
       for (const listener of benchSubjectOpenedListeners) listener(event);
@@ -5297,6 +5308,18 @@ export function openAudiobookListening(worldId: string, productionId: string): s
 export function setAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, picture: { file: string; source: import("@arke-studio/contracts").AudiobookPictureSource } | null): string | null {
   const requestId = ulid();
   return send({ kind: "set-audiobook-picture", worldId, productionId, chapterFile, block, picture, requestId }) ? requestId : null;
+}
+
+/** One block's timing (design turn 187, R-81): answered as `audiobook.record` under the id returned, or refused there. */
+export function setAudiobookTiming(worldId: string, productionId: string, chapterFile: string, block: string, timing: import("@arke-studio/contracts").BlockTimingInput): string | null {
+  const requestId = ulid();
+  return send({ kind: "set-audiobook-timing", worldId, productionId, chapterFile, block, timing, requestId }) ? requestId : null;
+}
+
+/** The chapter as it sounds with its timing, or a window of it (R-85): answered as `audiobook.mix` under the id returned. */
+export function renderAudiobookMix(worldId: string, productionId: string, chapterFile: string, window?: { from: number; to: number }): string | null {
+  const requestId = ulid();
+  return send({ kind: "render-audiobook-mix", worldId, productionId, chapterFile, requestId, ...(window !== undefined ? { window } : {}) }) ? requestId : null;
 }
 
 /** `Direct this chapter` (SPEC-047 R-10): the model asked for a direction per block; the card comes back as a run's result. */

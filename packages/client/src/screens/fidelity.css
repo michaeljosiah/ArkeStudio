@@ -8750,3 +8750,51 @@ button.fy-abdoor__voice:hover { background: var(--accent); border-color: var(--n
 .fy-samp__item.is-on, .fy-samp__item:hover { background: var(--secondary); }
 .fy-samp__item--foot { margin-top: 4px; border-top: 1px solid var(--border); border-radius: 0 0 8px 8px; font-weight: 400; color: var(--muted-foreground); }
 @media (max-width: 640px) { .fy-samp__fields { grid-template-columns: 1fr; margin-left: 10px; } }
+
+/* Timing (design turn 187a, 187c): a lane a voice, 64 high with a 120-wide name column; bars 40
+   high with their words and a mono line; reactions 28 high in italic; overlaps hatched across the
+   lanes. The track scrolls under the names, which stay. */
+.fy-ch__timing { min-width: 0; }
+.fy-tm { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--background); }
+.fy-tm__tools { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; border-bottom: 1px solid var(--border); font: 400 11px var(--font-mono); color: var(--muted-foreground); }
+.fy-tm__push { flex: 1; }
+.fy-tm__frame { display: flex; min-width: 0; position: relative; }
+.fy-tm__names { flex: none; width: 120px; border-right: 1px solid var(--border); background: var(--background); z-index: 2; }
+.fy-tm__ruler-pad { height: 28px; border-bottom: 1px solid var(--border); }
+.fy-tm__name { height: 64px; box-sizing: border-box; padding: 12px 14px; border-bottom: 1px solid var(--border); font: 500 12px var(--font-sans); color: var(--muted-foreground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fy-tm__name small { display: block; margin-top: 3px; font: 400 10.5px var(--font-mono); overflow: hidden; text-overflow: ellipsis; }
+.fy-tm__scroll { flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+.fy-tm__track { position: relative; touch-action: none; }
+.fy-tm__ruler { position: relative; height: 28px; border-bottom: 1px solid var(--border); font: 400 10.5px var(--font-mono); color: var(--muted-foreground); cursor: pointer; }
+.fy-tm__ruler span { position: absolute; top: 8px; padding-left: 3px; border-left: 1px solid var(--border); }
+.fy-tm__lanes { position: relative; }
+.fy-tm__lane { position: absolute; left: 0; right: 0; height: 64px; border-bottom: 1px solid var(--border); }
+.fy-tm__overlap { position: absolute; top: 0; bottom: 0; pointer-events: none; background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--foreground) 9%, transparent) 5px 7px); }
+.fy-tm__bar { position: absolute; box-sizing: border-box; height: 40px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--secondary); color: var(--foreground); font: 400 12px/1.3 var(--font-sans); overflow: hidden; cursor: grab; user-select: none; display: flex; flex-direction: column; justify-content: center; }
+.fy-tm__bar--on { border-color: var(--foreground); box-shadow: 0 0 0 1px var(--foreground); }
+.fy-tm__bar--unread { background: transparent; border-style: dashed; color: var(--muted-foreground); }
+.fy-tm__bar--overlap { background-image: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--foreground) 7%, transparent) 5px 7px); }
+.fy-tm__bar--reaction { height: 28px; font-style: italic; padding: 2px 8px; }
+.fy-tm__words { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fy-tm__line { font-size: 10.5px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-tm__edge { position: absolute; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+.fy-tm__edge--head { left: 0; }
+.fy-tm__edge--tail { right: 0; }
+.fy-tm__bar--on .fy-tm__edge { background: color-mix(in srgb, var(--foreground) 18%, transparent); }
+.fy-tm__gap { position: absolute; width: 8px; height: 16px; border-radius: 4px; border: 1px solid var(--border); background: var(--background); cursor: ew-resize; z-index: 1; }
+.fy-tm__bed { position: absolute; box-sizing: border-box; height: 20px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--muted); font: 400 10.5px var(--font-mono); color: var(--muted-foreground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fy-tm__sound { position: absolute; padding: 1px 6px; border-left: 2px solid var(--foreground); font: 400 10.5px var(--font-mono); color: var(--foreground); white-space: nowrap; }
+.fy-tm__playhead { position: absolute; top: -28px; bottom: 0; width: 1px; background: var(--foreground); pointer-events: none; z-index: 3; }
+.fy-tm__side { display: flex; flex-direction: column; gap: 10px; }
+.fy-tm__data { margin: 0; font-size: 11px; color: var(--muted-foreground); }
+.fy-tm__row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 28px; }
+.fy-tm__row > .fy-ab__label { width: 76px; flex: none; }
+.fy-tm__field { width: 64px; height: 26px; box-sizing: border-box; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--background); color: var(--foreground); font-size: 12px; }
+.fy-tm__unit { font-size: 10.5px; color: var(--muted-foreground); }
+.fy-tm__actions { display: flex; gap: 6px; justify-content: flex-end; }
+.fy-tm__block { display: flex; flex-direction: column; gap: 8px; }
+.fy-tm__wave { position: relative; height: 48px; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); touch-action: none; }
+.fy-tm__wave svg { width: 100%; height: 100%; display: block; fill: var(--foreground); opacity: 0.7; }
+.fy-tm__trimmed { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--background) 70%, transparent); pointer-events: none; }
+.fy-tm__handle { position: absolute; top: -2px; bottom: -2px; width: 6px; margin: 0 -3px; border-radius: 3px; background: var(--foreground); cursor: ew-resize; }
+@media (max-width: 599px) { .fy-tm__names { width: 88px; } .fy-tm__name { padding: 12px 8px; } }
