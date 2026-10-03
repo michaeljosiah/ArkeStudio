@@ -134,7 +134,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Forty-four fences durable conversation inputs and their promotion (SPEC-045, issue 1138): an
 // older build reads the conversation log tolerantly and would skip them, losing queued words.
 // Forty-five is the book note, the chapter notes and where a speaker's note came from (turn 184).
-export const SUPPORTED_SCHEMA_VERSION = 45;
+// Forty-six is grouped reads and one loudness on takes, flags and the book (turn 185).
+export const SUPPORTED_SCHEMA_VERSION = 46;
 
 export class WorldOpenError extends Error {
   constructor(

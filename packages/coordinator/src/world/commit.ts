@@ -351,6 +351,13 @@ export const AUDIOBOOK_NOTE_SCHEMA_VERSION = 43;
  * before the first book record carrying any of them is written. 44 is the conversation inputs'.
  */
 export const AUDIOBOOK_READING_NOTES_SCHEMA_VERSION = 45;
+/**
+ * Grouped reads and one loudness (design turn 185): `grouped` and `loudness` on a take and its
+ * sidecar's generation, `split` on a flag, and `requests` on the strict book record. A build
+ * before it reads each strictly — a chapter's record unreadable and every take lost, a sidecar
+ * dropped with its take, the book's reading lost — so the world is raised before the first.
+ */
+export const AUDIOBOOK_GROUPED_SCHEMA_VERSION = 46;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
@@ -358,13 +365,14 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
   for (const file of files) {
     if (!file.newContent || !file.path.endsWith(".json")) continue;
     try {
-      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown; workflow?: unknown; directionHash?: unknown; remakeOf?: unknown; recording?: unknown } } | null;
+      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown; workflow?: unknown; directionHash?: unknown; remakeOf?: unknown; recording?: unknown; grouped?: unknown; loudness?: unknown } } | null;
       if (file.path.startsWith("artifacts/") && (record?.generation?.source === "founding" || record?.generation?.workflow === "location-view-candidate")) boundary = Math.max(boundary, FOUNDING_IMAGES_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.retiredAt !== undefined) boundary = Math.max(boundary, ARTIFACT_RETIREMENT_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook") boundary = Math.max(boundary, AUDIOBOOK_TAKE_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.directionHash !== undefined) boundary = Math.max(boundary, AUDIOBOOK_DIRECTION_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.remakeOf !== undefined) boundary = Math.max(boundary, AUDIOBOOK_REMAKE_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.recording !== undefined) boundary = Math.max(boundary, RECORDED_TAKE_SCHEMA_VERSION);
+      if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && (record.generation.grouped !== undefined || record.generation.loudness !== undefined)) boundary = Math.max(boundary, AUDIOBOOK_GROUPED_SCHEMA_VERSION);
       const info = record?.mediaInfo;
       if (info == null) continue;
       if ("hasVideo" in info) boundary = Math.max(boundary, MEDIA_HAS_VIDEO_SCHEMA_VERSION);

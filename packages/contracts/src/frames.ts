@@ -3102,6 +3102,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("set-audiobook-reading"), worldId: UlidSchema, productionId: SlugSchema, reading: AudiobookReadingSchema })
     .strict(),
+  /** The book's requests for a groupable reader (design turn 185d): several blocks a request, or one. */
+  z
+    .object({ kind: z.literal("set-audiobook-requests"), worldId: UlidSchema, productionId: SlugSchema, requests: z.enum(["grouped", "per-paragraph"]) })
+    .strict(),
+  /**
+   * A grouped read's cut whose words did not match, kept as the block's take as it is (design
+   * turn 185c): the author heard it and keeps it. Answered as `audiobook.record`.
+   */
+  z
+    .object({ kind: z.literal("keep-audiobook-split"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), requestId: UlidSchema.optional() })
+    .strict(),
   /**
    * A speaker recorded by a person, or given back to their voice (design turn 155, SPEC-047
    * R-37): `narrator`, a sheet id, or a name no sheet carries. The book's choice, kept beside

@@ -126,6 +126,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "set-voice-pin": "studio", "read-audiobook-chapter": "studio", "stop-audiobook": "studio",
   "set-audiobook-reading": "studio", "set-audiobook-recorded": "studio", "set-audiobook-note": "studio",
   "set-audiobook-narrator": "studio", "quote-audiobook-narrator": "studio", "hear-audiobook-line": "studio",
+  "set-audiobook-requests": "studio", "keep-audiobook-split": "studio",
   "keep-audiobook-take": "studio", "discard-audiobook-take": "studio", "export-audiobook-script": "studio",
   "keep-audiobook-lines": "studio", "discard-audiobook-lines": "studio", "set-audiobook-block": "studio",
   "direct-chapter": "studio", "open-audiobook": "studio", "read-audiobook-book": "studio",

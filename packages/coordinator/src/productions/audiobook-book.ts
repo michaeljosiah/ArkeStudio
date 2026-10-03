@@ -9,6 +9,7 @@ import {
   audiobookTakeDirectionHash,
   audiobookTextHash,
   holdDirection,
+  groupingOffered,
   performanceNote,
   DEFAULT_AUDIOBOOK_BOOK,
   type AudiobookReader,
@@ -27,7 +28,7 @@ import type { WorldStore } from "../world/store.js";
 import { checkDirection } from "../voice/direction.js";
 import { castRefusal, effectiveReader, planAudiobook, readAudiobookBook, readerLanguage, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
 import { directableBlocks, type DirectableBlock } from "./audiobook-direction.js";
-import { chapterPriceToken, firstReadNotices, missIdentity, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
+import { chapterPriceToken, firstReadNotices, groupIdentity, missIdentity, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
 
 /**
  * The book (design turn 146, SPEC-047 R-15..R-17, R-29): every chapter prepared as its own
@@ -247,13 +248,19 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
       characters: misses.reduce((sum, block) => sum + block.text.length, 0),
       estimatedMicroUsd: toRead.reduce((sum, prepared) => sum + prepared.estimate, 0),
       voices: bookPriceLines(room.narrator, speaking, misses, priceOf, sheetName),
+      // Requests counted where reads are priced (design turn 185a), when any chapter groups.
+      ...(toRead.some((prepared) => prepared.groups.length > 0)
+        ? { requests: toRead.reduce((sum, prepared) => sum + prepared.requests, 0), perParagraph: toRead.reduce((sum, prepared) => sum + prepared.perParagraph, 0) }
+        : {}),
     },
+    // The book's Requests row (design turn 185d) shows only where the narrator's reader groups and this machine can split.
+    ...(groupingOffered(narratorModel, room.transcriber === true) ? { requests: bookFile !== null && bookFile !== "unreadable" && bookFile.requests === "per-paragraph" ? "per-paragraph" as const : "grouped" as const } : {}),
   };
 }
 
 export type AudiobookBookEvent =
   | { type: "started"; chapters: number; blocks: number }
-  | { type: "priced"; chapters: number; blocks: number; cloudBlocks: number; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: AudiobookPriceLine[]; notices: string[]; freePlan?: FreePlanShort }
+  | { type: "priced"; chapters: number; blocks: number; cloudBlocks: number; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: AudiobookPriceLine[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number }
   | { type: "progress"; chapterId: string; done: number; chapters: number }
   | { type: "finished"; outcome: "read" | "stopped" | "unavailable" | "failed"; chaptersRead: number; chaptersRefused: number; made: number; flagged: number; reason?: string };
 
@@ -326,7 +333,7 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
           "audiobook-book",
           deps.worldId,
           productionId,
-          ...toRead.flatMap((entry) => [`${entry.summary.id}:${entry.prepared.plan.chapter.version}:${entry.prepared.plan.chapter.hash}`, ...entry.prepared.misses.map(missIdentity)]),
+          ...toRead.flatMap((entry) => [`${entry.summary.id}:${entry.prepared.plan.chapter.version}:${entry.prepared.plan.chapter.hash}`, ...entry.prepared.misses.map(missIdentity), ...entry.prepared.groups.map(groupIdentity)]),
           // The free day's question with it (codex on PR 1475): an answer to `Read 1 now` is not one to read ten.
           ...(freePlan !== null ? [JSON.stringify(freePlan.short)] : []),
         ].join("\n"),
@@ -350,6 +357,10 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
         // chapter's read is the one that makes the slot, and the book asks once for all of them.
         notices: firstReadNotices(toRead.flatMap((entry) => entry.prepared.clones)),
         ...(freePlan !== null ? { freePlan: freePlan.short } : {}),
+        // Requests counted where reads are priced (design turn 185a).
+        ...(toRead.some((entry) => entry.prepared.groups.length > 0)
+          ? { requests: toRead.reduce((sum, entry) => sum + entry.prepared.requests, 0), perParagraph: toRead.reduce((sum, entry) => sum + entry.prepared.perParagraph, 0) }
+          : {}),
       });
       return;
     }
@@ -362,7 +373,7 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
     if (signal.aborted) break;
     // The chapter's price as the book priced it (R-17): the chapter's run reads on it only
     // while the chapter is still what was priced (codex on PR 1187).
-    const result = await deps.runChapter(entry.summary.id, chapterPriceToken(deps.worldId, productionId, entry.summary.id, entry.prepared.plan.chapter, entry.prepared.misses));
+    const result = await deps.runChapter(entry.summary.id, chapterPriceToken(deps.worldId, productionId, entry.summary.id, entry.prepared.plan.chapter, entry.prepared.misses, entry.prepared.groups));
     made += result.made;
     flagged += result.flagged;
     if (result.outcome === "refused") refused += 1;

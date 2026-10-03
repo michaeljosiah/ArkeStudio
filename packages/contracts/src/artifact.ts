@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AudiobookGroupedSchema, AudiobookLoudnessSchema } from "./audiobook-grouped.js";
 import { RecipeIdentitySchema } from "./comfyui.js";
 import { JobSamplingSchema } from "./local-sampling.js";
 import { BenchParamsSchema, BenchReferenceTokenSchema } from "./bench.js";
@@ -221,6 +222,10 @@ export const ArtifactAudiobookGenerationSchema = z
       })
       .strict()
       .optional(),
+    /** Cut from a grouped request (design turn 185): the request, its blocks and the cut's place in it. */
+    grouped: AudiobookGroupedSchema.optional(),
+    /** The loudness the take was filed at (design turn 185). */
+    loudness: AudiobookLoudnessSchema.optional(),
   })
   .strict();
 export type ArtifactAudiobookGeneration = z.infer<typeof ArtifactAudiobookGenerationSchema>;

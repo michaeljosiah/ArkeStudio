@@ -6,6 +6,7 @@ import { isSceneBreak } from "./manuscript.js";
 import { DeliverySchema } from "./voice.js";
 import { chapterParagraphs, voicedBlocks, type VoicedBlock } from "./prose.js";
 import { textDigest } from "./subtitles.js";
+import { AudiobookGroupedSchema, AudiobookLoudnessSchema, AudiobookSplitFlagSchema } from "./audiobook-grouped.js";
 
 /**
  * The audiobook (design turn 146, SPEC-047): a story production's third export beside `.docx`
@@ -180,6 +181,10 @@ export const AudiobookTakeSchema = z
     directionHash: z.string().min(1).optional(),
     /** The speaker's note could not be applied (R-45): this narrator's row takes no phrase, so the line was read without it. */
     noteHeld: z.literal(true).optional(),
+    /** Cut from a grouped request (design turn 185): the request, its blocks and the cut's place in it. */
+    grouped: AudiobookGroupedSchema.optional(),
+    /** The loudness the take was filed at (design turn 185). */
+    loudness: AudiobookLoudnessSchema.optional(),
     madeAt: IsoDateTimeSchema,
   })
   .strict();
@@ -311,7 +316,14 @@ export function audiobookRekeyed(record: Pick<ChapterAudiobook, "direction"> | n
 export const AUDIOBOOK_DELIVERIES = DeliverySchema.options;
 
 /** A block whose make failed or was refused (R-14): the reason, kept until a later make replaces it. */
-export const AudiobookFlagSchema = z.object({ reason: z.string().min(1), at: IsoDateTimeSchema }).strict();
+export const AudiobookFlagSchema = z
+  .object({
+    reason: z.string().min(1),
+    at: IsoDateTimeSchema,
+    /** A grouped read's cut whose words did not match (design turn 185c): kept on the shelf until the author keeps it. */
+    split: AudiobookSplitFlagSchema.optional(),
+  })
+  .strict();
 export type AudiobookFlag = z.infer<typeof AudiobookFlagSchema>;
 
 /**
@@ -406,6 +418,11 @@ export const AudiobookBookSchema = z
      * absent is the author's own. A note the author wrote is never replaced by a draft.
      */
     noteSources: z.record(z.string().min(1).max(120), z.literal("sheet")).optional(),
+    /**
+     * How a groupable reader's blocks are sent (design turn 185d): absent is grouped, several
+     * blocks a request; `per-paragraph` is one block a request, as every reader read before.
+     */
+    requests: z.literal("per-paragraph").optional(),
   })
   .strict();
 export type AudiobookBook = z.infer<typeof AudiobookBookSchema>;
@@ -664,8 +681,13 @@ export const AudiobookDoorSchema = z
         characters: z.number().int().min(0),
         estimatedMicroUsd: z.number().int().min(0),
         voices: z.array(AudiobookPriceLineSchema),
+        /** The requests `Read the book` makes, and a block a request (design turn 185). */
+        requests: z.number().int().min(0).optional(),
+        perParagraph: z.number().int().min(0).optional(),
       })
       .strict(),
+    /** How the book's groupable reader sends blocks (design turn 185d); absent when its reader cannot group or this machine cannot split. */
+    requests: z.enum(["grouped", "per-paragraph"]).optional(),
   })
   .strict();
 export type AudiobookDoor = z.infer<typeof AudiobookDoorSchema>;
