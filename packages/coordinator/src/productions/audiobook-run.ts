@@ -1,4 +1,4 @@
-import { freeCreditDraw, freeCreditOverrun, freeLimitReason, freePlanFailure, freePlanShortfall, GOOGLE_FREE_LIMIT, quoteSpeech, speechAsks, type FreePlanAllowance, type FreePlanShort, type SpeechQuote } from "@arke-studio/contracts";
+import { freeCreditDraw, freeCreditOverrun, freeLimitReason, freePlanFailure, freePlanShortfall, GOOGLE_DAILY_LIMIT, GOOGLE_FREE_LIMIT, quoteSpeech, speechAsks, type FreePlanAllowance, type FreePlanShort, type SpeechQuote } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -38,7 +38,8 @@ import { checkDirection, directionPlan, type RenderedPart } from "../voice/direc
 import { audiobookLanding, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
 
 /**
- * A read ended by its free plan — the day's limit, or a billed key — which ends the run with it.
+ * A read ended by a limit the rest of the run would only meet again — the free day, a billed key,
+ * or a paid key's own daily quota — which ends the run with it.
  * The message is what the block's flag says; `reason` is what the run ends with, which keeps the
  * limit and the reset Google named for the note under the button.
  */
@@ -841,6 +842,9 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
             const ended = job.status === "failed" ? freePlanFailure(job.error) : null;
             // The flag says the limit plainly; the run's ending keeps the reset Google named.
             if (ended !== null) throw new FreePlanEnded(ended.startsWith(GOOGLE_FREE_LIMIT) ? GOOGLE_FREE_LIMIT : ended, ended);
+            // A paid key's own day ends the run too (codex on PR 1475): flagged and passed over,
+            // a 122-block chapter sent 122 requests to the same refusal and ended `read`.
+            if (job.status === "failed" && job.error?.includes(GOOGLE_DAILY_LIMIT)) throw new FreePlanEnded(GOOGLE_DAILY_LIMIT);
             throw new Error(job.status === "cancelled" ? "stopped" : "the voice job failed · open Activity for details");
           }
           landed.push(job.landedFiles[0]);

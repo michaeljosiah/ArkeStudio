@@ -1,6 +1,6 @@
 import type { CapabilityProbe, ClientDeclarations, SpeechUsage, VoiceCandidate } from "@arke-studio/contracts";
 import { randomUUID } from "node:crypto";
-import { freeLimitDetail, GOOGLE_FREE_LIMIT, speechInputFits } from "@arke-studio/contracts";
+import { freeLimitDetail, GOOGLE_DAILY_LIMIT, GOOGLE_FREE_LIMIT, speechInputFits } from "@arke-studio/contracts";
 import { GEMINI_SPEECH_INPUT_BYTES, geminiSpeechModel } from "../gemini-tts-models.js";
 import { googleVoiceDesignBody, googleVoiceDesignResult, googleDesignedVoicePage, requireGoogleVoiceId } from "./google-voices.js";
 import type { VoiceDesignClient, VoiceDesignInput } from "../types.js";
@@ -306,7 +306,7 @@ export class GoogleClient implements VoiceCatalogueClient, VoiceDesignClient {
         const { limit, resetsAt } = googleDailyLimitDetail(body);
         if (googleFreeTier(body)) throw new ProviderFreeLimitError(`${GOOGLE_FREE_LIMIT} (HTTP 429 free daily quota${freeLimitDetail({ limit, resetsAt })})`, limit, resetsAt);
         // A paid tier's day is as final as the free one's, but it is not the free plan's to name.
-        throw new ProviderDailyLimitError(`Google's daily request limit was reached for this key (HTTP 429 daily quota${freeLimitDetail({ limit, resetsAt })})`);
+        throw new ProviderDailyLimitError(`${GOOGLE_DAILY_LIMIT} for this key (HTTP 429 daily quota${freeLimitDetail({ limit, resetsAt })})`);
       }
       throw new ProviderBusyError("Google's project quota was reached (HTTP 429)", { witnessed: true });
     }
