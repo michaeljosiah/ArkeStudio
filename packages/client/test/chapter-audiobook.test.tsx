@@ -1343,3 +1343,105 @@ describe("the director reads the book (design turn 184)", () => {
     assert.equal(q(m, '[data-testid="direct-audiobook"]'), null, "the card answers it until it is accepted or discarded");
   });
 });
+
+describe("grouped reads (design turn 185)", () => {
+  const GEMINI: ManifestModel = {
+    id: "gemini-3.8-flash-tts",
+    provider: "google",
+    capability: "voice-tts",
+    displayName: "Gemini 3.8 Flash TTS",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: { audioFormat: "wav", maxSpeechUtf8Bytes: 7000 },
+    pricing: { kind: "perToken", microUsdPerMillionInput: 500_000, microUsdPerMillionOutput: 9_000_000,
+      speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25, rates: [
+        { version: "intro", effectiveFrom: "2026-09-01T00:00:00.000Z", microUsdPerMillionInput: 500_000, microUsdPerMillionOutput: 9_000_000 },
+      ] } },
+    cadence: { deliveries: ["measured"], speed: null, pause: "unsupported", emphasis: "unsupported", breath: "unsupported", outputTimestamps: "none", phrase: "best-effort-instruction",
+      deliveryMappings: { measured: { settings: {}, instruction: "Read calmly." } }, groupable: true },
+  };
+  const READER = { provider: "google", model: GEMINI.id, voiceId: "Kore", label: "Kore" };
+  const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+  /** A groupable Gemini narrator for the book, and a local transcriber on this machine. */
+  function grouped(requests?: "per-paragraph", transcriber = true): ClientState {
+    const state = inkbound();
+    state.world = { ...state.world!, productions: state.world!.productions.map((p) => (p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "narrator", narrator: READER, ...(requests !== undefined ? { requests } : {}) } } : p)) };
+    state.app = {
+      ...state.app,
+      manifest: { ...state.app.manifest!, models: [...state.app.manifest!.models, GEMINI] },
+      providers: [...state.app.providers, { id: "whispercpp", configured: true, validation: "valid", probes: [{ capability: "voice-stt", available: transcriber }], fault: null }],
+    };
+    return state;
+  }
+  async function mountGrouped(state: ClientState): Promise<Mounted> {
+    const m = await mount(state);
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...READER, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    return m;
+  }
+
+  it("Read the chapter counts requests beside blocks, and each request's blocks are bracketed under a label (185a)", async () => {
+    const m = await mountGrouped(grouped());
+    const press = q(m, '[data-testid="read-audiobook"]')!.textContent!;
+    assert.match(press, /^Read the chapter · 4 blocks · 1 request · ~\$/, press);
+    assert.deepEqual(all(m, '[data-testid="audiobook-request"]').map((label) => label.textContent), ["request 1 · 4 blocks · ~1 min"]);
+    assert.equal(all(m, ".fy-ab__request .fy-ab__block").length, 4, "the request's blocks sit inside its bracket");
+  });
+
+  it("reads per paragraph where the book says so or this machine cannot split", async () => {
+    for (const state of [grouped("per-paragraph"), grouped(undefined, false)]) {
+      const m = await mountGrouped(state);
+      assert.doesNotMatch(q(m, '[data-testid="read-audiobook"]')!.textContent!, /request/);
+      assert.equal(all(m, '[data-testid="audiobook-request"]').length, 0);
+      await act(async () => m.root.unmount());
+      open.splice(open.indexOf(m), 1);
+      m.container.remove();
+    }
+  });
+
+  it("the confirm sheet names requests, a block a request and the estimate, and Confirm answers the token (185a)", async () => {
+    const m = await mountGrouped(grouped());
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 4_600, confirmationToken: "tok", voices: [{ label: "Kore", provider: "google", characters: 120, estimatedMicroUsd: 4_600 }], requests: 1, perParagraph: 4 }));
+    const sheet = q(m, '[data-testid="read-sheet"]')!;
+    assert.ok(sheet, "a grouped read is confirmed in its sheet");
+    assert.match(sheet.textContent!, /Requests1 · grouped/);
+    assert.match(sheet.textContent!, /Per paragraph4 requests/);
+    assert.match(sheet.textContent!, /Estimate~\$0\.0046/);
+    const confirm = q(m, '[data-testid="read-sheet"] [data-testid="audiobook-confirm"]')!;
+    assert.equal(confirm.textContent, "Confirm · 1 request · ~$0.0046");
+    await act(async () => confirm.click());
+    const answered = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.equal(answered.confirmationToken, "tok");
+  });
+
+  it("progress counts requests and blocks, and the request being read is dark (185b)", async () => {
+    const m = await mountGrouped(grouped());
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4, requests: 1, groups: [NARRATION_KEYS] }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.request", ...ids, index: 1, of: 1, keys: NARRATION_KEYS }));
+    assert.equal(q(m, '[data-testid="audiobook-progress"]')!.textContent, "reading… request 1 of 1 · 0 of 4");
+    assert.ok(q(m, ".fy-ab__request--now"), "the bracket is dark while its request is read");
+    assert.equal(q(m, '[data-testid="audiobook-request"]')!.textContent, "request 1 · reading");
+  });
+
+  it("a split that did not match says what was heard; Keep keeps it and Re-read reads it again (185c)", async () => {
+    const m = await mountGrouped(grouped());
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
+    const held = record(["title", "p0.0", "p1.0"], texts);
+    held.flags["p3.0"] = { reason: "split did not match · “six and the tide not called”", at: "2026-09-14T10:00:00.000Z",
+      split: { artifactId: "ar_01J8F3K2QW9VZX4N7M0RTYB6H9", heard: "six and the tide not called", request: "jb_01J8F3K2QW9VZX4N7M0RTYB6H9", offsetSec: 72, durationSec: 19 } };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, outcome: "read", made: 3, flagged: 1, record: held }));
+    const line = q(m, '[data-testid="audiobook-split"]')!;
+    assert.match(line.textContent!, /split did not match · “six and the tide not called”/);
+    await act(async () => all(m, ".fy-ab__block")[3]!.click());
+    const panel = q(m, '[data-testid="audiobook-split-panel"]')!;
+    assert.match(panel.textContent!, /grouped · 1:12–1:31/);
+    assert.match(panel.textContent!, /Heardsix and the tide not called/);
+    await act(async () => q(m, '[data-testid="audiobook-keep-split"]')!.click());
+    const kept = m.sent.findLast((message) => message.kind === "keep-audiobook-split") as Extract<ClientMessage, { kind: "keep-audiobook-split" }>;
+    assert.equal(kept.block, "p3.0");
+    assert.match(q(m, '[data-testid="audiobook-reread"]')!.textContent!, /^Re-read · 1 request · ~\$/);
+    await act(async () => q(m, '[data-testid="audiobook-reread"]')!.click());
+    const reread = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.deepEqual(reread.blocks, ["p3.0"], "one block, which the coordinator reads with its neighbours");
+  });
+});

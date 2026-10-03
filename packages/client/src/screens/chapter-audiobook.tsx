@@ -1,5 +1,5 @@
-import { estimateSpeechMicroUsd, freeCreditLeft, freePlanAskCopy, freePlanNote, speechPlanLabel, speechPriceCopy, speechPricePrefix } from "@arke-studio/contracts";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { chapterParagraphs, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   AUDIOBOOK_DELIVERIES,
   AUDIOBOOK_TITLE_KEY,
@@ -96,6 +96,8 @@ import {
   useAudiobookRuns,
   useDirectionRuns,
   useStore,
+  keepAudiobookSplit,
+  setAudiobookRequests,
 } from "../lib/store.js";
 
 /**
@@ -124,6 +126,8 @@ export interface ChapterAudiobookInput {
   bookNarrator?: AudiobookReader;
   /** The book note and this chapter's note (design turn 184, R-53), which lead every block. */
   readingNotes?: AudiobookReadingNotes;
+  /** The book reads a block a request (design turn 185d); absent is grouped where the reader can group. */
+  requests?: "per-paragraph";
   connection: string;
   locked: boolean;
   /**
@@ -191,6 +195,13 @@ export interface BlockRow {
    * block undirected.
    */
   proposed: { input: AudiobookDirectionInput; held: HeldControl[]; sentAs: SentPart[] | null; readingHeld: HeldReadingNote[] } | null;
+  /**
+   * The block as a grouped request takes it (design turn 185): the notes the chapter shares apart
+   * from each part's own style — the coordinator's packing, so the requests counted here are its.
+   */
+  turns: Pick<BlockTurns, "shared" | "parts">;
+  /** A grouped read's cut whose words did not match (design turn 185c), while its flag stands. */
+  split: AudiobookSplitFlag | null;
 }
 
 /** The block's direction as it stands for its words (R-43): the record's, or carried from earlier words. */
@@ -216,7 +227,7 @@ export function directionView(
   language?: string,
   note?: string,
   reading?: AudiobookReadingNotes,
-): { held: HeldControl[]; sentAs: SentPart[]; readingHeld: HeldReadingNote[] } | null {
+): { held: HeldControl[]; sentAs: SentPart[]; readingHeld: HeldReadingNote[]; turns: Pick<BlockTurns, "shared" | "parts"> } | null {
   try {
     // The book note and the chapter note lead every part, before the speaker's note and the
     // block's own direction (design turn 184, R-53): sentences in the style on an instruction
@@ -233,13 +244,23 @@ export function directionView(
       text: tags.length > 0 ? `${tags.join(" ")} ${part.text}` : part.text,
       ...(style !== "" ? { style: part.style === undefined ? style : `${style} ${part.style}` } : {}),
     });
-    if (input === null) return { held: [], sentAs: [lead({ text: normalizeSpeechText(text) })], readingHeld: context.held };
-    const { plan: sent, held } = holdDirection(text, viewPlan(input), model, language);
-    const sentAs = markerSegments(text, sent, model, language).map((segment) => {
-      const mapped = mapCadence(segment.text, VIEW_HASH, { ...segment.plan, sourceTextHash: VIEW_HASH }, model, language);
-      return lead({ text: mapped.providerText, ...(mapped.instructions !== undefined ? { style: mapped.instructions } : {}) });
+    // Each part's own style apart from the chapter's shared notes (design turn 185), as the
+    // coordinator packs a grouped request: the notes once, each turn its own after.
+    const own = (part: SentPart) => [...(playing?.mode === "instruction" ? [note!] : []), ...(part.style !== undefined ? [part.style] : [])].join(" ");
+    const turnsOf = (parts: SentPart[]): Pick<BlockTurns, "shared" | "parts"> => ({
+      ...(context.instructions !== undefined ? { shared: context.instructions } : {}),
+      parts: parts.map((part) => ({ text: tags.length > 0 ? `${tags.join(" ")} ${part.text}` : part.text, ...(own(part) !== "" ? { style: own(part) } : {}) })),
     });
-    return { held, sentAs, readingHeld: context.held };
+    if (input === null) {
+      const words = { text: normalizeSpeechText(text) };
+      return { held: [], sentAs: [lead(words)], readingHeld: context.held, turns: turnsOf([words]) };
+    }
+    const { plan: sent, held } = holdDirection(text, viewPlan(input), model, language);
+    const segments = markerSegments(text, sent, model, language).map((segment) => {
+      const mapped = mapCadence(segment.text, VIEW_HASH, { ...segment.plan, sourceTextHash: VIEW_HASH }, model, language);
+      return { text: mapped.providerText, ...(mapped.instructions !== undefined ? { style: mapped.instructions } : {}) };
+    });
+    return { held, sentAs: segments.map(lead), readingHeld: context.held, turns: turnsOf(segments) };
   } catch {
     return null;
   }
@@ -378,6 +399,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       const proposedView = proposedInput === undefined || speakerModel === null ? null : directionView(block.text, proposedInput, speakerModel, language, proposedNote, proposedReading);
       return {
         block,
+        turns: view?.turns ?? { parts: [{ text: normalizeSpeechText(block.text) }] },
+        split: recordOrNull?.flags[block.key]?.split ?? null,
         state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact, byPerson, note, led),
         readingHeld: view?.readingHeld ?? [],
         proposed: proposedInput === undefined ? null : { input: proposedInput, held: proposedView?.held ?? [], sentAs: proposedView?.sentAs ?? null, readingHeld: proposedView?.readingHeld ?? [] },
@@ -457,6 +480,63 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       }, { estimate: 0, plan: null, tokenPriced: false }),
     [rows, modelOf],
   );
+
+  // The requests a press would make (design turn 185a): the coordinator's grouping, computed on
+  // the same blocks — consecutive cloud blocks of one groupable reader, packed under the caps and
+  // closed at natural breaks — so the button says `5 requests` before anything is asked. Grouping
+  // is offered only where this machine can split, as the coordinator decides it.
+  const providers = state?.app.providers;
+  const requestsSetting = input.requests;
+  const grouping = useMemo(() => {
+    const transcriber = localTranscriberAvailable(providers ?? []);
+    const toRead = (row: BlockRow) => row.state !== "made" && row.state !== "awaiting" && row.speaker.provider !== "kokoro" && modelOf(row.speaker) !== null;
+    const grouped = (row: BlockRow) => {
+      const model = modelOf(row.speaker);
+      return model !== null && readsGrouped(model, transcriber, requestsSetting === undefined ? null : { requests: requestsSetting }) && model.limits.audioFormat === "wav"
+        && voiceSourceFor(world?.clonedVoices ?? [], row.speaker.provider, row.speaker.model, row.speaker.voiceId).kind !== "cloned";
+    };
+    const breaks = readBreaksFor(rows.map((row) => ({ key: row.block.key, paragraph: row.block.paragraph, ...(row.block.speaker !== undefined ? { speaker: row.block.speaker } : {}) })), chapterParagraphs(body));
+    const groups = groupReads(
+      rows.map((row) => {
+        if (!toRead(row) || !grouped(row)) return null;
+        const breakAfter = breaks.get(row.block.key);
+        return { key: row.block.key, reader: `${row.speaker.provider}/${row.speaker.model}/${row.speaker.voiceId}`, ...row.turns, ...(breakAfter !== undefined ? { breakAfter } : {}) };
+      }),
+      DEFAULT_GROUP_PACKING,
+    ).filter((group) => group.keys.length >= 2);
+    const groupOf = new Map(groups.flatMap((group) => group.keys.map((key) => [key, group] as const)));
+    // Each request numbered in reading order, a block alone counted as one.
+    let requests = 0;
+    const numbered: Array<{ keys: string[]; seconds: number; request: number; estimatedMicroUsd: number }> = [];
+    let perParagraph = 0;
+    for (const row of rows) {
+      if (!toRead(row)) continue;
+      perParagraph += 1;
+      const group = groupOf.get(row.block.key);
+      if (group === undefined) {
+        requests += 1;
+        continue;
+      }
+      if (group.keys[0] !== row.block.key) continue;
+      requests += 1;
+      const model = modelOf(row.speaker)!;
+      numbered.push({ keys: group.keys, seconds: group.seconds, request: requests, estimatedMicroUsd: speechPlanLabel(model) !== null ? 0 : quoteGroupedSpeech(model, group.turns).expectedMicroUsd });
+    }
+    return { groups: numbered, requests, perParagraph, groupOf: new Map(numbered.flatMap((group) => group.keys.map((key) => [key, group] as const))) };
+  }, [rows, modelOf, providers, requestsSetting, body, world?.clonedVoices]);
+  // A grouped request's estimate is its one quote: a lead-in and tail a request, not a block.
+  const groupedEstimate = useMemo(() => {
+    let estimate_ = 0;
+    for (const row of rows) {
+      const group = grouping.groupOf.get(row.block.key);
+      if (group === undefined || row.state === "made" || row.state === "awaiting") continue;
+      const model = modelOf(row.speaker);
+      if (model === null || speechPlanLabel(model) !== null) continue;
+      estimate_ -= estimateSpeechMicroUsd(model, row.block.text);
+    }
+    return estimate_ + grouping.groups.reduce((sum, group) => sum + group.estimatedMicroUsd, 0);
+  }, [rows, modelOf, grouping]);
+  const chapterEstimate = Math.max(0, estimate + groupedEstimate);
 
   // The player: the made takes in order, through the one queue the page read uses (R-20).
   // With a speaker chosen, Play plays that speaker's takes alone (R-33).
@@ -682,6 +762,16 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         />
       );
     }
+    if (run?.state === "priced" && run.price !== undefined && run.price.requests !== undefined) {
+      // A grouped read is confirmed in its sheet (design turn 185a): the head says what is asked.
+      return (
+        <span className="fy-ab__control">
+          <Button variant="primary" disabled data-testid="read-audiobook">
+            Read the chapter · {run.toMake} block{run.toMake === 1 ? "" : "s"} · {run.price.requests} request{run.price.requests === 1 ? "" : "s"} · {speechPricePrefix(models, run.price.voices.map((voice) => voice.provider))}{formatMicroUsd(run.price.estimatedMicroUsd)}
+          </Button>
+        </span>
+      );
+    }
     if (run?.state === "priced" && run.price !== undefined) {
       const price = run.price;
       // The author confirms the estimate. `up to` stays only where every reader is priced by
@@ -721,7 +811,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     if (reading_) {
       return (
         <span className="fy-ab__control">
-          <span className="fy-mono">reading… {run.made} of {run.toMake}</span>
+          <span className="fy-mono" data-testid="audiobook-progress">
+            {run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
+          </span>
           <Button variant="ghost" onClick={() => stopAudiobook(worldId, prodId, chapter.file)}>
             Stop
           </Button>
@@ -759,7 +851,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         {counts.toMake.length > 0 && (
           <Button variant={directable ? "secondary" : "primary"} disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
             Read the chapter · {counts.toMake.length} block{counts.toMake.length === 1 ? "" : "s"}
-            {estimate > 0 ? ` · ${tokenPriced ? "~" : ""}${formatMicroUsd(estimate)}` : plan !== null ? ` · ${plan}` : ""}
+            {grouping.groups.length > 0 ? ` · ${grouping.requests} request${grouping.requests === 1 ? "" : "s"}` : ""}
+            {chapterEstimate > 0 ? ` · ${tokenPriced ? "~" : ""}${formatMicroUsd(chapterEstimate)}` : plan !== null ? ` · ${plan}` : ""}
           </Button>
         )}
       </span>
@@ -775,10 +868,77 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
           ? "stopped · the takes made stand"
           : null;
 
+  // The sheet a grouped read is confirmed in (design turn 185a): blocks, requests, a block a
+  // request, Google's free day where it is known, the estimate.
+  const readSheet = run?.state === "priced" && run.price?.requests !== undefined
+    ? {
+        blocks: run.toMake,
+        requests: run.price.requests,
+        perParagraph: run.price.perParagraph ?? run.toMake,
+        voice: run.price.voices.map((voice) => voice.label).join(" · "),
+        ...(run.price.freePlan !== undefined ? { freeDay: run.price.freePlan } : {}),
+        estimate: `${speechPricePrefix(models, run.price.voices.map((voice) => voice.provider))}${formatMicroUsd(run.price.estimatedMicroUsd)}`,
+        starting,
+        confirm: () => {
+          if (run.price !== undefined && send({ confirmationToken: run.price.confirmationToken })) setStartingFrom(run);
+        },
+        cancel: () => dismissAudiobookRun(worldId, prodId, chapter.id),
+      }
+    : null;
+  // Re-read with neighbours (design turn 185c): the block before, the block, the block after, one request.
+  const reReadPrice = useCallback(
+    (key: string): string | null => {
+      const at = rows.findIndex((row) => row.block.key === key);
+      const row = rows[at];
+      const model = row === undefined ? null : modelOf(row.speaker);
+      if (row === undefined || model === null) return null;
+      const label = speechPlanLabel(model);
+      if (label !== null) return label;
+      const near = [rows[at - 1], row, rows[at + 1]].filter((candidate): candidate is BlockRow => candidate !== undefined && candidate.speaker.voiceId === row.speaker.voiceId && candidate.speaker.provider === row.speaker.provider);
+      const turns = packTurnsFor(near);
+      return `~${formatMicroUsd(quoteGroupedSpeech(model, turns).expectedMicroUsd)}`;
+    },
+    [rows, modelOf],
+  );
+  const keepSplit = useCallback(
+    (key: string) => {
+      if (locked || connection !== "open") return;
+      keepAudiobookSplit(worldId, prodId, chapter.file, key);
+    },
+    [locked, connection, worldId, prodId, chapter.file],
+  );
+  // The margin's brackets (design turn 185a, 185b): the run's own requests while it reads and
+  // after, the requests a press would make otherwise; each labelled in one mono line.
+  const brackets = useMemo(() => {
+    const state = new Map(rows.map((row) => [row.block.key, row.state]));
+    const ran = run?.groups !== undefined && run.groups.length > 0 ? run.groups : null;
+    const source = ran ?? grouping.groups.map((group) => group.keys);
+    return source.map((keys, index) => {
+      const numbered = grouping.groupOf.get(keys[0]!);
+      // The run's own requests are numbered as it sent them; a press's, as the blocks fall.
+      const number = ran !== null ? index + 1 : (numbered?.request ?? index + 1);
+      const made = keys.filter((key) => state.get(key) === "made").length;
+      const now = reading_ && run?.requestKeys?.[0] === keys[0];
+      const label = now
+        ? `request ${number} · reading`
+        : made === keys.length
+          ? `request ${number} · made · ${made} of ${keys.length}`
+          : made > 0
+            ? `request ${number} · ${made} of ${keys.length} made`
+            : `request ${number} · ${keys.length} blocks${numbered !== undefined ? ` · ~${Math.max(1, Math.round(numbered.seconds / 60))} min` : ""}`;
+      return { keys, label, now };
+    });
+  }, [rows, run, grouping, reading_]);
+
   return {
     rows,
     counts,
-    estimate,
+    estimate: chapterEstimate,
+    grouping,
+    readSheet,
+    keepSplit,
+    reReadPrice,
+    brackets,
     filter,
     setFilter,
     filters,
@@ -1002,8 +1162,14 @@ function SpeakerMenu({ row, choices, onPick, onClose }: {
   );
 }
 
-export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, onSelect, onPlayOne, slug, filter = null, choices, onPin, marker = null, onMarker, modelOf, onDirect }: {
+export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, onSelect, onPlayOne, slug, filter = null, choices, onPin, marker = null, onMarker, modelOf, onDirect, brackets = [], onReRead, reReadPrice }: {
+  /** What reading a block again with its neighbours would cost, as its button says it. */
+  reReadPrice?: (key: string) => string | null;
   rows: BlockRow[];
+  /** Each grouped request's blocks (design turn 185a, 185b), bracketed in the margin under a mono label; dark while it is read. */
+  brackets?: ReadonlyArray<{ keys: readonly string[]; label: string; now: boolean }>;
+  /** A flagged split read again with its neighbours, one request (design turn 185c). */
+  onReRead?: (key: string) => void;
   sounding: BlockRow | null;
   selected: string | null;
   onSelect: (key: string) => void;
@@ -1065,13 +1231,14 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
   }, [markable, rows, onMarker]);
   if (rows.length === 0) return <p className="fy-bible__empty">Nothing to read yet.</p>;
   const pinnable = choices !== undefined && onPin !== undefined;
-  return (
-    <div className="fy-ab__blocks" data-testid="audiobook-blocks">
-      {rows.map((row) => {
+  const renderRow = (row: BlockRow) => {
         // The margin names who speaks (R-33): a colour a speaker with a sheet, grey for the
         // narrator, a dashed dot for a name no sheet carries; a line is tinted, narration is not.
         const tone = row.speakerKey === null ? "narrator" : row.colour === null ? "none" : String(row.colour);
+        // A grouped read's cut that did not match (design turn 185c): what was heard, under the block.
+        const split = row.state === "flagged" && row.split !== null ? row.split : null;
         return (
+          <Fragment key={row.block.key}>
           <div
             key={row.block.key}
             className={`fy-ab__block fy-voice--${tone}${row.speakerKey !== null ? " fy-ab__block--line" : ""}${sounding?.block.key === row.block.key ? " fy-ab__block--sounding" : ""}${selected === row.block.key ? " fy-ab__block--selected" : ""}${inAudiobookFilter(row, filter) ? "" : " fy-ab__block--dim"}${row.proposed !== null ? " fy-ab__block--proposed" : ""}`}
@@ -1190,9 +1357,80 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
               ><Play size={16} aria-hidden="true" /></button>
             </span>
           </div>
+          {split !== null && (
+            <div className="fy-ab__split" data-testid="audiobook-split">
+              <span className="fy-ab__split-heard fy-mono">split did not match · “{split.heard}”</span>
+              {onReRead !== undefined && (
+                <Button variant="ghost" onClick={(event) => { event.stopPropagation(); onReRead(row.block.key); }}>
+                  Re-read · 1 request{(reReadPrice?.(row.block.key) ?? null) !== null ? ` · ${reReadPrice!(row.block.key)}` : ""}
+                </Button>
+              )}
+            </div>
+          )}
+          </Fragment>
         );
-      })}
+  };
+  // Rows in their requests: a bracketed run of blocks under its label, every other block alone.
+  const bracketOf = new Map(brackets.flatMap((bracket) => bracket.keys.map((key) => [key, bracket] as const)));
+  const segments: Array<{ bracket: (typeof brackets)[number] | null; rows: BlockRow[] }> = [];
+  for (const row of rows) {
+    const bracket = bracketOf.get(row.block.key) ?? null;
+    const last = segments[segments.length - 1];
+    if (bracket !== null && last !== undefined && last.bracket === bracket) last.rows.push(row);
+    else segments.push({ bracket, rows: [row] });
+  }
+  return (
+    <div className="fy-ab__blocks" data-testid="audiobook-blocks">
+      {segments.map((segment) =>
+        segment.bracket === null ? (
+          segment.rows.map(renderRow)
+        ) : (
+          <Fragment key={`request-${segment.rows[0]!.block.key}`}>
+            <div className="fy-ab__request-label fy-mono" data-testid="audiobook-request">{segment.bracket.label}</div>
+            <div className={`fy-ab__request${segment.bracket.now ? " fy-ab__request--now" : ""}`}>{segment.rows.map(renderRow)}</div>
+          </Fragment>
+        ),
+      )}
     </div>
+  );
+}
+
+/** The turns a run of rows would be sent as, packed as the coordinator packs a grouped request. */
+function packTurnsFor(rows: readonly BlockRow[]) {
+  return packTurns(rows.map((row) => ({ key: row.block.key, reader: "r", ...row.turns })), DEFAULT_GROUP_PACKING).map(({ keys: _keys, ...turn }) => turn);
+}
+
+/**
+ * The sheet a grouped read is confirmed in (design turn 185a): the blocks and the requests, as
+ * many as a block a request would make, Google's free day where it is known, and the estimate.
+ */
+export function ReadSheet({ sheet }: { sheet: NonNullable<ReturnType<typeof useChapterAudiobook>["readSheet"]> }) {
+  const row = (label: string, value: string) => (
+    <div className="fy-ab__read" key={label}>
+      <b>{label}</b>
+      <span>{value}</span>
+    </div>
+  );
+  return (
+    <section className="fy-bible__panel fy-ab__directsheet fy-ab__readsheet" data-testid="read-sheet" aria-label="Read the chapter">
+      <div>
+        <h3 className="fy-ab__card-title">Read the chapter</h3>
+        <p className="fy-mono fy-ab__card-line">{sheet.blocks} block{sheet.blocks === 1 ? "" : "s"} · {sheet.requests} request{sheet.requests === 1 ? "" : "s"}{sheet.voice !== "" ? ` · ${sheet.voice}` : ""}</p>
+      </div>
+      <div className="fy-ab__reads" data-testid="read-sheet-reads">
+        {row("Requests", `${sheet.requests} · grouped`)}
+        {row("Per paragraph", `${sheet.perParagraph} request${sheet.perParagraph === 1 ? "" : "s"}`)}
+        {sheet.freeDay !== undefined && row("Google today", `${sheet.freeDay.allowed} a day · ${sheet.freeDay.allowed - sheet.freeDay.left} used`)}
+        {row("Estimate", sheet.estimate)}
+      </div>
+      <div className="fy-ab__control fy-ab__directsheet-foot">
+        <span className="fy-ch__panelpush" />
+        <Button variant="ghost" onClick={sheet.cancel}>Cancel</Button>
+        <Button variant="primary" data-testid="audiobook-confirm" disabled={sheet.starting} onClick={sheet.confirm}>
+          {sheet.starting ? "starting…" : `Confirm · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"} · ${sheet.estimate}`}
+        </Button>
+      </div>
+    </section>
   );
 }
 
@@ -1380,7 +1618,11 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
 }
 
 /** The side in the Audiobook view: the block pressed, its direction, then its takes. */
-export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, onUpload, onRecorded, onLines, onMarker, refused, blockHost, capturedSelection, choices, onPin, inSheet = false, hear }: {
+export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, onUpload, onRecorded, onLines, onMarker, refused, blockHost, capturedSelection, choices, onPin, inSheet = false, hear, onKeepSplit, reReadPrice }: {
+  /** A grouped read's cut that did not match, kept as it is (design turn 185c). */
+  onKeepSplit?: (key: string) => void;
+  /** What reading the block again with its neighbours would cost, as the button says it. */
+  reReadPrice?: (key: string) => string | null;
   /** Hear a block as the held proposal would send it (design turn 184b): the world and the chapter's file to ask under. */
   hear?: { worldId: string; chapterFile: string };
   rows: BlockRow[];
@@ -1570,7 +1812,25 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
             ...(take?.adopted !== undefined ? ["from the speech cache"] : []),
           ].join(" · ")}
         </p>
-        {row.state === "flagged" && flag !== undefined && <div className="fy-ch__moved fy-ch__moved--line">{flag.reason}</div>}
+        {row.state === "flagged" && flag !== undefined && flag.split === undefined && <div className="fy-ch__moved fy-ch__moved--line">{flag.reason}</div>}
+        {row.state === "flagged" && flag?.split !== undefined && (
+          // A cut whose words did not match (design turn 185c): its place in the request, what was
+          // heard beside the words, kept as it is or read again with its neighbours.
+          <div className="fy-ab__splitpanel" data-testid="audiobook-split-panel">
+            <p className="fy-mono fy-ab__card-line">grouped · {clock(flag.split.offsetSec)}–{clock(flag.split.offsetSec + flag.split.durationSec)}</p>
+            <div className="fy-ab__reads">
+              <div className="fy-ab__read"><b>Heard</b><span>{flag.split.heard === "" ? "nothing" : flag.split.heard}</span></div>
+              <div className="fy-ab__read"><b>Words</b><span>{normalizeSpeechText(row.block.text)}</span></div>
+            </div>
+            <div className="fy-ab__control">
+              <span className="fy-ch__panelpush" />
+              {onKeepSplit !== undefined && <Button variant="ghost" data-testid="audiobook-keep-split" onClick={() => onKeepSplit(row.block.key)}>Keep</Button>}
+              <Button variant="primary" data-testid="audiobook-reread" onClick={() => onMakeAgain(row.block.key)}>
+                Re-read{reReadPrice?.(row.block.key) !== null && reReadPrice !== undefined ? ` · 1 request · ${reReadPrice(row.block.key)}` : ""}
+              </Button>
+            </div>
+          </div>
+        )}
       </section>
       {coarse && captured !== null && choices !== undefined && onPin !== undefined && row.speakerKey === null && row.block.paragraph >= 0 && captured.raw.to > captured.raw.from && captured.raw.to - captured.raw.from <= 600 && <div className="fy-ab__make-line">
         <Button onClick={() => setLineOpen(true)}>Make this a line</Button>
@@ -2146,11 +2406,62 @@ export function DirectSheet({ worldId, productionId, chapterFile, chapterOrder, 
  * author's — and `Draft from the sheets` for the speakers with none. An author's note is never
  * replaced.
  */
-export function BookReadingPanel({ worldId, productionId, title, bookNote, speakers, onDone }: {
+/**
+ * The book's requests (design turn 185d): `Requests · Grouped · Per paragraph`, shown only where
+ * the book's reader can group and this machine can split; grouped by default. With the book's
+ * counts beside it: as many requests as `Read the book` would make, and a block a request.
+ */
+export function BookRequests({ worldId, productionId, setting, reader, counts }: {
+  worldId: string;
+  productionId: string;
+  setting: "grouped" | "per-paragraph";
+  /** `Gemini Flash`. */
+  reader: string;
+  counts?: { requests: number; perParagraph: number };
+}) {
+  const connection = useStore().connection;
+  const held = connection !== "open" || useProductionReading(worldId, productionId);
+  return (
+    <div className="fy-ab__requests" data-testid="book-requests">
+      <div className="fy-ab__requests-row">
+        <span className="fy-vd__note-k">Requests</span>
+        <span className="fy-ab__chips" role="radiogroup" aria-label="Requests">
+          {(["grouped", "per-paragraph"] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={setting === value}
+              disabled={held}
+              className={`fy-ab__chip${setting === value ? " fy-ab__chip--on" : ""}`}
+              onClick={() => {
+                if (setting !== value) setAudiobookRequests(worldId, productionId, value);
+              }}
+            >
+              {value === "grouped" ? "Grouped" : "Per paragraph"}
+            </button>
+          ))}
+        </span>
+        <span className="fy-mono fy-vd__note-count">{reader} · up to ~5 min a request</span>
+      </div>
+      {counts !== undefined && (
+        <div className="fy-ab__requests-row">
+          <span className="fy-vd__note-k">Book</span>
+          <span>{counts.requests} request{counts.requests === 1 ? "" : "s"}</span>
+          <span className="fy-mono fy-vd__note-count">{counts.perParagraph} per paragraph</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function BookReadingPanel({ worldId, productionId, title, bookNote, speakers, onDone, requests }: {
   worldId: string;
   productionId: string;
   /** `Performed · Ife's voice`. */
   title: string;
+  /** The book's requests, where its reader can group (design turn 185d). */
+  requests?: Parameters<typeof BookRequests>[0];
   bookNote: string | undefined;
   speakers: ReadonlyArray<{ key: string; name: string; note?: string; source?: "sheet" }>;
   onDone: () => void;
@@ -2164,6 +2475,7 @@ export function BookReadingPanel({ worldId, productionId, title, bookNote, speak
   return (
     <section className="fy-ab__bookreading" data-testid="book-reading" aria-label="The book's reading">
       <h3 className="fy-ab__card-title">{title}</h3>
+      {requests !== undefined && <BookRequests {...requests} />}
       <NoteRow label="Book note" value={bookNote} disabled={held} multiline onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note)} />
       <div className="fy-ab__bookreading-lbl">
         <span className="fy-vd__note-k">Speakers</span>

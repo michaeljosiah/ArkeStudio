@@ -266,6 +266,18 @@ const SCREENS = [
   { group: "Around it", screen: "Sent as on a tag reader (story)", frame: "184d", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "built", checked: "2026-10-03",
     controls: ["Sent as", "book note", "chapter note"],
     notes: ["Turn 184: a book or chapter note too long for a tag is struck under Sent as and never sent."] },
+  { group: "Around it", screen: "Read the chapter, grouped (story)", frame: "185a", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drifted", checked: "2026-10-03",
+    controls: ["Read the chapter", "Requests", "Per paragraph", "Estimate", "Cancel"],
+    notes: ["Turn 185: the press counts requests beside blocks; each request's blocks are bracketed under a mono label; a grouped price is confirmed in a sheet in the block panel's place. Gated: shown only for a reader marked groupable, on a machine with a local transcriber.", "Drift: <code>Google today</code> is a row only where Google's free day is known; a paid tier's daily figure is not known to Arke."] },
+  { group: "Around it", screen: "Reading, grouped (story)", frame: "185b", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drifted", checked: "2026-10-03",
+    controls: ["Stop"],
+    notes: ["Turn 185: progress says the request and the blocks; the request being read is bracketed dark.", "Drift: no Reading sheet with Split and Spent rows; the head carries the progress and Stop."] },
+  { group: "Around it", screen: "A split that did not match (story)", frame: "185c", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drifted", checked: "2026-10-03",
+    controls: ["split did not match", "Heard", "Words", "Keep", "Re-read"],
+    notes: ["Turn 185, amended: Re-read sends the block with its neighbours, one request, keeping the middle cut.", "Drift: the panel names the cut's place as <code>grouped · 1:12–1:31</code>, not the request's number, and draws no waveform."] },
+  { group: "Around it", screen: "The book's requests (story)", frame: "185d", route: "#/w/:worldId/p/:prodId/story/audiobook", status: "drifted", checked: "2026-10-03",
+    controls: ["Requests", "Grouped", "Per paragraph", "Done"],
+    notes: ["Turn 185: offered only where the coordinator says the book's reader groups here; grouped by default, written to the book.", "Drift: on the door, and in the book's reading when it is open; the counts are the book's, not a chapter's, and the provider's tier is not shown."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
