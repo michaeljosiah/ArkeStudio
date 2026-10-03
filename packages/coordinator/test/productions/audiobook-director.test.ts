@@ -353,6 +353,23 @@ describe("the director writes turn 181's direction (R-52)", () => {
     assert.equal(verified.dropped, 2, "the long note and the sound the row does not make");
   });
 
+  // Design turn 185: read per paragraph, chapter 01 changed delivery on most blocks.
+  it("keeps one delivery across a run: a change within four blocks of the last is held to the one before and counted", () => {
+    const blocks: DirectableBlock[] = Array.from({ length: 10 }, (_, index) => ({ ...narration, key: `p${index}.0` }));
+    const deliveries = ["measured", "warm", "urgent", "warm", "measured", "cold", "cold", "whispered", "cold", "urgent"];
+    const verified = verifyDirections({ blocks: blocks.map((block, index) => ({ block: block.key, delivery: deliveries[index] })) }, blocks);
+    assert.deepEqual(
+      blocks.map((block) => verified.proposed[block.key]?.delivery),
+      ["measured", "warm", "warm", "warm", "warm", "cold", "cold", "cold", "cold", "urgent"],
+      "warm at the second block, cold four on, urgent four after that; the turns between are held",
+    );
+    assert.equal(verified.dropped, 3, "urgent, measured and whispered are held and counted");
+    assert.equal(verified.directed, 10, "a held block keeps its direction, at the delivery before");
+    const prompt = directionPromptFor({ title: "Neap", blocks: [], pass: { index: 1, of: 1 } } as unknown as Parameters<typeof directionPromptFor>[0]);
+    assert.match(prompt, /about one block in four/);
+    assert.match(prompt, /no note is better than one that restates the chapter note/);
+  });
+
   it("the words are never changed: an anchor that is not in the block, or is in it twice, is dropped", () => {
     const verified = verifyDirections({ blocks: [{ block: "p1.0", delivery: "measured", cues: [{ kind: "delivery", words: "the goat looked", delivery: "warm" }, { kind: "sound", after: "like", sound: "chuckles" }] }] }, [line]);
     assert.deepEqual(verified.proposed["p1.0"]?.cues, []);
