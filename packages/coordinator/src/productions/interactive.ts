@@ -866,7 +866,7 @@ export interface BeatVoices {
  * to be on the real path, just before the copy (codex round 17). An artifact must be a plain file
  * directly on the world's own shelf, as every other pass that reads one requires.
  */
-async function containedWorldFile(worldDir: string, rel: string): Promise<string | null> {
+export async function containedWorldFile(worldDir: string, rel: string): Promise<string | null> {
   if (rel.startsWith("artifacts/")) return containedArtifactFile(worldDir, rel.slice("artifacts/".length));
   try {
     const [root, target] = await Promise.all([

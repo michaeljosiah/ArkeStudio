@@ -20,7 +20,7 @@ import type { BlockRow } from "../screens/chapter-audiobook.js";
 import { Button, Textarea, cx } from "./ui.js";
 
 /**
- * Pictures that follow the words (design turn 186c, SPEC-047 R-60): in a chapter's Audiobook
+ * Pictures that follow the words (design turn 186c, SPEC-047 R-69): in a chapter's Audiobook
  * view a block's panel gains Picture — one the world holds, chosen from its art, the cast's and
  * places' pictures or its scenes' frames and takes, or one generated for the book through the
  * Bench, priced and confirmed there as any image is. A chip in the block's margin shows the
@@ -105,7 +105,7 @@ export function PictureChip({ slug, picture, estimated }: { slug: string; pictur
   );
 }
 
-/** The brief a generated picture starts from: the block's words, then the book's look (R-60). */
+/** The brief a generated picture starts from: the block's words, then the book's look (R-69). */
 export function pictureBrief(words: string, production: Pick<ProductionBundle, "meta"> | null, world: Pick<WorldBundle, "artDirection"> | null): string {
   const look = productionStyleFor(production?.meta, world?.artDirection.description);
   return [`A picture for an audiobook, showing this moment: ${words.replace(/\s+/g, " ").trim()}`, ...(look !== undefined ? [`The look: ${look}`] : [])].join("\n\n");
@@ -141,7 +141,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
     setAudiobookPicture(worldId, production.meta.id, chapterFile, row.block.key, { file, source });
   };
 
-  // Generate (R-60): a new Bench session in image mode with the brief written in, then the Bench —
+  // Generate (R-69): a new Bench session in image mode with the brief written in, then the Bench —
   // which prices and confirms the picture as any image, and files it as an artifact kept there.
   const bench = useBench();
   const pending = useRef<{ before: string | null; brief: string } | null>(null);

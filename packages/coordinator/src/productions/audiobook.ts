@@ -143,7 +143,7 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
   if (Object.keys(kept).length > 0) await store.ensureSchemaVersion(AUDIOBOOK_TIMING_SCHEMA_VERSION, "audiobook-timing");
   const record: ChapterAudiobook = { ...bare, ...kept };
   // A record with no picture is written without the field, in the shape the builds before
-  // pictures read; one with a picture raises the world past them first (design turn 186, R-64).
+  // pictures read; one with a picture raises the world past them first (design turn 186, R-73).
   const { pictures, ...unpictured } = record;
   const pictured = pictures !== undefined && Object.keys(pictures).length > 0;
   if (pictured) await store.ensureSchemaVersion(AUDIOBOOK_PICTURES_SCHEMA_VERSION, "audiobook-pictures");

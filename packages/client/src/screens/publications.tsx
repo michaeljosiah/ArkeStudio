@@ -4,6 +4,8 @@ import type { PublicationJob, PublicationPlayback } from "@arke-studio/contracts
 import { Button } from "../components/ui.js";
 import { AppChrome } from "../components/chrome.js";
 import { readPublicationPreference, savePublicationPreference } from "../lib/publication-preferences.js";
+import { useStore } from "../lib/store.js";
+import { WebPackages } from "../components/audiobook-export.js";
 
 /** Native controls keep keyboard/seek/volume behavior; preferences never write into the edition. */
 export function PublicationVideo({ publication, onReady, onFailure }: { publication: PublicationPlayback; onReady?: () => void; onFailure?: (reason: string) => void }) {
@@ -117,6 +119,8 @@ export function PublicationsScreen() {
   const opening = useRef(false);
   const owned = useRef(new Set<string>());
   const bridge = typeof window === "undefined" ? undefined : window.arke?.publications;
+  // The open world's web packages are listed beside the editions (turn 186e): the audiobook, the interactive, the visual novel.
+  const openWorld = useStore().state?.world?.meta.worldId ?? null;
   const close = (id: string) => { if (owned.current.delete(id)) void bridge?.close(id).catch(() => {}); };
   const finish = () => { opening.current = false; if (alive.current) setBusy(false); };
   const failed = (reason: string) => { setPending(null); setError(reason); finish(); };
@@ -167,6 +171,7 @@ export function PublicationsScreen() {
       <PublicationVideo publication={item} {...(item === pending ? { onReady: () => { setPublication(item); setPending(null); finish(); }, onFailure: failed } : {})} />
     </div>)}
     <PublicationJobs onOpen={id => void open({ operationId: id })} />
+    {openWorld && <WebPackages worldId={openWorld} />}
     </main>
   </div>;
 }

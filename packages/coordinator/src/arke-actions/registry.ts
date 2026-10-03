@@ -543,6 +543,9 @@ const CLIENT_COMMAND_METADATA = {
   // Timing on the blocks (turn 187): a command on the record, and the chapter's mix rendered into the cache.
   "set-audiobook-timing": action("production", "command", "voice", "authored-change", ["chapters"]),
   "render-audiobook-mix": readOnly(QUERY),
+  // The audiobook's web package and the world's packages (turn 186e): a file the host writes, and a read.
+  "export-audiobook-player": action("production", "host-action", "export", "export", ["chapters", "artifacts", "exports"]),
+  "list-web-packages": readOnly(QUERY),
   "read-audiobook-book": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
   "stop-audiobook-book": action("production", "command", "voice", "external-network-action", ["chapters"]),
   "accept-direction": action("production", "command", "voice", "external-network-action", ["chapters"]),

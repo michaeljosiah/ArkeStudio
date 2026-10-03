@@ -13,7 +13,7 @@ import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
- * Listen (design turn 186, SPEC-047 R-57, R-58): the book as a listener hears it, opened over the
+ * Listen (design turn 186, SPEC-047 R-66, R-67): the book as a listener hears it, opened over the
  * window from the audiobook door once a block anywhere is made, fed the coordinator's plan, and
  * fed it again while a chapter is read under it — without the player starting over.
  */

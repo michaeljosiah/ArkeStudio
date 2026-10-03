@@ -2,7 +2,7 @@ import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
 
 /**
- * A picture set on a block (design turn 186c, SPEC-047 R-57): it shows from that block until the
+ * A picture set on a block (design turn 186c, SPEC-047 R-66): it shows from that block until the
  * next picture, in the player and the package. Optional and sparse — most blocks carry none.
  *
  * Where it came from is the tab it was chosen on: the world's art and uploads, the cast's and

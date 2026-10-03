@@ -1344,6 +1344,30 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
    * window is never left opening.
    */
   z.object({ ...base, type: z.literal("audiobook.door"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, door: AudiobookDoorSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
+  /** The audiobook's web package (design turn 186e): where it was written and what it holds, or what stood in the way. */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.exported"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      result: z.union([
+        z.object({ ok: z.literal(true), id: z.string().min(1), dir: z.string().min(1), file: z.string().min(1), chapters: z.number().int().min(1), pictures: z.number().int().min(0), bytes: z.number().int().min(0), joined: z.boolean() }).strict(),
+        z.object({ ok: z.literal(false), blockers: z.array(z.string().min(1)).min(1) }).strict(),
+      ]),
+    })
+    .strict(),
+  /** The world's web packages, newest first (design turn 186e). */
+  z
+    .object({
+      ...base,
+      type: z.literal("web-packages.listed"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      packages: z.array(z.object({ kind: z.enum(["interactive", "visual-novel", "audiobook"]), productionId: SlugSchema, title: z.string(), dir: z.string().min(1), exportedAt: z.string().min(1) }).strict()),
+    })
+    .strict(),
   /** The book as a listener hears it (design turn 186), answered to the window that asked; or none, and why. */
   z.object({ ...base, type: z.literal("audiobook.listening"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, listening: AudiobookListeningSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
   /**

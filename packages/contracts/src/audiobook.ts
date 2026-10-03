@@ -347,8 +347,8 @@ export const ChapterAudiobookSchema = z
     /** The direction per block (R-6); absent on a record the first build wrote, which read the same. */
     direction: z.record(z.string(), AudiobookDirectionSchema).default({}),
     /**
-     * The pictures set on blocks (design turn 186c, SPEC-047 R-60), by block key; absent on a
-     * record with none, which the builds before them read as before (R-64).
+     * The pictures set on blocks (design turn 186c, SPEC-047 R-69), by block key; absent on a
+     * record with none, which the builds before them read as before (R-73).
      */
     pictures: z.record(z.string(), AudiobookPictureSchema).optional(),
     /**

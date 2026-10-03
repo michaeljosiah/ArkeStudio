@@ -3286,12 +3286,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    */
   z.object({ kind: z.literal("open-audiobook"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   /**
-   * The book as a listener hears it (design turn 186, SPEC-047 R-57..R-62): the made chapters in
+   * The book as a listener hears it (design turn 186, SPEC-047 R-66..R-71): the made chapters in
    * order with their takes, gaps and pictures, answered as `audiobook.listening`. Nothing written.
    */
   z.object({ kind: z.literal("open-audiobook-listening"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   /**
-   * A picture set on a block, or taken off it with null (design turn 186c, R-60): a picture the
+   * A picture set on a block, or taken off it with null (design turn 186c, R-69): a picture the
    * world holds, by its world-relative path, and the tab it was chosen on. Answered as
    * `audiobook.record` with the same id.
    */
@@ -3379,7 +3379,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       language: z.string().refine(isManuscriptLanguage, "expected a BCP-47 language tag").optional(),
     })
     .strict(),
-  z.object({ kind: z.literal("open-exports-folder"), worldId: UlidSchema }).strict(),
+  /** The world's exports folder, or with `dir` one package in it (design turn 186e): a single folder name, never a path. */
+  z.object({ kind: z.literal("open-exports-folder"), worldId: UlidSchema, dir: z.string().regex(/^[A-Za-z0-9._-]+$/).optional() }).strict(),
+  /**
+   * The audiobook as the player (design turn 186e, SPEC-047 R-72): a web package of the chapters
+   * read whole, their audio and their pictures, answered as `audiobook.exported`.
+   */
+  z.object({ kind: z.literal("export-audiobook-player"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /** The world's web packages — interactive, visual novel and audiobook — answered as `web-packages.listed`. */
+  z.object({ kind: z.literal("list-web-packages"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("pick-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("import-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   /** The same file read again at the level the person chose (turn 131): the held document, nothing written. */

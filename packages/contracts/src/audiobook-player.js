@@ -1,5 +1,5 @@
 /*
- * The audiobook player (design turn 186, SPEC-047 R-57..R-62): the book as a listener hears it.
+ * The audiobook player (design turn 186, SPEC-047 R-66..R-71): the book as a listener hears it.
  * One player for the app and the exported package, as the interactive player is (turn 156): the
  * app imports this module and mounts it over the window, and the exporter inlines this file's own
  * text into player.html. That is why it is plain JavaScript with no imports and nothing outside
@@ -322,7 +322,7 @@ export function mountAudiobookPlayer(root, options) {
   function applyRate(audio) {
     audio.playbackRate = speed;
     audio.defaultPlaybackRate = speed;
-    // The pitch kept at every speed (R-59), under each engine's own name for it.
+    // The pitch kept at every speed (R-68), under each engine's own name for it.
     audio.preservesPitch = true;
     audio.mozPreservesPitch = true;
     audio.webkitPreservesPitch = true;
@@ -489,7 +489,7 @@ export function mountAudiobookPlayer(root, options) {
     if (!c || !c.audio[segIndex]) return;
     const before = t;
     t = Math.min(c.seconds, c.audio[segIndex].at + (players[cur].currentTime || 0));
-    // A gap the clock just crossed is said in Text for a few seconds after (R-58).
+    // A gap the clock just crossed is said in Text for a few seconds after (R-67).
     const crossed = c.gaps.find((gap) => gap.at > before + 1e-6 && gap.at <= t + 1e-6 && gap.at > 0);
     if (crossed) gapNote = crossed;
     if (gapNote && (t < gapNote.at || t > gapNote.at + GAP_NOTE_SEC)) gapNote = null;
@@ -665,7 +665,7 @@ export function mountAudiobookPlayer(root, options) {
     syncPosition();
   }
 
-  // ---- the phone's lock screen and a headset (R-62) ---------------------------------------------
+  // ---- the phone's lock screen and a headset (R-71) ---------------------------------------------
   const session = options.mediaSession || (nav && nav.mediaSession ? nav.mediaSession : null);
   let sessionKey = "";
   /** The lock screen fetches the artwork itself, so it is named in full where the page has a base. */
@@ -870,7 +870,7 @@ export function mountAudiobookPlayer(root, options) {
 
   return {
     /**
-     * A newer plan for the same book — a take landed while the listener listens (R-58): the
+     * A newer plan for the same book — a take landed while the listener listens (R-67): the
      * place is kept by its block, and the piece playing plays on unless it is gone.
      */
     update(next) {

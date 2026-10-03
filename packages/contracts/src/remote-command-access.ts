@@ -129,7 +129,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "set-audiobook-requests": "studio", "keep-audiobook-split": "studio",
   "keep-audiobook-take": "studio", "discard-audiobook-take": "studio", "export-audiobook-script": "studio",
   "keep-audiobook-lines": "studio", "discard-audiobook-lines": "studio", "set-audiobook-block": "studio",
-  "direct-chapter": "studio", "open-audiobook": "studio", "open-audiobook-listening": "studio", "set-audiobook-picture": "studio", "set-audiobook-timing": "studio", "render-audiobook-mix": "studio", "read-audiobook-book": "studio",
+  "direct-chapter": "studio", "open-audiobook": "studio", "open-audiobook-listening": "studio", "set-audiobook-picture": "studio", "set-audiobook-timing": "studio", "render-audiobook-mix": "studio", "export-audiobook-player": "studio", "list-web-packages": "studio", "read-audiobook-book": "studio",
   "stop-audiobook-book": "studio", "discard-direction": "studio", "accept-direction": "studio",
   "preview-direction": "studio", "set-audiobook-reading-note": "studio", "draft-audiobook-speaker-notes": "studio",
   "export-manuscript": "studio", "import-manuscript": "studio", "reread-manuscript": "studio",

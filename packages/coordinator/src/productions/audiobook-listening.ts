@@ -21,7 +21,7 @@ import type { WorldStore } from "../world/store.js";
 import { planAudiobook, readAudiobookBook, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
 
 /**
- * The book as a listener hears it (design turn 186, SPEC-047 R-57..R-62): every chapter of the
+ * The book as a listener hears it (design turn 186, SPEC-047 R-66..R-71): every chapter of the
  * production in order, retired ones left out, each with the takes that say its words now — the
  * rest are the gaps they are — and its pictures on the chapter's clock. The player in the app
  * and the package both play this plan; nothing here writes, and nothing is asked of a provider.
@@ -72,7 +72,7 @@ async function usablePictures(store: WorldStore, pictures: Readonly<Record<strin
   return usable;
 }
 
-/** The book's cover (R-60): the world's key art, when it is on the shelf. */
+/** The book's cover (R-69): the world's key art, when it is on the shelf. */
 export async function bookCover(store: WorldStore): Promise<string | null> {
   const keyArt = store.getBundle().keyArt;
   return keyArt !== null && (await onShelf(store, keyArt)) ? keyArt : null;
@@ -99,7 +99,7 @@ export async function audiobookListening(store: WorldStore, productionId: string
     try {
       plan = await planAudiobook(store, productionId, summary.id, { narrator });
     } catch {
-      // A chapter that cannot be read is listed and held, never skipped (R-58).
+      // A chapter that cannot be read is listed and held, never skipped (R-67).
       chapters.push({ chapterId: summary.id, order: summary.order, title: summary.title, state: "not read", seconds: 0, blocks: [], gaps: [], pictures: [], opening: cover });
       continue;
     }
@@ -112,7 +112,7 @@ export async function audiobookListening(store: WorldStore, productionId: string
 }
 
 /**
- * A picture set on a block, or taken off (turn 186c, R-60): only a picture the world holds — one
+ * A picture set on a block, or taken off (turn 186c, R-69): only a picture the world holds — one
  * `worldImageReferences` lists, as the panel offers it — written into the chapter's record keyed
  * by the block, with the block's words so it can follow them, through the record's own lane.
  *
