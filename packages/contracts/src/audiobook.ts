@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CADENCE_PHRASE_MAX, CadencePlanSchema, isPointCue, normalizeSpeechText, VoiceDirectionInputSchema, type CadenceCue, type CadencePlan } from "./cadence.js";
+import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX, CadencePlanSchema, isPointCue, normalizeSpeechText, VoiceDirectionInputSchema, type CadenceCue, type CadencePlan } from "./cadence.js";
 import { orderCues } from "./direction-tags.js";
 import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema } from "./ids.js";
 import { isSceneBreak } from "./manuscript.js";
@@ -392,9 +392,66 @@ export const AudiobookBookSchema = z
      * Settings keeps the app's default, which every read outside the audiobook still uses.
      */
     narrator: AudiobookReaderSchema.optional(),
+    /**
+     * The book note (design turn 184, SPEC-047 R-53): accent, register and pronunciation for the
+     * whole book, at most 300 characters, sent with every block before the block's own direction
+     * so a chapter of separate requests sounds like one reader. The author's; never drafted
+     * unasked.
+     */
+    note: z.string().min(1).max(CADENCE_NOTE_MAX).optional(),
+    /** Each chapter's note (R-53): place, time and mood, keyed by chapter id, at most 300 each. */
+    chapterNotes: z.record(z.string().min(1).max(120), z.string().min(1).max(CADENCE_NOTE_MAX)).optional(),
+    /**
+     * Where a speaker's note came from (R-54): `sheet` for one drafted from the speaker's sheet;
+     * absent is the author's own. A note the author wrote is never replaced by a draft.
+     */
+    noteSources: z.record(z.string().min(1).max(120), z.literal("sheet")).optional(),
   })
   .strict();
 export type AudiobookBook = z.infer<typeof AudiobookBookSchema>;
+
+/**
+ * What a block is read under besides its own direction and its speaker's note (design turn 184,
+ * SPEC-047 R-53): the book note and its chapter's note. Every block of the chapter carries both,
+ * the title included.
+ */
+export interface AudiobookReadingNotes {
+  book?: string;
+  chapter?: string;
+}
+
+/** The book note and this chapter's note, as the book record holds them; empty when it holds neither. */
+export function audiobookReadingNotes(book: Pick<AudiobookBook, "note" | "chapterNotes"> | null | undefined, chapterId: string): AudiobookReadingNotes {
+  const chapter = book?.chapterNotes?.[chapterId];
+  return { ...(book?.note !== undefined ? { book: book.note } : {}), ...(chapter !== undefined ? { chapter } : {}) };
+}
+
+/**
+ * What `Direct this chapter` reads, said before it runs (design turn 184a, SPEC-047 R-51): one
+ * row each — the chapter, the tone, the speakers' sheets, the narrator, the notes, and what was
+ * directed before. Counts and names as data; nothing it reads goes to a voice provider.
+ */
+export const DirectionReadsSchema = z
+  .object({
+    chapter: z.object({ order: z.number().int().min(1), version: z.number().int().min(1), synopsis: z.boolean(), pov: z.string().min(1).optional() }).strict(),
+    tone: z.string().min(1).optional(),
+    speakers: z.array(z.string().min(1)).max(40),
+    narrator: z.object({ label: z.string().min(1), description: z.string().min(1).optional() }).strict(),
+    notes: z.object({ book: z.boolean(), chapter: z.boolean(), speakers: z.number().int().min(0) }).strict(),
+    /** The chapter before, and how many of its blocks are directed; null for the first chapter. */
+    before: z.object({ order: z.number().int().min(1), blocks: z.number().int().min(0) }).strict().nullable(),
+    /** Under `performed` or `cast`, why the lines are not cast (`not cast`, `cast moved`): the sheet offers casting first. */
+    cast: z.string().min(1).optional(),
+    /** Under `performed`: the speakers of the chapter's lines with a note, of all of them. */
+    speakerNotes: z.object({ set: z.number().int().min(0), of: z.number().int().min(0) }).strict().optional(),
+  })
+  .strict();
+export type DirectionReads = z.infer<typeof DirectionReadsSchema>;
+
+/** Whether a block is read under either note. */
+export function hasReadingNotes(reading: AudiobookReadingNotes | undefined): reading is AudiobookReadingNotes {
+  return reading !== undefined && (reading.book !== undefined || reading.chapter !== undefined);
+}
 
 /** Whose note a line is played with (R-44): the sheet, else the name; none for narration and the title. */
 export function audiobookNoteKey(block: Pick<AudiobookBlock, "speaker" | "sheet">): string | null {
@@ -413,9 +470,15 @@ export function audiobookNoteFor(book: Pick<AudiobookBook, "reading" | "notes"> 
  * under `performed`, its speaker's note — so a note changed makes every line of theirs stale.
  * The same name as before for a take with no note, so no take made before notes goes stale.
  */
-export function audiobookTakeDirectionHash(plan: CadencePlan | null, note?: string): string | undefined {
-  if (note === undefined) return plan === null ? undefined : audiobookDirectionHash(plan);
-  return textDigest(`performed-v1:${JSON.stringify({ note, direction: plan === null ? null : audiobookDirectionHash(plan) })}`);
+export function audiobookTakeDirectionHash(plan: CadencePlan | null, note?: string, reading?: AudiobookReadingNotes): string | undefined {
+  const inner = note === undefined
+    ? plan === null ? undefined : audiobookDirectionHash(plan)
+    : textDigest(`performed-v1:${JSON.stringify({ note, direction: plan === null ? null : audiobookDirectionHash(plan) })}`);
+  // The book note and the chapter note name the take too (design turn 184, R-53): changing
+  // either makes every block they lead stale. With neither the name is the one before them, so
+  // no take made before the notes goes stale.
+  if (!hasReadingNotes(reading)) return inner;
+  return textDigest(`reading-v1:${JSON.stringify({ book: reading.book ?? null, chapter: reading.chapter ?? null, direction: inner ?? null })}`);
 }
 export const DEFAULT_AUDIOBOOK_BOOK: AudiobookBook = { schemaVersion: 1, reading: "narrator" };
 
@@ -449,6 +512,8 @@ export function audiobookBlockState(
   recorded = false,
   /** The note the line is played with under `performed` (R-45), part of the direction a take is judged by. */
   note?: string,
+  /** The book note and the chapter note the block is read under (R-53), part of it too. */
+  reading?: AudiobookReadingNotes,
 ): AudiobookBlockState {
   if (recorded) {
     const take = record?.takes[block.key];
@@ -469,7 +534,7 @@ export function audiobookBlockState(
   // The direction the take was made under against the one that stands (R-14): a direction
   // added, changed or dropped since is a different take; one authored for other words is none.
   const direction = audiobookDirectionFor(record, block);
-  if (audiobookTakeDirectionHash(direction?.plan ?? null, note) !== take.directionHash) return "stale";
+  if (audiobookTakeDirectionHash(direction?.plan ?? null, note, reading) !== take.directionHash) return "stale";
   return "made";
 }
 
@@ -491,10 +556,13 @@ export function audiobookCounts(
   assignedOf: (block: AudiobookBlock) => AudiobookReader,
   hasArtifact?: (artifactId: string) => boolean,
   recordedOf: (block: AudiobookBlock) => boolean = () => false,
+  /** The speaker's note and the reading notes each block is read under (R-45, R-53). */
+  ledBy: (block: AudiobookBlock) => { note?: string; reading?: AudiobookReadingNotes } = () => ({}),
 ): AudiobookCounts {
   const counts: AudiobookCounts = { total: blocks.length, made: 0, stale: 0, flagged: 0, notMade: 0, awaiting: 0, toMake: [] };
   for (const block of blocks) {
-    const state = audiobookBlockState(block, record, assignedOf(block), hasArtifact, recordedOf(block));
+    const led = ledBy(block);
+    const state = audiobookBlockState(block, record, assignedOf(block), hasArtifact, recordedOf(block), led.note, led.reading);
     if (state === "made") counts.made += 1;
     else if (state === "awaiting") counts.awaiting += 1;
     else {
