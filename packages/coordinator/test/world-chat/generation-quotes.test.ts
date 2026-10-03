@@ -273,5 +273,52 @@ for (const format of [{ extension: ".jpg", contentType: "image/jpeg", bytes: jpe
     assert.ok(h.queue.listJobs()[0]!.landedFiles![0]!.endsWith(format.extension));
     assert.deepEqual(await readFile(join(h.dir, "references", prop.id, "takes", take.id, take.media!)), Buffer.from(format.bytes));
     assert.equal(h.store.getBundle().props.find(one => one.id === prop.id)!.states[0]!.reference, undefined);
+    await assert.rejects(readFile(join(h.dir, h.queue.listJobs()[0]!.landedFiles![0]!)), { code: "ENOENT" });
+    assert.equal(h.store.getBundle().referenceCandidates[prop.id], undefined, "the staging copy is not exposed as another creative result");
+  });
+}
+
+it("keeps concurrent establish-look cards in distinct landing files until immutable Take filing", async () => {
+  const h = await setup();
+  h.fake.onSubmitAccepted = remoteId => {
+    const bytes = pngBytes();
+    bytes[10] = Number(remoteId.slice(3));
+    h.fake.inlineArtifacts = [{ name: "image.png", contentType: "image/png", data: bytes }];
+  };
+  const action: ModelWorldChatAction = { kind: "reference-generation", modelId: MODEL.id,
+    request: { operation: "establish-look", sheetId: "maren-kest", count: 2 }, checkReceiptIds: [newId("check")] };
+  const ids = [newId("act"), newId("act")];
+  await Promise.all(ids.map(id => h.quotes().prepare(action, id, AT)));
+  await Promise.all(ids.map(id => h.quotes().dispatch(action, id)));
+  assert.equal(new Set(h.queue.listJobs().map(job => `${job.landing!.dir}/${job.landing!.name}`)).size, 4);
+  await until(() => h.queue.listJobs().every(job => job.finalization?.status === "complete"), "distinct establish results to finalize", 30_000);
+  await h.store.reload();
+  const jobs = h.queue.listJobs();
+  const takes = h.store.getBundle().referenceTakes.filter(take => jobs.some(job => job.id === take.jobId));
+  assert.equal(takes.length, 4);
+  for (const take of takes) {
+    const job = jobs.find(job => job.id === take.jobId)!;
+    const expected = pngBytes();
+    expected[10] = Number(job.providerJobId!.slice(3));
+    assert.deepEqual(await readFile(join(h.dir, "references/maren-kest/takes", take.id, take.media!)), Buffer.from(expected));
+  }
+});
+
+for (const operation of ["world-image", "master-look"] as const) {
+  it(`reports an empty ${operation} provider result as failed generation`, async () => {
+    const h = await setup();
+    h.fake.inlineArtifacts = [];
+    const action: ModelWorldChatAction = { kind: "image-generation", modelId: MODEL.id,
+      request: { operation, count: 1 }, checkReceiptIds: [newId("check")] };
+    const id = newId("act");
+    await h.quotes().prepare(action, id, AT);
+    await h.quotes().dispatch(action, id);
+    await until(() => h.queue.listJobs()[0]?.status === "succeeded", "empty provider result to settle", 30_000);
+    const outcome = await h.quotes().reconcile({ actionId: id } as ConversationActionCard);
+    assert.equal(outcome!.status, "failed");
+    assert.equal(outcome!.receipt!.generation!.completed, 0);
+    assert.equal(outcome!.receipt!.generation!.failed, 1);
+    assert.match(outcome!.receipt!.generation!.results[0]!.description, /no landed media/);
+    assert.equal(outcome!.receipt!.generation!.results[0]!.mediaPath, undefined);
   });
 }

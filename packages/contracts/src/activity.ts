@@ -524,7 +524,8 @@ export function jobOrigin(job: Job): JobOrigin | null {
     return { path: `/w/${job.worldId}/cast/${sheetId}/${segment}`, label, where };
   }
   if (job.target.kind === "prop-state-candidate") {
-    return { path: `/w/${job.worldId}`, label: "World Chat", where: "World Chat" };
+    const propId = job.target.id?.split("/")[0];
+    return propId ? { path: `/w/${job.worldId}/props/${propId}`, label: "Prop", where: "the prop's review screen" } : null;
   }
   if (job.target.kind === "world-image") {
     return { path: `/w/${job.worldId}`, label: "World", where: "the world's own screen" };

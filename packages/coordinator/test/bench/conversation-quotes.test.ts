@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
-import { JobSchema, newId, type ConversationActionCard, type Job, type ModelWorldChatAction, type SessionId } from "@arke-studio/contracts";
+import { ArkeGenerationReceiptDetailSchema, JobSchema, newId, type ConversationActionCard, type Job, type ModelWorldChatAction, type SessionId } from "@arke-studio/contracts";
+import { BenchStore } from "../../src/bench/store.js";
 import { openBenchSession } from "../../src/bench/service.js";
 import { Coordinator } from "../../src/coordinator.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
@@ -60,8 +61,8 @@ it("persists Bench take identities and exact inputs before approval without rese
   assert.equal(admitted.length, 2, "a fresh dependency composition rejoins rather than admitting again");
 });
 
-for (const known of [false, true]) {
-  it(`settles unattempted Bench work after interrupted admission (${known ? "known queue row" : "unknown purchase"}) without retry`, async t => {
+for (const known of [false, true, "partial", "reservation"] as const) {
+  it(`settles unattempted Bench work after interrupted admission (${known === "reservation" ? "uncertain reservation acknowledgement" : known === "partial" ? "partial completion" : known ? "known queue row" : "unknown purchase"}) without retry`, async t => {
     const at = "2026-10-03T12:00:00.000Z";
     const { root, worldDir } = await makeTempRoot();
     const provider = new FsWorldProvider(root, { clock: () => at });
@@ -81,10 +82,27 @@ for (const known of [false, true]) {
       jobQueue: { listJobs(): Job[] };
     };
     const jobs: Job[] = [];
+    if (known === "reservation") {
+      const original = BenchStore.prototype.append;
+      let interrupted = false;
+      t.mock.method(BenchStore.prototype, "append", async function(this: BenchStore, ...args: Parameters<BenchStore["append"]>) {
+        const result = await original.apply(this, args);
+        if (this.dir === opened.store.dir && args[0].type === "takes-reserved" && !interrupted) {
+          interrupted = true;
+          throw new Error("Reservation fsync succeeded but its acknowledgement was lost");
+        }
+        return result;
+      });
+    }
     let admissions = 0;
     internals.jobQueue = { listJobs: () => jobs };
     internals.enqueueWithSpeechChecks = async input => {
       admissions++;
+      if (known === "partial" && admissions === 1) {
+        const job = JobSchema.parse({ ...input, id: newId("jb"), status: "queued", createdAt: at, updatedAt: at });
+        jobs.push(job);
+        return job;
+      }
       if (known) jobs.push(JobSchema.parse({ ...input, id: newId("jb"), status: "failed", error: "Provider refused", createdAt: at, updatedAt: at }));
       throw new Error("Queue append outcome was interrupted");
     };
@@ -94,14 +112,27 @@ for (const known of [false, true]) {
     const id = newId("act");
     await quotes().prepare(action, id, at);
     assert.equal((await quotes().dispatch(action, id)).status, "running");
+    if (known === "partial") {
+      const first = (await opened.store.fold())!.takes[0]!;
+      await opened.store.append({ type: "take-completed", takeId: first.id, media: { file: "take.png", hash: `sha256:${"a".repeat(64)}` }, completedAt: at });
+    }
     const takes = (await opened.store.fold())!.takes;
-    assert.deepEqual(takes.map(take => take.status), [known ? "failed" : "needs-reconciliation", "failed", "failed"]);
-    assert.ok(takes.slice(1).every(take => /Not attempted/.test(take.error!)));
+    assert.deepEqual(takes.map(take => take.status), known === "partial" ? ["succeeded", "failed", "failed"] : [known ? "failed" : "needs-reconciliation", "failed", "failed"]);
+    assert.ok(takes.slice(known === "reservation" ? 0 : known === "partial" ? 2 : 1).every(take => /Not attempted/.test(take.error!)));
     assert.equal(takes[0]!.jobId, jobs[0]?.id);
     const result = await quotes().reconcile({ actionId: id, authority: { id: sessionId } } as ConversationActionCard);
-    assert.equal(result?.status, known ? "failed" : "running");
+    assert.equal(result?.status, known === "partial" ? "completed" : known ? "failed" : "running");
+    if (known) {
+      ArkeGenerationReceiptDetailSchema.parse(result!.receipt!.generation);
+      assert.equal(result!.receipt!.generation!.authorized, 3);
+      assert.equal(result!.receipt!.generation!.completed, known === "partial" ? 1 : 0);
+      assert.equal(result!.receipt!.generation!.failed, known === "reservation" ? 0 : 1);
+      assert.equal(result!.receipt!.generation!.unattempted, known === "reservation" ? 3 : known === "partial" ? 1 : 2);
+      assert.equal(result!.receipt!.generation!.results.length, known === "reservation" ? 0 : known === "partial" ? 2 : 1);
+      assert.equal(result!.receipt!.generation!.actualMicroUsd, known === "reservation" ? 0 : null, "only definitely unattempted work has a proven zero charge");
+    }
     if (!known) assert.match(result!.detail!, /reconciliation/);
     await quotes().dispatch(action, id);
-    assert.equal(admissions, 1, "a reconstructed service never resubmits uncertain work");
+    assert.equal(admissions, known === "reservation" ? 0 : known === "partial" ? 2 : 1, "a reconstructed service never resubmits uncertain work");
   });
 }

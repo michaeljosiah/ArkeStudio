@@ -54,7 +54,8 @@ export function imageGenerationSource(store: WorldStore, ports: {
           inputs = characterLookRequests(bundle.meta, bundle.artDirection, sheet, kit, model,
             { kind: req.lookKind, mode: req.mode, prompt: req.prompt, count: req.count, generationKey: actionId,
               staged: stagedWorldImage(bundle, stagedReferenceKey("look", sheet.id)) }).map(request => request.input); break;
-        case "establish-look": inputs = establishRequests(bundle.meta, sheet, kit, model, req.count, bundle.artDirection).map(request => request.input); break;
+        case "establish-look": inputs = establishRequests(bundle.meta, sheet, kit, model, req.count, bundle.artDirection)
+          .map((request, index) => ({ ...request.input, landing: { ...request.input.landing!, name: `candidate-${actionId}-${index + 1}.png` } })); break;
         case "location-view": {
           const establishing = kit ? orderedLocationViews(kit)[0] : undefined;
           inputs = locationViewRequests(bundle.meta, bundle.artDirection, sheet, kit, model,
@@ -100,7 +101,7 @@ export function imageGenerationSource(store: WorldStore, ports: {
           inputs = Array.from({ length: req.count }, (_, index) => ({ worldId: store.worldId, target: { kind: "prop-state-candidate", id: `${prop.id}/${state.id}` },
             capability: "image", provider: model.provider, model: model.id, estimatedMicroUsd: estimate,
             params: { prompt, output, provenance: { canonRevision: bundle.meta.canonRevision, sheets: {}, artDirectionVersion: bundle.artDirection.version } },
-            landing: { dir: `references/${prop.id}/candidates`, name: `state-${state.id}-${actionId}-${index + 1}.png` } })); break;
+            landing: { dir: `references/${prop.id}/incoming`, name: `state-${state.id}-${actionId}-${index + 1}.png` } })); break;
         }
       }
     }

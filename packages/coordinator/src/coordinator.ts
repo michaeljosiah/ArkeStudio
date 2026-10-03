@@ -184,6 +184,7 @@ import {
   addBenchReference,
   type WorldFileReader,
   recoverBenchSession,
+  BENCH_UNATTEMPTED_ADMISSION,
   planBenchUpscale,
   benchTakeFiles,
   deleteBenchTake,
@@ -19342,32 +19343,29 @@ export class Coordinator {
     if (active.length > 0) {
       return { status: "running" as const, detail: `${takes.length - active.length} of ${takes.length} items finished; ${active[0]!.id} is in flight.` };
     }
-    const completed = takes.filter((take) => take.status === "succeeded" && take.media).length;
-    const failed = takes.filter((take) => take.status === "failed" || (take.status === "succeeded" && !take.media)).length;
-    const cancelled = takes.filter((take) => take.status === "cancelled").length;
-    if (completed === 0) {
-      return cancelled === takes.length
-        ? { status: "cancelled" as const, detail: `All ${cancelled} generation items were cancelled.` }
-        : { status: "failed" as const, detail: `${failed} failed and ${cancelled} were cancelled; no result completed.` };
-    }
-    const knownActualCosts = takes.map((take) => take.cost?.actualMicroUsd);
+    const unattempted = takes.filter(take => take.status === "failed" && !take.jobId && take.error === BENCH_UNATTEMPTED_ADMISSION);
+    const attempted = takes.filter(take => !unattempted.includes(take));
+    const completed = attempted.filter((take) => take.status === "succeeded" && take.media).length;
+    const failed = attempted.filter((take) => take.status === "failed" || (take.status === "succeeded" && !take.media)).length;
+    const cancelled = attempted.filter((take) => take.status === "cancelled").length;
+    const knownActualCosts = attempted.map((take) => take.cost?.actualMicroUsd);
     const actualMicroUsd = knownActualCosts.every((cost) => cost !== undefined && cost !== null)
       ? knownActualCosts.reduce<number>((total, cost) => total + (cost ?? 0), 0)
       : null;
     return {
-      status: "completed" as const,
+      status: completed > 0 ? "completed" as const : cancelled === takes.length ? "cancelled" as const : "failed" as const,
       receipt: {
         kind: "bench-generation",
         id: action.authority.id,
-        summary: `${completed} completed, ${failed} failed, and ${cancelled} cancelled. Results remain unselected.`,
+        summary: `${completed} completed, ${failed} failed, ${cancelled} cancelled, and ${unattempted.length} were not attempted. Results remain unselected.`,
         generation: {
           authorized: takes.length,
           completed,
           failed,
           cancelled,
-          unattempted: 0,
+          unattempted: unattempted.length,
           actualMicroUsd,
-          results: takes.map((take) => ({
+          results: attempted.map((take) => ({
             id: take.id,
             medium: take.request.mode === "image" ? "image" as const : take.request.mode === "video" ? "video" as const : "audio" as const,
             status: take.status === "succeeded" && take.media ? "completed" as const
@@ -19413,10 +19411,10 @@ export class Coordinator {
           }
           const reserved = BenchReservedTakeSchema.array().parse(materialization);
           if (reserved.length !== inputs.length || reserved.some((take, index) => inputs[index]?.target.id !== `${action.sessionId}/${take.id}`)) throw new Error("The Bench reservation does not match its quote.");
-          const reservation = await bench.store.append({ type: "takes-reserved", takes: reserved }, { at: this.nowIso(), requestId: id });
-          if (reservation.deduplicated) return { status: "running", detail: "Rejoining the reserved Bench generation." };
           let attempted = -1;
           try {
+            const reservation = await bench.store.append({ type: "takes-reserved", takes: reserved }, { at: this.nowIso(), requestId: id });
+            if (reservation.deduplicated) return { status: "running", detail: "Rejoining the reserved Bench generation." };
             for (const [index, input] of inputs.entries()) {
               // An absent queue row after an uncertain append is not proof of no purchase.
               await bench.store.append({ type: "take-status", takeId: reserved[index]!.id, status: "needs-reconciliation",
@@ -19432,7 +19430,7 @@ export class Coordinator {
           } catch {
             for (const take of reserved.slice(attempted + 1)) {
               await bench.store.append({ type: "take-status", takeId: take.id, status: "failed",
-                error: "Not attempted: admission stopped before this take; no provider was called." }, { at: this.nowIso() });
+                error: BENCH_UNATTEMPTED_ADMISSION }, { at: this.nowIso() });
             }
             const session = await bench.store.fold();
             if (session) await recoverBenchSession({ store: bench.store, session }, quotePorts.jobs().filter(job => job.target.kind === "bench-take" && job.target.id).map(job => ({

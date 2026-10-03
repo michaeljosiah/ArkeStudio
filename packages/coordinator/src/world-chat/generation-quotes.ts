@@ -170,8 +170,9 @@ export class GenerationQuotes {
       const owner = take?.reference?.sheetId ?? take?.prop?.propId;
       const mediaPath = take?.media && owner ? `references/${owner}/takes/${take.id}/${take.media}` : job.landedFiles?.[0];
       return [{ id: take?.id ?? job.id, medium: "image" as const,
-      status: job.status === "succeeded" && job.finalization?.status !== "failed" ? "completed" as const : job.status === "cancelled" ? "cancelled" as const : "failed" as const,
-      description: job.error ?? (job.finalization?.status === "failed" ? "Result filing needs retry in Activity." : "Generation settled."),
+      status: job.status === "succeeded" && job.finalization?.status !== "failed" && mediaPath ? "completed" as const : job.status === "cancelled" ? "cancelled" as const : "failed" as const,
+      description: job.error ?? (job.finalization?.status === "failed" ? "Result filing needs retry in Activity."
+        : job.status === "succeeded" && !mediaPath ? "The provider returned no landed media." : "Generation settled."),
       ...(mediaPath ? { mediaPath } : {}),
     }]; });
     const completed = results.filter(result => result.status === "completed").length;
@@ -179,7 +180,9 @@ export class GenerationQuotes {
     const costs = await Promise.all(jobs.map(job => job ? this.ports.actualCost?.(job.id).catch(() => null) ?? null : null));
     const actualMicroUsd = costs.every(cost => cost !== null) ? costs.reduce<number>((sum, cost) => sum + cost!, 0) : null;
     return { status: completed > 0 ? "completed" : cancelled === quote.inputs.length ? "cancelled" : "failed",
-      receipt: { kind: "generation", id: card.actionId, summary: quote.admissionComplete ? "Generation settled; results await separate selection." : "Admission was interrupted; missing work was not resubmitted.",
+      receipt: { kind: "generation", id: card.actionId, summary: quote.admissionComplete
+        ? completed > 0 ? "Generation settled; results await separate selection." : "Generation settled without a usable result."
+        : "Admission was interrupted; missing work was not resubmitted.",
         generation: { authorized: quote.inputs.length, completed, failed: results.length - completed - cancelled, cancelled,
           unattempted: quote.inputs.length - results.length, actualMicroUsd, results } },
     };

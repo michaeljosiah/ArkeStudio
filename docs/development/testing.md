@@ -73,13 +73,16 @@ in the regression set for stored-card compatibility and decisions made on anothe
 
 Generation quote changes also run coordinator `test/world-chat/generation-quotes.test.ts`,
 `test/bench/conversation-quotes.test.ts`, `test/world-chat/retrieval.test.ts`,
-`test/audio/performances.test.ts`, `test/references/takes.test.ts` and
+`test/audio/performances.test.ts`, `test/references/takes.test.ts`,
+`test/references/background-finalization.test.ts` and
 `test/world/founding-build.test.ts`. These cover preparation without jobs, default routing,
 price/expiry/reference changes, pending result filing, frozen Bench reservations and cast audio,
 founding retry authority and interrupted admission without automatic resubmission. Run
-`node --import tsx --test` with those repository-relative test paths; no paid provider is used. The quote regressions cover concurrent world-image/master-look
-admission, long shared Bench briefs, uncertain queue admission without resubmission, and
-JPEG/WebP prop landing. Background finalization checks use a real prop state and verify that
+`node --import tsx --test` with those repository-relative test paths; no paid provider is used.
+The quote regressions cover concurrent world-image/master-look
+admission, distinct establish-look media, long shared Bench briefs, uncertain queue and
+reservation admission without resubmission, empty provider results, and JPEG/WebP prop landing
+with staging cleanup. Background finalization checks use a real prop state and verify that
 chat-generated character sheets remain pending for separate selection.
 
 Book/audio standards experiments use the separate [publication interoperability checks](publication-interop.md#reproduce).

@@ -1498,6 +1498,9 @@ export async function sweepDeletedBenchMedia(worldDir: string, session: BenchSes
 // Recovery (§6) — both crash windows, idempotent
 // ---------------------------------------------------------------------------
 
+/** Durable local-admission marker: only reservations never passed to enqueue receive it. */
+export const BENCH_UNATTEMPTED_ADMISSION = "Not attempted: admission stopped before this take; no provider was called.";
+
 export interface BenchRecoveryJobFacts {
   jobId: string;
   /** target.id: "<sessionId>/<takeId>". */
