@@ -70,6 +70,12 @@ export const ListeningChapterSchema = z
     pictures: z.array(ListeningPictureSchema),
     /** What shows before the chapter's first picture: its picture on its opening block, else the book's cover (R-69). */
     opening: z.string().nullable(),
+    /**
+     * The chapter's one mix (design turn 187, R-85), when it has timing: overlaps, reactions, beds
+     * and trims as set. The player plays this in place of the takes; blocks keep their places on
+     * its clock for Text and the pictures.
+     */
+    mix: z.object({ file: z.string().min(1), seconds: z.number().min(0) }).strict().optional(),
   })
   .strict();
 export type ListeningChapter = z.infer<typeof ListeningChapterSchema>;
@@ -198,25 +204,36 @@ export function listeningChapter(input: {
   pictures?: Readonly<Record<string, AudiobookPicture>>;
   cover: string | null;
   usable?: (file: string) => boolean;
+  /**
+   * The chapter's clock with its timing (design turn 187, SPEC-047 R-85), when it has any: each
+   * made block at its place in the one mix — trimmed, nudged, cutting in — and the mix itself,
+   * which the player plays in place of the takes. Absent, the takes play back to back.
+   */
+  timed?: { bars: ReadonlyArray<{ key: string; at: number; seconds: number }>; seconds: number; mix: { file: string; seconds: number } };
 }): ListeningChapter {
   const blocks: ListeningBlock[] = [];
   const gaps: ListeningGap[] = [];
   const starts: number[] = [];
   let clock = 0;
+  const timedAt = new Map((input.timed?.bars ?? []).map((bar) => [bar.key, bar]));
   input.blocks.forEach((block, index) => {
     const number = index + 1;
+    const bar = timedAt.get(block.key);
+    // On the timed clock a block not made stands where the next made one starts: the mix skips it.
+    if (input.timed !== undefined) clock = bar?.at ?? input.blocks.slice(index + 1).map((later) => timedAt.get(later.key)?.at).find((at) => at !== undefined) ?? input.timed.seconds;
     starts.push(round(clock));
-    if (block.take === undefined || !(block.take.seconds > 0)) {
+    if (block.take === undefined || !(block.take.seconds > 0) || (input.timed !== undefined && bar === undefined)) {
       const open = gaps[gaps.length - 1];
       if (open !== undefined && open.to === number - 1) open.to = number;
       else gaps.push({ at: round(clock), from: number, to: number });
       return;
     }
-    const sentences = blockSentences(block.text, block.take.seconds, block.take.grouped).map((sentence) => ({ at: round(clock + sentence.at), text: sentence.text }));
-    blocks.push({ key: block.key, number, file: block.take.file, ...(block.take.artifactId !== undefined ? { artifactId: block.take.artifactId } : {}), at: round(clock), seconds: block.take.seconds, sentences });
-    clock += block.take.seconds;
+    const length = bar?.seconds ?? block.take.seconds;
+    const sentences = blockSentences(block.text, length, block.take.grouped).map((sentence) => ({ at: round(clock + sentence.at), text: sentence.text }));
+    blocks.push({ key: block.key, number, file: block.take.file, ...(block.take.artifactId !== undefined ? { artifactId: block.take.artifactId } : {}), at: round(clock), seconds: length, sentences });
+    clock += length;
   });
-  const seconds = round(clock);
+  const seconds = input.timed !== undefined ? round(input.timed.mix.seconds) : round(clock);
   const { placed } = placePictures(input.blocks, input.pictures, input.usable);
   const pictures = pictureHolds(placed, starts, seconds).map((entry) => ({
     key: input.blocks[entry.index]!.key,
@@ -229,7 +246,7 @@ export function listeningChapter(input: {
   const first = pictures[0];
   const opening = first !== undefined && first.at === 0 ? first.file : (input.cover ?? first?.file ?? null);
   const state = blocks.length === 0 ? "not read" : blocks.length === input.blocks.length ? "read" : "part";
-  return { chapterId: input.chapterId, order: input.order, title: input.title, state, seconds, blocks, gaps, pictures, opening };
+  return { chapterId: input.chapterId, order: input.order, title: input.title, state, seconds, blocks, gaps, pictures, opening, ...(input.timed !== undefined && blocks.length > 0 ? { mix: input.timed.mix } : {}) };
 }
 
 /**

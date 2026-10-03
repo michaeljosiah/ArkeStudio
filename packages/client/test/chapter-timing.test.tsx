@@ -20,6 +20,7 @@ import {
 } from "@arke-studio/contracts";
 import { BlockTimingPanel, betweenClocks, proposedView, TimingProposalCard, TimingSide, TimingView, timingInputs, timingLanes, type TimingRowLike } from "../src/screens/chapter-timing.js";
 import { ReactionsPanel, soundsByTab } from "../src/components/audiobook-beds.js";
+import { playerChapters } from "../src/components/audiobook-player.js";
 import { ChapterScreen } from "../src/screens/chapter-workspace.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -387,6 +388,16 @@ describe("Propose timing (turn 187b)", () => {
       <TimingView timing={timingOf(shown!)} lanes={timingLanes(ROWS)} rows={ROWS} selected={null} onSelect={() => {}} onTiming={() => {}} playhead={0} onPlayhead={() => {}} locked proposed={proposed} />,
     );
     assert.deepEqual(all(m, ".fy-tm__bar--proposed").map((bar) => bar.dataset["key"]).sort(), ["p2.0", "x1"]);
+  });
+});
+
+describe("the player hears the timing (turn 187, R-85)", () => {
+  it("plays a chapter's one mix in place of its takes", () => {
+    const chapter = { chapterId: "neap", order: 1, title: "The Goat", state: "read" as const, seconds: 10, blocks: [{ key: "title", number: 1, file: "artifacts/t.wav", at: 0, seconds: 2, sentences: [{ at: 0, text: "x" }] }], gaps: [], pictures: [], opening: null };
+    const [mixed] = playerChapters({ productionId: "p", title: "Book", cover: null, chapters: [{ ...chapter, mix: { file: ".cache/audiobook-mix/p/01/r2-a.wav", seconds: 10 } }] }, (file) => `/media/w/${file}`);
+    assert.deepEqual(mixed!.audio, [{ src: "/media/w/.cache/audiobook-mix/p/01/r2-a.wav", at: 0, seconds: 10 }]);
+    const [plain] = playerChapters({ productionId: "p", title: "Book", cover: null, chapters: [chapter] }, (file) => `/media/w/${file}`);
+    assert.equal(plain!.audio, undefined, "no timing: its takes, as before");
   });
 });
 

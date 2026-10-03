@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { audiobookTextHash, ChapterAudiobookSchema } from "../src/audiobook.js";
 import {
   AudiobookListeningSchema,
+  ListeningChapterSchema,
   blockSentences,
   bookPlace,
   listeningChapter,
@@ -130,5 +131,23 @@ describe("the record and the wire (R-73)", () => {
     assert.equal(ChapterAudiobookSchema.parse({ ...base, pictures: { "p0.0": picture("x", "artifacts/a.png") } }).pictures?.["p0.0"]?.file, "artifacts/a.png");
     const chapter = listeningChapter({ chapterId: "neap", order: 7, title: "The Tenth Key", blocks: BLOCKS, cover: null });
     assert.ok(AudiobookListeningSchema.safeParse({ productionId: "the-ledger", title: "The Undersong", cover: null, chapters: [chapter] }).success);
+  });
+});
+
+describe("a chapter with timing plays its one mix (turn 187, R-85)", () => {
+  it("places the blocks on the mix's clock, a block not made where it stands, and carries the mix", () => {
+    const blocks = BLOCKS.map((block) => (block.key === "p2.0" ? { key: block.key, text: block.text } : block));
+    const timed = {
+      // p1.0 cuts in half a second before p0.0 ends; p2.0 is not made; p3.0 after a pause.
+      bars: [{ key: "title", at: 0, seconds: 4 }, { key: "p0.0", at: 4, seconds: 12 }, { key: "p1.0", at: 15.5, seconds: 3 }, { key: "p3.0", at: 19, seconds: 10 }],
+      seconds: 29,
+      mix: { file: ".cache/audiobook-mix/the-ledger/01-neap/r2-abc.wav", seconds: 29.2 },
+    };
+    const chapter = listeningChapter({ chapterId: "neap", order: 7, title: "The Tenth Key", blocks, cover: null, timed });
+    assert.deepEqual(chapter.blocks.map((block) => [block.key, block.at]), [["title", 0], ["p0.0", 4], ["p1.0", 15.5], ["p3.0", 19]]);
+    assert.deepEqual(chapter.gaps, [{ at: 19, from: 4, to: 4 }], "the block not made stands where the clock goes on");
+    assert.deepEqual(chapter.mix, timed.mix);
+    assert.equal(chapter.seconds, 29.2, "as long as the mix is");
+    assert.ok(ListeningChapterSchema.safeParse(chapter).success);
   });
 });
