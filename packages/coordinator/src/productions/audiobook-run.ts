@@ -209,6 +209,7 @@ export function priorPartJob(jobs: readonly Job[], identity: PartIdentity, part:
     (job) =>
       job.target.kind === "voice-preview" &&
       job.params["purpose"] === "audiobook" &&
+      job.params["hear"] !== true &&
       job.params["productionId"] === identity.productionId &&
       job.params["chapterId"] === identity.chapterId &&
       job.params["block"] === identity.block &&

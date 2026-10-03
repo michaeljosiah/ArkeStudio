@@ -654,6 +654,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     if (uploadId !== null && staged === undefined) setUploadId(null);
   }, [uploadId, staged]);
 
+  const directable = rows.length > 0 && proposal === null && directionRun?.state !== "directing";
   const head = (() => {
     if (upload !== null && run?.state !== "read") {
       return (
@@ -735,8 +736,15 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             </Button>
           )
         )}
+        {/* Direct this chapter in the head beside the read (design turn 184a), as well as the
+            dock's prompt: the same sheet. A held proposal answers it until accepted or discarded. */}
+        {directable && (
+          <Button variant="primary" disabled={locked || connection !== "open"} onClick={directPress} data-testid="direct-audiobook">
+            {directedBlocks > 0 ? "Direct again" : "Direct this chapter"}
+          </Button>
+        )}
         {counts.toMake.length > 0 && (
-          <Button variant="primary" disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
+          <Button variant={directable ? "secondary" : "primary"} disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
             Read the chapter · {counts.toMake.length} block{counts.toMake.length === 1 ? "" : "s"}
             {estimate > 0 ? ` · ${tokenPriced ? "~" : ""}${formatMicroUsd(estimate)}` : plan !== null ? ` · ${plan}` : ""}
           </Button>
@@ -2058,6 +2066,11 @@ export function DirectSheet({ worldId, productionId, chapterFile, chapterOrder, 
   const [cast, setCast] = useState(true);
   const [draftChapter, setDraftChapter] = useState(!chapterNote);
   const [draftSpeakers, setDraftSpeakers] = useState(true);
+  // Cast first, the speakers are the cast's, unknown until it runs and none of them noted yet as
+  // far as Reads can say: drafting their notes is offered, and the coordinator asks only for the
+  // speakers its cast makes that have none (R-54). Unoffered, one run could not do all three.
+  const castFirst = castNeeded && cast;
+  const speakersNoted = !castFirst && allNotes;
   const pad = String(chapterOrder).padStart(2, "0");
   const row = (label: string, value: string) => (
     <div className="fy-ab__read" key={label}>
@@ -2096,7 +2109,7 @@ export function DirectSheet({ worldId, productionId, chapterFile, chapterOrder, 
       <span className="fy-ab__label">Also</span>
       {castNeeded && check("Cast the lines first", cast, setCast, reads?.cast)}
       {check("Draft the chapter note", draftChapter, setDraftChapter)}
-      {reading === "performed" && check("Draft speaker notes", draftSpeakers, setDraftSpeakers, notesSet === undefined ? undefined : allNotes ? `all ${notesSet.of} set` : `${notesSet.of - notesSet.set} of ${notesSet.of} missing`, allNotes)}
+      {reading === "performed" && check("Draft speaker notes", draftSpeakers, setDraftSpeakers, castFirst || notesSet === undefined ? undefined : allNotes ? `all ${notesSet.of} set` : `${notesSet.of - notesSet.set} of ${notesSet.of} missing`, speakersNoted)}
       <div className="fy-ab__control fy-ab__directsheet-foot">
         <span className="fy-mono">nothing spent</span>
         <span className="fy-ch__panelpush" />
@@ -2105,7 +2118,7 @@ export function DirectSheet({ worldId, productionId, chapterFile, chapterOrder, 
           variant="primary"
           data-testid="direct-sheet-direct"
           disabled={reads === null || (reading !== "narrator" && reads.cast !== undefined && !cast)}
-          onClick={() => onDirect({ ...(castNeeded && cast ? { cast: true } : {}), ...(draftChapter ? { chapterNote: true } : {}), ...(reading === "performed" && draftSpeakers && !allNotes ? { speakerNotes: true } : {}) })}
+          onClick={() => onDirect({ ...(castFirst ? { cast: true } : {}), ...(draftChapter ? { chapterNote: true } : {}), ...(reading === "performed" && draftSpeakers && !speakersNoted ? { speakerNotes: true } : {}) })}
         >
           Direct
         </Button>

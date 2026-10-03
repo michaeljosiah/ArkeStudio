@@ -107,7 +107,15 @@ export async function hearAudiobookLine(
           voiceId: speaking.reader.voiceId,
           text: part,
           audioFormat: speaking.format,
-          purpose: "candidate-preview",
+          // A chapter block's read, as the run's parts are, so the coordinator settles it for the
+          // press waiting on it — as a character audition it ended unheard, the button stuck on
+          // `reading…` with the file landed and paid for — and Activity leads to the chapter.
+          // `hear` keeps it out of the run's search for a part already paid for.
+          purpose: "audiobook",
+          hear: true,
+          productionId,
+          chapterId: chapter.id,
+          block,
           characterCount: part.length,
           ...(perPart !== undefined && Object.keys(perPart.voiceSettings).length > 0 ? { voiceSettings: perPart.voiceSettings } : {}),
           ...(perPart?.instructions !== undefined ? { instructions: perPart.instructions } : {}),

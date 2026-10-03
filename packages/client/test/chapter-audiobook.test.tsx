@@ -19,7 +19,8 @@ import {
 import { ChapterScreen } from "../src/screens/chapter-workspace.js";
 import { cueLabel } from "../src/screens/chapter-audiobook.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { __applyEventForTest, __connectionStatusForTest, __handleFrameForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { HEAR_ANSWER_MS, HEAR_NO_ANSWER, __applyEventForTest, __connectionStatusForTest, __handleFrameForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { dismissPlayback, playbackSnapshot, setAudioFactoryForTest } from "../src/lib/audio.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -1215,5 +1216,95 @@ describe("the director reads the book (design turn 184)", () => {
     await act(async () => hear().click());
     const confirmed = m.sent.findLast((message) => message.kind === "hear-audiobook-line") as Extract<ClientMessage, { kind: "hear-audiobook-line" }>;
     assert.deepEqual({ token: confirmed.quoteToken, proposed: confirmed.proposed }, { token: "three", proposed: true });
+  });
+
+  /** A proposal on block 2, its panel open, the dock's player swapped for one that records what it was handed. */
+  async function proposedPanel() {
+    setAudioFactoryForTest(() => ({ playbackRate: 1, src: "", currentTime: 0, duration: NaN, play: async () => {}, pause() {}, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {} }) as never);
+    const m = await mount(voiced(withBook(inkbound(), { narrator: RACHEL })));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...RACHEL, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 4, dropped: 0, hash: HASH, chapterVersion: 4, proposalId: "card-4", proposed: { "p0.0": { delivery: "cold" as const, speed: 1, cues: [] } } }));
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    const row = () => q(m, '[data-testid="proposed-hear-row"]')!;
+    const press = async () => {
+      await act(async () => (row().querySelector('[data-testid="proposed-hear"]') as HTMLButtonElement).click());
+      return (m.sent.findLast((message) => message.kind === "hear-audiobook-line") as Extract<ClientMessage, { kind: "hear-audiobook-line" }>).requestId;
+    };
+    const answer = (requestId: string, outcome: { file: string } | { refused: string }) =>
+      act(async () => __applyEventForTest({ type: "audiobook.heard", at: AT, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId, ...outcome }));
+    return { m, row, press, answer };
+  }
+
+  it("Hear block's reading… gives way to the player on the heard file, and to the refusal when refused (2026-10-03)", async () => {
+    try {
+      const { row, press, answer } = await proposedPanel();
+      const first = await press();
+      assert.match(row().textContent ?? "", /reading…/);
+      await answer(first, { file: ".cache/speech/heard.mp3" });
+      assert.doesNotMatch(row().textContent ?? "", /reading…/, "answered, the press is put down");
+      assert.equal(playbackSnapshot().clip?.id, `hear-${first}`, "and the heard file plays");
+      const second = await press();
+      await answer(second, { refused: "the voice job failed · open Activity for details" });
+      assert.doesNotMatch(row().textContent ?? "", /reading…/);
+      assert.match(row().textContent ?? "", /the voice job failed/);
+      assert.equal((row().querySelector('[data-testid="proposed-hear"]') as HTMLButtonElement).disabled, false, "and it can be pressed again");
+    } finally {
+      dismissPlayback();
+      setAudioFactoryForTest(null);
+    }
+  });
+
+  it("a Hear block the coordinator never answers stops reading… at the bound, and a late file still plays (2026-10-03)", async (t) => {
+    try {
+      const { row, press, answer } = await proposedPanel();
+      t.mock.timers.enable({ apis: ["setTimeout"] });
+      const asked = await press();
+      await act(async () => t.mock.timers.tick(HEAR_ANSWER_MS - 1));
+      assert.match(row().textContent ?? "", /reading…/);
+      await act(async () => t.mock.timers.tick(1));
+      assert.doesNotMatch(row().textContent ?? "", /reading…/);
+      assert.match(row().textContent ?? "", new RegExp(HEAR_NO_ANSWER));
+      t.mock.timers.reset();
+      await answer(asked, { file: ".cache/speech/late.mp3" });
+      assert.equal(playbackSnapshot().clip?.id, `hear-${asked}`);
+    } finally {
+      t.mock.timers.reset();
+      dismissPlayback();
+      setAudioFactoryForTest(null);
+    }
+  });
+
+  it("cast first, Draft speaker notes is offered and ticked, and Direct asks for all three (2026-10-03)", async () => {
+    const m = await mount(voiced(inkbound("performed")));
+    await answerOpen(m);
+    await act(async () => q(m, '[data-testid="direct-audiobook"]')!.click());
+    const preview = m.sent.findLast((message) => message.kind === "preview-direction") as Extract<ClientMessage, { kind: "preview-direction" }>;
+    await act(async () =>
+      __applyEventForTest({
+        at: AT, type: "direction.reads", ...ids, requestId: preview.requestId,
+        reads: { chapter: { order: 2, version: 4, synopsis: true }, speakers: [], narrator: { label: "George" }, notes: { book: false, chapter: false, speakers: 0 }, before: null, cast: "not cast · cast the lines first" },
+      }),
+    );
+    const box = (label: string) => all(m, '[data-testid="direct-sheet"] .fy-ab__also').find((also) => also.textContent?.startsWith(label))!.querySelector("input") as HTMLInputElement;
+    assert.equal(box("Draft speaker notes").disabled, false, "the cast's speakers are drafted for");
+    assert.equal(box("Draft speaker notes").checked, true);
+    await act(async () => q(m, '[data-testid="direct-sheet-direct"]')!.click());
+    const direct = m.sent.findLast((message) => message.kind === "direct-chapter") as Extract<ClientMessage, { kind: "direct-chapter" }>;
+    assert.deepEqual({ cast: direct.cast, chapterNote: direct.chapterNote, speakerNotes: direct.speakerNotes }, { cast: true, chapterNote: true, speakerNotes: true });
+  });
+
+  it("Direct this chapter sits in the head beside the read, and gives way to a held proposal (184a, 184b)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    const head = q(m, '[data-testid="direct-audiobook"]');
+    assert.equal(head?.textContent, "Direct this chapter");
+    assert.ok(head?.classList.contains("ui-btn--primary"), "the primary press");
+    assert.equal(head?.parentElement, q(m, '[data-testid="read-audiobook"]')?.parentElement, "beside Read the chapter");
+    await act(async () => head!.click());
+    assert.ok(q(m, '[data-testid="direct-sheet"]'), "the dock's sheet");
+    assert.ok(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct this chapter"), "the dock keeps its prompt");
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 4, dropped: 0, hash: HASH, chapterVersion: 4, proposalId: "card-5", proposed: { "p0.0": { delivery: "cold" as const, speed: 1, cues: [] } } }));
+    assert.equal(q(m, '[data-testid="direct-audiobook"]'), null, "the card answers it until it is accepted or discarded");
   });
 });

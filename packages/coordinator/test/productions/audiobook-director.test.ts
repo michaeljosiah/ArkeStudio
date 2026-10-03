@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AudiobookBookSchema,
@@ -10,6 +10,7 @@ import {
   type ClientMessage,
   type DomainEvent,
   type ManifestModel,
+  type VoiceCandidate,
 } from "@arke-studio/contracts";
 import { geminiSpeechModel } from "@arke-studio/providers";
 import { Coordinator } from "../../src/coordinator.js";
@@ -31,6 +32,8 @@ import type { VoicesDeriver } from "../../src/productions/voices.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { FakeProvider } from "../queue/fake-provider.js";
+import { until } from "../wait.js";
 
 /**
  * The director reads the book (design turn 184, SPEC-047 R-51..R-55): `Direct this chapter`
@@ -76,6 +79,17 @@ const V3: ManifestModel = {
     deliveryMappings: { measured: { settings: { stability: 0.5 } }, whispered: { settings: { stability: 0.5 }, tag: "whispers" }, warm: { settings: { stability: 0.5 }, tag: "warmly" } },
   },
 };
+/** A hosted reader priced by the character, so a heard block asks no consent first. */
+const VOXTRAL: ManifestModel = {
+  id: "voxtral-mini-tts",
+  provider: "mistral",
+  capability: "voice-tts",
+  displayName: "Voxtral TTS",
+  accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+  limits: { maxPromptChars: 5000, audioFormat: "wav" },
+  pricing: { kind: "perCharacter", microUsdPerCharacter: 16 },
+};
+const PAUL: VoiceCandidate = { provider: "mistral", model: VOXTRAL.id, voiceId: "en_paul_neutral", label: "Paul · neutral", attributes: [], local: false, canClone: false };
 const castRecord = (hash: string): ChapterVoices => ({
   version: 4,
   hash,
@@ -120,6 +134,8 @@ async function withDirector(
     /** No cast written beside chapter 01. */
     uncast?: boolean;
     book?: Record<string, unknown>;
+    /** A hosted narrator behind the job queue (Voxtral's Paul), its provider this fake. */
+    cloud?: FakeProvider;
   },
   run: (h: { worldDir: string; store: WorldStore; events: DomainEvent[]; spoken: string[]; send: (message: ClientMessage) => Promise<void> }) => Promise<void>,
 ): Promise<void> {
@@ -150,8 +166,9 @@ async function withDirector(
     appRoot: root,
     cipher: devCipher(),
     credentialsFileName: "credentials.dev.dat",
-    manifest: { manifestVersion: 1, generated: "2026-10-03", models: [KOKORO] },
+    manifest: { manifestVersion: 1, generated: "2026-10-03", models: input.cloud ? [KOKORO, VOXTRAL] : [KOKORO] },
     observeEvent: (event) => events.push(event),
+    ...(input.cloud ? { dispatchClients: { mistral: input.cloud } } : {}),
     ...(input.direction ? { directionDeriver: input.direction } : {}),
     ...(input.voices ? { voicesDeriver: input.voices } : {}),
     ...(input.speakerNotes ? { speakerNotesDeriver: input.speakerNotes } : {}),
@@ -166,15 +183,25 @@ async function withDirector(
         transcribe: async () => ({ text: "" }),
       } as never,
       localPresets: [],
-      cloudSources: [],
+      cloudSources: input.cloud ? [{ provider: "mistral", list: async () => [PAUL] }] : [],
+      ...(input.cloud ? { hostedReaders: [{ provider: "mistral" as const, model: VOXTRAL.id }] } : {}),
     },
   });
   const send = (message: ClientMessage) =>
     (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
-  coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
+  if (input.cloud) {
+    // The queue runs only on a started coordinator, and a started one is stopped, or its
+    // transport holds the file open past every timeout.
+    await coordinator.start(0);
+    await send({ kind: "set-credential", provider: "mistral", key: "mistral-test-key" });
+    await send({ kind: "set-narrator", voice: { provider: PAUL.provider, model: PAUL.model, voiceId: PAUL.voiceId, label: PAUL.label } });
+  } else {
+    coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
+  }
   try {
     await run({ worldDir, store, events, spoken, send });
   } finally {
+    if (input.cloud) await coordinator.stop();
     await provider.close();
   }
 }
@@ -419,6 +446,32 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
       },
     ));
 
+  it("cast first, the speakers its own cast makes have their notes drafted in the same run (2026-10-03)", () => {
+    const asked: string[][] = [];
+    return withDirector(
+      {
+        uncast: true,
+        book: { reading: "performed" },
+        voices: async () => ({ lines: [{ speaker: "maren-kest", quote: SPAN }] }),
+        direction: async (input) => {
+          asked.push((input.asks?.speakerNotes ?? []).map((speaker) => speaker.key));
+          return {
+            blocks: input.blocks.map((block) => ({ block: block.key })),
+            speakerNotes: Object.fromEntries((input.asks?.speakerNotes ?? []).map((speaker) => [speaker.key, "dry, exact, unhurried"])),
+          };
+        },
+      },
+      async ({ events, send }) => {
+        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", cast: true, speakerNotes: true, chapterNote: true });
+        const directed = events.find((e): e is Directed => e.type === "direction.finished");
+        assert.equal(directed?.outcome, "directed", directed?.reason);
+        assert.deepEqual(directed.cast, { lines: 1, speakers: 1 });
+        assert.deepEqual(asked[0], ["maren-kest"], "the cast's speaker, unknown before it ran, is asked about");
+        assert.deepEqual(directed.speakerNotes, { "maren-kest": "dry, exact, unhurried" });
+      },
+    );
+  });
+
   it("without casting first, an uncast chapter is refused in the run's words", () =>
     withDirector(
       { uncast: true, book: { reading: "performed" }, direction: async (input) => ({ blocks: input.blocks.map((block) => ({ block: block.key })) }) },
@@ -546,6 +599,55 @@ describe("hear a block before accepting (R-55)", () => {
         assert.equal(sidecar?.generation?.source === "audiobook" ? sidecar.generation.remakeOf : undefined, was);
       },
     ));
+
+  // A hosted reader's block is heard through the job queue (2026-10-03): its job ended, landed
+  // and was paid for, and no answer ever came — the press waited on a job settled only for a run.
+  type Heard = Extract<DomainEvent, { type: "audiobook.heard" }>;
+  const HEAR = "01J8F3K2QW9VZX4N7M0RTYB6H5";
+  const hearUnderProposal = async (h: { worldDir: string; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void> }) => {
+    await h.send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap" });
+    const directed = h.events.find((e): e is Directed => e.type === "direction.finished");
+    assert.equal(directed?.outcome, "directed", directed?.reason);
+    // Not awaited: a press that never answers must fail this test by name, not hang the file.
+    const pressed = h.send({ kind: "hear-audiobook-line", worldId: WORLD_ID, productionId: LEDGER, requestId: HEAR, chapterFile: "01-neap", block: "title", proposed: true });
+    await until(() => h.events.some((e) => e.type === "audiobook.heard" && e.requestId === HEAR), "the heard block's answer", 30_000);
+    await pressed;
+    return h.events.find((e): e is Heard => e.type === "audiobook.heard" && e.requestId === HEAR)!;
+  };
+  const landed = async (worldDir: string) => readdir(join(worldDir, ".staging", "audiobook", LEDGER, "01-neap")).catch(() => [] as string[]);
+  const reader = (setup: (fake: FakeProvider) => void) => {
+    const fake = new FakeProvider();
+    setup(fake);
+    return fake;
+  };
+  const speech = [{ name: "speech.wav", contentType: "audio/wav", data: wav() }];
+
+  for (const [when, setup] of [
+    ["answered at once", (fake: FakeProvider) => { fake.inlineArtifacts = speech; }],
+    ["answered later", (fake: FakeProvider) => { fake.inlineArtifacts = speech; fake.submitDelayMs = 400; }],
+  ] as const) {
+    it(`a hosted reader's block heard under the proposal comes back as the heard file, ${when}`, () => {
+      const fake = reader(setup);
+      return withDirector({ cloud: fake, direction: async (input) => ({ blocks: input.blocks.map((block) => ({ block: block.key })) }) }, async ({ worldDir, events, send }) => {
+        const heard = await hearUnderProposal({ worldDir, events, send });
+        assert.ok(heard.file, heard.refused);
+        assert.equal(heard.cached, false);
+        assert.equal(fake.submitCount, 1, "one read of the block");
+        assert.deepEqual(await readFile(join(worldDir, heard.file)), Buffer.from(wav()), "the heard file is the reader's audio");
+        assert.deepEqual((await landed(worldDir)).filter((name) => name.startsWith("hear-")), [], "the landed part is taken off the staging shelf");
+        assert.ok(!events.some((e) => e.type === "voice.preview"), "not told to the character picker as an audition");
+      });
+    });
+  }
+
+  it("a hosted reader's block that fails is refused, never left waiting", () => {
+    const fake = reader((one) => { one.pollState = "failed"; });
+    return withDirector({ cloud: fake, direction: async (input) => ({ blocks: input.blocks.map((block) => ({ block: block.key })) }) }, async ({ worldDir, events, send }) => {
+      const heard = await hearUnderProposal({ worldDir, events, send });
+      assert.equal(heard.file, undefined);
+      assert.match(heard.refused ?? "", /voice job failed/);
+    });
+  });
 });
 
 describe("a card's extras go only with that card (codex on PR 1476)", () => {
