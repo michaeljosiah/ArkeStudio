@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   ClientMessageSchema,
+  BIBLE_EDIT_BOUNDS,
   ModelEditorRequestSchema,
   ModelWorldChatActionSchema,
   worldChatResultShapeGuide,
@@ -209,6 +210,12 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     assert.equal(thread.conversationSchema.safeParse({ ...question, candidates: ["To find her sister"] }).success, false);
     assert.equal(thread.conversationSchema.safeParse({ ...question, candidates: ["CANON-001"] }).success, true);
     assert.equal(thread.conversationSchema.safeParse(question).success, true);
+    const bible = ARKE_CLIENT_COMMAND_REGISTRY["save-bible"];
+    assert.ok(bible.classification === "supported-by-arke");
+    const oversizedBible = { kind: "save-bible", worldId, text: "x".repeat(BIBLE_EDIT_BOUNDS.text + 1) };
+    assert.equal(bible.schema.safeParse(oversizedBible).success, true, "the human editor keeps its unbounded transport");
+    assert.equal(bible.conversationSchema.safeParse(oversizedBible).success, false, "a whole-document chat replacement is bounded");
+    assert.equal(bible.conversationSchema.safeParse({ ...oversizedBible, text: "x".repeat(BIBLE_EDIT_BOUNDS.text) }).success, true);
   });
 
   it("names unsafe command seams and exposes strict authority actions", () => {

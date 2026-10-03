@@ -2,6 +2,7 @@ import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringAc
 import {
   ClientMessageSchema,
   CanonIdSchema,
+  BIBLE_EDIT_BOUNDS,
   ChatSceneCommandSchema,
   ModelEditorRequestSchema,
   BenchGenerationModelActionSchema,
@@ -761,6 +762,7 @@ function conversationCommandSchema(kind: ClientMessageKind, schema: z.ZodDiscrim
     case "stage-art-direction-change":
     case "set-art-direction": return schema.extend({ masterLook: z.null().optional() });
     case "open-thread": return schema.extend({ candidates: z.array(CanonIdSchema).max(10).default([]) });
+    case "save-bible": return schema.extend({ text: z.string().max(BIBLE_EDIT_BOUNDS.text) });
     case "upload-artifacts": return schema.omit({ editor: true, sourcePaths: true });
     case "pick-staged-reference": return schema.omit({ image: true, worldFile: true });
     case "clone-voice": return schema.omit({ language: true, clipId: true, consent: true });
