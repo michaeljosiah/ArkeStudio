@@ -64,6 +64,53 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 @keyframes drift{from{transform:translateY(0)}to{transform:translateY(-7px)}}
 @keyframes barFill{from{width:4%}to{width:78%}}@keyframes kenburns{from{transform:scale(1)}to{transform:scale(1.08)}}@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
 /* Turn 127: settings narrator catalogue. Scoped to these proposed drawings. */
+/* t184 */
+.v184-head{display:flex;align-items:center;gap:10px;height:46px;padding:0 34px;border-bottom:1px solid var(--border);font:var(--type-ui)}
+.v184-head .mono{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.v184-head .grow{flex:1}
+.v184-seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}.v184-seg span{height:26px;padding:0 10px;display:inline-flex;align-items:center;font:var(--type-label);color:var(--muted-foreground)}.v184-seg span.on{background:var(--secondary);color:var(--foreground)}
+.v184-btn{height:28px;padding:0 11px;border:1px solid var(--border);border-radius:8px;background:var(--background);font:var(--type-label);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;color:var(--foreground)}
+.v184-btn.primary{background:var(--foreground);color:var(--background);border-color:transparent}
+.v184-notes{padding:10px 34px 4px;display:flex;flex-direction:column;gap:6px;border-bottom:1px solid var(--border)}
+.v184-notes .v181-note{margin:0 0 6px}
+.v184-body{display:flex;height:calc(100% - 46px)}
+.v184-body .page{flex:1;min-width:0;padding:6px 34px 0;border-right:1px solid var(--border);overflow:hidden}
+.v184-blk{display:flex;gap:16px;padding:10px 0;border-bottom:1px solid var(--border);font-size:var(--text-md);line-height:2.05}
+.v184-blk .who{width:96px;flex:none;font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);padding-top:6px}
+.v184-blk.sel{background:var(--secondary);margin:0 -12px;padding:10px 12px;border-radius:10px;border-bottom-color:transparent}
+.v184-blk .dot{width:6px;height:6px;border-radius:50%;background:var(--neutral-400);display:inline-block;margin-right:6px;vertical-align:1px}
+.v184-prop{outline:1.5px dashed var(--neutral-400);outline-offset:2px;border-radius:6px}
+.v184-sheet{width:400px;flex:none;padding:22px 20px;display:flex;flex-direction:column;gap:12px;background:var(--background)}
+.v184-sheet h4{margin:0;font:var(--type-label);font-weight:600;font-size:var(--text-sm)}
+.v184-sheet .lbl{font:var(--type-label);color:var(--muted-foreground)}
+.v184-sheet .mono{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.v184-reads{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.v184-reads div{display:flex;gap:10px;align-items:baseline;padding:7px 12px;border-bottom:1px solid var(--border);font-size:var(--text-sm)}
+.v184-reads div:last-child{border-bottom:0}
+.v184-reads b{width:92px;flex:none;font:var(--type-label);font-weight:500;color:var(--muted-foreground)}
+.v184-reads span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v184-check{display:flex;align-items:center;gap:8px;font-size:var(--text-sm)}
+.v184-box{width:15px;height:15px;border-radius:4px;border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;font-size:10px;flex:none}
+.v184-box.on{background:var(--foreground);color:var(--background);border-color:transparent}
+.v184-foot{margin-top:auto;display:flex;align-items:center;gap:8px}
+.v184-foot .grow{flex:1}
+.v184-card{border:1px solid var(--border);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;background:var(--card)}
+.v184-card p{margin:0;font-size:var(--text-sm);line-height:1.6}
+.v184-tally{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.v184-play{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:10px}
+.v184-play .btn{width:24px;height:24px;border-radius:50%;background:var(--foreground);color:var(--background);display:inline-flex;align-items:center;justify-content:center;font-size:9px;flex:none}
+.v184-play .grow{flex:1;min-width:0}.v184-play .bar{height:3px;border-radius:2px;background:var(--secondary);margin-top:5px;overflow:hidden}.v184-play .bar i{display:block;height:100%;background:var(--foreground)}
+.v184-play .mono{white-space:nowrap}
+.v184-who{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:var(--text-sm)}
+.v184-who b{width:70px;flex:none;font-weight:500}
+.v184-who span.v{flex:1;min-width:0}
+.v184-who small{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);white-space:nowrap}
+.v184-panel{width:560px;margin:22px auto;border:1px solid var(--border);border-radius:14px;padding:20px 22px;display:flex;flex-direction:column;gap:12px;background:var(--background);box-shadow:0 18px 50px color-mix(in srgb,var(--foreground) 10%,transparent)}
+.v184-panel h3{margin:0;font:var(--type-ui);font-weight:600}
+.v184-panel .lbl{font:var(--type-label);color:var(--muted-foreground);display:flex;justify-content:space-between}
+.v184-panel textarea{width:100%;height:74px;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:var(--type-body);font-size:var(--text-sm);resize:none;background:var(--background);color:var(--foreground);box-sizing:border-box}
+.v184-panel .mono{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+/* /t184 */
 /* t183 */
 .v183-ws{display:flex;height:806px}
 .v183-page{flex:1;min-width:0;padding:30px 40px;border-right:1px solid var(--border)}
@@ -448,7 +495,7 @@ x-import[hint-size^="100%"] { width: 100%; }
   <main class="main">
     <div class="top">
       <h1>Arke Studio · design review</h1>
-      <p>Generated 2026-10-02 from <code>Arke Studio.dc.html</code> by <code>npm run design:review</code>; this page never edits the master. Each screen is its latest frame, copied verbatim, then what shipped, then the turn's binding rules. A screen the master has deliberately not drawn says so. The build refuses a missing frame, a bitmap in place of a drawing, and a frame that does not carry a control the build shipped.</p>
+      <p>Generated 2026-10-03 from <code>Arke Studio.dc.html</code> by <code>npm run design:review</code>; this page never edits the master. Each screen is its latest frame, copied verbatim, then what shipped, then the turn's binding rules. A screen the master has deliberately not drawn says so. The build refuses a missing frame, a bitmap in place of a drawing, and a frame that does not carry a control the build shipped.</p>
     </div>
     <div class="legend"><span><i class="dot dot--built"></i> built</span><span><i class="dot dot--drifted"></i> built · drifted from the drawing</span><span><i class="dot dot--drawn"></i> drawn · not built</span></div>
     
