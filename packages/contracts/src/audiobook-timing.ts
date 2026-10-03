@@ -119,7 +119,9 @@ export function nextReactionKey(reactions: Readonly<Record<string, unknown>> | u
  */
 export function isWorldAudioPath(file: string): boolean {
   return !/[\\:]/.test(file) && ![...file].some((char) => char.charCodeAt(0) < 32) && file.split("/").every((part) => part !== "" && part !== "." && part !== "..")
-    && /\.(wav|mp3|flac|ogg|oga|opus|m4a|aac)$/i.test(file);
+    // The shelf files an audio-only MP4, MOV, WebM or MKV as audio once probed (codex on PR 1503),
+    // and the renderer decodes it through ffmpeg; its container is no reason to refuse it.
+    && /\.(wav|mp3|flac|ogg|oga|opus|m4a|aac|mp4|mov|webm|mkv)$/i.test(file);
 }
 
 /** What a reaction says, as its take is read and keyed: its words, or its sound in brackets. */

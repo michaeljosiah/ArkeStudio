@@ -252,6 +252,7 @@ describe("timing holds to the blocks (R-82)", () => {
     assert.deepEqual(result.sounds, []);
     assert.deepEqual(result.lost, { sounds: ["s1"], reactions: [], beds: ["b1"] });
     assert.ok(isWorldAudioPath("artifacts/club.mp3"));
+    assert.ok(isWorldAudioPath("artifacts/rain.mp4"), "an audio-only container the shelf files as audio (codex on PR 1503)");
     assert.equal(isWorldAudioPath("artifacts/../club.wav"), false);
   });
 
