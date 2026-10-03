@@ -176,6 +176,8 @@ export interface ArkeSupportedClientCommand<K extends ClientMessageKind>
   readonly classification: "supported-by-arke";
   /** Model action kinds, or the existing typed turn-result channels that reach this authority. */
   readonly reachedBy: readonly string[];
+  /** The client-command variants reached by those paths; the transport schema still owns human controls. */
+  readonly conversationSchema: z.ZodType<ClientMessageOfKind<K>>;
 }
 
 export interface ArkeExcludedClientCommand<K extends ClientMessageKind> {

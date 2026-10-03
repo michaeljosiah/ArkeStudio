@@ -1,6 +1,8 @@
 import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema } from "@arke-studio/contracts";
 import {
   ClientMessageSchema,
+  ChatSceneCommandSchema,
+  ModelEditorRequestSchema,
   BenchGenerationModelActionSchema,
   AudioSpineModelActionSchema,
   WorldChatBibleActionSchema,
@@ -95,7 +97,7 @@ import {
 } from "@arke-studio/contracts";
 import { z } from "zod";
 
-type SupportedMetadata = Omit<ArkeSupportedClientCommand<ClientMessageKind>, "kind" | "schema" | "reachedBy">;
+type SupportedMetadata = Omit<ArkeSupportedClientCommand<ClientMessageKind>, "kind" | "schema" | "reachedBy" | "conversationSchema">;
 type ExcludedMetadata = {
   readonly classification: Exclude<ArkeCommandClassification, "supported-by-arke">;
   readonly reason: string;
@@ -749,6 +751,18 @@ function commandReachability(kind: ClientMessageKind, metadata: SupportedMetadat
   };
 }
 
+function conversationCommandSchema(kind: ClientMessageKind, schema: z.ZodDiscriminatedUnionOption<"kind">): z.ZodTypeAny {
+  // Reach can cover fewer variants than the person's control: editor requests cannot detach
+  // live-source audio, and ordinary imports do not place media or choose borrowed paths.
+  switch (kind) {
+    case "timeline-command": return schema.extend({ commands: ModelEditorRequestSchema.shape.commands });
+    case "scene-command": return schema.extend({ command: ChatSceneCommandSchema });
+    case "upload-artifacts": return schema.omit({ editor: true, sourcePaths: true });
+    case "pick-staged-reference": return schema.omit({ image: true, worldFile: true });
+    default: return schema;
+  }
+}
+
 function buildClientRegistry(): ArkeClientCommandRegistry {
   const schemas = new Map<ClientMessageKind, z.ZodDiscriminatedUnionOption<"kind">>();
   for (const option of ClientMessageSchema.options) {
@@ -768,7 +782,7 @@ function buildClientRegistry(): ArkeClientCommandRegistry {
     const metadata = CLIENT_COMMAND_METADATA[kind];
     built[kind] = {
       kind, schema, ...metadata,
-      ...(metadata.classification === "supported-by-arke" ? commandReachability(kind, metadata) : {}),
+      ...(metadata.classification === "supported-by-arke" ? { ...commandReachability(kind, metadata), conversationSchema: conversationCommandSchema(kind, schema) } : {}),
     } as ArkeClientCommandDescriptor;
   }
   for (const kind of schemas.keys()) {
@@ -1378,7 +1392,7 @@ export function modelActionCatalogue(): readonly ModelActionCatalogueEntry[] {
       requiredReads: descriptor.requiredReads,
       support: descriptor.support,
       reachedBy: descriptor.reachedBy,
-      fields: descriptor.support.preparation.state === "available" ? fieldsFor(descriptor.schema) : [],
+      fields: descriptor.support.preparation.state === "available" ? fieldsFor(descriptor.conversationSchema) : [],
     });
   }
   for (const descriptor of Object.values(ARKE_AUTHORITY_ACTION_REGISTRY)) {

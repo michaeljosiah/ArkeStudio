@@ -839,7 +839,7 @@ const editShotCommand = SceneCommandSchema.options.find((option): option is Extr
 const ChatInsertShotCommandSchema = insertShotCommand.extend({ shot: insertShotCommand.shape.shot.omit({ visualFacts: true }) });
 const ChatEditShotCommandSchema = editShotCommand.extend({ change: editShotCommand.shape.change.omit({ visualFacts: true }) });
 type ChatSceneCommandOption = Exclude<SceneCommandOption, typeof insertShotCommand | typeof editShotCommand> | typeof ChatInsertShotCommandSchema | typeof ChatEditShotCommandSchema;
-const ChatSceneCommandSchema = z.discriminatedUnion("kind", SceneCommandSchema.options.map((option): ChatSceneCommandOption => {
+export const ChatSceneCommandSchema = z.discriminatedUnion("kind", SceneCommandSchema.options.map((option): ChatSceneCommandOption => {
   if (option.shape.kind.value === "insert-shot") return ChatInsertShotCommandSchema;
   if (option.shape.kind.value === "edit-shot") return ChatEditShotCommandSchema;
   return option as Exclude<SceneCommandOption, typeof insertShotCommand | typeof editShotCommand>;

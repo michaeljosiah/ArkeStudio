@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   ClientMessageSchema,
-  TimelineCommandSchema,
+  ModelEditorRequestSchema,
   ModelWorldChatActionSchema,
   worldChatResultShapeGuide,
   type ClientMessageKind,
@@ -131,7 +131,7 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
         assert.deepEqual(entry.fields, [], `${entry.kind} must not advertise its unsafe legacy payload`);
         continue;
       }
-      const schema = descriptor.schema as unknown as z.ZodObject<z.ZodRawShape>;
+      const schema = descriptor.conversationSchema as unknown as z.ZodObject<z.ZodRawShape>;
       assert.deepEqual(
         entry.fields.map((field) => field.name),
         Object.keys(schema.shape).filter((field) => field !== "kind"),
@@ -143,10 +143,38 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     assert.ok(timeline);
     const commands = timeline.fields.find((field) => field.name === "commands");
     assert.ok(commands);
-    for (const option of TimelineCommandSchema.options) {
+    for (const option of ModelEditorRequestSchema.shape.commands.element.options) {
       const kind = option.shape.kind as z.ZodLiteral<string>;
       assert.match(commands.type, new RegExp(`\\b${String(kind.value)}\\b`));
     }
+    assert.doesNotMatch(commands.type, /detach-audio/);
+  });
+
+  it("offers only conversation variants while preserving the human transport schemas", () => {
+    const worldId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const timeline = ARKE_CLIENT_COMMAND_REGISTRY["timeline-command"];
+    const upload = ARKE_CLIENT_COMMAND_REGISTRY["upload-artifacts"];
+    assert.ok(timeline.classification === "supported-by-arke" && upload.classification === "supported-by-arke");
+    const command = { kind: "timeline-command", worldId, productionId: "saltlight", baseRevision: 1, sourceFingerprint: "story-picture-v1:0123456789abcdef",
+      commands: [{ kind: "detach-audio", clipId: "cl_picture", newClipId: "cl_audio" }] };
+    assert.equal(timeline.schema.safeParse(command).success, true, "the human editor still owns detachment");
+    assert.equal(timeline.conversationSchema.safeParse(command).success, false, "request ghosts cannot detach live-source audio");
+    assert.equal(timeline.conversationSchema.safeParse({ ...command, commands: [{ kind: "set-clip-audio", clipId: "cl_picture", audio: "mute" }] }).success, true);
+    const files = { kind: "upload-artifacts", worldId, requestId: worldId };
+    const editor = { productionId: "saltlight", baseRevision: 1, sourceFingerprint: command.sourceFingerprint, destination: "library" };
+    assert.equal(upload.schema.safeParse({ ...files, editor }).success, true);
+    assert.equal(upload.conversationSchema.safeParse({ ...files, editor }).success, false, "plain filing cannot populate the editor");
+    assert.equal(upload.schema.safeParse({ ...files, sourcePaths: ["chosen.mp4"] }).success, true);
+    assert.equal(upload.conversationSchema.safeParse({ ...files, sourcePaths: ["chosen.mp4"] }).success, false, "the host chooses paths for conversation imports");
+    assert.equal(upload.conversationSchema.safeParse(files).success, true);
+    const fields = modelActionCatalogue().find((entry) => entry.kind === "upload-artifacts")!.fields;
+    assert.equal(fields.some((field) => field.name === "editor" || field.name === "sourcePaths"), false);
+    const scene = ARKE_CLIENT_COMMAND_REGISTRY["scene-command"];
+    assert.ok(scene.classification === "supported-by-arke");
+    const offeredScene = scene.conversationSchema as unknown as z.ZodObject<z.ZodRawShape>;
+    assert.equal(offeredScene.shape["command"]!.safeParse({ kind: "edit-shot", shotId: "sh_12", change: { visualFacts: { onScreenCharacters: [], composition: "wide", confirmedAt: "2026-09-04T12:00:00.000Z" } } }).success, false);
+    const staged = modelActionCatalogue().find((entry) => entry.kind === "pick-staged-reference")!.fields;
+    assert.equal(staged.some((field) => field.name === "image" || field.name === "worldFile"), false);
   });
 
   it("names unsafe command seams and exposes strict authority actions", () => {
