@@ -10,6 +10,7 @@ import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema, DirectionReadsSchema } from "./audiobook.js";
 import { AudiobookListeningSchema } from "./audiobook-listening.js";
+import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX } from "./cadence.js";
 import { FreePlanShortSchema } from "./provider-plans.js";
 import { z } from "zod";
@@ -1370,6 +1371,19 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     .strict(),
   /** The book as a listener hears it (design turn 186), answered to the window that asked; or none, and why. */
   z.object({ ...base, type: z.literal("audiobook.listening"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, listening: AudiobookListeningSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
+  /** Arke's timing for a chapter (design turn 187b, R-86), answered to the window that asked; or none, and why. */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.timing-proposal"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      proposal: TimingProposalSchema.nullable(),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
   /**
    * The chapter's mix rendered (design turn 187, R-85): the world-relative file, how long it is and
    * where on the chapter's clock it starts; or none, and why, in one clause.

@@ -307,7 +307,7 @@ import {
 import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiobookBook } from "./productions/audiobook-book.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
 import { audiobookListening, setAudiobookPicture } from "./productions/audiobook-listening.js";
-import { chapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
+import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
 import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
@@ -14971,6 +14971,42 @@ export class Coordinator {
         } catch (err) {
           if (!(err instanceof TimingRefusal)) void this.appLog?.append({ kind: "audiobook.timing-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: at(), type: "audiobook.record", ...ids, refused: err instanceof TimingRefusal ? err.message : describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "propose-audiobook-timing": {
+        // Propose timing (turn 187b, R-86): read off the chapter as it stands, answered to the
+        // window that asked; nothing written and nothing asked of a provider.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
+        try {
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const proposal = await proposeChapterTiming(store, msg.productionId, chapter.file, narrator);
+          this.emit({ at: new Date().toISOString(), type: "audiobook.timing-proposal", ...ids, proposal });
+        } catch (err) {
+          if (!(err instanceof TimingRefusal)) void this.appLog?.append({ kind: "audiobook.timing-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: new Date().toISOString(), type: "audiobook.timing-proposal", ...ids, proposal: null, refused: err instanceof TimingRefusal ? err.message : describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "accept-audiobook-timing": {
+        // The proposal accepted whole (R-86): never over the author's timing; answered as the record.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
+        try {
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const record = await acceptTimingProposal(store, msg.productionId, chapter.file, msg.proposal, narrator);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record });
+        } catch (err) {
+          if (!(err instanceof TimingRefusal)) void this.appLog?.append({ kind: "audiobook.timing-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, refused: err instanceof TimingRefusal ? err.message : describeCoordinatorError(err) });
         }
         return;
       }

@@ -3,7 +3,10 @@ import {
   audiobookTextHash,
   formatRunningTime,
   formatTimingSeconds,
+  applyTimingProposal,
   hasTiming,
+  proposalCounts,
+  type TimingProposal,
   reactionText,
   timeChapter,
   TIMING_ESTIMATED_CPS,
@@ -24,7 +27,7 @@ import {
 import { Button } from "../components/ui.js";
 import { playClip, usePlayback } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
-import { renderAudiobookMix, setAudiobookTiming, subscribeAudiobookMix } from "../lib/store.js";
+import { acceptAudiobookTiming, proposeAudiobookTiming, renderAudiobookMix, setAudiobookTiming, subscribeAudiobookMix, subscribeAudiobookTimingProposal, useAudiobookRecords } from "../lib/store.js";
 
 /**
  * Timing (design turn 187, SPEC-047 R-80..R-88): the chapter's third view beside Manuscript and
@@ -204,7 +207,7 @@ type Drag = { key: string; mode: "move" | "head" | "tail" | "pause"; x: number; 
  * Dragging a bar moves its start (or, under another, its offset); its edges trim the take; the
  * grip after it sets the pause after it; dropping it over a bar in another lane plays it under.
  */
-export function TimingView({ timing, lanes, rows, selected, onSelect, onTiming, playhead, onPlayhead, locked, reactionLabels }: {
+export function TimingView({ timing, lanes, rows, selected, onSelect, onTiming, playhead, onPlayhead, locked, reactionLabels, proposed }: {
   timing: ChapterTiming;
   lanes: readonly TimingLane[];
   rows: readonly TimingRowLike[];
@@ -216,6 +219,8 @@ export function TimingView({ timing, lanes, rows, selected, onSelect, onTiming, 
   locked: boolean;
   /** What each reaction says, by its key: drawn on its bar in italic (R-88). */
   reactionLabels?: Readonly<Record<string, string>>;
+  /** Bars and beds Arke proposes (187b): drawn dashed until the proposal is accepted whole. */
+  proposed?: ReadonlySet<string>;
 }) {
   const [zoom, setZoom] = useState<(typeof ZOOMS)[number]>(40);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -369,7 +374,7 @@ export function TimingView({ timing, lanes, rows, selected, onSelect, onTiming, 
                 <div key={`${span.from}`} className="fy-tm__overlap" data-testid="timing-overlap" style={{ left: span.from * pps, width: Math.max(2, (span.to - span.from) * pps) }} />
               ))}
               {timing.beds.map((bed) => (
-                <div key={bed.id} className="fy-tm__bed" data-testid="timing-bed" style={{ left: bed.at * pps, width: Math.max(4, bed.seconds * pps), top: bedLane * 64 + 12 }}>
+                <div key={bed.id} className={proposed?.has(bed.id) === true ? "fy-tm__bed fy-tm__bed--proposed" : "fy-tm__bed"} data-testid="timing-bed" style={{ left: bed.at * pps, width: Math.max(4, bed.seconds * pps), top: bedLane * 64 + 12 }}>
                   {bed.source.label} · {bed.levelDb} dB{bed.duckDb > 0 ? " · ducks under voices" : ""}
                 </div>
               ))}
@@ -395,6 +400,7 @@ export function TimingView({ timing, lanes, rows, selected, onSelect, onTiming, 
                       reaction ? "fy-tm__bar--reaction" : "",
                       bar.made ? "" : "fy-tm__bar--unread",
                       bar.overlaps ? "fy-tm__bar--overlap" : "",
+                      proposed?.has(bar.key) === true ? "fy-tm__bar--proposed" : "",
                       selected === bar.key ? "fy-tm__bar--on" : "",
                     ].filter((name) => name !== "").join(" ")}
                     style={{ left: place.left, width: place.width, top: place.top }}
@@ -704,6 +710,104 @@ export function BlockTimingPanel({ bar, timing, slug, onTiming, onPlayWindow, lo
       <div className="fy-tm__actions">
         <Button variant="ghost" disabled={locked} onClick={() => onTiming(bar.key, resetOf(bar))} data-testid="block-reset">Reset</Button>
         <Button variant="secondary" disabled={!bar.made} onClick={neighbours} data-testid="block-play-neighbours">Play with neighbours</Button>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Propose timing (design turn 187b, R-86): asked of the coordinator, held here until accepted
+ * whole or discarded, and drawn on the view dashed — the record as it would stand, by the same
+ * rule the coordinator writes it with. A new chapter or the transport dropping lets it go.
+ */
+export function useTimingProposal(input: { worldId: string; prodId: string; chapterId: string; chapterFile: string; connection: string }) {
+  const { worldId, prodId, chapterId, chapterFile, connection } = input;
+  const asked = useRef<string | null>(null);
+  const [proposal, setProposal] = useState<TimingProposal | null>(null);
+  const [pending, setPending] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+  const accepting = useRef<string | null>(null);
+  useEffect(() => subscribeAudiobookTimingProposal((answer) => {
+    if (answer.requestId !== asked.current) return;
+    asked.current = null;
+    setPending(false);
+    if (answer.proposal === null) setRefused(answer.refused ?? "could not propose");
+    else setProposal(answer.proposal);
+  }), []);
+  const records = useAudiobookRecords();
+  const answer = records[`${worldId}/${prodId}/${chapterId}`];
+  // The acceptance's own answer: the record, which ends the proposal, or a refusal said on the card.
+  useEffect(() => {
+    if (accepting.current === null || answer === undefined) return;
+    accepting.current = null;
+    if (answer.refused !== undefined) setRefused(answer.refused);
+    else setProposal(null);
+  }, [answer]);
+  const reset = useCallback(() => {
+    asked.current = null;
+    accepting.current = null;
+    setProposal(null);
+    setPending(false);
+    setRefused(null);
+  }, []);
+  useEffect(() => reset(), [reset, chapterId]);
+  useEffect(() => {
+    if (connection !== "open") reset();
+  }, [connection, reset]);
+  const propose = useCallback(() => {
+    setRefused(null);
+    const requestId = proposeAudiobookTiming(worldId, prodId, chapterFile);
+    if (requestId === null) return;
+    asked.current = requestId;
+    setPending(true);
+  }, [worldId, prodId, chapterFile]);
+  const accept = useCallback(() => {
+    if (proposal === null) return;
+    accepting.current = acceptAudiobookTiming(worldId, prodId, chapterFile, proposal);
+  }, [worldId, prodId, chapterFile, proposal]);
+  return { proposal, pending, refused, propose, accept, discard: reset };
+}
+
+/** The record with the proposal in it, and which bars and beds that adds or moves: what the view draws dashed. */
+export function proposedView(record: ChapterAudiobook | null, proposal: TimingProposal | null, blocks: readonly { key: string; text: string }[]): { record: ChapterAudiobook | null; proposed: Set<string> } {
+  if (record === null || proposal === null) return { record, proposed: new Set() };
+  const next = applyTimingProposal(record, proposal, blocks, record.updatedAt);
+  const added = (after: Record<string, unknown> | undefined, before: Record<string, unknown> | undefined) => Object.keys(after ?? {}).filter((key) => before?.[key] === undefined);
+  const moved = Object.keys(proposal.starts).filter((key) => next.timing?.[key]?.by === "arke" && next.timing[key] !== record.timing?.[key]);
+  return { record: next, proposed: new Set([...moved, ...added(next.reactions, record.reactions), ...added(next.beds, record.beds)]) };
+}
+
+/** The proposal's card (187b): what it changes, as data, what it read, and Accept or Discard, whole. */
+export function TimingProposalCard({ proposal, onAccept, onDiscard, refused, locked }: { proposal: TimingProposal; onAccept: () => void; onDiscard: () => void; refused: string | null; locked: boolean }) {
+  const counts = proposalCounts(proposal);
+  return (
+    <section className="fy-bible__panel fy-tm__proposal" data-testid="timing-proposal" aria-label="Proposed timing">
+      <p className="fy-mono fy-tm__data" data-testid="timing-proposal-counts">
+        {[
+          `proposed · ${counts.changes} change${counts.changes === 1 ? "" : "s"}`,
+          `${counts.overlaps} overlap${counts.overlaps === 1 ? "" : "s"}`,
+          `${counts.reactions} reaction${counts.reactions === 1 ? "" : "s"}`,
+          `${counts.pauses} pause${counts.pauses === 1 ? "" : "s"}`,
+          ...(counts.beds > 0 ? [`${counts.beds} bed${counts.beds === 1 ? "" : "s"}`] : []),
+          `0 of yours changed${counts.kept > 0 ? ` · ${counts.kept} kept` : ""}`,
+        ].join(" · ")}
+      </p>
+      <div className="fy-ab__reads">
+        {proposal.heard > 0 && (
+          <div className="fy-ab__read">
+            <b>Heard</b>
+            <span>word times · this machine</span>
+          </div>
+        )}
+        <div className="fy-ab__read">
+          <b>Reads</b>
+          <span>the words, the direction, the cast</span>
+        </div>
+      </div>
+      {refused !== null && <p className="fy-mono fy-ch__who-where--warn">{refused}</p>}
+      <div className="fy-tm__actions">
+        <Button variant="ghost" onClick={onDiscard} data-testid="timing-proposal-discard">Discard</Button>
+        <Button variant="primary" disabled={locked || counts.changes === 0} onClick={onAccept} data-testid="timing-proposal-accept">Accept</Button>
       </div>
     </section>
   );

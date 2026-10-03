@@ -1,5 +1,10 @@
 import {
+  applyTimingProposal,
   audiobookSpeakerKey,
+  chapterParagraphs,
+  proposeTiming,
+  type ProposalBlock,
+  type TimingProposal,
   audiobookTextHash,
   contiguousCuts,
   ESTIMATED_CHARACTERS_PER_SECOND,
@@ -26,7 +31,8 @@ import {
   type TimingInputReaction,
   type TimingTake,
 } from "@arke-studio/contracts";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
+import { frameLevels, readSpeechWav, silenceThreshold } from "../audio/speech-wav.js";
 import { join } from "node:path";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -261,6 +267,71 @@ export async function setBlockTiming(
     }
     const { timing: _old, ...rest } = current;
     return { ...rest, updatedAt: now, ...(Object.keys(entries).length > 0 ? { timing: entries } : {}) };
+  });
+}
+
+/** The quiet after a take's last word, heard on this machine (R-86): where a cut-in should land. Null for a take this reader cannot read. */
+async function tailOf(store: WorldStore, file: string): Promise<number | null> {
+  if (!file.toLowerCase().endsWith(".wav")) return null;
+  try {
+    const pcm = readSpeechWav(new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(file))))));
+    const levels = frameLevels(pcm);
+    const threshold = silenceThreshold(levels);
+    let last = levels.length - 1;
+    while (last > 0 && levels[last]! < threshold) last -= 1;
+    return Math.max(0, pcm.samples.length / pcm.rate - (last + 1) * 0.01);
+  } catch {
+    return null;
+  }
+}
+
+/** The world's sounds a bed may be proposed from: audio on the shelf that is no take of the audiobook. */
+function worldSounds(store: WorldStore): AudiobookAudioSource[] {
+  return store.getBundle().artifacts.flatMap((artifact) => {
+    const file = `artifacts/${artifact.file}`;
+    if (artifact.kind !== "audio" || artifact.retiredAt !== undefined || artifact.generation?.source === "audiobook" || !isWorldAudioPath(file)) return [];
+    const label = artifact.file.split("/").pop()!.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").slice(0, 120) || "sound";
+    const seconds = artifact.mediaInfo?.durationSec;
+    return [{ file, origin: artifact.origin.by === "user" ? ("library" as const) : artifact.generation?.source === "bench" ? ("generated" as const) : ("world" as const), label, ...(seconds !== undefined && seconds > 0 ? { seconds } : {}) }];
+  });
+}
+
+/**
+ * Propose timing for a chapter (design turn 187b, R-86): the blocks with their takes' ends heard
+ * here, the paragraphs for the scene breaks, the cast's names for the reactions the narration
+ * names, and the world's sounds for a bed the words name. Nothing written, nothing spent.
+ */
+export async function proposeChapterTiming(store: WorldStore, productionId: string, chapterFile: string, narrator: AudiobookReader): Promise<TimingProposal> {
+  const plan = await chapterPlan(store, productionId, chapterFile, narrator);
+  const record = plan.record === "unreadable" ? null : plan.record;
+  const inputs = timingBlocks(store, plan);
+  const sheets = store.getBundle().sheets;
+  const blocks: ProposalBlock[] = [];
+  for (const [index, planned] of plan.blocks.entries()) {
+    const take = inputs[index]?.take;
+    const tail = take === undefined ? null : await tailOf(store, take.file);
+    const speaker = audiobookSpeakerKey(planned.block);
+    const name = planned.block.speaker === undefined ? null : (sheets.find((sheet) => sheet.id === planned.block.sheet)?.name ?? planned.block.speaker);
+    blocks.push({ key: planned.block.key, text: planned.block.text, paragraph: planned.block.paragraph, speaker, name, ...(take !== undefined ? { take: { seconds: take.seconds, ...(tail !== null ? { tail } : {}) } } : {}) });
+  }
+  const locked = new Set(chapterTiming(store, plan, "estimate").bars.filter((bar) => bar.locked.start).map((bar) => bar.key));
+  return proposeTiming({ blocks, paragraphs: chapterParagraphs(plan.body), record, sounds: worldSounds(store), locked });
+}
+
+/**
+ * A proposal accepted whole (R-86): each start written as Arke's where the author's does not
+ * stand and the reader's does not hold it, its reactions and beds added, a bed only from a sound
+ * the world still holds. Through the record's lane, as every timing write is.
+ */
+export async function acceptTimingProposal(store: WorldStore, productionId: string, chapterFile: string, proposal: TimingProposal, narrator: AudiobookReader): Promise<ChapterAudiobook> {
+  const plan = await chapterPlan(store, productionId, chapterFile, narrator);
+  const locked = new Set(chapterTiming(store, plan, "estimate").bars.filter((bar) => bar.locked.start).map((bar) => bar.key));
+  const starts = Object.fromEntries(Object.entries(proposal.starts).filter(([key]) => !locked.has(key)));
+  const sounds = new Map(worldSounds(store).map((source) => [source.file, source]));
+  const blocks = plan.blocks.map((planned) => planned.block);
+  return updateAudiobook(store, productionId, plan.chapter, (current) => {
+    const next = applyTimingProposal(current, { ...proposal, starts }, blocks, store.now(), (bed) => sounds.get(bed.source.file) ?? null);
+    return { ...next, updatedAt: store.now() };
   });
 }
 

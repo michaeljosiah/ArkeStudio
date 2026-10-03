@@ -11,6 +11,7 @@ import { isManuscriptLanguage } from "./manuscript.js";
 import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema } from "./audiobook.js";
 import { AudiobookPictureSourceSchema } from "./audiobook-pictures.js";
 import { BedInputSchema, BlockSoundInputSchema, BlockTimingInputSchema, ReactionInputSchema } from "./audiobook-timing.js";
+import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
@@ -3357,6 +3358,23 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       chapterFile: z.string().min(1),
       key: z.string().min(1).max(40).nullable(),
       sound: BlockSoundInputSchema.nullable(),
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /**
+   * Propose timing (design turn 187b, SPEC-047 R-86): read off the chapter as it stands — the
+   * takes' ends heard on this machine, the words, the cast — answered as
+   * `audiobook.timing-proposal`. Nothing written, nothing spent.
+   */
+  z.object({ kind: z.literal("propose-audiobook-timing"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema }).strict(),
+  /** The proposal accepted whole (R-86): written by Arke where the author's timing does not stand; answered as `audiobook.record`. */
+  z
+    .object({
+      kind: z.literal("accept-audiobook-timing"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      proposal: TimingProposalSchema,
       requestId: UlidSchema.optional(),
     })
     .strict(),

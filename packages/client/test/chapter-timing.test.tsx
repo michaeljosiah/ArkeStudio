@@ -15,9 +15,10 @@ import {
   type ChapterTiming,
   type ClientMessage,
   type ClientState,
+  type TimingProposal,
 
 } from "@arke-studio/contracts";
-import { BlockTimingPanel, betweenClocks, TimingSide, TimingView, timingInputs, timingLanes, type TimingRowLike } from "../src/screens/chapter-timing.js";
+import { BlockTimingPanel, betweenClocks, proposedView, TimingProposalCard, TimingSide, TimingView, timingInputs, timingLanes, type TimingRowLike } from "../src/screens/chapter-timing.js";
 import { ReactionsPanel, soundsByTab } from "../src/components/audiobook-beds.js";
 import { ChapterScreen } from "../src/screens/chapter-workspace.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -335,6 +336,37 @@ describe("beds, sounds and reactions on a block (turn 187d)", () => {
     assert.match(q(m, "[data-testid=audiobook-reaction]")!.textContent ?? "", /“mm”Tunde · under · 0\.5 s · not read/);
     await act(async () => (all(m, "[data-testid=audiobook-reaction] button")[0] as HTMLElement).click());
     assert.deepEqual(writes, [["x1", null]]);
+  });
+});
+
+describe("Propose timing (turn 187b)", () => {
+  const proposal: TimingProposal = {
+    starts: { "p2.0": { start: -0.6, why: "cuts in" }, "p0.0": { start: 1, why: "heading" } },
+    reactions: [{ host: "p3.0", speaker: "tunde", sound: "laughs", offset: 0.5 }],
+    beds: [],
+    kept: 1,
+    heard: 4,
+  };
+
+  it("says what it changes and what it read, and is accepted or discarded whole", async () => {
+    const pressed: string[] = [];
+    const m = await render(<TimingProposalCard proposal={proposal} onAccept={() => pressed.push("accept")} onDiscard={() => pressed.push("discard")} refused={null} locked={false} />);
+    assert.equal(q(m, "[data-testid=timing-proposal-counts]")!.textContent, "proposed · 3 changes · 1 overlap · 1 reaction · 1 pause · 0 of yours changed · 1 kept");
+    assert.match(q(m, "[data-testid=timing-proposal]")!.textContent ?? "", /Heardword times · this machine/);
+    await act(async () => q(m, "[data-testid=timing-proposal-accept]")!.click());
+    await act(async () => q(m, "[data-testid=timing-proposal-discard]")!.click());
+    assert.deepEqual(pressed, ["accept", "discard"]);
+  });
+
+  it("draws what it moves and adds dashed, and never the author's", async () => {
+    const held = record({ "p0.0": { start: 0.2 } });
+    const { record: shown, proposed } = proposedView(held, proposal, ROWS.map((row) => row.block));
+    assert.deepEqual([...proposed].sort(), ["p2.0", "x1"]);
+    assert.equal(shown!.timing!["p0.0"]!.start, 0.2, "the author's start stands");
+    const m = await render(
+      <TimingView timing={timingOf(shown!)} lanes={timingLanes(ROWS)} rows={ROWS} selected={null} onSelect={() => {}} onTiming={() => {}} playhead={0} onPlayhead={() => {}} locked proposed={proposed} />,
+    );
+    assert.deepEqual(all(m, ".fy-tm__bar--proposed").map((bar) => bar.dataset["key"]).sort(), ["p2.0", "x1"]);
   });
 });
 
