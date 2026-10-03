@@ -268,6 +268,7 @@ import { ProviderToolService, type ToolProbe } from "./providers/tool.js";
 import { ProviderCallStore } from "./providers/call-store.js";
 import { JobQueue, type DispatchClient, type EnqueueInput } from "./queue/dispatcher.js";
 import { enqueueInputs } from "./queue/acknowledge.js";
+import { JobWaiters } from "./queue/job-waiters.js";
 import {
   extractText,
   resolveCandidate,
@@ -1239,23 +1240,16 @@ export class Coordinator {
   private readonly readingAudiobooks = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string; toMake?: number; blocks?: number; made?: number }>();
   /** The request each audiobook run is asked under, by run key, so a replayed start names the same one. */
   private readonly audiobookRequests = new Map<string, string>();
-  /**
-   * An audiobook run awaits each of its jobs in turn (SPEC-047 R-16): the waiter is registered
-   * the moment the job is queued, and a job that reaches its end before anyone waits is held
-   * until someone does, so the race between enqueue returning and the provider finishing can
-   * never lose a block.
-   */
   /** `Read the book` runs (turn 146, SPEC-047 R-16), one per production, under the chapters' own runs. */
   private readonly readingBooks = new Map<string, { control: AbortController; worldId: string; productionId: string; requestId: string; chapters?: number; blocks?: number; done?: number }>();
-  private readonly audiobookWaiters = new Map<string, (job: Job) => void>();
-  private readonly audiobookTerminal = new Map<string, Job>();
+  /**
+   * An audiobook run awaits each of its jobs in turn (SPEC-047 R-16), and a heard block its own
+   * (R-45): a job that reaches its end before anyone waits is held until someone does, so the
+   * race between enqueue returning and the provider finishing can never lose a block.
+   */
+  private readonly audiobookJobs = new JobWaiters();
   private waitForAudiobookJob(jobId: string): Promise<Job> {
-    const done = this.audiobookTerminal.get(jobId);
-    if (done !== undefined) {
-      this.audiobookTerminal.delete(jobId);
-      return Promise.resolve(done);
-    }
-    return new Promise((resolve) => this.audiobookWaiters.set(jobId, resolve));
+    return this.audiobookJobs.wait(jobId);
   }
   /**
    * Clips chosen or recorded for a clone, held between 74c and 74d (SPEC-022 T-10).
@@ -5239,17 +5233,10 @@ export class Coordinator {
     // was the sandbox, and looking its scope up as a world would scan every world's meta
     // just to throw. The genesis rail reads the job row itself.
     if (!UlidSchema.safeParse(job.worldId).success) return;
-    // An audiobook block's job (turn 146): the run that queued it is waiting, and files the take
-    // itself once it hears; a job that ends before the run waits is held for it.
-    if (job.target.kind === "voice-preview" && job.params["purpose"] === "audiobook") {
-      const waiter = this.audiobookWaiters.get(job.id);
-      if (waiter !== undefined) {
-        this.audiobookWaiters.delete(job.id);
-        waiter(job);
-      } else {
-        this.audiobookTerminal.set(job.id, job);
-      }
-    }
+    // An audiobook block's job (turn 146), or a heard block's (R-45): the press that queued it is
+    // waiting, and files the take or the heard file itself once it hears; a job that ends before
+    // it waits is held for it.
+    this.audiobookJobs.settle(job, job.target.kind === "voice-preview" && job.params["purpose"] === "audiobook");
     if (job.status !== "succeeded") {
       if (job.target.kind === "voice-preview" && typeof job.params["requestId"] === "string" && !this.failedReads.has(job.params["requestId"])) {
         const requestId = job.params["requestId"];

@@ -5095,8 +5095,21 @@ export function hearAudiobookLine(worldId: string, productionId: string, chapter
   const requestId = ulid();
   if (!send({ kind: "hear-audiobook-line", worldId, productionId, requestId, chapterFile, block, ...(voice !== undefined ? { voice } : {}), ...(quoteToken !== undefined ? { quoteToken } : {}), ...(proposed === true ? { proposed: true as const } : {}) })) return null;
   emitChange({ ...current, heardLines: { ...current.heardLines, [requestId]: { state: "working" } } });
+  // A press never sits on `reading…` for good (2026-10-03: an answer the coordinator never sent
+  // held the button for as long as the window was open). Past the bound it says so; an answer
+  // that still comes replaces the line, so a late file plays.
+  const bound = setTimeout(() => {
+    if (current.heardLines[requestId]?.state !== "working") return;
+    emitChange({ ...current, heardLines: { ...current.heardLines, [requestId]: { state: "refused", refused: HEAR_NO_ANSWER } } });
+  }, HEAR_ANSWER_MS);
+  // Never what keeps a process alive (Node's timers have `unref`, a browser's do not).
+  (bound as unknown as { unref?: () => void }).unref?.();
   return requestId;
 }
+
+/** How long a heard block waits for the coordinator before the press gives up: several parts behind a busy lane. */
+export const HEAR_ANSWER_MS = 180_000;
+export const HEAR_NO_ANSWER = "no answer · open Activity";
 
 export function useNarratorQuotes(): StoreState["narratorQuotes"] {
   return useStore().narratorQuotes;
