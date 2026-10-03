@@ -91,4 +91,35 @@ describe("Production Chat Bench take filing (SPEC-051 R-7, R-13)", () => {
     await assert.rejects(h.service().file(h.action, fresh, () => null), /unavailable/);
     assert.equal((await h.bench.fold())!.takes[0]!.filedTakeIds, undefined);
   });
+  it("refuses a Bench result that was filed elsewhere after its review card was prepared", async () => {
+    const h = await setup();
+    const id = newId("act");
+    await h.service().prepare(h.action, id);
+    const before = structuredClone(h.world.getBundle().productions.find(p => p.meta.id === "saltlight")!.selections);
+    await h.bench.append({ type: "take-subject-filed", takeId: h.action.takeId, productionTakeIds: [newId("tk")] }, { at: AT });
+    await assert.rejects(h.service().file(h.action, id, () => null), /changed/);
+    assert.deepEqual(h.world.getBundle().productions.find(p => p.meta.id === "saltlight")!.selections, before);
+  });
+  for (const recover of ["file", "reconcile"] as const) it(`repairs a missing Bench filing event through ${recover} without copying or accepting again`, async t => {
+    const h = await setup();
+    const id = newId("act");
+    await h.service().prepare(h.action, id);
+    const append = h.bench.append.bind(h.bench);
+    let failed = false;
+    t.mock.method(h.bench, "append", (...args: Parameters<BenchStore["append"]>) => {
+      if (!failed && args[0].type === "take-subject-filed") { failed = true; return Promise.reject(new Error("Interrupted Bench append")); }
+      return append(...args);
+    });
+    const committed = await h.service().file(h.action, id, () => null);
+    assert.equal(committed.benchRecorded, false);
+    assert.equal((await h.bench.fold())!.takes[0]!.filedTakeIds, undefined);
+    const before = structuredClone(h.world.getBundle().productions.find(p => p.meta.id === "saltlight")!);
+    const repaired = recover === "file" ? await h.service().file(h.action, id, () => "Selection moved") : await h.service().reconcile(id);
+    assert.deepEqual(repaired?.productionTakeIds, committed.productionTakeIds);
+    assert.deepEqual((await h.bench.fold())!.takes[0]!.filedTakeIds, committed.productionTakeIds);
+    assert.deepEqual(h.world.getBundle().productions.find(p => p.meta.id === "saltlight")!, before);
+    const count = (await h.bench.read()).length;
+    await h.service().reconcile(id);
+    assert.equal((await h.bench.read()).length, count, "the recovery event is idempotent");
+  });
 });

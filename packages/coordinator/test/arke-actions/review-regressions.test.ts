@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { ART_DIRECTION_PATH, LOCAL_ACTOR_ID, newId, orderedShots, orderedTrackClips, stageShot, ulid, type ArkeGenerationBody, type ClientMessage, type DomainEvent, type SessionId } from "@arke-studio/contracts";
+import { ART_DIRECTION_PATH, JobSchema, LOCAL_ACTOR_ID, newId, orderedShots, orderedTrackClips, stageShot, ulid, type ArkeGenerationBody, type ClientMessage, type DomainEvent, type Job, type ModelManifest, type SessionId } from "@arke-studio/contracts";
 import { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { openBenchSession } from "../../src/bench/service.js";
 import { Coordinator } from "../../src/coordinator.js";
@@ -10,10 +10,13 @@ import { setOwner } from "../../src/artifacts/filing.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { worldChatActionAdapters } from "../../src/world-chat/actions.js";
+import { recordTakesFromJob } from "../../src/takes/arrival.js";
+import { encodePng, solidImage } from "../../src/references/png.js";
+import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { discoverConversations } from "../../src/world-chat/discover.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
-import { chaptersFence, jobsFence, sceneFence, storyFence, timelineFence, worldMetadataFence } from "../../src/world-chat/target-reads.js";
+import { chaptersFence, jobsFence, sceneFence, storyFence, takesFence, timelineFence, worldMetadataFence } from "../../src/world-chat/target-reads.js";
 import { DRAFT_CHANGED_DETAIL, ProposalManager } from "../../src/gate/proposals.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { WorldStateStaleError, type WorldStore } from "../../src/world/store.js";
@@ -24,13 +27,13 @@ import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 const AT = "2026-09-04T12:00:00.000Z";
 
-async function setup(ffmpeg?: FfmpegRunner) {
+async function setup(ffmpeg?: FfmpegRunner, manifest?: ModelManifest) {
   const made = await makeTempRoot();
   const provider = new FsWorldProvider(made.root, { clock: () => AT });
   closeOnCleanup(() => provider.close());
   await provider.loadWorld(WORLD_ID);
   const events: DomainEvent[] = [];
-  const coordinator = new Coordinator({ provider, adapter: null, ffmpeg, changeLogPath: join(made.root, "logs/changes.jsonl"), appVersion: "test", observeEvent: (event) => events.push(event) });
+  const coordinator = new Coordinator({ provider, adapter: null, ffmpeg, manifest, changeLogPath: join(made.root, "logs/changes.jsonl"), appVersion: "test", observeEvent: (event) => events.push(event) });
   const internal = coordinator as unknown as {
     handleClientMessage(message: ClientMessage): Promise<void>;
     conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle;
@@ -44,6 +47,61 @@ async function setup(ffmpeg?: FfmpegRunner) {
   };
   return { ...made, provider, store: provider.openStore()!, gate: provider.gate()!, coordinator, internal, events };
 }
+
+for (const status of ["succeeded", "failed", "cancelled"] as const) it(`settles a quoted production card live when its job ${status}`, async () => {
+  const w = await setup(undefined, { manifestVersion: 1, generated: "2026-10-03", models: [{ id: "test-image", provider: "fal", capability: "image", displayName: "Test image",
+    accepts: { referenceImages: 16, startFrame: false, endFrame: false }, limits: { aspects: ["16:9"] }, pricing: { kind: "perImage", microUsdPerImage: 40_000 } }] });
+  await w.coordinator.openWorld(WORLD_ID);
+  const internals = w.coordinator as unknown as { jobQueue: { listJobs(): Job[] }; enqueueWithSpeechChecks(input: EnqueueInput): Promise<Job>; onJobTerminal(job: Job): Promise<void> };
+  const jobs: Job[] = [];
+  internals.jobQueue = { listJobs: () => jobs };
+  internals.enqueueWithSpeechChecks = async input => { const job = JobSchema.parse({ ...input, id: newId("jb"), status: "queued", createdAt: AT, updatedAt: AT }); jobs.push(job); return job; };
+  const production = w.store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
+  const scene = production.scenes.find(s => s.id === "sc_04")!;
+  const selections = structuredClone(production.selections);
+  const conversationId = newId("cv");
+  const log = new WorldChatStore(conversationDir(w.worldDir, conversationId));
+  await log.create(conversationId, AT);
+  await log.append({ type: "conversation.created", title: "Generate a frame", entryContext: { kind: "scene", productionId: production.meta.id, sceneId: scene.id } }, { at: AT });
+  const action = await w.internal.conversationActionLifecycle(w.store).prepare({
+    conversationId, turnId: newId("turn"), worldId: WORLD_ID, actionKind: "world-chat-production-take-generation", productionId: production.meta.id,
+    targets: [{ kind: "shot", id: "sh_12" }], createdAt: AT,
+    payload: { kind: "world-chat-production-take-generation", worldId: WORLD_ID, action: { kind: "production-take-generation", productionId: production.meta.id,
+      sceneId: scene.id, target: { kind: "shot", shotId: "sh_12" }, mode: "image", modelId: "test-image", checkReceiptIds: [newId("check")] } },
+    baseObservations: [{ requirement: "scenes", target: `${production.meta.id}:${scene.id}`, revisionOrDigest: sceneFence(production, scene.id), complete: true },
+      { requirement: "takes", target: production.meta.id, revisionOrDigest: takesFence(production), complete: true }],
+  });
+  await w.internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
+  await w.internal.handleClientMessage({ kind: "conversation-action-decide", worldId: WORLD_ID, conversationId, actionId: action.actionId,
+    requestId: ulid(), decision: "approve", expectedStatus: "pending", expectedConversationSeq: foldConversation(conversationId, AT, (await log.read()).events).view.seq });
+  assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, "queued");
+  assert.equal(jobs.length, 1);
+  jobs[0] = { ...jobs[0]!, status };
+  w.coordinator.emit({ type: "job.updated", at: AT, job: jobs[0] });
+  await Promise.all(w.internal.backgroundWork);
+  assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, "queued", "the first terminal update precedes filing and ledger settlement");
+  jobs[0] = { ...jobs[0]!, status, ...(status === "succeeded" ? { landedFiles: ["incoming/chat-frame.png"], finalization: { status: "pending", error: null, updatedAt: AT } } : {}) };
+  if (status === "succeeded") {
+    w.coordinator.emit({ type: "job.updated", at: AT, job: jobs[0] });
+    await Promise.all(w.internal.backgroundWork);
+    assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, "queued", "provider success waits for candidate filing");
+    await mkdir(join(w.worldDir, "incoming"), { recursive: true });
+    await writeFile(join(w.worldDir, "incoming/chat-frame.png"), encodePng(solidImage(4, 4, [20, 40, 60, 255])));
+    await recordTakesFromJob(w.store, jobs[0], null);
+    jobs[0] = { ...jobs[0], finalization: { status: "complete", error: null, updatedAt: AT } };
+  }
+  w.coordinator.emit({ type: "job.updated", at: AT, job: jobs[0] });
+  if (status !== "succeeded") await internals.onJobTerminal(jobs[0]);
+  await Promise.all(w.internal.backgroundWork);
+  const settled = w.coordinator.getState().worldChat?.actions[0];
+  assert.equal(settled?.status, status === "succeeded" ? "completed" : status);
+  assert.equal(settled?.receipt?.generation?.authorized, 1);
+  assert.deepEqual(w.store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.selections, selections);
+  const count = (await log.read()).events.length;
+  w.coordinator.emit({ type: "job.updated", at: AT, job: jobs[0] });
+  await Promise.all(w.internal.backgroundWork);
+  assert.equal((await log.read()).events.length, count, "duplicate terminal updates cannot settle or dispatch twice");
+});
 
 for (const decision of ["accept", "card-accept", "discard", "journal-discard"] as const) {
   it(`reconciles an overview card after ${decision} through the proposal panel (#953)`, async () => {

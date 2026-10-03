@@ -7,7 +7,7 @@ import {
   type BenchSession, type WorldChatProductionTakeFileAction,
 } from "@arke-studio/contracts";
 import { conversationActionDigest } from "../arke-actions/lifecycle.js";
-import { existingBenchSubjectFiling, fileBenchSubjectTake } from "../bench/filing.js";
+import { existingBenchSubjectFiling, fileBenchSubjectTake, type SubjectFilingOutcome } from "../bench/filing.js";
 import { BenchStore, sessionMediaDir } from "../bench/store.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "../world/reference-files.js";
@@ -43,7 +43,8 @@ export class ProductionTakeFiling {
     const mediaPath = `${sessionMediaDir(action.sessionId, take.id)}/${take.media.file}`;
     const files = take.request.mode === "image" ? await readContainedImageReferences(this.world.dir, [mediaPath]) : await readContainedVideoReferences(this.world.dir, [mediaPath]);
     return { bench, take, mediaPath, mediaHash: createHash("sha256").update(files[0]!.data).digest("hex"),
-      sourceDigest: conversationActionDigest({ request: take.request, media: take.media, jobId: take.jobId ?? null }) };
+      sourceDigest: conversationActionDigest({ request: take.request, media: take.media, jobId: take.jobId ?? null,
+        filedTakeIds: take.filedTakeIds ?? [] }) };
   }
   private destination(action: Action) {
     const production = this.world.getBundle().productions.find(p => p.meta.id === action.productionId);
@@ -100,7 +101,11 @@ export class ProductionTakeFiling {
     const plan = await this.read(id);
     if (!plan || plan.actionDigest !== conversationActionDigest(action)) throw new Error("The prepared filing is unavailable.");
     const recovered = this.existing(action, plan);
-    if (recovered) return recovered;
+    if (recovered) {
+      const benchRecorded = await this.recordFiling(action, id, recovered);
+      await this.ports.refresh?.(action.sessionId);
+      return { ...recovered, benchRecorded };
+    }
     const source = await this.source(action);
     const session = { ...source.bench.session, subject: plan.subject };
     const take = { ...source.take, request: plan.request };
@@ -111,15 +116,35 @@ export class ProductionTakeFiling {
         expectedMediaHash: plan.mediaHash,
         precondition: () => { const moved = precondition(); if (moved) return moved; this.validate(action, plan, source, this.destination(action)); return null; } });
     }
-    await this.world.ownedWrite(() => source.bench.store.append({ type: "take-subject-filed", takeId: take.id, productionTakeIds: filed!.productionTakeIds as never,
-      ...(filed!.artifactId ? { artifactId: filed!.artifactId as never } : {}) }, { at: this.world.now(), requestId: id })).catch(() => {});
+    const benchRecorded = await this.recordFiling(action, id, filed, source.bench);
     await this.ports.refresh?.(action.sessionId);
-    return filed;
+    return { ...filed, benchRecorded };
+  }
+  private async recordFiling(action: Action, id: string, filed: SubjectFilingOutcome,
+    bench?: Awaited<ReturnType<ProductionTakeFiling["ports"]["bench"]>>) {
+    const source = bench ?? await this.ports.bench(action.sessionId);
+    if (!source?.session.takes.some(take => take.id === action.takeId)) return true;
+    const take = source.session.takes.find(take => take.id === action.takeId)!;
+    if (conversationActionDigest(take.filedTakeIds ?? []) === conversationActionDigest(filed.productionTakeIds)) return true;
+    // Production metadata is the committed authority, but Bench must learn that its source
+    // was accepted before this card settles. A failed append stays recoverable, never completed.
+    try {
+      await this.world.ownedWrite(() => source.store.append({ type: "take-subject-filed", takeId: action.takeId,
+        productionTakeIds: filed.productionTakeIds as never, ...(filed.artifactId ? { artifactId: filed.artifactId as never } : {}) },
+      { at: this.world.now(), requestId: id }));
+      return true;
+    } catch { return false; }
   }
   async reconcile(id: string) {
     const plan = await this.read(id);
     if (!plan || plan.actionDigest !== conversationActionDigest(plan.action)) return null;
-    return this.existing(plan.action, plan);
+    const work = async () => {
+      const filed = this.existing(plan.action, plan);
+      if (!filed || !await this.recordFiling(plan.action, id, filed)) return null;
+      await this.ports.refresh?.(plan.action.sessionId);
+      return filed;
+    };
+    return this.ports.serialise ? this.ports.serialise(`${plan.action.sessionId}/${plan.action.takeId}`, work) : work();
   }
   private existing(action: Action, plan: Plan) {
     const session = foldBenchSession({ schemaVersion: 1, id: action.sessionId, createdAt: plan.take.createdAt, subject: plan.subject }, []);

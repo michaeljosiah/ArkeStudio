@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  attachmentFor, characterAudioRoute, characterImageEstimateIsUsable, foldBenchSession, orderedShots, resolveCast,
+  attachmentFor, characterAudioRoute, characterImageEstimateIsUsable, foldBenchSession, keyframePlan, orderedShots, resolveCast,
   type AppSettings, type ArkeGenerationBody, type BenchSubject, type ModelManifest,
 } from "@arke-studio/contracts";
 import { resolveSubjectCastVoices } from "../audio/reference-inputs.js";
@@ -65,7 +65,10 @@ export function productionGenerationSource(store: WorldStore, ports: {
         session.composer = { ...prefill.composer, ...routing, provider: model.provider, model: model.id,
           brief: [prefill.composer.brief, ...(retake ? [`Retake ${retake.id}.`] : []), ...(action.instruction ? [action.instruction] : [])].join("\n\n") };
         if (session.composer.params.kind === "image") session.composer.params.count = action.count ?? 1;
-        const route = action.mode === "video" ? characterAudioRoute(model) : null;
+        const framePlan = action.mode === "video" && routing.keyframeTokens.length ? keyframePlan(model, routing.keyframeTokens.length) : null;
+        if (framePlan && !framePlan.ok) throw new Error(framePlan.reason);
+        const taskMode = framePlan?.ok ? framePlan.mode : "generate";
+        const route = action.mode === "video" ? characterAudioRoute(model, taskMode) : null;
         const cast = route ? await resolveSubjectCastVoices(store, prefill.subject, actionId, route.local === true, { acknowledge: false, at })
           : { references: [], notSent: [], refused: [] };
         if (cast.refused.length) throw new Error(cast.refused.map(ref => `${ref.name}: ${ref.reason}`).join(" · "));
@@ -85,6 +88,7 @@ export function productionGenerationSource(store: WorldStore, ports: {
           id: target.kind === "shot" ? target.shotId : action.sceneId, role: prefill.title });
         for (const ref of cast.references) offered.set(ref.performance.id, { id: ref.performance.id, role: `Cast voice: ${ref.characterName}` });
         exclusions.push(...cast.notSent.map(ref => `${ref.name}: voice not sent · ${ref.reason}`));
+        if (action.mode === "video" && !route) exclusions.push(`Cast audio not sent: the ${taskMode} route does not carry character audio.`);
         authorities.push({ subject: prefill.subject, references: prefill.references, cast: cast.references });
         const repetitions = action.mode === "video" ? action.count ?? 1 : 1;
         for (let copy = 0; copy < repetitions; copy++) for (const [index, input] of plan.inputs.entries()) {
@@ -133,7 +137,8 @@ export function productionGenerationSource(store: WorldStore, ports: {
       for (const subject of materialization as BenchSubject[]) {
         // The quote already resolved the exact destination; acknowledgement records the person's approval.
         const model = ports.manifest?.models.find(m => m.id === _inputs[0]?.model);
-        const route = model ? characterAudioRoute(model) : null;
+        const taskMode = typeof _inputs[0]?.params.taskMode === "string" ? _inputs[0].params.taskMode : "generate";
+        const route = model ? characterAudioRoute(model, taskMode) : null;
         if (!route) continue;
         const cast = await resolveSubjectCastVoices(store, subject, actionId, route.local === true, { at });
         if (cast.refused.length) throw new Error("The approved cast audio could not be cleared.");

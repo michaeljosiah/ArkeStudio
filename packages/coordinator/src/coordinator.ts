@@ -3915,6 +3915,10 @@ export class Coordinator {
         this.trackBackground(this.reconcileProposalConversationActions(store, parsed.proposalId));
       }
     }
+    if (parsed.type === "job.updated" && parsed.job.status === "succeeded" &&
+      (parsed.job.finalization?.status === "complete" || parsed.job.finalization?.status === "failed")) {
+      this.noteGenerationJobSettled(parsed.job);
+    }
     // Every R-17 source changes through this fold, so this is the whole of SPEC-032 R-33:
     // re-derive when something changed, coalesced to one derivation per tick, never a timer.
     // A tail read that failed transiently (an AV pass holding app.jsonl) would otherwise stick
@@ -5357,6 +5361,8 @@ export class Coordinator {
       // A bench take's failure reaches its session log, so the strip says so after a restart
       // without waiting for recovery to notice (issue 305 §6).
       if (job.target.kind === "bench-take") await this.recordBenchTerminal(job).catch(() => {});
+      // This callback follows ledger settlement; the earlier terminal update does not.
+      this.noteGenerationJobSettled(job);
       return;
     }
     const finalize = async (store: WorldStore) => {
@@ -19061,7 +19067,29 @@ export class Coordinator {
     if (this.stopping || !this.stillOpen(store)) return;
     const lifecycle = this.conversationActionLifecycle(store);
     for (const action of activeActions) {
-      if (action.actionKind !== "world-chat-bench-generation" || action.authority.id !== sessionId) continue;
+      if (!["world-chat-bench-generation", "world-chat-production-take-file"].includes(action.actionKind) || action.authority.id !== sessionId) continue;
+      if (await lifecycle.reconcileAction(action.conversationId, action.actionId)) {
+        await this.refreshConversationOutcome(store, action.conversationId);
+      }
+    }
+  }
+
+  private noteGenerationJobSettled(job: Job): void {
+    if (!("generationQuoteReferences" in job.params)) return;
+    const store = this.opts.provider.openStore?.();
+    if (store?.worldId === job.worldId && !this.stopping) {
+      // Finalized updates follow take arrival. Waiting on the action lock also covers a
+      // provider finishing before dispatch has written its queued conversation outcome.
+      this.trackBackground(this.reconcileGenerationConversationActions(store));
+    }
+  }
+
+  private async reconcileGenerationConversationActions(store: WorldStore): Promise<void> {
+    const { activeActions } = await discoverConversations(store.dir);
+    if (this.stopping || !this.stillOpen(store)) return;
+    const lifecycle = this.conversationActionLifecycle(store);
+    for (const action of activeActions) {
+      if (action.authority.kind !== "job-queue" || action.shown.body.family !== "generation") continue;
       if (await lifecycle.reconcileAction(action.conversationId, action.actionId)) {
         await this.refreshConversationOutcome(store, action.conversationId);
       }

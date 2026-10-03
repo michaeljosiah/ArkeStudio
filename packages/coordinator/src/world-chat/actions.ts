@@ -3752,6 +3752,7 @@ async function executeSharedResource(
     case "world-chat-production-take-file": {
       const filed = await deps.productionTakeFiling?.file(payload.action, action.actionId, precondition);
       if (!filed) throw new Error("Bench take filing is unavailable.");
+      if (!filed.benchRecorded) return { status: "running", detail: "Production filing is durable; its Bench link needs reconciliation." };
       return { status: "completed", receipt: { kind: "production-take-file", id: filed.productionTakeIds[0]!, summary: "The Bench take was filed and accepted on the reviewed shot." } };
     }
     case "world-chat-production-shot-frame-clear": {

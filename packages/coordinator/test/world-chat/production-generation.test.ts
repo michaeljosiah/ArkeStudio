@@ -184,4 +184,19 @@ describe("quoted production take generation (SPEC-051 R-4..7, R-11..12)", () => 
     assert.equal(h.fake.submitCount, 0);
     assert.match(h.queue.listJobs().find(j => j.id === job.id)!.error!, /Video references changed after generation approval/);
   });
+  it("omits cast audio clearance and acknowledgement on a first-frame route", async () => {
+    const h = await setup();
+    h.manifest.models[1]!.id = "seedance-2.0";
+    const frame = await recordUploadedShotFrameTake(h.store, "saltlight", "sh_12", "frame.png", encodePng(solidImage(4, 4, [20, 40, 60, 255])));
+    await acceptStill(h.store, h.store.getBundle().productions.find(p => p.meta.id === "saltlight")!, { takeId: frame.id, shotId: "sh_12", by: "test" });
+    const action = { ...videoAction(), modelId: "seedance-2.0" };
+    const id = newId("act");
+    const body = await h.quotes().prepare(action, id, AT);
+    const quote = await h.quotes().validate(action, id);
+    assert.equal(quote.inputs[0]!.params.taskMode, "first-frame");
+    assert.equal(quote.inputs[0]!.params.audioReferences, undefined);
+    assert.deepEqual(quote.materialization, [], "no unsupported cast clearance is acknowledged on approval");
+    assert.ok(body.exclusions?.some(line => /Cast audio not sent.*first-frame/.test(line)));
+    assert.equal(body.references.some(ref => ref.role.startsWith("Cast voice:")), false);
+  });
 });
