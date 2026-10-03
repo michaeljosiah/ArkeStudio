@@ -85,7 +85,7 @@ describe("screen inventory", () => {
   it("opens every start on the launch surface, two ways in (design turn 158)", () => {
     const html = renderAt("/");
     assert.ok(html.includes('data-screen="startup"'), "/ mounts the launch surface");
-    assert.ok(html.includes("launch-harbour.webp"), "the loop's still is up from the first frame");
+    assert.ok(html.includes("launch-creation.webp"), "the loop's still is up from the first frame");
     assert.ok(html.includes("Welcome back"));
     assert.ok(html.includes("Continue Locally"), "the local way is live at once");
     assert.ok(html.includes("Cloud Login") && html.includes("Coming soon"), "cloud is named, not offered");
