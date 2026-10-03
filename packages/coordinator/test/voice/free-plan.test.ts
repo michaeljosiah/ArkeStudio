@@ -207,7 +207,9 @@ describe("a provider's Free plan (design turn 182)", () => {
       await h.send({ kind: "set-provider-plan", provider: "google", plan: "free" });
       assert.equal(h.app().providerPlans.googleBilledAt, null, "Free said again clears the mark");
       assert.equal(h.app().manifest?.models.find((model) => model.id === GEMINI.id)?.speechPlan, "free-plan");
-      assert.deepEqual((await h.settings()).plans, { google: "free", mistral: "paid", googleBilledAt: null });
+      const { googleKeySetAt, ...plans } = (await h.settings()).plans as { googleKeySetAt?: unknown };
+      assert.deepEqual(plans, { google: "free", mistral: "paid", googleBilledAt: null });
+      assert.equal(typeof googleKeySetAt, "string", "the key's save is kept beside the plan");
     } finally {
       await h.coordinator.stop();
     }
@@ -249,6 +251,54 @@ describe("a provider's Free plan (design turn 182)", () => {
       const refused = h.audio("01J8F3K2QW9VZX4N7M0RTYB6RB").find((event) => event.status === "failed");
       assert.match(refused?.error ?? "", /^Google free limit reached · 10 a day · resets \d{4}-/);
       assert.equal(h.google.attempts, 1);
+    } finally {
+      await h.coordinator.stop();
+    }
+  });
+
+  // Codex on PR 1475: a paid key's own daily quota was flagged block by block, a request each,
+  // and the chapter ended `read`.
+  it("ends a paid chapter at the key's own daily limit after one request", async () => {
+    const h = await harness();
+    try {
+      await h.narrateWith(KORE);
+      h.google.refuse = { error: { code: "too_many_requests", message: "Rate limit exceeded for model gemini-3.8-flash-tts (limit: 2000 requests per day). Please retry in 3h." } };
+      const chapter = (confirmationToken?: string) => h.send({ kind: "read-audiobook-chapter", worldId: WORLD_ID, productionId: "the-ledger-of-nights", chapterFile: "01-neap",
+        ...(confirmationToken !== undefined ? { confirmationToken } : {}) });
+      await chapter();
+      const priced = h.events.find((event) => event.type === "audiobook.priced");
+      assert.ok(priced?.type === "audiobook.priced", "a paid chapter asks its price");
+      await chapter(priced.confirmationToken);
+      const ending = h.events.filter((event) => event.type === "audiobook.finished").at(-1);
+      assert.ok(ending?.type === "audiobook.finished");
+      assert.equal(ending.outcome, "failed");
+      assert.equal(ending.reason, "Google's daily request limit was reached");
+      assert.equal(h.google.attempts, 1, "one request, not one a block");
+    } finally {
+      await h.coordinator.stop();
+    }
+  });
+
+  it("starts a new key's free day afresh", async () => {
+    const h = await harness();
+    try {
+      await h.narrateWith(KORE);
+      await h.send({ kind: "set-provider-plan", provider: "google", plan: "free" });
+      const now = new Date().toISOString();
+      const rows = Array.from({ length: 10 }, (_, i) => JSON.stringify({
+        ts: now, worldId: WORLD_ID, jobId: `jb_01K${"0".repeat(21)}G${i}`, provider: "google", model: GEMINI.id,
+        outcome: "succeeded", estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "free-plan",
+        speechQuote: { ...quoteSpeech(GEMINI, "x", { at: now }), plan: "free-plan" }, speechUsage: { inputTextTokens: 1, outputAudioTokens: 25 },
+      }));
+      await appendFile(join(h.root, "ledger.jsonl"), `${rows.join("\n")}\n`);
+      await h.read("01J8F3K2QW9VZX4N7M0RTYB6RC");
+      const asked = h.audio("01J8F3K2QW9VZX4N7M0RTYB6RC").find((event) => event.status === "confirmation-required");
+      assert.deepEqual(asked?.freePlan, { requests: 1, allowed: 10, left: 0 }, "the old key's day is spent");
+      // Another project's key: its day is its own.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await h.send({ kind: "set-credential", provider: "google", key: "google-other-project-key" });
+      await h.read("01J8F3K2QW9VZX4N7M0RTYB6RD");
+      assert.ok(!h.audio("01J8F3K2QW9VZX4N7M0RTYB6RD").some((event) => event.status === "confirmation-required"), "the new key reads unasked");
     } finally {
       await h.coordinator.stop();
     }

@@ -161,6 +161,12 @@ export function speechPriceCopy(model: Pick<ManifestModel, "speechPlan" | "prici
  */
 export const GOOGLE_FREE_LIMIT = "Google free limit reached";
 export const GOOGLE_BILLED = "Google billed this read";
+/**
+ * A paid key's own daily quota, as its failure opens (codex on PR 1475). Not a free plan's end:
+ * no free-limit stop, no shipped-narrator remedy. But it ends a run as the free limit does,
+ * since every later request that day would meet the same refusal.
+ */
+export const GOOGLE_DAILY_LIMIT = "Google's daily request limit was reached";
 
 export type FreePlanStop = { kind: "free-limit"; provider: "google"; resetsAt: string; limit?: number } | { kind: "billed"; provider: "google" };
 
@@ -246,9 +252,11 @@ export interface FreePlanAllowance {
  * usage and is not counted. Reads made from another machine on the same key are invisible here,
  * which is why a refusal outranks the count. `pending` is the free-plan reads queued and not yet
  * settled (codex on PR 1475): they have no ledger line, and two page reads pressed together
- * would each otherwise see the whole day.
+ * would each otherwise see the whole day — `freePlanPending` counts them. `keySetAt` is when the
+ * Google key was last saved: a new key may be another project, whose day the old key's reads
+ * did not spend, so the count starts there.
  */
-export function freePlanAllowance(ledger: readonly LedgerEntry[], model: string, now: Date = new Date(), observed?: FreePlanLimit | null, pending = 0): FreePlanAllowance {
+export function freePlanAllowance(ledger: readonly LedgerEntry[], model: string, now: Date = new Date(), observed?: FreePlanLimit | null, pending = 0, keySetAt?: string | null): FreePlanAllowance {
   // A model with no known figure is not weighed: inventing a limit would ask before every read.
   const allowed = observed?.limit ?? GOOGLE_FREE_DAILY_REQUESTS[model] ?? Infinity;
   const observedReset = observed ? Date.parse(observed.resetsAt) : NaN;
@@ -258,6 +266,8 @@ export function freePlanAllowance(ledger: readonly LedgerEntry[], model: string,
   const next = nextPacificMidnight(now);
   let start = lastPacificMidnight(now).getTime();
   if (Number.isFinite(observedReset) && observedReset > start) start = observedReset;
+  const keyed = keySetAt ? Date.parse(keySetAt) : NaN;
+  if (Number.isFinite(keyed) && keyed > start) start = keyed;
   let used = 0;
   for (const entry of ledger) {
     if (entry.provider !== "google" || entry.model !== model || entry.speechQuote?.plan !== "free-plan") continue;
@@ -268,6 +278,29 @@ export function freePlanAllowance(ledger: readonly LedgerEntry[], model: string,
     used += (taken ? 1 : 0) + (entry.speechAttempts?.length ?? 0);
   }
   return { model, allowed, left: Math.max(0, allowed - used - pending), resetsAt: next.toISOString(), reached: false };
+}
+
+/**
+ * The free-plan Google reads on a model queued, or finished but not yet in the ledger (codex on
+ * PR 1475, twice): a job writes its terminal row before its ledger line, so a read admitted in
+ * that window would see the request in neither. A finished job without a line counts only from
+ * today, so a line that was never written cannot hold the day forever; start-up recovery writes it.
+ */
+export function freePlanPending(
+  jobs: readonly Pick<Job, "id" | "provider" | "model" | "status" | "speechQuote" | "updatedAt">[],
+  ledger: readonly Pick<LedgerEntry, "jobId">[],
+  model: string,
+  now: Date = new Date(),
+): number {
+  const settled = new Set(ledger.map((entry) => entry.jobId));
+  const today = lastPacificMidnight(now).getTime();
+  let pending = 0;
+  for (const job of jobs) {
+    if (job.provider !== "google" || job.model !== model || job.speechQuote?.plan !== "free-plan" || settled.has(job.id)) continue;
+    const ended = job.status === "succeeded" || job.status === "failed" || job.status === "cancelled";
+    if (!ended || Date.parse(job.updatedAt) >= today) pending += 1;
+  }
+  return pending;
 }
 
 /** A read the free day cannot cover: how many requests it needs, against what the day allows and has left. Carried on the read's question. */
@@ -308,10 +341,13 @@ export function freePlanShortfall(
  * job is in every window's list, so a screen deciding to read unasked can see it too. A reset
  * the failure named decides; without one, a refusal since the last midnight Pacific does.
  */
-export function freeDayRefused(jobs: readonly Pick<Job, "provider" | "model" | "status" | "error" | "updatedAt">[], model: string, now: Date = new Date()): boolean {
+export function freeDayRefused(jobs: readonly Pick<Job, "provider" | "model" | "status" | "error" | "updatedAt">[], model: string, now: Date = new Date(), keySetAt?: string | null): boolean {
   const since = lastPacificMidnight(now).getTime();
+  // A refusal of the key before the one saved now says nothing of this one's day.
+  const keyed = keySetAt ? Date.parse(keySetAt) : NaN;
   return jobs.some((job) => {
     if (job.provider !== "google" || job.model !== model || job.status !== "failed" || !job.error?.includes(GOOGLE_FREE_LIMIT)) return false;
+    if (Number.isFinite(keyed) && Date.parse(job.updatedAt) < keyed) return false;
     const named = /resets (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/.exec(job.error)?.[1];
     return named !== undefined ? Date.parse(named) > now.getTime() : Date.parse(job.updatedAt) >= since;
   });

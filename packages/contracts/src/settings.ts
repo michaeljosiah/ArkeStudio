@@ -235,16 +235,19 @@ export type NarratorSettings = z.infer<typeof NarratorSettingsSchema>;
  * when a read on a key marked Free was billed or refused for payment: from then on Google reads
  * are priced again until the author says Free once more — the switch itself is never turned off
  * unasked, and a read is never priced free after a charge without the author saying so again.
+ * `googleKeySetAt` is when a Google key was last saved: the free day's count starts there, since
+ * a new key may be another project with its own quota (codex on PR 1475).
  */
 export const ProviderPlansSchema = z
   .object({
     google: z.enum(["paid", "free"]).default("paid"),
     mistral: z.enum(["paid", "free-credit"]).default("paid"),
     googleBilledAt: z.string().datetime({ offset: true }).nullable().default(null),
+    googleKeySetAt: z.string().datetime({ offset: true }).nullable().default(null),
   })
   .strict();
 export type ProviderPlans = z.infer<typeof ProviderPlansSchema>;
-export const PAID_PLANS: ProviderPlans = { google: "paid", mistral: "paid", googleBilledAt: null };
+export const PAID_PLANS: ProviderPlans = { google: "paid", mistral: "paid", googleBilledAt: null, googleKeySetAt: null };
 
 const AppSettingsObjectSchema = z
   .object({

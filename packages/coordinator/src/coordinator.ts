@@ -1,5 +1,5 @@
 import { estimateSpeechMicroUsd, samplingProblems, speechInputFits } from "@arke-studio/contracts";
-import { applyProviderPlans, freeCreditDraw, freeCreditLeft, freeCreditOverrun, freeLimitReason, freePlanAllowance, freePlanFailure, freePlanShortfall, PAID_PLANS, speechAsks, type FreePlanAllowance, type ProviderPlans } from "@arke-studio/contracts";
+import { applyProviderPlans, freeCreditDraw, freeCreditLeft, freeCreditOverrun, freeLimitReason, freePlanAllowance, freePlanFailure, freePlanPending, freePlanShortfall, GOOGLE_DAILY_LIMIT, PAID_PLANS, speechAsks, type FreePlanAllowance, type ProviderPlans } from "@arke-studio/contracts";
 import { designedVoiceTarget, isDesignedVoiceTarget, narratorDesignedRecord, resolveDesignedVoice, VoiceDesignDraftSchema, quoteVoiceDesign, type NarratorDesignedVoice, type NarratorSettings, type WorldDesignedVoice } from "@arke-studio/contracts";
 import type { VoiceDesignClient } from "@arke-studio/providers";
 import { saveDesignedVoice } from "./voice/designed-library.js";
@@ -1508,14 +1508,11 @@ export class Coordinator {
   private async freePlanAllowanceNow(): Promise<(model: string) => FreePlanAllowance> {
     const ledger = this.ledger ? await this.ledger.readAll().catch(() => []) : [];
     const now = new Date();
-    // Reads already queued on the free plan and not yet settled hold their share of the day: a
-    // job writes its ledger line only when it ends, so a settled one is never counted twice.
-    const pending = new Map<string, number>();
-    for (const job of this.jobQueue?.listJobs() ?? []) {
-      if (job.provider !== "google" || job.speechQuote?.plan !== "free-plan" || ["succeeded", "failed", "cancelled"].includes(job.status)) continue;
-      pending.set(job.model, (pending.get(job.model) ?? 0) + 1);
-    }
-    return (model) => freePlanAllowance(ledger, model, now, this.jobQueue?.freeLimitSeen("google", model) ?? null, pending.get(model) ?? 0);
+    // Reads queued on the free plan, or finished without their ledger line yet, hold their share
+    // of the day; the day's count starts no earlier than the key that is saved now.
+    const jobs = this.jobQueue?.listJobs() ?? [];
+    return (model) => freePlanAllowance(ledger, model, now, this.jobQueue?.freeLimitSeen("google", model) ?? null,
+      freePlanPending(jobs, ledger, model, now), this.providerPlans.googleKeySetAt);
   }
 
   /** The book's available reader, or the app's; reading still checks the host's local capability. */
@@ -5285,7 +5282,8 @@ export class Coordinator {
             estimatedMicroUsd: job.estimatedMicroUsd,
             // The two ways a free plan ends are said on the read itself (design turn 182), so
             // the reader can offer the narrator or the switch; anything else stays generic.
-            error: freePlanFailure(job.error) ?? "Voice synthesis failed. Open Activity for details.",
+            // A paid key's daily quota says so too: "synthesis failed" would invite a retry today.
+            error: freePlanFailure(job.error) ?? (job.error?.includes(GOOGLE_DAILY_LIMIT) ? GOOGLE_DAILY_LIMIT : "Voice synthesis failed. Open Activity for details."),
           });
         }
       }
@@ -9028,8 +9026,14 @@ export class Coordinator {
         }
         try {
           await this.credentials.set(msg.provider, msg.key);
-          // A free day the old key was refused is not the new key's (design turn 182 follow-up).
+          // A free day the old key was refused, or spent, is not the new key's (design turn 182
+          // follow-up): the refusal is forgotten and the day's count starts at the key. Kept in
+          // settings beside the plan, so it outlives a restart and reaches every window.
           this.jobQueue?.forgetFreeLimits(msg.provider);
+          if (msg.provider === "google" && this.appSettings) {
+            const at = new Date().toISOString();
+            this.adoptProviderPlans(await this.appSettings.updatePlans((current) => ({ ...current, googleKeySetAt: at })));
+          }
           const fingerprint = this.providerService.setConfigured(msg.provider, true);
           // Admission reads this shared state; publish invalidation before optional I/O yields.
           this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });

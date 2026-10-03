@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { freeCreditLeft, freeDayRefused, freePlanAllowance, narratorLabelFor, narratorReadsUnasked, type WorldChatWorkspace } from "@arke-studio/contracts";
+import { freeCreditLeft, freeDayRefused, freePlanAllowance, freePlanPending, narratorLabelFor, narratorReadsUnasked, type WorldChatWorkspace } from "@arke-studio/contracts";
 import { useStore } from "../lib/store.js";
 import { setReadReplies, stopReplyRead, useReadRepliesChoice } from "../lib/reply-reads.js";
 import type { ReadRepliesControl } from "./composer.js";
@@ -59,7 +59,8 @@ export function useReadReplies(workspace: WorldChatWorkspace | null): {
   const ledger = state?.app.ledger ?? [];
   const jobs = state?.app.jobs ?? [];
   unasked.current = (text) => narratorReadsUnasked(narrator, worldId, models ?? [], creditLeft, text,
-    (model) => freeDayRefused(jobs, model) ? 0 : freePlanAllowance(ledger, model).left);
+    (model) => freeDayRefused(jobs, model, new Date(), state?.app.providerPlans.googleKeySetAt) ? 0
+      : freePlanAllowance(ledger, model, new Date(), null, freePlanPending(jobs, ledger, model), state?.app.providerPlans.googleKeySetAt).left);
   useEffect(() => {
     if (workspace === null) return;
     const seen = newest.current;

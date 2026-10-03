@@ -14,6 +14,7 @@ import {
   freePlanAllowance,
   freePlanAskCopy,
   freePlanFailure,
+  freePlanPending,
   freePlanNote,
   freePlanShortfall,
   freePlanStop,
@@ -304,6 +305,21 @@ describe("a free day Google named", () => {
     assert.equal(freeDayRefused([{ ...refused, error: "Google free limit reached (HTTP 429 free daily quota)" }], gemini.id, now), true, "no reset named: since midnight Pacific");
     assert.equal(freeDayRefused([{ ...refused, error: "Google free limit reached", updatedAt: "2026-10-02T06:00:00.000Z" }], gemini.id, now), false, "yesterday's");
     assert.equal(freeDayRefused([refused], "gemini-3.8-flash-lite-tts", now), false);
+  });
+
+  // Codex on PR 1475, round three: a finished job is in neither place until its ledger line lands,
+  // and a new key is another project's day.
+  it("holds a finished read until its ledger line lands, and starts the count at a new key", () => {
+    const now = new Date("2026-10-02T18:00:00.000Z");
+    const quote = { ...quoteSpeech(gemini, "x", { at: at }), plan: "free-plan" as const };
+    const job = (id: string, status: "queued" | "succeeded", updatedAt = "2026-10-02T17:59:00.000Z") =>
+      ({ id, provider: "google", model: gemini.id, status, speechQuote: quote, updatedAt });
+    const jobs = [job("jb_a", "queued"), job("jb_b", "succeeded"), job("jb_c", "succeeded"), job("jb_d", "succeeded", "2026-10-01T12:00:00.000Z")];
+    assert.equal(freePlanPending(jobs, [{ jobId: "jb_c" }], gemini.id, now), 2, "queued, and finished without a line; not settled, not yesterday's");
+    const ledger = [entry("2026-10-02T09:00:00.000Z"), entry("2026-10-02T15:00:00.000Z")];
+    assert.equal(freePlanAllowance(ledger, gemini.id, now, null, 0, "2026-10-02T12:00:00.000Z").left, 9);
+    const refused = { provider: "google", model: gemini.id, status: "failed" as const, updatedAt: "2026-10-02T11:00:00.000Z", error: "Google free limit reached" };
+    assert.equal(freeDayRefused([refused], gemini.id, now, "2026-10-02T12:00:00.000Z"), false, "the old key's refusal");
   });
 
   it("weighs a read whole per model, and asks in plain words", () => {
