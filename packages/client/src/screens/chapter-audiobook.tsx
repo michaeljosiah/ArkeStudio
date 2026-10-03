@@ -551,10 +551,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // and as the mix plays it — a chapter with any timing is heard through the one mix, never as
   // takes joined back to back, so Play sounds the overlaps, trims and beds as they are set.
   const artifacts = world?.artifacts;
-  const timing = useMemo(() => chapterTimingOf(rows, recordOrNull, artifacts ?? [], reading), [rows, recordOrNull, artifacts, reading]);
-  const mixed = useMemo(() => chapterTimingOf(rows, recordOrNull, artifacts ?? [], reading, "skip"), [rows, recordOrNull, artifacts, reading]);
+  const timing = useMemo(() => chapterTimingOf(rows, recordOrNull, artifacts ?? [], reading, "estimate", missing), [rows, recordOrNull, artifacts, reading, missing]);
+  const mixed = useMemo(() => chapterTimingOf(rows, recordOrNull, artifacts ?? [], reading, "skip", missing), [rows, recordOrNull, artifacts, reading, missing]);
   const timed = hasTiming(recordOrNull);
-  const mixPlayer = useMixPlayer({ worldId, prodId, chapterId: chapter.id, chapterFile: chapter.file, slug: world?.meta.slug ?? "", title: chapter.title });
+  const mixPlayer = useMixPlayer({ worldId, prodId, chapterId: chapter.id, chapterFile: chapter.file, slug: world?.meta.slug ?? "", title: chapter.title, connection });
   const mixPlaying = mixPlayer.playing;
   const playing = (at !== null && at < playable.length && playback.status !== "ended" && playback.clip?.id === queueId) || mixPlaying;
   const play = useCallback(() => {
@@ -577,11 +577,14 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     });
   }, [world, playable, queueId, chapter.title, timed, filter, mixPlayer]);
   const mixClip = mixPlayer.clipId;
+  const mixCancel = mixPlayer.cancel;
   const stopPlaying = useCallback(() => {
     const sounding_ = playbackSnapshot().clip?.id;
     if (sounding_ === queueId || sounding_ === mixClip) dismissPlayback();
     clearQueue();
-  }, [queueId, mixClip]);
+    // A mix still rendering is not wanted any more either: its answer plays nothing.
+    mixCancel();
+  }, [queueId, mixClip, mixCancel]);
   useEffect(() => stopPlaying, [stopPlaying, chapter.id]);
   // A queue built for one filter is not another's: changing it stops what was playing.
   useEffect(() => stopPlaying, [stopPlaying, filter]);

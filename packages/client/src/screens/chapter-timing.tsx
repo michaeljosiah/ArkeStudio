@@ -4,6 +4,7 @@ import {
   formatRunningTime,
   formatTimingSeconds,
   hasTiming,
+  reactionText,
   timeChapter,
   TIMING_ESTIMATED_CPS,
   TIMING_NUDGE_MAX_SEC,
@@ -43,9 +44,9 @@ export interface TimingRowLike {
 }
 
 /** A take as the clock reads it: the player's rule — its words are the block's and it is on the shelf (186). */
-function takeOf(record: ChapterAudiobook | null, key: string, text: string, artifact: ArtifactSidecar | null): TimingTake | undefined {
+function takeOf(record: ChapterAudiobook | null, key: string, text: string, artifact: ArtifactSidecar | null, missing: readonly string[] = []): TimingTake | undefined {
   const take = record?.takes[key];
-  if (take === undefined || artifact === null || artifact.id !== take.artifactId || artifact.retiredAt !== undefined) return undefined;
+  if (take === undefined || artifact === null || artifact.id !== take.artifactId || artifact.retiredAt !== undefined || missing.includes(take.artifactId)) return undefined;
   if (take.textHash !== audiobookTextHash(text)) return undefined;
   const measured = artifact.mediaInfo?.durationSec;
   const seconds = measured !== undefined && measured > 0 ? measured : (take.grouped?.durationSec ?? Math.max(1, text.length / TIMING_ESTIMATED_CPS));
@@ -57,23 +58,23 @@ function takeOf(record: ChapterAudiobook | null, key: string, text: string, arti
   };
 }
 
-export function timingInputs(rows: readonly TimingRowLike[], record: ChapterAudiobook | null, artifacts: readonly ArtifactSidecar[]): { blocks: TimingInputBlock[]; reactions: TimingInputReaction[] } {
+export function timingInputs(rows: readonly TimingRowLike[], record: ChapterAudiobook | null, artifacts: readonly ArtifactSidecar[], missing: readonly string[] = []): { blocks: TimingInputBlock[]; reactions: TimingInputReaction[] } {
   const blocks = rows.map((row): TimingInputBlock => {
-    const take = takeOf(record, row.block.key, row.block.text, row.artifact);
+    const take = takeOf(record, row.block.key, row.block.text, row.artifact, missing);
     return { key: row.block.key, text: row.block.text, lane: row.speakerKey ?? "narration", ...(take !== undefined ? { take } : {}) };
   });
   const reactions = Object.entries(record?.reactions ?? {}).map(([key, reaction]): TimingInputReaction => {
     const take = record?.takes[key];
     const artifact = take === undefined ? null : (artifacts.find((candidate) => candidate.id === take.artifactId) ?? null);
-    const timed = take === undefined || artifact === null ? undefined : takeOf(record, key, reaction.words ?? reaction.sound ?? "", artifact);
+    const timed = take === undefined || artifact === null ? undefined : takeOf(record, key, reactionText(reaction), artifact, missing);
     return { key, lane: reaction.speaker === "narrator" ? "narration" : reaction.speaker, ...(timed !== undefined ? { take: timed } : {}) };
   });
   return { blocks, reactions };
 }
 
 /** The chapter's clock as the Timing view draws it: a block not read yet at the reading rate. */
-export function chapterTimingOf(rows: readonly TimingRowLike[], record: ChapterAudiobook | null, artifacts: readonly ArtifactSidecar[], reading: AudiobookReading, unmade: "skip" | "estimate" = "estimate"): ChapterTiming {
-  const { blocks, reactions } = timingInputs(rows, record, artifacts);
+export function chapterTimingOf(rows: readonly TimingRowLike[], record: ChapterAudiobook | null, artifacts: readonly ArtifactSidecar[], reading: AudiobookReading, unmade: "skip" | "estimate" = "estimate", missing: readonly string[] = []): ChapterTiming {
+  const { blocks, reactions } = timingInputs(rows, record, artifacts, missing);
   return timeChapter({ blocks, reactions, record: record ?? {}, reading, unmade });
 }
 
@@ -99,8 +100,8 @@ export function timingLanes(rows: readonly TimingRowLike[]): TimingLane[] {
  * The chapter heard with its timing (R-85): the coordinator renders the mix, or a window of it,
  * and the answer plays through the one element the app plays everything through.
  */
-export function useMixPlayer(input: { worldId: string; prodId: string; chapterId: string; chapterFile: string; slug: string; title: string }) {
-  const { worldId, prodId, chapterId, chapterFile, slug, title } = input;
+export function useMixPlayer(input: { worldId: string; prodId: string; chapterId: string; chapterFile: string; slug: string; title: string; connection: string }) {
+  const { worldId, prodId, chapterId, chapterFile, slug, title, connection } = input;
   const clipId = `audiobook-mix:${worldId}/${prodId}/${chapterId}`;
   const asked = useRef<{ requestId: string; from: number; to: number | null; window: boolean } | null>(null);
   const [pending, setPending] = useState(false);
@@ -138,12 +139,27 @@ export function useMixPlayer(input: { worldId: string; prodId: string; chapterId
     },
     [worldId, prodId, chapterFile],
   );
+  /**
+   * A render asked for and no longer wanted — the chapter left, the filter changed, Stop pressed
+   * (codex on PR 1500): its answer, when it comes, plays nothing.
+   */
+  const cancel = useCallback(() => {
+    asked.current = null;
+    setPending(false);
+  }, []);
+  // An answer is not replayed after a reconnect, so a request the transport dropped is let go.
+  useEffect(() => {
+    if (connection !== "open") cancel();
+  }, [connection, cancel]);
+  useEffect(() => cancel, [cancel, chapterId]);
   const playback = usePlayback();
   const mine = playback.clip?.id === clipId;
-  const playing = mine && (playback.status === "playing" || playback.status === "loading");
+  // Paused is still this chapter's (codex on PR 1500): the head offers Stop, and the dock resumes
+  // it where it was, rather than Play rendering from the start again.
+  const playing = mine && (playback.status === "playing" || playback.status === "loading" || playback.status === "paused" || playback.status === "blocked");
   /** Where the mix is on the chapter's clock while it plays. */
   const at = mine && playback.status !== "idle" ? offset + playback.currentTime : null;
-  return { play, pending, refused, playing, at, clipId };
+  return { play, cancel, pending, refused, playing, at, clipId };
 }
 
 /** The bar the clock is in at `t`: the block, or a reaction, sounding then. */
@@ -159,10 +175,18 @@ export function barAt(timing: ChapterTiming, t: number): TimedBar | null {
 export function betweenClocks(from: ChapterTiming, to: ChapterTiming, t: number): number {
   const bars = from.bars.filter((bar) => bar.kind === "block" && bar.under === null).sort((a, b) => a.at - b.at);
   const target = new Map(to.bars.filter((bar) => bar.kind === "block").map((bar) => [bar.key, bar]));
+  // Whether `t` sits in a block the other clock has not: it lands where that clock stands.
+  let inMissing = false;
   for (const bar of bars) {
-    if (t >= bar.at + bar.seconds) continue;
     const there = target.get(bar.key);
-    if (there !== undefined) return Math.max(0, there.at + Math.max(0, t - bar.at));
+    if (t >= bar.at + bar.seconds) continue;
+    if (there === undefined) {
+      if (t >= bar.at) inMissing = true;
+      continue;
+    }
+    // In the pause before a block, as far before it on the other clock (codex on PR 1500): a
+    // playhead in authored silence stays in it rather than jumping to the next block.
+    return Math.max(0, there.at + (inMissing ? Math.max(0, t - bar.at) : t - bar.at));
   }
   return to.seconds;
 }
@@ -217,7 +241,12 @@ export function TimingView({ timing, lanes, rows, selected, onSelect, onTiming, 
     event.stopPropagation();
     (event.currentTarget as Element & { setPointerCapture?: (id: number) => void }).setPointerCapture?.(event.pointerId);
     setDrag({ key, mode, x: event.clientX, y: event.clientY, dx: 0, dy: 0 });
-    onSelect(key);
+    onSelect(selectable(key));
+  };
+  // A reaction is listed on its host (R-83): pressing it selects that block, which both views know (codex on PR 1500).
+  const selectable = (key: string): string => {
+    const bar = timing.bars.find((candidate) => candidate.key === key);
+    return bar?.kind === "reaction" && bar.under !== null ? bar.under.host : key;
   };
   const move = (event: ReactPointerEvent) => {
     if (drag === null) return;
@@ -247,7 +276,10 @@ export function TimingView({ timing, lanes, rows, selected, onSelect, onTiming, 
         onTiming(bar.key, { under: { host: bar.under.host, offset: round2(Math.max(0, bar.under.offset + seconds)) } });
         return;
       }
-      if (bar.locked.start) return;
+      // The chapter's first block starts the chapter (codex on PR 1500): it has no start to drag,
+      // as the side's Starts is closed for it.
+      const first = timing.bars.filter((candidate) => candidate.kind === "block" && candidate.under === null).reduce((low, candidate) => Math.min(low, candidate.index), Infinity);
+      if (bar.locked.start || bar.index === first) return;
       onTiming(bar.key, { start: round2(clamp(bar.start + seconds, TIMING_START_MIN_SEC, TIMING_START_MAX_SEC)) });
       return;
     }
@@ -365,9 +397,9 @@ export function TimingView({ timing, lanes, rows, selected, onSelect, onTiming, 
                     ].filter((name) => name !== "").join(" ")}
                     style={{ left: place.left, width: place.width, top: place.top }}
                     onPointerDown={(event) => begin(event, bar.key, "move")}
-                    onClick={() => onSelect(bar.key)}
+                    onClick={() => onSelect(selectable(bar.key))}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") onSelect(bar.key);
+                      if (event.key === "Enter" || event.key === " ") onSelect(selectable(bar.key));
                     }}
                   >
                     {!reaction && bar.made && <span className="fy-tm__edge fy-tm__edge--head" data-testid="timing-head" onPointerDown={(event) => begin(event, bar.key, "head")} />}
@@ -397,10 +429,20 @@ export function TimingView({ timing, lanes, rows, selected, onSelect, onTiming, 
   );
 }
 
+/**
+ * Reset as the panel shows the block (codex on PR 1500): its own timing and the Pause after it,
+ * which is kept on the next block's start — or the pause the field shows would stay.
+ */
+function resetOf(bar: TimedBar): BlockTimingInput {
+  return { reset: true, ...(bar.pauseAfter !== null && bar.pauseAfter !== 0 && !bar.locked.pauseAfter ? { pauseAfter: null } : {}) };
+}
+
 /** A seconds field that writes on Enter or when it is left, never on each key. */
-export function SecondsField({ label, value, min, max, disabled, onCommit, testId }: { label: string; value: number; min: number; max: number; disabled?: boolean; onCommit: (seconds: number) => void; testId?: string }) {
+export function SecondsField({ label, value, min, max, disabled, onCommit, testId, revision }: { label: string; value: number; min: number; max: number; disabled?: boolean; onCommit: (seconds: number) => void; testId?: string; revision?: number }) {
   const [text, setText] = useState(value.toFixed(2));
-  useEffect(() => setText(value.toFixed(2)), [value]);
+  // Put back to the record's value whenever an answer lands (codex on PR 1500): a refused write
+  // leaves the value as it was, and the field must not keep showing what was refused.
+  useEffect(() => setText(value.toFixed(2)), [value, revision]);
   // Read from the field itself at the commit: what is in it is what was meant, whatever the last
   // change event carried.
   const commit = (typed: string) => {
@@ -438,7 +480,7 @@ export function SecondsField({ label, value, min, max, disabled, onCommit, testI
  * under, who set it, Reset and Play from here. Under Performed a grouped request's inside is the
  * reader's (R-85), and says so where a field would be.
  */
-export function TimingSide({ bar, row, timing, rows, onTiming, onPlayFrom, refused, locked }: {
+export function TimingSide({ bar, row, timing, rows, onTiming, onPlayFrom, refused, locked, revision }: {
   bar: TimedBar | null;
   row: TimingRowLike | null;
   timing: ChapterTiming;
@@ -447,6 +489,8 @@ export function TimingSide({ bar, row, timing, rows, onTiming, onPlayFrom, refus
   onPlayFrom: (seconds: number) => void;
   refused: string | null;
   locked: boolean;
+  /** Moves with every answer to a timing write, so a refused value is put back. */
+  revision?: number;
 }) {
   if (bar === null || row === null) return null;
   const before = timing.bars.filter((candidate) => candidate.kind === "block" && candidate.under === null && candidate.index < bar.index).sort((a, b) => b.index - a.index)[0];
@@ -466,7 +510,7 @@ export function TimingSide({ bar, row, timing, rows, onTiming, onPlayFrom, refus
           <span className="fy-mono" data-testid="timing-start-locked">{formatTimingSeconds(bar.start)} · the reader's</span>
         ) : (
           <>
-            <SecondsField label="Starts" testId="timing-start" value={bar.start} min={TIMING_START_MIN_SEC} max={TIMING_START_MAX_SEC} disabled={locked || bar.index === 0} onCommit={(start) => onTiming(key, { start })} />
+            <SecondsField revision={revision} label="Starts" testId="timing-start" value={bar.start} min={TIMING_START_MIN_SEC} max={TIMING_START_MAX_SEC} disabled={locked || bar.index === 0} onCommit={(start) => onTiming(key, { start })} />
             {bar.start < 0 && beforeMark !== null && <span className="fy-mono">cuts in on {beforeMark}</span>}
           </>
         )}
@@ -478,10 +522,10 @@ export function TimingSide({ bar, row, timing, rows, onTiming, onPlayFrom, refus
         ) : bar.locked.pauseAfter ? (
           <span className="fy-mono" data-testid="timing-pause-locked">{formatTimingSeconds(bar.pauseAfter)} · the reader's</span>
         ) : (
-          <SecondsField label="Pause after" testId="timing-pause" value={bar.pauseAfter} min={TIMING_START_MIN_SEC} max={TIMING_START_MAX_SEC} disabled={locked} onCommit={(pauseAfter) => onTiming(key, { pauseAfter })} />
+          <SecondsField revision={revision} label="Pause after" testId="timing-pause" value={bar.pauseAfter} min={TIMING_START_MIN_SEC} max={TIMING_START_MAX_SEC} disabled={locked} onCommit={(pauseAfter) => onTiming(key, { pauseAfter })} />
         )}
       </div>
-      <TrimRow bar={bar} locked={locked} onTiming={onTiming} />
+      <TrimRow bar={bar} locked={locked} onTiming={onTiming} revision={revision} />
       <div className="fy-tm__row">
         <span className="fy-ab__label">Plays</span>
         <span className="fy-seg" role="radiogroup" aria-label="Plays">
@@ -505,7 +549,7 @@ export function TimingSide({ bar, row, timing, rows, onTiming, onPlayFrom, refus
       {(bar.trim !== null || bar.trimDropped) && <p className="fy-mono fy-tm__data">{bar.trimDropped ? "new take · trim reset" : "take kept · trim resets on a new take"}</p>}
       {refused !== null && <p className="fy-mono fy-ch__who-where--warn" data-testid="timing-refused">{refused}</p>}
       <div className="fy-tm__actions">
-        <Button variant="ghost" disabled={locked} onClick={() => onTiming(key, { reset: true })} data-testid="timing-reset">Reset</Button>
+        <Button variant="ghost" disabled={locked} onClick={() => onTiming(key, resetOf(bar))} data-testid="timing-reset">Reset</Button>
         <Button variant="secondary" onClick={() => onPlayFrom(bar.at)} data-testid="timing-play-here">Play from here</Button>
       </div>
     </section>
@@ -513,15 +557,15 @@ export function TimingSide({ bar, row, timing, rows, onTiming, onPlayFrom, refus
 }
 
 /** Trim as two seconds, head and tail; a block with no take has nothing to trim. */
-function TrimRow({ bar, locked, onTiming }: { bar: TimedBar; locked: boolean; onTiming: (key: string, input: BlockTimingInput) => void }) {
+function TrimRow({ bar, locked, onTiming, revision }: { bar: TimedBar; locked: boolean; onTiming: (key: string, input: BlockTimingInput) => void; revision?: number }) {
   const trim = bar.trim ?? { head: 0, tail: 0 };
   return (
     <div className="fy-tm__row">
       <span className="fy-ab__label">Trim</span>
       {bar.made ? (
         <>
-          <SecondsField label="Trim head" testId="timing-trim-head" value={trim.head} min={0} max={TIMING_TRIM_MAX_SEC} disabled={locked} onCommit={(head) => onTiming(bar.key, { trim: { head, tail: trim.tail } })} />
-          <SecondsField label="Trim tail" testId="timing-trim-tail" value={trim.tail} min={0} max={TIMING_TRIM_MAX_SEC} disabled={locked} onCommit={(tail) => onTiming(bar.key, { trim: { head: trim.head, tail } })} />
+          <SecondsField revision={revision} label="Trim head" testId="timing-trim-head" value={trim.head} min={0} max={TIMING_TRIM_MAX_SEC} disabled={locked} onCommit={(head) => onTiming(bar.key, { trim: { head, tail: trim.tail } })} />
+          <SecondsField revision={revision} label="Trim tail" testId="timing-trim-tail" value={trim.tail} min={0} max={TIMING_TRIM_MAX_SEC} disabled={locked} onCommit={(tail) => onTiming(bar.key, { trim: { head: trim.head, tail } })} />
           <span className="fy-mono fy-tm__unit">head · tail</span>
         </>
       ) : (
@@ -573,7 +617,7 @@ function usePeaks(url: string | null, count = 120): number[] | null {
  * handles, Pause after, a grouped cut's nudge, Play with neighbours — the same values as the
  * Timing view's (R-81).
  */
-export function BlockTimingPanel({ bar, timing, slug, onTiming, onPlayWindow, locked, grouped }: {
+export function BlockTimingPanel({ bar, timing, slug, onTiming, onPlayWindow, locked, grouped, revision }: {
   bar: TimedBar | null;
   timing: ChapterTiming;
   slug: string;
@@ -582,6 +626,7 @@ export function BlockTimingPanel({ bar, timing, slug, onTiming, onPlayWindow, lo
   locked: boolean;
   /** `request 1` when the take was cut from a grouped request. */
   grouped: string | null;
+  revision?: number;
 }) {
   const file = bar !== null && bar.made ? (bar.segments.find((segment) => segment.from === 0 || segment.from === (bar.trim?.head ?? 0))?.file ?? bar.segments[0]?.file ?? null) : null;
   const peaks = usePeaks(file === null ? null : mediaUrl(slug, file));
@@ -598,6 +643,13 @@ export function BlockTimingPanel({ bar, timing, slug, onTiming, onPlayWindow, lo
     onPlayWindow(before?.at ?? bar.at, after !== undefined ? after.at + after.seconds : bar.at + bar.seconds);
   };
   const widthOf = () => wave.current?.getBoundingClientRect?.().width ?? 0;
+  // The pointer is held by the handle until it is let go (codex on PR 1500): a trim is undone by
+  // dragging out past the waveform's edge, where the waveform would never hear the release.
+  const grab = (event: ReactPointerEvent, which: "head" | "tail") => {
+    event.stopPropagation();
+    (event.currentTarget as Element & { setPointerCapture?: (id: number) => void }).setPointerCapture?.(event.pointerId);
+    setHandle({ which, x: event.clientX, dx: 0 });
+  };
   const release = () => {
     if (handle === null) return;
     const span = widthOf();
@@ -622,11 +674,11 @@ export function BlockTimingPanel({ bar, timing, slug, onTiming, onPlayWindow, lo
           </svg>
           <span className="fy-tm__trimmed" style={{ left: 0, width: `${headPct}%` }} />
           <span className="fy-tm__trimmed" style={{ right: 0, width: `${tailPct}%` }} />
-          <span className="fy-tm__handle" data-testid="wave-head" style={{ left: `${headPct}%` }} onPointerDown={(event) => !locked && setHandle({ which: "head", x: event.clientX, dx: 0 })} />
-          <span className="fy-tm__handle" data-testid="wave-tail" style={{ right: `${tailPct}%` }} onPointerDown={(event) => !locked && setHandle({ which: "tail", x: event.clientX, dx: 0 })} />
+          <span className="fy-tm__handle" data-testid="wave-head" style={{ left: `${headPct}%` }} onPointerDown={(event) => !locked && grab(event, "head")} />
+          <span className="fy-tm__handle" data-testid="wave-tail" style={{ right: `${tailPct}%` }} onPointerDown={(event) => !locked && grab(event, "tail")} />
         </div>
       )}
-      <TrimRow bar={bar} locked={locked} onTiming={onTiming} />
+      <TrimRow bar={bar} locked={locked} onTiming={onTiming} revision={revision} />
       <div className="fy-tm__row">
         <span className="fy-ab__label">Pause after</span>
         {bar.pauseAfter === null ? (
@@ -635,7 +687,7 @@ export function BlockTimingPanel({ bar, timing, slug, onTiming, onPlayWindow, lo
           <span className="fy-mono">{formatTimingSeconds(bar.pauseAfter)} · the reader's</span>
         ) : (
           <>
-            <SecondsField label="Pause after" testId="block-pause" value={bar.pauseAfter} min={TIMING_START_MIN_SEC} max={TIMING_START_MAX_SEC} disabled={locked} onCommit={(pauseAfter) => onTiming(bar.key, { pauseAfter })} />
+            <SecondsField revision={revision} label="Pause after" testId="block-pause" value={bar.pauseAfter} min={TIMING_START_MIN_SEC} max={TIMING_START_MAX_SEC} disabled={locked} onCommit={(pauseAfter) => onTiming(bar.key, { pauseAfter })} />
             <span className="fy-mono fy-tm__unit">−1.5 to 3 s</span>
           </>
         )}
@@ -643,12 +695,12 @@ export function BlockTimingPanel({ bar, timing, slug, onTiming, onPlayWindow, lo
       {bar.nudgeable && (
         <div className="fy-tm__row">
           <span className="fy-ab__label">Cut</span>
-          <SecondsField label="Cut" testId="block-nudge" value={bar.nudge} min={-TIMING_NUDGE_MAX_SEC} max={TIMING_NUDGE_MAX_SEC} disabled={locked} onCommit={(nudge) => onTiming(bar.key, { nudge })} />
+          <SecondsField revision={revision} label="Cut" testId="block-nudge" value={bar.nudge} min={-TIMING_NUDGE_MAX_SEC} max={TIMING_NUDGE_MAX_SEC} disabled={locked} onCommit={(nudge) => onTiming(bar.key, { nudge })} />
           <span className="fy-mono fy-tm__unit">{bar.nudge !== 0 ? `${formatTimingSeconds(bar.nudge, true)} nudged · ` : ""}grouped split</span>
         </div>
       )}
       <div className="fy-tm__actions">
-        <Button variant="ghost" disabled={locked} onClick={() => onTiming(bar.key, { reset: true })}>Reset</Button>
+        <Button variant="ghost" disabled={locked} onClick={() => onTiming(bar.key, resetOf(bar))} data-testid="block-reset">Reset</Button>
         <Button variant="secondary" disabled={!bar.made} onClick={neighbours} data-testid="block-play-neighbours">Play with neighbours</Button>
       </div>
     </section>
