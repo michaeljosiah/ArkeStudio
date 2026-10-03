@@ -33,6 +33,10 @@ export function geminiSpeechModel(variant: "flash" | "lite"): ManifestModel {
       deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"],
       speed: null, pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none",
       phrase: "best-effort-instruction", tagSyntax: "angle", sounds: GEMINI_SOUNDS,
+      // Several styled turns in one request on a designed voice were heard on Flash (the turn
+      // 185 probe, 2026-10-03: all three packings came back whole, B chosen by ear). Flash-Lite
+      // has not been heard, so it reads per paragraph until it is (SPEC-049 R-48).
+      ...(variant === "flash" ? { groupable: true as const } : {}),
       deliveryMappings: {
         measured: { settings: {}, instruction: "Read calmly and evenly, at a steady pace." },
         whispered: { settings: {}, instruction: "Read in a whisper." },
