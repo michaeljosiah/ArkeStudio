@@ -62,6 +62,11 @@ window.mountLaunch = async (mode, desktop) => {
   __setBridgeForTest(bridge);
   __setStateForTest(state, { connection: mode === "connecting" ? "connecting" : mode === "offline" ? "closed" : mode === "expired" ? "auth-refused" : "open" });
   Object.defineProperty(navigator, "userAgentData", { configurable: true, value: { getHighEntropyValues: async () => ({ model: "Pixel 9" }) } });
+  // Pairing's worker registration belongs to the remote journey smoke check. This layout
+  // fixture has no hosted worker; model an already controlled page so the gate can settle.
+  Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: {
+    controller: {}, register: async () => ({}), addEventListener() {}, removeEventListener() {}
+  } });
   window.fetch = async path => new Response(null, { status: path === "/remote/session" ? 401 : mode === "pending" ? 202 : 410 });
   renderer = createRoot(document.getElementById("root"));
   flushSync(() => renderer.render(<MemoryRouter initialEntries={[mode === "setup" || mode === "connecting" ? "/starting" : "/"]}>
@@ -69,6 +74,9 @@ window.mountLaunch = async (mode, desktop) => {
     {mode === "approval" && <PairingPrompt />}
   </MemoryRouter>));
   await settle(); await document.fonts.ready; await settle();
+  if (mode === "pair" || mode === "typing" || mode === "pending") {
+    for (let attempt = 0; attempt < 100 && document.querySelector(".fy-launch__action[aria-busy]"); attempt++) await settle();
+  }
   if (mode === "typing") {
     document.querySelector(".fy-launch__code-field").click();
     await settle();
@@ -97,7 +105,9 @@ window.measureLaunch = () => {
   } }],
   loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js"),
 });
-await copyFile(join(root, "packages/client/public/launch-harbour.webp"), join(dir, "launch-harbour.webp"));
+for (const asset of ["launch-creation.mp4", "launch-creation.webp"]) {
+  await copyFile(join(root, "packages/client/public", asset), join(dir, asset));
+}
 await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
 await writeFile(join(dir, "main.cjs"), `(${electronMain.toString()})().catch(error => { console.error(error); require("electron").app.exit(1); });`);
 const child = spawn(require("electron"), [join(dir, "main.cjs")], { windowsHide: true, stdio: "inherit",
