@@ -385,6 +385,7 @@ describe("actions offered only where the state permits (R-13, D10, §3.2)", () =
       }),
     );
     assert.equal(bibleRead?.path, `/w/${WORLD}/bible`);
+    assert.deepEqual(cast("prop-state-candidate", "pr_tide/ps_broken"), { path: `/w/${WORLD}/props/pr_tide`, label: "Prop", where: "the prop's review screen" });
     // Every reference kind the queue can finalize is one Activity can route home, or the row it
     // leaves behind is the dead end this issue was about.
     for (const kind of REFERENCE_FINALIZATION_TARGETS) {

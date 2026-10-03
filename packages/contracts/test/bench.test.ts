@@ -378,6 +378,19 @@ describe("the fold", () => {
     assert.deepEqual(parsed.takes[0]!.filedTakeIds, [TK, TK2]);
   });
 
+  it("clears an unresolved admission error when the queue proves a take was admitted", () => {
+    const session = foldBenchSession(META, [
+      env(1, { type: "takes-reserved", takes: [{ id: TK as never, n: 1, requestId: "r1", request: SNAPSHOT, createdAt: "2026-08-16T10:00:03.000Z" }] }),
+      env(2, { type: "take-status", takeId: TK as never, status: "needs-reconciliation", error: "Admission is unresolved" }),
+      env(3, { type: "take-job", takeId: TK as never, jobId: JB as never }),
+      env(4, { type: "take-status", takeId: TK as never, status: "queued", error: null }),
+    ]);
+    const take = BenchSessionSchema.parse(session).takes[0]!;
+    assert.equal(take.status, "queued");
+    assert.equal(take.error, undefined);
+    assert.equal(take.jobId, JB);
+  });
+
   it("replays a session: reserve, job, completion, keep — and the counters clear the allocations", () => {
     const session = foldBenchSession(META, [
       env(1, { type: "composer-set", mode: "image", provider: "fal", model: "test-image", params: { kind: "image", count: 1 }, brief: "x" }),

@@ -145,7 +145,7 @@ function turn(result: Partial<WorldChatTurnResult>): string {
 
 describe("parsing a turn result", () => {
   it("rejects execution-blocked generation before it can become a dead card", () => {
-    for (const kind of ["reference-generation", "voice-audition"] as const) {
+    for (const kind of ["voice-audition"] as const) {
       const action = WORLD_CHAT_SHAPE_EXAMPLES.worldActions[kind];
       const parsed = parseTurnResult(turn({ actions: [action] }));
       assert.equal(parsed.ok, false, kind);

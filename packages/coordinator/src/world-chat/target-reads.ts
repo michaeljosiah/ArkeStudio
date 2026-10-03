@@ -55,6 +55,7 @@ export interface ArkeExportReadRecord {
 }
 
 export interface TargetReadDeps {
+  readonly getBuildItems?: () => readonly ArkeBuildItemRead[];
   readonly getPlans?: (productionId: string) => Promise<readonly DispatchPlan[]>;
   readonly getJobs?: () => readonly Job[];
   readonly getExports?: () => readonly ArkeExportReadRecord[] | Promise<readonly ArkeExportReadRecord[]>;
@@ -64,6 +65,8 @@ export interface TargetReadDeps {
   /** The cast of lines beside a chapter (turn 130), so who speaks can be answered from the record. */
   readonly getChapterVoices?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").ChapterVoices | null>;
 }
+export interface ArkeBuildItemRead { readonly key: string; readonly kind: string; readonly subject: string; readonly state: string; readonly detail: string | null }
+export const buildItemsFence = (items: readonly ArkeBuildItemRead[]) => conversationActionDigest(items);
 
 export interface TargetReadOutcome {
   readonly result: ArkeTargetReadPage;
@@ -871,6 +874,14 @@ export class WorldChatTargetReads {
         readTarget = target("jobs", productionId ?? lease.worldId);
         rows = [...jobs].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)).map((job) => ({ key: `${job.createdAt}:${job.id}`, value: safeJob(job) }));
         revisionOrDigest = jobsFence(jobs, lease.worldId, productionId);
+        break;
+      }
+      case "list_build_items": {
+        assertArgs(args, []);
+        const items = this.deps.getBuildItems?.() ?? [];
+        readTarget = target("founding-build", lease.worldId);
+        rows = [...items].sort((a, b) => a.key.localeCompare(b.key)).map(item => ({ key: item.key, value: item }));
+        revisionOrDigest = buildItemsFence(items);
         break;
       }
       case "list_exports": {

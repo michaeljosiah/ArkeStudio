@@ -1498,6 +1498,9 @@ export async function sweepDeletedBenchMedia(worldDir: string, session: BenchSes
 // Recovery (§6) — both crash windows, idempotent
 // ---------------------------------------------------------------------------
 
+/** Durable local-admission marker: only reservations never passed to enqueue receive it. */
+export const BENCH_UNATTEMPTED_ADMISSION = "Not attempted: admission stopped before this take; no provider was called.";
+
 export interface BenchRecoveryJobFacts {
   jobId: string;
   /** target.id: "<sessionId>/<takeId>". */
@@ -1536,14 +1539,19 @@ export async function recoverBenchSession(
         touched = true;
         continue;
       }
+    }
+    if (job && take.jobId !== job.jobId) {
+      // A quote marks admission uncertain before enqueue, so missing bindings can also be
+      // recovered from that state without classifying an absent row as unspent.
       await store.append({ type: "take-job", takeId: take.id, jobId: job.jobId as never }, { at: now() });
       touched = true;
     }
-    if (job && take.status !== job.status && job.status !== "succeeded") {
-      // Terminal failures and live statuses catch up; success waits for finalization, which
-      // records media and cost with it.
+    const status = job?.status === "succeeded" ? "running" : job?.status;
+    if (job && take.status !== "succeeded" && (job.status !== "succeeded" || take.status === "needs-reconciliation") && (take.status !== status || take.error !== (job.error ?? undefined))) {
+      // Provider success waits for finalization to record media and cost. A resolved queue
+      // binding clears the admission marker without downgrading a finalized take.
       await store.append(
-        { type: "take-status", takeId: take.id, status: job.status, ...(job.error !== null ? { error: job.error } : {}) },
+        { type: "take-status", takeId: take.id, status: status!, error: job.error },
         { at: now() },
       );
       touched = true;

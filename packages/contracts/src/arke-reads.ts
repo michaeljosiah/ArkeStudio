@@ -32,6 +32,7 @@ export const ArkeTargetReadToolSchema = z.enum([
   "get_routing",
   "list_plans",
   "list_jobs",
+  "list_build_items",
   "list_exports",
 ]);
 export type ArkeTargetReadTool = z.infer<typeof ArkeTargetReadToolSchema>;

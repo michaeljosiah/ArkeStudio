@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { REFERENCE_FINALIZATION_TARGETS, type Job } from "@arke-studio/contracts";
+import { REFERENCE_FINALIZATION_TARGETS, newId, ulid, type Job } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
+import { createProp, addPropState } from "../../src/references/props.js";
+import { imageGenerationSource } from "../../src/world-chat/image-generation.js";
 import { acceptCharacterSheet } from "../../src/references/kit.js";
 import { recordUploadedCharacterSheetTake, referenceReviewDecision } from "../../src/references/takes.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -181,7 +183,16 @@ describe("background world finalization", () => {
       const { root, worldDir } = await makeTempRoot();
       const provider = new FsWorldProvider(root, { clock: () => CLOCK });
       await provider.loadWorld(WORLD_ID);
-      const sheetId = kind === "location-view-candidate" ? "the-vigil" : "maren-kest";
+      let sheetId = kind === "location-view-candidate" ? "the-vigil" : "maren-kest";
+      let stateId: string | undefined;
+      if (kind === "prop-state-candidate") {
+        const prop = await createProp(provider.openStore()!, "Tide sword");
+        assert.ok(prop);
+        const state = await addPropState(provider.openStore()!, prop.id, "Broken");
+        assert.ok(state);
+        sheetId = prop.id;
+        stateId = state.id;
+      }
       const landed = `references/${sheetId}/incoming/${kind}.png`;
       await mkdir(join(worldDir, "references", sheetId, "incoming"), { recursive: true });
       await writeFile(join(worldDir, landed), pngBytes());
@@ -197,14 +208,14 @@ describe("background world finalization", () => {
         id: `jb_01J8E00000000000000000${String([...REFERENCE_FINALIZATION_TARGETS].indexOf(kind)).padStart(3, "0")}`,
         idempotencyKey: `01J8E10000000000000000${String([...REFERENCE_FINALIZATION_TARGETS].indexOf(kind)).padStart(3, "0")}`,
         worldId: WORLD_ID,
-        target: { kind, id: `${sheetId}/cover` },
+        target: { kind, id: `${sheetId}/${stateId ?? "cover"}` },
         capability: "image",
         provider: "fal",
         model: "flux-2-pro",
         params: {
           prompt: "one image",
           references: [],
-          provenance: { canonRevision: 42, sheets: { [sheetId]: sheetVersion }, artDirectionVersion: 1 },
+          provenance: { canonRevision: 42, sheets: stateId ? {} : { [sheetId]: sheetVersion }, artDirectionVersion: 1 },
         },
         estimatedMicroUsd: 47000,
         status: "succeeded",
@@ -226,4 +237,33 @@ describe("background world finalization", () => {
       await provider.close();
     }
   });
+});
+
+it("keeps a World Chat character-sheet result pending until a separate selection", async t => {
+  const { root, worldDir } = await makeTempRoot();
+  const provider = new FsWorldProvider(root, { clock: () => CLOCK });
+  t.after(() => provider.close());
+  await provider.loadWorld(WORLD_ID);
+  const store = provider.openStore()!;
+  const before = structuredClone(store.getBundle().referenceKits.find(kit => kit.sheetId === "maren-kest"));
+  const source = imageGenerationSource(store, { manifest: { manifestVersion: 1, generated: "2026-10-03", models: [{
+    id: "test-image", provider: "fal", capability: "image", displayName: "Test image",
+    accepts: { referenceImages: 4, startFrame: false, endFrame: false }, limits: {}, pricing: { kind: "perImage", microUsdPerImage: 40_000 },
+  }] }, settings: async () => null, freeze: input => input });
+  const resolved = await source.compile({ kind: "reference-generation", modelId: "test-image", request: {
+    operation: "character-sheet", sheetId: "maren-kest",
+  }, checkReceiptIds: [newId("check")] }, newId("act"), CLOCK);
+  const input = resolved.inputs[0]!;
+  const landed = `${input.landing!.dir}/quoted-sheet.png`;
+  await mkdir(join(worldDir, input.landing!.dir), { recursive: true });
+  await writeFile(join(worldDir, landed), pngBytes());
+  const job: Job = { ...input, id: newId("jb"), idempotencyKey: ulid(), status: "succeeded", providerJobId: "remote-quoted", attempt: 1,
+    error: null, createdAt: CLOCK, updatedAt: CLOCK, landedFiles: [landed] };
+  const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "changes.jsonl"), appVersion: "test" });
+  await (coordinator as unknown as { onJobTerminal(job: Job): Promise<void> }).onJobTerminal(job);
+  await store.reload();
+  const take = store.getBundle().referenceTakes.find(take => take.jobId === job.id);
+  assert.ok(take?.media);
+  assert.deepEqual(store.getBundle().referenceKits.find(kit => kit.sheetId === "maren-kest"), before);
+  assert.equal(store.getBundle().referenceReviews.some(review => review.takeId === take.id), false);
 });

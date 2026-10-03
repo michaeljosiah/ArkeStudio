@@ -30,6 +30,10 @@ import { saveProductionNarrative } from "./productions/narrative.js";
 import { guardProductionSetupAuthority } from "./productions/setup-authority.js";
 import { StageConstructor } from "./productions/stage-construction.js";
 import { worldImageReferences, stagedWorldImage } from "@arke-studio/contracts";
+import { GenerationQuotes } from "./world-chat/generation-quotes.js";
+import { BenchReservedTakeSchema } from "@arke-studio/contracts";
+import { imageGenerationSource } from "./world-chat/image-generation.js";
+import { buildGenerationSource } from "./world-chat/build-generation.js";
 import { recordDialogueFeedback } from "./takes/feedback.js";
 import { proposeShotVisualFacts } from "./productions/visual-facts.js";
 import { KeyArtPromptReviews, keyArtReviewContext } from "./references/prompt-review.js";
@@ -185,6 +189,7 @@ import {
   addBenchReference,
   type WorldFileReader,
   recoverBenchSession,
+  BENCH_UNATTEMPTED_ADMISSION,
   planBenchUpscale,
   benchTakeFiles,
   deleteBenchTake,
@@ -5485,12 +5490,12 @@ export class Coordinator {
         if (!take) throw new Error("reference take finalization produced no take");
         // The human's own action rule (frames.ts, assign-voice): a composite the user asked for
         // lands designated — there is no review step for the person who pressed the button.
-        // Sheet generation has no agent path; if one arrives, it must stage instead. A founding
+        // Chat generation stages its composite for a separate selection. A founding
         // build is NOT that path (SPEC-031 D2): the press is a person's, the cap is stated, and
         // the spend is authorized before anything runs — its sheets land designated under the
         // same rule as a user-pressed generation, through this branch and its own landing.
         // Failure leaves the take pending, and the review strip still knows how to offer it.
-        if (job.target.kind === "character-sheet" && take.media) {
+        if (job.target.kind === "character-sheet" && take.media && job.params.generationQuotePendingSelection !== true) {
           const sheetId = job.target.id?.split("/")[0];
           const bundle = store.getBundle();
           const sheet = sheetId ? bundle.sheets.find((s) => s.id === sheetId) : undefined;
@@ -19506,11 +19511,13 @@ export class Coordinator {
     store: WorldStore,
     action: WorldChatBenchGenerationAction["action"],
     createdAt: string,
+    actionId = `quote-${createdAt}`,
   ) {
     const bench = await this.benchFor(store.worldId, action.sessionId);
     if (!bench) throw new Error("That Bench session is no longer available.");
     const model = this.opts.manifest?.models.find((candidate) =>
       candidate.provider === action.composer.provider && candidate.id === action.composer.model) ?? null;
+    if (this.readModel.getState().app.models.disabled.includes(action.composer.model)) throw new Error("This Bench model is turned off in AI models.");
     const subjectRouting = subjectSessionReferenceRouting(bench.session, model);
     const session = {
       ...bench.session,
@@ -19521,23 +19528,33 @@ export class Coordinator {
       },
     };
     const revision = (await bench.store.read()).length;
-    // A quote prices; it acknowledges nothing. The cast's reads cost nothing to carry
-    // (`incrementalInputMicroUsd: 0`), so the number is the same without them, and resolving
-    // them here wrote a rights entry per quote for an upload that never happened.
+    // Resolve the same cast inputs as Bench dispatch, without recording upload rights.
+    const benchRoute = model === null ? null : characterAudioRoute(model);
+    const castVoices = session.subject && session.composer.params.kind === "video" && !session.composer.params.audioReferencesDisabled && benchRoute
+      ? await resolveSubjectCastVoices(store, session.subject, actionId, benchRoute.local === true, { acknowledge: false, at: createdAt })
+      : { references: [], notSent: [], refused: [] };
+    if (castVoices.refused.length) throw new Error(castVoices.refused.map(entry => `${entry.name}: voice not sent · ${entry.reason}`).join(" · "));
+    let seedIndex = 0;
     const plan = planBenchDispatch(session, store.getBundle(), this.opts.manifest ?? null, {
       worldId: store.worldId,
-      requestId: `quote-${createdAt}`,
+      requestId: actionId,
+      performanceReferences: castVoices.references,
       at: createdAt,
       recipeVersionOf: (modelId, route) => this.recipeVersionOf(modelId, route),
       adapterRecipeFor: (modelId, selections, route) => this.adapterRecipeIdentity(modelId, selections, route),
+      localFreeze: (modelId, rerunOf) => localTakeFreeze(modelId, rerunOf,
+        recipeId => this.readModel.getState().app.localSampling?.choices[recipeId],
+        () => createHash("sha256").update(`${actionId}/${seedIndex++}`).digest().readUInt32BE(0) % 0x7fffffff),
     });
     if (!plan.ok) throw new Error(plan.reason);
     await this.requireSpeechInputsAvailable(plan.inputs);
     const estimatedMicroUsd = plan.inputs.reduce((total, input) => total + input.estimatedMicroUsd, 0);
     const snapshot = plan.reserved[0]!.request;
+    const { filing: _filing, ...authoritySnapshot } = snapshot;
     const references = [...snapshot.references, ...snapshot.keyframes]
       .filter((reference, index, all) => all.findIndex((candidate) => candidate.token === reference.token) === index)
       .map((reference) => ({ id: reference.token, role: reference.label ?? reference.subjectRole ?? reference.kind }));
+    references.push(...castVoices.references.map(ref => ({ id: ref.performance.id, role: `Cast voice: ${ref.characterName}` })));
     const params = action.composer.params;
     const quantity = "count" in params ? params.count : 1;
     const localCharge = estimatedMicroUsd === 0 && PROVIDERS[action.composer.provider as ProviderId]?.local === true;
@@ -19570,13 +19587,18 @@ export class Coordinator {
     const audioPolicy = params.kind === "video"
       ? params.sound === true ? "Generate picture with provider audio" : params.sound === false ? "Silent output" : "Provider default"
       : action.composer.mode === "voice" ? "Spoken audio" : action.composer.mode === "music" ? "Music audio" : undefined;
+    const prompts = [...new Set(plan.inputs.map(input => [input.params.prompt ?? input.params.text ?? action.composer.brief,
+      input.params.instructions, input.params.lyrics].filter(value => typeof value === "string" && value.length > 0).join("\n\n")))];
     return {
       authorityRevision: revision,
+      inputs: plan.inputs.map(input => this.freezeLocalIdentity(input)),
+      authority: { revision, subject: bench.session.subject ?? null, model, snapshot: authoritySnapshot },
+      materialization: plan.reserved,
       body: {
         family: "generation" as const,
         medium,
         purpose: bench.session.subject ? "Production Bench take" : "Bench exploration",
-        prompt: action.composer.brief || "No creative brief",
+        prompt: prompts.map((prompt, index) => prompts.length === 1 ? prompt : `${index + 1}. ${prompt}`).join("\n\n") || "No creative brief",
         exclusions: [],
         references,
         provider: action.composer.provider,
@@ -19639,37 +19661,33 @@ export class Coordinator {
       take.requestId === action.actionId || take.requestId.startsWith(`${action.actionId}/`)) ?? [];
     if (takes.length === 0) return null;
     const active = takes.filter((take) => !["succeeded", "failed", "cancelled"].includes(take.status));
+    if (active.some(take => take.status === "needs-reconciliation")) return { status: "running" as const, detail: "Bench work needs reconciliation in Activity; it was not resubmitted." };
     if (active.length > 0) {
-      return action.status === "approved" || action.status === "queued"
-        ? { status: "running" as const, detail: `${takes.length - active.length} of ${takes.length} items finished; ${active[0]!.id} is in flight.` }
-        : null;
+      return { status: "running" as const, detail: `${takes.length - active.length} of ${takes.length} items finished; ${active[0]!.id} is in flight.` };
     }
-    const completed = takes.filter((take) => take.status === "succeeded" && take.media).length;
-    const failed = takes.filter((take) => take.status === "failed" || (take.status === "succeeded" && !take.media)).length;
-    const cancelled = takes.filter((take) => take.status === "cancelled").length;
-    if (completed === 0) {
-      return cancelled === takes.length
-        ? { status: "cancelled" as const, detail: `All ${cancelled} generation items were cancelled.` }
-        : { status: "failed" as const, detail: `${failed} failed and ${cancelled} were cancelled; no result completed.` };
-    }
-    const knownActualCosts = takes.map((take) => take.cost?.actualMicroUsd);
+    const unattempted = takes.filter(take => take.status === "failed" && !take.jobId && take.error === BENCH_UNATTEMPTED_ADMISSION);
+    const attempted = takes.filter(take => !unattempted.includes(take));
+    const completed = attempted.filter((take) => take.status === "succeeded" && take.media).length;
+    const failed = attempted.filter((take) => take.status === "failed" || (take.status === "succeeded" && !take.media)).length;
+    const cancelled = attempted.filter((take) => take.status === "cancelled").length;
+    const knownActualCosts = attempted.map((take) => take.cost?.actualMicroUsd);
     const actualMicroUsd = knownActualCosts.every((cost) => cost !== undefined && cost !== null)
       ? knownActualCosts.reduce<number>((total, cost) => total + (cost ?? 0), 0)
       : null;
     return {
-      status: "completed" as const,
+      status: completed > 0 ? "completed" as const : cancelled === takes.length ? "cancelled" as const : "failed" as const,
       receipt: {
         kind: "bench-generation",
         id: action.authority.id,
-        summary: `${completed} completed, ${failed} failed, and ${cancelled} cancelled. Results remain unselected.`,
+        summary: `${completed} completed, ${failed} failed, ${cancelled} cancelled, and ${unattempted.length} were not attempted. Results remain unselected.`,
         generation: {
           authorized: takes.length,
           completed,
           failed,
           cancelled,
-          unattempted: 0,
+          unattempted: unattempted.length,
           actualMicroUsd,
-          results: takes.map((take) => ({
+          results: attempted.map((take) => ({
             id: take.id,
             medium: take.request.mode === "image" ? "image" as const : take.request.mode === "video" ? "video" as const : "audio" as const,
             status: take.status === "succeeded" && take.media ? "completed" as const
@@ -19685,7 +19703,81 @@ export class Coordinator {
 
   /** Platform callbacks stay in the host; the application service composes their authority. */
   private conversationActionDependencies(store: WorldStore): WorldChatActionAdapterDeps {
+    const quotePorts = {
+      enqueue: (input: EnqueueInput) => {
+        if (this.stopping || !this.stillOpen(store)) throw new Error("The owning world is no longer open.");
+        return this.enqueueWithSpeechChecks(input, new Map());
+      },
+      jobs: () => this.jobQueue?.listJobs() ?? [],
+      actualCost: async (id: string) => (await this.ledger?.readAll())?.find(entry => entry.jobId === id)?.actualMicroUsd ?? null,
+    };
+    const benchQuotes = new GenerationQuotes(store, {
+      compile: async (action, id, at) => {
+        if (action.kind !== "bench-generation") throw new Error("The Bench generation action is unavailable.");
+        return this.quoteBenchGenerationForConversationAction(store, action, at, id);
+      },
+      compareInputs: inputs => inputs.map(({ target, landing: _landing, ...input }) => ({ ...input, target: { kind: target.kind } })),
+      dispatch: async (action, id, inputs, materialization) => {
+        if (action.kind !== "bench-generation") throw new Error("The Bench generation action is unavailable.");
+        return this.serialiseBenchDispatch(`${store.worldId}/${action.sessionId}`, async () => {
+          let quotedAt: string;
+          try { quotedAt = (await benchQuotes.validate(action, id)).createdAt; }
+          catch { return { status: "stale", detail: "The Bench generation changed after approval. Prepare a fresh card." }; }
+          const bench = await this.benchFor(store.worldId, action.sessionId);
+          if (!bench || this.stopping || !this.stillOpen(store)) throw new Error("The owning Bench is unavailable.");
+          const model = this.opts.manifest?.models.find(candidate => candidate.id === action.composer.model && candidate.provider === action.composer.provider);
+          const route = model ? characterAudioRoute(model) : null;
+          if (bench.session.subject && action.composer.params.kind === "video" && !action.composer.params.audioReferencesDisabled && route) {
+            const cast = await resolveSubjectCastVoices(store, bench.session.subject, id, route.local === true, { at: quotedAt });
+            if (cast.refused.length) throw new Error("The approved cast audio could not be cleared.");
+          }
+          const reserved = BenchReservedTakeSchema.array().parse(materialization);
+          if (reserved.length !== inputs.length || reserved.some((take, index) => inputs[index]?.target.id !== `${action.sessionId}/${take.id}`)) throw new Error("The Bench reservation does not match its quote.");
+          let attempted = -1;
+          try {
+            const reservation = await bench.store.append({ type: "takes-reserved", takes: reserved }, { at: this.nowIso(), requestId: id });
+            if (reservation.deduplicated) return { status: "running", detail: "Rejoining the reserved Bench generation." };
+            for (const [index, input] of inputs.entries()) {
+              // An absent queue row after an uncertain append is not proof of no purchase.
+              await bench.store.append({ type: "take-status", takeId: reserved[index]!.id, status: "needs-reconciliation",
+                error: "Queue admission is unresolved; inspect Activity before starting new work." }, { at: this.nowIso() });
+              attempted = index;
+              const job = await quotePorts.enqueue(input);
+              await bench.store.append({ type: "take-job", takeId: reserved[index]!.id, jobId: job.id }, { at: this.nowIso() });
+              const session = await bench.store.fold();
+              if (session) await recoverBenchSession({ store: bench.store, session: { ...session, takes: session.takes.filter(take => take.id === reserved[index]!.id) } }, [{
+                jobId: job.id, targetId: input.target.id!, status: job.status, error: job.error,
+              }], () => this.nowIso());
+            }
+          } catch {
+            for (const take of reserved.slice(attempted + 1)) {
+              await bench.store.append({ type: "take-status", takeId: take.id, status: "failed",
+                error: BENCH_UNATTEMPTED_ADMISSION }, { at: this.nowIso() });
+            }
+            const session = await bench.store.fold();
+            if (session) await recoverBenchSession({ store: bench.store, session }, quotePorts.jobs().filter(job => job.target.kind === "bench-take" && job.target.id).map(job => ({
+              jobId: job.id, targetId: job.target.id!, status: job.status, error: job.error,
+            })), () => this.nowIso());
+            await this.refreshBench(store.worldId, action.sessionId);
+            return { status: "running", detail: "Admission stopped. Unattempted takes were settled; uncertain work needs reconciliation in Activity." };
+          }
+          await this.refreshBench(store.worldId, action.sessionId);
+          return { status: "queued", detail: `${reserved.length} Bench items reserved and queued.` };
+        });
+      },
+      reconcile: async card => (await this.reconcileBenchGenerationForConversationAction(store, card)) ?? {
+        status: "failed", detail: "No durable Bench reservation survived this approval. Inspect Activity before preparing new work.",
+      },
+    }, quotePorts);
     return {
+      benchGenerationQuotes: benchQuotes,
+      generationQuotes: new GenerationQuotes(store, imageGenerationSource(store, {
+        manifest: this.opts.manifest ?? null,
+        settings: () => this.appSettings ? this.appSettings.load() : Promise.resolve(null),
+        freeze: input => this.freezeLocalIdentity(input),
+      }), quotePorts),
+      ...(this.foundingBuild ? { buildGenerationQuotes: new GenerationQuotes(store,
+        buildGenerationSource(store.worldId, this.foundingBuild, input => this.freezeLocalIdentity(input)), quotePorts) } : {}),
       activePlans: (productionId) => this.activeScenePlans(store, productionId),
       ...(this.opts.pickFiles ? { pickFiles: this.opts.pickFiles } : {}),
       ...(this.opts.pickFolder ? { pickFolder: this.opts.pickFolder } : {}),
@@ -19743,6 +19835,7 @@ export class Coordinator {
         this.openProductionTakeGenerationForConversationAction(store, action, mutation),
       getExports: () => [...this.exportReads.values()].filter((entry) => entry.worldId === store.worldId),
       getJobs: () => this.jobQueue?.listJobs() ?? [],
+      getBuildItems: () => this.conversationBuildItems(store.worldId),
       quoteBenchGeneration: (action, createdAt) =>
         this.quoteBenchGenerationForConversationAction(store, action, createdAt),
       dispatchBenchGeneration: (action, actionId) =>
@@ -19856,6 +19949,12 @@ export class Coordinator {
     });
   }
 
+  private conversationBuildItems(worldId: string) {
+    return (this.foundingBuild?.states().find(state => state.worldId === worldId)?.items ?? []).map(item => ({
+      key: item.key, kind: item.kind, subject: item.subject, state: item.state, detail: item.detail ?? null,
+    }));
+  }
+
   private conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle {
     return this.conversationActions(store).lifecycle;
   }
@@ -19894,6 +19993,7 @@ export class Coordinator {
       query: this.worldQuery,
       actions: this.conversationActionLifecycle(store),
       jobs: () => this.jobQueue?.listJobs() ?? [],
+      buildItems: () => this.conversationBuildItems(store.worldId),
       exports: () => this.durableExportReads(store.worldId),
       actionExports: () => [...this.exportReads.values()].filter((entry) => entry.worldId === store.worldId),
       researchAllowed: async () => {
