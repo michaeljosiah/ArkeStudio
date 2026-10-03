@@ -1096,6 +1096,31 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(adds[4]!.getAttribute("title"), "no sounds");
     assert.ok(adds.every((b) => b.querySelector("svg") !== null), "the plus is an icon inside the button, never a line of its own");
   });
+
+  it("a world's designed narrator is named on the head and the block panel, before the catalogue answers and after, as the door names it", async () => {
+    const ife = { kind: "designed" as const, id: "dv_01M3WMVV9W7J85PPRYQJ0YB26G", revision: 1, name: "Ife's voice", description: "Low and warm.", language: "en-NG",
+      provider: "google" as const, model: "gemini-3.8-flash-tts" as const, remoteId: "voice_ife", expiresAt: "2099-01-01T00:00:00.000Z", created: AT, origin: "imported" as const,
+      sample: "voices/dv_01M3WMVV9W7J85PPRYQJ0YB26G.wav" };
+    const target = "designed:dv_01M3WMVV9W7J85PPRYQJ0YB26G:1";
+    const state = voiced(inkbound("performed"));
+    state.world = { ...state.world!, designedVoices: [ife] };
+    state.app = { ...state.app, narrator: { provider: "google", model: "gemini-3.8-flash-tts", voiceId: target, label: "Ife's voice" } };
+    const m = await mount(state);
+    await answerOpen(m, { audiobook: record(NARRATION_KEYS, { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." }) });
+    const named = () => ({
+      head: (q(m, '[data-testid="audiobook-reading"]')?.textContent ?? "").replace(/\s+$/, ""),
+      readBy: q(m, ".fy-ab__readby")?.textContent,
+    });
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    assert.match(named().head, /^Performed · Ife's voice/, "no catalogue yet: the stored choice, never the shipped George");
+    assert.equal(named().readBy, "read by Ife's voice · narrator");
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [
+      { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George", attributes: [], local: true, canClone: false, usedBy: [] },
+      { provider: "google", model: "gemini-3.8-flash-tts", voiceId: target, label: "Ife's voice", attributes: [], local: false, canClone: false, readsDesigned: ife.id, usedBy: [] },
+    ] }));
+    assert.match(named().head, /^Performed · Ife's voice/, "the catalogue holds the voice, so it still narrates");
+    assert.equal(named().readBy, "read by Ife's voice · narrator");
+  });
 });
 
 describe("the marker list's words (design turn 165, issue 1324 §3)", () => {
