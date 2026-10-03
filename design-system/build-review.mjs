@@ -323,6 +323,18 @@ const SCREENS = [
   { group: "Around it", screen: "A bed and a sound (story)", frame: "187d", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drifted", checked: "2026-10-03",
     controls: ["Bed", "Sound", "Library", "World", "Generate", "Level", "Fade", "Ends", "Remove", "Done"],
     notes: ["Turn 187d: the block's panel gains Bed — from this block to the one it Ends on, a Level and a duck under voices, Fade in and out — and Sound at the block's start, each chosen from the world's sounds (Library: brought in; World: made here) or generated through the Bench's music route. Reactions sit above them: a sound from the cadence list or a few words, in a speaker's voice, under the block.", "Drift: the bed is edited from the block it starts on, not drawn on the page as a band; a sound's chips are the cadence list, struck nowhere yet for a reader that makes none — the run refuses it in one clause instead; Generate opens the Bench in music mode, as 186c's pictures do."] },
+  { group: "Around it", screen: "Suggest picture (story)", frame: "191a", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-10-03",
+    controls: ["Picture", "Edit prompt", "Generate"],
+    notes: ["Turn 191a: a block's Picture gains Suggest picture — one editable prompt drafted from the block, the chapter, who is in it and their look, with each person as a chip over their reference, the look lines it used, the model, ratio and price; nothing is made until Generate. Not built yet."] },
+  { group: "Around it", screen: "Illustrate this chapter (story)", frame: "191b", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-10-03",
+    controls: ["Illustrate again", "Accept", "Discard", "Skip"],
+    notes: ["Turn 191b: where the pictures go and what each shows, dashed on the blocks and listed in a card with its time, a short title and who is in it; sparse, never over a picture the author set. Not built yet."] },
+  { group: "Around it", screen: "The look sheet (story)", frame: "191c", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "built", checked: "2026-10-03",
+    controls: ["Look", "Derive again", "Done"],
+    notes: ["Turn 191c: the chapter read once for its look — the place, the time and the light, and what each character wears and carries here, with the blocks each line comes from. Kept on the chapter's record (schema 49), every line editable and the author's from then on, never replaced by a derive again; a character the look missed can be added by name. Opened from the block's Picture; nothing is spent, the writing service reads it.", "Drift: the same words as before are not an edit, so a derived line stays derived until its text changes; a line an author clears is taken away and may come back with the next derive."] },
+  { group: "Around it", screen: "Pictures made one at a time (story)", frame: "191d", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-10-03",
+    controls: ["Stop"],
+    notes: ["Turn 191d: an accepted proposal makes its pictures through the Bench one after another under one confirm, each filed on its block as it lands, counted in the card. Not built yet."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */

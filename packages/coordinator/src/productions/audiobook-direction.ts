@@ -155,7 +155,7 @@ export interface DirectionDeriverInput {
 export type DirectionDeriver = (input: DirectionDeriverInput, signal?: AbortSignal) => Promise<RawDirection>;
 
 /** A string cut to a bound at a word, with an ellipsis when it was cut; whitespace folded. */
-function clip(text: string | undefined, max: number): string | undefined {
+export function clip(text: string | undefined, max: number): string | undefined {
   if (text === undefined) return undefined;
   const folded = normalizeSpeechText(text);
   if (folded === "") return undefined;
@@ -546,7 +546,7 @@ export async function directableBlocks(
 }
 
 /** A sheet's section by its heading (`## Essence`, `## Voice`), whatever its case. */
-function section(sheet: Sheet | undefined, heading: RegExp): string | undefined {
+export function section(sheet: Sheet | undefined, heading: RegExp): string | undefined {
   return sheet?.sections.find((candidate) => heading.test(candidate.heading.trim()))?.body;
 }
 

@@ -8,6 +8,7 @@ import { chapterParagraphs, voicedBlocks, type VoicedBlock } from "./prose.js";
 import { textDigest } from "./subtitles.js";
 import { AudiobookGroupedSchema, AudiobookLoudnessSchema, AudiobookSplitFlagSchema } from "./audiobook-grouped.js";
 import { AudiobookPictureSchema } from "./audiobook-pictures.js";
+import { AudiobookLookSchema } from "./audiobook-look.js";
 import { AudiobookBedSchema, AudiobookBlockSoundSchema, AudiobookReactionSchema, BlockTimingSchema } from "./audiobook-timing.js";
 
 /**
@@ -356,6 +357,13 @@ export const ChapterAudiobookSchema = z
      * record with none, which the builds before them read as before (R-73).
      */
     pictures: z.record(z.string(), AudiobookPictureSchema).optional(),
+    /**
+     * The chapter's look (design turn 191c, SPEC-047 R-98): the place, the time and the light, and
+     * what each character wears and carries here, read once from the prose and kept, every line
+     * editable. Absent until read or written; the first record with one raises the world to
+     * schema 49, and so does a picture that keeps the look it was made under.
+     */
+    look: AudiobookLookSchema.optional(),
     /**
      * Timing held to the blocks (design turn 187, SPEC-047 R-80..R-89): each block's start, trim,
      * `under` and nudge by block key; the reactions under their hosts by reaction key (`x<n>`),

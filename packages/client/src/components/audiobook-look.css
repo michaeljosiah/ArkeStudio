@@ -1,0 +1,19 @@
+/* The look sheet (design turn 191c): 720 wide, centred, drawn on the body. */
+.fy-look { max-width: calc(100vw - 32px); }
+.fy-look__body { display: flex; flex-direction: column; gap: 0; }
+.fy-look__line { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--border); }
+.fy-look__line:first-child { border-top: 0; }
+.fy-look__thumb { width: 40px; height: 40px; border-radius: 9px; object-fit: cover; flex: none; display: block; }
+.fy-look__thumb--none { border: 1px dashed var(--neutral-400); box-sizing: border-box; }
+.fy-look__place { width: 40px; flex: none; font-size: var(--text-2xs); color: var(--muted-foreground); padding-top: 8px; }
+.fy-look__tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--text-sm); line-height: 1.5; }
+.fy-look__tx b { font-weight: 600; }
+.fy-look__tx textarea { min-height: 0; resize: vertical; }
+.fy-look__src { white-space: nowrap; font-size: var(--text-2xs); color: var(--muted-foreground); padding-top: 2px; }
+.fy-look__meta { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0 4px; border-top: 1px solid var(--border); font-size: var(--text-xs); color: var(--muted-foreground); }
+.fy-look__none { margin: 0; padding: 18px 0; font-size: var(--text-xs); color: var(--muted-foreground); }
+.fy-look__foot { display: flex; align-items: center; gap: 8px; padding-top: 12px; }
+@media (max-width: 599px) {
+  .fy-look__meta { flex-direction: column; gap: 2px; }
+  .fy-look__src { display: none; }
+}

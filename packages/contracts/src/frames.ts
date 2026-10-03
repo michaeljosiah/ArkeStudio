@@ -10,6 +10,7 @@ import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
 import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema } from "./audiobook.js";
 import { AudiobookPictureSourceSchema } from "./audiobook-pictures.js";
+import { LOOK_LINE_MAX, LookTargetSchema } from "./audiobook-look.js";
 import { BedInputSchema, BlockSoundInputSchema, BlockTimingInputSchema, ReactionInputSchema } from "./audiobook-timing.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
@@ -3307,6 +3308,28 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       chapterFile: z.string().min(1),
       block: z.string().min(1),
       picture: z.object({ file: z.string().min(1).max(1000), source: AudiobookPictureSourceSchema }).strict().nullable(),
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /**
+   * The chapter read for its look (design turn 191c, SPEC-047 R-98): the place, the time and the
+   * light and what each character wears here, asked of the writing service once and kept on the
+   * chapter's record — the author's own lines never replaced. Nothing is spent. Answered as
+   * `audiobook.record` under the same id, or refused there in one clause.
+   */
+  z.object({ kind: z.literal("derive-audiobook-look"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema }).strict(),
+  /**
+   * One line of the look written by the author (R-98): the place's, or one character's; null takes
+   * the line away. Written lines are the author's for good. Answered as `audiobook.record`.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-look"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      target: LookTargetSchema,
+      text: z.string().max(LOOK_LINE_MAX * 2).nullable(),
       requestId: UlidSchema.optional(),
     })
     .strict(),
