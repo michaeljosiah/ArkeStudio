@@ -49,6 +49,7 @@ import { passageAction, passageActions, type PassageAction } from "../lib/passag
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
 import { ListenButton } from "../components/audiobook-player.js";
+import { BlockPicturePanel, useChapterPictures } from "../components/audiobook-picture.js";
 import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectSheet, DirectionCard, ReadSheet, PerformedSpeaker, ReadingMenu, ReadingNotes, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { playClip } from "../lib/audio.js";
@@ -1608,6 +1609,9 @@ export function ChapterWorkspace({
         ? "Saving…"
         : `Saved · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`;
 
+  // The pictures set on blocks (design turn 186c): the margin's chips and the block's Picture.
+  const chapterPictures = useChapterPictures(world, audiobook.rows, audiobookRecord.record === "unreadable" ? null : audiobookRecord.record);
+  const pictureRow = audiobook.rows.find((row) => row.block.key === audiobook.selected) ?? null;
   // The block's panel, beside the blocks or, on a phone, in a sheet (turn 165): one set of props.
   const blockPanel: Parameters<typeof AudiobookSide>[0] = {
     rows: audiobook.rows,
@@ -1788,6 +1792,7 @@ export function ChapterWorkspace({
                   onSelectionChange={setBlockSelection}
                   onSelect={audiobook.setSelected}
                   slug={worldSlug}
+                  pictures={chapterPictures}
                   onPlayOne={(row) => {
                     if (row.artifact === null) return;
                     void playClip({ id: row.artifact.id, url: mediaUrl(worldSlug, `artifacts/${row.artifact.file}`), title: `${chapter.title} · ${row.mark}`, sub: "audiobook · one block" });
@@ -2047,7 +2052,7 @@ export function ChapterWorkspace({
               </aside>
             </ResponsiveSheet>
           )}
-          {view === "audiobook" && <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null} title={`${audiobook.selected === "title" ? "Title" : `Block ${audiobook.rows.findIndex(row => row.block.key === audiobook.selected) + 1}`} · ${audiobook.rows.find(row => row.block.key === audiobook.selected)?.mark ?? "Narrator"}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><AudiobookSide {...blockPanel} /></aside></ResponsiveSheet>}
+          {view === "audiobook" && <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null} title={`${audiobook.selected === "title" ? "Title" : `Block ${audiobook.rows.findIndex(row => row.block.key === audiobook.selected) + 1}`} · ${audiobook.rows.find(row => row.block.key === audiobook.selected)?.mark ?? "Narrator"}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><AudiobookSide {...blockPanel} />{pictureRow !== null && <BlockPicturePanel worldId={worldId} production={production} chapterFile={chapter.file} chapterOrder={chapter.order} row={pictureRow} rows={audiobook.rows} pictures={chapterPictures} />}</aside></ResponsiveSheet>}
           <ResponsiveSheet sheet={compact} open={notesOpen} title={`Chapter ${String(chapter.order).padStart(2,"0")} · notes`} onClose={() => setNotesOpen(false)} className="fy-chapter-notes-sheet">
           <aside className="fy-ch__side fy-ch__notes">
             <section className="fy-bible__panel">

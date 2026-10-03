@@ -6758,6 +6758,17 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-ab__fcount { font: 400 11px/1 var(--font-mono); color: var(--neutral-400); }
 .fy-ab__fchip--on .fy-ab__fcount { color: var(--background); opacity: 0.7; }
 .fy-ab__block--selected { background: var(--muted); }
+/* Pictures on blocks (turn 186c): a chip under the speaker in the margin, and the panel's grid. */
+.fy-ab__who { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.fy-ab__picchip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px 0 3px; border: 1px solid var(--border); border-radius: 7px; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); background: var(--background); box-sizing: border-box; }
+.fy-ab__picchip img { width: 28px; height: 18px; object-fit: cover; border-radius: 4px; display: block; }
+.fy-ab__picchip--short { border-color: var(--warning); }
+.fy-ab__pick { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-height: 280px; overflow-y: auto; }
+.fy-ab__pickitem { padding: 0; border: 2px solid transparent; border-radius: 8px; background: none; cursor: pointer; }
+.fy-ab__pickitem img { width: 100%; height: 64px; object-fit: cover; border-radius: 6px; display: block; }
+.fy-ab__pickitem--on { border-color: var(--foreground); }
+.fy-ab__picnow { width: 64px; height: 40px; object-fit: cover; border-radius: 6px; display: block; }
+.fy-ab__picgen { display: flex; flex-direction: column; gap: 8px; }
 .fy-ab__block--line.fy-ab__block--selected { background: color-mix(in srgb, var(--fy-voice) 7%, transparent); box-shadow: inset 2px 0 0 var(--fy-voice), inset 0 0 0 1px color-mix(in srgb, var(--fy-voice) 45%, transparent); }
 .fy-ab__block--sounding { background: var(--secondary); box-shadow: inset 2px 0 0 var(--fy-voice, var(--foreground)); }
 .fy-ab__mark { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

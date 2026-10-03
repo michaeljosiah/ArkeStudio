@@ -62,6 +62,7 @@ import { ChevronDown, Mic, Pin, Play, Plus, Waveform } from "../components/icons
 import { EditorDialog } from "../components/editor-dialog.js";
 import { Button } from "../components/ui.js";
 import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, usePlayback, useQueueAt } from "../lib/audio.js";
+import { PictureChip, type PictureSpan } from "../components/audiobook-picture.js";
 import { mediaUrl } from "../lib/media.js";
 import {
   acceptDirection,
@@ -1162,7 +1163,7 @@ function SpeakerMenu({ row, choices, onPick, onClose }: {
   );
 }
 
-export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, onSelect, onPlayOne, slug, filter = null, choices, onPin, marker = null, onMarker, modelOf, onDirect, brackets = [], onReRead, reReadPrice }: {
+export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, onSelect, onPlayOne, slug, filter = null, choices, onPin, marker = null, onMarker, modelOf, onDirect, brackets = [], onReRead, reReadPrice, pictures }: {
   /** What reading a block again with its neighbours would cost, as its button says it. */
   reReadPrice?: (key: string) => string | null;
   rows: BlockRow[];
@@ -1187,6 +1188,8 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
   modelOf?: (reader: AudiobookReader) => ManifestModel | null;
   /** A block's direction written with its markers changed (R-42). */
   onDirect?: (key: string, direction: AudiobookDirectionInput | null) => void;
+  /** The pictures set on blocks (design turn 186c): a chip in the margin with when each starts. */
+  pictures?: { byKey: ReadonlyMap<string, PictureSpan>; estimated: boolean };
 }) {
   const coarse = useMediaQuery("(pointer: coarse)");
   const pressedSelection = useRef<BlockSelection | null>(null);
@@ -1249,7 +1252,8 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
             onPointerDown={() => { pressedSelection.current = audiobookSelection(rows); }}
             onClick={() => { onSelectionChange?.(audiobookSelection(rows) ?? pressedSelection.current); pressedSelection.current = null; onSelect(row.block.key); }}
           >
-            {pinnable && row.block.paragraph >= 0 ? (
+            {(() => {
+              const speaker = pinnable && row.block.paragraph >= 0 ? (
               <button
                 type="button"
                 className={`fy-ab__speaker fy-ab__speaker--press${menu?.key === row.block.key && menu.selection === undefined ? " fy-ab__speaker--open" : ""}`}
@@ -1269,7 +1273,16 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
                 <i className="fy-ab__speaker-dot" aria-hidden="true" />
                 <span className={`fy-ab__mark${row.markWarn ? " fy-ab__mark--warn" : ""}`}>{row.mark}</span>
               </span>
-            )}
+            );
+              // A picture set on the block (turn 186c): its chip under the speaker, in the margin.
+              const picture = pictures?.byKey.get(row.block.key);
+              return picture === undefined || slug === undefined ? speaker : (
+                <span className="fy-ab__who">
+                  {speaker}
+                  <PictureChip slug={slug} picture={picture} estimated={pictures?.estimated === true} />
+                </span>
+              );
+            })()}
             <span
               className={`fy-ab__text${row.proposed !== null ? " fy-ab__text--proposed" : ""}`}
               onMouseUp={(event) => {
