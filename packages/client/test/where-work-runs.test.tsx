@@ -230,8 +230,9 @@ describe("language work reads the production's choice (#587)", () => {
 
   it("seeds a production conversation with the remembered language model", () => {
     const text = renderConversation(languageState(LANGUAGE.id));
+    // A chip in the composer's row names it; a scope word under the title is gone (turn 190e).
     assert.match(text, /Gemma 4 12B/);
-    assert.match(text, /THIS PRODUCTION/);
+    assert.doesNotMatch(text, /THIS PRODUCTION|THIS TURN|CHAT AGENT|Ask the harness/);
   });
 
   it("names a removed language model instead of falling back", () => {

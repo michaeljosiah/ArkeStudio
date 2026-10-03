@@ -28,9 +28,15 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
-  { group: "Arrive", screen: "Founding conversation", frame: "189a", route: "#/new", status: "built", checked: "2026-10-03",
-    controls: ["Writing model", "Send"],
-    notes: ["Issue 1324: a writing model before the first turn; no empty content, voices, images or readiness sections. Send immediately holds the composer until the coordinator answers."] },
+  { group: "Arrive", screen: "Founding conversation", frame: "189a", route: "#/new", status: "drifted", checked: "2026-10-03",
+    controls: ["Send"],
+    notes: ["Issue 1324: a writing model before the first turn; no empty content, voices, images or readiness sections. Send immediately holds the composer until the coordinator answers.",
+      "Turn 190e supersedes the <code>Writing model</code> field drawn in 189a: the model is the chip in the composer's row (see the chat composer below). A world that does not exist yet has nowhere to remember a choice, so the chip picks for this conversation only, and letting go of it is <code>Use the default</code>."] },
+  { group: "Around it", screen: "Chat composer · every conversation", frame: "190e", route: "every chat composer", status: "built", checked: "2026-10-03",
+    controls: ["Every chat in this production"],
+    notes: ["Turn 190e: attach, voice and the model in one row, the model a chip with a menu and no row of its own (<code>model-chip.tsx</code>, <code>composer.tsx</code>'s <code>modelControl</code>). PR 1527 built it on the production docks; it now serves the Develop page's production and episode chats, the founding chat and production setup as well.",
+      "Where a chat has nowhere to remember a model the chip offers neither <code>Every chat in this production</code> nor a clear press, and picks for that chat alone. World Chat's model is the chat agent's, set in Settings, and the coordinator refuses a named model outside a production (issue 1403), so its chip names the model and has no menu.",
+      "Frames still drawn with the old controls, superseded by this rule: 153c's <code>Writing model</code> field on production setup, 171's <code>Story author</code> sheet that held the model on a phone (the header button stays for the context line), and 189's <code>Writing model</code> field. The scene dock has no model control (turn 143) and keeps none."] },
   { group: "Arrive", screen: "Founding content review", frame: "189b", route: "#/new?draft=:id", status: "built", checked: "2026-10-03",
     controls: ["Continue a draft", "Approve this version", "Reject", "Request changes", "Check readiness"],
     notes: ["Issue 1324: review follows proposed content, readiness follows an approval. The two states are drawn together for the controls; pending content alone does not reveal readiness. Prior approved versions and exact digest approval remain available."] },

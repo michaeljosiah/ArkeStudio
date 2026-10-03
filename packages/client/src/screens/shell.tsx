@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
 import { remoteStudio } from "./launch.js";
-import { HarnessModelOptions, HarnessModelStatus } from "../components/harness-models.js";
+import { HarnessModelStatus, harnessModelsNeedAWord } from "../components/harness-models.js";
+import { ModelChip } from "../components/model-chip.js";
 import { languageChoiceReason } from "../components/conversation.js";
 import { Button, Callout, IconButton, Input, Select, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
@@ -1283,14 +1284,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 {g?.status === "failed" && g.detail && <Callout title="The conversation needs attention">{g.detail}</Callout>}
                 {g?.chatError && <Callout title="Your message was held">{g.chatError}</Callout>}
                 <div style={{ marginTop: "auto" }}>
-                  <label style={{ display: "grid", gap: 6 }}>Writing model
-                    <Select label="Writing model" value={writingModel ?? ""} disabled={chatRunning || buildPressed || !!g?.founding}
-                      onChange={event => setWritingModel(event.target.value || undefined)}>
-                      <option value="">World author default</option>
-                      <HarnessModelOptions state={state} selected={writingModel} needsTools />
-                    </Select>
-                  </label>
-                  <HarnessModelStatus state={state} />
+                  {harnessModelsNeedAWord(state) && <HarnessModelStatus state={state} />}
                   <Composer
                     value={message}
                     onChange={setMessage}
@@ -1302,6 +1296,11 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     busyLabel={buildPressed ? "founding the world…" : sizingBuild ? "sizing the build…" : "shaping the draft…"}
                     onAttach={() => genesisAttachFiles(genesisId)}
                     onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
+                    // A world that does not exist yet has nowhere to remember a model, so the chip
+                    // picks for this conversation only, and letting go of it is the author's default.
+                    modelControl={<ModelChip state={state} value={writingModel} set={writingModel !== undefined}
+                      onPick={setWritingModel} needsTools unsetLabel="Use the default"
+                      disabled={chatRunning || buildPressed || !!g?.founding} />}
                     {...(hostCanAttach()
                       ? {
                           onAttachFiles: (files: readonly File[]) => attachHostFiles(attachTarget, files),

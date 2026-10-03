@@ -69,8 +69,8 @@ it('two pointers zoom the map without creating a choice, and cancellation releas
  await act(async()=>handlers.onPointerMoveCapture!(event(2,50) as never));assert.notEqual(find('.bm-stage').style.transform,before);
  await act(async()=>{handlers.onPointerCancelCapture!(event(1,10) as never);handlers.onPointerCancelCapture!(event(2,50) as never);});assert.equal(sent.some(m=>m.kind==='routing-command'),false);
 });
-it('setup keeps the draft, no autofocus, and a phone-accessible writing model',async()=>{
- await mount('productions/setup/'+CHAT_ID,390,'setup');assert.equal(find('.fy-cx__editor').hasAttribute('autofocus'),false);await draft('Keep the two endings');await click(find('.fy-thread-peek'));assert.ok(find('.fy-setup-outline-sheet[open] [aria-label="Writing model"]'));
+it('setup keeps the draft, no autofocus, and the writing model a chip in the composer row on a phone',async()=>{
+ await mount('productions/setup/'+CHAT_ID,390,'setup');assert.equal(find('.fy-cx__editor').hasAttribute('autofocus'),false);await draft('Keep the two endings');assert.ok(find('.fy-cx__bar .fy-mchip__btn'));await click(find('.fy-thread-peek'));assert.equal(find('[aria-label="Writing model"]'),null,'the outline sheet holds no model select of its own');
  for(const next of [984,390]){await act(async()=>{width=next;for(const listener of listeners)listener();});assert.equal(find('.fy-cx__editor').innerText,'Keep the two endings');}
 });
 it('episode script labels follow authored blocks independently of lifecycle status',async()=>{

@@ -363,7 +363,7 @@ function SeasonDock({ onPutAway }: { onPutAway: () => void }) {
     <ProductionConversation
       worldId={worldId}
       productionId={prodId}
-      dock={{ controlsInSheet: true, title: `Arke · ${production?.meta.title ?? "…"}`, subject: `season · ${version}`, onPutAway }}
+      dock={{ title: `Arke · ${production?.meta.title ?? "…"}`, subject: `season · ${version}`, onPutAway }}
       openingNote="opening…"
       emptyLine="Let’s shape the season. What is it about?"
       placeholder="Ask about the season"
@@ -400,7 +400,7 @@ function EpisodeDock({ episode, onPutAway }: { episode: Episode; onPutAway: () =
       worldId={worldId}
       productionId={prodId}
       entry={{ kind: "episode", productionId: prodId ?? "", episodeId: episode.id }}
-      dock={{ controlsInSheet: true, title: `Arke · Episode ${pad(episode.order)}`, subject: `${episode.title} · v${episode.version}`, onPutAway }}
+      dock={{ title: `Arke · Episode ${pad(episode.order)}`, subject: `${episode.title} · v${episode.version}`, onPutAway }}
       openingNote="opening…"
       emptyLine={`Develop ${episode.title} here — how it opens, where it turns, how it closes, and the scenes it needs.`}
       placeholder="Ask about the episode"
