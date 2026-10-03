@@ -679,6 +679,14 @@ export function subscribeBriefEnhanced(listener: (answer: BriefEnhanced) => void
   return () => briefEnhancedListeners.delete(listener);
 }
 
+/** The book as a listener hears it (design turn 186): answered to the ask that named it. */
+export type AudiobookListeningAnswer = Extract<DomainEvent, { type: "audiobook.listening" }>;
+const audiobookListeningListeners = new Set<(answer: AudiobookListeningAnswer) => void>();
+export function subscribeAudiobookListening(listener: (answer: AudiobookListeningAnswer) => void): () => void {
+  audiobookListeningListeners.add(listener);
+  return () => audiobookListeningListeners.delete(listener);
+}
+
 export type BenchSubjectOpened = Extract<DomainEvent, { type: "bench.subject-opened" }>;
 const benchSubjectOpenedListeners = new Set<(answer: BenchSubjectOpened) => void>();
 export function subscribeBenchSubjectOpened(listener: (answer: BenchSubjectOpened) => void): () => void {
@@ -1592,6 +1600,9 @@ function handleFrame(json: string): void {
     if (event.type === "stage.construction") for (const listener of stageConstructionListeners) listener(event);
     if (event.type === "bench.brief-enhanced") {
       for (const listener of briefEnhancedListeners) listener(event);
+    }
+    if (event.type === "audiobook.listening") {
+      for (const listener of audiobookListeningListeners) listener(event);
     }
     if (event.type === "bench.subject-opened") {
       for (const listener of benchSubjectOpenedListeners) listener(event);
@@ -5254,6 +5265,18 @@ export function useStagedTakes(): StoreState["stagedTakes"] {
 /** One block's direction, set or cleared (SPEC-047 R-6): the coordinator answers with the record, or why not. */
 export function setAudiobookBlock(worldId: string, productionId: string, chapterFile: string, block: string, direction: import("@arke-studio/contracts").AudiobookDirectionInput | null): boolean {
   return send({ kind: "set-audiobook-block", worldId, productionId, chapterFile, block, direction });
+}
+
+/** The book as a listener hears it (design turn 186): answered as `audiobook.listening` under the id returned. */
+export function openAudiobookListening(worldId: string, productionId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "open-audiobook-listening", worldId, productionId, requestId }) ? requestId : null;
+}
+
+/** A picture set on a block, or taken off with null (design turn 186c): answered as `audiobook.record` under the id returned. */
+export function setAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, picture: { file: string; source: import("@arke-studio/contracts").AudiobookPictureSource } | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "set-audiobook-picture", worldId, productionId, chapterFile, block, picture, requestId }) ? requestId : null;
 }
 
 /** `Direct this chapter` (SPEC-047 R-10): the model asked for a direction per block; the card comes back as a run's result. */

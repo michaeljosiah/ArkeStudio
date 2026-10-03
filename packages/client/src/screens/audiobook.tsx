@@ -8,6 +8,7 @@ import { BookReadingPanel, BookRequests } from "./chapter-audiobook.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { ChevronRight, Play, Speaker } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
+import { ListenButton } from "../components/audiobook-player.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { Badge, Button, cx } from "../components/ui.js";
 import { useProduction } from "../lib/selectors.js";
@@ -316,6 +317,8 @@ export function AudiobookScreen() {
           {door === null ? "…" : line.line}
         </span>
         <span className="fy-h1row__push" />
+        {/* Listen (design turn 186): the book as a listener hears it, once a block anywhere is made. */}
+        <ListenButton worldId={worldId} production={production} />
         {!phone && primary}
       </div>
       {phone && <HeldBar className="fy-abdoor-held"><span>{totalBlocks} blocks · {price === null ? "price unavailable" : price.estimatedMicroUsd === 0 ? "free" : `${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}`}</span>{primary}</HeldBar>}

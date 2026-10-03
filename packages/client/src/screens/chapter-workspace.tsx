@@ -48,6 +48,7 @@ import { continuityStamp } from "../lib/continuity.js";
 import { passageAction, passageActions, type PassageAction } from "../lib/passage-actions.js";
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
+import { ListenButton } from "../components/audiobook-player.js";
 import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectSheet, DirectionCard, ReadSheet, PerformedSpeaker, ReadingMenu, ReadingNotes, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { playClip } from "../lib/audio.js";
@@ -1736,6 +1737,8 @@ export function ChapterWorkspace({
                   onNarrator={() => setNarratorOpen(true)}
                 />
                 <span className="fy-ch__viewpush" />
+                {/* Listen (design turn 186): the book from this chapter, beside the chapter's own Play. */}
+                {stagedDraft === undefined && <ListenButton worldId={worldId} production={production} chapterId={chapter.id} />}
                 {stagedDraft === undefined && audiobook.head}
               </>
             )}
