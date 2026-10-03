@@ -143,7 +143,12 @@ import {
   type VoiceAudioFormat,
   type ArtifactGeneration,
   type CharacterReferenceWorkflow,
+  pictureLookFor,
+  type PictureWho,
+  pictureBench,
+  priceLabel,
   type BenchSession,
+  type BenchTake,
   type SessionId,
   type Delivery,
   supportedDeliveries,
@@ -308,6 +313,7 @@ import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiob
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
 import { audiobookListening, setAudiobookPicture } from "./productions/audiobook-listening.js";
 import { deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
+import { clipPrompt, depictable, makeAdapterPictureDeriver, pictureAspect, pictureRoom, pictureWho, promptRoom, suggestPicture, type PictureDeriver } from "./productions/audiobook-picture-suggest.js";
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
 import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
@@ -341,6 +347,9 @@ import {
   slotAtAuthorizationOf,
 } from "./takes/drawn-frame.js";
 
+/** An audiobook picture waits for its Bench take this often, and at most this long (design turn 191). */
+const PICTURE_POLL_MS = 1_000;
+const PICTURE_WAIT_MS = 20 * 60_000;
 /**
  * How long an opening bench session may spend drawing pictures it should already have. Long
  * enough for an ordinary session in one pass, short enough that nobody waits on it.
@@ -965,6 +974,8 @@ export interface CoordinatorOptions {
   speakerNotesDeriver?: SpeakerNotesDeriver;
   /** Turn 191c: the look model seam; every line is held to the chapter's people and blocks regardless (SPEC-047 R-98). */
   lookDeriver?: LookDeriver;
+  /** Turn 191a: the picture-prompt model seam; who it names and the length it writes are held regardless (SPEC-047 R-99). */
+  pictureDeriver?: PictureDeriver;
   /** Desktop-owned update commands. Electron APIs remain outside the coordinator. */
   updates?: {
     check: () => Promise<void>;
@@ -1238,6 +1249,8 @@ export class Coordinator {
   private readonly directingChapters = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /** A chapter being read for its look (turn 191c): one at a time, ended with the world. */
   private readonly derivingLooks = new Map<string, AbortController>();
+  /** A picture being made for a block (turn 191a): one at a time a block, ended with the world. */
+  private readonly makingPictures = new Map<string, AbortController>();
   /**
    * A proposal not yet answered (SPEC-047 R-10): held by chapter until it is accepted or
    * discarded and replayed to a window that connects, so a refresh does not lose a card the
@@ -1567,6 +1580,34 @@ export class Coordinator {
   }
 
   /** The room `Direct this chapter` reads in (R-51): the book's narrator, the manifest, what can speak, and the narrator's description. */
+  /** Where the writing service keeps its scratch: beside the app's own, or the change log. */
+  private extractScratch(): string {
+    return this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`;
+  }
+
+  /** The look's reader (design turn 191c): the seam under test, else the harness when it is ready to author. */
+  private lookDeriverFor(): LookDeriver | null {
+    if (this.opts.lookDeriver) return this.opts.lookDeriver;
+    return this.opts.adapter?.readiness().ready && this.opts.authoring ? makeAdapterLookDeriver(this.opts.adapter, this.sessionInput, this.extractScratch()) : null;
+  }
+
+  /** The picture prompt's writer (design turn 191a): the seam under test, else the harness when it is ready to author. */
+  private pictureDeriverFor(): PictureDeriver | null {
+    if (this.opts.pictureDeriver) return this.opts.pictureDeriver;
+    return this.opts.adapter?.readiness().ready && this.opts.authoring ? makeAdapterPictureDeriver(this.opts.adapter, this.sessionInput, this.extractScratch()) : null;
+  }
+
+  /**
+   * The model an audiobook picture is made on (design turn 191a): the one the world's image work
+   * is routed to, the Bench's own default — and none when it is switched off, since a substitute
+   * would spend on a model nobody chose.
+   */
+  private async pictureModel(store: WorldStore): Promise<ManifestModel | null> {
+    if (!this.opts.manifest) return null;
+    const settings = this.appSettings ? await this.appSettings.load() : null;
+    return imageModelFor(settings, this.opts.manifest, undefined, store.getBundle().meta.models);
+  }
+
   private async directionRoom(store: WorldStore, productionId: string): Promise<{ narrator: AudiobookReader; models: readonly ManifestModel[]; catalogue: VoiceCandidate[]; narratorDescription?: string; designedBinding?: DesignedBinding }> {
     const room = await this.audiobookNarrator(store, this.voiceService, productionId);
     const narratorDescription = await this.narratorDescription(store, room.narrator);
@@ -12703,36 +12744,8 @@ export class Coordinator {
           await this.refreshBench(msg.worldId, msg.sessionId);
           return;
         }
-        const generation: ArtifactGeneration = {
-          source: "bench",
-          sessionId: bench.session.id,
-          takeId: take.id,
-          takeNumber: take.n,
-          brief: take.request.brief,
-          references: take.request.references,
-          keyframes: take.request.keyframes,
-          provider: take.request.provider,
-          model: take.request.model,
-          params: take.request.params,
-          // How the bytes were made includes which recipe version made them (SPEC-021 R-13).
-          ...(take.request.recipeVersion !== undefined ? { recipeVersion: take.request.recipeVersion } : {}),
-          ...(take.request.recipe ? { recipe: take.request.recipe } : {}),
-          ...(take.request.requestedSeed !== undefined ? { requestedSeed: take.request.requestedSeed } : {}),
-          ...(take.request.sampling !== undefined ? { sampling: take.request.sampling } : {}),
-          costMicroUsd: take.cost?.actualMicroUsd ?? null,
-        };
-        const sourcePath = join(store.dir, ".sessions", bench.session.id, "media", take.id, take.media.file);
         try {
-          const artifact = await fileGeneratedArtifact(store, {
-            sourcePath,
-            generation,
-            ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
-            abandoned: () => !this.stillOpen(store) || this.stopping,
-          });
-          await bench.store.append(
-            { type: "take-filed", takeId: take.id, artifactId: artifact.id },
-            { at: this.nowIso(), requestId: msg.requestId },
-          );
+          await this.fileBenchTake(store, bench, take, msg.requestId);
         } catch (err) {
           void this.appLog?.append({
             kind: "bench.keep-failed",
@@ -14983,10 +14996,7 @@ export class Coordinator {
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         try {
-          let deriver = this.opts.lookDeriver ?? null;
-          if (!deriver && this.opts.adapter?.readiness().ready && this.opts.authoring) {
-            deriver = makeAdapterLookDeriver(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`);
-          }
+          const deriver = this.lookDeriverFor();
           if (!deriver) {
             this.emit({ at: at(), type: "audiobook.record", ...ids, refused: "the writing service is not running" });
             return;
@@ -15005,6 +15015,107 @@ export class Coordinator {
         } finally {
           store.closingSignal.removeEventListener("abort", onClose);
           this.derivingLooks.delete(key);
+        }
+        return;
+      }
+      case "suggest-audiobook-picture": {
+        // A picture suggested for a block (design turn 191a, SPEC-047 R-99, R-100): the chapter's
+        // look is read first when it has none, then the writing service drafts one prompt; who
+        // rides as a reference, the model, the ratio and the price are the coordinator's own.
+        // Answered to the window that asked; nothing is made and nothing is spent.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
+        const at = () => new Date().toISOString();
+        const refuse = (refused: string) => this.emit({ at: at(), type: "audiobook.picture-suggestion", ...ids, refused });
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        try {
+          const deriver = this.pictureDeriverFor();
+          if (!deriver) return refuse("the writing service is not running");
+          const model = await this.pictureModel(store);
+          if (!model) return refuse("no picture model is on");
+          const held = await readAudiobook(store, msg.productionId, chapter.file);
+          let look = held === null || held === "unreadable" ? null : (held.look ?? null);
+          if (look === null) {
+            // The look is read once and kept (R-98): the first suggestion in a chapter reads it.
+            const lookDeriver = this.lookDeriverFor();
+            if (!lookDeriver) return refuse("the writing service is not running");
+            const derived = await deriveChapterLook(store, msg.productionId, chapter.id, lookDeriver, control.signal);
+            const written = await writeDerivedLook(store, msg.productionId, chapter.id, derived);
+            if (written === "moved") return refuse("the prose moved · try again");
+            look = written.record.look ?? null;
+            this.refreshIfStillOpen(store);
+            this.emit({ at: at(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, record: written.record });
+          }
+          const room = await pictureRoom(store, msg.productionId, chapter.id, look);
+          const suggestion = await suggestPicture(store, room, msg.block, { deriver, model, signal: control.signal });
+          this.emit({ at: at(), type: "audiobook.picture-suggestion", ...ids, suggestion });
+        } catch (err) {
+          if (!control.signal.aborted) void this.appLog?.append({ kind: "audiobook.picture-suggest-failed", chapter: chapter.file, block: msg.block, message: err instanceof Error ? err.message : String(err) });
+          refuse(control.signal.aborted ? "stopped" : describeCoordinatorError(err));
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+        }
+        return;
+      }
+      case "make-audiobook-picture": {
+        // A suggestion made (design turn 191a, R-99): through the Bench as any image is, on the
+        // price the press showed, and filed on the block as its picture — one that keeps the
+        // look it was made under. A failure is held with its reason and never retried unasked.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, block: msg.block };
+        const at = () => new Date().toISOString();
+        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}/${msg.block}`;
+        const fail = (reason: string, sessionId?: string) => this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "failed", reason, ...(sessionId !== undefined ? { sessionId } : {}) });
+        if (this.makingPictures.has(key)) return fail("making a picture here already");
+        const control = new AbortController();
+        this.makingPictures.set(key, control);
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        try {
+          const model = await this.pictureModel(store);
+          if (!model) return fail("no picture model is on");
+          this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "making" });
+          const held = await readAudiobook(store, msg.productionId, chapter.file);
+          const look = held === null || held === "unreadable" ? null : (held.look ?? null);
+          const room = await pictureRoom(store, msg.productionId, chapter.id, look);
+          const index = room.plan.blocks.findIndex((planned) => planned.block.key === msg.block);
+          if (index < 0) return fail("that block is no longer in the chapter");
+          const characters = depictable(room.people).filter((person) => msg.who.includes(person.key));
+          const place = room.places.find((candidate) => msg.who.includes(candidate.key));
+          const who = pictureWho(store, model, [
+            ...characters.map((person) => ({ key: person.key, name: person.name, ...(person.sheet !== undefined ? { sheet: person.sheet } : {}), kind: "character" as const, ...(person.billing !== undefined ? { billing: person.billing } : {}) })),
+            ...(place === undefined ? [] : [{ key: place.key, name: place.name, sheet: place.key, kind: "place" as const }]),
+          ]);
+          const made = await this.makeBenchPicture(store, {
+            title: `Chapter ${chapter.order} · ${msg.block === "title" ? "title" : `block ${index + 1}`}`,
+            prompt: clipPrompt(msg.prompt, promptRoom(model)),
+            ...(room.art !== undefined ? { art: room.art } : {}),
+            model,
+            ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
+            who,
+            requestId: msg.requestId,
+            ceilingMicroUsd: msg.confirmedMicroUsd,
+            signal: control.signal,
+          });
+          if (!made.ok) return fail(made.reason, made.sessionId);
+          const stamp = pictureLookFor(look, characters.map((person) => person.key));
+          const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, stamp !== undefined ? { look: stamp } : {});
+          this.refreshIfStillOpen(store);
+          this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "made", sessionId: made.sessionId, record });
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.picture-failed", chapter: chapter.file, block: msg.block, message: err instanceof Error ? err.message : String(err) });
+          fail(control.signal.aborted ? "stopped" : describeCoordinatorError(err));
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+          this.makingPictures.delete(key);
         }
         return;
       }
@@ -18615,6 +18726,147 @@ export class Coordinator {
   }
 
   /** The open world's bench session by id, or null — a closed world answers no bench command. */
+  /**
+   * A kept take (issue 305): its bytes filed as an artifact of the world and the session told so,
+   * idempotent by take id. Shared by the Bench's Keep and by a picture an audiobook asked for
+   * (design turn 191), which keeps what it made on its own. Throws what filing refused.
+   */
+  private async fileBenchTake(store: WorldStore, bench: OpenedBench, take: BenchTake, requestId?: string): Promise<{ id: string; file: string }> {
+    if (!take.media) throw new Error("that take has no picture yet");
+    if (take.disposition === "filed" && take.keptArtifactId !== undefined) {
+      const held = store.getBundle().artifacts.find((artifact) => artifact.id === take.keptArtifactId);
+      if (held !== undefined) return { id: held.id, file: held.file };
+    }
+    const generation: ArtifactGeneration = {
+      source: "bench",
+      sessionId: bench.session.id,
+      takeId: take.id,
+      takeNumber: take.n,
+      brief: take.request.brief,
+      references: take.request.references,
+      keyframes: take.request.keyframes,
+      provider: take.request.provider,
+      model: take.request.model,
+      params: take.request.params,
+      // How the bytes were made includes which recipe version made them (SPEC-021 R-13).
+      ...(take.request.recipeVersion !== undefined ? { recipeVersion: take.request.recipeVersion } : {}),
+      ...(take.request.recipe ? { recipe: take.request.recipe } : {}),
+      ...(take.request.requestedSeed !== undefined ? { requestedSeed: take.request.requestedSeed } : {}),
+      ...(take.request.sampling !== undefined ? { sampling: take.request.sampling } : {}),
+      costMicroUsd: take.cost?.actualMicroUsd ?? null,
+    };
+    const sourcePath = join(store.dir, ".sessions", bench.session.id, "media", take.id, take.media.file);
+    const artifact = await fileGeneratedArtifact(store, {
+      sourcePath,
+      generation,
+      ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
+      abandoned: () => !this.stillOpen(store) || this.stopping,
+    });
+    await bench.store.append({ type: "take-filed", takeId: take.id, artifactId: artifact.id }, { at: this.nowIso(), requestId: requestId ?? `keep:${take.id}` });
+    return { id: artifact.id, file: artifact.file };
+  }
+
+  /**
+   * One picture an audiobook asked for (design turn 191, SPEC-047 R-99), made through the Bench as
+   * any image is: a session of its own in the Bench's list, the prompt and its references written
+   * into the composer as the Bench would, planned by the Bench's own gate, reserved before a job
+   * exists, the take kept as an artifact when it lands. It is the press the author confirmed —
+   * `ceilingMicroUsd` is the price shown on it, and a plan that costs more is refused, not spent.
+   * The window the author is in is left where it is: nothing here opens or changes the Bench view.
+   */
+  private async makeBenchPicture(
+    store: WorldStore,
+    input: { title: string; prompt: string; art?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal },
+  ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null } | { ok: false; reason: string; sessionId?: SessionId }> {
+    const worldId = store.worldId;
+    const params = { kind: "image" as const, count: 1, ...(input.aspect !== undefined ? { aspect: input.aspect } : {}) };
+    const opened = await openBenchSession(store.dir, () => this.nowIso(), { fresh: true, defaultModel: { provider: input.model.provider, model: input.model.id }, initial: { mode: "image", brief: input.prompt, title: input.title } }).catch(() => null);
+    if (opened === null) return { ok: false, reason: "the Bench could not open a session" };
+    const sessionId = opened.session.id;
+    const fail = async (reason: string) => {
+      this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
+      this.transport.broadcastSnapshot();
+      return { ok: false as const, reason, sessionId };
+    };
+    await opened.store.append({ type: "composer-set", mode: "image", provider: input.model.provider, model: input.model.id, params, brief: input.prompt }, { at: this.nowIso(), requestId: `pic-composer:${input.requestId}` });
+    // The pictures that ride, each by the name the Bench gives it; a picture it refuses is left
+    // off and the take is made without it — the refusal is the Bench's own and is logged.
+    const cited: Array<{ name: string; kind: "character" | "place"; token: string }> = [];
+    for (const [index, entry] of input.who.filter((candidate) => candidate.carried && candidate.reference !== null).entries()) {
+      const bench = await this.benchFor(worldId, sessionId);
+      if (bench === null) return fail("the Bench session is gone");
+      const outcome = await addBenchReference(bench, store.getBundle(), input.model, {
+        source: { source: "world-file", path: entry.reference! },
+        worldFile: worldFileReader(store.dir),
+        requestId: `pic-ref:${input.requestId}/${index}`,
+        at: this.nowIso(),
+      });
+      if (outcome.outcome === "refused") void this.appLog?.append({ kind: "bench.reference-refused", worldId, reason: outcome.reason });
+      else cited.push({ name: entry.name, kind: entry.kind, token: outcome.token });
+    }
+    const brief = pictureBench(input.prompt, cited, input.art);
+    const composed = await this.benchFor(worldId, sessionId);
+    if (composed === null) return fail("the Bench session is gone");
+    await composed.store.append({ type: "composer-set", mode: "image", provider: input.model.provider, model: input.model.id, params, brief }, { at: this.nowIso(), requestId: `pic-brief:${input.requestId}` });
+    const bench = await this.benchFor(worldId, sessionId);
+    if (bench === null) return fail("the Bench session is gone");
+    const plan = planBenchDispatch(bench.session, store.getBundle(), this.opts.manifest ?? null, {
+      worldId,
+      requestId: `pic:${input.requestId}`,
+      at: this.nowIso(),
+      speechAuthorisation: {},
+      performanceReferences: [],
+      recipeVersionOf: (modelId, route) => this.recipeVersionOf(modelId, route),
+      adapterRecipeFor: (modelId, selections, route) => this.adapterRecipeIdentity(modelId, selections, route),
+      localFreeze: (modelId, rerunOf) => localTakeFreeze(modelId, rerunOf, (recipeId) => this.readModel.getState().app.localSampling?.choices[recipeId], randomLocalSeed),
+    });
+    if (!plan.ok) return fail(plan.reason);
+    const planned = plan.inputs.reduce((total, job) => total + job.estimatedMicroUsd, 0);
+    if (planned > input.ceilingMicroUsd) return fail(`the price moved · ${priceLabel(planned)}`);
+    // The reservation is durable before any job exists, as the Bench's press makes it.
+    const reservation = await bench.store.append({ type: "takes-reserved", takes: plan.reserved }, { at: this.nowIso(), requestId: `pic:${input.requestId}` });
+    if (reservation.deduplicated) return fail("that picture was already asked for");
+    const outcome = await enqueueInputs(plan.inputs, async (job) => {
+      if (!this.jobQueue) throw new Error("the job queue is unavailable");
+      return this.enqueueWithSpeechChecks(job, new Map());
+    });
+    const reserved = plan.reserved[0]!;
+    const failure = outcome.failures[0];
+    if (failure !== undefined) {
+      await bench.store.append({ type: "take-status", takeId: reserved.id, status: "failed", error: failure.reason }, { at: this.nowIso() });
+      return fail(failure.reason);
+    }
+    const jobId = outcome.acceptedJobIds[0];
+    if (jobId !== undefined) await bench.store.append({ type: "take-job", takeId: reserved.id, jobId }, { at: this.nowIso() });
+    this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
+    this.transport.broadcastSnapshot();
+    // The take lands through the job's own finalisation; this waits for it to be written to the log.
+    const deadline = Date.now() + PICTURE_WAIT_MS;
+    for (;;) {
+      if (input.signal?.aborted) {
+        // Stop costs nothing more: the job is cancelled where it stands, and what was made stays.
+        if (jobId !== undefined) await this.jobQueue?.cancel(jobId).catch(() => {});
+        return { ok: false, reason: "stopped", sessionId };
+      }
+      const now = await this.benchFor(worldId, sessionId);
+      const take = now?.session.takes.find((candidate) => candidate.id === reserved.id);
+      if (take?.media !== undefined && now !== null) {
+        try {
+          const artifact = await this.fileBenchTake(store, now, take, `pic-keep:${input.requestId}`);
+          await this.refreshWorldSnapshot(worldId);
+          this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
+          this.transport.broadcastSnapshot();
+          return { ok: true, sessionId, artifact, costMicroUsd: take.cost?.actualMicroUsd ?? null };
+        } catch (err) {
+          return fail(describeCoordinatorError(err));
+        }
+      }
+      if (take !== undefined && (take.status === "failed" || take.status === "cancelled" || take.status === "needs-reconciliation")) return fail(take.error ?? (take.status === "cancelled" ? "cancelled" : "the picture could not be made"));
+      if (Date.now() > deadline) return fail("the picture took too long");
+      await new Promise((resolve) => setTimeout(resolve, PICTURE_POLL_MS));
+    }
+  }
+
   private async benchFor(worldId: string, sessionId: SessionId): Promise<OpenedBench | null> {
     const store = this.opts.provider.openStore?.();
     if (!store || store.worldId !== worldId) return null;
@@ -20039,6 +20291,7 @@ export class Coordinator {
       for (const run of this.castingVoices.values()) run.control.abort();
       for (const run of this.directingChapters.values()) run.control.abort();
       for (const control of this.derivingLooks.values()) control.abort();
+      for (const control of this.makingPictures.values()) control.abort();
       for (const run of this.readingBooks.values()) run.control.abort();
       for (const run of this.readingAudiobooks.values()) run.control.abort();
       for (const handle of this.exports.values()) handle.cancel();

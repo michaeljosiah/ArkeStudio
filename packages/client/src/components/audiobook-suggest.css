@@ -1,0 +1,16 @@
+/* Suggest picture (design turn 191a): the prompt, who is in it, their look, the model and the price. */
+.fy-sugg { display: flex; flex-direction: column; gap: 10px; }
+.fy-sugg__prompt { border: 1px dashed var(--neutral-400); border-radius: 12px; padding: 12px 14px; font-size: var(--text-sm); line-height: 1.5; background: var(--background); resize: vertical; }
+.fy-sugg__refs { display: flex; gap: 8px; flex-wrap: wrap; }
+.fy-sugg__ref { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px 0 4px; border: 1px solid var(--border); border-radius: 10px; font-size: var(--text-sm); box-sizing: border-box; }
+.fy-sugg__ref img { width: 32px; height: 32px; border-radius: 7px; object-fit: cover; display: block; }
+.fy-sugg__ref--miss { border-style: dashed; color: var(--muted-foreground); }
+.fy-sugg__ref--miss i { width: 32px; height: 32px; border-radius: 7px; border: 1px dashed var(--neutral-400); display: inline-block; box-sizing: border-box; }
+.fy-sugg__ref--over { color: var(--muted-foreground); }
+.fy-sugg__ref--over img { opacity: 0.5; }
+.fy-sugg__make { padding: 0; border: 0; background: none; color: var(--foreground); font: inherit; font-size: var(--text-xs); text-decoration: underline; cursor: pointer; }
+.fy-sugg__look { border: 1px solid var(--border); border-radius: 12px; }
+.fy-sugg__look div { display: flex; gap: 12px; padding: 9px 12px; font-size: var(--text-sm); border-top: 1px solid var(--border); }
+.fy-sugg__look div:first-child { border-top: 0; }
+.fy-sugg__look b { width: 64px; flex: none; font-weight: 500; color: var(--muted-foreground); }
+.fy-sugg__meta { display: flex; justify-content: space-between; gap: 12px; font-size: var(--text-xs); color: var(--muted-foreground); }

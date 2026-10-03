@@ -139,6 +139,7 @@ export * from "./grouped-reads.js";
 export * from "./audiobook-grouped.js";
 export * from "./audiobook-pictures.js";
 export * from "./audiobook-look.js";
+export * from "./audiobook-illustrate.js";
 export * from "./audiobook-listening.js";
 export * from "./audiobook-timing.js";
 export * from "./audiobook-timing-proposal.js";

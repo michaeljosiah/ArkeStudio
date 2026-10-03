@@ -549,6 +549,9 @@ const CLIENT_COMMAND_METADATA = {
   // The chapter's look (turn 191c): read by the writing service (no picture provider, nothing spent), then the author's lines.
   "derive-audiobook-look": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "set-audiobook-look": action("production", "command", "voice", "authored-change", ["chapters"]),
+  // A picture suggested for a block (turn 191a): read by the writing service, nothing spent; made through the Bench on the price shown.
+  "suggest-audiobook-picture": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets", "references"]),
+  "make-audiobook-picture": action("production", "generation", "bench", "spend-and-compute", ["chapters", "sheets", "references", "artifacts", "bench"]),
   // Timing on the blocks (turn 187): a command on the record, and the chapter's mix rendered into the cache.
   "set-audiobook-timing": action("production", "command", "voice", "authored-change", ["chapters"]),
   "set-audiobook-reaction": action("production", "command", "voice", "authored-change", ["chapters"]),
