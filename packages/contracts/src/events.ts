@@ -1347,6 +1347,22 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   /** The book as a listener hears it (design turn 186), answered to the window that asked; or none, and why. */
   z.object({ ...base, type: z.literal("audiobook.listening"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, listening: AudiobookListeningSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
   /**
+   * The chapter's mix rendered (design turn 187, R-85): the world-relative file, how long it is and
+   * where on the chapter's clock it starts; or none, and why, in one clause.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.mix"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      mix: z.object({ file: z.string().min(1), seconds: z.number().min(0), from: z.number().min(0) }).strict().nullable(),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
+  /**
    * The book read as one run (SPEC-047 R-16..R-18): started under the run's request (a cloned
    * voice's consent is asked under it), priced once for every chapter's cloud blocks, a chapter
    * at a time — each chapter's own events say how far it is — and finished with the counts.

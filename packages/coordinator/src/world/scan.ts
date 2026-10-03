@@ -136,7 +136,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Forty-five is the book note, the chapter notes and where a speaker's note came from (turn 184).
 // Forty-six is grouped reads and one loudness on takes, flags and the book (turn 185).
 // Forty-seven is a picture set on a block of a chapter's audiobook (turn 186).
-export const SUPPORTED_SCHEMA_VERSION = 47;
+// Forty-eight is timing on an audiobook's blocks, its reactions, beds and sounds (turn 187).
+export const SUPPORTED_SCHEMA_VERSION = 48;
 
 export class WorldOpenError extends Error {
   constructor(

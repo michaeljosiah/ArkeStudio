@@ -10,6 +10,7 @@ import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
 import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema } from "./audiobook.js";
 import { AudiobookPictureSourceSchema } from "./audiobook-pictures.js";
+import { BlockTimingInputSchema } from "./audiobook-timing.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
@@ -3303,6 +3304,37 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       block: z.string().min(1),
       picture: z.object({ file: z.string().min(1).max(1000), source: AudiobookPictureSourceSchema }).strict().nullable(),
       requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /**
+   * One block's timing set by the author (design turn 187, SPEC-047 R-81): its start, the pause
+   * after it, plays under another block, its take's trim, its grouped cut's nudge, or reset.
+   * Answered as `audiobook.record` with the same id, or refused there in one clause.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-timing"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      block: z.string().min(1).max(40),
+      timing: BlockTimingInputSchema,
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /**
+   * The chapter as it sounds with its timing (R-85): rendered by the one mixer, or a window of it
+   * around a block, and answered as `audiobook.mix` with the file to play. Nothing is written to
+   * the world but its cache.
+   */
+  z
+    .object({
+      kind: z.literal("render-audiobook-mix"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      requestId: UlidSchema,
+      window: z.object({ from: z.number().min(0), to: z.number().positive() }).strict().optional(),
     })
     .strict(),
   z
