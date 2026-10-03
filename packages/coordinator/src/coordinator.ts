@@ -309,6 +309,7 @@ import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear
 import { audiobookListening, setAudiobookPicture } from "./productions/audiobook-listening.js";
 import { chapterTiming, setBlockTiming, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
+import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
 import { checkDirection, directionPlan, heldKey } from "./voice/direction.js";
@@ -13824,7 +13825,30 @@ export class Coordinator {
       case "open-exports-folder": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        this.opts.openPath?.(join(store.dir, "exports"));
+        this.opts.openPath?.(msg.dir === undefined || msg.dir === "." || msg.dir === ".." ? join(store.dir, "exports") : join(store.dir, "exports", msg.dir));
+        return;
+      }
+      case "export-audiobook-player": {
+        // The audiobook as the player (turn 186e, SPEC-047 R-72): the chapters read whole, their
+        // audio joined where this machine has ffmpeg, their pictures, in a package under exports/.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId };
+        const result = await exportAudiobookPlayer(store, msg.productionId, { clock: () => new Date().toISOString(), ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), signal: store.closingSignal }).catch(
+          (err: unknown): { ok: false; blockers: string[] } => {
+            void this.appLog?.append({ kind: "audiobook.export-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+            return { ok: false, blockers: [describeCoordinatorError(err)] };
+          },
+        );
+        this.emit({ at: new Date().toISOString(), type: "audiobook.exported", ...ids, result });
+        return;
+      }
+      case "list-web-packages": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const packages = await listWebPackages(store).catch(() => []);
+        this.emit({ at: new Date().toISOString(), type: "web-packages.listed", requestId: msg.requestId, worldId: msg.worldId, packages });
         return;
       }
       case "pick-manuscript": {
@@ -14851,7 +14875,7 @@ export class Coordinator {
         return;
       }
       case "open-audiobook-listening": {
-        // The book as a listener hears it (turn 186, SPEC-047 R-57..R-62): every chapter planned
+        // The book as a listener hears it (turn 186, SPEC-047 R-66..R-71): every chapter planned
         // as its press would plan it, the made takes on one clock and the pictures placed on it,
         // answered to the window that asked. Nothing written, nothing asked of a provider.
         const store = this.opts.provider.openStore?.();
@@ -14869,7 +14893,7 @@ export class Coordinator {
         return;
       }
       case "set-audiobook-picture": {
-        // A picture set on a block or taken off (turn 186c, R-60): only one the world holds,
+        // A picture set on a block or taken off (turn 186c, R-69): only one the world holds,
         // written into the chapter's record through its lane and answered as the record.
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;

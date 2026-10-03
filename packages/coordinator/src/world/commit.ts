@@ -359,7 +359,7 @@ export const AUDIOBOOK_READING_NOTES_SCHEMA_VERSION = 45;
  */
 export const AUDIOBOOK_GROUPED_SCHEMA_VERSION = 46;
 /**
- * Pictures that follow the words (design turn 186, SPEC-047 R-64): `pictures` on the chapter's
+ * Pictures that follow the words (design turn 186, SPEC-047 R-73): `pictures` on the chapter's
  * strict audiobook record. A build before it reads such a record as unreadable — every take of the
  * chapter lost to a run that would make them again — so the world is raised before the first
  * record carrying a picture is written. A record with none is written without the field.

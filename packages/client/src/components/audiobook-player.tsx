@@ -12,7 +12,7 @@ import { openAudiobookListening, subscribeAudiobookListening, useAudiobookRecord
 import { Button } from "./ui.js";
 
 /**
- * The audiobook player in the app (design turn 186, SPEC-047 R-57): the same module the exported
+ * The audiobook player in the app (design turn 186, SPEC-047 R-66): the same module the exported
  * package inlines, mounted over the window and left to run. React owns the element, the plan it
  * is fed and its lifetime; the player owns everything inside it, so the book an author listens to
  * here is the book a listener opens from the package.
@@ -40,7 +40,7 @@ export function playerChapters(listening: AudiobookListening, src: (file: string
   }));
 }
 
-/** Whether anything of the book is made yet: Listen waits for one block anywhere (R-58). */
+/** Whether anything of the book is made yet: Listen waits for one block anywhere (R-67). */
 export function bookHasTakes(production: Pick<ProductionBundle, "chapters"> | null): boolean {
   return (production?.chapters ?? []).some((chapter) => !chapter.retired && chapter.audiobook !== undefined && "takes" in chapter.audiobook && chapter.audiobook.takes > 0);
 }
@@ -183,7 +183,7 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
   );
 }
 
-/** `Listen` (design turn 186, R-57): on the audiobook door and on a chapter, the book as a listener hears it. */
+/** `Listen` (design turn 186, R-66): on the audiobook door and on a chapter, the book as a listener hears it. */
 export function ListenButton({ worldId, production, chapterId, className }: { worldId: string; production: ProductionBundle; chapterId?: string; className?: string }) {
   const [open, setOpen] = useState(false);
   const connection = useStore().connection;

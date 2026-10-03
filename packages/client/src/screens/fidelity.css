@@ -6769,6 +6769,13 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-ab__pickitem--on { border-color: var(--foreground); }
 .fy-ab__picnow { width: 64px; height: 40px; object-fit: cover; border-radius: 6px; display: block; }
 .fy-ab__picgen { display: flex; flex-direction: column; gap: 8px; }
+/* Export audiobook (turn 186e): the player package as an option card with its counts. */
+.fy-abexport__opt { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; }
+.fy-abexport__opt--on { border-color: var(--foreground); }
+.fy-abexport__opt b { font: var(--type-ui); font-weight: 600; }
+.fy-abexport__opt .fy-mono { font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abexport__radio { width: 16px; height: 16px; flex: none; margin-top: 2px; border-radius: 50%; border: 1px solid var(--border); box-sizing: border-box; }
+.fy-abexport__opt--on .fy-abexport__radio { border: 5px solid var(--foreground); }
 .fy-ab__block--line.fy-ab__block--selected { background: color-mix(in srgb, var(--fy-voice) 7%, transparent); box-shadow: inset 2px 0 0 var(--fy-voice), inset 0 0 0 1px color-mix(in srgb, var(--fy-voice) 45%, transparent); }
 .fy-ab__block--sounding { background: var(--secondary); box-shadow: inset 2px 0 0 var(--fy-voice, var(--foreground)); }
 .fy-ab__mark { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

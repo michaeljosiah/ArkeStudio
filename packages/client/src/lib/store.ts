@@ -679,6 +679,20 @@ export function subscribeBriefEnhanced(listener: (answer: BriefEnhanced) => void
   return () => briefEnhancedListeners.delete(listener);
 }
 
+/** The audiobook's package, and the world's packages (design turn 186e): answered to the ask that named them. */
+export type AudiobookExported = Extract<DomainEvent, { type: "audiobook.exported" }>;
+const audiobookExportedListeners = new Set<(answer: AudiobookExported) => void>();
+export function subscribeAudiobookExported(listener: (answer: AudiobookExported) => void): () => void {
+  audiobookExportedListeners.add(listener);
+  return () => audiobookExportedListeners.delete(listener);
+}
+export type WebPackagesListed = Extract<DomainEvent, { type: "web-packages.listed" }>;
+const webPackagesListeners = new Set<(answer: WebPackagesListed) => void>();
+export function subscribeWebPackages(listener: (answer: WebPackagesListed) => void): () => void {
+  webPackagesListeners.add(listener);
+  return () => webPackagesListeners.delete(listener);
+}
+
 /** The book as a listener hears it (design turn 186): answered to the ask that named it. */
 export type AudiobookListeningAnswer = Extract<DomainEvent, { type: "audiobook.listening" }>;
 const audiobookListeningListeners = new Set<(answer: AudiobookListeningAnswer) => void>();
@@ -1603,6 +1617,12 @@ function handleFrame(json: string): void {
     }
     if (event.type === "audiobook.listening") {
       for (const listener of audiobookListeningListeners) listener(event);
+    }
+    if (event.type === "audiobook.exported") {
+      for (const listener of audiobookExportedListeners) listener(event);
+    }
+    if (event.type === "web-packages.listed") {
+      for (const listener of webPackagesListeners) listener(event);
     }
     if (event.type === "bench.subject-opened") {
       for (const listener of benchSubjectOpenedListeners) listener(event);
@@ -5415,8 +5435,20 @@ export function exportManuscript(worldId: string, productionId: string, format: 
   return send({ kind: "export-manuscript", worldId, productionId, format, ...(language !== undefined && format === "epub" ? { language } : {}) });
 }
 
-export function openExportsFolder(worldId: string): void {
-  send({ kind: "open-exports-folder", worldId });
+export function openExportsFolder(worldId: string, dir?: string): void {
+  send({ kind: "open-exports-folder", worldId, ...(dir !== undefined ? { dir } : {}) });
+}
+
+/** The audiobook as the player (design turn 186e): answered as `audiobook.exported` under the id returned. */
+export function exportAudiobookPlayer(worldId: string, productionId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "export-audiobook-player", worldId, productionId, requestId }) ? requestId : null;
+}
+
+/** The world's web packages (design turn 186e): answered as `web-packages.listed` under the id returned. */
+export function listWebPackages(worldId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "list-web-packages", worldId, requestId }) ? requestId : null;
 }
 
 /** Ask the host for a `.docx` and read it; the answer arrives by this request id, and nothing is written until the import press. */

@@ -9,6 +9,7 @@ import { EditorDialog } from "../components/editor-dialog.js";
 import { ChevronRight, Play, Speaker } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
 import { ListenButton } from "../components/audiobook-player.js";
+import { ExportAudiobookButton } from "../components/audiobook-export.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { Badge, Button, cx } from "../components/ui.js";
 import { useProduction } from "../lib/selectors.js";
@@ -319,6 +320,8 @@ export function AudiobookScreen() {
         <span className="fy-h1row__push" />
         {/* Listen (design turn 186): the book as a listener hears it, once a block anywhere is made. */}
         <ListenButton worldId={worldId} production={production} />
+        {/* Export (design turn 186e): the book as the player, once a chapter is read whole. */}
+        <ExportAudiobookButton worldId={worldId} production={production} readWhole={rows.filter((row) => !row.planned && row.total > 0 && row.made === row.total).length} />
         {!phone && primary}
       </div>
       {phone && <HeldBar className="fy-abdoor-held"><span>{totalBlocks} blocks · {price === null ? "price unavailable" : price.estimatedMicroUsd === 0 ? "free" : `${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}`}</span>{primary}</HeldBar>}
