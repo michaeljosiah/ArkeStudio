@@ -372,6 +372,8 @@ export function mountAudiobookPlayer(root, options) {
   }
   function startAudio() {
     const audio = players[cur];
+    // The host takes the app's voice back each time the book sounds (codex on PR 1499).
+    if (options.onPlay) options.onPlay();
     applyRate(audio);
     const started = audio.play && audio.play();
     if (started && typeof started.catch === "function") {

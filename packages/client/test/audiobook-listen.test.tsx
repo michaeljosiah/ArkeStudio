@@ -168,6 +168,15 @@ describe("Listen (turn 186)", () => {
     const m = await mount(inkbound(2));
     await press(q(m, '[data-testid="audiobook-listen"]'));
     assert.equal(stopped, true);
+    // A read that takes the voice while the book is open pauses it; the book's next play takes it back.
+    await answer(m, listening(2));
+    let second = false;
+    claimRead("page-read:later", () => {
+      second = true;
+    });
+    await press(q(m, '.abp [data-act="toggle"]'));
+    if (q(m, '.abp [data-act="toggle"]')?.getAttribute("aria-label") === "Play") await press(q(m, '.abp [data-act="toggle"]'));
+    assert.equal(second, true, "the later read is stopped when the book plays again");
   });
 
   it("closes from the player's own Close", async () => {
