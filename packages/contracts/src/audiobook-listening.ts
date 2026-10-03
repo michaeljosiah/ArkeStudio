@@ -4,7 +4,7 @@ import { PICTURE_MIN_HOLD_SEC, type AudiobookPicture } from "./audiobook-picture
 import { SlugSchema } from "./ids.js";
 
 /**
- * The book as a listener hears it (design turn 186, SPEC-047 R-57..R-62): the made chapters in
+ * The book as a listener hears it (design turn 186, SPEC-047 R-66..R-71): the made chapters in
  * order, each its takes back to back with nothing added between them — a grouped take was cut at
  * the middle of the reader's own pause, and a take read alone is as it was made (turn 185) — the
  * blocks not made counted as the gaps they are, and the pictures set on blocks placed on the
@@ -33,7 +33,7 @@ export const ListeningBlockSchema = z
     artifactId: z.string().min(1).optional(),
     at: z.number().min(0),
     seconds: z.number().positive(),
-    /** What Text shows: the sentences of a grouped take, or a block read alone whole (R-61). */
+    /** What Text shows: the sentences of a grouped take, or a block read alone whole (R-70). */
     sentences: z.array(ListeningSentenceSchema).min(1),
   })
   .strict();
@@ -51,7 +51,7 @@ export const ListeningPictureSchema = z
     at: z.number().min(0),
     /** How long it holds before the next picture or the chapter's end. */
     seconds: z.number().min(0),
-    /** Held for less than twenty seconds (R-60): flagged in the chapter's view, never dropped. */
+    /** Held for less than twenty seconds (R-69): flagged in the chapter's view, never dropped. */
     short: z.boolean(),
   })
   .strict();
@@ -62,14 +62,20 @@ export const ListeningChapterSchema = z
     chapterId: SlugSchema,
     order: z.number().int().min(1),
     title: z.string(),
-    /** `read`: every block made; `part`: some; `not read`: none, or no prose — listed and held, never skipped silently (R-58). */
+    /** `read`: every block made; `part`: some; `not read`: none, or no prose — listed and held, never skipped silently (R-67). */
     state: z.enum(["read", "part", "not read"]),
     seconds: z.number().min(0),
     blocks: z.array(ListeningBlockSchema),
     gaps: z.array(ListeningGapSchema),
     pictures: z.array(ListeningPictureSchema),
-    /** What shows before the chapter's first picture: its picture on its opening block, else the book's cover (R-60). */
+    /** What shows before the chapter's first picture: its picture on its opening block, else the book's cover (R-69). */
     opening: z.string().nullable(),
+    /**
+     * The chapter's one mix (design turn 187, R-85), when it has timing: overlaps, reactions, beds
+     * and trims as set. The player plays this in place of the takes; blocks keep their places on
+     * its clock for Text and the pictures.
+     */
+    mix: z.object({ file: z.string().min(1), seconds: z.number().min(0) }).strict().optional(),
   })
   .strict();
 export type ListeningChapter = z.infer<typeof ListeningChapterSchema>;
@@ -103,7 +109,7 @@ export interface PlacedPicture {
 }
 
 /**
- * Where each picture stands now (R-60). A picture follows its block's words: on its own key while
+ * Where each picture stands now (R-69). A picture follows its block's words: on its own key while
  * that block still says what it said, else on the one block that does, else on its key whatever
  * it says now. A picture whose key is gone and whose words are nowhere is `lost` — named, so the
  * chapter's view can say so, never shown on a block it was not set on. Two pictures on one block
@@ -150,7 +156,7 @@ export function sentencesOf(text: string): string[] {
 }
 
 /**
- * What Text shows for a block (R-61), from the block's start: a grouped take's sentences, each
+ * What Text shows for a block (R-70), from the block's start: a grouped take's sentences, each
  * given its share of the take by its length — the split kept no word times past the cut — and a
  * block read alone whole, for its length, as the binding says.
  */
@@ -171,7 +177,7 @@ export function blockSentences(text: string, seconds: number, grouped: boolean):
 const round = (seconds: number) => Math.round(seconds * 1000) / 1000;
 
 /**
- * Each picture's place on the chapter's clock and how long it holds (R-60): it shows from its
+ * Each picture's place on the chapter's clock and how long it holds (R-69): it shows from its
  * block's start until the next picture, or the chapter's end. `starts` is every block's start —
  * a block with no take starts where the clock stands when it is reached, which is where the next
  * take starts.
@@ -187,7 +193,7 @@ export function pictureHolds(placed: readonly PlacedPicture[], starts: readonly 
 }
 
 /**
- * The chapter as it plays (R-58..R-60): the made blocks in order on one clock, the runs of blocks
+ * The chapter as it plays (R-67..R-69): the made blocks in order on one clock, the runs of blocks
  * not made as gaps, each picture placed and held, and what the chapter opens on.
  */
 export function listeningChapter(input: {
@@ -198,25 +204,36 @@ export function listeningChapter(input: {
   pictures?: Readonly<Record<string, AudiobookPicture>>;
   cover: string | null;
   usable?: (file: string) => boolean;
+  /**
+   * The chapter's clock with its timing (design turn 187, SPEC-047 R-85), when it has any: each
+   * made block at its place in the one mix — trimmed, nudged, cutting in — and the mix itself,
+   * which the player plays in place of the takes. Absent, the takes play back to back.
+   */
+  timed?: { bars: ReadonlyArray<{ key: string; at: number; seconds: number }>; seconds: number; mix: { file: string; seconds: number } };
 }): ListeningChapter {
   const blocks: ListeningBlock[] = [];
   const gaps: ListeningGap[] = [];
   const starts: number[] = [];
   let clock = 0;
+  const timedAt = new Map((input.timed?.bars ?? []).map((bar) => [bar.key, bar]));
   input.blocks.forEach((block, index) => {
     const number = index + 1;
+    const bar = timedAt.get(block.key);
+    // On the timed clock a block not made stands where the next made one starts: the mix skips it.
+    if (input.timed !== undefined) clock = bar?.at ?? input.blocks.slice(index + 1).map((later) => timedAt.get(later.key)?.at).find((at) => at !== undefined) ?? input.timed.seconds;
     starts.push(round(clock));
-    if (block.take === undefined || !(block.take.seconds > 0)) {
+    if (block.take === undefined || !(block.take.seconds > 0) || (input.timed !== undefined && bar === undefined)) {
       const open = gaps[gaps.length - 1];
       if (open !== undefined && open.to === number - 1) open.to = number;
       else gaps.push({ at: round(clock), from: number, to: number });
       return;
     }
-    const sentences = blockSentences(block.text, block.take.seconds, block.take.grouped).map((sentence) => ({ at: round(clock + sentence.at), text: sentence.text }));
-    blocks.push({ key: block.key, number, file: block.take.file, ...(block.take.artifactId !== undefined ? { artifactId: block.take.artifactId } : {}), at: round(clock), seconds: block.take.seconds, sentences });
-    clock += block.take.seconds;
+    const length = bar?.seconds ?? block.take.seconds;
+    const sentences = blockSentences(block.text, length, block.take.grouped).map((sentence) => ({ at: round(clock + sentence.at), text: sentence.text }));
+    blocks.push({ key: block.key, number, file: block.take.file, ...(block.take.artifactId !== undefined ? { artifactId: block.take.artifactId } : {}), at: round(clock), seconds: length, sentences });
+    clock += length;
   });
-  const seconds = round(clock);
+  const seconds = input.timed !== undefined ? round(input.timed.mix.seconds) : round(clock);
   const { placed } = placePictures(input.blocks, input.pictures, input.usable);
   const pictures = pictureHolds(placed, starts, seconds).map((entry) => ({
     key: input.blocks[entry.index]!.key,
@@ -229,7 +246,7 @@ export function listeningChapter(input: {
   const first = pictures[0];
   const opening = first !== undefined && first.at === 0 ? first.file : (input.cover ?? first?.file ?? null);
   const state = blocks.length === 0 ? "not read" : blocks.length === input.blocks.length ? "read" : "part";
-  return { chapterId: input.chapterId, order: input.order, title: input.title, state, seconds, blocks, gaps, pictures, opening };
+  return { chapterId: input.chapterId, order: input.order, title: input.title, state, seconds, blocks, gaps, pictures, opening, ...(input.timed !== undefined && blocks.length > 0 ? { mix: input.timed.mix } : {}) };
 }
 
 /**
@@ -261,7 +278,7 @@ export function pictureSpans(
   };
 }
 
-/** Where the listener is in the book (R-59): `chapter 7 of 22` and what is left from here, the chapter's rest and the chapters after it. */
+/** Where the listener is in the book (R-68): `chapter 7 of 22` and what is left from here, the chapter's rest and the chapters after it. */
 export function bookPlace(chapters: readonly Pick<ListeningChapter, "seconds">[], index: number, at: number): { chapter: number; of: number; leftSeconds: number } {
   const here = chapters[index];
   const rest = here === undefined ? 0 : Math.max(0, here.seconds - at);

@@ -50,6 +50,8 @@ export interface AudiobookPlayerOptions {
   autoplay?: boolean;
   /** With `autoplay`: still open on Continue when a place is kept on this device. */
   continueFirst?: boolean;
+  /** Called each time the book starts sounding: the app claims its one read again. */
+  onPlay?: () => void;
   /** Present in the app: the Close button and Esc. */
   onClose?: () => void;
   /** The wall clock the sleep timer counts by; tests pass their own. */
@@ -62,6 +64,8 @@ export interface AudiobookPlayerOptions {
 export interface AudiobookPlayerHandle {
   /** A newer plan for the same book: the place kept by its block, the piece playing left playing. */
   update(chapters: AudiobookPlayerChapter[]): void;
+  /** Pause where it is, as when another read takes the app's voice. */
+  pause(): void;
   destroy(): void;
 }
 

@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { KOKORO_VOICE_MODEL, type VoiceCandidate } from "@arke-studio/contracts";
+import { isWavContentType, transcriptionWav } from "./wav.js";
+
+export { decodeWav, encodePcm16Wav, isWavContentType, resample, transcriptionWav, TRANSCRIPTION_RATE } from "./wav.js";
 
 /**
  * The Voxa sidecar client (SPEC-011): local inference only — cloud speech goes through the
@@ -200,8 +203,13 @@ export class VoxaClient {
     }
   }
 
-  /** Local transcription (R-17): audio never leaves the machine — this URL is loopback. */
+  /**
+   * Local transcription (R-17): audio never leaves the machine — this URL is loopback. A WAV is
+   * converted to the 16 kHz mono 16-bit PCM `/stt` accepts first (see wav.ts); other content goes
+   * as it came.
+   */
   async transcribe(audio: Uint8Array, contentType: string, options: VoxaRequestOptions = {}): Promise<string> {
+    if (isWavContentType(contentType)) audio = await transcriptionWav(audio);
     return this.request(
       "stt",
       "/stt",

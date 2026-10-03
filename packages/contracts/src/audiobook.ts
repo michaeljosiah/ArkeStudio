@@ -8,6 +8,7 @@ import { chapterParagraphs, voicedBlocks, type VoicedBlock } from "./prose.js";
 import { textDigest } from "./subtitles.js";
 import { AudiobookGroupedSchema, AudiobookLoudnessSchema, AudiobookSplitFlagSchema } from "./audiobook-grouped.js";
 import { AudiobookPictureSchema } from "./audiobook-pictures.js";
+import { AudiobookBedSchema, AudiobookBlockSoundSchema, AudiobookReactionSchema, BlockTimingSchema } from "./audiobook-timing.js";
 
 /**
  * The audiobook (design turn 146, SPEC-047): a story production's third export beside `.docx`
@@ -346,10 +347,20 @@ export const ChapterAudiobookSchema = z
     /** The direction per block (R-6); absent on a record the first build wrote, which read the same. */
     direction: z.record(z.string(), AudiobookDirectionSchema).default({}),
     /**
-     * The pictures set on blocks (design turn 186c, SPEC-047 R-60), by block key; absent on a
-     * record with none, which the builds before them read as before (R-64).
+     * The pictures set on blocks (design turn 186c, SPEC-047 R-69), by block key; absent on a
+     * record with none, which the builds before them read as before (R-73).
      */
     pictures: z.record(z.string(), AudiobookPictureSchema).optional(),
+    /**
+     * Timing held to the blocks (design turn 187, SPEC-047 R-80..R-89): each block's start, trim,
+     * `under` and nudge by block key; the reactions under their hosts by reaction key (`x<n>`),
+     * whose takes sit in `takes` beside the blocks'; the beds from one block to another; the
+     * sounds at a block's start. Each absent on a record with none, as the builds before read it.
+     */
+    timing: z.record(z.string(), BlockTimingSchema).optional(),
+    reactions: z.record(z.string(), AudiobookReactionSchema).optional(),
+    beds: z.record(z.string(), AudiobookBedSchema).optional(),
+    sounds: z.record(z.string(), AudiobookBlockSoundSchema).optional(),
   })
   .strict();
 export type ChapterAudiobook = z.infer<typeof ChapterAudiobookSchema>;

@@ -10,6 +10,8 @@ import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
 import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema } from "./audiobook.js";
 import { AudiobookPictureSourceSchema } from "./audiobook-pictures.js";
+import { BedInputSchema, BlockSoundInputSchema, BlockTimingInputSchema, ReactionInputSchema } from "./audiobook-timing.js";
+import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
@@ -3285,12 +3287,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    */
   z.object({ kind: z.literal("open-audiobook"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   /**
-   * The book as a listener hears it (design turn 186, SPEC-047 R-57..R-62): the made chapters in
+   * The book as a listener hears it (design turn 186, SPEC-047 R-66..R-71): the made chapters in
    * order with their takes, gaps and pictures, answered as `audiobook.listening`. Nothing written.
    */
   z.object({ kind: z.literal("open-audiobook-listening"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   /**
-   * A picture set on a block, or taken off it with null (design turn 186c, R-60): a picture the
+   * A picture set on a block, or taken off it with null (design turn 186c, R-69): a picture the
    * world holds, by its world-relative path, and the tab it was chosen on. Answered as
    * `audiobook.record` with the same id.
    */
@@ -3303,6 +3305,92 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       block: z.string().min(1),
       picture: z.object({ file: z.string().min(1).max(1000), source: AudiobookPictureSourceSchema }).strict().nullable(),
       requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /**
+   * One block's timing set by the author (design turn 187, SPEC-047 R-81): its start, the pause
+   * after it, plays under another block, its take's trim, its grouped cut's nudge, or reset.
+   * Answered as `audiobook.record` with the same id, or refused there in one clause.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-timing"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      block: z.string().min(1).max(40),
+      timing: BlockTimingInputSchema,
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /**
+   * A reaction, a bed or a sound at a block set, changed (by its key) or taken away (null) —
+   * design turn 187, SPEC-047 R-83, R-84. A new one takes the next free key. Answered as
+   * `audiobook.record` with the same id, or refused there in one clause.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-reaction"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      key: z.string().min(1).max(40).nullable(),
+      reaction: ReactionInputSchema.nullable(),
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("set-audiobook-bed"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      key: z.string().min(1).max(40).nullable(),
+      bed: BedInputSchema.nullable(),
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("set-audiobook-sound"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      key: z.string().min(1).max(40).nullable(),
+      sound: BlockSoundInputSchema.nullable(),
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /**
+   * Propose timing (design turn 187b, SPEC-047 R-86): read off the chapter as it stands — the
+   * takes' ends heard on this machine, the words, the cast — answered as
+   * `audiobook.timing-proposal`. Nothing written, nothing spent.
+   */
+  z.object({ kind: z.literal("propose-audiobook-timing"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema }).strict(),
+  /** The proposal accepted whole (R-86): written by Arke where the author's timing does not stand; answered as `audiobook.record`. */
+  z
+    .object({
+      kind: z.literal("accept-audiobook-timing"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      proposal: TimingProposalSchema,
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /**
+   * The chapter as it sounds with its timing (R-85): rendered by the one mixer, or a window of it
+   * around a block, and answered as `audiobook.mix` with the file to play. Nothing is written to
+   * the world but its cache.
+   */
+  z
+    .object({
+      kind: z.literal("render-audiobook-mix"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      requestId: UlidSchema,
+      window: z.object({ from: z.number().min(0), to: z.number().positive() }).strict().optional(),
     })
     .strict(),
   z
@@ -3347,7 +3435,24 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       language: z.string().refine(isManuscriptLanguage, "expected a BCP-47 language tag").optional(),
     })
     .strict(),
-  z.object({ kind: z.literal("open-exports-folder"), worldId: UlidSchema }).strict(),
+  /** The world's exports folder, or with `dir` one package in it (design turn 186e): a single folder name, never a path. */
+  z.object({ kind: z.literal("open-exports-folder"), worldId: UlidSchema, dir: z.string().regex(/^[A-Za-z0-9._-]+$/).optional() }).strict(),
+  /**
+   * The audiobook as the player (design turn 186e, SPEC-047 R-72): a web package of the chapters
+   * read whole, their audio and their pictures, answered as `audiobook.exported`.
+   */
+  z
+    .object({
+      kind: z.literal("export-audiobook-player"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      /** The package's id, chosen by the window so it can find the package again after a reconnect lost the answer. */
+      exportId: z.string().regex(/^ab_[0-9A-HJKMNP-TV-Z]{26}$/).optional(),
+    })
+    .strict(),
+  /** The world's web packages — interactive, visual novel and audiobook — answered as `web-packages.listed`. */
+  z.object({ kind: z.literal("list-web-packages"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("pick-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("import-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   /** The same file read again at the level the person chose (turn 131): the held document, nothing written. */

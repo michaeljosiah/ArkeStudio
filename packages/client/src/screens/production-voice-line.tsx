@@ -8,6 +8,7 @@ import {
   supportedDeliveries,
   voiceSourceFor,
   type Delivery,
+  voiceDisplayLabel,
 } from "@arke-studio/contracts";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
@@ -169,7 +170,7 @@ export function VoiceLineDialogScreen() {
                 “{shot.audio!.line}”
               </div>
               <div className="fy-mono" style={{ marginTop: 4 }}>
-                {`voice · ${speaker.voice ? `${speaker.voice.label ?? speaker.voice.voiceId} (${speaker.voice.provider})` : "none assigned"}`}
+                {`voice · ${speaker.voice ? `${voiceDisplayLabel(speaker.voice, world ?? {})} (${speaker.voice.provider})` : "none assigned"}`}
               </div>
             </div>
           </div>

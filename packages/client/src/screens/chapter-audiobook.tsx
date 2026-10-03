@@ -1,4 +1,4 @@
-import { chapterParagraphs, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
+import { chapterParagraphs, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   AUDIOBOOK_DELIVERIES,
@@ -64,6 +64,8 @@ import { Button } from "../components/ui.js";
 import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, usePlayback, useQueueAt } from "../lib/audio.js";
 import { PictureChip, type PictureSpan } from "../components/audiobook-picture.js";
 import { mediaUrl } from "../lib/media.js";
+import { reactionsToRead } from "@arke-studio/contracts";
+import { barAt, chapterTimingOf, hasTiming, useMixPlayer } from "./chapter-timing.js";
 import {
   acceptDirection,
   directChapter,
@@ -137,6 +139,8 @@ export interface ChapterAudiobookInput {
    * draft, and will send it once the save lands.
    */
   beforeRead?: (intent: AudiobookIntent) => boolean;
+  /** Listen is the head's primary (`listenLeads`): Direct and Read the chapter stand back beside it. */
+  listenLeads?: boolean;
 }
 
 /** What a press asks for once the save lands: the chapter, these blocks alone, a direction, or a card's acceptance. */
@@ -446,22 +450,23 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   useEffect(() => {
     if (connection === "open") requestVoiceCatalogue(worldId);
   }, [connection, worldId]);
-  const counts = useMemo(
-    () =>
-      audiobookCounts(
-        derived.blocks,
-        recordOrNull,
-        (block) => rows.find((row) => row.block.key === block.key)?.assigned ?? narrator,
-        hasArtifact,
-        (block) => recordedKeys.has(audiobookRecordingKey(block)),
-        // The notes a block is led by name its take (R-45, R-53): the counts judge it as the row does.
-        (block) => {
-          const row = rows.find((candidate) => candidate.block.key === block.key);
-          return { ...(row?.note !== undefined ? { note: row.note } : {}), ...(hasReadingNotes(readingNotes) ? { reading: readingNotes } : {}) };
-        },
-      ),
-    [derived.blocks, recordOrNull, rows, narrator, hasArtifact, recordedKeys, readingNotes],
-  );
+  const counts = useMemo(() => {
+    const blocks = audiobookCounts(
+      derived.blocks,
+      recordOrNull,
+      (block) => rows.find((row) => row.block.key === block.key)?.assigned ?? narrator,
+      hasArtifact,
+      (block) => recordedKeys.has(audiobookRecordingKey(block)),
+      // The notes a block is led by name its take (R-45, R-53): the counts judge it as the row does.
+      (block) => {
+        const row = rows.find((candidate) => candidate.block.key === block.key);
+        return { ...(row?.note !== undefined ? { note: row.note } : {}), ...(hasReadingNotes(readingNotes) ? { reading: readingNotes } : {}) };
+      },
+    );
+    // Reactions are read when the chapter is (design turn 187, R-83): the press counts them with
+    // the blocks, so it stands while one is left to read. The chapter's own totals stay its blocks'.
+    return { ...blocks, toMake: [...blocks.toMake, ...reactionsToRead(recordOrNull, derived.blocks, hasArtifact)] };
+  }, [derived.blocks, recordOrNull, rows, narrator, hasArtifact, recordedKeys, readingNotes]);
   // What a press would spend, before the run asks: the cloud blocks not made, by the character
   // as the row bills it (SPEC-046 R-8) — bytes or doubled CJK for the readers that count so.
   // The cache is not consulted here, so a character reader's run can only be lower. A token
@@ -546,11 +551,25 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // A queue that has run dry rests on `ended` with `at` one past its last piece (codex on PR
   // 1180): that is not playing, and the head goes back to Play rather than `N+1 of N · Stop`.
   const playback = usePlayback();
-  const playing = at !== null && at < playable.length && playback.status !== "ended" && playback.clip?.id === queueId;
+  // Timing on the blocks (design turn 187, R-85): the chapter's clock as the Timing view draws it,
+  // and as the mix plays it — a chapter with any timing is heard through the one mix, never as
+  // takes joined back to back, so Play sounds the overlaps, trims and beds as they are set.
+  const artifacts = world?.artifacts;
+  const timing = useMemo(() => chapterTimingOf(rows, recordOrNull, artifacts ?? [], reading, "estimate", missing), [rows, recordOrNull, artifacts, reading, missing]);
+  const mixed = useMemo(() => chapterTimingOf(rows, recordOrNull, artifacts ?? [], reading, "skip", missing), [rows, recordOrNull, artifacts, reading, missing]);
+  const timed = hasTiming(recordOrNull);
+  const mixPlayer = useMixPlayer({ worldId, prodId, chapterId: chapter.id, chapterFile: chapter.file, slug: world?.meta.slug ?? "", title: chapter.title, connection });
+  const mixPlaying = mixPlayer.playing;
+  const playing = (at !== null && at < playable.length && playback.status !== "ended" && playback.clip?.id === queueId) || mixPlaying;
   const play = useCallback(() => {
     if (world === null || playable.length === 0) return;
     clearQueue();
     dismissPlayback();
+    // With a speaker chosen Play is that speaker's takes alone (R-33), which no mix is.
+    if (timed && filter === null) {
+      mixPlayer.play(0);
+      return;
+    }
     playable.forEach((row, index) => {
       void enqueueClip({
         id: queueId,
@@ -560,15 +579,26 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         part: index,
       });
     });
-  }, [world, playable, queueId, chapter.title]);
+  }, [world, playable, queueId, chapter.title, timed, filter, mixPlayer]);
+  const mixClip = mixPlayer.clipId;
+  const mixCancel = mixPlayer.cancel;
   const stopPlaying = useCallback(() => {
-    if (playbackSnapshot().clip?.id === queueId) dismissPlayback();
+    const sounding_ = playbackSnapshot().clip?.id;
+    if (sounding_ === queueId || sounding_ === mixClip) dismissPlayback();
     clearQueue();
-  }, [queueId]);
+    // A mix still rendering is not wanted any more either: its answer plays nothing.
+    mixCancel();
+  }, [queueId, mixClip, mixCancel]);
   useEffect(() => stopPlaying, [stopPlaying, chapter.id]);
   // A queue built for one filter is not another's: changing it stops what was playing.
   useEffect(() => stopPlaying, [stopPlaying, filter]);
-  const sounding = playing && at !== null ? (playable[at] ?? null) : null;
+  const mixAt = mixPlayer.at;
+  const sounding = mixPlaying && mixAt !== null
+    ? (() => {
+        const bar = barAt(mixed, mixAt);
+        return bar === null ? null : (rows.find((row) => row.block.key === (bar.kind === "reaction" ? (bar.under?.host ?? bar.key) : bar.key)) ?? null);
+      })()
+    : playing && at !== null ? (playable[at] ?? null) : null;
 
   // A cloned voice's recording leaving the machine (SPEC-022, SPEC-046): asked once, by the run's request.
   const [upload, setUpload] = useState<{ destination: string; token: string; notice?: string } | null>(null);
@@ -823,7 +853,16 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     }
     return (
       <span className="fy-ab__control">
-        {playing ? (
+        {mixPlaying ? (
+          <>
+            <span className="fy-mono" data-testid="audiobook-mix-at">
+              {sounding?.mark ?? ""} · {clock(mixAt ?? 0)}
+            </span>
+            <Button variant="ghost" onClick={stopPlaying}>
+              Stop
+            </Button>
+          </>
+        ) : playing ? (
           <>
             <span className="fy-mono">
               {sounding?.mark ?? ""} · {(at ?? 0) + 1} of {playable.length}
@@ -837,20 +876,21 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
           </>
         ) : (
           playable.length > 0 && (
-            <Button variant="ghost" onClick={play}>
-              Play
+            <Button variant="ghost" onClick={play} disabled={mixPlayer.pending} data-testid="audiobook-play">
+              {mixPlayer.pending ? "Mixing…" : "Play"}
             </Button>
           )
         )}
+        {mixPlayer.refused !== null && !mixPlaying && <span className="fy-mono fy-ch__who-where--warn">{mixPlayer.refused}</span>}
         {/* Direct this chapter in the head beside the read (design turn 184a), as well as the
             dock's prompt: the same sheet. A held proposal answers it until accepted or discarded. */}
         {directable && (
-          <Button variant="primary" disabled={locked || connection !== "open"} onClick={directPress} data-testid="direct-audiobook">
+          <Button variant={input.listenLeads === true ? "secondary" : "primary"} disabled={locked || connection !== "open"} onClick={directPress} data-testid="direct-audiobook">
             {directedBlocks > 0 ? "Direct again" : "Direct this chapter"}
           </Button>
         )}
         {counts.toMake.length > 0 && (
-          <Button variant={directable ? "secondary" : "primary"} disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
+          <Button variant={directable || input.listenLeads === true ? "secondary" : "primary"} disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
             Read the chapter · {counts.toMake.length} block{counts.toMake.length === 1 ? "" : "s"}
             {grouping.groups.length > 0 ? ` · ${grouping.requests} request${grouping.requests === 1 ? "" : "s"}` : ""}
             {chapterEstimate > 0 ? ` · ${tokenPriced ? "~" : ""}${formatMicroUsd(chapterEstimate)}` : plan !== null ? ` · ${plan}` : ""}
@@ -969,6 +1009,12 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     lastRecord,
     uploadTake,
     uploadDialog,
+    /** The chapter's clock with its timing (design turn 187): the Timing view's bars and the block panel's values. */
+    timing,
+    /** The mix's clock: what Play hears, a block not made skipped. */
+    mixed,
+    timed,
+    mixPlayer,
   };
 }
 
@@ -1277,7 +1323,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
               // A picture set on the block (turn 186c): its chip under the speaker, in the margin.
               const picture = pictures?.byKey.get(row.block.key);
               return picture === undefined || slug === undefined ? speaker : (
-                <span className="fy-ab__who">
+                <span className="fy-ab__picwho">
                   {speaker}
                   <PictureChip slug={slug} picture={picture} estimated={pictures?.estimated === true} />
                 </span>
@@ -1669,6 +1715,8 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   const row = rows.find((candidate) => candidate.block.key === selected) ?? null;
   // A Make again past the month's free credit is priced again, and says so (design turn 182).
   const creditLeft = freeCreditLeft(useStore().state?.app.ledger ?? []);
+  // A designed or cloned voice is said by its name, never its id (the door's Cast, 2026-10-03).
+  const voiceNames = useStore().state?.world ?? {};
   const [supportNotice, setSupportNotice] = useState<string | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
   const [markerMenu, setMarkerMenu] = useState<MarkerAt | null>(null);
@@ -1705,7 +1753,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   // Who reads it, in words (turn 165): the voice and its role, never the provider's id — the
   // reader's provider and model are the Voices panel's to say, and the takes'.
   const readBy = [
-    `read by ${row.speaker.label ?? row.speaker.voiceId}`,
+    `read by ${voiceDisplayLabel(row.speaker, voiceNames)}`,
     row.byNarrator || row.speakerKey === null ? "narrator" : row.mark,
     ...(row.speaker !== row.assigned ? ["stands in"] : row.byNarrator && row.note !== undefined ? ["performed"] : []),
     ...(row.proposed !== null ? ["proposed"] : []),
@@ -2064,7 +2112,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
                         ? `recorded${generation.voiceLabel !== undefined ? ` · ${generation.voiceLabel}` : ""}`
                         : (
                           <>
-                            {generation !== null ? `${generation.voiceLabel ?? generation.voiceId} · ${readerName(generation, modelOf(generation))}` : ""}
+                            {generation !== null ? `${voiceDisplayLabel({ label: generation.voiceLabel, voiceId: generation.voiceId }, voiceNames)} · ${readerName(generation, modelOf(generation))}` : ""}
                             {generation?.delivery !== undefined ? ` · ${generation.delivery}` : ""}
                             {generation !== null ? ` · ${generation.costMicroUsd === null ? formatMicroUsd(generation.estimatedMicroUsd) : formatMicroUsd(generation.costMicroUsd)}` : ""}
                           </>
@@ -2583,7 +2631,7 @@ export function RecordedTakeDialog({ staged, row, onCancel, onReplace, onKeep }:
   ].filter((part) => part !== null).join(" · ");
   const refused = staged.state === "refused" ? staged.refused : undefined;
   return (
-    <EditorDialog open title="Upload a take" subtitle={`${row.mark} · ${row.block.key}`} onClose={onCancel} width={540}>
+    <EditorDialog open title="Upload a take" subtitle={`${row.mark} · ${row.block.key}`} onClose={onCancel} width={540} onBody>
       <div className="fy-rectake" data-testid="recorded-take-dialog">
         <div className={`fy-rectake__quote fy-voice--${tone}`}>{row.block.text}</div>
         {refused !== undefined ? (
@@ -2690,7 +2738,7 @@ export function SpeakerLinesDialog({ worldId, productionId, speaker, label, tone
     return { text: row.words === "match" ? "match" : "unchecked", tone: row.words === "match" ? "pass" : "unavailable" };
   };
   return (
-    <EditorDialog open title={label} onClose={close} width={680}>
+    <EditorDialog open title={label} onClose={close} width={680} onBody>
       <div className="fy-rectake" data-testid="speaker-lines-dialog">
         <div className="fy-rectake__sect">
           <span className="fy-rectake__sect-title">Script</span>

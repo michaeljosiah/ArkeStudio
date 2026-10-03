@@ -181,6 +181,16 @@ checks the manuscript and stacked cards, the Markdown selection gutter, and mode
 series and microdrama overviews. It never opens a user's world. Set `ARKE_LAYOUT_SCREENSHOT`
 to a PNG path to capture the 1200×791 source view for visual inspection.
 
+## Audiobook layers
+
+For changes to the audiobook player, the Export audiobook sheet or a window-wide layer opened from
+a page head, run `node scripts/smoke-audiobook-overlays.mjs` from the root with Chrome installed
+(or `ARKE_CHROME`). It renders the fixture book's door and a chapter at 390, 820, 1440 and 2560
+wide, opens Listen and Export, and checks each layer covers the window from the body with no
+transformed or contained ancestor, Listen leads the head, and the chapter's Voices rail names a
+designed voice and never overlaps it. `--out <dir>` keeps the screenshots; `--baseline <rev>`
+renders the changed screens as they were at that revision and asserts nothing.
+
 ## Independent editor media
 
 After building desktop, run `node apps/desktop/scripts/smoke-editor-import.mjs` from the repository root. It opens a hidden sandboxed Electron file page with the built preload, supplies real file-backed selections, and verifies ordered path resolution and private authentication. It uses a temporary profile and requires a desktop display (it is separate from headless CI).

@@ -790,3 +790,25 @@ it("a designed narrator keeps its identity and binding with the choice, and neve
   assert.equal(stored?.designed?.remoteId, "voice_mall1uvc7rp3");
   assert.equal(NarratorSettingsSchema.safeParse({ ...stored, designed: { ...designed, sample: world.sample } }).success, false);
 });
+
+describe("a voice's name on screen (owner, 2026-10-03)", () => {
+  // The audiobook door's Cast read `designed:dv_…:1 · Google · cloud`: a sheet given a designed
+  // voice without a label showed its address as its name.
+  const target = "designed:dv_01M3WMVV9W7J85PPRYQJ0YB26G:1";
+  const world = {
+    designedVoices: [{ id: "dv_01M3WMVV9W7J85PPRYQJ0YB26G", revision: 2, name: "Ife's voice" }],
+    clonedVoices: [{ id: "vc_harbour", name: "Harbour glass" }],
+  };
+  it("names a designed voice from the world, by its id when the revision moved on, and never by its target", async () => {
+    const { voiceDisplayLabel } = await import("../src/designed-voice.js");
+    assert.equal(voiceDisplayLabel({ voiceId: target }, world), "Ife's voice");
+    assert.equal(voiceDisplayLabel({ voiceId: target, label: target }, world), "Ife's voice", "a label that is the id is no label");
+    assert.equal(voiceDisplayLabel({ voiceId: target, label: "Ife (warm)" }, world), "Ife (warm)", "a voice's own label stands");
+    assert.equal(voiceDisplayLabel({ voiceId: target }), "Designed voice", "with no world to ask, still never the id");
+  });
+  it("names a cloned voice from the library, and keeps a preset's id as its name", async () => {
+    const { voiceDisplayLabel } = await import("../src/designed-voice.js");
+    assert.equal(voiceDisplayLabel({ voiceId: "vc_harbour", label: "vc_harbour" }, world), "Harbour glass");
+    assert.equal(voiceDisplayLabel({ voiceId: "Kore" }, world), "Kore");
+  });
+});

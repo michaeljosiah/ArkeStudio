@@ -17,6 +17,7 @@ import {
   CADENCE_PHRASE_MAX,
   legacyVoiceModel,
   normalizeSpeechText,
+  voiceDisplayLabel,
   voiceSourceFor,
   type AudiobookBlock,
   type AudiobookBlockState,
@@ -33,12 +34,14 @@ import {
   type ClonedVoice,
   type ManifestModel,
   type Sheet,
+  type Sound,
   type VoiceCandidate,
+  type WorldDesignedVoice,
 } from "@arke-studio/contracts";
 import { clipFor } from "../voice/library.js";
 import { directionPlan } from "../voice/direction.js";
 import { atomicWriteFile } from "../world/atomic.js";
-import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
@@ -134,9 +137,16 @@ async function writeOwned(store: WorldStore, rel: string, value: unknown, supers
  * PR 1186): its strict reader would otherwise take the record for unreadable and make the
  * chapter's paid takes again.
  */
-export async function writeAudiobook(store: WorldStore, productionId: string, chapterFile: string, record: ChapterAudiobook): Promise<void> {
+export async function writeAudiobook(store: WorldStore, productionId: string, chapterFile: string, untimed: ChapterAudiobook): Promise<void> {
+  // Timing, reactions, beds and sounds (design turn 187, R-89) the same way: each part written
+  // only when it holds something, and the world raised before the first record carrying any.
+  const { timing, reactions, beds, sounds, ...bare } = untimed;
+  const parts = { timing, reactions, beds, sounds };
+  const kept = Object.fromEntries(Object.entries(parts).filter(([, part]) => part !== undefined && Object.keys(part).length > 0));
+  if (Object.keys(kept).length > 0) await store.ensureSchemaVersion(AUDIOBOOK_TIMING_SCHEMA_VERSION, "audiobook-timing");
+  const record: ChapterAudiobook = { ...bare, ...kept };
   // A record with no picture is written without the field, in the shape the builds before
-  // pictures read; one with a picture raises the world past them first (design turn 186, R-64).
+  // pictures read; one with a picture raises the world past them first (design turn 186, R-73).
   const { pictures, ...unpictured } = record;
   const pictured = pictures !== undefined && Object.keys(pictures).length > 0;
   if (pictured) await store.ensureSchemaVersion(AUDIOBOOK_PICTURES_SCHEMA_VERSION, "audiobook-pictures");
@@ -365,6 +375,11 @@ export interface PlannedBlock {
   substituted?: AudiobookSubstitution;
   /** The block's speaker is recorded by a person (SPEC-047 R-37): made only by a recording. */
   recorded?: true;
+  /**
+   * A reaction read as a block (design turn 187, SPEC-047 R-83): its key is `x<n>`, its words
+   * are what it says, and a sound is sent as the reader's own tag for it, never as words.
+   */
+  reaction?: { sound?: Sound };
   /** The speaker's performance note under `performed` (R-44): the line's leading phrase. */
   note?: string;
   /** The book note and the chapter note the block is read under (design turn 184, R-53); absent when neither is set. */
@@ -392,6 +407,8 @@ export function assignReaders(
   notes: Readonly<Record<string, string>> = {},
   /** The book note and the chapter's note (R-53), which lead every block of the chapter. */
   readingNotes: AudiobookReadingNotes = {},
+  /** The world's designed voices, which name a sheet's designed voice that carries no label of its own. */
+  designedVoices: readonly Pick<WorldDesignedVoice, "id" | "revision" | "name">[] = [],
 ): PlannedBlock[] {
   const reading_ = hasReadingNotes(readingNotes) ? readingNotes : undefined;
   return blocks.map((block) => {
@@ -411,7 +428,7 @@ export function assignReaders(
       const model = voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId, clonedVoices);
       if (model === null || model === undefined) return { assigned: narrator, sheet: block.sheet, substituted: "no voice" };
       return {
-        assigned: { provider: voice.provider, model, voiceId: voice.voiceId, ...(voice.label !== undefined ? { label: voice.label } : {}) },
+        assigned: { provider: voice.provider, model, voiceId: voice.voiceId, label: voiceDisplayLabel(voice, { designedVoices, clonedVoices }) },
         sheet: block.sheet,
         sheetVersion: voice.assignedAtVersion,
       };
@@ -507,7 +524,7 @@ export async function planAudiobook(
     override?.chapterNote === undefined ? book : { ...book, chapterNotes: { ...book?.chapterNotes, [summary.id]: override.chapterNote } },
     summary.id,
   );
-  const blocks = assignReaders(derived.blocks, reading, input.narrator, sheets, store.getBundle().clonedVoices ?? [], record === "unreadable" ? null : record, (artifactId) => present.has(artifactId), recorded, notes, readingNotes);
+  const blocks = assignReaders(derived.blocks, reading, input.narrator, sheets, store.getBundle().clonedVoices ?? [], record === "unreadable" ? null : record, (artifactId) => present.has(artifactId), recorded, notes, readingNotes, store.getBundle().designedVoices ?? []);
   return {
     chapter: { id: summary.id, file: summary.file, title: summary.title, order: summary.order, version: opened.version, hash: sha256(opened.body) },
     body: opened.body,

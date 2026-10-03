@@ -4,16 +4,17 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import type { AudiobookListening, ChapterSummary, ClientMessage, ClientState } from "@arke-studio/contracts";
+import type { AudiobookDoor, AudiobookListening, ChapterSummary, ClientMessage, ClientState } from "@arke-studio/contracts";
 import { AudiobookScreen } from "../src/screens/audiobook.js";
 import { bookHasTakes, playerChapters } from "../src/components/audiobook-player.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { claimRead } from "../src/lib/reply-reads.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
- * Listen (design turn 186, SPEC-047 R-57, R-58): the book as a listener hears it, opened over the
+ * Listen (design turn 186, SPEC-047 R-66, R-67): the book as a listener hears it, opened over the
  * window from the audiobook door once a block anywhere is made, fed the coordinator's plan, and
  * fed it again while a chapter is read under it — without the player starting over.
  */
@@ -50,6 +51,17 @@ function inkbound(takes: number): ClientState {
     },
   };
 }
+
+const DOOR: AudiobookDoor = {
+  reading: "narrator",
+  voices: [{ name: "George", voice: { label: "George", provider: "kokoro", local: true }, state: "narrator", blocks: 4 }],
+  unattributed: 0,
+  rows: [
+    { chapterId: "slack-water", file: "01-slack-water", order: 1, title: "Slack water", version: 4, planned: false, total: 3, made: 2, stale: 0, flagged: 0, notMade: 1, seconds: 14 },
+    { chapterId: "neap", file: "02-neap", order: 2, title: "The counting of bells", version: 4, planned: false, total: 3, made: 0, stale: 0, flagged: 0, notMade: 3, seconds: 0 },
+  ],
+  price: { chapters: 2, blocks: 4, cloudBlocks: 0, characters: 0, estimatedMicroUsd: 0, voices: [] },
+};
 
 const sentence = (at: number, text: string) => [{ at, text }];
 function listening(made: number): AudiobookListening {
@@ -100,7 +112,9 @@ afterEach(async () => {
   }
 });
 
-const q = (m: Mounted, selector: string): HTMLElement | null => m.container.querySelector(selector) as HTMLElement | null;
+// The player is drawn on the body, outside the screen that opened it: found from the document.
+const q = (m: Mounted, selector: string): HTMLElement | null => (m.container.querySelector(selector) ?? dom.document.querySelector(selector)) as HTMLElement | null;
+const all = (selector: string) => dom.document.querySelectorAll(selector);
 const press = async (element: Element | null) => {
   assert.ok(element, "the thing to press exists");
   await act(async () => void element.dispatchEvent(new dom.Event("click", { bubbles: true }) as unknown as Event));
@@ -129,7 +143,7 @@ describe("Listen (turn 186)", () => {
     const player = q(m, ".abp");
     assert.ok(player, "the player is mounted");
     assert.match(q(m, ".abp-chap")?.textContent ?? "", /Chapter 01 · Slack water/);
-    assert.equal(m.container.querySelectorAll(".abp-line u").length, 1, "the unread blocks are marked");
+    assert.equal(all(".abp-line u").length, 1, "the unread blocks are marked");
     assert.match((q(m, "audio") as HTMLAudioElement | null)?.getAttribute("src") ?? "", /artifacts\/t\.wav/, "the takes are served by the app");
   });
 
@@ -143,7 +157,7 @@ describe("Listen (turn 186)", () => {
     assert.equal(asks(m).length, 2, "asked again a breath after the book moved");
     await answer(m, listening(3));
     assert.ok(q(m, ".abp") === player, "the same player, not started over");
-    assert.equal(m.container.querySelectorAll(".abp-line u").length, 0, "the gap is filled");
+    assert.equal(all(".abp-line u").length, 0, "the gap is filled");
   });
 
   it("is a modal while it waits for its plan: Esc closes it (codex on PR 1493)", async () => {
@@ -159,12 +173,68 @@ describe("Listen (turn 186)", () => {
     assert.equal(q(m, '[data-testid="audiobook-player"]'), null);
   });
 
+  it("stops a read still being made as it opens, so its first piece never lands over the book (codex on PR 1495)", async () => {
+    let stopped = false;
+    claimRead("page-read:test", () => {
+      stopped = true;
+    });
+    const m = await mount(inkbound(2));
+    await press(q(m, '[data-testid="audiobook-listen"]'));
+    assert.equal(stopped, true);
+    // A read that takes the voice while the book is open pauses it; the book's next play takes it back.
+    await answer(m, listening(2));
+    let second = false;
+    claimRead("page-read:later", () => {
+      second = true;
+    });
+    await press(q(m, '.abp [data-act="toggle"]'));
+    if (q(m, '.abp [data-act="toggle"]')?.getAttribute("aria-label") === "Play") await press(q(m, '.abp [data-act="toggle"]'));
+    assert.equal(second, true, "the later read is stopped when the book plays again");
+  });
+
   it("closes from the player's own Close", async () => {
     const m = await mount(inkbound(2));
     await press(q(m, '[data-testid="audiobook-listen"]'));
     await answer(m, listening(2));
     await press(q(m, '.abp [aria-label="Close"]'));
     assert.equal(q(m, '[data-testid="audiobook-player"]'), null);
+  });
+
+  it("draws the player on the body, never inside the animated title row (owner, 2026-10-03)", async () => {
+    // `.fy-h1row` enters with fy-fade-up; a transformed ancestor made the fixed player an
+    // invisible box over the row, and the head disappeared under it.
+    const m = await mount(inkbound(2));
+    await press(q(m, '[data-testid="audiobook-listen"]'));
+    const shell = q(m, '[data-testid="audiobook-player"]');
+    assert.ok(shell, "the player opened");
+    assert.equal(shell.parentElement, dom.document.body as unknown as HTMLElement, "a child of the body");
+    assert.equal(shell.closest(".fy-h1row"), null);
+    assert.equal(shell.closest(".fy-fade-up, .fy-prodmain"), null, "outside every animated container of the screen");
+    assert.equal(m.container.contains(shell), false);
+    await press(q(m, '.fy-abplayer__wait button'));
+    assert.equal(q(m, '[data-testid="audiobook-player"]'), null, "and gone from the body when closed");
+  });
+
+  it("is the head's one primary, with a play icon, once a block is made — Read the book stands back", async () => {
+    const none = await mount(inkbound(0));
+    const waiting = q(none, '[data-testid="audiobook-listen"]');
+    assert.equal(waiting?.classList.contains("ui-btn--primary"), false, "a ghost while there is nothing to hear");
+    assert.ok(waiting?.querySelector("svg"), "the play icon either way");
+    await act(async () => none.root.unmount());
+    open.splice(0);
+    none.container.remove();
+    const m = await mount(inkbound(2));
+    const doorAsk = m.sent.filter((message): message is Extract<ClientMessage, { kind: "open-audiobook" }> => message.kind === "open-audiobook").at(-1)!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: doorAsk.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: DOOR }));
+    const listen = q(m, '[data-testid="audiobook-listen"]');
+    assert.equal(listen?.classList.contains("ui-btn--primary"), true);
+    assert.equal(q(m, '[data-testid="read-book"]')?.classList.contains("ui-btn--secondary"), true, "the read of the rest stands back");
+    assert.ok(listen?.querySelector("svg"));
+    const head = listen!.closest(".fy-h1row")!;
+    const order = [...head.querySelectorAll("button")].map((button) => button.getAttribute("data-testid"));
+    assert.ok(order.indexOf("audiobook-listen") < order.indexOf("audiobook-export-open"), "Listen before Export");
+    assert.equal(q(m, '[data-testid="audiobook-export-open"]')?.classList.contains("ui-btn--ghost"), true);
+    assert.equal(head.querySelectorAll(".ui-btn--primary").length, 1, "one primary in the head");
   });
 
   it("serves every file the plan names through the app", () => {

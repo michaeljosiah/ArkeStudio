@@ -1,5 +1,5 @@
 /*
- * The audiobook player (design turn 186, SPEC-047 R-57..R-62): the book as a listener hears it.
+ * The audiobook player (design turn 186, SPEC-047 R-66..R-71): the book as a listener hears it.
  * One player for the app and the exported package, as the interactive player is (turn 156): the
  * app imports this module and mounts it over the window, and the exporter inlines this file's own
  * text into player.html. That is why it is plain JavaScript with no imports and nothing outside
@@ -145,6 +145,8 @@ export function mountAudiobookPlayer(root, options) {
   let sleepLeft = null;
   let lastTick = null;
   let gapNote = null;
+  /** The listener's place while a newer plan has nothing to play: kept for when takes come back. */
+  let heldPlace = null;
 
   const icon = (d, size, fill) =>
     '<svg width="' + (size || 18) + '" height="' + (size || 18) + '" viewBox="0 0 24 24" fill="' + (fill ? "currentColor" : "none") + '" stroke="' + (fill ? "none" : "currentColor") + '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + "</svg>";
@@ -322,7 +324,7 @@ export function mountAudiobookPlayer(root, options) {
   function applyRate(audio) {
     audio.playbackRate = speed;
     audio.defaultPlaybackRate = speed;
-    // The pitch kept at every speed (R-59), under each engine's own name for it.
+    // The pitch kept at every speed (R-68), under each engine's own name for it.
     audio.preservesPitch = true;
     audio.mozPreservesPitch = true;
     audio.webkitPreservesPitch = true;
@@ -370,6 +372,8 @@ export function mountAudiobookPlayer(root, options) {
   }
   function startAudio() {
     const audio = players[cur];
+    // The host takes the app's voice back each time the book sounds (codex on PR 1499).
+    if (options.onPlay) options.onPlay();
     applyRate(audio);
     const started = audio.play && audio.play();
     if (started && typeof started.catch === "function") {
@@ -489,7 +493,7 @@ export function mountAudiobookPlayer(root, options) {
     if (!c || !c.audio[segIndex]) return;
     const before = t;
     t = Math.min(c.seconds, c.audio[segIndex].at + (players[cur].currentTime || 0));
-    // A gap the clock just crossed is said in Text for a few seconds after (R-58).
+    // A gap the clock just crossed is said in Text for a few seconds after (R-67).
     const crossed = c.gaps.find((gap) => gap.at > before + 1e-6 && gap.at <= t + 1e-6 && gap.at > 0);
     if (crossed) gapNote = crossed;
     if (gapNote && (t < gapNote.at || t > gapNote.at + GAP_NOTE_SEC)) gapNote = null;
@@ -665,7 +669,7 @@ export function mountAudiobookPlayer(root, options) {
     syncPosition();
   }
 
-  // ---- the phone's lock screen and a headset (R-62) ---------------------------------------------
+  // ---- the phone's lock screen and a headset (R-71) ---------------------------------------------
   const session = options.mediaSession || (nav && nav.mediaSession ? nav.mediaSession : null);
   let sessionKey = "";
   /** The lock screen fetches the artwork itself, so it is named in full where the page has a base. */
@@ -870,11 +874,13 @@ export function mountAudiobookPlayer(root, options) {
 
   return {
     /**
-     * A newer plan for the same book — a take landed while the listener listens (R-58): the
+     * A newer plan for the same book — a take landed while the listener listens (R-67): the
      * place is kept by its block, and the piece playing plays on unless it is gone.
      */
     update(next) {
-      const place = placeHere();
+      // A place held through a plan with nothing to play is the one to come back to (codex on PR 1495).
+      const place = heldPlace || placeHere();
+      heldPlace = null;
       const playingSrc = holds[cur] >= 0 && chapter() ? (chapter().audio[holds[cur]] || {}).src : null;
       const offsetInPiece = players[cur].currentTime || 0;
       chapters = normalise(next);
@@ -891,7 +897,8 @@ export function mountAudiobookPlayer(root, options) {
         holds[0] = holds[1] = -1;
         playing = false;
         lastTick = null;
-        ci = 0;
+        heldPlace = place;
+        ci = Math.min(ci, Math.max(0, chapters.length - 1));
         t = 0;
         render();
         return;
@@ -911,6 +918,10 @@ export function mountAudiobookPlayer(root, options) {
       }
       holds[0] = holds[1] = -1;
       seek(found && found.index === ci ? found.t : 0);
+    },
+    /** Another read takes the app's voice: the book pauses where it is. */
+    pause() {
+      if (playing) pause();
     },
     destroy() {
       for (const audio of players) {

@@ -14,8 +14,8 @@ import {
   type VoiceCandidate,
 } from "@arke-studio/contracts";
 import { geminiSpeechModel } from "@arke-studio/providers";
-import { integratedLoudness, normaliseSpeech, readSpeechWav, trimSpeech, writeSpeechWav, type SpeechPcm } from "../../src/audio/speech-wav.js";
-import { judgeSplit, splitRequest } from "../../src/productions/audiobook-split.js";
+import { dropRunawayTail, integratedLoudness, normaliseSpeech, readSpeechWav, trimSpeech, writeSpeechWav, type SpeechPcm } from "../../src/audio/speech-wav.js";
+import { judgeSplit, LONG_TAIL, splitAudio, splitRequest } from "../../src/productions/audiobook-split.js";
 import { keepSplitTake, prepareChapter, readBreaks, runAudiobookChapter, type AudiobookRunEvent } from "../../src/productions/audiobook-run.js";
 import { directionEntry, planAudiobook, writeAudiobookBookRaised, writeBlockDirection } from "../../src/productions/audiobook.js";
 import { directionPlan } from "../../src/voice/direction.js";
@@ -100,6 +100,85 @@ describe("word times and the split (design turn 185)", () => {
   });
 });
 
+/** A runaway nonverbal tail as the turn 185 probe's merged request had one: 0.1 s blips every 0.7 s. */
+const blips = (seconds: number) => join_(...Array.from({ length: Math.round(seconds / 0.7) }, () => [tone(0.1, 0.3), silence(0.6)]).flat()).samples;
+
+/** A transcriber that hears the next block's words in a stretch of speech, and nothing in a run of blips. */
+const hearsSpeech = (texts: string[]) => {
+  let next = 0;
+  return async (bytes: Uint8Array) => {
+    const piece = readSpeechWav(bytes);
+    let squares = 0;
+    for (const sample of piece.samples) squares += sample * sample;
+    return Math.sqrt(squares / piece.samples.length) > 0.12 ? texts[next++] ?? "" : "";
+  };
+};
+
+describe("a request that runs on past its words (design turn 185 follow-up)", () => {
+  const hash = () => `sha256:${"a".repeat(64)}`;
+  const blocks = [{ key: "p0.0", text: "First block here." }, { key: "p1.0", text: "A line." }, { key: "p1.1", text: "The last block, longer." }];
+
+  it("ends the last block's cut in the pause after its words, and drops the tail", async () => {
+    // Speech ends at 4.9 s; then 26 s of blips.
+    const pcm = join_(silence(0.3), tone(1, 0.3), silence(0.5), tone(1.2, 0.3), silence(0.5), tone(1.4, 0.3), silence(0.6), blips(26));
+    const stretches = speechStretches(pcm);
+    assert.ok(Math.abs(stretches[2]!.end - 4.9) < 0.02, `the last words' stretch ends with them, not at ${stretches[2]!.end}`);
+    const timed = await timeWords(writeSpeechWav(pcm), hearsSpeech(blocks.map((block) => block.text)));
+    const cuts = splitRequest(blocks, timed.words, timed.seconds, hash, splitAudio(pcm));
+    assert.ok(cuts.every((cut) => cut.matched), JSON.stringify(cuts.map((cut) => cut.heard)));
+    const last = cuts.at(-1)!;
+    assert.ok(last.end >= 4.9 && last.end <= 4.9 + 0.8, `the last cut ends at ${last.end}`);
+    assert.ok(cuts.every((cut) => cut.longTail), "the request ran long, said on every cut");
+    // Without the audio the cut runs to the end, as before.
+    assert.equal(splitRequest(blocks, timed.words, timed.seconds, hash).at(-1)!.end, timed.seconds);
+  });
+
+  it("holds at most 0.8 s of the quiet after the last words", () => {
+    const pcm = join_(silence(0.3), tone(1, 0.3), silence(0.5), tone(1.2, 0.3), silence(0.5), tone(1.4, 0.3), silence(4));
+    const words: TimedWord[] = [
+      { text: "First", start: 0.3, end: 0.6 }, { text: "block", start: 0.6, end: 0.9 }, { text: "here.", start: 0.9, end: 1.3 },
+      { text: "A", start: 1.8, end: 2.2 }, { text: "line.", start: 2.2, end: 3.0 },
+      { text: "The", start: 3.5, end: 3.8 }, { text: "last", start: 3.8, end: 4.1 }, { text: "block,", start: 4.1, end: 4.5 }, { text: "longer.", start: 4.5, end: 4.9 },
+    ];
+    const cuts = splitRequest(blocks, words, 8.9, hash, splitAudio(pcm));
+    assert.ok(Math.abs(cuts.at(-1)!.end - 5.7) < 0.02, `ends at ${cuts.at(-1)!.end}`);
+    assert.ok(cuts.every((cut) => cut.matched && cut.longTail === undefined));
+  });
+
+  it("keeps a last word heard as something else inside the cut", () => {
+    const pcm = join_(silence(0.3), tone(1, 0.3), silence(0.5), tone(1.2, 0.3), silence(0.5), tone(0.9, 0.3), silence(0.3), tone(0.4, 0.3), silence(2));
+    const words: TimedWord[] = [
+      { text: "First", start: 0.3, end: 0.6 }, { text: "block", start: 0.6, end: 0.9 }, { text: "here.", start: 0.9, end: 1.3 },
+      { text: "A", start: 1.8, end: 2.2 }, { text: "line.", start: 2.2, end: 3.0 },
+      { text: "The", start: 3.5, end: 3.8 }, { text: "last", start: 3.8, end: 4.1 }, { text: "block,", start: 4.1, end: 4.4 }, { text: "lunger.", start: 4.7, end: 5.1 },
+    ];
+    const last = splitRequest(blocks, words, 7.1, hash, splitAudio(pcm)).at(-1)!;
+    assert.ok(last.end > 5.1, `the misheard last word stays: ends at ${last.end}`);
+    assert.equal(last.heard, "The last block, lunger.");
+  });
+
+  it("holds the block a long stretch inside the request belongs to", async () => {
+    // The blips lie between the first block and the second, and what is kept still runs long.
+    const pcm = join_(silence(0.3), tone(1, 0.3), silence(0.6), blips(26), tone(1.2, 0.3), silence(0.5), tone(1.4, 0.3), silence(0.3));
+    const timed = await timeWords(writeSpeechWav(pcm), hearsSpeech(blocks.map((block) => block.text)));
+    const cuts = splitRequest(blocks, timed.words, timed.seconds, hash, splitAudio(pcm));
+    assert.ok(cuts.every((cut) => cut.longTail));
+    const held = cuts.filter((cut) => !cut.matched).map((cut) => cut.key);
+    assert.equal(held.length, 1, JSON.stringify(cuts.map((cut) => [cut.key, cut.start, cut.end, cut.matched])));
+    assert.ok(["p0.0", "p1.0"].includes(held[0]!));
+  });
+
+  it("drops a runaway tail from a take read alone, and leaves a last short word or a breath", () => {
+    const tailed = join_(silence(0.2), tone(2, 0.3), silence(0.6), blips(10));
+    assert.ok(Math.abs(dropRunawayTail(tailed).samples.length / RATE - 2.5) < 0.02);
+    assert.ok(Math.abs(trimSpeech(tailed).samples.length / RATE - 2.45) < 0.02);
+    const words = join_(tone(2, 0.3), silence(0.4), tone(0.3, 0.3), silence(0.4), tone(0.3, 0.3), silence(0.4), tone(0.3, 0.3), silence(0.5));
+    assert.equal(dropRunawayTail(words), words);
+    const breath = join_(tone(2, 0.3), silence(0.6), tone(0.1, 0.3), silence(0.3));
+    assert.equal(dropRunawayTail(breath), breath);
+  });
+});
+
 // ---- the run ----------------------------------------------------------------------------------
 
 const LEDGER = "the-ledger-of-nights";
@@ -124,7 +203,7 @@ interface RunHarness {
   run: (extra?: { confirmationToken?: string; only?: string[] }) => Promise<void>;
 }
 
-async function harness(store: WorldStore, opts: { heardFor?: (text: string) => string; fail?: string; actual?: number } = {}): Promise<RunHarness> {
+async function harness(store: WorldStore, opts: { heardFor?: (text: string) => string; fail?: string; actual?: number; tail?: number } = {}): Promise<RunHarness> {
   const plan = await planAudiobook(store, LEDGER, "neap", { narrator: READER });
   const textOf = new Map(plan.blocks.map((planned) => [planned.block.key, planned.block.text.replace(/\s+/g, " ").trim()]));
   const events: AudiobookRunEvent[] = [];
@@ -152,7 +231,7 @@ async function harness(store: WorldStore, opts: { heardFor?: (text: string) => s
         sent.push(input);
         const keys = (input.params["blocks"] as string[] | undefined) ?? [String(input.params["block"])];
         // A second of speech a block, half a second of pause between.
-        const pcm = join_(...keys.flatMap((key, index) => [...(index > 0 ? [silence(0.5)] : [silence(0.2)]), tone(1, 0.2)]), silence(0.2));
+        const pcm = join_(...keys.flatMap((key, index) => [...(index > 0 ? [silence(0.5)] : [silence(0.2)]), tone(1, 0.2)]), silence(0.2), ...(opts.tail !== undefined ? [silence(0.4), blips(opts.tail)] : []));
         const file = `${input.landing!.dir}/${input.landing!.name}`;
         await mkdir(join(store.dir, dirname(file)), { recursive: true });
         await writeFile(join(store.dir, file), writeSpeechWav(pcm));
@@ -217,6 +296,26 @@ describe("a chapter read grouped (design turn 185)", () => {
       // Cuts follow one another through the request with nothing between them.
       const ordered = takes.map((take) => take.grouped!).sort((a, b) => a.offsetSec - b.offsetSec);
       for (let i = 1; i < ordered.length; i++) assert.ok(Math.abs(ordered[i]!.offsetSec - (ordered[i - 1]!.offsetSec + ordered[i - 1]!.durationSec)) < 0.002);
+    } finally {
+      await close();
+    }
+  });
+
+  it("files the last block's take without a runaway tail, and says the request ran long", async () => {
+    const { store, worldDir, close } = await world();
+    try {
+      // The chapter's words should take about two minutes; the request runs four minutes on.
+      const h = await harness(store, { tail: 240 });
+      await h.run();
+      await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+      assert.equal(finished(h.events)?.outcome, "read", finished(h.events)?.reason);
+      const record = await recordOf(worldDir);
+      assert.equal(Object.keys(record.flags).length, 0, "the extra was at the end: nothing held");
+      const last = Object.values(record.takes).map((take) => take.grouped!).sort((a, b) => b.offsetSec - a.offsetSec)[0]!;
+      // Half the pause before it, its second of speech, and the middle of the 0.6 s after.
+      assert.ok(last.durationSec > 1.2 && last.durationSec < 1.6, `the last take runs ${last.durationSec} s`);
+      const made = h.events.filter((event): event is Extract<AudiobookRunEvent, { type: "progress" }> => event.type === "progress");
+      assert.ok(made.length > 0 && made.every((event) => event.outcome === "made" && event.reason === LONG_TAIL));
     } finally {
       await close();
     }

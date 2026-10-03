@@ -26,6 +26,7 @@ import {
   type HarnessAdapter,
   type ManifestModel,
   type Sheet,
+  voiceDisplayLabel,
   type VoiceCandidate,
 } from "@arke-studio/contracts";
 import type { SessionInput } from "../harness/session-files.js";
@@ -583,7 +584,7 @@ export async function directionContext(store: WorldStore, productionId: string, 
     chapter: { order: plan.chapter.order, title: plan.chapter.title, version: plan.chapter.version, ...(synopsis !== undefined ? { synopsis } : {}), ...(pov !== undefined ? { pov } : {}) },
     ...(tone !== undefined ? { tone } : {}),
     speakers,
-    narrator: { label: room.narrator.label ?? room.narrator.voiceId, ...(description !== undefined ? { description } : {}) },
+    narrator: { label: voiceDisplayLabel(room.narrator, bundle), ...(description !== undefined ? { description } : {}) },
     ...(book?.note !== undefined ? { bookNote: book.note } : {}),
     ...(chapterNote !== undefined ? { chapterNote } : {}),
     before: await chapterBefore(store, productionId, plan.chapter.order),
@@ -722,7 +723,7 @@ export async function directChapter(
           return {
             key: block.key,
             text: normalizeSpeechText(block.text),
-            reader: `${block.reader.label ?? block.reader.voiceId} · ${block.model.displayName}`,
+            reader: `${voiceDisplayLabel(block.reader, store.getBundle())} · ${block.model.displayName}`,
             ...(speaker !== undefined ? { speaker } : {}),
             deliveries: AUDIOBOOK_DELIVERIES.filter((delivery) => support.deliveries[delivery]?.status !== "unsupported"),
             note: support.note.status === "unsupported" ? "none" : support.note.method?.startsWith("tag") === true ? "tag" : "instruction",

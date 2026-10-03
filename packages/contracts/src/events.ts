@@ -10,6 +10,7 @@ import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema, DirectionReadsSchema } from "./audiobook.js";
 import { AudiobookListeningSchema } from "./audiobook-listening.js";
+import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX } from "./cadence.js";
 import { FreePlanShortSchema } from "./provider-plans.js";
 import { z } from "zod";
@@ -1344,8 +1345,61 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
    * window is never left opening.
    */
   z.object({ ...base, type: z.literal("audiobook.door"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, door: AudiobookDoorSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
+  /** The audiobook's web package (design turn 186e): where it was written and what it holds, or what stood in the way. */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.exported"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      result: z.union([
+        z.object({ ok: z.literal(true), id: z.string().min(1), dir: z.string().min(1), file: z.string().min(1), chapters: z.number().int().min(1), pictures: z.number().int().min(0), bytes: z.number().int().min(0), joined: z.boolean() }).strict(),
+        z.object({ ok: z.literal(false), blockers: z.array(z.string().min(1)).min(1) }).strict(),
+      ]),
+    })
+    .strict(),
+  /** The world's web packages, newest first (design turn 186e). */
+  z
+    .object({
+      ...base,
+      type: z.literal("web-packages.listed"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      packages: z.array(z.object({ kind: z.enum(["interactive", "visual-novel", "audiobook"]), productionId: SlugSchema, title: z.string(), dir: z.string().min(1), exportedAt: z.string().min(1) }).strict()),
+    })
+    .strict(),
   /** The book as a listener hears it (design turn 186), answered to the window that asked; or none, and why. */
   z.object({ ...base, type: z.literal("audiobook.listening"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, listening: AudiobookListeningSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
+  /** Arke's timing for a chapter (design turn 187b, R-86), answered to the window that asked; or none, and why. */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.timing-proposal"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      proposal: TimingProposalSchema.nullable(),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
+  /**
+   * The chapter's mix rendered (design turn 187, R-85): the world-relative file, how long it is and
+   * where on the chapter's clock it starts; or none, and why, in one clause.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.mix"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      mix: z.object({ file: z.string().min(1), seconds: z.number().min(0), from: z.number().min(0) }).strict().nullable(),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
   /**
    * The book read as one run (SPEC-047 R-16..R-18): started under the run's request (a cloned
    * voice's consent is asked under it), priced once for every chapter's cloud blocks, a chapter

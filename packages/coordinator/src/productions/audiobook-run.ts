@@ -6,13 +6,16 @@ import {
   audiobookTakeDirectionHash,
   performanceNote,
   readingNotesLead,
+  soundMode,
   audiobookTextHash,
   firstReadNotice,
   normalizeSpeechText,
   speechInputFits,
   speechUtf8Bytes,
   voiceFormatForModel,
+  voiceDisplayLabel,
   voiceSourceFor,
+  type VoiceNames,
   type ArtifactAudiobookGeneration,
   type BlockTurns,
   type ArtifactSidecar,
@@ -35,10 +38,11 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
-import { applyGain, normaliseSpeech, readSpeechWav, samplePeak, sliceSpeech, trimSpeech, writeSpeechWav } from "../audio/speech-wav.js";
+import { applyGain, dropRunawayTail, normaliseSpeech, readSpeechWav, samplePeak, sliceSpeech, trimSpeech, writeSpeechWav } from "../audio/speech-wav.js";
 import type { TimedWord } from "../voice/word-times.js";
-import { splitRequest } from "./audiobook-split.js";
+import { LONG_TAIL, splitAudio, splitRequest } from "./audiobook-split.js";
 import { checkDirection, directionPlan, type RenderedPart } from "../voice/direction.js";
+import { plannedReactions } from "./audiobook-timing.js";
 import { audiobookLanding, recordsLoudness, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
 
 /**
@@ -311,7 +315,13 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     plan.record === null || plan.record === "unreadable"
       ? emptyAudiobook(plan.chapter.version, plan.chapter.hash, now())
       : { ...plan.record, takes: { ...plan.record.takes }, flags: { ...plan.record.flags } };
-  const toMake = only !== undefined ? plan.blocks.filter((planned) => only.includes(planned.block.key)) : plan.blocks.filter((planned) => planned.state !== "made" && planned.state !== "awaiting");
+  // Reactions are read when the chapter is (design turn 187, R-83), after its blocks, priced as
+  // any read; `Make again` on one names it as it names a block.
+  const reactions = plannedReactions(store, plan, room.narrator);
+  const toMake = [
+    ...(only !== undefined ? plan.blocks.filter((planned) => only.includes(planned.block.key)) : plan.blocks.filter((planned) => planned.state !== "made" && planned.state !== "awaiting")),
+    ...(only !== undefined ? reactions.filter((planned) => only.includes(planned.block.key)) : reactions.filter((planned) => planned.state !== "made" && planned.state !== "awaiting")),
+  ];
   const clonedVoices = store.getBundle().clonedVoices ?? [];
   // Each cloned reader's recording, hashed once for the chapter (SPEC-046 R-39): the hash keys
   // its cache files and names its parts' jobs, so a voice re-recorded since is read afresh.
@@ -433,6 +443,18 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     } catch (error) {
       refusal = error instanceof Error ? error.message : String(error);
       parts = [text];
+    }
+    // A reaction that is a sound (R-83) is sent as the reader's own tag for it, alone: the take
+    // still names what the reaction says (`[laughs]`), and a reader that makes no such sound is
+    // refused in one clause rather than reading the word aloud.
+    const sound = planned.reaction?.sound;
+    if (sound !== undefined) {
+      const how = soundMode(sound, model, language);
+      if (how.mode === "unsupported") refusal = `${model.displayName} makes no ${sound}`;
+      else {
+        parts = [how.tag];
+        direction = null;
+      }
     }
     const local = reader.provider === "kokoro";
     const format = voiceFormatForModel(model);
@@ -657,11 +679,11 @@ export function firstReadNotices(clones: readonly { provider: string; voice: Clo
 }
 
 /** The price's lines (R-17): every cloud voice the words would go to, once each, with its share. */
-export function priceLines(misses: readonly Speaking[], priceOf: (block: Speaking) => number): { label: string; provider: string; characters: number; estimatedMicroUsd: number }[] {
+export function priceLines(misses: readonly Speaking[], priceOf: (block: Speaking) => number, names: VoiceNames = {}): { label: string; provider: string; characters: number; estimatedMicroUsd: number }[] {
   const voices = new Map<string, { label: string; provider: string; characters: number; estimatedMicroUsd: number }>();
   for (const block of misses) {
     const key = `${block.reader.provider}\n${block.reader.voiceId}`;
-    const held = voices.get(key) ?? { label: block.reader.label ?? block.reader.voiceId, provider: block.reader.provider, characters: 0, estimatedMicroUsd: 0 };
+    const held = voices.get(key) ?? { label: voiceDisplayLabel(block.reader, names), provider: block.reader.provider, characters: 0, estimatedMicroUsd: 0 };
     held.characters += block.text.length;
     held.estimatedMicroUsd += priceOf(block);
     voices.set(key, held);
@@ -721,7 +743,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   // token: the day moves as the book reads, and the book's answer covered it.
   const answer = freePlan !== null ? createHash("sha256").update(`${token}\n${JSON.stringify(freePlan.short)}`).digest("hex") : token;
   if (asks && deps.priced === undefined && deps.confirmationToken !== answer) {
-    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}) });
+    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf, store.getBundle()), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}) });
     return;
   }
 
@@ -735,12 +757,13 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     // to the target as it is filed, and a groupable reader's is trimmed to a grouped take's
     // pause first, so a block read alone does not stand out between cuts that share theirs. A
     // grouped cut arrives gained already, by its request's measure. A file this cannot read as
-    // 16-bit PCM is filed as it came.
+    // 16-bit PCM is filed as it came. Any reader's take loses a runaway tail: a solo read can run
+    // on past its words as a grouped one did.
     let leveled: { path: string; loudness: AudiobookLoudness } | null = null;
     if (input.loudness === undefined && block.format === "wav") {
       try {
         const source = readSpeechWav(new Uint8Array(await readFile(toExtendedLength(sourcePath))));
-        const trimmed = readsGrouped(block.model, transcriber, plan.book) ? trimSpeech(source) : source;
+        const trimmed = readsGrouped(block.model, transcriber, plan.book) ? trimSpeech(source) : dropRunawayTail(source);
         const normal = normaliseSpeech(trimmed);
         if (normal.loudness.gainDb === 0 && trimmed === source) leveled = { path: sourcePath, loudness: normal.loudness };
         else {
@@ -946,7 +969,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     const pcm = readSpeechWav(bytes);
     const heard = await deps.wordTimes(bytes, signal);
     if (signal.aborted) return null;
-    const cuts = splitRequest(group.members.map((block) => ({ key: block.block.key, text: block.text })), heard.words, heard.seconds, (start, end) => audioHash(writeSpeechWav(sliceSpeech(pcm, start, end))));
+    const cuts = splitRequest(group.members.map((block) => ({ key: block.block.key, text: block.text })), heard.words, heard.seconds, (start, end) => audioHash(writeSpeechWav(sliceSpeech(pcm, start, end))), splitAudio(pcm));
     // One request is one performance: measured whole and gained as one, so a whisper inside it
     // stays a whisper beside the lines around it.
     const level = normaliseSpeech(pcm);
@@ -967,10 +990,12 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       settled.add(block.block.key);
       if (cut.matched) {
         await keep(block, artifact, provenance);
-        progress(block, "made");
+        // A request that ran long is said on its takes' progress; the record keeps no note, which
+        // would be another strict field and another world schema for what the cut already dropped.
+        progress(block, "made", cut.longTail ? LONG_TAIL : undefined);
       } else {
         const split: AudiobookSplitFlag = { artifactId: artifact.id, heard: cut.heard.slice(0, 4000), request: job.id, offsetSec: grouped.offsetSec, durationSec: grouped.durationSec };
-        const reason = `${SPLIT_DID_NOT_MATCH} · \u201c${cut.heard.length > 80 ? `${cut.heard.slice(0, 79)}\u2026` : cut.heard}\u201d`;
+        const reason = `${SPLIT_DID_NOT_MATCH} · ${cut.longTail ? `${LONG_TAIL} · ` : ""}\u201c${cut.heard.length > 80 ? `${cut.heard.slice(0, 79)}\u2026` : cut.heard}\u201d`;
         await write((current) => ({ ...current, updatedAt: deps.now(), flags: { ...current.flags, [block.block.key]: { reason, at: deps.now(), split } } }));
         flaggedCount += 1;
         progress(block, "flagged", reason);

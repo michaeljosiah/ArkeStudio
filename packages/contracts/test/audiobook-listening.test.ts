@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { audiobookTextHash, ChapterAudiobookSchema } from "../src/audiobook.js";
 import {
   AudiobookListeningSchema,
+  ListeningChapterSchema,
   blockSentences,
   bookPlace,
   listeningChapter,
@@ -14,7 +15,7 @@ import {
 import type { AudiobookPicture } from "../src/audiobook-pictures.js";
 
 /**
- * The book as a listener hears it (design turn 186, SPEC-047 R-57..R-62): the plan the player in
+ * The book as a listener hears it (design turn 186, SPEC-047 R-66..R-71): the plan the player in
  * the app and the package both play — the made takes on one clock, the blocks not made as gaps,
  * the pictures placed and held, and what a chapter opens on.
  */
@@ -31,7 +32,7 @@ const BLOCKS: ListeningInputBlock[] = [
   { key: "p3.0", text: "Below them the quarter opened like a held breath.", take: take(10) },
 ];
 
-describe("a chapter on one clock (R-58)", () => {
+describe("a chapter on one clock (R-67)", () => {
   it("plays the made takes back to back with nothing added, the title first", () => {
     const chapter = listeningChapter({ chapterId: "neap", order: 7, title: "The Tenth Key", blocks: BLOCKS, cover: null });
     assert.equal(chapter.state, "read");
@@ -62,7 +63,7 @@ describe("a chapter on one clock (R-58)", () => {
   });
 });
 
-describe("the words, if wanted (R-61)", () => {
+describe("the words, if wanted (R-70)", () => {
   it("splits a grouped take into sentences by length, and shows a block read alone whole", () => {
     assert.deepEqual(sentencesOf("She held the lamp lower. The water took its light! And kept it…"), ["She held the lamp lower.", "The water took its light!", "And kept it…"]);
     const grouped = blockSentences("One two three. Four five six.", 10, true);
@@ -78,7 +79,7 @@ describe("the words, if wanted (R-61)", () => {
   });
 });
 
-describe("pictures that follow the words (R-60)", () => {
+describe("pictures that follow the words (R-69)", () => {
   it("shows a picture from its block until the next, flags one held under twenty seconds, and opens on the cover when the first block has none", () => {
     const pictures = { "p1.0": picture(BLOCKS[2]!.text, "artifacts/stair.png"), "p2.0": picture(BLOCKS[3]!.text, "references/odile/main.png") };
     const chapter = listeningChapter({ chapterId: "neap", order: 7, title: "The Tenth Key", blocks: BLOCKS, pictures, cover: "world-art.png" });
@@ -123,12 +124,30 @@ describe("pictures that follow the words (R-60)", () => {
   });
 });
 
-describe("the record and the wire (R-64)", () => {
+describe("the record and the wire (R-73)", () => {
   it("reads a record with pictures and one without, and the plan's schema holds a computed chapter", () => {
     const base = { schemaVersion: 1, chapterVersion: 1, hash: "h", updatedAt: AT, takes: {}, flags: {} };
     assert.equal(ChapterAudiobookSchema.parse(base).pictures, undefined);
     assert.equal(ChapterAudiobookSchema.parse({ ...base, pictures: { "p0.0": picture("x", "artifacts/a.png") } }).pictures?.["p0.0"]?.file, "artifacts/a.png");
     const chapter = listeningChapter({ chapterId: "neap", order: 7, title: "The Tenth Key", blocks: BLOCKS, cover: null });
     assert.ok(AudiobookListeningSchema.safeParse({ productionId: "the-ledger", title: "The Undersong", cover: null, chapters: [chapter] }).success);
+  });
+});
+
+describe("a chapter with timing plays its one mix (turn 187, R-85)", () => {
+  it("places the blocks on the mix's clock, a block not made where it stands, and carries the mix", () => {
+    const blocks = BLOCKS.map((block) => (block.key === "p2.0" ? { key: block.key, text: block.text } : block));
+    const timed = {
+      // p1.0 cuts in half a second before p0.0 ends; p2.0 is not made; p3.0 after a pause.
+      bars: [{ key: "title", at: 0, seconds: 4 }, { key: "p0.0", at: 4, seconds: 12 }, { key: "p1.0", at: 15.5, seconds: 3 }, { key: "p3.0", at: 19, seconds: 10 }],
+      seconds: 29,
+      mix: { file: ".cache/audiobook-mix/the-ledger/01-neap/r2-abc.wav", seconds: 29.2 },
+    };
+    const chapter = listeningChapter({ chapterId: "neap", order: 7, title: "The Tenth Key", blocks, cover: null, timed });
+    assert.deepEqual(chapter.blocks.map((block) => [block.key, block.at]), [["title", 0], ["p0.0", 4], ["p1.0", 15.5], ["p3.0", 19]]);
+    assert.deepEqual(chapter.gaps, [{ at: 19, from: 4, to: 4 }], "the block not made stands where the clock goes on");
+    assert.deepEqual(chapter.mix, timed.mix);
+    assert.equal(chapter.seconds, 29.2, "as long as the mix is");
+    assert.ok(ListeningChapterSchema.safeParse(chapter).success);
   });
 });

@@ -1521,6 +1521,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-h1 { margin: 0; font: 650 28px/1.05 var(--font-sans); letter-spacing: -0.025em; }
 .fy-h1row__meta { font: 400 11px var(--font-mono); color: var(--neutral-400); }
 .fy-h1row__push { flex: 1; }
+.fy-h1row__actions { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 .fy-mono { font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
 .fy-eyebrow-sm { font: 500 10.5px var(--font-sans); letter-spacing: 0.14em; color: var(--muted-foreground); text-transform: uppercase; }
@@ -6759,7 +6760,7 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-ab__fchip--on .fy-ab__fcount { color: var(--background); opacity: 0.7; }
 .fy-ab__block--selected { background: var(--muted); }
 /* Pictures on blocks (turn 186c): a chip under the speaker in the margin, and the panel's grid. */
-.fy-ab__who { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.fy-ab__picwho { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
 .fy-ab__picchip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px 0 3px; border: 1px solid var(--border); border-radius: 7px; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); background: var(--background); box-sizing: border-box; }
 .fy-ab__picchip img { width: 28px; height: 18px; object-fit: cover; border-radius: 4px; display: block; }
 .fy-ab__picchip--short { border-color: var(--warning); }
@@ -6769,6 +6770,13 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-ab__pickitem--on { border-color: var(--foreground); }
 .fy-ab__picnow { width: 64px; height: 40px; object-fit: cover; border-radius: 6px; display: block; }
 .fy-ab__picgen { display: flex; flex-direction: column; gap: 8px; }
+/* Export audiobook (turn 186e): the player package as an option card with its counts. */
+.fy-abexport__opt { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; }
+.fy-abexport__opt--on { border-color: var(--foreground); }
+.fy-abexport__opt b { font: var(--type-ui); font-weight: 600; }
+.fy-abexport__opt .fy-mono { font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abexport__radio { width: 16px; height: 16px; flex: none; margin-top: 2px; border-radius: 50%; border: 1px solid var(--border); box-sizing: border-box; }
+.fy-abexport__opt--on .fy-abexport__radio { border: 5px solid var(--foreground); }
 .fy-ab__block--line.fy-ab__block--selected { background: color-mix(in srgb, var(--fy-voice) 7%, transparent); box-shadow: inset 2px 0 0 var(--fy-voice), inset 0 0 0 1px color-mix(in srgb, var(--fy-voice) 45%, transparent); }
 .fy-ab__block--sounding { background: var(--secondary); box-shadow: inset 2px 0 0 var(--fy-voice, var(--foreground)); }
 .fy-ab__mark { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -6919,6 +6927,14 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-ch__who-head { display: flex; align-items: center; gap: 8px; }
 .fy-ch__who-name { font: 500 12px var(--font-sans); flex: 1; min-width: 0; }
 .fy-ch__who-where { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; }
+/* A speaker and their voice never run under each other (a designed voice's id once did): the
+   name keeps its width up to half the row, and the voice takes what is left, cut with an
+   ellipsis — its whole text is the title. */
+.fy-ch__who-head > .fy-ch__who-name { flex: 0 0 auto; max-width: 55%; }
+.fy-ch__who-head > .fy-ch__who-name + :is(.fy-ch__who-where, .fy-ch__who-count) { margin-left: auto; }
+.fy-ch__who-head > .fy-ch__who-where { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
+.fy-ch__who-head > .fy-ch__who-where:not(:has(svg)) { display: block; text-overflow: ellipsis; }
+.fy-ch__who-name > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-ch__line { position: relative; padding-left: 14px; margin-top: 3px; font: 400 11px/1.45 var(--font-sans); color: var(--muted-foreground); }
 .fy-ch__line::before { content: "·"; position: absolute; left: 2px; top: 0; color: var(--neutral-400); }
 .fy-ch__line--more { color: var(--neutral-400); }
@@ -8699,7 +8715,7 @@ button.fy-abdoor__voice:hover { background: var(--accent); border-color: var(--n
 .fy-abdoor__voice--warn { border-color: var(--warning); }
 .fy-abdoor__voice--warn .fy-abdoor__voice-what { color: var(--warning); }
 .fy-abdoor__voice-name { font: 500 12px var(--font-sans); color: var(--foreground); }
-.fy-abdoor__voice-what { font-size: 10.5px; color: var(--muted-foreground); }
+.fy-abdoor__voice-what { font-size: 10.5px; color: var(--muted-foreground); overflow-wrap: anywhere; }
 .fy-abdoor__note { display: flex; gap: 16px; align-items: center; margin-top: 10px; font-size: 10.5px; color: var(--muted-foreground); }
 .fy-abdoor__planned { color: var(--neutral-400); }
 .fy-abdoor__lines { display: flex; flex-direction: column; gap: 6px; }
@@ -8743,3 +8759,62 @@ button.fy-abdoor__voice:hover { background: var(--accent); border-color: var(--n
 .fy-samp__item.is-on, .fy-samp__item:hover { background: var(--secondary); }
 .fy-samp__item--foot { margin-top: 4px; border-top: 1px solid var(--border); border-radius: 0 0 8px 8px; font-weight: 400; color: var(--muted-foreground); }
 @media (max-width: 640px) { .fy-samp__fields { grid-template-columns: 1fr; margin-left: 10px; } }
+
+/* Timing (design turn 187a, 187c): a lane a voice, 64 high with a 120-wide name column; bars 40
+   high with their words and a mono line; reactions 28 high in italic; overlaps hatched across the
+   lanes. The track scrolls under the names, which stay. */
+.fy-ch__timing { min-width: 0; }
+.fy-tm { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--background); }
+.fy-tm__tools { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; border-bottom: 1px solid var(--border); font: 400 11px var(--font-mono); color: var(--muted-foreground); }
+.fy-tm__push { flex: 1; }
+.fy-tm__frame { display: flex; min-width: 0; position: relative; }
+.fy-tm__names { flex: none; width: 120px; border-right: 1px solid var(--border); background: var(--background); z-index: 2; }
+.fy-tm__ruler-pad { height: 28px; border-bottom: 1px solid var(--border); }
+.fy-tm__name { height: 64px; box-sizing: border-box; padding: 12px 14px; border-bottom: 1px solid var(--border); font: 500 12px var(--font-sans); color: var(--muted-foreground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fy-tm__name small { display: block; margin-top: 3px; font: 400 10.5px var(--font-mono); overflow: hidden; text-overflow: ellipsis; }
+.fy-tm__scroll { flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+.fy-tm__track { position: relative; touch-action: none; }
+.fy-tm__ruler { position: relative; height: 28px; border-bottom: 1px solid var(--border); font: 400 10.5px var(--font-mono); color: var(--muted-foreground); cursor: pointer; }
+.fy-tm__ruler span { position: absolute; top: 8px; padding-left: 3px; border-left: 1px solid var(--border); }
+.fy-tm__lanes { position: relative; }
+.fy-tm__lane { position: absolute; left: 0; right: 0; height: 64px; border-bottom: 1px solid var(--border); }
+.fy-tm__overlap { position: absolute; top: 0; bottom: 0; pointer-events: none; background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--foreground) 9%, transparent) 5px 7px); }
+.fy-tm__bar { position: absolute; box-sizing: border-box; height: 40px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--secondary); color: var(--foreground); font: 400 12px/1.3 var(--font-sans); overflow: hidden; cursor: grab; user-select: none; display: flex; flex-direction: column; justify-content: center; }
+.fy-tm__bar--on { border-color: var(--foreground); box-shadow: 0 0 0 1px var(--foreground); }
+.fy-tm__bar--unread { background: transparent; border-style: dashed; color: var(--muted-foreground); }
+.fy-tm__bar--overlap { background-image: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--foreground) 7%, transparent) 5px 7px); }
+.fy-tm__bar--reaction { height: 28px; font-style: italic; padding: 2px 8px; }
+.fy-tm__words { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fy-tm__line { font-size: 10.5px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-tm__edge { position: absolute; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+.fy-tm__edge--head { left: 0; }
+.fy-tm__edge--tail { right: 0; }
+.fy-tm__bar--on .fy-tm__edge { background: color-mix(in srgb, var(--foreground) 18%, transparent); }
+.fy-tm__gap { position: absolute; width: 8px; height: 16px; border-radius: 4px; border: 1px solid var(--border); background: var(--background); cursor: ew-resize; z-index: 1; }
+.fy-tm__bed { position: absolute; box-sizing: border-box; height: 20px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--muted); font: 400 10.5px var(--font-mono); color: var(--muted-foreground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fy-tm__sound { position: absolute; padding: 1px 6px; border-left: 2px solid var(--foreground); font: 400 10.5px var(--font-mono); color: var(--foreground); white-space: nowrap; }
+.fy-tm__playhead { position: absolute; top: -28px; bottom: 0; width: 1px; background: var(--foreground); pointer-events: none; z-index: 3; }
+.fy-tm__side { display: flex; flex-direction: column; gap: 10px; }
+.fy-tm__data { margin: 0; font-size: 11px; color: var(--muted-foreground); }
+.fy-tm__row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 28px; }
+.fy-tm__row > .fy-ab__label { width: 76px; flex: none; }
+.fy-tm__field { width: 64px; height: 26px; box-sizing: border-box; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--background); color: var(--foreground); font-size: 12px; }
+.fy-tm__unit { font-size: 10.5px; color: var(--muted-foreground); }
+.fy-tm__actions { display: flex; gap: 6px; justify-content: flex-end; }
+.fy-tm__block { display: flex; flex-direction: column; gap: 8px; }
+.fy-tm__wave { position: relative; height: 48px; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); touch-action: none; }
+.fy-tm__wave svg { width: 100%; height: 100%; display: block; fill: var(--foreground); opacity: 0.7; }
+.fy-tm__trimmed { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--background) 70%, transparent); pointer-events: none; }
+.fy-tm__handle { position: absolute; top: -2px; bottom: -2px; width: 6px; margin: 0 -3px; border-radius: 3px; background: var(--foreground); cursor: ew-resize; }
+@media (max-width: 599px) { .fy-tm__names { width: 88px; } .fy-tm__name { padding: 12px 8px; } }
+/* Beds, sounds and reactions on a block (turn 187d): a list of the world's sounds, a row each. */
+.fy-tm__bedpanel, .fy-tm__reactions { display: flex; flex-direction: column; gap: 8px; }
+.fy-tm__sounds { display: flex; flex-direction: column; max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+.fy-tm__soundrow { display: flex; align-items: center; gap: 8px; justify-content: space-between; min-height: 30px; padding: 0 10px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--foreground); font: 400 12px var(--font-sans); text-align: left; cursor: pointer; }
+.fy-tm__soundrow:last-child { border-bottom: 0; }
+.fy-tm__soundrow > span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fy-tm__soundrow--on { background: var(--secondary); font-weight: 500; }
+.fy-tm__reaction { font: italic 400 12px var(--font-sans); color: var(--foreground); }
+/* Propose timing (turn 187b): Arke's bars and beds take a 1.5 dashed outline until accepted, as 184b's markers do. */
+.fy-tm__bar--proposed, .fy-tm__bed--proposed { outline: 1.5px dashed var(--foreground); outline-offset: 1px; }
+.fy-tm__proposal { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; border-style: dashed; }

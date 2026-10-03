@@ -7,12 +7,15 @@ import {
   type ProductionBundle,
 } from "@arke-studio/contracts";
 import { clearQueue, dismissPlayback } from "../lib/audio.js";
+import { claimRead, releaseRead } from "../lib/reply-reads.js";
 import { mediaUrl } from "../lib/media.js";
 import { openAudiobookListening, subscribeAudiobookListening, useAudiobookRecords, useAudiobookRuns, useStore } from "../lib/store.js";
+import { BodyLayer } from "./body-layer.js";
+import { Play } from "./icons.js";
 import { Button } from "./ui.js";
 
 /**
- * The audiobook player in the app (design turn 186, SPEC-047 R-57): the same module the exported
+ * The audiobook player in the app (design turn 186, SPEC-047 R-66): the same module the exported
  * package inlines, mounted over the window and left to run. React owns the element, the plan it
  * is fed and its lifetime; the player owns everything inside it, so the book an author listens to
  * here is the book a listener opens from the package.
@@ -21,6 +24,9 @@ import { Button } from "./ui.js";
  * lands or a picture moves while the player is open, and pushed into the running player — which
  * keeps the listener's place by its block, so a chapter being read under it fills in around them.
  */
+
+/** The book's claim on the app's one read (design turn 183's rule). */
+const READ_KEY = "audiobook-player";
 
 /** Where a book's listener's place is kept on this device, in the app. */
 export const audiobookPlaceKey = (worldId: string, productionId: string): string => `arke-ab-${worldId}-${productionId}`;
@@ -33,6 +39,8 @@ export function playerChapters(listening: AudiobookListening, src: (file: string
     title: chapter.title,
     state: chapter.state,
     seconds: chapter.seconds,
+    // A chapter with timing plays its one mix (design turn 187, R-85): overlaps and beds as set.
+    ...(chapter.mix !== undefined ? { audio: [{ src: src(chapter.mix.file), at: 0, seconds: chapter.mix.seconds }] } : {}),
     blocks: chapter.blocks.map((block) => ({ key: block.key, at: block.at, seconds: block.seconds, src: src(block.file), sentences: block.sentences })),
     gaps: chapter.gaps,
     pictures: chapter.pictures.map((picture) => ({ at: picture.at, src: src(picture.file) })),
@@ -40,9 +48,20 @@ export function playerChapters(listening: AudiobookListening, src: (file: string
   }));
 }
 
-/** Whether anything of the book is made yet: Listen waits for one block anywhere (R-58). */
+/** Whether anything of the book is made yet: Listen waits for one block anywhere (R-67). */
 export function bookHasTakes(production: Pick<ProductionBundle, "chapters"> | null): boolean {
   return (production?.chapters ?? []).some((chapter) => !chapter.retired && chapter.audiobook !== undefined && "takes" in chapter.audiobook && chapter.audiobook.takes > 0);
+}
+
+/**
+ * Whether Listen leads the head it sits in (owner, 2026-10-03: the player went unfound as a ghost
+ * beside Export). On the door, once a block anywhere is made; on a chapter, once a block of that
+ * chapter is — before then the chapter's own read is the work, and Listen stands back.
+ */
+export function listenLeads(production: Pick<ProductionBundle, "chapters"> | null, chapterId?: string): boolean {
+  if (chapterId === undefined) return bookHasTakes(production);
+  const chapter = production?.chapters.find((candidate) => candidate.id === chapterId);
+  return chapter !== undefined && !chapter.retired && chapter.audiobook !== undefined && "takes" in chapter.audiobook && chapter.audiobook.takes > 0;
 }
 
 /** What moves the plan while the player is open: each chapter's record and the runs reading it. */
@@ -101,6 +120,13 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
     return () => clearTimeout(timer);
   }, [worldId, productionId, connection, stamp]);
 
+  /** The book takes the app's one read: the previous owner stopped, the dock's clip let go. */
+  const claimBook = () => {
+    claimRead(READ_KEY, () => handle.current?.pause());
+    clearQueue();
+    dismissPlayback();
+  };
+
   // A modal from the moment it opens, before its plan is answered (codex on PR 1493): focus moves
   // in at once and returns to what opened it, Tab and Shift+Tab stay inside while it is up, and
   // Esc closes it while it waits — past the player's last control is the screen behind it.
@@ -108,8 +134,10 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
     const element = shell.current;
     if (!element) return;
     // One voice at a time: a chapter read or a clip in the dock stops as the book opens (codex on PR 1493).
-    clearQueue();
-    dismissPlayback();
+    // A read still being made would queue its first piece over the book when it lands, so the book
+    // claims the one read the app has, which stops the read's owner outright (codex on PR 1495),
+    // and a read started while the book plays pauses the book.
+    claimBook();
     const opener = element.ownerDocument.activeElement as HTMLElement | null;
     const trap = (event: KeyboardEvent) => {
       if (event.key === "Escape" && handle.current === null) {
@@ -119,11 +147,18 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
       }
       if (event.key !== "Tab") return;
       const shown = (el: HTMLElement) => el.closest("[hidden]") === null && (typeof el.checkVisibility !== "function" || el.checkVisibility());
-      const focusable = [element, ...[...element.querySelectorAll<HTMLElement>("button:not([disabled]), [tabindex]:not([tabindex='-1'])")].filter(shown)];
+      // The boundary is the first and last control Tab actually reaches: the shell itself is out of
+      // the sequence (tabIndex -1), so with it as the first, Shift+Tab left the modal (codex on PR 1495).
+      const focusable = [...element.querySelectorAll<HTMLElement>("button:not([disabled]), [tabindex]:not([tabindex='-1'])")].filter(shown);
+      const at = element.ownerDocument.activeElement;
+      if (focusable.length === 0) {
+        event.preventDefault();
+        element.focus();
+        return;
+      }
       const firstEl = focusable[0]!;
       const last = focusable[focusable.length - 1]!;
-      const at = element.ownerDocument.activeElement;
-      if (event.shiftKey && (at === firstEl || !element.contains(at))) {
+      if (event.shiftKey && (at === firstEl || at === element || !element.contains(at))) {
         event.preventDefault();
         last.focus();
       } else if (!event.shiftKey && (at === last || !element.contains(at))) {
@@ -135,6 +170,7 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
     element.focus();
     return () => {
       element.removeEventListener("keydown", trap);
+      releaseRead(READ_KEY);
       handle.current?.destroy();
       handle.current = null;
       if (opener && opener.isConnected && typeof opener.focus === "function") opener.focus();
@@ -162,34 +198,45 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
       autoplay: true,
       continueFirst: chapterId === undefined,
       onClose: () => closing.current(),
+      // Every play or resume — a press, a key, the lock screen — takes the voice back from a read
+      // that took it meanwhile (codex on PR 1499).
+      onPlay: () => claimBook(),
     });
     element.focus();
     // The options are read once, at the mount; the plan is the one thing pushed in after.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan, slug]);
 
+  // Drawn on the body: the door's title row enters with fy-fade-up, and that transformed ancestor
+  // turned this fixed, full-window player into a transparent box over the row.
   return (
-    <div ref={shell} className="fy-abplayer" data-testid="audiobook-player" role="dialog" aria-modal="true" aria-label="Audiobook" tabIndex={-1} style={{ position: "fixed", inset: 0, zIndex: 60 }}>
-      <div ref={host} style={{ position: "absolute", inset: 0 }} />
-      {!ready && (
-        <div className="fy-abplayer__wait" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 12, background: "var(--media-overlay-bg)", color: "var(--media-overlay-fg)" }}>
-          <span className="fy-mono">{refused ?? "opening…"}</span>
-          <Button variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-      )}
-    </div>
+    <BodyLayer>
+      <div ref={shell} className="fy-abplayer" data-testid="audiobook-player" role="dialog" aria-modal="true" aria-label="Audiobook" tabIndex={-1} style={{ position: "fixed", inset: 0, zIndex: 60 }}>
+        <div ref={host} style={{ position: "absolute", inset: 0 }} />
+        {!ready && (
+          <div className="fy-abplayer__wait" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 12, background: "var(--media-overlay-bg)", color: "var(--media-overlay-fg)" }}>
+            <span className="fy-mono">{refused ?? "opening…"}</span>
+            <Button variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        )}
+      </div>
+    </BodyLayer>
   );
 }
 
-/** `Listen` (design turn 186, R-57): on the audiobook door and on a chapter, the book as a listener hears it. */
+/**
+ * `Listen` (design turn 186, R-66): on the audiobook door and on a chapter, the book as a listener
+ * hears it — the head's one primary, with a play icon, once there is something to hear there.
+ */
 export function ListenButton({ worldId, production, chapterId, className }: { worldId: string; production: ProductionBundle; chapterId?: string; className?: string }) {
   const [open, setOpen] = useState(false);
   const connection = useStore().connection;
   return (
     <>
-      <Button variant="ghost" className={className} disabled={!bookHasTakes(production) || connection !== "open"} onClick={() => setOpen(true)} data-testid="audiobook-listen">
+      <Button variant={listenLeads(production, chapterId) ? "primary" : "ghost"} className={className} disabled={!bookHasTakes(production) || connection !== "open"} onClick={() => setOpen(true)} data-testid="audiobook-listen">
+        <Play size={14} />
         Listen
       </Button>
       {open && <AudiobookPlayerView worldId={worldId} production={production} {...(chapterId !== undefined ? { chapterId } : {})} onClose={() => setOpen(false)} />}

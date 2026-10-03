@@ -4,6 +4,8 @@ import type { ProductionBundle } from "./client-state.js";
 import type { ManifestModel } from "./manifest.js";
 import { PROVIDERS, type ProviderInfo } from "./provider.js";
 import type { Sheet } from "./world.js";
+// A cycle by design: designed-voice reads voice.js only inside its functions, never at load.
+import { voiceDisplayLabel } from "./designed-voice.js";
 
 /**
  * Voice (SPEC-011): the unified catalogue, honest attribute-overlap matching (D5, D6), preview
@@ -744,12 +746,12 @@ export function narratorLabelFor(
   // A choice that is not what reads is said, never swapped in silence: `Ife's voice unavailable
   // · reading with George` (issue 1215 follow-up) — a key withdrawn or a voice gone otherwise
   // looks like the narrator changing by itself.
-  const instead = (reading: string) => (stored === null ? reading : `${stored.label ?? stored.voiceId} unavailable · reading with ${reading}`);
+  const instead = (reading: string) => (stored === null ? reading : `${voiceDisplayLabel(stored)} unavailable · reading with ${reading}`);
   if (spoke !== undefined) {
-    if (chosen !== null && spoke.provider === chosen.provider && spoke.voiceId === chosen.voiceId) return chosen.label ?? chosen.voiceId;
-    return instead(spoke.provider === DEFAULT_NARRATOR.provider && spoke.voiceId === DEFAULT_NARRATOR.voiceId ? DEFAULT_NARRATOR.label : spoke.voiceId);
+    if (chosen !== null && spoke.provider === chosen.provider && spoke.voiceId === chosen.voiceId) return voiceDisplayLabel(chosen);
+    return instead(spoke.provider === DEFAULT_NARRATOR.provider && spoke.voiceId === DEFAULT_NARRATOR.voiceId ? DEFAULT_NARRATOR.label : voiceDisplayLabel(spoke));
   }
-  return chosen === null ? instead(DEFAULT_NARRATOR.label) : (chosen.label ?? chosen.voiceId);
+  return chosen === null ? instead(DEFAULT_NARRATOR.label) : voiceDisplayLabel(chosen);
 }
 
 /**

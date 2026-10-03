@@ -130,7 +130,7 @@ afterEach(() => {
   session.positions = [];
 });
 
-describe("the book, not a chapter (186a, R-58)", () => {
+describe("the book, not a chapter (186a, R-67)", () => {
   it("plays a chapter's takes back to back: the next is waiting in the other element when one ends", () => {
     const p = mount();
     assert.equal(p.root.getAttribute("data-mode"), "playing");
@@ -218,6 +218,23 @@ describe("what codex found on PR 1493", () => {
     assert.ok(p.audios().every((audio) => !audio.hasAttribute("src")), "the stale take is let go");
   });
 
+  it("keeps the listener's place through a plan with nothing to play, and returns to it (codex on PR 1495)", () => {
+    const p = mount({ chapterId: "ink" });
+    p.end();
+    p.at(3); // 0:07, three seconds into c2.p2
+    p.handle.update([CH3]);
+    p.handle.update(BOOK);
+    assert.match(p.text(".abp-chap"), /Chapter 02/);
+    assert.equal(p.text(".abp-now"), "0:07");
+  });
+
+  it("pauses when another read takes the app's voice", () => {
+    const p = mount();
+    assert.ok(p.playingAudio());
+    p.handle.pause();
+    assert.ok(p.playingAudio() === null);
+  });
+
   it("lands on the last chapter with takes before the place when none follows it", () => {
     const p = mount({ chapterId: "hand" });
     p.handle.update([CH1, CH2, CH3, { ...CH4, state: "not read", seconds: 0, blocks: [], gaps: [{ at: 0, from: 1, to: 2 }] }]);
@@ -225,7 +242,7 @@ describe("what codex found on PR 1493", () => {
   });
 });
 
-describe("the transport (R-59)", () => {
+describe("the transport (R-68)", () => {
   it("seeks back 15 and forward 30, steps chapters, and keys play, pause and seek", () => {
     const p = mount();
     p.end();
@@ -295,7 +312,7 @@ describe("the transport (R-59)", () => {
   });
 });
 
-describe("the listener's place (R-62)", () => {
+describe("the listener's place (R-71)", () => {
   it("keeps the place by block and offset, so a return lands in the same words after earlier blocks are made", () => {
     const first = mount({ chapterId: "ink" });
     first.end();
@@ -352,7 +369,7 @@ describe("the listener's place (R-62)", () => {
   });
 });
 
-describe("the lock screen and a headset (R-62)", () => {
+describe("the lock screen and a headset (R-71)", () => {
   it("names the chapter with the picture of the moment, and drives the player from the session's buttons", () => {
     const p = mount();
     assert.equal(session.metadata?.title, "Chapter 01 · Neap");
@@ -375,7 +392,7 @@ describe("the lock screen and a headset (R-62)", () => {
   });
 });
 
-describe("one player, two homes (R-57)", () => {
+describe("one player, two homes (R-66)", () => {
   it("is the same text the exporter inlines", () => {
     assert.match(AUDIOBOOK_PLAYER_SOURCE, /export function mountAudiobookPlayer\(root, options\)/);
     assert.doesNotMatch(AUDIOBOOK_PLAYER_SOURCE, /^\s*import\s/m,"no imports: it runs in a page with nothing else on it");

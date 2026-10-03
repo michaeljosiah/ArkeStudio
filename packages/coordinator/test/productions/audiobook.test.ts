@@ -24,7 +24,7 @@ import {
 import { Coordinator } from "../../src/coordinator.js";
 import { geminiSpeechModel } from "@arke-studio/providers";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
-import { audiobookBookPath, audiobookPath, legacyAudiobookPath } from "../../src/productions/audiobook.js";
+import { assignReaders, audiobookBookPath, audiobookPath, legacyAudiobookPath } from "../../src/productions/audiobook.js";
 import { checkDirection, directionPlan, renderParts } from "../../src/voice/direction.js";
 import { verifyDirections, type DirectionDeriver, type DirectableBlock } from "../../src/productions/audiobook-direction.js";
 import { bookPriceLines } from "../../src/productions/audiobook-book.js";
@@ -1706,6 +1706,23 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       ],
       "Maren's Kokoro voice is her own line, not the narrator's; a speaker with no sheet is stood in for by name, never folded into the narrator's words",
     );
+  });
+
+  it("a designed voice is named by the world, never by its target, on the speaker's reader and the price's line (owner, 2026-10-03)", () => {
+    // The door's Cast read `Ife / designed:dv_…:1 · Google · cloud · 16 blocks`: the sheet's
+    // voice carried no label, and the target stood in for one.
+    const target = "designed:dv_01M3WMVV9W7J85PPRYQJ0YB26G:1";
+    const designedVoices = [{ id: "dv_01M3WMVV9W7J85PPRYQJ0YB26G", revision: 1, name: "Ife's voice" }];
+    const narrator = { provider: "kokoro", model: KOKORO.id, voiceId: "bm_george", label: "George" };
+    const ife = { id: "ife", name: "Ife", voice: { provider: "google", model: "gemini-3.8-flash-tts", voiceId: target, assignedAtVersion: 1 } } as unknown as Parameters<typeof assignReaders>[3][number];
+    const [planned] = assignReaders([{ key: "p0.0", paragraph: 0, text: "“Wait,” said Ife.", speaker: "Ife", sheet: "ife" }], "cast", narrator, [ife], [], null, undefined, new Set(), {}, {}, designedVoices);
+    assert.equal(planned?.assigned.voiceId, target, "the target still addresses the voice");
+    assert.equal(planned?.assigned.label, "Ife's voice");
+    type Line = Parameters<typeof bookPriceLines>[1][number];
+    const unlabelled = { provider: "google", model: "gemini-3.8-flash-tts", voiceId: target };
+    const line = { block: { key: "p0.0", paragraph: 0, text: "“Wait,” said Ife.", speaker: "Ife" }, reader: unlabelled, local: false, text: "“Wait,” said Ife.", sheet: "ife" } as unknown as Line;
+    const [priced] = bookPriceLines(narrator, [line], [line], () => 1, () => "Ife", { designedVoices });
+    assert.equal(priced?.label, "Ife's voice");
   });
 
   it("switching the reading re-checks every standing direction against its new reader, holding what that row cannot carry and saying how many (R-13, R-47)", () =>

@@ -12,6 +12,7 @@ import {
   type Sheet,
   type WorldBundle,
   supportedDeliveries,
+  voiceDisplayLabel,
 } from "@arke-studio/contracts";
 import { Button } from "../../components/ui.js";
 import { dismissPlayback, playClip, playbackSnapshot } from "../../lib/audio.js";
@@ -225,7 +226,7 @@ export function GenerateLineSheet({ world, production, scene, sheet, model, line
       <div className="fy-linedoor__head"><span>Generate a line</span><button type="button" className="fy-linedoor__close" aria-label="Close" onClick={onClose}>×</button></div>
       <LineChoice lines={lines} value={lineId} disabled={busy} onChange={setLineId} />
       {line ? <blockquote className="fy-linedoor__text">{line.text}</blockquote> : <p className="fy-linedoor__note">no line to read</p>}
-      <p className="fy-linedoor__note">{sheet.voice?.label ?? sheet.voice?.voiceId} · {model.displayName}</p>
+      <p className="fy-linedoor__note">{sheet.voice === undefined ? "" : voiceDisplayLabel(sheet.voice, world)} · {model.displayName}</p>
       {quote === null ? (
         <div className="fy-linedoor__actions">
           <Button size="sm" disabled={busy || !line || !hash || !sheet.voice} onClick={() => {

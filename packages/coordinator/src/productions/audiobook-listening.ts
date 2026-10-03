@@ -1,6 +1,8 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  chapterMix,
+  hasTiming,
   audiobookTextHash,
   DEFAULT_NARRATOR,
   ESTIMATED_CHARACTERS_PER_SECOND,
@@ -19,9 +21,12 @@ import {
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { planAudiobook, readAudiobookBook, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
+import { renderChapterMix } from "./audiobook-mix.js";
+import { chapterTiming } from "./audiobook-timing.js";
+import type { FfmpegRunner } from "../takes/export.js";
 
 /**
- * The book as a listener hears it (design turn 186, SPEC-047 R-57..R-62): every chapter of the
+ * The book as a listener hears it (design turn 186, SPEC-047 R-66..R-71): every chapter of the
  * production in order, retired ones left out, each with the takes that say its words now — the
  * rest are the gaps they are — and its pictures on the chapter's clock. The player in the app
  * and the package both play this plan; nothing here writes, and nothing is asked of a provider.
@@ -72,7 +77,7 @@ async function usablePictures(store: WorldStore, pictures: Readonly<Record<strin
   return usable;
 }
 
-/** The book's cover (R-60): the world's key art, when it is on the shelf. */
+/** The book's cover (R-69): the world's key art, when it is on the shelf. */
 export async function bookCover(store: WorldStore): Promise<string | null> {
   const keyArt = store.getBundle().keyArt;
   return keyArt !== null && (await onShelf(store, keyArt)) ? keyArt : null;
@@ -88,7 +93,28 @@ async function anyNarrator(store: WorldStore, productionId: string): Promise<Aud
   return book !== null && book !== "unreadable" && book.narrator !== undefined ? book.narrator : { ...DEFAULT_NARRATOR };
 }
 
-export async function audiobookListening(store: WorldStore, productionId: string): Promise<AudiobookListening> {
+/**
+ * A chapter with timing as the player hears it (design turn 187, R-85): its one mix, rendered
+ * by the renderer the chapter's Play uses and kept in the cache under its plan's name, and the
+ * blocks' places on that mix's clock. Null for a chapter with none, or whose mix cannot be made
+ * here — the takes then play back to back, as before timing.
+ */
+async function timedListening(store: WorldStore, productionId: string, plan: AudiobookPlan, ffmpeg: FfmpegRunner | undefined): Promise<{ bars: Array<{ key: string; at: number; seconds: number }>; seconds: number; mix: { file: string; seconds: number } } | null> {
+  const record = plan.record === "unreadable" ? null : plan.record;
+  if (!hasTiming(record)) return null;
+  try {
+    const timing = chapterTiming(store, plan, "skip");
+    const mix = chapterMix(timing);
+    if (mix.voices.length === 0) return null;
+    const rendered = await renderChapterMix(store.dir, productionId, plan.chapter.file, mix, ffmpeg !== undefined ? { ffmpeg } : {});
+    const bars = timing.bars.filter((bar) => bar.kind === "block" && bar.made).map((bar) => ({ key: bar.key, at: bar.at, seconds: bar.seconds }));
+    return { bars, seconds: rendered.seconds, mix: { file: rendered.file, seconds: rendered.seconds } };
+  } catch {
+    return null;
+  }
+}
+
+export async function audiobookListening(store: WorldStore, productionId: string, options: { ffmpeg?: FfmpegRunner } = {}): Promise<AudiobookListening> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const cover = await bookCover(store);
@@ -99,20 +125,21 @@ export async function audiobookListening(store: WorldStore, productionId: string
     try {
       plan = await planAudiobook(store, productionId, summary.id, { narrator });
     } catch {
-      // A chapter that cannot be read is listed and held, never skipped (R-58).
+      // A chapter that cannot be read is listed and held, never skipped (R-67).
       chapters.push({ chapterId: summary.id, order: summary.order, title: summary.title, state: "not read", seconds: 0, blocks: [], gaps: [], pictures: [], opening: cover });
       continue;
     }
     const record = plan.record === "unreadable" ? null : plan.record;
     const pictures = record?.pictures ?? {};
     const usable = await usablePictures(store, pictures);
-    chapters.push(listeningChapter({ chapterId: summary.id, order: summary.order, title: summary.title, blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file) }));
+    const timed = await timedListening(store, productionId, plan, options.ffmpeg);
+    chapters.push(listeningChapter({ chapterId: summary.id, order: summary.order, title: summary.title, blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file), ...(timed !== null ? { timed } : {}) }));
   }
   return { productionId, title: production.meta.title, cover, chapters };
 }
 
 /**
- * A picture set on a block, or taken off (turn 186c, R-60): only a picture the world holds — one
+ * A picture set on a block, or taken off (turn 186c, R-69): only a picture the world holds — one
  * `worldImageReferences` lists, as the panel offers it — written into the chapter's record keyed
  * by the block, with the block's words so it can follow them, through the record's own lane.
  *

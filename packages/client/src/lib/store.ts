@@ -679,12 +679,42 @@ export function subscribeBriefEnhanced(listener: (answer: BriefEnhanced) => void
   return () => briefEnhancedListeners.delete(listener);
 }
 
+/** The audiobook's package, and the world's packages (design turn 186e): answered to the ask that named them. */
+export type AudiobookExported = Extract<DomainEvent, { type: "audiobook.exported" }>;
+const audiobookExportedListeners = new Set<(answer: AudiobookExported) => void>();
+export function subscribeAudiobookExported(listener: (answer: AudiobookExported) => void): () => void {
+  audiobookExportedListeners.add(listener);
+  return () => audiobookExportedListeners.delete(listener);
+}
+export type WebPackagesListed = Extract<DomainEvent, { type: "web-packages.listed" }>;
+const webPackagesListeners = new Set<(answer: WebPackagesListed) => void>();
+export function subscribeWebPackages(listener: (answer: WebPackagesListed) => void): () => void {
+  webPackagesListeners.add(listener);
+  return () => webPackagesListeners.delete(listener);
+}
+
 /** The book as a listener hears it (design turn 186): answered to the ask that named it. */
 export type AudiobookListeningAnswer = Extract<DomainEvent, { type: "audiobook.listening" }>;
 const audiobookListeningListeners = new Set<(answer: AudiobookListeningAnswer) => void>();
 export function subscribeAudiobookListening(listener: (answer: AudiobookListeningAnswer) => void): () => void {
   audiobookListeningListeners.add(listener);
   return () => audiobookListeningListeners.delete(listener);
+}
+
+/** A chapter's mix rendered (design turn 187): answered to the ask that named it. */
+export type AudiobookMixAnswer = Extract<DomainEvent, { type: "audiobook.mix" }>;
+const audiobookMixListeners = new Set<(answer: AudiobookMixAnswer) => void>();
+export function subscribeAudiobookMix(listener: (answer: AudiobookMixAnswer) => void): () => void {
+  audiobookMixListeners.add(listener);
+  return () => audiobookMixListeners.delete(listener);
+}
+
+/** Arke's timing for a chapter (design turn 187b): answered to the ask that named it. */
+export type AudiobookTimingProposalAnswer = Extract<DomainEvent, { type: "audiobook.timing-proposal" }>;
+const audiobookTimingProposalListeners = new Set<(answer: AudiobookTimingProposalAnswer) => void>();
+export function subscribeAudiobookTimingProposal(listener: (answer: AudiobookTimingProposalAnswer) => void): () => void {
+  audiobookTimingProposalListeners.add(listener);
+  return () => audiobookTimingProposalListeners.delete(listener);
 }
 
 export type BenchSubjectOpened = Extract<DomainEvent, { type: "bench.subject-opened" }>;
@@ -1603,6 +1633,18 @@ function handleFrame(json: string): void {
     }
     if (event.type === "audiobook.listening") {
       for (const listener of audiobookListeningListeners) listener(event);
+    }
+    if (event.type === "audiobook.exported") {
+      for (const listener of audiobookExportedListeners) listener(event);
+    }
+    if (event.type === "web-packages.listed") {
+      for (const listener of webPackagesListeners) listener(event);
+    }
+    if (event.type === "audiobook.mix") {
+      for (const listener of audiobookMixListeners) listener(event);
+    }
+    if (event.type === "audiobook.timing-proposal") {
+      for (const listener of audiobookTimingProposalListeners) listener(event);
     }
     if (event.type === "bench.subject-opened") {
       for (const listener of benchSubjectOpenedListeners) listener(event);
@@ -5279,6 +5321,48 @@ export function setAudiobookPicture(worldId: string, productionId: string, chapt
   return send({ kind: "set-audiobook-picture", worldId, productionId, chapterFile, block, picture, requestId }) ? requestId : null;
 }
 
+/** One block's timing (design turn 187, R-81): answered as `audiobook.record` under the id returned, or refused there. */
+export function setAudiobookTiming(worldId: string, productionId: string, chapterFile: string, block: string, timing: import("@arke-studio/contracts").BlockTimingInput): string | null {
+  const requestId = ulid();
+  return send({ kind: "set-audiobook-timing", worldId, productionId, chapterFile, block, timing, requestId }) ? requestId : null;
+}
+
+/** A reaction under a block set, changed by its key, or taken away with null (design turn 187, R-83). */
+export function setAudiobookReaction(worldId: string, productionId: string, chapterFile: string, key: string | null, reaction: import("@arke-studio/contracts").ReactionInput | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "set-audiobook-reaction", worldId, productionId, chapterFile, key, reaction, requestId }) ? requestId : null;
+}
+
+/** A bed from one block to another set, changed or taken away (R-84). */
+export function setAudiobookBed(worldId: string, productionId: string, chapterFile: string, key: string | null, bed: import("@arke-studio/contracts").BedInput | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "set-audiobook-bed", worldId, productionId, chapterFile, key, bed, requestId }) ? requestId : null;
+}
+
+/** A sound at a block's start set, changed or taken away (R-84). */
+export function setAudiobookSound(worldId: string, productionId: string, chapterFile: string, key: string | null, sound: import("@arke-studio/contracts").BlockSoundInput | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "set-audiobook-sound", worldId, productionId, chapterFile, key, sound, requestId }) ? requestId : null;
+}
+
+/** Propose timing (design turn 187b, R-86): answered as `audiobook.timing-proposal` under the id returned. */
+export function proposeAudiobookTiming(worldId: string, productionId: string, chapterFile: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "propose-audiobook-timing", worldId, productionId, chapterFile, requestId }) ? requestId : null;
+}
+
+/** A proposal accepted whole (R-86): answered as `audiobook.record` under the id returned. */
+export function acceptAudiobookTiming(worldId: string, productionId: string, chapterFile: string, proposal: import("@arke-studio/contracts").TimingProposal): string | null {
+  const requestId = ulid();
+  return send({ kind: "accept-audiobook-timing", worldId, productionId, chapterFile, proposal, requestId }) ? requestId : null;
+}
+
+/** The chapter as it sounds with its timing, or a window of it (R-85): answered as `audiobook.mix` under the id returned. */
+export function renderAudiobookMix(worldId: string, productionId: string, chapterFile: string, window?: { from: number; to: number }): string | null {
+  const requestId = ulid();
+  return send({ kind: "render-audiobook-mix", worldId, productionId, chapterFile, requestId, ...(window !== undefined ? { window } : {}) }) ? requestId : null;
+}
+
 /** `Direct this chapter` (SPEC-047 R-10): the model asked for a direction per block; the card comes back as a run's result. */
 export function directChapter(worldId: string, productionId: string, chapterFile: string, also: { cast?: boolean; chapterNote?: boolean; speakerNotes?: boolean } = {}): boolean {
   return send({
@@ -5415,8 +5499,20 @@ export function exportManuscript(worldId: string, productionId: string, format: 
   return send({ kind: "export-manuscript", worldId, productionId, format, ...(language !== undefined && format === "epub" ? { language } : {}) });
 }
 
-export function openExportsFolder(worldId: string): void {
-  send({ kind: "open-exports-folder", worldId });
+export function openExportsFolder(worldId: string, dir?: string): void {
+  send({ kind: "open-exports-folder", worldId, ...(dir !== undefined ? { dir } : {}) });
+}
+
+/** The audiobook as the player (design turn 186e): answered as `audiobook.exported` under the id returned. */
+export function exportAudiobookPlayer(worldId: string, productionId: string, exportId?: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "export-audiobook-player", worldId, productionId, requestId, ...(exportId !== undefined ? { exportId } : {}) }) ? requestId : null;
+}
+
+/** The world's web packages (design turn 186e): answered as `web-packages.listed` under the id returned. */
+export function listWebPackages(worldId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "list-web-packages", worldId, requestId }) ? requestId : null;
 }
 
 /** Ask the host for a `.docx` and read it; the answer arrives by this request id, and nothing is written until the import press. */

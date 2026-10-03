@@ -13,7 +13,7 @@ import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
- * Pictures on blocks (design turn 186c, SPEC-047 R-60): a block's panel gains Picture — chosen
+ * Pictures on blocks (design turn 186c, SPEC-047 R-69): a block's panel gains Picture — chosen
  * from what the world holds by tab, or generated through the Bench — and the margin shows the
  * picture and when it starts, how long it holds, and a hold under twenty seconds flagged.
  */

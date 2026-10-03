@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AudiobookListeningSchema,
@@ -16,10 +17,11 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import { AUDIOBOOK_PICTURES_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { audiobookBookPath, planAudiobook, updateAudiobook } from "../../src/productions/audiobook.js";
 import type { WorldStore } from "../../src/world/store.js";
+import type { FfmpegRunner } from "../../src/takes/export.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 /**
- * The book as a listener hears it (design turn 186, SPEC-047 R-57..R-64): the plan the player
+ * The book as a listener hears it (design turn 186, SPEC-047 R-66..R-73): the plan the player
  * plays — every chapter in order, a chapter read in part playing its made blocks around its gaps,
  * a chapter not read listed and held — and a picture set on a block, written into the chapter's
  * record past the build before pictures.
@@ -58,7 +60,7 @@ function wav(): Uint8Array {
 type Listening = Extract<DomainEvent, { type: "audiobook.listening" }>;
 type RecordEvent = Extract<DomainEvent, { type: "audiobook.record" }>;
 
-async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void>; schemaVersion: () => number; store: () => WorldStore }) => Promise<void>): Promise<void> {
+async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void>; schemaVersion: () => number; store: () => WorldStore }) => Promise<void>, options: { ffmpeg?: FfmpegRunner } = {}): Promise<void> {
   const { root, worldDir } = await makeTempRoot();
   await mkdir(join(worldDir, "productions", LEDGER, ".voices"), { recursive: true });
   const provider = new FsWorldProvider(root, { clock: () => CLOCK });
@@ -75,6 +77,7 @@ async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; s
     manifest: { manifestVersion: 1, generated: "2026-10-03", models: [KOKORO] },
     observeEvent: (event) => events.push(event),
     mediaProbe: { durationSec: async () => 3, info: async () => ({ durationSec: 3, hasAudio: true }) },
+    ...(options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {}),
     voice: {
       sidecar: {
         health: async () => ({ engineStatus: { kokoro: { ready: true } } }),
@@ -214,5 +217,96 @@ describe("the book as a listener hears it (turn 186)", () => {
       await send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p999.0", picture: { file: "world-art.png", source: "world" } });
       const answer = events.filter((e): e is RecordEvent => e.type === "audiobook.record").at(-1);
       assert.match(answer?.refused ?? "", /no longer in the chapter/);
+    }));
+});
+
+type Exported = Extract<DomainEvent, { type: "audiobook.exported" }>;
+type Packages = Extract<DomainEvent, { type: "web-packages.listed" }>;
+async function exportPlayer(send: (message: ClientMessage) => Promise<void>, events: DomainEvent[]): Promise<Exported["result"]> {
+  await send({ kind: "export-audiobook-player", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST });
+  const answer = events.filter((e): e is Exported => e.type === "audiobook.exported").at(-1);
+  assert.ok(answer, "the export is answered");
+  return answer.result;
+}
+
+describe("the audiobook as the player (turn 186e)", () => {
+  it("packages only the chapters read whole, the same player, the takes and the pictures, and lists it beside the other packages", () =>
+    withHarness(async ({ worldDir, events, send }) => {
+      await read(send, "01-neap");
+      await read(send, "02-the-same-ink", ["title", "p0.0"]);
+      await send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p1.0", picture: { file: "artifacts/board-v2.png", source: "scenes" }, requestId: REQUEST });
+      const result = await exportPlayer(send, events);
+      assert.ok(result.ok, JSON.stringify(result));
+      assert.equal(result.chapters, 1, "the chapter read in part stays out");
+      assert.equal(result.pictures, 2, "the cover and the one picture, once each");
+      assert.equal(result.joined, false, "no ffmpeg here: the takes go as they were made");
+      const dir = join(worldDir, result.dir);
+      const page = await readFile(join(dir, "player.html"), "utf8");
+      assert.match(page, /function mountAudiobookPlayer\(root, options\)/, "the app's own player, inlined");
+      const manifest = JSON.parse(await readFile(join(dir, "manifest.json"), "utf8")) as { kind: string; chapters: Array<{ id: string; audio: Array<{ src: string }>; blocks: unknown[]; pictures: Array<{ src: string }>; opening: string | null }>; files: Array<{ file: string }> };
+      assert.equal(manifest.kind, "audiobook");
+      assert.deepEqual(manifest.chapters.map((chapter) => chapter.id), ["neap"]);
+      const neap = manifest.chapters[0]!;
+      assert.equal(neap.audio.length, neap.blocks.length, "a piece a take");
+      assert.ok(neap.audio.every((piece) => existsSync(join(dir, piece.src))));
+      assert.equal(neap.pictures.length, 1);
+      assert.ok(neap.opening !== null && existsSync(join(dir, neap.opening)), "the cover at the start");
+      assert.equal(existsSync(join(worldDir, ".staging", "audiobook-export")) ? (await readdir(join(worldDir, ".staging", "audiobook-export"))).length : 0, 0, "nothing left staged");
+
+      await send({ kind: "list-web-packages", worldId: WORLD_ID, requestId: REQUEST });
+      const listed = events.filter((e): e is Packages => e.type === "web-packages.listed").at(-1);
+      assert.deepEqual(listed?.packages.map((entry) => [entry.kind, entry.productionId, entry.dir]), [["audiobook", LEDGER, result.dir]]);
+    }));
+
+  it("joins each chapter's takes into one file where this machine has ffmpeg", () => {
+    const calls: string[][] = [];
+    const ffmpeg: FfmpegRunner = {
+      slateFont: "",
+      run: async (args) => {
+        calls.push(args);
+        await writeFile(args[args.length - 1]!, "audio");
+      },
+    };
+    return withHarness(async ({ worldDir, events, send }) => {
+      await read(send, "01-neap");
+      const result = await exportPlayer(send, events);
+      assert.ok(result.ok, JSON.stringify(result));
+      assert.equal(result.joined, true);
+      const manifest = JSON.parse(await readFile(join(worldDir, result.dir, "manifest.json"), "utf8")) as { chapters: Array<{ audio: Array<{ src: string; at: number }> }> };
+      assert.deepEqual(manifest.chapters[0]!.audio.map((piece) => [piece.src, piece.at]), [["media/chapter-01.m4a", 0]]);
+      const join_ = calls.find((args) => args.includes("concat"));
+      assert.ok(join_, "the takes joined back to back by the concat demuxer, nothing added");
+    }, { ffmpeg });
+  });
+
+  it("is registered with the exports, so shutdown and cancel stop a join in progress (codex on PR 1498)", () => {
+    let started!: () => void;
+    const joining = new Promise<void>((resolve) => (started = resolve));
+    const ffmpeg: FfmpegRunner = {
+      slateFont: "",
+      run: (args, _progress, signal) => {
+        if (!args.includes("concat") && !args.some((arg) => arg.endsWith(".wav"))) return writeFile(args[args.length - 1]!, "audio");
+        started();
+        return new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true }));
+      },
+    };
+    return withHarness(async ({ worldDir, events, send }) => {
+      await read(send, "01-neap");
+      const exportId = "ab_01J8G0000000000000000000X1";
+      const running = send({ kind: "export-audiobook-player", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, exportId });
+      await joining;
+      await send({ kind: "cancel-export", worldId: WORLD_ID, exportId });
+      await running;
+      const answer = events.filter((e): e is Exported => e.type === "audiobook.exported").at(-1);
+      assert.deepEqual(answer?.result, { ok: false, blockers: ["the export was cancelled"] });
+      assert.equal(existsSync(join(worldDir, "exports", `audiobook-${LEDGER}-${exportId}`)), false, "nothing named");
+    }, { ffmpeg });
+  });
+
+  it("refuses a book with no chapter read whole", () =>
+    withHarness(async ({ events, send }) => {
+      await read(send, "01-neap", ["title"]);
+      const result = await exportPlayer(send, events);
+      assert.deepEqual(result, { ok: false, blockers: ["no chapter is read whole yet"] });
     }));
 });

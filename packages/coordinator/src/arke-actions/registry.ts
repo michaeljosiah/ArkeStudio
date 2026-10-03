@@ -540,6 +540,18 @@ const CLIENT_COMMAND_METADATA = {
   // The book as a listener hears it, and a picture on a block (turn 186): a read, and a command on the record.
   "open-audiobook-listening": readOnly(QUERY),
   "set-audiobook-picture": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
+  // Timing on the blocks (turn 187): a command on the record, and the chapter's mix rendered into the cache.
+  "set-audiobook-timing": action("production", "command", "voice", "authored-change", ["chapters"]),
+  "set-audiobook-reaction": action("production", "command", "voice", "authored-change", ["chapters"]),
+  "set-audiobook-bed": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
+  "set-audiobook-sound": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
+  "render-audiobook-mix": readOnly(QUERY),
+  // Propose timing (turn 187b): read off the chapter, nothing spent; its acceptance is a command on the record.
+  "propose-audiobook-timing": readOnly(QUERY),
+  "accept-audiobook-timing": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
+  // The audiobook's web package and the world's packages (turn 186e): a file the host writes, and a read.
+  "export-audiobook-player": action("production", "host-action", "export", "export", ["chapters", "artifacts", "exports"]),
+  "list-web-packages": readOnly(QUERY),
   "read-audiobook-book": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
   "stop-audiobook-book": action("production", "command", "voice", "external-network-action", ["chapters"]),
   "accept-direction": action("production", "command", "voice", "external-network-action", ["chapters"]),
