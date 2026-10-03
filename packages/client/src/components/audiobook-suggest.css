@@ -10,7 +10,8 @@
 .fy-sugg__ref--over img { opacity: 0.5; }
 .fy-sugg__make { padding: 0; border: 0; background: none; color: var(--foreground); font: inherit; font-size: var(--text-xs); text-decoration: underline; cursor: pointer; }
 .fy-sugg__look { border: 1px solid var(--border); border-radius: 12px; }
-.fy-sugg__look div { display: flex; gap: 12px; padding: 9px 12px; font-size: var(--text-sm); border-top: 1px solid var(--border); }
+.fy-sugg__look div { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 9px 12px; font-size: var(--text-sm); border-top: 1px solid var(--border); }
 .fy-sugg__look div:first-child { border-top: 0; }
-.fy-sugg__look b { width: 64px; flex: none; font-weight: 500; color: var(--muted-foreground); }
+.fy-sugg__look b { font-weight: 500; color: var(--muted-foreground); font-size: var(--text-xs); }
+.fy-sugg__look span { overflow-wrap: anywhere; }
 .fy-sugg__meta { display: flex; justify-content: space-between; gap: 12px; font-size: var(--text-xs); color: var(--muted-foreground); }

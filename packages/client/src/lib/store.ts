@@ -2073,6 +2073,12 @@ function handleFrame(json: string): void {
         audiobookAsks = { ...audiobookAsks, [event.requestId]: event.suggestion !== undefined ? { state: "suggested", suggestion: event.suggestion } : { state: "refused", refused: event.refused ?? "no picture suggested" } };
       }
     } else if (event.type === "audiobook.picture-made") {
+      // A picture on its block carries the record it stands in, taken as any record write is: a window that has it
+      // from this event alone shows the chip and the panel without waiting for a reopen.
+      if (event.record !== undefined) {
+        const recordKey = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+        audiobookRecords = { ...audiobookRecords, [recordKey]: { seq: (audiobookRecords[recordKey]?.seq ?? 0) + 1, requestId: event.requestId, record: event.record } };
+      }
       if (audiobookAsks[event.requestId] !== undefined && event.state !== "making") {
         audiobookAsks = { ...audiobookAsks, [event.requestId]: event.state === "made" ? { state: "made", ...(event.sessionId !== undefined ? { sessionId: event.sessionId } : {}) } : { state: "failed", reason: event.reason ?? "the picture was not made", ...(event.sessionId !== undefined ? { sessionId: event.sessionId } : {}) } };
       }

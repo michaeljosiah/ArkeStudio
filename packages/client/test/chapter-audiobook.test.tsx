@@ -251,6 +251,32 @@ function record(keys: readonly string[], texts: Record<string, string>): Chapter
   };
 }
 
+describe("a picture Arke made lands on its block in the open window (turn 191a)", () => {
+  it("shows the chip and the panel's picture from the picture's own word, without a reload", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    assert.equal(all(m, '[data-testid="audiobook-picture-chip"]').length, 0);
+    const made: ChapterAudiobook = {
+      ...record([], {}),
+      pictures: { "p1.0": { file: "world-art.png", source: "generated", textHash: audiobookTextHash(LINE), at: AT } },
+    };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.picture-made", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H9", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", block: "p1.0", state: "made", record: made }));
+    assert.equal(all(m, '[data-testid="audiobook-picture-chip"]').length, 1, "the margin's chip is there");
+    await act(async () => all(m, ".fy-ab__block")[2]!.click());
+    assert.ok(q(m, ".fy-ab__picture .fy-ab__picnow"), "and the panel shows the picture, with Remove");
+  });
+
+  it("and one made as part of Illustrate this chapter arrives as the record, one picture after another", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const picture = (text: string) => ({ file: "world-art.png", source: "generated" as const, textHash: audiobookTextHash(text), at: AT });
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", record: { ...record([], {}), pictures: { "p0.0": picture("Maren counted the bells.") } } }));
+    assert.equal(all(m, '[data-testid="audiobook-picture-chip"]').length, 1);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", record: { ...record([], {}), updatedAt: "2026-09-14T09:00:05.000Z", pictures: { "p0.0": picture("Maren counted the bells."), "p1.0": picture(LINE) } } }));
+    assert.equal(all(m, '[data-testid="audiobook-picture-chip"]').length, 2);
+  });
+});
+
 describe("the Audiobook view (turn 146)", () => {
   it("shows the saved prose as blocks — the title first, a scene break left out — with the editor hidden underneath", async () => {
     const m = await mount(inkbound());

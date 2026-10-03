@@ -15114,6 +15114,8 @@ export class Coordinator {
           const stamp = pictureLookFor(look, characters.map((person) => person.key));
           const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, stamp !== undefined ? { look: stamp } : {});
           this.refreshIfStillOpen(store);
+          // The record the picture now stands in goes to every window as any record write does: the margin's chip and the panel read it from there, and the card's own word is only that it is done.
+          this.emit({ at: at(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, requestId: msg.requestId, record });
           this.emit({ at: at(), type: "audiobook.picture-made", ...ids, state: "made", sessionId: made.sessionId, record });
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.picture-failed", chapter: chapter.file, block: msg.block, message: err instanceof Error ? err.message : String(err) });
