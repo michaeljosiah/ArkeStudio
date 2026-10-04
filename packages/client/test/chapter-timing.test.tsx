@@ -346,6 +346,8 @@ describe("beds, sounds and reactions on a block (turn 187d)", () => {
     const writes: unknown[] = [];
     const timing = timingOf(record());
     const m = await render(<ReactionsPanel record={record()} timing={timing} row={ROWS[4]!} speakers={[{ key: "narrator", name: "Narrator" }, { key: "tunde", name: "Tunde" }, { key: "ade", name: "Ade" }]} onReaction={(key, reaction) => writes.push([key, reaction])} locked={false} />);
+    // The form waits behind Add (design turn 194g), then its own Add writes.
+    await act(async () => q(m, "[data-testid=reaction-open]")!.click());
     await act(async () => q(m, "[data-testid=reaction-add]")!.click());
     assert.deepEqual(writes, [[null, { host: "p3.0", speaker: "tunde", sound: "laughs", offset: 0 }]]);
   });

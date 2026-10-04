@@ -36,7 +36,7 @@ const SCREENS = [
     controls: ["Every chat in this production"],
     notes: ["Turn 190e: attach, voice and the model in one row, the model a chip with a menu and no row of its own (<code>model-chip.tsx</code>, <code>composer.tsx</code>'s <code>modelControl</code>). PR 1527 built it on the production docks; it now serves the Develop page's production and episode chats, the founding chat and production setup as well.",
       "Where a chat has nowhere to remember a model the chip offers neither <code>Every chat in this production</code> nor a clear press, and picks for that chat alone. World Chat's model is the chat agent's, set in Settings, and the coordinator refuses a named model outside a production (issue 1403), so its chip names the model and has no menu.",
-      "Frames still drawn with the old controls, superseded by this rule: 153c's <code>Writing model</code> field on production setup, 171's <code>Story author</code> sheet that held the model on a phone (the header button stays for the context line), and 189's <code>Writing model</code> field. The scene dock has no model control (turn 143) and keeps none.", "Turn 195 restyles this chip's menu as a searchable picker (195b-g); the chip gains the provider's mark and, for models with variants, an effort chip beside it. World Chat's fixed label (195f) is unchanged."] },
+      "Frames still drawn with the old controls, superseded by this rule: 153c's <code>Writing model</code> field on production setup, 171's <code>Story author</code> sheet that held the model on a phone (the header button stays for the context line), and 189's <code>Writing model</code> field. The scene dock has no model control (turn 143) and keeps none."] },
   { group: "Arrive", screen: "Founding content review", frame: "189b", route: "#/new?draft=:id", status: "built", checked: "2026-10-03",
     controls: ["Continue a draft", "Approve this version", "Reject", "Request changes", "Check readiness"],
     notes: ["Issue 1324: review follows proposed content, readiness follows an approval. The two states are drawn together for the controls; pending content alone does not reveal readiness. Prior approved versions and exact digest approval remain available."] },
@@ -368,15 +368,6 @@ const SCREENS = [
   { group: "Around it", screen: "Audiobook view on a phone (story)", frame: "194h", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-10-04",
     controls: ["Listen", "Notes", "Everyone"],
     notes: ["Turn 194h: the view switch and one line of quiet presses with a menu for Direct and illustrate; Read and Listen held at the foot; the block's sheet with the same three tabs. Not built yet."] },
-  { group: "Around it", screen: "Model picker (every chat composer)", frame: "195b", route: "every chat composer", status: "drawn", checked: "2026-10-04",
-    controls: ["Search models", "Recent", "Manage models", "Every chat in this production"],
-    notes: ["Turn 195b-d: the chip opens a 430 popover upward, portalled to the body: search with a count, Recent (three, per device), the providers as groups in the harness's order, the current model ticked, the hovered or focused row's card on the side with room (Provider, Inputs, Reasoning, Context, Tools, Price, only what is known), an unusable model struck with its reason first in its card, and Manage models pinned at the foot. Reasoning, Price and provider names need catalogue additions (<code>providerName</code>, <code>reasoning</code>, <code>cost</code>). Not built yet."] },
-  { group: "Around it", screen: "Model effort control (every chat composer)", frame: "195e", route: "every chat composer", status: "drawn", checked: "2026-10-04",
-    controls: ["Effort", "High"],
-    notes: ["Turn 195e: a second quiet chip beside the model, only for a model that declares variants, remembered with the model choice and per model. Needs <code>variants</code> on the catalogue. Not built yet."] },
-  { group: "Around it", screen: "Model picker on a phone", frame: "195g", route: "every chat composer · below 600 wide", status: "drawn", checked: "2026-10-04",
-    controls: ["Search models", "Manage models"],
-    notes: ["Turn 195g: a bottom sheet with the same search, Recent and groups; the effort in its head; an info press opens a row's card in place; a struck model shows its reason under its name. Not built yet."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */

@@ -234,10 +234,10 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 :root {
   --content-max: var(--width-max);   /* a production page's content, beside the rail: 1080 */
   --content-max-chapter: 940px;      /* the Manuscript: 640 prose, 28 gap, 250 rail, the head over them */
-  /* The Audiobook view takes the whole room (193, amending 188): the block's panel is a third of the
-     room between 420 and 520 (cqw is the chapter column's width), the list's text stops at 920. */
-  --ab-panel: clamp(420px, 34cqw, 520px);
-  --ab-list-max: 920px;
+  /* The Audiobook view takes the whole room (193, amending 188; 194): the block's panel is 30% of the
+     chapter's centre between 420 and 560 (cqw is the centre's width); the list runs to it from the
+     24 gutter, its words capped at the 780 measure on each block (--ab-measure). */
+  --ab-panel: clamp(420px, 30cqw, 560px);
   --page-max: 1440px;                /* a world page has no rail: the frame the 1080 sits in */
 }
 /*
@@ -6571,9 +6571,21 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ch__band-push { flex: 1; }
 .fy-ch__draft { border-left: 2px solid var(--border); padding-left: 14px; }
 .fy-ch__side { width: 250px; flex: none; display: flex; flex-direction: column; gap: 20px; padding-top: 6px; overflow: auto; }
-/* The Audiobook view (design turn 146): a row a block, the reader in a 70px mark column, an 8px dot for its state. */
-.fy-ab__blocks { flex: 1; min-height: 0; overflow: auto; padding: 6px 8px 0; max-width: 640px; }
-.fy-ab__block { display: grid; grid-template-columns: 96px minmax(0, 1fr) 44px; gap: 10px; align-items: start; padding: 5px 8px; margin: 0 -8px 4px; border-radius: 7px; cursor: pointer; box-sizing: border-box; }
+/*
+ * The Audiobook view (design turn 146; quieter and wider since 194, rules 7–10): the list from the
+ * page's 24 gutter to the panel, a block a bracketed row — the speaker in 120, the words up to the
+ * 780 measure at the body size, a flexible gap, and the row's end pinned right. Every block has
+ * its 3-wide bracket in the rule colour, dark and tinted when chosen; a block of several turns
+ * draws each later turn as a row of its own under a soft rule, its speaker in the same column.
+ * The master draws these content-box; here every box is border-box, so heights carry their rules.
+ */
+/* A column of flex items, as the master's list is, so the blocks' 2 margins add up rather than collapse. */
+.fy-ab__blocks { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; padding: 10px 24px 0; }
+.fy-ab__blocks > * { flex: none; }
+.fy-ab__block { --ab-measure: 780px; position: relative; display: grid; grid-template-columns: 120px minmax(0, var(--ab-measure)) minmax(16px, 1fr) auto; column-gap: 14px; align-items: start; margin: 2px 0; padding: 7px 0 7px 12px; border-bottom: 1px solid var(--border); cursor: pointer; box-sizing: border-box; container-type: inline-size; }
+.fy-ab__block::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 3px; border-radius: 2px; background: var(--border); }
+/* Containment makes each block its own stacking context: one with a menu open stands over the rest. */
+.fy-ab__block:has(.fy-ab__menu) { z-index: 7; }
 /* Who speaks (SPEC-047 R-33): a colour a speaker, grey for the narrator, a dashed dot for a name
    no sheet carries. A line is tinted in its speaker's colour and ruled; narration is neither. */
 .fy-voice--narrator { --fy-voice: var(--neutral-400); }
@@ -6584,17 +6596,17 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-voice--4 { --fy-voice: var(--voice-4); }
 .fy-voice--5 { --fy-voice: var(--voice-5); }
 .fy-voice--6 { --fy-voice: var(--voice-6); }
-.fy-ab__block--line { background: color-mix(in srgb, var(--fy-voice) 7%, transparent); box-shadow: inset 2px 0 0 var(--fy-voice); }
 .fy-ab__block--dim { opacity: 0.4; }
-.fy-ab__speaker { display: inline-flex; align-items: center; gap: 6px; max-width: 96px; height: 22px; margin-top: 3px; min-width: 0; font: 400 12px/1.2 var(--font-sans); color: var(--fy-voice); }
+/* Who speaks: the colour is the dot's; the name is the label type in the muted ink (194). */
+.fy-ab__speaker { display: inline-flex; align-items: center; gap: 7px; max-width: 120px; padding-top: 3px; min-width: 0; font: var(--type-label); color: var(--muted-foreground); white-space: nowrap; }
+.fy-ab__speaker .fy-ab__speaker-dot { width: 7px; height: 7px; }
 .fy-ab__speaker-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--fy-voice); box-sizing: border-box; }
 .fy-voice--none .fy-ab__speaker-dot, .fy-ab__speaker-dot.fy-voice--none { background: transparent; border: 1px dashed var(--fy-voice); }
 .fy-ch__who-name:has(.fy-ab__speaker-dot) { display: flex; align-items: baseline; gap: 7px; }
 .fy-ch__who-name .fy-ab__speaker-dot { align-self: center; }
-.fy-voice--none .fy-ab__speaker, .fy-voice--narrator .fy-ab__speaker { color: var(--muted-foreground); }
-.fy-ab__block { position: relative; }
-.fy-ab__speaker--press { border: 0; background: transparent; padding: 0 7px 0 6px; margin-left: -6px; border-radius: 6px; cursor: pointer; }
-.fy-ab__speaker--press:hover, .fy-ab__speaker--open { background: var(--background); box-shadow: 0 0 0 1px var(--ring); }
+.fy-ab__speaker--press { border: 0; background: transparent; padding: 3px 0 0; border-radius: 6px; cursor: pointer; }
+.fy-ab__speaker--press:hover .fy-ab__mark, .fy-ab__speaker--open .fy-ab__mark { color: var(--foreground); }
+.fy-ab__speaker--press:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .fy-voice--plain { --fy-voice: var(--neutral-300); }
 .fy-ab__pin { display: inline-flex; color: var(--muted-foreground); }
 /* The speaker menu (design turn 155b, SPEC-012 R-63): 236 wide, under the chip. */
@@ -6680,7 +6692,9 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ab__request { position: relative; padding-left: 14px; }
 .fy-ab__request::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; background: var(--neutral-400); }
 .fy-ab__request--now::before { background: var(--foreground); }
-.fy-ab__split { display: flex; align-items: center; gap: 10px; margin: 0 0 8px 112px; font-size: 12px; }
+/* Inside a request its bracket is the one bar; the blocks' own would stand beside it. */
+.fy-ab__request .fy-ab__block:not(.fy-ab__block--selected)::before { content: none; }
+.fy-ab__split { display: flex; align-items: center; gap: 10px; margin: 0 0 8px 146px; font-size: 12px; }
 .fy-ab__split-heard { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); }
 .fy-ab__splitpanel { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .fy-ab__readsheet .fy-ab__read b, .fy-ab__splitpanel .fy-ab__read b { width: 84px; }
@@ -6803,19 +6817,30 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-rectake__verdict--pass { color: var(--success); }
 .fy-rectake__verdict--warning { color: var(--warning); }
 .fy-rectake__verdict--refused, .fy-rectake__verdict--unavailable { color: var(--muted-foreground); }
-.fy-ab__marks { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding-top: 9px; }
-.fy-ab__source { display: inline-flex; color: var(--neutral-400); }
-.fy-ab__marks .fy-ab__dot { margin-top: 0; }
-.fy-ab__filter { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+/* The row's end (194, rules 7 and 8): the picture chip, a labelled mark where the author is needed,
+   and the play a fine pointer finds on hover — nothing on a made block otherwise. */
+.fy-ab__marks { grid-column: 4; position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 1px; }
+.fy-ab__state { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border: 1px solid var(--border); border-radius: 6px; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; box-sizing: border-box; }
+.fy-ab__state::before { content: ""; width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--neutral-400); }
+.fy-ab__state--stale::before { background: var(--warning); }
+.fy-ab__state--flagged::before { background: var(--destructive); }
+.fy-ab__state--not-made::before { width: 8px; height: 8px; background: transparent; border: 1.5px solid var(--neutral-400); box-sizing: border-box; }
+/* The play is out of the row's flow (the master draws it 22 round and bordered, 24 outside, at the
+   row's end): it never makes a made row taller than its words, nor pushes a chip off the edge; with a
+   chip or a mark it stands to their left. */
+.fy-ab__rowplay { position: absolute; top: 1px; right: 0; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: var(--background); color: var(--foreground); cursor: pointer; visibility: hidden; box-sizing: border-box; }
+.fy-ab__marks:has(> :not(.fy-ab__rowplay)) > .fy-ab__rowplay { right: calc(100% + 8px); }
+.fy-ab__rowplay svg { width: 9px; height: 9px; }
+.fy-ab__block:hover .fy-ab__rowplay, .fy-ab__rowplay:focus-visible { visibility: visible; }
 .fy-ab__fchip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted-foreground); font: 400 12px/1 var(--font-sans); cursor: pointer; box-sizing: border-box; }
 .fy-ab__fchip--on { background: var(--foreground); color: var(--background); border-color: transparent; }
 .fy-ab__fcount { font: 400 11px/1 var(--font-mono); color: var(--neutral-400); }
 .fy-ab__fchip--on .fy-ab__fcount { color: var(--background); opacity: 0.7; }
-.fy-ab__block--selected { background: var(--muted); }
-/* Pictures on blocks (turn 186c): a chip under the speaker in the margin, and the panel's grid. */
-.fy-ab__picwho { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
-.fy-ab__picchip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px 0 3px; border: 1px solid var(--border); border-radius: 7px; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); background: var(--background); box-sizing: border-box; }
-.fy-ab__picchip img { width: 28px; height: 18px; object-fit: cover; border-radius: 4px; display: block; }
+.fy-ab__block--selected { background: color-mix(in srgb, var(--secondary) 70%, transparent); border-radius: 10px; }
+.fy-ab__block--selected::before, .fy-ab__block--sounding::before { background: var(--foreground); }
+/* Pictures on blocks (turn 186c): a chip at the row's end since 194 (rule 8), and the panel's grid. */
+.fy-ab__picchip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 3px; border: 1px solid var(--border); border-radius: 7px; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); background: var(--background); white-space: nowrap; box-sizing: border-box; }
+.fy-ab__picchip img { width: 34px; height: 20px; object-fit: cover; border-radius: 4px; display: block; }
 .fy-ab__picchip--short { border-color: var(--warning); }
 .fy-ab__pick { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-height: 280px; overflow-y: auto; }
 .fy-ab__pickitem { padding: 0; border: 2px solid transparent; border-radius: 8px; background: none; cursor: pointer; }
@@ -6830,25 +6855,23 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-abexport__opt .fy-mono { font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-abexport__radio { width: 16px; height: 16px; flex: none; margin-top: 2px; border-radius: 50%; border: 1px solid var(--border); box-sizing: border-box; }
 .fy-abexport__opt--on .fy-abexport__radio { border: 5px solid var(--foreground); }
-.fy-ab__block--line.fy-ab__block--selected { background: color-mix(in srgb, var(--fy-voice) 7%, transparent); box-shadow: inset 2px 0 0 var(--fy-voice), inset 0 0 0 1px color-mix(in srgb, var(--fy-voice) 45%, transparent); }
-/* A block of several turns (design turn 190): the turns are rows in one block, bracketed at its edge, dark when it is selected. Each later turn begins at a rule with its speaker's name in the margin; the break holds no text, so offsets still count the words. */
-.fy-ab__block--merged { box-shadow: inset 3px 0 0 var(--neutral-400); }
-.fy-ab__block--merged.fy-ab__block--selected { box-shadow: inset 3px 0 0 var(--foreground); }
-.fy-ab__text { position: relative; }
-.fy-ab__turn { display: block; position: relative; height: 0; margin: 8px 0; border-top: 1px solid var(--border); }
-.fy-ab__turn::before { content: attr(data-who); position: absolute; left: -106px; top: 15px; width: 82px; padding-left: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12px/1.2 var(--font-sans); color: var(--fy-voice); }
-.fy-ab__turn::after { content: ""; position: absolute; left: -106px; top: 18px; width: 8px; height: 8px; border-radius: 50%; background: var(--fy-voice); }
+/*
+ * A block of several turns (design turn 190): the turns are rows in one block. Each later turn
+ * begins at a soft rule across the whole row — the break is pulled back over the speaker column and
+ * runs the block's width, which the block's container measures — with its speaker's dot and name in
+ * that column, where the first turn's are (194). The break holds no text, so offsets still count
+ * the words; the row's end belongs to the first turn, so a chip there can never meet a later name.
+ */
+.fy-ab__text { position: relative; font: 400 var(--text-base)/1.6 var(--font-sans); }
+/* A block of turns whose first row carries a chip: that row is as tall as the chip, as the master
+   draws it (28 outside + 1 above, 7 below). The float is the height, the break clears it. */
+.fy-ab__block--merged:has(.fy-ab__marks > .fy-ab__picchip) .fy-ab__text::before { content: ""; float: left; width: 0; height: 36px; }
+.fy-ab__turn { clear: left; display: block; position: relative; width: 100cqw; height: 0; margin: 7px 0 7px -134px; border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.fy-ab__turn::before { content: attr(data-who); position: absolute; left: 14px; top: 10px; max-width: 106px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-label); color: var(--muted-foreground); }
+.fy-ab__turn::after { content: ""; position: absolute; left: 0; top: 13.7px; width: 7px; height: 7px; border-radius: 50%; background: var(--fy-voice); }
 .fy-voice--none.fy-ab__turn::after { background: transparent; border: 1px dashed var(--fy-voice); box-sizing: border-box; }
-.fy-voice--narrator.fy-ab__turn::before, .fy-voice--none.fy-ab__turn::before { color: var(--muted-foreground); }
-.fy-ab__block--sounding { background: var(--secondary); box-shadow: inset 2px 0 0 var(--fy-voice, var(--foreground)); }
 .fy-ab__mark { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fy-ab__mark--warn { color: var(--warning); }
-.fy-ab__text { font: 400 15px/1.75 var(--font-sans); }
-.fy-ab__dot { width: 8px; height: 8px; margin-top: 9px; padding: 0; border-radius: 50%; border: 1px solid var(--neutral-400); background: transparent; cursor: pointer; flex: none; box-sizing: border-box; }
-.fy-ab__dot:disabled { cursor: default; }
-.fy-ab__dot--made { background: var(--success); border-color: var(--success); }
-.fy-ab__dot--stale { background: var(--warning); border-color: var(--warning); }
-.fy-ab__dot--flagged { background: var(--destructive); border-color: var(--destructive); }
 .fy-ab__control { display: inline-flex; align-items: center; gap: 8px; }
 .fy-ab__play { width: 18px; height: 18px; padding: 0; border: 0; background: transparent; color: var(--muted-foreground); cursor: pointer; font-size: 10px; }
 .fy-ab__foot { display: flex; align-items: center; gap: 14px; padding: 10px 0 16px; border-top: 1px solid var(--border); font: 400 10.5px var(--font-mono); color: var(--neutral-400); }

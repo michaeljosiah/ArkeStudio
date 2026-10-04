@@ -1,5 +1,5 @@
 /* Turn 173 (issue 1369): page reading, captured touch subjects, and one set of movable panels. */
-.fy-chapters-count, .fy-chapter-card__meta, .fy-ab__state-word, .fy-ab__dot svg { display: none; }
+.fy-chapters-count, .fy-chapter-card__meta { display: none; }
 .fy-passage-ask { display: grid; align-items: stretch; border: 1px solid var(--border); border-radius: 16px; padding: 12px; background: var(--background); min-width: 0; }
 .fy-passage-ask > header { display: flex; align-items: center; gap: 8px; min-height: 44px; font: var(--type-meta); }
 .fy-passage-ask > header strong { font: 600 13px var(--font-sans); }
@@ -71,16 +71,19 @@
   .fy-chapter-notes-sheet :is(button,a,select,input), .fy-chapter-block-sheet :is(button,a,select,input) { min-height: 44px; }
   .fy-chapter-notes-sheet .fy-bible__versions li { display: flex; justify-content: space-between; gap: 12px; }
   .fy-chapter-notes-sheet .fy-bible__versions button { width: 50%; }
-  [data-screen="chapter"] .fy-ab__blocks { max-width: none; overflow: visible; }
-  [data-screen="chapter"] .fy-ab__block { grid-template-columns: minmax(0, 1fr) 44px; padding: 12px 8px; border-bottom: 1px solid var(--border); border-radius: 0; gap: 6px; }
-  [data-screen="chapter"] .fy-ab__speaker { grid-column: 1; max-width: none; height: auto; }
-  [data-screen="chapter"] .fy-ab__text { grid-column: 1 / -1; grid-row: 2; font: 400 15px/1.75 var(--font-sans); }
-  /* A block's later turns name their speaker above them, in the one column. */
-  [data-screen="chapter"] .fy-ab__turn { height: auto; margin: 10px 0 0; padding-top: 8px; }
-  [data-screen="chapter"] .fy-ab__turn::before { position: static; display: block; width: auto; padding: 0 0 2px; }
+  /* The 173 rules under 194 (194h): the speaker over the words, the chip and marks at the end of the
+     speaker's line, rows ruled from edge to edge, the chosen block tinted with its bar. */
+  [data-screen="chapter"] .fy-ab__blocks { max-width: none; overflow: visible; padding: 0; }
+  [data-screen="chapter"] .fy-ab__block { grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 3px; margin: 0; padding: 9px 0; border-radius: 0; container-type: normal; }
+  [data-screen="chapter"] .fy-ab__block::before { content: none; }
+  [data-screen="chapter"] .fy-ab__block--selected { margin: 0 -16px; padding-inline: 13px 16px; border-left: 3px solid var(--foreground); border-radius: 0; }
+  [data-screen="chapter"] .fy-ab__speaker { grid-column: 1; grid-row: 1; max-width: none; padding-top: 0; }
+  [data-screen="chapter"] .fy-ab__marks { grid-column: 2; grid-row: 1; padding-top: 0; }
+  [data-screen="chapter"] .fy-ab__text { grid-column: 1 / -1; grid-row: 2; }
+  /* A block's later turns name their speaker above them, in the one column, under a full rule. */
+  [data-screen="chapter"] .fy-ab__turn { width: auto; height: auto; margin: 9px 0 0; padding-top: 9px; border-top-color: var(--border); }
+  [data-screen="chapter"] .fy-ab__turn::before { position: static; display: block; max-width: none; padding: 0 0 3px 14px; background: radial-gradient(circle at 3.5px 50%, var(--fy-voice) 3.5px, transparent 4px) no-repeat; }
   [data-screen="chapter"] .fy-ab__turn::after { display: none; }
-  [data-screen="chapter"] .fy-ab__marks { grid-row: 3; grid-column: 1 / -1; display: flex; justify-content: flex-start; }
-  [data-screen="chapter"] .fy-ab__state-word { display: inline; color: var(--muted-foreground); font: var(--type-meta); }
   .fy-ab__foot { flex-wrap: wrap; }
   .fy-chapter-menu .fy-page-sheet__body { display: grid; gap: 8px; }
   .fy-chapter-menu button { min-height: 44px; }
@@ -173,10 +176,8 @@
   [data-screen="chapter"] .fy-ch__manuscript { position: relative; }
   .fy-ch__edit { display: block; min-height: 44px; width: 100%; padding: 8px; margin: 6px 0; border: 1px solid var(--border); border-radius: 10px; text-align: left; }
   .fy-ch__edit-state { float: right; }
-  .fy-ab__dot { display: inline-grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--border); background: transparent; border-radius: 10px; }
-  .fy-ab__dot svg { display: block; }
-  .fy-ab__dot:disabled { display: none; }
-  .fy-ab__state-word { display: inline; font: var(--type-meta); color: var(--muted-foreground); }
+  /* On touch the row's press selects the block and its sheet plays it (194, rule 7). */
+  .fy-ab__rowplay { display: none; }
   .fy-ab__marks { display: flex; flex-wrap: wrap; min-width: 0; }
   :is(.fy-ab__chip,.fy-ab__filter,.fy-ab__add,.fy-ab__cue-x,.fy-ab__menu-opt,.fy-ab__mchip,.fy-ab__reading-press,.fy-ab__note-input,.fy-ch__derive,.fy-ch__dismiss,.fy-abnarr__row,.fy-ab__speaker--press) { min-height: 44px; }
   :is(.fy-ab__cue-x,.fy-ch__dismiss,.fy-dock__dismiss) { min-width: 44px; }
@@ -307,20 +308,28 @@
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__panels .fy-ch__notes > .fy-bible__panel:not([data-testid="chapter-voices"]) { display: none; }
 
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__body { gap: 0; }
+  /* The block's panel grows with the room (194, rule 11): clamp(420, 30% of the centre, 560) of
+     content and its rule — 560 at 2000, 466 at 1600, the 420 floor with Arke open. Its header, tabs,
+     body and foot carry their own padding; only the body scrolls. */
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__panels {
-    width: var(--ab-panel);
+    width: calc(var(--ab-panel) + 1px);
     box-sizing: border-box;
-    padding: 6px 24px 20px;
+    gap: 0;
+    padding: 0;
     border-left: 1px solid var(--border);
-    /* The picture sits beside its facts from 480 and over them at 420 (193c): a card answers the
-       panel's own width, not the window's. */
+    overflow: hidden;
+    /* The picture card answers the panel's own width, not the window's (193c). */
     container: ab-panel / inline-size;
   }
-  /* The list scrolls in the whole room left of the panel, so its bar stays at the panel's rule; the
-     text, the filter and the foot centre at 920 inside it. */
-  [data-screen="chapter"][data-view="audiobook"] .fy-ch__manuscript { --ab-pad: max(8px, calc((100% - var(--ab-list-max)) / 2)); }
-  [data-screen="chapter"][data-view="audiobook"] .fy-ab__blocks { max-width: none; padding-inline: var(--ab-pad); }
-  [data-screen="chapter"][data-view="audiobook"] .fy-ch__band { margin-inline: var(--ab-pad); }
+  /* The panel is the block's alone: the manuscript's rail stays with the Manuscript (194), and with
+     no block chosen — the panel put away — the list takes the room. */
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__panels .fy-ch__notes { display: none; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__panels:not(:has(.fy-abp, .fy-ab__directsheet)) { display: none; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__panels .fy-ch__block-side:has(.fy-abp) { flex: 1; min-height: 0; gap: 0; padding: 0; overflow: hidden; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__panels .fy-ch__block-side:has(.fy-ab__directsheet) { padding: 16px 22px; }
+  /* The list starts at the page's 24 gutter and its rows run to the panel (194, rule 10). */
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__blocks { max-width: none; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__band { margin: 10px 24px 0; }
 }
 /* With Arke's dock open the room between 1100 and about 1350 is short of 420 + a list: the panel
    gives up width before the list does, down to 300, and the list keeps about 440. */
@@ -407,6 +416,94 @@
 .fy-ab__footlink { padding: 0; border: 0; background: transparent; color: var(--muted-foreground); font: inherit; cursor: pointer; }
 .fy-ab__footlink:hover:not(:disabled) { color: var(--foreground); }
 .fy-ab__footlink:disabled { opacity: 0.5; cursor: default; }
+
+/*
+ * The block's panel (194, rules 11 and 12; 194g): the head — the block and who speaks, one mono
+ * line — then Picture | Voice | Timing as underlined tabs, the chosen tab's body scrolling under
+ * them, its foot held at the bottom. Rows inside are the master's: a 96 label in the label type,
+ * the value in 13, data in 11 mono, a rule between rows; presses 30 high (28 + border).
+ */
+.fy-abp { display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--background); }
+.fy-abp__head { display: flex; flex-direction: column; gap: 3px; padding: 16px 22px 0; }
+.fy-abp__title { display: flex; align-items: baseline; gap: 10px; }
+.fy-abp__title h2 { flex: 1; min-width: 0; margin: 0; font: var(--type-ui); font-weight: 600; color: var(--foreground); overflow-wrap: anywhere; }
+.fy-abp__x { align-self: baseline; padding: 0; border: 0; background: transparent; font: var(--type-body); color: var(--muted-foreground); cursor: pointer; }
+.fy-abp__x:hover { color: var(--foreground); }
+.fy-abp__sub, .fy-abp__flag { margin: 0; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abp__flag { color: var(--warning); }
+.fy-abp__tabs { display: flex; gap: 2px; padding: 12px 22px 0; border-bottom: 1px solid var(--border); }
+.fy-abp__tab { margin-bottom: -1px; padding: 0 12px 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; font: var(--type-label); color: var(--muted-foreground); cursor: pointer; }
+.fy-abp__tab:hover { color: var(--foreground); }
+.fy-abp__tab--on { border-bottom-color: var(--foreground); color: var(--foreground); font-weight: 600; }
+.fy-abp__tab em { margin-left: 5px; font: var(--type-mono); font-size: var(--text-2xs); font-style: normal; color: var(--muted-foreground); }
+.fy-abp__body { display: flex; flex-direction: column; gap: 13px; flex: 1; min-height: 0; overflow: auto; padding: 16px 22px 0; }
+/* The Picture tab's section and card are columns too, so the foot inside them still reaches the bottom. */
+.fy-abp :is(.fy-ab__picture, .fy-pcard, .fy-sugg) { display: flex; flex-direction: column; gap: 13px; flex: 1; }
+.fy-abp__foot { position: sticky; bottom: 0; z-index: 1; display: flex; align-items: center; gap: 8px; margin: auto -22px 0; padding: 12px 22px 16px; border-top: 1px solid var(--border); background: var(--background); }
+.fy-abp :is(.fy-abp__foot, .fy-ab__splitpanel, .fy-ab__make-line) .ui-btn { height: 30px; min-height: 0; padding: 0 11px; gap: 6px; border-radius: 8px; font: var(--type-label); box-shadow: none; }
+.fy-abp .fy-abp__foot .ui-btn--outline { border-color: var(--border); background: var(--background); }
+.fy-abp .fy-abp__foot .ui-btn--primary { background: var(--foreground); color: var(--background); }
+.fy-abp__foot .ui-btn svg { width: 10px; height: 10px; }
+/* Rows and sections. */
+.fy-abp__sec { display: flex; flex-direction: column; gap: 7px; }
+.fy-abp__k { flex: none; font: var(--type-label); color: var(--muted-foreground); }
+.fy-abp__kv { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.fy-abp__kv > .fy-abp__k { width: 96px; }
+.fy-abp__kv--top { align-items: center; }
+.fy-abp__v { flex: 1; min-width: 0; font-size: var(--text-sm); color: var(--foreground); }
+.fy-abp__v--off { color: var(--muted-foreground); }
+.fy-abp__i { flex: none; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abp__add { flex: none; padding: 0; border: 0; background: transparent; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); cursor: pointer; }
+.fy-abp__add:hover { color: var(--foreground); }
+.fy-abp__none { font-size: var(--text-sm); }
+.fy-abp .fy-ab__cues { flex: 1; }
+.fy-abp .fy-ab__direction { display: flex; flex-direction: column; gap: 13px; }
+.fy-abp .fy-ab__chips { gap: 6px; }
+.fy-abp .fy-ab__chip { height: 30px; padding: 0 11px; font: var(--type-label); color: var(--muted-foreground); }
+.fy-abp .fy-ab__chip--on { color: var(--background); }
+.fy-abp .fy-ab__chip--off { color: var(--neutral-400); }
+.fy-abp__note { flex: 1; min-width: 0; height: 20.8px; padding: 0; border: 0; background: transparent; color: var(--foreground); font-size: var(--text-sm); outline: none; }
+.fy-abp__note::placeholder { color: var(--muted-foreground); }
+/* Speed and the seconds as a step control (194g). */
+.fy-abp .fy-ab__seg, .fy-abp__step { display: inline-flex; align-items: stretch; flex: none; padding: 0; border: 1px solid var(--border); border-radius: 7px; background: transparent; overflow: hidden; font: var(--type-mono); font-size: var(--text-2xs); }
+.fy-abp .fy-ab__seg .fy-seg__item, .fy-abp__step > button { height: auto; padding: 4px 8px; border: 0; border-radius: 0; background: transparent; box-shadow: none; text-align: left; font: inherit; color: var(--foreground); cursor: pointer; }
+.fy-abp .fy-ab__seg .fy-seg__item + .fy-seg__item, .fy-abp__step > * + * { border-left: 1px solid var(--border); }
+.fy-abp .fy-ab__seg .fy-seg__item--active { background: var(--secondary); font-weight: 400; }
+.fy-abp__step > button:disabled { color: var(--neutral-400); cursor: default; }
+.fy-abp__stepval { display: inline-flex; align-items: center; justify-content: flex-start; gap: 2px; padding: 4px 8px; }
+/* In a row the step takes half of it beside the value, its three cells equal (the master's `.v194-kv span { flex: 1 }`). */
+.fy-abp__kv > .fy-abp__step { flex: 1; }
+.fy-abp__kv > .fy-abp__step > * { flex: 1; }
+.fy-abp__stepval .fy-tm__field { field-sizing: content; min-width: 2ch; height: auto; padding: 0; border: 0; background: transparent; font: inherit; text-align: left; color: var(--foreground); -moz-appearance: textfield; }
+.fy-abp__stepval .fy-tm__field::-webkit-inner-spin-button, .fy-abp__stepval .fy-tm__field::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+/* Takes, each with its play (194g). */
+.fy-abp__takes { margin-top: 4px; gap: 0; }
+.fy-abp__takes > .fy-abp__k { padding-bottom: 7px; }
+.fy-abp__take { display: grid; grid-template-columns: 24px 34px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.fy-abp__take b { font-weight: 700; }
+.fy-abp__take > .fy-abp__i { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-abp__takeplay { position: static; visibility: visible; }
+/* Sent as, folded (rule 12). */
+.fy-abp__disc { border-top: 1px solid var(--border); }
+.fy-abp__disc > summary { display: flex; align-items: center; gap: 8px; padding: 8px 0; font: var(--type-label); color: var(--muted-foreground); cursor: pointer; list-style: none; }
+.fy-abp__disc > summary::-webkit-details-marker { display: none; }
+.fy-abp__disc > summary svg { width: 12px; height: 12px; transition: transform var(--dur-fast) var(--ease-standard); }
+.fy-abp__disc[open] > summary svg { transform: rotate(90deg); }
+.fy-abp__disc > .fy-ab__sentcol { padding: 0 0 8px 20px; }
+.fy-abp .fy-ab__recorded { margin-top: 0; padding: 8px 0; border-top: 1px solid var(--border); }
+.fy-abp .fy-ab__recorded .fy-abp__add { margin-left: auto; }
+/* Timing: the rows as kv rows, the waveform 46 high, its axis in mono (194g). */
+.fy-abp .fy-tm__block { display: flex; flex-direction: column; gap: 13px; }
+.fy-abp .fy-tm__block > .fy-abp__kv:first-of-type { border-top: 0; }
+.fy-abp .fy-tm__block > .fy-abp__sec { margin-top: 4px; }
+.fy-abp .fy-tm__wave { height: 48px; border-radius: 9px; }
+.fy-abp__waveaxis { display: flex; justify-content: space-between; }
+.fy-abp__plays { flex: 1; }
+.fy-abp__plays .fy-ab__chip { flex: 1; justify-content: flex-start; }
+.fy-abp :is(.fy-tm__reactions, .fy-tm__bedpanel) { padding: 0; border: 0; border-radius: 0; background: transparent; gap: 13px; }
+.fy-abp :is(.fy-tm__reactions, .fy-tm__bedpanel) .fy-tm__row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.fy-abp :is(.fy-tm__reactions, .fy-tm__bedpanel) .fy-tm__row > .fy-ab__label { width: 96px; flex: none; font: var(--type-label); color: var(--muted-foreground); }
+.fy-abp :is(.fy-tm__reactions, .fy-tm__bedpanel) .fy-tm__data { font-family: var(--font-sans); font-size: var(--text-sm); line-height: 1.6; color: var(--foreground); }
 
 @media (min-width: 1100px) {
   /* One toolbar line, 52 high, across the room (rule 1): the page head is the Manuscript's (rule 2). */
