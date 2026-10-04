@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { formatRunningTime, frameWord, illustrationTotal, pacePhrase, priceLabel, type IllustrationRow, type PictureWho } from "@arke-studio/contracts";
 import { dismissIllustration, illustrateChapter, skipIllustrationRow, sendIllustrationWithout, stopIllustration, acceptIllustration, useIllustrationRuns, type IllustrationRun } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
+import { useOverlay } from "../lib/overlays.js";
 import { Button, cx } from "./ui.js";
 
 /**
@@ -209,6 +210,8 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
 }) {
   const proposal = run.proposal;
   const head = useRef<HTMLHeadingElement>(null);
+  // A block drawer open beneath (a modal dialog, drawn above everything) gives way while the sheet is open.
+  useOverlay("layer", true, () => head.current);
   // Escape reads the latest onClose; the listener itself goes up once per opening.
   const closing = useRef(onClose);
   closing.current = onClose;

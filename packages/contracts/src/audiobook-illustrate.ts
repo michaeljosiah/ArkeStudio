@@ -136,6 +136,19 @@ export function priceLabel(microUsd: number): string {
   return `~$${(Math.ceil(microUsd / 10_000) / 100).toFixed(2)}`;
 }
 
+/**
+ * Why a picture was not made, in plain words for a row: a provider's safety refusal reads `refused
+ * by the image safety check`, whatever the provider called it; any other reason loses its provider
+ * prefix and the advice after the dash (`openai: rate limited — try again later` → `rate limited`).
+ */
+export function pictureRefusal(reason: string | null | undefined): string {
+  const said = (reason ?? "").replace(/\s+/g, " ").trim();
+  if (said === "") return "not made";
+  if (/\b(safety|moderation|content polic|policy violation|nsfw|flagged)\b/i.test(said)) return "refused by the image safety check";
+  const clause = said.replace(/^[a-z0-9-]+:\s*/i, "").split(/\s+[—–]\s+/)[0]!.trim();
+  return clause === "" ? "not made" : clause;
+}
+
 /** The sentence-free reference line a Bench brief carries, so each picture is cited by the name the Bench gave it. */
 export function referenceBriefLine(cited: ReadonlyArray<{ name: string; kind: "character" | "place"; token: string }>): string {
   if (cited.length === 0) return "";

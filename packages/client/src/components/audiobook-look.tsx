@@ -19,7 +19,8 @@ import { resolveModel, worldModel } from "./dispatch-bar.js";
 import { EditorDialog } from "./editor-dialog.js";
 import { NewLookSheet } from "./audiobook-new-look.js";
 import { mediaUrl } from "../lib/media.js";
-import { acceptChapterLook, chooseAudiobookLook, deriveAudiobookLook, makeChapterLook, readAudiobookLooks, setAudiobookLook, useAudiobookAsks, useAudiobookRecords, useStore } from "../lib/store.js";
+import { acceptChapterLook, chooseAudiobookLook, deriveAudiobookLook, makeChapterLook, readAudiobookLooks, rejectReferenceTake, setAudiobookLook, useAudiobookAsks, useAudiobookRecords, useStore } from "../lib/store.js";
+import { lookJobState, lookJobs, useQueueRefusals } from "./look-jobs.js";
 import { Button, Select, Textarea, cx } from "./ui.js";
 
 /**
@@ -113,8 +114,24 @@ function LookLine({ row, disabled, onWrite }: { row: Row; disabled: boolean; onW
 
 const kitOf = (world: { referenceKits: readonly ReferenceKit[] } | null, sheet: string | undefined): ReferenceKit | null => (world === null || sheet === undefined ? null : (world.referenceKits.find((candidate) => candidate.sheetId === sheet) ?? null));
 
+/**
+ * Where a chosen look's close view stands: none yet, being made, refused with its reason, made and
+ * waiting to be accepted or discarded, or accepted (shown at once, before the kit's snapshot says so).
+ */
+export type CloseViewState =
+  | { kind: "none" }
+  | { kind: "making" }
+  | { kind: "failed"; reason: string }
+  | { kind: "made"; take: { id: string; path: string } }
+  | { kind: "accepted"; path: string };
+
+/** The price of one close view on this model: one picture from two references, the main photo and the full body, as the job is priced. */
+export function closeViewCost(model: Parameters<typeof estimateCharacterImageMicroUsd>[0] | null): string {
+  return model === null ? "" : priceLabel(estimateCharacterImageMicroUsd(model, "character-look", 1, 2));
+}
+
 /** One character: the look chosen (or the main photo), the picker over their looks, the line, and what to do about the rest. */
-function CharacterRow({ row, kit, slug, orderOf, usage, off, onWrite, onNewLook, onChoose, closeAsked, onMakeClose, closeTakeFor, onAcceptClose }: {
+function CharacterRow({ row, kit, slug, orderOf, usage, off, onWrite, onNewLook, onChoose, closeState, onMakeClose, onAcceptClose, onDiscardClose }: {
   row: Row;
   kit: ReferenceKit | null;
   slug: string;
@@ -124,10 +141,10 @@ function CharacterRow({ row, kit, slug, orderOf, usage, off, onWrite, onNewLook,
   onWrite: (target: LookTarget, text: string | null) => void;
   onNewLook: (row: Row) => void;
   onChoose: (row: Row, lookId: string | null) => void;
-  closeAsked: Record<string, true>;
+  closeState: (look: CharacterLook) => CloseViewState;
   onMakeClose: (row: Row, look: CharacterLook) => void;
-  closeTakeFor: (lookId: string) => { id: string; path: string } | null;
-  onAcceptClose: (row: Row, look: CharacterLook, takeId: string) => void;
+  onAcceptClose: (row: Row, look: CharacterLook, take: { id: string; path: string }) => void;
+  onDiscardClose: (look: CharacterLook, takeId: string, again: boolean) => void;
 }) {
   const sheet = row.sheet;
   const line = row.line!;
@@ -135,10 +152,10 @@ function CharacterRow({ row, kit, slug, orderOf, usage, off, onWrite, onNewLook,
   const chosen = looks.find((look) => look.id === line.lookId) ?? null;
   const photo = kit === null ? null : mainPhotoFor(kit);
   const model = useStore().state;
-  const resolved = resolveModel(model, "image", undefined, worldModel(model, "image")).model;
-  const closeCost = resolved === null ? "" : priceLabel(estimateCharacterImageMicroUsd(resolved, "character-look", 1, 2));
+  const closeCost = closeViewCost(resolveModel(model, "image", undefined, worldModel(model, "image")).model);
   const from = line.from !== undefined ? orderOf(line.from) : null;
-  const closeTake = chosen === null ? null : closeTakeFor(chosen.id);
+  const close: CloseViewState = chosen === null ? { kind: "none" } : chosen.closeFile !== undefined ? { kind: "accepted", path: `references/${sheet}/${chosen.closeFile}` } : closeState(chosen);
+  const priced = (label: string) => `${label}${closeCost !== "" ? ` · ${closeCost}` : ""}`;
   const here = (id: string): string | null => {
     const chapters = usage[id];
     return chapters === undefined || chapters.length === 0 ? null : `chapter${chapters.length === 1 ? "" : "s"} ${[...chapters].sort((a, b) => a - b).join(", ")}`;
@@ -157,7 +174,7 @@ function CharacterRow({ row, kit, slug, orderOf, usage, off, onWrite, onNewLook,
           <b>{row.label}</b>
           <Field row={row} label={row.label ?? "Line"} disabled={off} onWrite={onWrite} />
           <div className="fy-look__facts fy-mono" data-testid="look-facts">
-            <span data-testid="look-state">{chosen !== null ? (chosen.closeFile !== undefined ? "full body, close" : "full body · no close view") : looks.length > 0 ? "no look · the main photo rides" : "head and shoulders · no look"}</span>
+            <span data-testid="look-state">{chosen !== null ? (close.kind === "accepted" ? "full body, close" : "full body · no close view") : looks.length > 0 ? "no look · the main photo rides" : "head and shoulders · no look"}</span>
             {row.source !== null && <span>{row.source}</span>}
             {from !== null && <span data-testid="look-from">from chapter {from}</span>}
             {chosen !== null && kit !== null && lookOlderFace(kit, chosen) && <span className="fy-ch__who-where--warn" data-testid="look-older">older face</span>}
@@ -176,19 +193,39 @@ function CharacterRow({ row, kit, slug, orderOf, usage, off, onWrite, onNewLook,
               )}
             </div>
           ))}
-          {chosen !== null && chosen.closeFile === undefined && closeTake === null && (
+          {chosen !== null && (close.kind === "none" || close.kind === "making") && (
             <div className="fy-look__facts fy-mono">
-              <button type="button" className="fy-sugg__make" disabled={off || closeAsked[chosen.id] === true} onClick={() => onMakeClose(row, chosen)} data-testid="look-make-close">
-                {closeAsked[chosen.id] === true ? "Making close view…" : `Make close view${closeCost !== "" ? ` · ${closeCost}` : ""}`}
+              <button type="button" className="fy-sugg__make" disabled={off || close.kind === "making"} onClick={() => onMakeClose(row, chosen)} data-testid="look-make-close">
+                {close.kind === "making" ? "Making close view…" : priced("Make close view")}
               </button>
             </div>
           )}
-          {chosen !== null && closeTake !== null && (
+          {chosen !== null && close.kind === "failed" && (
+            <div className="fy-look__facts fy-mono" data-testid="look-close-failed">
+              <span className="fy-ch__who-where--warn" data-testid="look-close-reason">Close view {close.reason}</span>
+              <button type="button" className="fy-sugg__make" disabled={off} onClick={() => onMakeClose(row, chosen)} data-testid="look-close-retry">
+                {priced("Try again")}
+              </button>
+            </div>
+          )}
+          {chosen !== null && close.kind === "made" && (
             <div className="fy-look__facts fy-mono" data-testid="look-close-made">
-              <img className="fy-look__closeimg" src={mediaUrl(slug, closeTake.path)} alt="" />
-              <button type="button" className="fy-sugg__make" disabled={off} onClick={() => onAcceptClose(row, chosen, closeTake.id)} data-testid="look-accept-close">
+              <img className="fy-look__closeimg" src={mediaUrl(slug, close.take.path)} alt="" />
+              <button type="button" className="fy-sugg__make" disabled={off} onClick={() => onAcceptClose(row, chosen, close.take)} data-testid="look-accept-close">
                 Accept close view
               </button>
+              <button type="button" className="fy-sugg__make" disabled={off} onClick={() => onDiscardClose(chosen, close.take.id, true)} data-testid="look-close-again">
+                {priced("Make again")}
+              </button>
+              <button type="button" className="fy-sugg__make" disabled={off} onClick={() => onDiscardClose(chosen, close.take.id, false)} data-testid="look-close-discard">
+                Discard
+              </button>
+            </div>
+          )}
+          {chosen !== null && close.kind === "accepted" && chosen.closeFile === undefined && (
+            <div className="fy-look__facts fy-mono" data-testid="look-close-accepted">
+              <img className="fy-look__closeimg" src={mediaUrl(slug, close.path)} alt="" />
+              <span>close view · saving…</span>
             </div>
           )}
         </div>
@@ -217,6 +254,38 @@ function CharacterRow({ row, kit, slug, orderOf, usage, off, onWrite, onNewLook,
   );
 }
 
+/** The words a target's line holds in a look, or null where it holds none. */
+export function lineOf(look: AudiobookLook | null, target: LookTarget): string | null {
+  if (look === null) return null;
+  if (target.kind === "place") return look.place?.text ?? null;
+  if (target.kind === "mood") return look.mood?.text ?? null;
+  return look.characters[target.key]?.text ?? null;
+}
+
+/**
+ * The look with choices laid over it that were pressed and not yet answered: a look chosen takes
+ * that look's clothing line, the main photo takes back the chapter's own reading, as the
+ * coordinator's `chooseLook` will write them.
+ */
+export function withChoices(look: AudiobookLook | null, choosing: Record<string, { lookId: string | null }>, kitLook: (sheet: string, lookId: string) => CharacterLook | null): AudiobookLook | null {
+  if (look === null || Object.keys(choosing).length === 0) return look;
+  const characters = { ...look.characters };
+  for (const [key, press] of Object.entries(choosing)) {
+    const line = characters[key];
+    if (line === undefined) continue;
+    if (press.lookId === null) {
+      const { lookId: _id, from: _from, conflicts: _conflicts, reading, ...rest } = line;
+      characters[key] = { ...rest, text: reading ?? line.text };
+      continue;
+    }
+    const chosen = line.sheet === undefined ? null : kitLook(line.sheet, press.lookId);
+    if (chosen === null) continue;
+    const { from: _from, conflicts: _conflicts, ...rest } = line;
+    characters[key] = { ...rest, text: lookClothing(chosen), lookId: press.lookId, ...(line.lookId === undefined ? { reading: line.text } : {}) };
+  }
+  return { ...look, characters };
+}
+
 export function LookSheet({ open, onClose, worldId, productionId, chapterFile, chapterOrder, record, blockKeys }: {
   open: boolean;
   onClose: () => void;
@@ -231,25 +300,62 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
   const store = useStore();
   const world = store.state?.world ?? null;
   const connection = store.connection;
-  const look = record?.look ?? null;
+  const answers = useAudiobookRecords();
+  // The newest of the record the chapter holds and the records this sheet's own writes were
+  // answered with: the sheet never waits on the chapter view to take the answer first.
+  const asking = useRef(new Set<string>());
+  const current = Object.values(answers).reduce<ChapterAudiobook | null>((newest, answer) => (answer.record !== undefined && answer.requestId !== undefined && asking.current.has(answer.requestId) && (newest === null || answer.record.updatedAt > newest.updatedAt) ? answer.record : newest), record);
+  useEffect(() => {
+    asking.current = new Set();
+  }, [chapterFile]);
+  const look = current?.look ?? null;
   const numberOf = (key: string): number | null => {
     const index = blockKeys.indexOf(key);
     return index < 0 ? null : index + 1;
   };
-  const answers = useAudiobookRecords();
   const asks = useAudiobookAsks();
+  const jobs = store.state?.app.jobs ?? [];
+  const queueRefused = useQueueRefusals();
   const [asked, setAsked] = useState<string | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const [usageAsk, setUsageAsk] = useState<string | null>(null);
   const [making, setMaking] = useState<{ key: string; name: string; sheet: string; line: string } | null>(null);
-  const [closeAsked, setCloseAsked] = useState<Record<string, true>>({});
+  /** Close views asked for here, by look: the request whose job is that row's. */
+  const [closeAsked, setCloseAsked] = useState<Record<string, string>>({});
+  /** Close views accepted or discarded here, shown so at once: the kit's snapshot follows. */
+  const [closeAccepted, setCloseAccepted] = useState<Record<string, string>>({});
+  const [discarded, setDiscarded] = useState<readonly string[]>([]);
+  /**
+   * Choices and line writes pressed and not yet in the record (2026-10-04, 0.5.60-local.14): the
+   * coordinator wrote the choice, but the record it answers with took seconds to come back and the
+   * sheet said `no look · 0 looks chosen` all that time, so the author thought nothing happened.
+   * The sheet shows what was pressed at once, says `saving…`, and lets the record or a refusal
+   * settle it.
+   */
+  const [choosing, setChoosing] = useState<Record<string, { lookId: string | null; requestId: string }>>({});
+  const [writing, setWriting] = useState<ReadonlyArray<{ requestId: string; target: LookTarget; text: string | null }>>([]);
   useEffect(() => {
-    if (asked === null) return;
-    const landed = Object.values(answers).find((value) => value.requestId === asked);
-    if (landed === undefined) return;
-    setAsked(null);
-    setRefused(landed.refused ?? null);
-  }, [answers, asked]);
+    const landed = (id: string) => Object.values(answers).find((value) => value.requestId === id);
+    if (asked !== null && landed(asked) !== undefined) {
+      setRefused(landed(asked)!.refused ?? null);
+      setAsked(null);
+    }
+    const answered = Object.entries(choosing).filter(([, press]) => landed(press.requestId) !== undefined);
+    const wrote = writing.filter((press) => landed(press.requestId) !== undefined);
+    const refusal = [...answered.map(([, press]) => press.requestId), ...wrote.map((press) => press.requestId)].map((id) => landed(id)!.refused).find((said) => said !== undefined);
+    if (refusal !== undefined) setRefused(refusal);
+    if (answered.length > 0) setChoosing((held) => Object.fromEntries(Object.entries(held).filter(([key]) => !answered.some(([done]) => done === key))));
+    if (wrote.length > 0) setWriting((held) => held.filter((press) => !wrote.includes(press)));
+  }, [answers, asked, choosing, writing]);
+  // A press the record already shows is settled, whichever answer brought it: answers to quick
+  // presses replace one another in the store, so its own may never be read.
+  useEffect(() => {
+    if (look === null) return;
+    const shown = Object.entries(choosing).filter(([key, press]) => (look.characters[key]?.lookId ?? null) === press.lookId);
+    if (shown.length > 0) setChoosing((held) => Object.fromEntries(Object.entries(held).filter(([key]) => !shown.some(([done]) => done === key))));
+    const written = writing.filter((press) => (lineOf(look, press.target) ?? null) === press.text);
+    if (written.length > 0) setWriting((held) => held.filter((press) => !written.includes(press)));
+  }, [look]);
   const [adding, setAdding] = useState<Array<{ key: string; name: string; sheet?: string }>>([]);
   // Which chapters chose each look (R-114): asked when the sheet opens and again when a choice is made, so a picker is never a chapter behind.
   const chosenSignature = Object.entries(look?.characters ?? {}).map(([key, line]) => `${key}:${line.lookId ?? ""}`).join("|");
@@ -259,6 +365,10 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
       setRefused(null);
       setMaking(null);
       setCloseAsked({});
+      setCloseAccepted({});
+      setDiscarded([]);
+      setChoosing({});
+      setWriting([]);
       return;
     }
     setUsageAsk(readAudiobookLooks(worldId, productionId));
@@ -268,33 +378,64 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
   const off = connection !== "open";
   const derive = () => {
     setRefused(null);
-    setAsked(deriveAudiobookLook(worldId, productionId, chapterFile));
+    const requestId = deriveAudiobookLook(worldId, productionId, chapterFile);
+    if (requestId !== null) asking.current.add(requestId);
+    setAsked(requestId);
   };
   const write = (target: LookTarget, text: string | null) => {
-    setAudiobookLook(worldId, productionId, chapterFile, target, text);
+    const requestId = setAudiobookLook(worldId, productionId, chapterFile, target, text);
+    if (requestId === null) return;
+    asking.current.add(requestId);
+    setWriting((held) => [...held, { requestId, target, text }]);
   };
-  const rows = lookRows(look, numberOf);
+  // What the sheet draws: the record, with the choices pressed and not yet answered laid over it.
+  const shownLook = withChoices(look, choosing, (sheet, lookId) => chapterLooksOf(kitOf(world, sheet)).find((candidate) => candidate.id === lookId) ?? null);
+  const rows = lookRows(shownLook, numberOf);
   // A character the look holds no line for, offered to add: a sheet of the world's, by name.
   const held = new Set(Object.keys(look?.characters ?? {}));
   const addable = (world?.sheets ?? []).filter((sheet) => sheet.type === "character" && sheet.retired !== true && sheet.neverDepicted !== true && !held.has(sheet.id) && !adding.some((entry) => entry.key === sheet.id));
-  const count = Object.keys(look?.characters ?? {}).length;
-  const chosenCount = Object.values(look?.characters ?? {}).filter((line) => line.lookId !== undefined).length;
+  const count = Object.keys(shownLook?.characters ?? {}).length;
+  const chosenCount = Object.values(shownLook?.characters ?? {}).filter((line) => line.lookId !== undefined).length;
   const state = look === null ? null : rows.some((row) => row.source?.includes("yours")) ? "edited" : "derived";
+  const saving = Object.keys(choosing).length > 0 || writing.length > 0;
   const slug = world?.meta.slug ?? "";
   const orderOf = (file: string): number | null => world?.productions.find((candidate) => candidate.meta.id === productionId)?.chapters.find((chapter) => chapter.file === file)?.order ?? null;
   const choose = (row: Row, lookId: string | null) => {
-    chooseAudiobookLook(worldId, productionId, chapterFile, { key: row.id, ...(row.label !== null ? { name: row.label } : {}), ...(row.sheet !== undefined ? { sheet: row.sheet } : {}) }, lookId);
+    // The row already shows what was pressed and not yet answered: the same press again sends nothing.
+    if ((row.line?.lookId ?? null) === lookId) return;
+    setRefused(null);
+    const requestId = chooseAudiobookLook(worldId, productionId, chapterFile, { key: row.id, ...(row.label !== null ? { name: row.label } : {}), ...(row.sheet !== undefined ? { sheet: row.sheet } : {}) }, lookId);
+    if (requestId === null) return;
+    asking.current.add(requestId);
+    setChoosing((pressed) => ({ ...pressed, [row.id]: { lookId, requestId } }));
   };
-  const pendingClose = (sheet: string | undefined, lookId: string): { id: string; path: string } | null => {
-    if (world === null || sheet === undefined) return null;
-    const found = world.referenceTakes.find(
-      (take) => take.kind === "look" && take.reference?.sheetId === sheet && take.media !== undefined && take.params["lookFraming"] === "close" && take.params["lookOfLook"] === lookId && !world.referenceReviews.some((review) => review.takeId === take.id),
-    );
+  const pendingClose = (sheet: string, lookId: string): { id: string; path: string } | null => {
+    if (world === null) return null;
+    const found = world.referenceTakes
+      .filter((take) => take.kind === "look" && take.reference?.sheetId === sheet && take.media !== undefined && take.params["lookFraming"] === "close" && take.params["lookOfLook"] === lookId && !discarded.includes(take.id) && !world.referenceReviews.some((review) => review.takeId === take.id))
+      .sort((a, b) => (a.id < b.id ? 1 : -1))[0];
     return found === undefined ? null : { id: found.id, path: `references/${sheet}/takes/${found.id}/${found.media}` };
+  };
+  /** The close view's row (R-118): accepted here, made and waiting, being made, or refused with its reason — never a spinner on a job that ended. */
+  const closeStateFor = (sheet: string, chosen: CharacterLook): CloseViewState => {
+    const accepted = closeAccepted[chosen.id];
+    if (accepted !== undefined) return { kind: "accepted", path: accepted };
+    // A close view waiting to be accepted is the row's (a discarded one is gone at once, and Make
+    // again discards before it asks, so a newer request never stands behind an older picture).
+    const take = pendingClose(sheet, chosen.id);
+    if (take !== null) return { kind: "made", take };
+    const request = closeAsked[chosen.id];
+    if (request !== undefined && queueRefused[request] !== undefined) return { kind: "failed", reason: queueRefused[request]! };
+    // A request asked here is followed by its own job; otherwise the newest close job of this look.
+    const job = request !== undefined ? lookJobs(jobs, (params) => params["lookBatch"] === request)[0] : lookJobs(jobs, (params) => params["lookFraming"] === "close" && params["lookOfLook"] === chosen.id)[0];
+    const ended = lookJobState(job);
+    if (ended?.state === "failed") return { kind: "failed", reason: ended.reason };
+    return ended?.state === "making" || request !== undefined ? { kind: "making" } : { kind: "none" };
   };
   const makeClose = (row: Row, chosen: CharacterLook) => {
     if (row.sheet === undefined) return;
-    if (makeChapterLook(worldId, row.sheet, { framing: "close", prompt: chosen.prompt, count: 1, closeOf: { lookId: chosen.id } }) !== null) setCloseAsked((heldAsks) => ({ ...heldAsks, [chosen.id]: true }));
+    const request = makeChapterLook(worldId, row.sheet, { framing: "close", prompt: lookClothing(chosen), count: 1, closeOf: { lookId: chosen.id } });
+    if (request !== null) setCloseAsked((heldAsks) => ({ ...heldAsks, [chosen.id]: request }));
   };
   return (
     <>
@@ -318,10 +459,18 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
                 onWrite={write}
                 onNewLook={(entry) => setMaking({ key: entry.id, name: entry.label ?? entry.id, sheet: entry.sheet!, line: entry.text })}
                 onChoose={choose}
-                closeAsked={closeAsked}
+                closeState={(chosen) => closeStateFor(row.sheet!, chosen)}
                 onMakeClose={makeClose}
-                closeTakeFor={(lookId) => pendingClose(row.sheet, lookId)}
-                onAcceptClose={(entry, chosen, takeId) => acceptChapterLook(worldId, entry.sheet!, takeId, { closeFor: chosen.id })}
+                onAcceptClose={(entry, chosen, take) => {
+                  acceptChapterLook(worldId, entry.sheet!, take.id, { closeFor: chosen.id });
+                  setCloseAccepted((heldViews) => ({ ...heldViews, [chosen.id]: take.path }));
+                }}
+                onDiscardClose={(chosen, takeId, again) => {
+                  rejectReferenceTake(worldId, takeId, "close view", again ? "made again" : "discarded");
+                  setDiscarded((heldTakes) => [...heldTakes, takeId]);
+                  setCloseAsked(({ [chosen.id]: _gone, ...rest }) => rest);
+                  if (again) makeClose(row, chosen);
+                }}
               />
             ) : (
               <LookLine key={row.id} row={row} disabled={off} onWrite={write} />
@@ -341,7 +490,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
           {look !== null && (
             <div className="fy-look__meta fy-mono">
               <span data-testid="look-summary">
-                {count} character{count === 1 ? "" : "s"} · {chosenCount} look{chosenCount === 1 ? "" : "s"} chosen · {state} · saved
+                {count} character{count === 1 ? "" : "s"} · {chosenCount} look{chosenCount === 1 ? "" : "s"} chosen · {state} · {saving ? "saving…" : "saved"}
               </span>
               <span>used by every picture in this chapter</span>
             </div>

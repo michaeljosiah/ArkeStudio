@@ -216,3 +216,58 @@ describe("making, choosing and accepting", () => {
     assert.equal(accept.choose, undefined);
   });
 });
+
+/** A look job as the queue holds it: what a slot reads to say it ended without a picture. */
+const job = (id: string, params: Record<string, unknown>, status: "queued" | "running" | "succeeded" | "failed", error: string | null = null) =>
+  ({ id: `jb_${id}`, target: { kind: "character-look", id: "maren-kest/x/1" }, params, status, error, createdAt: AT, updatedAt: AT }) as never;
+const SAFETY = "openai: the safety system refused the prompt (moderation blocked) — recompose the prompt away from what it flagged and try again";
+const withJobs = (state: ClientState, jobs: unknown[]): ClientState => ({ ...state, app: { ...state.app, jobs: jobs as ClientState["app"]["jobs"] } });
+
+describe("a picture the provider refuses (2026-10-04)", () => {
+  it("says so in the candidate's slot, with the reason in plain words, and never leaves it making", async () => {
+    const m = await mount(ready());
+    await press(bodyAll('[data-testid="new-look-make"]')[0]);
+    const batch = sentOf(m, "generate-character-looks")[0]!.requestId;
+    const params = { lookKind: "costume", lookPrompt: "x", lookFraming: "full-body", lookBatch: batch };
+    await m.rerender(withJobs(ready([take(ids[0]!, params)]), [job(ids[0]!, params, "succeeded"), job(ids[1]!, params, "failed", SAFETY), job(ids[2]!, params, "running")]));
+    const cells = bodyAll('[data-testid="new-look-candidate"]');
+    assert.deepEqual(cells.map((cell) => cell.getAttribute("data-state")), ["made", "making", "failed"]);
+    assert.equal(text(bodyAll('[data-testid="new-look-candidate-reason"]')[0]), "refused by the image safety check");
+    assert.ok(bodyAll('[data-testid="new-look-again"]')[0], "Make again is there to try again");
+  });
+
+  it("says so on the close view, offers Try again, and lets the look be accepted without it", async () => {
+    const m = await mount(ready());
+    await press(bodyAll('[data-testid="new-look-make"]')[0]);
+    const batch = sentOf(m, "generate-character-looks")[0]!.requestId;
+    const base = { lookKind: "costume", lookPrompt: "x", lookFraming: "full-body", lookBatch: batch };
+    const fulls = ids.slice(0, 3).map((id) => take(id, base));
+    await m.rerender(ready(fulls));
+    await press(bodyAll('[data-testid="new-look-candidate"]')[1]);
+    const closeAsk = sentOf(m, "generate-character-looks")[1]!;
+    await m.rerender(withJobs(ready(fulls), [job("01J8Z3X4Y5Z6A7B8C9D0E1F2H5", { lookFraming: "close", lookOfTake: `tk_${ids[1]}`, lookBatch: closeAsk.requestId }, "failed", SAFETY)]));
+    assert.equal(bodyAll('[data-testid="new-look-close"]')[0]!.getAttribute("data-state"), "failed", "not making");
+    assert.equal(text(bodyAll('[data-testid="new-look-close-reason"]')[0]), "refused by the image safety check");
+    assert.equal((bodyAll('[data-testid="new-look-accept"]')[0] as HTMLButtonElement).disabled, false, "the look can be accepted without its close view");
+    await press(bodyAll('[data-testid="new-look-close-retry"]')[0]);
+    assert.equal(sentOf(m, "generate-character-looks").length, 3, "Try again asks once more");
+    assert.equal(bodyAll('[data-testid="new-look-close"]')[0]!.getAttribute("data-state"), "making");
+  });
+});
+
+describe("the close view's price (2026-10-04)", () => {
+  // GPT Image 2 as the manifest prices it: per picture, and per reference picture.
+  const REAL: ManifestModel = { ...GPT, pricing: { kind: "perImage", microUsdPerImage: 53_000, microUsdPerReferenceImage: 100_000 } };
+  const real = (): ClientState => {
+    const state = ready();
+    return { ...state, app: { ...state.app, manifest: { ...state.app.manifest!, models: [...state.app.manifest!.models.filter((model) => model.id !== GPT.id), REAL] } } };
+  };
+
+  it("states the real price on the box, on by default: one picture from the main photo and the full body", async () => {
+    await mount(real());
+    const box = bodyAll('[data-testid="new-look-close-box"]')[0] as HTMLInputElement;
+    assert.equal(box.checked, true, "on by default");
+    assert.match(text(bodyAll('[data-testid="new-look-fixed"]')[0]), /Close view · ~\$0\.26/, "53,000 for the picture and 100,000 for each of its two references");
+    assert.match(text(bodyAll('[data-testid="new-look-price"]')[0]), /3 pictures · ~\$0\.46 · close view ~\$0\.26/);
+  });
+});

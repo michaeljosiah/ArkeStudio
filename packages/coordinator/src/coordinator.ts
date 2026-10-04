@@ -15296,8 +15296,10 @@ export class Coordinator {
         const at = () => new Date().toISOString();
         try {
           const record = await setChapterLook(store, msg.productionId, chapter.id, msg.target, msg.text);
-          this.refreshIfStillOpen(store);
+          // The answer before the snapshot: the open sheet reads the record, and a whole world's
+          // snapshot serialised ahead of it kept the sheet a press behind (0.5.60-local.14).
           this.emit({ at: at(), type: "audiobook.record", ...ids, record });
+          this.refreshIfStillOpen(store);
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.look-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
@@ -15324,8 +15326,9 @@ export class Coordinator {
         const at = () => new Date().toISOString();
         try {
           const record = await chooseChapterLook(store, msg.productionId, chapter.id, { key: msg.key, ...(msg.name !== undefined ? { name: msg.name } : {}), ...(msg.sheet !== undefined ? { sheet: msg.sheet } : {}) }, msg.lookId);
-          this.refreshIfStillOpen(store);
+          // The answer first, as for a line written above.
           this.emit({ at: at(), type: "audiobook.record", ...ids, record });
+          this.refreshIfStillOpen(store);
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.look-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
