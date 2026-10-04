@@ -44,10 +44,12 @@ it("offers a writing model without empty review sections on the founding front d
     const chip = container.querySelector<HTMLButtonElement>(".fy-cx__bar button.fy-mchip__btn");
     assert.ok(chip, "the model chip is in the composer's tool row");
     await act(async () => chip.click());
-    assert.equal(container.querySelector('.fy-mchip__menu [data-model="ollama/no-tools"]')?.hasAttribute("disabled"), true);
-    assert.match(container.querySelector('.fy-mchip__menu [data-model="ollama/no-tools"]')?.textContent ?? "", /cannot use tools/);
-    assert.equal(container.querySelector('.fy-mchip__menu [data-model="ollama/writing"]')?.hasAttribute("disabled"), false, "unknown tool support stays selectable");
-    assert.equal(container.querySelectorAll(".fy-mchip__menu button[role=menuitem]").length, 0);
+    // The menu is drawn on the body, out of the composer's clip.
+    const body = dom.document.body;
+    assert.equal(body.querySelector('.fy-mchip__menu [data-model="ollama/no-tools"]')?.hasAttribute("disabled"), true);
+    assert.match(body.querySelector('.fy-mchip__menu [data-model="ollama/no-tools"]')?.textContent ?? "", /cannot use tools/);
+    assert.equal(body.querySelector('.fy-mchip__menu [data-model="ollama/writing"]')?.hasAttribute("disabled"), false, "unknown tool support stays selectable");
+    assert.equal(body.querySelectorAll(".fy-mchip__menu button[role=menuitem]").length, 0);
     assert.doesNotMatch(container.textContent ?? "", /models? from /, "the catalogue is not counted while it is fine");
     assert.match(container.textContent ?? "", /What is this world/);
     assert.doesNotMatch(container.textContent ?? "", /Review world content|Review the world|Available voices/);

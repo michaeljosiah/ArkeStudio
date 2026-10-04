@@ -116,17 +116,21 @@ async function choose(label: string, value: string) {
   });
 }
 
-/** The chat's model is a chip in the composer's row; its menu holds the models and the two presses (design turn 190e). */
+/**
+ * The chat's model is a chip in the composer's row; its menu holds the models and the two presses
+ * (design turn 190e). The menu is drawn on the body, out of the composer's clip, so it is looked
+ * for there.
+ */
 function chip(): HTMLButtonElement {
   const element = container.querySelector<HTMLButtonElement>("button.fy-mchip__btn");
   assert.ok(element, "the model chip");
   return element;
 }
 async function openChip() {
-  if (!container.querySelector(".fy-mchip__menu")) await act(async () => chip().click());
+  if (!dialogRoot(container).querySelector(".fy-mchip__menu")) await act(async () => chip().click());
 }
 function modelItems(): HTMLButtonElement[] {
-  return [...container.querySelectorAll<HTMLButtonElement>(".fy-mchip__menu [data-model]")];
+  return [...dialogRoot(container).querySelectorAll<HTMLButtonElement>(".fy-mchip__menu [data-model]")];
 }
 function modelItem(id: string): HTMLButtonElement {
   const item = modelItems().find((candidate) => candidate.getAttribute("data-model") === id);
@@ -139,7 +143,7 @@ async function pickModel(id: string) {
   await act(async () => item.click());
 }
 function menuPress(label: RegExp): HTMLButtonElement | undefined {
-  return [...container.querySelectorAll<HTMLButtonElement>(".fy-mchip__menu button[role=menuitem]")].find((candidate) => label.test(candidate.textContent ?? ""));
+  return [...dialogRoot(container).querySelectorAll<HTMLButtonElement>(".fy-mchip__menu button[role=menuitem]")].find((candidate) => label.test(candidate.textContent ?? ""));
 }
 async function chipPress(label: RegExp) {
   await openChip();
@@ -409,7 +413,7 @@ describe("live harness model controls (#1123, #1124)", () => {
     state.app.harnessModelStatus = { status: "error", reason: "The harness did not answer." };
     await mount(state, conversation());
     await openChip();
-    assert.match(container.querySelector(".fy-mchip__menu")!.textContent ?? "", /anthropic\/sonnet\s*unavailable/);
+    assert.match(dialogRoot(container).querySelector(".fy-mchip__menu")!.textContent ?? "", /anthropic\/sonnet\s*unavailable/);
     await chipPress(/Clear the production/);
     assert.ok(sent.some((message) => message.kind === "set-production-model" && message.modelId === null));
     await press("Retry models");
@@ -444,7 +448,7 @@ describe("live harness model controls (#1123, #1124)", () => {
     }
     await openChip();
     assert.equal(modelItem(OPUS).disabled, true);
-    assert.ok(menuPress(/Use the saved choice/) ?? [...container.querySelectorAll<HTMLButtonElement>(".fy-mchip__menu button")].find((b) => /Use the saved choice/.test(b.textContent ?? "")), "clearing remains available");
+    assert.ok(menuPress(/Use the saved choice/) ?? [...dialogRoot(container).querySelectorAll<HTMLButtonElement>(".fy-mchip__menu button")].find((b) => /Use the saved choice/.test(b.textContent ?? "")), "clearing remains available");
     const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.trim() === label)!;
     assert.equal(button("Explain the scene").disabled, true);
     assert.equal(menuPress(/Every chat in this production/), undefined, "a choice that cannot be checked is not offered to the production");
@@ -673,7 +677,7 @@ describe("the model chip on a conversation page (turn 190e)", () => {
     state.app.harnessModelStatus = { status: "error", reason: "The harness did not answer." };
     await mount(state, pageConversation());
     await openChip();
-    assert.match(container.querySelector(".fy-mchip__menu")!.textContent ?? "", /anthropic\/sonnet\s*unavailable/);
+    assert.match(dialogRoot(container).querySelector(".fy-mchip__menu")!.textContent ?? "", /anthropic\/sonnet\s*unavailable/);
     assert.equal(modelItem(CLAUDE).disabled, true);
     assert.match(container.textContent!, /The harness did not answer/, "the catalogue's trouble is said, below the title and above the composer");
     await chipPress(/Clear the production/);
