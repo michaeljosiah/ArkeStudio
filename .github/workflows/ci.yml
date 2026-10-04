@@ -110,3 +110,43 @@ jobs:
         run: |
           node --test scripts/test/install-comfyui-qwen21.test.mjs
           python scripts/test/qwen21-runtime.test.py
+
+  production-acceptance:
+    name: ${{ matrix.os }} · Production Chat film
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      ARKE_PRODUCTION_ACCEPTANCE_REAL_MEDIA: 1
+      ARKE_PRODUCTION_ACCEPTANCE_DIR: ${{ runner.temp }}/arke-production-acceptance
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --yes --no-progress
+      # The ordinary shards cover the same authorities with the injected encoder. This job
+      # additionally decodes provider fixtures and makes the native twelve-second review cut.
+      - name: Make a film from Production Chat
+        working-directory: packages/coordinator
+        run: node --import tsx --test --test-timeout=240000 test/world-chat/production-acceptance.test.ts
+      - name: Retain cards, spend and exported media
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-chat-${{ runner.os }}
+          path: ${{ env.ARKE_PRODUCTION_ACCEPTANCE_DIR }}
+          if-no-files-found: warn

@@ -1109,6 +1109,25 @@ describe("ephemeral provider voice references", () => {
 });
 
 describe("reference finalization after provider success", () => {
+  it("keeps a failed Bench score filing retryable without another purchase", async t => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.inlineArtifacts = [{ name: "score.mp3", contentType: "audio/mpeg", data: Uint8Array.from([0xff, 0xfb, 0x90, 0, ...Array(413).fill(0)]) }];
+    let fail = true, finalizations = 0;
+    const h = await makeHarness({ fake }, { onTerminal: () => { finalizations++; if (fail) throw new Error("Bench log is busy"); } });
+    t.after(() => h.queue.dispose()); await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, capability: "music", target: { kind: "bench-take", id: "sess/take" }, landing: { dir: ".sessions/sess/media/take" } });
+    await until(() => {
+      const current = foldedJob(h, job.id); assert.notEqual(current?.status, "failed", JSON.stringify(current));
+      return current?.finalization?.status === "failed";
+    }, "the score filing failure", FOLD_MS);
+    assert.equal(h.events.some(event => event.type === "job.ready"), false);
+    assert.equal(foldedJob(h, job.id)?.finalization?.cause, "Bench log is busy");
+    fail = false; await h.queue.retryFinalization(job.id);
+    assert.equal(foldedJob(h, job.id)?.finalization?.status, "complete");
+    assert.equal(h.events.some(event => event.type === "job.ready"), true);
+    assert.equal(finalizations, 2); assert.equal(fake.submitCount, 1); assert.equal(h.ledger.entries.length, 1);
+  });
+
   it("retries a failed finalizer without provider or ledger activity", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.artifacts = [{ name: "sheet.png", contentType: "image/png", data: pngBytes() }];

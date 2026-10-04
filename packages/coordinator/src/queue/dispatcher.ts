@@ -324,6 +324,7 @@ const FOLLOW_ON_TARGETS = new Set([
   "scene-pass",
   "voice-line",
   "voice-preview",
+  "bench-take",
 ]);
 /**
  * Params the coordinator keeps on the job for itself and never sends. `voiceClipHash` is the
