@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { formatRunningTime, illustrationTotal, pacePhrase, priceLabel, type IllustrationRow, type PictureWho } from "@arke-studio/contracts";
+import { formatRunningTime, frameWord, illustrationTotal, pacePhrase, priceLabel, type IllustrationRow, type PictureWho } from "@arke-studio/contracts";
 import { dismissIllustration, illustrateChapter, skipIllustrationRow, sendIllustrationWithout, stopIllustration, acceptIllustration, useIllustrationRuns, type IllustrationRun } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { Button, cx } from "./ui.js";
@@ -141,9 +141,12 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
   const people = row.who.filter((entry) => entry.kind === "character");
   const lacking = people.find((entry) => entry.sheet !== undefined && entry.reference === null);
   const time = clock(row.at, estimated);
+  // The frame word in the slot's corner (193h, rule 11): what the brief said the picture is.
+  const frame = row.shot === undefined ? null : (frameWord(row.shot.frame) ?? (row.shot.frame === "" ? null : row.shot.frame));
   return (
     <article className={cx("fy-ills__card", skipped && "fy-ills__card--off", held && !skipped && "fy-ills__card--held")} data-testid="illustration-row" data-block={row.block} data-state={skipped ? "skipped" : held ? "held" : "ready"}>
       <div className="fy-ills__th">
+        {frame !== null && <span className="fy-mono fy-ills__frame" data-testid="illustration-frame" title={row.shot?.frame}>{frame}</span>}
         <span className="fy-mono fy-ills__tm">{time}</span>
         <p className="fy-ills__words">{words ?? row.title}</p>
         <span className="fy-ills__figs" aria-hidden="true">{people.map((entry) => <Face key={entry.key} who={entry} slug={slug} />)}</span>
@@ -151,7 +154,7 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
       <div className="fy-ills__hd">
         <span className="fy-ills__t">
           <b>{row.title}</b>
-          <span className="fy-mono fy-ills__meta">{time}</span>
+          <span className="fy-mono fy-ills__meta">{frame !== null ? `${frame} · ${time}` : time}</span>
         </span>
         {held && !skipped ? (
           <Button variant="ghost" disabled={disabled || lacking === undefined} onClick={() => lacking !== undefined && onMakeLook(lacking)} data-testid="illustration-needs">

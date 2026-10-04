@@ -112,9 +112,37 @@ export type LookView = z.infer<typeof LookViewSchema>;
  * Read from the frame's opening words, so `Medium two-shot across the table` is a two-shot.
  */
 export function lookViewFor(frame: string | undefined | null): LookView {
-  if (frame === undefined || frame === null) return "full";
-  const words = frame.toLowerCase().replace(/[-‐–]/g, " ").replace(/\s+/g, " ").trim();
-  return /\b(two shot|close up|closeup)\b/.test(words.split(/[,·:;(]/)[0] ?? "") ? "close" : "full";
+  const word = frameWord(frame);
+  return word !== null && CLOSE_FRAMES.has(word) ? "close" : "full";
+}
+
+/**
+ * The frame words (design turn 193, rule 11), in the order they are looked for: the readable word a
+ * frame is named by, so `Medium two-shot across the table` is a Two-shot and `Wide shot from
+ * behind` a Wide.
+ */
+const FRAME_WORDS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\bextreme close ?up\b/, "Extreme close-up"],
+  [/\bmedium close ?up\b/, "Medium close-up"],
+  [/\bclose ?up\b/, "Close-up"],
+  [/\btwo shot\b/, "Two-shot"],
+  [/\bover the shoulder\b/, "Over the shoulder"],
+  [/\bmedium wide\b/, "Medium wide"],
+  [/\bestablishing\b/, "Establishing"],
+  [/\bwide\b/, "Wide"],
+  [/\bdetail\b/, "Detail"],
+  [/\bmedium\b/, "Medium"],
+];
+
+/** The frames that show faces, for which a look's close view rides (rule 8, R-118). */
+export const CLOSE_FRAMES: ReadonlySet<string> = new Set(["Two-shot", "Medium close-up", "Close-up", "Extreme close-up"]);
+
+/** The frame word a frame (or a prompt's opening) names, from its first clause; null where it names none. */
+export function frameWord(frame: string | null | undefined): string | null {
+  if (frame === null || frame === undefined) return null;
+  const words = (frame.toLowerCase().replace(/[-‐–]/g, " ").replace(/\s+/g, " ").trim().split(/[,·:;(]/)[0] ?? "").trim();
+  for (const [pattern, word] of FRAME_WORDS) if (pattern.test(words)) return word;
+  return null;
 }
 
 /**

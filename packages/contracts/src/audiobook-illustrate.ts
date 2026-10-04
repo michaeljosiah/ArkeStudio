@@ -56,6 +56,60 @@ export const PictureModelSchema = z
   .strict();
 export type PictureModel = z.infer<typeof PictureModelSchema>;
 
+// ---------------------------------------------------------------------------
+// The shot (design turn 193k, SPEC-047 R-120, R-121)
+// ---------------------------------------------------------------------------
+
+/** Longest frame a picture names: a frame word and a few words of subject (`Extreme close-up, Ife's eyes`). */
+export const PICTURE_FRAME_MAX = 120;
+/** Longest expression, or a detail's ease or tension, the card carries. */
+export const PICTURE_EXPRESSION_MAX = 300;
+export const PICTURE_DETAIL_PART_MAX = 60;
+
+/** A hand or an arm a detail shot shows (rule 3, 5): whose, which part, its ease or tension. */
+export const PictureDetailSchema = z
+  .object({
+    of: z.string().min(1).max(120),
+    part: z.string().min(1).max(PICTURE_DETAIL_PART_MAX),
+    state: z.string().min(1).max(PICTURE_EXPRESSION_MAX).optional(),
+  })
+  .strict();
+export type PictureDetail = z.infer<typeof PictureDetailSchema>;
+
+/**
+ * One of the seven checks the coordinator runs on a drafted picture (rule 14, R-121): a line on
+ * the card, ticked or marked. A mark never blocks Generate.
+ */
+export const PictureCheckSchema = z
+  .object({
+    id: z.enum(["reference", "not-in-frame", "frame", "garments", "mood", "closing", "expression"]),
+    ok: z.boolean(),
+    label: z.string().min(1).max(80),
+    note: z.string().min(1).max(240).optional(),
+  })
+  .strict();
+export type PictureCheck = z.infer<typeof PictureCheckSchema>;
+
+/**
+ * What the brief answered for one picture and what the coordinator found (R-120, R-121): the frame,
+ * who is in it and who is in the scene but not in it, each face's expression by key, the hands or
+ * arms a detail shows, and the checks.
+ */
+export const PictureShotSchema = z
+  .object({
+    frame: z.string().max(PICTURE_FRAME_MAX),
+    inFrame: z.array(z.string().min(1).max(120)).max(24),
+    notInFrame: z.array(z.string().min(1).max(120)).max(24),
+    expressions: z.record(z.string().min(1).max(120), z.string().min(1).max(PICTURE_EXPRESSION_MAX)),
+    details: z.array(PictureDetailSchema).max(12),
+    checks: z.array(PictureCheckSchema).max(7),
+  })
+  .strict();
+export type PictureShot = z.infer<typeof PictureShotSchema>;
+
+/** The identity line the app writes after every prompt with someone in it (rule 8c, 193k). */
+export const PICTURE_IDENTITY_LINE = "Keep each person's identity, hair and clothes as in the references; the expression is as written above, not the reference's.";
+
 /** One block's suggestion (R-99): the prompt, who is in it, the look it used, the model, ratio and price. */
 export const PictureSuggestionSchema = z
   .object({
@@ -70,6 +124,8 @@ export const PictureSuggestionSchema = z
     estimatedMicroUsd: z.number().int().min(0),
     /** What the picture will keep of the look: who was in it and a digest of their lines. */
     look: PictureLookSchema.optional(),
+    /** The frame, who is in it and who is not, each face's expression, the details and the checks (design turn 193k, R-120, R-121). */
+    shot: PictureShotSchema.optional(),
   })
   .strict();
 export type PictureSuggestion = z.infer<typeof PictureSuggestionSchema>;
@@ -178,6 +234,8 @@ export const IllustrationRowSchema = z
      * — `Make a reference` — and goes ahead without only if the author says so.
      */
     needs: z.array(z.string().min(1).max(120)).max(24).optional(),
+    /** The row's frame, who is in it and not, the expressions, details and checks (design turn 193k, R-120, R-121). */
+    shot: PictureShotSchema.optional(),
   })
   .strict();
 export type IllustrationRow = z.infer<typeof IllustrationRowSchema>;
@@ -241,5 +299,15 @@ export type IllustrationProgress = z.infer<typeof IllustrationProgressSchema>;
  * text, which named clothes and dressed everyone in them.
  */
 export function pictureBench(prompt: string, cited: ReadonlyArray<{ name: string; kind: "character" | "place"; token: string }>, mood: string | undefined): string {
-  return [prompt.replace(/\s+/g, " ").trim(), referenceBriefLine(cited), ...(mood !== undefined && mood !== "" ? [`Light and mood: ${mood}`] : [])].filter((part) => part !== "").join("\n\n");
+  // The closing lines are the app's, never the model's (193k, check 6): who is shown where, that the
+  // references fix identity, hair and clothes and never the expression, the light, and no text.
+  const people = cited.some((entry) => entry.kind === "character");
+  return [
+    prompt.replace(/\s+/g, " ").trim(),
+    [referenceBriefLine(cited), people ? PICTURE_IDENTITY_LINE : ""].filter((part) => part !== "").join(" "),
+    mood !== undefined && mood !== "" ? `Light and mood: ${mood}` : "",
+    "No text in the picture.",
+  ]
+    .filter((part) => part !== "")
+    .join("\n\n");
 }

@@ -3350,6 +3350,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       block: z.string().min(1).max(40),
       prompt: z.string().min(1).max(PICTURE_PROMPT_MAX),
       who: z.array(z.string().min(1).max(120)).max(24),
+      /** The frame the suggestion named (design turn 193, R-118): which of each look's images rides. */
+      frame: z.string().max(120).optional(),
       confirmedMicroUsd: z.number().int().min(0),
       requestId: UlidSchema,
     })

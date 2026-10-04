@@ -7,6 +7,8 @@ import {
   chooseLook,
   cutMoodClothing,
   editLook,
+  frameWord,
+  lookViewFor,
   lookDigest,
   lookLinesFor,
   lookNeedsChoiceBoundary,
@@ -283,5 +285,26 @@ describe("the Mood line (design turn 193, rule 9)", () => {
     assert.doesNotMatch(fallback, /agbada/);
     assert.match(fallback, /^Lagos at night/);
     assert.equal(pictureMood(null, undefined), undefined);
+  });
+});
+describe("the frame word (design turn 193, rule 11)", () => {
+  it("reads the readable word from a frame's first clause, and the close view follows it", () => {
+    const cases: Array<[string, string | null, "full" | "close"]> = [
+      ["Extreme close-up, Ife's eyes", "Extreme close-up", "close"],
+      ["Medium two-shot across the table", "Two-shot", "close"],
+      ["Medium close-up · the key", "Medium close-up", "close"],
+      ["Close-up on her face", "Close-up", "close"],
+      ["Wide shot from behind Maren", "Wide", "full"],
+      ["Medium wide, the room", "Medium wide", "full"],
+      ["Establishing, the quarter", "Establishing", "full"],
+      ["Detail, her fingers on his forearm", "Detail", "full"],
+      ["Over the shoulder", "Over the shoulder", "full"],
+      ["Medium", "Medium", "full"],
+      ["A picture of her", null, "full"],
+    ];
+    for (const [frame, word, view] of cases) {
+      assert.equal(frameWord(frame), word, frame);
+      assert.equal(lookViewFor(frame), view, frame);
+    }
   });
 });

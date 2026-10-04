@@ -23,7 +23,8 @@ import { sendBenchAddReference, sendBenchCompose, sendBenchNewSession, setAudiob
 import type { BlockRow } from "../screens/chapter-audiobook.js";
 import { Button, Textarea, cx } from "./ui.js";
 import { LookSheet } from "./audiobook-look.js";
-import { PictureSuggestionCard, usePictureSuggestion } from "./audiobook-suggest.js";
+import { usePictureSuggestion } from "./audiobook-suggest.js";
+import { PictureCard } from "./audiobook-picture-card.js";
 
 /**
  * Pictures that follow the words (design turn 186c, SPEC-047 R-69): in a chapter's Audiobook
@@ -195,7 +196,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
       <h2 className="fy-ab__blocktitle">Picture · {blockName}</h2>
       {shownCaption !== null && <p className={cx("fy-mono fy-ab__card-line", here?.short && "fy-ch__who-where--warn")}>{shownCaption}</p>}
       {lookChanged && <p className="fy-mono fy-ab__card-line fy-ch__who-where--warn" data-testid="picture-look-changed">look changed</p>}
-      {!open && world !== null && <PictureSuggestionCard world={world} worldId={worldId} state={suggestion} onEdit={editInBench} offline={connection !== "open"} />}
+      {!open && world !== null && <PictureCard world={world} worldId={worldId} state={suggestion} onEdit={editInBench} offline={connection !== "open"} />}
       {!open ? (
         <div className="fy-ab__control">
           {here !== null && world !== null && <img className="fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" />}

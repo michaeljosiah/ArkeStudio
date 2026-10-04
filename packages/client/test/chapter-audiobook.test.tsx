@@ -1564,6 +1564,15 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(q(m, '[data-testid="illustration-status"]')!.dataset.state, "making");
   });
 
+  it("names each card's frame in the slot's corner (design turn 193h, rule 11)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    const shot = (frame: string) => ({ frame, inFrame: [], notInFrame: [], expressions: {}, details: [], checks: [] });
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { shot: shot("Medium two-shot across the table") }), row("p3.0", { at: 150, who: [], shot: shot("Detail, her hand on the rail") }), row("p1.0", { at: 70 })] } }));
+    assert.deepEqual(all(m, '[data-testid="illustration-row"]').map((card) => card.querySelector('[data-testid="illustration-frame"]')?.textContent ?? null), ["Two-shot", "Detail", null]);
+    assert.match(all(m, '[data-testid="illustration-row"]')[1]!.textContent ?? "", /no reference rides/, "a detail carries no one");
+  });
+
   it("makes a look from a held row over the proposal for a character with a main photo, and sends one without to their page (design turn 193h)", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m);

@@ -31,6 +31,8 @@
 .fy-ills__card { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
 .fy-ills__th { position: relative; aspect-ratio: 16 / 9; box-sizing: border-box; padding: 8px 10px; display: flex; align-items: flex-end; overflow: hidden; border: 1px dashed var(--neutral-400); border-radius: 10px; }
 .fy-ills__tm { position: absolute; right: 8px; top: 8px; font-size: var(--text-2xs); color: var(--muted-foreground); }
+/* The frame word in the slot's top-left corner (193h): Wide, Two-shot, Detail. */
+.fy-ills__frame { position: absolute; left: 8px; top: 8px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--background); font-size: var(--text-2xs); color: var(--foreground); }
 .fy-ills__words { margin: 0; font-size: var(--text-xs); line-height: 1.5; color: var(--muted-foreground); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .fy-ills__figs { display: none; }
 .fy-ills__hd { display: flex; align-items: baseline; gap: 8px; font-size: var(--text-sm); }
@@ -75,7 +77,7 @@
   .fy-ills__grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .fy-ills__card { display: grid; grid-template-columns: 104px minmax(0, 1fr); column-gap: 12px; row-gap: 2px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
   .fy-ills__th { grid-row: 1 / 3; grid-column: 1; aspect-ratio: auto; width: 104px; height: 58px; align-items: center; justify-content: center; padding: 0; }
-  .fy-ills__words, .fy-ills__tm { display: none; }
+  .fy-ills__words, .fy-ills__tm, .fy-ills__frame { display: none; }
   .fy-ills__figs { display: flex; gap: 6px; }
   .fy-ills__hd { grid-column: 2; grid-row: 1; align-items: center; }
   .fy-ills__meta { display: block; }
