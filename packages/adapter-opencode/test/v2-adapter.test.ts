@@ -259,6 +259,25 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
     }
   });
 
+  it("pins the chosen effort inside the model reference, only for the dispatch model (design turn 195)", async () => {
+    const adapter = makeAdapter();
+    try {
+      await adapter.init();
+      adapter.prepareSession({ preparationId: "prep_effort", model: "openai/gpt-5.4", modelVariant: "high" });
+      await adapter.createSession({ purpose: "authoring", agent: "scene-writer", preparationId: "prep_effort" });
+      assert.deepEqual(stub.lastRequest(/^\/api\/session$/)?.body, { model: { providerID: "openai", id: "gpt-5.4", variant: "high" } });
+      // An agent's own default keeps the harness's effort: the variant belongs to the dispatch choice.
+      adapter.prepareSession({ preparationId: "prep_agent_effort", modelVariant: "high", agents: { "scene-writer": { model: "ollama/gemma4:12b" } } });
+      await adapter.createSession({ purpose: "authoring", agent: "scene-writer", preparationId: "prep_agent_effort" });
+      assert.deepEqual(stub.lastRequest(/^\/api\/session$/)?.body, { model: { providerID: "ollama", id: "gemma4:12b" } });
+      adapter.prepareSession({ preparationId: "prep_no_effort", model: "openai/gpt-5.4" });
+      await adapter.createSession({ purpose: "authoring", agent: "scene-writer", preparationId: "prep_no_effort" });
+      assert.deepEqual(stub.lastRequest(/^\/api\/session$/)?.body, { model: { providerID: "openai", id: "gpt-5.4" } });
+    } finally {
+      await adapter.dispose();
+    }
+  });
+
   it("budgets a pinned session from its own model's window, not the default's (issue 1247)", async () => {
     const adapter = makeAdapter();
     try {
@@ -513,6 +532,26 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
       assert.equal(ask?.type === "permission.requested" && ask.permissionId, "per_stub_resync");
     } finally {
       stub.pendingPermissions.clear();
+      await adapter.dispose();
+    }
+  });
+
+  it("carries the provider's name, reasoning, variants and cost when the catalogue states them (design turn 195)", async () => {
+    const adapter = makeAdapter();
+    try {
+      await adapter.init();
+      stub.models = [
+        { id: "gpt-5.4", providerID: "openai", providerName: "OpenAI", name: "GPT-5.4", reasoning: true,
+          variants: { low: {}, medium: {}, high: {} }, cost: { input: 1.25, output: 10 } },
+        { id: "bare", providerID: "openai" },
+      ];
+      const models = await adapter.listModels();
+      assert.deepEqual(models[0], {
+        id: "gpt-5.4", provider: "openai", providerName: "OpenAI", displayName: "GPT-5.4", reasoning: true,
+        variants: { names: ["low", "medium", "high"] }, cost: { inputPerMTok: 1.25, outputPerMTok: 10 },
+      });
+      assert.deepEqual(models[1], { id: "bare", provider: "openai" }, "nothing is invented for a row that states nothing");
+    } finally {
       await adapter.dispose();
     }
   });

@@ -91,15 +91,17 @@ export interface RunDeps {
     attachmentIds: readonly ChatAttachmentId[];
   }) => Promise<{ cwd: string; leaseToken: string }>;
   /** Atomically configure and create the harness session after preparation succeeds. */
-  createSession?: (input: { cwd: string; runId: RunId; model?: string; signal?: AbortSignal }) => Promise<{ sessionId: string }>;
+  createSession?: (input: { cwd: string; runId: RunId; model?: string; variant?: string; signal?: AbortSignal }) => Promise<{ sessionId: string }>;
   prepareImages?: (input: { leaseToken: string; attachments: readonly WorldChatAttachment[] }) => Promise<{ parts: MessagePart[]; description: string }>;
   /** Resolve an explicit or production language choice without ever substituting another model. */
   resolveLanguageModel?: (input: {
     entryContext: WorldChatContext | undefined;
     modelId?: string;
+    /** This turn's effort, in the harness's own name; absent takes the one kept for the model (design turn 195). */
+    variant?: string;
     /** The run's own Stop: the decision may wait on model discovery (issue 1247). */
     signal?: AbortSignal;
-  }) => Promise<{ modelId?: string; sessionModel?: string; inputTokenLimit?: number; reason?: string }>;
+  }) => Promise<{ modelId?: string; sessionModel?: string; variant?: string; inputTokenLimit?: number; reason?: string }>;
   /** Release the lease and clean the scratch, whatever the outcome. */
   release: (input: { conversationId: ConversationId; runId: RunId }) => Promise<void>;
   /** Receipts this run produced, in order. */
@@ -411,8 +413,10 @@ export class WorldChatRunner {
     replyOnly = false,
     /** Told once the line is durable as a turn; a send declined before that never calls it. */
     onAdmitted?: (turnId: TurnId) => void,
+    /** This turn's effort for the model that answers (design turn 195); absent takes what is kept for it. */
+    variant?: string,
   ): Promise<TurnOutcome> {
-    return this.runTurn(store, conversationId, text, attachmentIds, undefined, subject, modelId, replyOnly, onAdmitted);
+    return this.runTurn(store, conversationId, text, attachmentIds, undefined, subject, modelId, replyOnly, onAdmitted, variant);
   }
 
   /**
@@ -532,9 +536,10 @@ export class WorldChatRunner {
     modelId?: string,
     replyOnly = false,
     onAdmitted?: (turnId: TurnId) => void,
+    variant?: string,
   ): Promise<TurnOutcome> {
     return this.runExclusive(conversationId, controller => this.runRegisteredTurn(controller, store,
-      conversationId, text, attachmentIds, existingTurnId, subject, modelId, replyOnly, onAdmitted));
+      conversationId, text, attachmentIds, existingTurnId, subject, modelId, replyOnly, onAdmitted, undefined, variant));
   }
 
   /** The one admission guard every kind of turn shares: one run per conversation, held to the end. */
@@ -577,6 +582,7 @@ export class WorldChatRunner {
     replyOnly: boolean,
     onAdmitted?: (turnId: TurnId) => void,
     queued?: QueuedTurn,
+    variant?: string,
   ): Promise<TurnOutcome> {
     const adapter = this.deps.adapter!;
     const at = this.deps.now();
@@ -614,6 +620,7 @@ export class WorldChatRunner {
       ? await this.deps.resolveLanguageModel({
           entryContext: view.entryContext,
           ...(modelId !== undefined ? { modelId } : {}),
+          ...(variant !== undefined ? { variant } : {}),
           signal: controller.signal,
         })
       : modelId !== undefined ? { modelId } : {};
@@ -803,6 +810,7 @@ export class WorldChatRunner {
               cwd,
               runId,
               ...(modelChoice.sessionModel !== undefined ? { model: modelChoice.sessionModel } : {}),
+              ...(modelChoice.variant !== undefined ? { variant: modelChoice.variant } : {}),
               signal: controller.signal,
             })
           : await adapter.createSession({ purpose: "world-chat", cwd, agent: "world-builder", signal: controller.signal });

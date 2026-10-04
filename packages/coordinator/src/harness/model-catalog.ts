@@ -96,6 +96,8 @@ export class HarnessModelCatalog {
 export interface LanguageModelSelection {
   modelId?: string;
   sessionModel?: string;
+  /** The effort the session runs at: one the model declares, in the harness's own name. */
+  variant?: string;
   inputTokenLimit?: number;
   reason?: string;
 }
@@ -103,6 +105,8 @@ export interface LanguageModelSelection {
 /** Evaluate local readiness and deliberate disablement without consulting media API keys. */
 export function selectHarnessModel(
   reference: string, models: readonly ModelInfo[], app: ClientState["app"], needsImages = false, needsTools = false,
+  /** Effort asked for, kept only when the model declares it: a model that does not has nothing to run it at. */
+  variant?: string,
 ): LanguageModelSelection {
   const model = findHarnessModel(reference, models, app.manifest?.models);
   if (!model) return { modelId: reference, reason: `${reference} is unavailable through the running harness. Choose an available model or clear the saved choice.` };
@@ -124,6 +128,7 @@ export function selectHarnessModel(
   }
   return {
     modelId: harnessModelReference(model), sessionModel: harnessModelReference(model),
+    ...(variant !== undefined && model.variants?.names.includes(variant) ? { variant } : {}),
     ...(model.inputTokenLimit ?? entry?.limits.maxContextTokens
       ? { inputTokenLimit: model.inputTokenLimit ?? entry?.limits.maxContextTokens } : {}),
   };

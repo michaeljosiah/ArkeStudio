@@ -71,3 +71,42 @@ export function harnessModelDisabled(
     entry.provider === model.provider && names(model).includes(providerModelId(entry))).map((entry) => entry.id);
   return disabledIds.some((id) => refs.includes(id) || legacyIds.includes(id));
 }
+
+/** The effort control's five plain words, lowest first (design turn 195). */
+export const EFFORT_WORDS = ["Minimal", "Low", "Medium", "High", "Highest"] as const;
+
+/** Each harness variant name, lowercased and unspaced, to the nearest plain word. */
+const EFFORT_OF: Readonly<Record<string, (typeof EFFORT_WORDS)[number]>> = {
+  none: "Minimal", minimal: "Minimal", low: "Low", medium: "Medium", default: "Medium",
+  high: "High", xhigh: "Highest", max: "Highest", highest: "Highest",
+};
+
+/** `xhigh-plus` as it comes, for a variant Arke has no word for: `Xhigh Plus`. */
+export function titleCaseVariant(name: string): string {
+  return name.split(/[\s_-]+/).filter((word) => word !== "")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
+
+/**
+ * The plain words for a model's variants, in the model's own order. Each name takes the nearest of
+ * the five; two names that would take one word keep the order and the second is title-cased as it
+ * came, so a menu never offers two rows with one name that mean different things; a name Arke does
+ * not know is title-cased too.
+ */
+export function harnessEffortLabels(names: readonly string[]): string[] {
+  const taken = new Set<string>();
+  return names.map((name) => {
+    const word = EFFORT_OF[name.toLowerCase().replace(/[\s_-]+/g, "")];
+    if (word !== undefined && !taken.has(word)) {
+      taken.add(word);
+      return word;
+    }
+    return titleCaseVariant(name);
+  });
+}
+
+/** One variant's plain word, in the context of its model's whole list. Undefined when the model lists no such variant. */
+export function harnessEffortLabel(variants: NonNullable<ModelInfo["variants"]>, variant: string): string | undefined {
+  const at = variants.names.indexOf(variant);
+  return at === -1 ? undefined : harnessEffortLabels(variants.names)[at];
+}

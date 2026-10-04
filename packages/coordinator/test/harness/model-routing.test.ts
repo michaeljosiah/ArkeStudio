@@ -142,12 +142,12 @@ async function fixture(options: {
   // The runtime probe runs on a thirty-second timer; a test that wants the next tick asks for it.
   const probeLocalRuntimes = () => (coordinator as unknown as { revalidateLocalRuntimes(): Promise<void> }).revalidateLocalRuntimes();
   const settings = async () => JSON.parse(await readFile(join(root, "settings.json"), "utf8")) as { agents?: Record<string, { model?: string; brief?: string }> };
-  const chat = async (modelId?: string) => {
+  const chat = async (modelId?: string, variant?: string) => {
     await send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Model routing",
       entryContext: { kind: "production", productionId: "saltlight" } });
     const conversationId = coordinator.getState().worldChat!.conversationId;
     await send({ kind: "world-chat-send", worldId: WORLD_ID, requestId: randomUUID(), conversationId,
-      text: "Explain the current production.", attachmentIds: [], ...(modelId ? { modelId } : {}) });
+      text: "Explain the current production.", attachmentIds: [], ...(modelId ? { modelId } : {}), ...(variant ? { variant } : {}) });
     return adapter.sessions.filter(session => session.agent === "world-builder").at(-1);
   };
   const stage = async () => {
@@ -1133,6 +1133,85 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     const test = await fixture({ adapter });
     try {
       assert.deepEqual((await test.chat())?.config.agents ?? {}, {}, "no agent is given a model it did not ask for");
+    } finally { await test.close(); }
+  });
+});
+
+describe("effort travels with the model (design turn 195)", () => {
+  const EFFORT_MODELS: ModelInfo[] = [
+    ...MODELS,
+    { provider: "openai", id: "gpt-5.4", displayName: "GPT-5.4", variants: { names: ["low", "medium", "high"] } },
+    { provider: "openai", id: "gpt-5.4-mini", displayName: "GPT-5.4 mini", variants: { names: ["low", "high"] } },
+  ];
+  const EFFORT = "openai/gpt-5.4";
+  const OTHER = "openai/gpt-5.4-mini";
+  const kept = (test: Awaited<ReturnType<typeof fixture>>) =>
+    test.provider.openStore()!.getBundle().productions.find(production => production.meta.id === "saltlight")!.meta.llmVariants;
+  const production = (test: Awaited<ReturnType<typeof fixture>>) =>
+    test.provider.openStore()!.getBundle().productions.find(candidate => candidate.meta.id === "saltlight")!.meta;
+  const keep = (test: Awaited<ReturnType<typeof fixture>>, modelId: string | null, variant?: string) =>
+    test.send({ kind: "set-production-model", worldId: WORLD_ID, productionId: "saltlight", capability: "llm", modelId, ...(variant ? { variant } : {}) });
+  const withEffortModels = async () => {
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => EFFORT_MODELS;
+    return fixture({ adapter });
+  };
+
+  it("sends a chosen effort with the chosen model into the session", async () => {
+    const test = await withEffortModels();
+    try {
+      const session = await test.chat(EFFORT, "high");
+      assert.equal(session?.config.model, EFFORT);
+      assert.equal(session?.config.modelVariant, "high");
+    } finally { await test.close(); }
+  });
+
+  it("drops an effort the model does not declare rather than sending it", async () => {
+    const test = await withEffortModels();
+    try {
+      assert.equal((await test.chat(EFFORT, "xhigh"))?.config.modelVariant, undefined, "a model that lists no such name");
+      assert.equal((await test.chat(CHAT, "high"))?.config.modelVariant, undefined, "a model that declares no variants");
+    } finally { await test.close(); }
+  });
+
+  it("keeps the effort with the model for every chat in the production, per model", async () => {
+    const test = await withEffortModels();
+    try {
+      await keep(test, EFFORT, "low");
+      assert.deepEqual(kept(test), { [EFFORT]: "low" });
+      assert.equal(production(test).models?.llm, EFFORT);
+      // A chat that names nothing runs at what the production kept for the model it resolves to.
+      assert.equal((await test.chat())?.config.modelVariant, "low");
+      // This chat's own choice outranks it for the turn.
+      assert.equal((await test.chat(undefined, "high"))?.config.modelVariant, "high");
+      // Another model has its own effort, and none until one is kept for it.
+      assert.equal((await test.chat(OTHER))?.config.modelVariant, undefined);
+      await keep(test, OTHER, "high");
+      assert.deepEqual(kept(test), { [EFFORT]: "low", [OTHER]: "high" }, "a kept effort replaces only its own model's");
+      // Switching back finds the first model's effort where it was left.
+      await keep(test, EFFORT);
+      assert.deepEqual(kept(test), { [EFFORT]: "low", [OTHER]: "high" }, "choosing a model without an effort leaves the kept ones alone");
+      assert.equal((await test.chat())?.config.modelVariant, "low");
+    } finally { await test.close(); }
+  });
+
+  it("lets go of every kept effort when the production's choice is cleared", async () => {
+    const test = await withEffortModels();
+    try {
+      await keep(test, EFFORT, "low");
+      await keep(test, null);
+      assert.equal(kept(test), undefined);
+      assert.equal((await test.chat(EFFORT))?.config.modelVariant, undefined);
+    } finally { await test.close(); }
+  });
+
+  it("never keeps an effort the model does not declare", async () => {
+    const test = await withEffortModels();
+    try {
+      await keep(test, CHAT, "high");
+      assert.equal(kept(test), undefined);
+      await keep(test, EFFORT, "ultra");
+      assert.equal(kept(test), undefined);
     } finally { await test.close(); }
   });
 });

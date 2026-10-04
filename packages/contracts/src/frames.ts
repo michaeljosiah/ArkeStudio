@@ -639,6 +639,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       attachmentIds: z.array(z.string().min(1)).max(20).default([]),
       /** This turn's language-model override; absent uses the production's remembered choice. */
       modelId: z.string().min(1).optional(),
+      /**
+       * This turn's effort for whichever model answers, in the harness's own name for it (design
+       * turn 195). Absent uses the effort the production kept for that model, else the harness's.
+       */
+      variant: z.string().min(1).optional(),
       /** What is selected on the timeline while they talk (SPEC-039 R-26); the subject of "this". */
       subject: WorldChatSubjectSchema.optional(),
       /**
@@ -2337,6 +2342,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       capability: CapabilitySchema,
       modelId: z.string().min(1).nullable(),
+      /**
+       * The effort kept with the model, for a language model (design turn 195). Absent leaves what
+       * the production already kept for that model; clearing the choice clears every kept effort.
+       */
+      variant: z.string().min(1).optional(),
     })
     .strict(),
   /** Compile the exact server-side price and option identity before authorization. */

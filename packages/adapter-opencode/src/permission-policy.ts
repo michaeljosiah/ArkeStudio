@@ -37,6 +37,16 @@ export class PreparedSessionPolicies {
     return input?.model ?? (agentName !== undefined ? input?.agents?.[agentName]?.model : undefined);
   }
 
+  /**
+   * The effort the prepared session runs its model at, when a dispatch choice named both. It
+   * belongs to the explicit `model` alone: an agent's own default model keeps the harness's effort.
+   */
+  modelVariant(preparationId: string | undefined): string | undefined {
+    if (preparationId === undefined) return undefined;
+    const input = this.byId.get(preparationId);
+    return input?.model !== undefined ? input.modelVariant : undefined;
+  }
+
   abandon(preparationId: string): void {
     this.byId.delete(preparationId);
   }

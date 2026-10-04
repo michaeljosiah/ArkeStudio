@@ -22,7 +22,7 @@ import { createNormalizeState, normalizeOpenCode, type NormalizeState } from "./
 import { assessV1Permission, buildSessionConfig } from "./config.js";
 import { PreparedSessionPolicies, type SessionPermissionPolicy } from "./permission-policy.js";
 import { parseSse } from "./sse.js";
-import { modelEnabled, modelMetadata, type WireModel } from "./model-metadata.js";
+import { modelEnabled, modelMetadata, providerNameOf, type WireModel } from "./model-metadata.js";
 
 /**
  * The live OpenCode adapter (SPEC-005). Drives the probed /api surface with legacy fallbacks,
@@ -376,7 +376,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
   async listModels(): Promise<ModelInfo[]> {
     try {
       const res = await this.http.req<{
-        providers?: Array<{ id: string; models?: Record<string, WireModel> }>;
+        providers?: Array<{ id: string; name?: string; models?: Record<string, WireModel> }>;
         default?: Record<string, string>;
       }>("GET", "/config/providers", undefined, { signal: AbortSignal.timeout(15_000) });
       if (!Array.isArray(res?.providers)) throw new Error("OpenCode returned an invalid provider catalog");
@@ -388,6 +388,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
           out.push({
             id,
             provider: provider.id,
+            ...(typeof provider.name === "string" && provider.name !== "" ? { providerName: provider.name } : {}),
             ...modelMetadata(model),
             // What this provider would pick if we did not: worth putting first in its group.
             ...(id === preferred ? { isDefault: true } : {}),
@@ -407,6 +408,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
         .map((m) => ({
           id: m.id!,
           provider: m.providerID!,
+          ...(providerNameOf(m) !== undefined ? { providerName: providerNameOf(m)! } : {}),
           ...modelMetadata(m),
         }));
     }

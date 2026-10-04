@@ -22,7 +22,7 @@ import {
 import { assessV2Permission, buildSessionConfigV2 } from "./config.js";
 import { PreparedSessionPolicies, type SessionPermissionPolicy } from "../permission-policy.js";
 import { parseSse } from "../sse.js";
-import { modelEnabled, modelMetadata, type WireModel } from "../model-metadata.js";
+import { modelEnabled, modelMetadata, providerNameOf, type WireModel } from "../model-metadata.js";
 import { OpenCodeV2Http, sameDirectory, wireDirectory } from "./http.js";
 import { OpenCodeError } from "../http.js";
 import { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2State } from "./normalize.js";
@@ -80,10 +80,10 @@ const STREAM_SILENCE_MS = 45_000;
 const WARMUP_MS = 30_000;
 
 /** `provider/model` as v2's session model reference. Null when no provider is named: the server decides. */
-export function wireModelRef(reference: string): { providerID: string; id: string } | null {
+export function wireModelRef(reference: string, variant?: string): { providerID: string; id: string; variant?: string } | null {
   const slash = reference.indexOf("/");
   if (slash <= 0 || slash === reference.length - 1) return null;
-  return { providerID: reference.slice(0, slash), id: reference.slice(slash + 1) };
+  return { providerID: reference.slice(0, slash), id: reference.slice(slash + 1), ...(variant !== undefined ? { variant } : {}) };
 }
 
 /** v2 rejects client message ids outside the msg_ namespace, and ids are globally durable. */
@@ -231,7 +231,10 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   }
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
-    const model = wireModelRef(this.preparedPolicies.model(input.agent, input.preparationId) ?? "");
+    // The effort is part of the model reference v2 pins on the session (`POST …/model` takes
+    // `{ providerID, id, variant? }`); it is read before `take` retires the preparation.
+    const model = wireModelRef(this.preparedPolicies.model(input.agent, input.preparationId) ?? "",
+      this.preparedPolicies.modelVariant(input.preparationId));
     const permissionPolicy = this.preparedPolicies.take(input.agent, input.preparationId);
     if (input.preparationId !== undefined && permissionPolicy === null) {
       throw new Error("session preparation is missing or was already consumed");
@@ -531,6 +534,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       out.push({
         id: row.id,
         provider: row.providerID,
+        ...(providerNameOf(row) !== undefined ? { providerName: providerNameOf(row)! } : {}),
         ...metadata,
         ...(key === defaultKey ? { isDefault: true } : {}),
       });

@@ -2922,7 +2922,7 @@ export class Coordinator {
     });
   }
 
-  private async validateLanguageModel(modelId: string, needsImages = false, signal?: AbortSignal): Promise<LanguageModelSelection> {
+  private async validateLanguageModel(modelId: string, needsImages = false, signal?: AbortSignal, variant?: string): Promise<LanguageModelSelection> {
     // The catalogue read may be discovery still under way; a request stopped meanwhile is
     // answered with its stop, not held to the read's own bound.
     const stopped = signal === undefined ? null : new Promise<never>((_, reject) => {
@@ -2939,7 +2939,7 @@ export class Coordinator {
     }
     try {
       const models = stopped === null ? await read : await Promise.race([read, stopped]);
-      return selectHarnessModel(modelId, models, this.readModel.getState().app, needsImages);
+      return selectHarnessModel(modelId, models, this.readModel.getState().app, needsImages, false, variant);
     } catch (error) {
       if (signal?.aborted) return { modelId, reason: describeCoordinatorError(error) };
       return { modelId, reason: "The running harness's models could not be verified. Retry models in Settings → Harness → Advanced or the production's Develop conversation." };
@@ -2952,6 +2952,8 @@ export class Coordinator {
     requestedId?: string,
     agent = "world-builder",
     signal?: AbortSignal,
+    /** This turn's effort, in the harness's own name; absent takes what the production kept for the model (design turn 195). */
+    requestedVariant?: string,
   ): Promise<LanguageModelSelection> {
     const productionId = context && "productionId" in context ? context.productionId : undefined;
     if (requestedId !== undefined && productionId === undefined && context?.kind !== "production-setup") {
@@ -2962,7 +2964,16 @@ export class Coordinator {
       ?.getBundle()
       .productions.find((candidate) => candidate.meta.id === productionId);
     const modelId = requestedId ?? this.agentOverrides?.[agent]?.model ?? production?.meta.models?.llm;
-    if (modelId !== undefined) return this.validateLanguageModel(modelId, agent === "stage-designer", signal);
+    if (modelId !== undefined) {
+      const selected = await this.validateLanguageModel(modelId, agent === "stage-designer", signal, requestedVariant);
+      // Kept per model: the effort a production left a model at follows that model, whichever way
+      // it was chosen, and a choice made for another model is never carried over to this one.
+      const kept = selected.sessionModel !== undefined && selected.variant === undefined && requestedVariant === undefined
+        ? production?.meta.llmVariants?.[selected.sessionModel] : undefined;
+      if (kept === undefined) return selected;
+      const declared = this.readModel.getState().app.harnessModels.find((model) => harnessModelReference(model) === selected.sessionModel);
+      return declared?.variants?.names.includes(kept) ? { ...selected, variant: kept } : selected;
+    }
     // Nothing chosen: the local default, where there is one (issue 1247). Stage needs a model
     // that reads images, and refuses before its session is built when none is chosen — so it
     // is decided here, where the refusal is, rather than left to the session builder.
@@ -11082,7 +11093,7 @@ export class Coordinator {
         const change = this.beginValidatedSettingChange(JSON.stringify(["production", store.dir, msg.productionId, msg.capability]));
         try {
           const selected = msg.capability === "llm" && msg.modelId
-            ? await this.validateLanguageModel(msg.modelId) : undefined;
+            ? await this.validateLanguageModel(msg.modelId, false, undefined, msg.variant) : undefined;
           if (!change.current() || !this.stillOpen(store)) return;
           if (selected?.reason) {
             this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: selected.reason });
@@ -11092,7 +11103,9 @@ export class Coordinator {
           // so a clear can land immediately and independent capability edits cannot collide.
           await serializeFileMutation(join(store.dir, "productions", msg.productionId, "production.json"), async () => {
             if (!change.current() || !this.stillOpen(store)) return;
-            await setProductionModel(store, msg.productionId, msg.capability, selected?.sessionModel ?? msg.modelId);
+            await setProductionModel(store, msg.productionId, msg.capability, selected?.sessionModel ?? msg.modelId,
+              selected?.variant !== undefined && selected.sessionModel !== undefined
+                ? { variant: { model: selected.sessionModel, name: selected.variant } } : {});
           });
         } catch (err) {
           void this.appLog?.append({
@@ -20388,7 +20401,7 @@ export class Coordinator {
         if (this.stillOpen(store) && this.getState().worldChat?.conversationId === id) await this.openWorldChat(store, id);
         if (this.stillOpen(store)) this.transport.broadcastSnapshot();
       },
-      resolveLanguageModel: (input) => this.languageModelFor(input.entryContext, input.modelId, "world-builder", input.signal),
+      resolveLanguageModel: (input) => this.languageModelFor(input.entryContext, input.modelId, "world-builder", input.signal, input.variant),
       onTurnFailed: ({ conversationId, runId, cause }) => {
         void this.appLog?.append({ level: "warn", event: "world-chat.turn-failed", conversationId, runId, cause });
         if (isAuthShapedFailure(cause)) void this.vendorAuth.noteAuthFailure().catch(() => {});

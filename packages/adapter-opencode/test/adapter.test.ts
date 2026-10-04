@@ -460,6 +460,27 @@ describe("listing what the harness can run", () => {
     }
   });
 
+  it("carries the provider's name, reasoning, variants and cost from /config/providers where they are stated", async () => {
+    stub.configProviders = { providers: [
+      { id: "opencode", name: "OpenCode Zen", models: {
+        "fledge-alpha-free": {
+          name: "Fledge Alpha Free", capabilities: { reasoning: true, input: { text: true, image: true } },
+          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } }, limit: { context: 1_048_576 },
+          variants: { low: { reasoningEffort: "low" }, high: { reasoningEffort: "high" }, max: { reasoningEffort: "max" } },
+        },
+      } },
+      { id: "plain", models: { "no-metadata": {} } },
+    ] };
+    assert.deepEqual(await adapter.listModels(), [
+      {
+        id: "fledge-alpha-free", provider: "opencode", providerName: "OpenCode Zen", displayName: "Fledge Alpha Free",
+        inputModalities: ["text", "image"], inputTokenLimit: 1_048_576, reasoning: true,
+        variants: { names: ["low", "high", "max"] }, cost: { inputPerMTok: 0, outputPerMTok: 0 },
+      },
+      { id: "no-metadata", provider: "plain" },
+    ]);
+  });
+
   it("carries measured v1 modalities and input limits while dropping disabled rows", async () => {
     stub.configProviders = { providers: [{ id: "custom-provider", models: {
       "team/model:tag": { name: "Custom", capabilities: { input: { text: true, image: false } }, limit: { input: 32_000, context: 64_000 } },
@@ -488,6 +509,15 @@ describe("per-agent settings", () => {
     const config = buildSessionConfig({ agents: { "world-author": { model: "github-copilot/claude-sonnet-4.6" } } });
     assert.equal(agentsIn(config)["world-author"]!.model, "github-copilot/claude-sonnet-4.6");
     assert.equal(agentsIn(config)["canon-author"]!.model, undefined, "everyone else is left to the harness");
+  });
+
+  it("a chosen effort travels with the dispatch model only, never with an agent's own default", () => {
+    const withBoth = buildSessionConfig({ model: "openai/gpt-5.4", modelVariant: "high" });
+    for (const agent of Object.values(agentsIn(withBoth))) assert.equal((agent as Agent & { variant?: string }).variant, "high");
+    const override = buildSessionConfig({ modelVariant: "high", agents: { "canon-qa": { model: "ollama/gemma4" } } });
+    for (const agent of Object.values(agentsIn(override))) assert.equal((agent as Agent & { variant?: string }).variant, undefined);
+    const modelOnly = buildSessionConfig({ model: "openai/gpt-5.4" });
+    for (const agent of Object.values(agentsIn(modelOnly))) assert.equal((agent as Agent & { variant?: string }).variant, undefined);
   });
 
   it("no model at all leaves every agent to the harness, which is the safe default", () => {
