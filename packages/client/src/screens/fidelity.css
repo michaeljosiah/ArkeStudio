@@ -2480,8 +2480,9 @@ select.fy-sheetselect { padding-right: 24px; }
   cursor: pointer;
   transition: var(--transition-control);
 }
-.fy-cx__mic:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
-.fy-cx__mic:disabled { opacity: 0.4; cursor: default; }
+.fy-cx__mic:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--accent); color: var(--foreground); }
+/* Off for a reason stays focusable (aria-disabled) so its tip reaches the keyboard; it looks as disabled does. */
+.fy-cx__mic:disabled, .fy-cx__mic[aria-disabled="true"] { opacity: 0.4; cursor: default; }
 /*
  * Listening is a filled control, not a pulsing one. Animation flattens entirely under
  * prefers-reduced-motion, so a pulse and a resting mic would become the same still glyph exactly
