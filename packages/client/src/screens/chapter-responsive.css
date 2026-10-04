@@ -290,6 +290,12 @@
 .fy-passage-prompts { scrollbar-width: none; }
 @media (max-width: 599px) {
   .fy-chapter-block-sheet { top: min(311px, 40dvh); }
+  /* The block's panel rises to 110, just under the view switch (194h): the picture, its facts and
+     In frame show together, where at 311 only the head and tabs cleared the fold. The grab is the
+     master's 40 in neutral 400, which the sheet's 36 in the border colour all but lost on dark. The
+     Read and Direct sheets and Timing's keep the lower top; :has() names the panel alone. */
+  .fy-chapter-block-sheet:has(.fy-abp) { top: calc(110px + env(safe-area-inset-top, 0px)); }
+  .fy-chapter-block-sheet:has(.fy-abp) .fy-page-sheet__grab { width: 40px; border-radius: 2px; background: var(--neutral-400); margin-top: 8px; }
   .fy-chapter-notes-sheet .fy-ch__draws > li { width: auto; }
   .fy-chapter-notes-sheet .fy-ch__draw-name { color: var(--muted-foreground); font-weight: 400; }
 }

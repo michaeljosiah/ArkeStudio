@@ -121,6 +121,42 @@ describe("the Illustrate proposal is a sheet over the main area (turn 193)", () 
   });
 });
 
+/** The rules inside every `@media (<query>) { … }` block of a sheet, read by brace depth. */
+function inMedia(css: string, query: string): { selector: string; body: string }[] {
+  const found: { selector: string; body: string }[] = [];
+  const opener = `@media (${query}) {`;
+  for (let at = css.indexOf(opener); at !== -1; at = css.indexOf(opener, at + 1)) {
+    let depth = 1, end = at + opener.length;
+    for (; end < css.length && depth > 0; end++) depth += css[end] === "{" ? 1 : css[end] === "}" ? -1 : 0;
+    found.push(...rules(css.slice(at + opener.length, end - 1)));
+  }
+  return found;
+}
+
+describe("the block's panel as a phone sheet stands where 194h draws it", () => {
+  const phone = inMedia(responsive, "max-width: 599px");
+
+  it("rises to 110 under the view switch, the panel alone: Read, Direct and Timing keep the lower top", () => {
+    const panel = phone.find((rule) => rule.selector === ".fy-chapter-block-sheet:has(.fy-abp)");
+    assert.ok(panel, "a phone rule names the sheet that holds the block's panel");
+    assert.equal(panel!.body, "top: calc(110px + env(safe-area-inset-top, 0px));");
+    assert.ok(phone.some((rule) => rule.selector === ".fy-chapter-block-sheet" && rule.body === "top: min(311px, 40dvh);"), "the other block sheets are unchanged");
+    // Only the phone moves it: the tablet's raised sheet and the desktop's docked one keep theirs.
+    const elsewhere = rules(responsive).filter((rule) => rule.selector.includes(".fy-chapter-block-sheet:has(.fy-abp)") && /(^|; )(top|inset):/.test(rule.body));
+    assert.equal(elsewhere.length, 1);
+  });
+
+  it("draws the grab 40 by 4 in neutral 400 with a 2 radius, on the phone alone", () => {
+    const grab = phone.find((rule) => rule.selector === ".fy-chapter-block-sheet:has(.fy-abp) .fy-page-sheet__grab");
+    assert.ok(grab);
+    assert.match(grab!.body, /width: 40px/);
+    assert.match(grab!.body, /border-radius: 2px/);
+    assert.match(grab!.body, /background: var\(--neutral-400\)/);
+    assert.match(grab!.body, /margin-top: 8px/);
+    assert.equal(rules(responsive).filter((rule) => rule.selector.includes(":has(.fy-abp) .fy-page-sheet__grab")).length, 1);
+  });
+});
+
 describe("the toolbar's menus mark focus by their filled row (turn 194, local.15)", () => {
   it("draws no ring round the item a menu focuses as it opens: the soft fill is its mark", () => {
     const focused = rules(fidelity).filter((candidate) => candidate.selector.split(",").map((part) => part.trim()).includes(".fy-ab__menu-opt:focus-visible"));
