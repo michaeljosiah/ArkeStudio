@@ -716,7 +716,7 @@ export function derivedAspect(model: ManifestModel, landscape: boolean): string 
 
 /** The shapes a row advertises, as curated — before the default is folded in. */
 function curatedAspects(model: ManifestModel): readonly string[] {
-  if (model.unverified === true) return [];
+  if (model.unverified === true || model.limits.providerSelectedSize) return [];
   const enumerated = model.limits.aspects;
   if (enumerated !== undefined && enumerated.length > 0) return enumerated;
   const range = model.aspectRange;
@@ -733,7 +733,8 @@ function curatedAspects(model: ManifestModel): readonly string[] {
  *
  * Prefer the orientation's default only when the model offers it. Recipe bucket lists are
  * exhaustive: adding a generic ratio made Krea 2 promise 3:2 while producing 4:3 (#975).
- * Validation still accepts the output builder's derived shapes through aspectOffered.
+ * Validation accepts the output builder's derived shapes through aspectOffered only when
+ * the provider takes dimensions; provider-selected sizes promise no particular shape.
  */
 export function offeredAspects(
   model: ManifestModel,
@@ -751,7 +752,8 @@ export function offeredAspects(
  * Whether this model would take that shape.
  *
  * The union of both orientations' defaults and the curated list, because the output builder
- * validates through here and must never reject a shape it would itself have produced.
+ * validates through here. A provider that chooses its own size accepts no requested shape;
+ * the output builder's nominal dimensions are not sent by that client.
  */
 export function aspectOffered(model: ManifestModel, aspect: string): boolean {
   if (model.limits.providerSelectedSize) return false;
