@@ -173,6 +173,19 @@ their open conversation cards after filing/ledger settlement, including failure 
 Filing recovery repairs the idempotent Bench journal link before completing the card, and a
 first-frame route neither clears cast audio nor records an upload acknowledgement for it.
 
+Production Chat audio changes run coordinator `test/world-chat/production-audio.test.ts`,
+`test/bench/chat.test.ts`, `test/bench/conversation-quotes.test.ts`,
+`test/audio/performance-generation.test.ts`, `test/audio/performances.test.ts`,
+`test/audio/table-read.test.ts`, `test/audio/character-sample.test.ts` and
+`test/world-chat/action-guide.test.ts`; contracts `test/world-chat-actions.test.ts`,
+`test/bench.test.ts` and `test/world-chat-shape.test.ts`; client
+`test/human-decisions.test.tsx` and `test/bench-subject-session.test.tsx`.
+These check quoted assigned voices, stale voice refusal, approval-only local preparation,
+recovery without another provider purchase or tool run, unselected generated dialogue,
+native human review and timing fences, production music ownership, denied cue dependencies,
+separate editor acceptance, typed audio edits and named SFX refusal. Typecheck after test edits.
+An installed-app audition and real provider qualification remain separate acceptance work.
+
 Frame-run and planned-dispatch chat changes also run `test/world-chat/production-batch.test.ts`,
 `test/productions/frame-run.test.ts`, `test/productions/frame-run-coordinator.test.ts`,
 `test/productions/dispatch-plans.test.ts` and `test/dispatch-refusal.test.ts` in the coordinator.

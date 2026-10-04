@@ -98,9 +98,10 @@ export function wavSeconds(data: Uint8Array): number | null {
   while (offset + 8 <= data.byteLength) {
     const id = String.fromCharCode(data[offset]!, data[offset + 1]!, data[offset + 2]!, data[offset + 3]!);
     const size = view.getUint32(offset + 4, true);
+    if (offset + 8 + size > data.byteLength) return null;
     // Byte rate sits at +16 into the chunk body, four past the sample rate. Reading the sample
     // rate instead yields a plausible-looking duration that is wrong by the frame size.
-    if (id === "fmt " && offset + 20 <= data.byteLength) byteRate = view.getUint32(offset + 16, true);
+    if (id === "fmt " && size >= 16) byteRate = view.getUint32(offset + 16, true);
     if (id === "data") return byteRate > 0 ? size / byteRate : null;
     // Chunks are word-aligned: an odd size is followed by a pad byte that is not part of it.
     offset += 8 + size + (size % 2);

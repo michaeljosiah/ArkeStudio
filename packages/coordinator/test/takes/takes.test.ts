@@ -1131,6 +1131,9 @@ describe("take QC at arrival (#248)", () => {
       await readFile(join(dir, "productions", "saltlight", "takes", takes[0]!.id, "take.json"), "utf8"),
     );
     assert.equal(written.prompt, "the verse, under the water");
+    assert.equal(written.mediaHash, `sha256:${createHash("sha256").update("fake-mp4-bytes-fake-mp4-bytes").digest("hex")}`);
+    assert.equal((await readWorldMeta(dir)).schemaVersion, 54, "a native voice take raises the original-media boundary too");
+    await assert.rejects(readWorldMeta(dir, { supports: 53 }), /newer|schema|version/i);
     await store.close();
   });
 

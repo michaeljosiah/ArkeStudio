@@ -1,4 +1,4 @@
-import { illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
+import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
 import type { AudiobookReader, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
@@ -2107,7 +2107,8 @@ function handleFrame(json: string): void {
             state: "proposed",
             proposal: event.proposal,
             skipped: (before?.skipped ?? []).filter((block) => present.has(block)),
-            without: (before?.without ?? []).filter((block) => present.has(block)),
+            // A row refused again is held again: consent to try it was for the run that just ended (codex on PR 1559).
+            without: (before?.without ?? []).filter((block) => present.has(block) && event.proposal!.rows.find((row) => row.block === block)?.refused === undefined),
             ...((before?.state === "done" || before?.state === "stopped") && before.progress !== undefined ? { progress: before.progress } : {}),
           },
         };
@@ -4149,8 +4150,8 @@ export function acceptChapterLook(
   sheetId: string,
   takeId: string,
   options: { closeTakeId?: string; closeFor?: string; choose?: { productionId: string; chapterFile: string; key: string; name?: string; sheet?: string } } = {},
-): void {
-  send({ kind: "accept-character-look", worldId, sheetId, takeId, ...options });
+): boolean {
+  return send({ kind: "accept-character-look", worldId, sheetId, takeId, ...options });
 }
 
 /** Which chapters of the book chose each kit look (R-114), answered under the id returned and held in `audiobookAsks`. */
@@ -4167,8 +4168,8 @@ export function chooseAudiobookLook(worldId: string, productionId: string, chapt
   return send({ kind: "choose-audiobook-look", worldId, productionId, chapterFile, ...who, lookId, requestId }) ? requestId : null;
 }
 
-export function rejectReferenceTake(worldId: string, takeId: string, field: string, note?: string): void {
-  send({
+export function rejectReferenceTake(worldId: string, takeId: string, field: string, note?: string): boolean {
+  return send({
     kind: "reject-reference-take",
     worldId,
     takeId,
@@ -5648,7 +5649,8 @@ export function acceptIllustration(worldId: string, productionId: string, chapte
   if (run === undefined || run.state !== "proposed" || run.proposal === undefined) return false;
   const total = illustrationTotal(run.proposal.rows, new Set(run.skipped), new Set(run.without));
   if (total.count === 0) return false;
-  const blocks = run.proposal.rows.filter((row) => !run.skipped.includes(row.block) && ((row.needs?.length ?? 0) === 0 || run.without.includes(row.block))).map((row) => row.block);
+  // A row held for a reference, or one a run's picture was refused for, goes only once the author named it (2026-10-04).
+  const blocks = run.proposal.rows.filter((row) => illustrationRowGoes(row, new Set(run.skipped), new Set(run.without))).map((row) => row.block);
   const sent = send({ kind: "accept-illustration", worldId, productionId, chapterFile, proposalId: run.proposal.proposalId, blocks, ...(run.without.length > 0 ? { without: run.without } : {}), confirmedMicroUsd: total.microUsd });
   if (sent) {
     const { reason: _reason, ...rest } = run;

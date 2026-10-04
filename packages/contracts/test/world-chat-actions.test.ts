@@ -10,6 +10,19 @@ import {
 
 const CHECK = "check_01J8F3K2QW9VZX4N7M0RTYB6HC";
 
+it("accepts typed production audio operations but refuses invented consent, prices, raw cut JSON and SFX", () => {
+  const generation = { kind: "production-audio-generation", productionId: "saltlight", request: { operation: "voice-line", shotId: "sh_12" }, checkReceiptIds: [CHECK] };
+  assert.ok(ModelWorldChatActionSchema.safeParse(generation).success);
+  for (const extra of [{ confirmedMicroUsd: 1 }, { voiceUploadConfirmedFor: "token" }, { rightsBasis: "authorized" }, { singleSpeaker: true }, { heard: true }]) {
+    assert.equal(ModelWorldChatActionSchema.safeParse({ ...generation, request: { ...generation.request, ...extra } }).success, false);
+  }
+  const edit = { kind: "production-audio-edit", productionId: "saltlight", request: { summary: "Mute music", commands: [{ kind: "set-track", trackId: "tr_music", muted: true }] }, checkReceiptIds: [CHECK] };
+  assert.ok(ModelWorldChatActionSchema.safeParse(edit).success);
+  assert.equal(ModelWorldChatActionSchema.safeParse({ ...edit, request: { summary: "Replace audio", tracks: [] } }).success, false);
+  assert.equal(ModelWorldChatActionSchema.safeParse({ ...generation, request: { operation: "sfx", prompt: "Bell" } }).success, false);
+  assert.equal(ModelWorldChatActionSchema.safeParse({ ...generation, request: { operation: "review-performance", decision: "accept" } }).success, false);
+});
+
 describe("the craft loop's actions (design turn 128, issue 896)", () => {
   const edit = (changes: Record<string, unknown>) =>
     ModelWorldChatActionSchema.safeParse({

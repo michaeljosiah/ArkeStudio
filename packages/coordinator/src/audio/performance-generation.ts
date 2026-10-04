@@ -19,6 +19,15 @@ import { compileLine } from "../voice/direction.js";
 const digest = (value: unknown) => audioHash(Buffer.from(JSON.stringify(value)));
 export async function preparePerformanceGeneration(store: WorldStore, model: ManifestModel,
   request: Extract<ClientMessage, { kind: "prepare-performance-generation" }>) {
+  const quote = compilePerformanceGeneration(store, model, request);
+  await retainPerformanceGenerationQuote(store, quote);
+  return quote;
+}
+
+/** Pure quote compilation is shared by the native panel and the sealed conversation quote. */
+export function compilePerformanceGeneration(store: WorldStore, model: ManifestModel,
+  request: Extract<ClientMessage, { kind: "prepare-performance-generation" }>,
+  identity: { operationId?: string; createdAt?: string } = {}) {
   const { target, text, sheet } = performanceTarget(store, request);
   // The model is the character's assigned one, a legacy assignment resolved the way the Voice
   // page resolves it (codex round 3): a request naming the provider's other model would quote
@@ -45,12 +54,15 @@ export async function preparePerformanceGeneration(store: WorldStore, model: Man
       : compiled.reason.endsWith(ONE_REQUEST_HOLD) ? `${compiled.reason} · remove it, choose another voice, or read the passage in the audiobook`
         : `${compiled.reason} · remove it or choose another voice`);
   }
-  const quote = PerformanceGenerationQuoteSchema.parse({ operationId: randomUUID(), target, authoredText: text, voiceAssignment: sheet.voice,
+  return PerformanceGenerationQuoteSchema.parse({ operationId: identity.operationId ?? randomUUID(), target, authoredText: text, voiceAssignment: sheet.voice,
     cadencePlan: request.cadencePlan, cadencePlanHash: digest(request.cadencePlan), mapping: { ...mapped, providerTextHash: audioHash(Buffer.from(mapped.providerText)) },
     modelHash: digest(model), estimatedMicroUsd: estimateSpeechMicroUsd(model, mapped.providerText, undefined, undefined, mapped.instructions), local: model.provider === "kokoro",
-    audioFormat: voiceFormatForModel(model), ...(language !== undefined ? { language } : {}), createdAt: store.now() });
+    audioFormat: voiceFormatForModel(model), ...(language !== undefined ? { language } : {}), createdAt: identity.createdAt ?? store.now() });
+}
+
+export async function retainPerformanceGenerationQuote(store: WorldStore, value: PerformanceGenerationQuote): Promise<void> {
+  const quote = PerformanceGenerationQuoteSchema.parse(value);
   await store.ownedWrite(async () => atomicWriteFile(await audioWorldPath(store.dir, `.staging/performances/${quote.operationId}/quote.json`, true), JSON.stringify(quote)));
-  return quote;
 }
 export async function readPerformanceGenerationQuote(store: WorldStore, operationId: string): Promise<PerformanceGenerationQuote> {
   // The command schema owns UUID validation; the filesystem boundary independently rejects traversal.

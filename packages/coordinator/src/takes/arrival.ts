@@ -231,7 +231,7 @@ export async function recordTakesFromJob(
 
   await store.gateOp(async () => {
     const existingPrimary = rejoins ? await takeForJob(store, job.productionId!, job.id) : null;
-    if (!existingPrimary && (job.capability === "image" || job.capability === "video")) {
+    if (!existingPrimary) {
       await store.commitUnserialised({ kind: "take-media-identity", source: "app", files: [], raiseSchemaVersion: TAKE_MEDIA_IDENTITY_SCHEMA_VERSION });
     }
     // A replayable finalization needs a deterministic id, so a retry can recover the window
@@ -250,7 +250,7 @@ export async function recordTakesFromJob(
 
     // Failed checksum work must not strand paid media after it has moved. Such a take remains
     // metadata-only; never attest its current bytes on a later read. Capture before diagnostics.
-    const mediaHash = existingPrimary?.mediaHash ?? (existingPrimary || takeKindFor(job) === "voice" ? null : await hashMedia(finalMedia, store.closingSignal).catch(() => null));
+    const mediaHash = existingPrimary?.mediaHash ?? (existingPrimary ? null : await hashMedia(finalMedia, store.closingSignal).catch(() => null));
 
     // Measured once, against the file that arrived, before any take.json exists — a take is
     // immutable, so the only moment to record this is before it is written (#248). Every

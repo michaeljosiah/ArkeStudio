@@ -1,4 +1,6 @@
 import { WorldChatBenchKeepActionSchema, WorldChatBenchSelectActionSchema, WorldChatBenchDiscardActionSchema } from "@arke-studio/contracts";
+import { WorldChatProductionAudioGenerationActionSchema, WorldChatProductionPerformanceActionSchema, WorldChatProductionAudioCueActionSchema,
+  ProductionAudioGenerationModelActionSchema, ProductionPerformanceModelActionSchema, ProductionAudioEditModelActionSchema, ProductionAudioCueModelActionSchema } from "@arke-studio/contracts";
 import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema } from "@arke-studio/contracts";
 import {
   ClientMessageSchema,
@@ -116,7 +118,7 @@ type SupportedMetadata = Omit<ArkeSupportedClientCommand<ClientMessageKind>, "ki
 type ExcludedMetadata = {
   readonly classification: Exclude<ArkeCommandClassification, "supported-by-arke">;
   readonly reason: string;
-  readonly inThreadCard?: "plan" | "stage" | "voice-sample" | "proposal" | "editor-request" | "extraction";
+  readonly inThreadCard?: "plan" | "stage" | "voice-sample" | "proposal" | "editor-request" | "extraction" | "performance";
 };
 type CommandMetadata = SupportedMetadata | ExcludedMetadata;
 
@@ -404,7 +406,7 @@ const CLIENT_COMMAND_METADATA = {
   "voice-catalogue": readOnly(QUERY),
   "catalogue-voice-preview": humanOnly("The voice picker states the preview price before the person's Play gesture."),
   "stop-catalogue-voice-preview": humanOnly("Stops the person's transient voice audition."),
-  "voice-line": action("production", "generation", "voice", "privacy-sensitive", ["sheets", "voices", "scenes", "shots"], { preparation: GENERATION_QUOTE }),
+  "voice-line": action("production", "generation", "voice", "privacy-sensitive", ["sheets", "voices", "scenes", "shots"]),
   "voice-preview": action("world", "generation", "voice", "privacy-sensitive", ["sheets", "voices"], { preparation: GENERATION_QUOTE }),
   "transcribe-dictation": readOnly("Returns transient local transcription and does not mutate a creative target."),
   "create-production": action("world", "command", "production-store", "authored-change", ["world-metadata", "series"]),
@@ -636,25 +638,25 @@ const CLIENT_COMMAND_METADATA = {
   "attach-files-correlated": action("world", "host-action", "host", "host-file-access", ["artifacts"]),
   "convert-performance": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
   "plan-table-read": readOnly(QUERY),
-  "prepare-table-read": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
+  "prepare-table-read": action("production", "generation", "voice", "spend-and-compute", ["scenes", "sheets", "voices"]),
   "save-rehearsal-note": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
   "designate-performance-bible": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
   "clear-performance-bible": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
-  "prepare-performance-generation": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
-  "generate-performance": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
+  "prepare-performance-generation": action("production", "generation", "voice", "spend-and-compute", ["scenes", "sheets", "voices"]),
+  "generate-performance": action("production", "generation", "voice", "spend-and-compute", ["scenes", "sheets", "voices"]),
   "cancel-performance-generation": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
-  "propose-performance-duration": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
-  "place-selected-performance": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
-  "clear-performance-selection": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
-  "review-performance": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
-  "purge-performance": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
+  "propose-performance-duration": action("production", "command", "scene-store", "authored-change", ["performances", "scenes"]),
+  "place-selected-performance": action("production", "command", "timeline", "authored-change", ["performances", "scenes", "timeline"]),
+  "clear-performance-selection": action("production", "command", "production-store", "authored-change", ["performances"]),
+  "review-performance": humanOnly("Only the person can audition and review a performance.", "performance"),
+  "purge-performance": humanOnly("Only the person can purge performance media.", "performance"),
   "keep-performance-recording": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
   "resume-character-voice-sample": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions.", "voice-sample"),
-  "prepare-character-voice-sample": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
+  "prepare-character-voice-sample": action("production", "generation", "voice", "spend-and-compute", ["sheets", "voices", "voice-samples"]),
   "accept-character-voice-sample": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions.", "voice-sample"),
   "clear-character-voice-sample": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
   "withdraw-character-voice-sample": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
-  "generate-character-voice-sample": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
+  "generate-character-voice-sample": action("production", "generation", "voice", "spend-and-compute", ["sheets", "references"]),
   "prepare-master-audio-reference": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
   "prepare-performance-audio-reference": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
   "cancel-key-art-prompt": humanOnly(HUMAN_DECISION),
@@ -673,6 +675,15 @@ export type ArkeClientCommandRegistry = {
 // atomic import-and-select commands, and chapter edits cannot restore or retire a chapter.
 type ConversationPath = ModelWorldChatAction["kind"] | "bibleEdits" | "editorRequests" | "sceneEdits" | "candidateOperations";
 const COMMAND_MODEL_PATHS = {
+  "voice-line": ["production-audio-generation"],
+  "prepare-table-read": ["production-audio-generation"],
+  "prepare-performance-generation": ["production-audio-generation"],
+  "generate-performance": ["production-audio-generation"],
+  "prepare-character-voice-sample": ["production-audio-generation"],
+  "generate-character-voice-sample": ["production-audio-generation"],
+  "propose-performance-duration": ["production-performance-command"],
+  "place-selected-performance": ["production-performance-command"],
+  "clear-performance-selection": ["production-performance-command"],
   "use-world-image": ["reference-world-image-result-use"],
   "discard-world-image": ["reference-image-discard"],
   "pick-staged-reference": ["reference-image-import"],
@@ -1197,6 +1208,12 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     schema: WorldChatAudioSpineActionSchema,
     ...action("production", "command", "audio-spine", "authored-change", ["spine"]),
   },
+  "world-chat-production-audio-generation": { kind: "world-chat-production-audio-generation", schema: WorldChatProductionAudioGenerationActionSchema,
+    ...action("production", "generation", "job-queue", "spend-and-compute", ["scenes", "sheets", "voices"]) },
+  "world-chat-production-performance-command": { kind: "world-chat-production-performance-command", schema: WorldChatProductionPerformanceActionSchema,
+    ...action("production", "command", "production-store", "authored-change", ["performances", "scenes"]) },
+  "world-chat-production-audio-cue": { kind: "world-chat-production-audio-cue", schema: WorldChatProductionAudioCueActionSchema,
+    ...action("production", "command", "timeline", "authored-change", ["timeline"]) },
   "world-chat-production-routing": {
     kind: "world-chat-production-routing",
     schema: WorldChatProductionRoutingActionSchema,
@@ -1260,6 +1277,14 @@ export interface ArkeBlockedAuthoritySeam {
 
 /** Typed authorities that do not have a ClientMessage command to classify (SPEC-041 R-52). */
 export const ARKE_AUTHORITY_ACTION_REGISTRY = {
+  "production-audio-generation": { kind: "production-audio-generation", schema: ProductionAudioGenerationModelActionSchema,
+    ...action("production", "generation", "job-queue", "spend-and-compute", ["scenes", "sheets", "voices"]) },
+  "production-performance-command": { kind: "production-performance-command", schema: ProductionPerformanceModelActionSchema,
+    ...action("production", "command", "production-store", "authored-change", ["performances", "scenes"]) },
+  "production-audio-edit": { kind: "production-audio-edit", schema: ProductionAudioEditModelActionSchema,
+    ...action("production", "command", "timeline", "authored-change", ["timeline"]) },
+  "production-audio-cue": { kind: "production-audio-cue", schema: ProductionAudioCueModelActionSchema,
+    ...action("production", "command", "timeline", "authored-change", ["timeline"]) },
   "bench-generation": {
     kind: "bench-generation",
     schema: BenchGenerationModelActionSchema,
@@ -1450,7 +1475,7 @@ export function modelActionFields(schema: z.ZodTypeAny): readonly ModelActionFie
 
 /** The prepared-action descriptor behind one model action kind, keyed as the model sends it. */
 export function worldChatActionDescriptor(modelKind: string) {
-  const key = `world-chat-${modelKind}`;
+  const key = modelKind === "production-audio-edit" ? "world-chat-editor-request" : `world-chat-${modelKind}`;
   return Object.prototype.hasOwnProperty.call(WORLD_CHAT_ACTION_REGISTRY, key)
     ? WORLD_CHAT_ACTION_REGISTRY[key as keyof typeof WORLD_CHAT_ACTION_REGISTRY]
     : undefined;

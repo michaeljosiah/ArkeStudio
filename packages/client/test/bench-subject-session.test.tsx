@@ -292,6 +292,20 @@ const q = (bench: Bench, selector: string): HTMLElement => {
 const all = (bench: Bench, selector: string): HTMLElement[] =>
   [...bench.container.querySelectorAll(selector)] as unknown as HTMLElement[];
 const text = (bench: Bench): string => bench.container.textContent ?? "";
+
+it("clears a production music brief in its existing session without opening a world Bench", async () => {
+  const session = { ...shotSession(), subject: { kind: "production" as const, productionId: "saltlight", productionTitle: "Saltlight", role: "music" as const },
+    composer: { mode: "music" as const, provider: "fal", model: "test-music", params: { kind: "music" as const, lyrics: "[instrumental]", count: 1 }, brief: "A quiet cue", activeTokens: [], keyframeTokens: [] }, takes: [] };
+  const bench = await openBench(session, SESSION_ID, state => {
+    state.app.manifest!.models.push({ ...IMAGE_MODEL, id: "test-music", capability: "music", pricing: { kind: "perSecond", microUsdPerSecond: 100 }, accepts: { referenceImages: 0, startFrame: false, endFrame: false } });
+  });
+  await act(async () => q(bench, '[data-testid="bench-clear-audio"]').click());
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+  assert.equal(bench.sent.some(message => message.kind === "bench-new-session"), false);
+  const composed = bench.sent.find((message): message is Extract<ClientMessage, { kind: "bench-compose" }> => message.kind === "bench-compose");
+  assert.equal(composed?.sessionId, SESSION_ID); assert.equal(composed?.brief, "");
+  assert.match(text(bench), /Production audio/); assert.doesNotMatch(text(bench), /Opening the bench/);
+});
 /** The same lookups for a dialog, which is drawn on the body rather than in the bench. */
 const dq = (bench: Bench, selector: string): HTMLElement => {
   const node = dialogRoot(bench.container).querySelector(selector) as HTMLElement | null;
