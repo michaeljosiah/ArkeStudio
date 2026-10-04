@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ModelWorldChatActionSchema, type WorldChatContext } from "@arke-studio/contracts";
+import { ModelWorldChatActionSchema, TimelineCommandSchema, type WorldChatContext } from "@arke-studio/contracts";
 import {
   ACTION_GUIDE_ENTRIES,
   actionGuideScopes,
@@ -23,6 +23,13 @@ const SCHEMA_KINDS = ModelWorldChatActionSchema.options.map(
 );
 const HUGE = 10_000_000;
 
+it("advertises every complete receipt enforced by whole-cut actions", () => {
+  const entry = ACTION_GUIDE_ENTRIES.find(value => value.kind === "production-timeline-operation")!;
+  assert.deepEqual(entry.reads, ["get_timeline", "list_scenes", "get_scene", "list_takes", "list_artifacts"]);
+  assert.equal(ModelWorldChatActionSchema.safeParse({ kind: "production-timeline-operation", productionId: "saltlight",
+    request: { operation: "transcribe", trackId: "tr_subtitles", language: "English" }, checkReceiptIds: ["check_01J8G0000000000000000000C1"] }).success, false);
+});
+
 it("advertises available audio actions, dependent cues, spine verbs and the human audition boundary", () => {
   for (const kind of ["production-audio-generation", "production-performance-command", "production-audio-cue", "production-audio-edit"]) {
     const entry = describeAction(kind)!;
@@ -34,6 +41,16 @@ it("advertises available audio actions, dependent cues, spine verbs and the huma
 });
 
 /** The kinds a rendered guide names, read back out of its entry lines. */
+it("names every timeline command in full and compact guides and explicitly excludes live detachment", () => {
+  for (const budget of [HUGE, 1000]) {
+    const text = renderActionGuide(["world", "production"], budget).text;
+    for (const option of TimelineCommandSchema.options) assert.ok(text.includes(option.shape.kind.value), option.shape.kind.value);
+    assert.match(text, /detach-audio is excluded from editorRequests/);
+    assert.match(text, /set-performance-source \(clipId, sourceClipId\)/);
+    assert.match(text, /import-cues \(trackId, cues, replace, provenance\)/);
+  }
+});
+
 function namedKinds(text: string): string[] {
   return [...text.matchAll(/^- ([a-z-]+) ·/gm)].map((match) => match[1]!);
 }

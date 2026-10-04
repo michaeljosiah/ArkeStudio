@@ -1,3 +1,4 @@
+import { draftDialogueSubtitles } from "./productions/transcription.js";
 import { BenchChatControls } from "./bench/chat-controls.js";
 import { benchChatSessionId, prepareBenchChatSession, materializeBenchChatSession, BenchChatMaterializationSchema } from "./bench/chat-session.js";
 import { benchTakeMediaPath, generationRouteReadRows, readBenchSession } from "./bench/chat-reads.js";
@@ -105,12 +106,8 @@ import {
   CutFileSchema,
   buildRenderPlan,
   legacyArtifactScopeRefusal,
-  playsWholeAudioSource,
   serializeTimedText,
-  audibleTracks,
-  orderedTrackClips,
   storyTimelineFingerprint,
-  type TimelineCommand,
   productionFrameRate,
   designatedCompilation,
   comfyUiRecoveryDecision,
@@ -362,7 +359,6 @@ import { applySceneCommand, sceneCommandFrom } from "./productions/scene-command
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
 import { assembleTimelineScene, applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
 import { importEditorMedia } from "./productions/editor-import.js";
-import { AUDIO_TRACK_KINDS, effectiveAudioRole } from "@arke-studio/contracts";
 import { decideEditorRequest, EditorRequestRefused, readEditorRequest } from "./productions/editor-requests.js";
 import {
   acceptStill,
@@ -12227,130 +12223,14 @@ export class Coordinator {
           this.transport.broadcastSnapshot();
         };
         try {
-          const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+          const production = store.getBundle().productions.find(p => p.meta.id === msg.productionId);
           if (!production) return;
-          if (production.timeline?.status !== "ready") throw new Error("speech-to-text needs a saved timeline with Dialogue clips");
-          if (!this.voiceService) throw new Error("Voxa is not running — speech-to-text is off");
-          const record = production.timeline.timeline;
-          // The same audible set the plan mixes (SPEC-038 R-6): a solo elsewhere silences these
-          // clips in preview and export, so it silences them here too (round five).
-          const dialogue = audibleTracks(record)
-            .filter((track) => AUDIO_TRACK_KINDS.has(track.kind))
-            .flatMap((track) => orderedTrackClips(track).filter(clip => effectiveAudioRole(track, clip) === "dialogue"));
-          if (dialogue.length === 0) throw new Error("there are no Dialogue clips to transcribe");
-          const takesById = new Map(production.takes.map((take) => [take.id, take] as const));
-          const commands: TimelineCommand[] = [];
-          if (!record.tracks.some((track) => track.id === msg.trackId)) {
-            commands.push({ kind: "add-subtitle-track", trackId: msg.trackId, name: `Subtitles (${msg.language})`, language: msg.language });
-          }
-          const at = new Date().toISOString();
-          const ffmpeg = this.opts.ffmpeg;
-          const heard: Array<{ startFrame: number; endFrame: number; text: string; clip: (typeof dialogue)[number] }> = [];
-          const transcriptionPlan = buildRenderPlan({ production, artifacts: store.getBundle().artifacts, timeline: production.timeline, scope: { kind: "production" }, preset: "review-cut" });
-          if (!transcriptionPlan.ok) throw new Error(transcriptionPlan.reason);
-          for (const clip of dialogue) {
-            const heardSource = transcriptionPlan.plan.audio.find(item => item.clipId === clip.id);
-            if (!heardSource) throw new Error(clip.id + ": the Voice source is not audible in this cut");
-            const path = join(store.dir, fromPortable(heardSource.path));
-            let sourceLengthSec: number | null = null;
-            if (clip.source.kind === "take") {
-              const take = takesById.get(clip.source.takeId);
-              sourceLengthSec = production.takeMediaInfo[take?.segment?.passTakeId ?? clip.source.takeId]?.mediaInfo.durationSec ?? null;
-            } else if (clip.source.kind === "artifact") {
-              const source = clip.source;
-              sourceLengthSec = store.getBundle().artifacts.find(artifact => artifact.id === source.artifactId)?.mediaInfo?.durationSec ?? null;
-            } else if (clip.source.kind === "performance") {
-              const source = clip.source;
-              sourceLengthSec = production.performances.find(performance => performance.id === source.performanceId)?.provenance.outputTechnical.durationSec ?? null;
-            }
-            const sourceInSec = heardSource.sourceInSec;
-            const clipSec = heardSource.endSec - heardSource.startSec;
-            // Whole-source equivalence has to be established, not assumed: an unmeasured source
-            // under a tail-trimmed clip is windowed like any other (round four).
-            const wholeSource = playsWholeAudioSource(heardSource, sourceLengthSec, record.frameRate);
-            let audio: Buffer;
-            let contentType: string;
-            if (ffmpeg !== undefined) {
-              // Through ffmpeg whenever it is there: the window when the clip plays part of its
-              // source, a plain extraction otherwise, so a video container never reaches the
-              // model labelled as WAV (round five).
-              const windowDir = join(store.dir, ".cache", "transcribe");
-              const windowed = join(windowDir, `${ulid()}.wav`);
-              await mkdir(toExtendedLength(windowDir), { recursive: true });
-              try {
-                await ffmpeg.run(
-                  ["-y", ...(wholeSource ? [] : ["-ss", String(sourceInSec), "-t", String(clipSec)]), "-i", path, "-vn", "-ac", "1", "-ar", "16000", windowed],
-                  () => {},
-                  new AbortController().signal,
-                );
-                audio = await readFile(toExtendedLength(windowed));
-              } finally {
-                await rm(toExtendedLength(windowed), { force: true }).catch(() => {});
-              }
-              contentType = "audio/wav";
-            } else {
-              if (!wholeSource) {
-                throw new Error(`${clip.id} may play only part of its source, and ffmpeg is needed to transcribe only what it plays`);
-              }
-              const extension = path.toLowerCase().split(".").pop() ?? "";
-              const known: Record<string, string> = {
-                wav: "audio/wav",
-                mp3: "audio/mpeg",
-                m4a: "audio/mp4",
-                aac: "audio/aac",
-                ogg: "audio/ogg",
-                oga: "audio/ogg",
-                opus: "audio/ogg",
-                flac: "audio/flac",
-              };
-              const type = known[extension];
-              if (type === undefined) throw new Error(`${clip.id} plays a .${extension} source, and ffmpeg is needed to extract its audio for speech-to-text`);
-              contentType = type;
-              audio = await readFile(toExtendedLength(path));
-            }
-            const text = (await this.voiceService.transcribe(Uint8Array.from(audio), contentType)).trim();
-            if (text === "") continue;
-            heard.push({ startFrame: clip.startFrame, endFrame: clip.startFrame + clip.durationFrames, text, clip });
-          }
-          /*
-           * Two Dialogue tracks may overlap in time; a subtitle track may not. Overlapping windows
-           * become one cue carrying both lines, cited to the first, rather than a second add-cue
-           * the batch refuses — which would have thrown away every transcription with it (round
-           * four).
-           */
-          heard.sort((a, b) => a.startFrame - b.startFrame);
-          const merged: typeof heard = [];
-          for (const item of heard) {
-            const last = merged[merged.length - 1];
-            if (last !== undefined && item.startFrame < last.endFrame) {
-              last.endFrame = Math.max(last.endFrame, item.endFrame);
-              last.text = `${last.text} ${item.text}`;
-            } else merged.push({ ...item });
-          }
-          for (const item of merged) {
-            const clip = item.clip;
-            commands.push({
-              kind: "add-cue",
-              trackId: msg.trackId,
-              cue: {
-                id: `cu_${ulid()}`,
-                text: item.text.slice(0, 500),
-                startFrame: item.startFrame,
-                endFrame: item.endFrame,
-                ...(clip.source.kind === "take" && clip.source.sheetId !== undefined ? { speaker: clip.source.sheetId } : {}),
-                citation: { kind: "clip", clipId: clip.id },
-                provenance: { kind: "speech-to-text", model: "voxa", clipId: clip.id, at },
-              },
-            });
-          }
-          if (!commands.some((command) => command.kind === "add-cue")) throw new Error("the model heard no words in the Dialogue clips");
-          await applyTimelineCommand(store, msg.productionId, {
-            kind: "commands",
-            commands,
-            baseRevision: msg.baseRevision,
-            sourceFingerprint: storyTimelineFingerprint(production),
-            label: "Draft subtitles from speech",
+          const commands = await draftDialogueSubtitles(store, msg.productionId, msg.trackId, msg.language, {
+            ffmpeg: this.opts.ffmpeg,
+            ...(this.voiceService ? { transcribe: (audio, contentType) => this.voiceService!.transcribe(audio, contentType) } : {}),
           });
+          await applyTimelineCommand(store, msg.productionId, { kind: "commands", commands, baseRevision: msg.baseRevision,
+            sourceFingerprint: storyTimelineFingerprint(production), label: "Draft subtitles from speech" });
           await this.refreshWorldSnapshot(msg.worldId);
         } catch (error) {
           refuse(describeCoordinatorError(error));
@@ -20242,6 +20122,7 @@ export class Coordinator {
         refresh: async sessionId => { await this.refreshWorldSnapshot(store.worldId); await this.refreshBench(store.worldId, sessionId); },
       }),
       productionBatchQuotes: new GenerationQuotes(store, productionBatchSource(store, this.productionBatchPorts(store)), quotePorts),
+      transcription: { ffmpeg: this.opts.ffmpeg, ...(this.voiceService?.localSpeechConfigured ? { transcribe: (audio, contentType) => this.voiceService!.transcribe(audio, contentType) } : {}) },
       productionAudioQuotes: new GenerationQuotes(store, productionAudioGenerationSource(store, {
         manifest: this.opts.manifest ?? null, settings: () => this.appSettings ? this.appSettings.load() : Promise.resolve(null),
         providers: () => this.readModel.getState().app.providers, jobs: quotePorts.jobs,

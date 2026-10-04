@@ -56,12 +56,17 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
         }
       }
     }
-    for (const kind of ["timeline-assemble", "derive-continuity", "read-audiobook-chapter", "export-manuscript"] as const) {
+    for (const kind of ["derive-continuity", "read-audiobook-chapter", "export-manuscript"] as const) {
       const descriptor = ARKE_CLIENT_COMMAND_REGISTRY[kind];
       assert.equal(descriptor.classification, "supported-by-arke");
       if (descriptor.classification === "supported-by-arke") assert.deepEqual(descriptor.reachedBy, [], kind);
     }
-    assert.match(modelActionCatalogueText(), /timeline-assemble.*no-model-action/);
+    for (const kind of ["timeline-assemble", "timeline-history", "timeline-transcribe", "place-overlay", "move-overlay", "split-overlay-audio", "rejoin-overlay-audio", "remove-overlay"] as const) {
+      const descriptor = ARKE_CLIENT_COMMAND_REGISTRY[kind];
+      assert.equal(descriptor.classification, "supported-by-arke");
+      if (descriptor.classification === "supported-by-arke") assert.deepEqual(descriptor.reachedBy, ["production-timeline-operation"], kind);
+    }
+    assert.match(modelActionCatalogueText(), /timeline-assemble.*reached by: production-timeline-operation/);
     assert.match(modelActionCatalogueText(), /timeline-command.*reached by: editorRequests/);
   });
 

@@ -35,7 +35,7 @@ import { ScriptBlockSchema, ShotFramingSchema } from "./scene.js";
 import { SceneCommandSchema } from "./scene-operations.js";
 import { SceneRecordSchema, type SceneRecord } from "./scene-flow.js";
 import { AudioSpineCommandSchema } from "./spine.js";
-import { SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
+import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { TimelineClipIdSchema, TimelineTrackIdSchema } from "./timeline.js";
 import {
   CHARACTER_ROLE_MAX,
@@ -54,6 +54,21 @@ const CandidateRevisionSchema = z
 const CompleteReadIdsSchema = z.array(CheckReceiptIdSchema).min(1).max(8);
 export const TurnActionRefSchema = z.string().regex(/^[a-z][a-z0-9-]{0,31}$/);
 export const PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION = 57;
+export const PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION = 58;
+export const ProductionTimelineOperationSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("assemble"), sceneIds: z.array(SceneIdSchema).min(1).max(40) }).strict(),
+  z.object({ operation: z.literal("overlay-place"), artifactId: ArtifactIdSchema, trackId: TimelineTrackIdSchema,
+    startFrame: z.number().int().nonnegative(), durationFrames: z.number().int().positive(), sourceInFrames: z.number().int().nonnegative().default(0) }).strict(),
+  z.object({ operation: z.literal("overlay-move"), clipId: TimelineClipIdSchema, startFrame: z.number().int().nonnegative() }).strict(),
+  z.object({ operation: z.literal("overlay-split-audio"), clipId: TimelineClipIdSchema }).strict(),
+  z.object({ operation: z.literal("overlay-rejoin-audio"), clipId: TimelineClipIdSchema, audioClipId: TimelineClipIdSchema }).strict(),
+  z.object({ operation: z.literal("overlay-remove"), clipId: TimelineClipIdSchema }).strict(),
+  z.object({ operation: z.literal("transcribe"), trackId: TimelineTrackIdSchema, language: LanguageTagSchema }).strict(),
+  z.object({ operation: z.literal("undo") }).strict(),
+  z.object({ operation: z.literal("redo") }).strict(),
+]);
+export const ProductionTimelineModelActionSchema = z.object({ kind: z.literal("production-timeline-operation"),
+  productionId: SlugSchema, request: ProductionTimelineOperationSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
 const ActionSequencingShape = { ref: TurnActionRefSchema.optional(), after: z.array(TurnActionRefSchema).max(24).optional() };
 export const CHAT_SEQUENCING_SCHEMA_VERSION = 55;
 const SemanticIdsSchema = z.array(ConversationActionSemanticIdSchema).max(40);
@@ -1366,6 +1381,7 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionPerformanceModelActionSchema.extend(ActionSequencingShape),
   ProductionAudioEditModelActionSchema.extend(ActionSequencingShape),
   ProductionAudioCueModelActionSchema.extend(ActionSequencingShape),
+  ProductionTimelineModelActionSchema.extend(ActionSequencingShape),
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
 
@@ -1473,6 +1489,11 @@ export const WorldChatProductionStageConstructActionSchema = preparedAction("wor
 export const WorldChatProductionStagePlayblastActionSchema = preparedAction("world-chat-production-stage-playblast", ProductionStagePlayblastModelActionSchema);
 export const WorldChatAudioSpineActionSchema = preparedAction("world-chat-audio-spine-command", AudioSpineModelActionSchema);
 export const WorldChatProductionAudioGenerationActionSchema = preparedAction("world-chat-production-audio-generation", ProductionAudioGenerationModelActionSchema);
+export const WorldChatProductionTimelineActionSchema = preparedAction("world-chat-production-timeline-operation", ProductionTimelineModelActionSchema).extend({
+  frozenHash: z.string().min(1),
+  historyEntryDigest: z.string().min(1).optional(),
+});
+export const WorldChatProductionTimelineTranscribeActionSchema = WorldChatProductionTimelineActionSchema.extend({ kind: z.literal("world-chat-production-timeline-transcribe") });
 export const WorldChatProductionPerformanceActionSchema = preparedAction("world-chat-production-performance-command", ProductionPerformanceModelActionSchema).extend({
   frozen: z.object({ sceneVersion: z.number().int().positive().nullable(), timelineRevision: z.number().int().nonnegative().nullable(),
     timelineHash: z.string().nullable(), selectionHash: z.string().nullable(), reviewHash: z.string().nullable(), performanceHash: z.string().nullable() }).strict(),
@@ -1707,5 +1728,7 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionAudioGenerationActionSchema,
   WorldChatProductionPerformanceActionSchema,
   WorldChatProductionAudioCueActionSchema,
+  WorldChatProductionTimelineActionSchema,
+  WorldChatProductionTimelineTranscribeActionSchema,
 ]);
 export type WorldChatPreparedAction = z.infer<typeof WorldChatPreparedActionSchema>;

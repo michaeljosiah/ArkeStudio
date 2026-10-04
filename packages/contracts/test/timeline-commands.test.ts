@@ -29,6 +29,22 @@ import {
 const AT = "2026-09-01T12:00:00Z";
 const TAKE = "tk_01J8E0000000000000000000T1";
 
+it("records a filled tail hole in history, so repeated audio detachment remains undoable", () => {
+  const base = seedStoryPictureTimeline(production());
+  const clip: TimelineClip = { id: "cl_audio_one", startFrame: 0, durationFrames: 40, sourceInFrames: 0, source: { kind: "take", takeId: TAKE, label: "Video audio" }, gainDb: 0 };
+  const placed = ProductionTimelineSchema.parse(applyTimelineCommands(base, [{ kind: "add-track", trackId: "tr_audio", trackKind: "audio", name: "Audio" }, { kind: "place", trackId: "tr_audio", clip }]));
+  const deleted = ProductionTimelineSchema.parse(applyTimelineCommands(placed, [{ kind: "delete", clipId: clip.id }]));
+  assert.equal(deleted.tracks.find(t => t.id === "tr_audio")!.endFrame, 40);
+  const filled = ProductionTimelineSchema.parse(applyTimelineCommands(deleted, [{ kind: "place", trackId: "tr_audio", clip: { ...clip, id: "cl_audio_two" } }]));
+  assert.equal(filled.tracks.find(t => t.id === "tr_audio")!.endFrame, undefined);
+  const undoFill = ProductionTimelineSchema.parse(undoTimelineHistory(filled));
+  assert.equal(undoFill.tracks.find(t => t.id === "tr_audio")!.endFrame, 40);
+  const undoDelete = ProductionTimelineSchema.parse(undoTimelineHistory(undoFill));
+  assert.deepEqual(undoDelete.tracks, placed.tracks);
+  const redoBoth = ProductionTimelineSchema.parse(redoTimelineHistory(redoTimelineHistory(undoDelete)));
+  assert.deepEqual(redoBoth.tracks, filled.tracks);
+});
+
 function scene(id: string, order: number, shots: Array<{ id: string; durationSec?: number }>): Scene {
   return {
     id,

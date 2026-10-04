@@ -79,6 +79,8 @@ export interface ConversationActionAuthorityAdapter {
   completeHost?(action: ConversationActionCard, payload: unknown): Promise<ConversationActionExecutionOutcome>;
   /** Idempotently settle authority-owned preparation after the local actor's denial is durable. */
   deny?(action: ConversationActionCard): Promise<void>;
+  /** Idempotent cleanup only after a failed outcome is durable; recovery retries interrupted cleanup. */
+  settleFailed?(action: ConversationActionCard): Promise<void>;
   /** Null means the authority still has exactly the projected status. */
   reconcile?(action: ConversationActionCard): Promise<ConversationActionExecutionOutcome | null>;
   /** The exact authority-owned inverse available after successful execution. */
@@ -809,6 +811,7 @@ export class ConversationActionLifecycle {
       }
       if (terminal(action.status)) {
         if (action.status === "completed") await this.linkAvailableUndo(action);
+        if (action.status === "failed") await this.adapters.get(action.actionKind)?.settleFailed?.(action).catch(() => {});
         continue;
       }
       const adapter = this.adapters.get(action.actionKind);
@@ -1131,6 +1134,7 @@ export class ConversationActionLifecycle {
       const current = loaded.actions.find((one) => one.actionId === action.actionId);
       if (!current || !transitionAllowed(current.status, outcome.status)) {
         if (current?.status === "completed") await this.linkAvailableUndo(current);
+        if (current?.status === "failed") await this.adapters.get(current.actionKind)?.settleFailed?.(current).catch(() => {});
         return false;
       }
       try {
@@ -1152,6 +1156,10 @@ export class ConversationActionLifecycle {
         if (outcome.status === "completed") {
           const completed = await this.loadAction(action.conversationId, action.actionId);
           if (completed) await this.linkAvailableUndo(completed);
+        }
+        if (outcome.status === "failed") {
+          const failed = await this.loadAction(action.conversationId, action.actionId);
+          if (failed?.status === "failed") await this.adapters.get(failed.actionKind)?.settleFailed?.(failed).catch(() => {});
         }
         return !appended.deduplicated;
       } catch (error) {
