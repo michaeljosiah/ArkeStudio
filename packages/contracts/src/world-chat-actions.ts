@@ -1380,6 +1380,7 @@ export const WorldChatProductionCreateActionSchema = z
     worldId: UlidSchema,
     action: ProductionCreateModelActionSchema,
     plan: ProductionCreationPlanSchema,
+    dependencyPreview: WorldChatDependencyPreviewSchema.optional(),
   })
   .strict();
 export const WorldChatProductionMetadataActionSchema = preparedAction("world-chat-production-metadata", ProductionMetadataModelActionSchema);

@@ -8,7 +8,7 @@ import { currentPerformanceTarget } from "../audio/performances.js";
 import { sha256 } from "../world/text-files.js";
 import { parseSceneRecord } from "./scene-record.js";
 import type { CommitFileInput } from "../world/commit.js";
-import type { WorldStore } from "./../world/store.js";
+import { WorldStateStaleError, type WorldStore } from "../world/store.js";
 
 /**
  * The one way a scene's structure changes (SPEC-029 R-36, R-61, R-62).
@@ -115,7 +115,7 @@ export async function applySceneCommands(store: WorldStore, input: SceneCommands
   const stem = stemOrThrow(input.sceneFile), path = `productions/${input.productionId}/scenes/${stem}.json`;
   await store.gateOp(async () => {
     const refused = input.precondition?.();
-    if (refused) throw new SceneCommandRefused([refused]);
+    if (refused) throw new WorldStateStaleError(refused);
     const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
     const record = parseSceneRecord(raw);
     fenceOrThrow(input, record, stem);

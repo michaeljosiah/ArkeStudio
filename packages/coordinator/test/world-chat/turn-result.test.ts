@@ -151,6 +151,15 @@ describe("parsing a turn result", () => {
     assert.equal(parseTurnResult(raw).ok, false);
   });
 
+  it("rejects an oversized merged scene batch before turn completion", () => {
+    const { command: _command, commands: _commands, ...action } = WORLD_CHAT_SHAPE_EXAMPLES.worldActions["production-scene-command"];
+    const raw = turn({ actions: [{ ...action, commands: Array.from({ length: 24 }, () => ({ kind: "edit-scene" as const, title: "The bell" })) },
+      { ...action, command: { kind: "edit-scene", title: "The tide" } }] });
+    const result = parseTurnResult(raw, true);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.ok(result.problems.some(problem => /at most 24 commands/.test(problem.safeMessage)));
+  });
+
   it("rejects execution-blocked generation before it can become a dead card", () => {
     for (const kind of ["voice-audition"] as const) {
       const action = WORLD_CHAT_SHAPE_EXAMPLES.worldActions[kind];

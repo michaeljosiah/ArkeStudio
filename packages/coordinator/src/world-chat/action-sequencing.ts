@@ -1,5 +1,5 @@
 import { ModelWorldChatActionSchema, orderedShots, sceneCommandCandidate, sceneCommandBatchCandidate,
-  turnActionDependencyIndexes, type ModelWorldChatAction, type SceneRecord, type WorldBundle, type WorldChatDependencyPreview } from "@arke-studio/contracts";
+  turnActionGroups, type ModelWorldChatAction, type SceneRecord, type WorldBundle, type WorldChatDependencyPreview } from "@arke-studio/contracts";
 import { sceneCommandFrom } from "../productions/scene-commands.js";
 
 export function sceneActionCommands<T>(action: { command?: T; commands?: readonly T[] }): T[] {
@@ -20,21 +20,9 @@ export interface TurnActionGroup {
 
 /** Explicit dependency boundaries stay separate; independent edits to one scene share a card. */
 export function sequenceTurnActions(bundle: WorldBundle, actions: readonly ModelWorldChatAction[]): TurnActionGroup[] {
-  const edges = turnActionDependencyIndexes(actions), groups: TurnActionGroup[] = [];
-  const groupOf = new Map<number, number>(), sceneGroups = new Map<string, number>();
-  for (const [index, action] of actions.entries()) {
-    const dependencies = [...new Set(edges[index]!.map(parent => groupOf.get(parent)!))].sort((a, b) => a - b);
-    const key = action.kind === "production-scene-command" ? JSON.stringify([action.productionId, action.sceneId, dependencies]) : null;
-    const existing = key ? sceneGroups.get(key) : undefined;
-    if (existing !== undefined) {
-      groups[existing]!.members.push(action); groupOf.set(index, existing);
-    } else {
-      const group = groups.length;
-      groups.push({ action, members: [action], dependencies }); groupOf.set(index, group);
-      if (key) sceneGroups.set(key, group);
-    }
-  }
-  const created = new Map<string, string[]>();
+  const groups: TurnActionGroup[] = turnActionGroups(actions).map(group => ({ action: actions[group.members[0]!]!,
+    members: group.members.map(index => actions[index]!), dependencies: group.dependencies }));
+  const created = new Map<string, CreatedShots>();
   for (const group of groups) {
     const ancestors = new Set<number>();
     const visit = (index: number) => {
@@ -57,7 +45,10 @@ export function sequenceTurnActions(bundle: WorldBundle, actions: readonly Model
     // Existing guarded callers deliberately validate passage/scope rules before the payload's
     // structural parse. Removing transport metadata must preserve that validation order.
     const allowedRefs = new Set([...ancestors].flatMap(index => groups[index]!.members.flatMap(member => member.ref ? [member.ref] : [])));
-    group.action = resolveShotRefs(withoutRefs, allowedRefs, created) as ModelWorldChatAction;
+    group.action = resolveShotRefs(withoutRefs, allowedRefs, created, {
+      productionId: "productionId" in withoutRefs ? withoutRefs.productionId ?? undefined : undefined,
+      sceneId: "sceneId" in withoutRefs ? withoutRefs.sceneId : undefined,
+    }) as ModelWorldChatAction;
     if (group.action.kind !== "production-scene-command") continue;
     const action = group.action;
     const production = working.productions.find(p => p.meta.id === action.productionId);
@@ -69,14 +60,14 @@ export function sequenceTurnActions(bundle: WorldBundle, actions: readonly Model
     for (const member of group.members as SceneAction[]) {
       const inserted: string[] = [];
       for (const raw of sceneActionCommands(member)) {
-        const command = resolveShotRefs(raw, allowedRefs, created);
+        const command = resolveShotRefs(raw, allowedRefs, created, action);
         const previous = new Set(orderedShots(record).map(shot => shot.id));
         record = sceneCommandCandidate(working, action.productionId, record, sceneCommandFrom(command));
         inserted.push(...orderedShots(record).filter(shot => !previous.has(shot.id)).map(shot => shot.id));
         working = replaceScene(working, action.productionId, record);
         commands.push(command);
       }
-      if (member.ref) { created.set(member.ref, inserted); allowedRefs.add(member.ref); }
+      if (member.ref) { created.set(member.ref, { productionId: action.productionId, sceneId: action.sceneId, shotIds: inserted }); allowedRefs.add(member.ref); }
     }
     const after = sceneCommandBatchCandidate(beforeBundle, action.productionId, before, commands.map(sceneCommandFrom));
     group.scene = { before, after, beforeBundle };
@@ -91,12 +82,14 @@ function replaceScene(bundle: WorldBundle, productionId: string, scene: SceneRec
     { ...p, scenes: p.scenes.map(existing => existing.id === scene.id ? scene : existing) }) };
 }
 
-function resolveShotRefs<T>(command: T, allowed: ReadonlySet<string>, created: ReadonlyMap<string, string[]>): T {
+interface CreatedShots { productionId: string; sceneId: string; shotIds: string[] }
+function resolveShotRefs<T>(command: T, allowed: ReadonlySet<string>, created: ReadonlyMap<string, CreatedShots>, scope: { productionId?: string; sceneId?: string }): T {
   const resolve = (id: string) => {
     if (!id.startsWith("ref:")) return id;
-    const ref = id.slice(4), ids = created.get(ref);
-    if (!allowed.has(ref) || ids?.length !== 1) throw new Error(`Shot ref ${ref} must name one shot created by a preceding command or a declared dependency.`);
-    return ids[0]!;
+    const ref = id.slice(4), target = created.get(ref);
+    if (!allowed.has(ref) || target?.shotIds.length !== 1) throw new Error(`Shot ref ${ref} must name one shot created by a preceding command or a declared dependency.`);
+    if (target.productionId !== scope.productionId || target.sceneId !== scope.sceneId) throw new Error(`Shot ref ${ref} belongs to another production or scene.`);
+    return target.shotIds[0]!;
   };
   const visit = (value: unknown, key?: string): unknown => {
     if (typeof value === "string" && ["shotId", "fromShotId", "toShotId", "before", "after"].includes(key ?? "")) return resolve(value);

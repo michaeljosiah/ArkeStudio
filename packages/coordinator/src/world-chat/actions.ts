@@ -3933,7 +3933,7 @@ async function executeSharedResource(
         await applySceneCommands(store, { productionId: payload.action.productionId, sceneFile, sceneId: scene.id,
           baseVersion: payload.scenePlan.before.version, commands: sceneActionCommands(payload.action).map(sceneCommandFrom),
           expectedBefore: payload.scenePlan.before, expectedAfter: payload.scenePlan.after, requestId: action.actionId,
-          precondition: observationPrecondition(store, { baseObservations: payload.scenePlan.expectedObservations }, deps),
+          precondition,
         }, deps.activePlans ? { activePlans: deps.activePlans } : {});
         return { status: "completed", receipt: { kind: "scene-version", id: `${scene.id}-v${payload.scenePlan.after.version}`,
           summary: "The approved scene-command batch was applied atomically." } };

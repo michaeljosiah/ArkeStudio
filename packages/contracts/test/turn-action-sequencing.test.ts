@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ModelWorldChatActionSchema, ProductionChatTurnResultSchema, WorldChatTurnResultSchema,
-  WORLD_CHAT_SHAPE_EXAMPLES, turnActionDependencyIndexes } from "../src/index.js";
+  WORLD_CHAT_SHAPE_EXAMPLES, turnActionDependencyIndexes, turnActionGroups } from "../src/index.js";
 
 describe("turn-local action sequencing (SPEC-051 R-14/R-17)", () => {
   it("accepts ref and after on every model action kind", () => {
@@ -26,5 +26,12 @@ describe("turn-local action sequencing (SPEC-051 R-14/R-17)", () => {
     assert.equal(WorldChatTurnResultSchema.safeParse(result).success, false);
     assert.equal(ProductionChatTurnResultSchema.safeParse({ ...result, actions: [...result.actions, action] }).success, false);
     assert.equal(ProductionChatTurnResultSchema.safeParse({ ...result, editorRequests: [...result.editorRequests, request] }).success, false);
+  });
+  it("enforces the aggregate scene cap and retains explicit dependency boundaries", () => {
+    const action = { kind: "production-scene-command", productionId: "saltlight", sceneId: "sc_04", ref: "first",
+      commands: Array.from({ length: 24 }, () => ({ kind: "edit-scene", title: "The bell" })) };
+    const next = { kind: action.kind, productionId: action.productionId, sceneId: action.sceneId, command: { kind: "edit-scene", title: "The tide" } };
+    assert.throws(() => turnActionGroups([action, next]), /at most 24 commands/);
+    assert.deepEqual(turnActionGroups([action, { ...next, after: ["first"] }]), [{ members: [0], dependencies: [] }, { members: [1], dependencies: [0] }]);
   });
 });

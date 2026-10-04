@@ -29,3 +29,27 @@ export function turnActionDependencyIndexes(actions: readonly { ref?: string; af
   }
   return edges;
 }
+
+/** The same grouping and aggregate cap apply at model validation and authoritative preparation. */
+export function turnActionGroups(actions: readonly { kind: string; ref?: string; after?: readonly string[];
+  productionId?: string | null; sceneId?: string; command?: unknown; commands?: readonly unknown[] }[]): Array<{ members: number[]; dependencies: number[] }> {
+  const edges = turnActionDependencyIndexes(actions), groups: Array<{ members: number[]; dependencies: number[] }> = [];
+  const groupOf = new Map<number, number>(), scenes = new Map<string, number>();
+  for (const [index, action] of actions.entries()) {
+    const dependencies = [...new Set(edges[index]!.map(parent => groupOf.get(parent)!))].sort((a, b) => a - b);
+    const key = action.kind === "production-scene-command" ? JSON.stringify([action.productionId, action.sceneId, dependencies]) : null;
+    const existing = key ? scenes.get(key) : undefined;
+    if (existing !== undefined) { groups[existing]!.members.push(index); groupOf.set(index, existing); }
+    else {
+      const group = groups.length;
+      groups.push({ members: [index], dependencies }); groupOf.set(index, group);
+      if (key) scenes.set(key, group);
+    }
+  }
+  for (const group of groups) {
+    if (actions[group.members[0]!]!.kind !== "production-scene-command") continue;
+    const count = group.members.reduce((total, index) => total + (actions[index]!.commands?.length ?? 1), 0);
+    if (count > 24) throw new Error("Independent commands on one scene share a batch; that batch may contain at most 24 commands. Use a separate turn or an explicit dependency boundary.");
+  }
+  return groups;
+}

@@ -1,4 +1,4 @@
-import { ModelWorldChatActionSchema, WorldChatTurnResultSchema, ProductionChatTurnResultSchema, turnActionDependencyIndexes, type WorldChatTurnResult } from "@arke-studio/contracts";
+import { ModelWorldChatActionSchema, WorldChatTurnResultSchema, ProductionChatTurnResultSchema, turnActionGroups, type WorldChatTurnResult } from "@arke-studio/contracts";
 import { z } from "zod";
 import { worldChatActionDescriptor } from "../arke-actions/registry.js";
 
@@ -26,7 +26,7 @@ export const ModelWorldChatActionInputSchema = ModelWorldChatActionSchema.superR
 });
 
 function validateModelTurn(result: WorldChatTurnResult, context: z.RefinementCtx) {
-  try { turnActionDependencyIndexes(result.actions); }
+  try { turnActionGroups(result.actions); }
   catch (error) { context.addIssue({ code: z.ZodIssueCode.custom, path: ["actions"], message: String((error as Error).message) }); }
   for (const [index, action] of result.actions.entries()) {
     const checked = ModelWorldChatActionInputSchema.safeParse(action);
