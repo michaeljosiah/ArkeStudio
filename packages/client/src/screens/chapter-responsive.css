@@ -49,7 +49,11 @@
 .fy-chapter-block-sheet .fy-abp__x { display: grid; place-items: center; align-self: center; width: 44px; height: 44px; min-height: 0; margin: -15px -15px -15px 0; }
 .fy-chapter-block-sheet .fy-abp__tabs { padding-top: 0; }
 .fy-chapter-block-sheet .fy-abp__tab { min-height: 0; padding-top: 12px; }
-.fy-abp__title h2:focus { outline: none; }
+/* The title takes the focus a sheet gives its heading on opening, by script and never by Tab
+   (tabindex -1), so no ring is ever the author's: the global :focus-visible draws its ring as a
+   box-shadow, which Chromium matches after showModal(), and an outline rule alone left the title
+   boxed on the phone (installed local.18). */
+.fy-abp__title h2:focus { outline: none; box-shadow: none; }
 @media (max-width: 1099px) {
   .fy-ch__panels { display: contents; }
   [data-screen="chapter"] { overflow: visible; min-width: 0; height: auto; min-height: 100%; }

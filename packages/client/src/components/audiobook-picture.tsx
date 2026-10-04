@@ -216,7 +216,17 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
     <section className="fy-ab__picture" data-testid="audiobook-picture" aria-label={`Picture · ${blockName}`}>
       {lookChanged && <p className="fy-mono fy-ab__card-line fy-ch__who-where--warn" data-testid="picture-look-changed">look changed</p>}
       {!open && world !== null && card.ask !== null ? (
-        <PictureCard world={world} worldId={worldId} state={card} onEdit={editInBench} offline={connection !== "open"} picture={here === null ? null : mediaUrl(world.meta.slug, here.file)} {...(here !== null ? { onRemove: remove } : {})} {...(choosePicture !== undefined ? { onChoose: choosePicture } : {})} />
+        <PictureCard
+          world={world}
+          worldId={worldId}
+          state={card}
+          onEdit={editInBench}
+          offline={connection !== "open"}
+          picture={here === null ? null : mediaUrl(world.meta.slug, here.file)}
+          {...(here !== null ? { onRemove: remove } : {})}
+          {...(choosePicture !== undefined ? { onChoose: choosePicture } : {})}
+          chapter={{ productionId: production.meta.id, chapterFile, order: chapterOrder, look: record?.look ?? null }}
+        />
       ) : !open ? (
         <>
           <div className="fy-pcard__top">
@@ -231,10 +241,19 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
             )}
             <div className="fy-pcard__facts">
               {here !== null && world !== null ? (
-                <div className="fy-pcard__fact">
-                  <span className="fy-mono">Rides</span>
-                  <b data-testid="picture-card-rides">{chosenFrom(world, here.file)}</b>
-                </div>
+                <>
+                  {/* A picture whose card cannot be drawn (its model gone from the manifest) still says the frame its stamp kept. */}
+                  {here.entry.shot !== undefined && here.entry.shot.frame !== "" && (
+                    <div className="fy-pcard__fact">
+                      <span className="fy-mono">Frame</span>
+                      <b data-testid="picture-card-frame">{here.entry.shot.frame}</b>
+                    </div>
+                  )}
+                  <div className="fy-pcard__fact">
+                    <span className="fy-mono">Rides</span>
+                    <b data-testid="picture-card-rides">{chosenFrom(world, here.file)}</b>
+                  </div>
+                </>
               ) : (
                 <div className="fy-pcard__fact">
                   <span className="fy-mono">Chapter {pad}</span>
