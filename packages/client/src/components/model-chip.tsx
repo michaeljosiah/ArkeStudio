@@ -12,6 +12,7 @@ import { ModelPicker } from "./model-picker.js";
 import { modelGroups, providerHeading, recentModels } from "./model-picker-data.js";
 import { cx } from "./ui.js";
 import { useOverlaysOpened } from "../lib/overlays.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { readRecentModels, rememberRecentModel } from "../lib/recent-models.js";
 
 /** The layer's distance from the chip, as it stood when it hung off the chip itself. */
@@ -96,7 +97,9 @@ function AnchoredLayer({
     const doc = panelRef.current?.ownerDocument ?? document;
     const view = doc.defaultView ?? window;
     const within = (element: Element | null, target: EventTarget | null) => element !== null && target !== null && element.contains(target as Node);
-    const inside = (target: EventTarget | null) => within(root.current, target) || within(panelRef.current, target);
+    // The chip that opened the layer is inside it: a press on that chip is the chip being used (a phone's
+    // effort chip lives in the sheet, outside the composer's own box).
+    const inside = (target: EventTarget | null) => within(root.current, target) || within(anchor.current, target) || within(panelRef.current, target);
     // Capture, so a press elsewhere closes the layer even where that element stops propagation.
     const away = (event: MouseEvent) => {
       if (!inside(event.target)) closing.current(false);
@@ -141,6 +144,57 @@ function AnchoredLayer({
     <div ref={panelRef} id={id} className={className} role={role} aria-label={label} onKeyDown={onKeyDown}>
       {children}
     </div>,
+    host,
+  );
+}
+
+/**
+ * A phone's picker: a bottom sheet from the foot to about 85% of the height, over a scrim, drawn on
+ * the body for the reason the popover is (design turn 195). It closes on Escape, on a press on the
+ * scrim, and when a sheet opens after it. It takes focus itself, not the search: the keyboard does
+ * not rise until the field is pressed.
+ */
+function SheetLayer({
+  host, panelRef, id, label, onClose, onEscape, onKeyDown, children,
+}: {
+  host: HTMLElement;
+  panelRef: RefObject<HTMLDivElement | null>;
+  id: string;
+  label: string;
+  onClose: (refocus: boolean) => void;
+  onEscape?: () => boolean;
+  onKeyDown?: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
+  children: ReactNode;
+}) {
+  const opened = useOverlaysOpened();
+  const openedAt = useRef(opened);
+  const closing = useRef(onClose);
+  closing.current = onClose;
+  const escaping = useRef(onEscape);
+  escaping.current = onEscape;
+  useLayoutEffect(() => { panelRef.current?.focus({ preventScroll: true }); }, []);
+  useEffect(() => {
+    const doc = panelRef.current?.ownerDocument ?? document;
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (escaping.current?.() === true) return;
+      closing.current(true);
+    };
+    doc.addEventListener("keydown", key, true);
+    return () => doc.removeEventListener("keydown", key, true);
+  }, []);
+  useEffect(() => {
+    if (opened > openedAt.current) closing.current(false);
+  }, [opened]);
+  return createPortal(
+    <>
+      <div className="fy-msheet__scrim" onMouseDown={() => onClose(true)} />
+      <div ref={panelRef} id={id} className="fy-msheet fy-mpick" role="dialog" aria-label={label} tabIndex={-1} onKeyDown={onKeyDown}>
+        {children}
+      </div>
+    </>,
     host,
   );
 }
@@ -227,10 +281,15 @@ export function ModelChip({
 }) {
   /** Which layer is open and where it is drawn; null while both are closed. */
   const [menu, setMenu] = useState<{ kind: MenuKind; host: HTMLElement } | null>(null);
+  /** On a phone the effort chip is in the sheet's head, and its menu opens over the sheet. */
+  const [sheetEffort, setSheetEffort] = useState(false);
+  const phone = useMediaQuery("(max-width: 599px)");
   const root = useRef<HTMLSpanElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const effortButton = useRef<HTMLButtonElement>(null);
+  const sheetEffortButton = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
+  const effortPanel = useRef<HTMLDivElement>(null);
   const escapeRef: MutableRefObject<(() => boolean) | null> = useRef(null);
   const menuId = useId();
   const listboxId = useId();
@@ -240,11 +299,13 @@ export function ModelChip({
   const closeMenu = (refocus: boolean) => {
     const kind = menu?.kind;
     setMenu(null);
+    setSheetEffort(false);
     if (refocus) (kind === "effort" ? effortButton : button).current?.focus({ preventScroll: true });
   };
   const show = (kind: MenuKind) => {
     const chip = root.current;
     if (chip === null) return;
+    setSheetEffort(false);
     setMenu({ kind, host: chip.closest("dialog") ?? chip.ownerDocument.body });
   };
 
@@ -252,10 +313,11 @@ export function ModelChip({
   // it by: opening hands focus to the effort in force, else the first.
   const effortOpening = menu?.kind === "effort";
   useLayoutEffect(() => {
-    if (!effortOpening) return;
-    const target = panel.current?.querySelector<HTMLButtonElement>("button[aria-checked=true]") ?? panel.current?.querySelector<HTMLButtonElement>("button");
+    const menuPanel = effortOpening ? panel.current : sheetEffort ? effortPanel.current : null;
+    if (menuPanel === null) return;
+    const target = menuPanel.querySelector<HTMLButtonElement>("button[aria-checked=true]") ?? menuPanel.querySelector<HTMLButtonElement>("button");
     target?.focus({ preventScroll: true });
-  }, [effortOpening]);
+  }, [effortOpening, sheetEffort]);
 
   const models = state?.app.harnessModels ?? [];
   const manifest = state?.app.manifest?.models;
@@ -312,17 +374,18 @@ export function ModelChip({
   const effortLabel = variants === undefined ? "" : inForce === undefined ? "Effort" : (harnessEffortLabel(variants, inForce) ?? titleCaseVariant(inForce));
   const efforts = variants === undefined ? [] : harnessEffortLabels(variants.names);
 
-  const onEffortKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+  /** The effort menu's keys, for whichever panel holds it. */
+  const onEffortKey = (panelRef: RefObject<HTMLDivElement | null>, close: (refocus: boolean) => void) => (event: ReactKeyboardEvent<HTMLDivElement>) => {
     // Out of the menu by Tab is out from the chip: focus goes back to it before the browser moves
     // it on, so Tab lands after the chip and Shift+Tab before it, as when the menu followed it.
     if (event.key === "Tab") {
-      closeMenu(true);
+      close(true);
       return;
     }
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     event.stopPropagation();
-    const items = [...(panel.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
+    const items = [...(panelRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
     if (items.length === 0) return;
     const at = items.findIndex((item) => item === item.ownerDocument.activeElement);
     const next = event.key === "Home" ? 0
@@ -331,6 +394,75 @@ export function ModelChip({
       : (at + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
     items[next]?.focus({ preventScroll: true });
   };
+  const closeSheetEffort = (refocus: boolean) => {
+    setSheetEffort(false);
+    if (refocus) sheetEffortButton.current?.focus({ preventScroll: true });
+  };
+  /** The effort menu, from the composer's chip or, on a phone, from the sheet's head. */
+  const effortMenu = (host: HTMLElement, from: "composer" | "sheet") => variants === undefined || onVariant === undefined ? null : (
+    <AnchoredLayer
+      host={host}
+      anchor={from === "sheet" ? sheetEffortButton : effortButton}
+      root={root}
+      panelRef={from === "sheet" ? effortPanel : panel}
+      className="fy-mchip__menu fy-mchip__menu--effort"
+      id={`${menuId}-effort`}
+      role="menu"
+      label="Effort"
+      onClose={from === "sheet" ? closeSheetEffort : closeMenu}
+      onKeyDown={onEffortKey(from === "sheet" ? effortPanel : panel, from === "sheet" ? closeSheetEffort : closeMenu)}
+    >
+      <div className="fy-mpick__grp fy-mpick__grp--first" role="presentation">Effort</div>
+      {variants.names.map((name, index) => (
+        <button
+          key={name}
+          type="button"
+          role="menuitemradio"
+          aria-checked={name === inForce}
+          data-variant={name}
+          className={cx("fy-mpick__row", name === inForce && "fy-mpick__row--on")}
+          onClick={() => { onVariant(name); if (from === "sheet") closeSheetEffort(true); else closeMenu(true); }}
+        >
+          <span className="fy-mpick__name">{efforts[index]}</span>
+          {name === inForce && <PickerTick />}
+        </button>
+      ))}
+    </AnchoredLayer>
+  );
+  const picker = (sheet: boolean) => (
+    <ModelPicker
+      groups={groups}
+      recent={recent}
+      total={models.length}
+      reference={reference}
+      lost={lost}
+      set={set}
+      unsetLabel={unsetLabel}
+      listboxId={listboxId}
+      panelRef={panel}
+      escapeRef={escapeRef}
+      onChoose={choose}
+      sheet={sheet}
+      {...(sheet && effortShown ? { effort: (
+        <button
+          ref={sheetEffortButton}
+          type="button"
+          className="fy-mchip__btn fy-mchip__btn--effort fy-msheet__effort"
+          aria-label="Effort"
+          aria-haspopup="menu"
+          aria-expanded={sheetEffort}
+          aria-controls={sheetEffort ? `${menuId}-effort` : undefined}
+          onClick={() => setSheetEffort(!sheetEffort)}
+        >
+          <span className="fy-mchip__name">{effortLabel}</span>
+          <ChipChevron />
+        </button>
+      ) } : {})}
+      {...(onRemember !== undefined ? { onRemember: () => { onRemember(); closeMenu(true); } } : {})}
+      {...(onClear !== undefined ? { onClear: () => { onClear(); closeMenu(true); } } : {})}
+      onManage={() => { closeMenu(false); manage?.(); }}
+    />
+  );
   return (
     <span className="fy-mchip" ref={root}>
       <button
@@ -375,7 +507,19 @@ export function ModelChip({
           <ChipChevron />
         </button>
       )}
-      {menu !== null && open && (
+      {menu !== null && open && (phone ? (
+        <SheetLayer
+          host={menu.host}
+          panelRef={panel}
+          id={menuId}
+          label="Language model"
+          onClose={closeMenu}
+          // The effort menu over the sheet answers its own Escape first.
+          onEscape={() => sheetEffort || (escapeRef.current?.() ?? false)}
+        >
+          {picker(true)}
+        </SheetLayer>
+      ) : (
         <AnchoredLayer
           host={menu.host}
           anchor={button}
@@ -389,54 +533,11 @@ export function ModelChip({
           onEscape={() => escapeRef.current?.() ?? false}
           onKeyDown={(event) => { if (leavesOnTab(event, panel.current)) closeMenu(true); }}
         >
-          <ModelPicker
-            groups={groups}
-            recent={recent}
-            total={models.length}
-            reference={reference}
-            lost={lost}
-            set={set}
-            unsetLabel={unsetLabel}
-            listboxId={listboxId}
-            panelRef={panel}
-            escapeRef={escapeRef}
-            onChoose={choose}
-            {...(onRemember !== undefined ? { onRemember: () => { onRemember(); closeMenu(true); } } : {})}
-            {...(onClear !== undefined ? { onClear: () => { onClear(); closeMenu(true); } } : {})}
-            onManage={() => { closeMenu(false); manage?.(); }}
-          />
+          {picker(false)}
         </AnchoredLayer>
-      )}
-      {menu !== null && effortOpen && variants !== undefined && onVariant !== undefined && (
-        <AnchoredLayer
-          host={menu.host}
-          anchor={effortButton}
-          root={root}
-          panelRef={panel}
-          className="fy-mchip__menu fy-mchip__menu--effort"
-          id={`${menuId}-effort`}
-          role="menu"
-          label="Effort"
-          onClose={closeMenu}
-          onKeyDown={onEffortKey}
-        >
-          <div className="fy-mpick__grp fy-mpick__grp--first" role="presentation">Effort</div>
-          {variants.names.map((name, index) => (
-            <button
-              key={name}
-              type="button"
-              role="menuitemradio"
-              aria-checked={name === inForce}
-              data-variant={name}
-              className={cx("fy-mpick__row", name === inForce && "fy-mpick__row--on")}
-              onClick={() => { onVariant(name); closeMenu(true); }}
-            >
-              <span className="fy-mpick__name">{efforts[index]}</span>
-              {name === inForce && <PickerTick />}
-            </button>
-          ))}
-        </AnchoredLayer>
-      )}
+      ))}
+      {menu !== null && effortOpen && effortMenu(menu.host, "composer")}
+      {menu !== null && open && phone && sheetEffort && effortMenu(menu.host, "sheet")}
     </span>
   );
 }
