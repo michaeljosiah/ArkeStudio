@@ -2423,7 +2423,8 @@ export function blockPanelHead(row: BlockRow, rows: readonly BlockRow[], record:
  * The block's panel (design turn 194, rules 11 and 12; 194g): its head, then Picture, Voice and
  * Timing as tabs, each with a short fact (`Picture 10:22`, `Voice v3`), the chosen tab's body
  * scrolling under them and its foot held at the panel's bottom. Where the panel is the raised sheet
- * the sheet's own head names the block, so the panel's title steps back.
+ * (194h) this head is the sheet's: the sheet draws none of its own, and the title takes the focus
+ * a sheet gives its heading on opening.
  */
 export function BlockPanel({ head, tab, onTab, facts, onClose, children }: {
   head: { title: string; full?: string; sub: string; flag: string | null };
@@ -2438,7 +2439,7 @@ export function BlockPanel({ head, tab, onTab, facts, onClose, children }: {
     <section className="fy-abp" data-testid="audiobook-block-panel">
       <header className="fy-abp__head" data-testid="audiobook-block">
         <div className="fy-abp__title">
-          <h2 data-testid="audiobook-block-title" {...(head.full !== undefined ? { title: head.full } : {})}>{head.title}</h2>
+          <h2 data-testid="audiobook-block-title" tabIndex={-1} {...(head.full !== undefined ? { title: head.full } : {})}>{head.title}</h2>
           <button type="button" className="fy-abp__x" aria-label="Close" onClick={onClose}>
             <X size={14} />
           </button>

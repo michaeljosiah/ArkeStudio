@@ -37,6 +37,19 @@
 .fy-chapter-block-sheet { inset: 52px 42px 0 auto; width: 340px; max-width: 100%; border-radius: 0; }
 .fy-chapter-block-sheet .fy-page-sheet__grab { display: none; }
 .fy-chapter-block-sheet .fy-ch__side { width: 100%; overflow: visible; }
+/* The block's panel raised as a sheet (194h). The sheet draws no head of its own (PageSheet's
+   `headless`): the panel's head sits under the grab, and the panel fills the sheet edge to edge —
+   its tabs ruled across, its body the one that scrolls, its foot held at the bottom — as the
+   docked panel fills its column. The master's sizes stand over the sheet's 44-high presses, as the
+   foot's already do: the close keeps a 44 reach through negative margins, and a tab's reach runs
+   up to the meta line through padding the tab row gives up. Two classes outrank the sheet's 44s
+   (a class and an element), and the :has() its narrower widths' body padding, wherever they sit. */
+.fy-chapter-block-sheet .fy-page-sheet__body:has(.fy-abp) { padding: 0; gap: 0; overflow: hidden; }
+.fy-chapter-block-sheet .fy-ch__block-side:has(.fy-abp) { flex: 1; min-height: 0; gap: 0; padding: 0; overflow: hidden; }
+.fy-chapter-block-sheet .fy-abp__x { display: grid; place-items: center; align-self: center; width: 44px; height: 44px; min-height: 0; margin: -15px -15px -15px 0; }
+.fy-chapter-block-sheet .fy-abp__tabs { padding-top: 0; }
+.fy-chapter-block-sheet .fy-abp__tab { min-height: 0; padding-top: 12px; }
+.fy-abp__title h2:focus { outline: none; }
 @media (max-width: 1099px) {
   .fy-ch__panels { display: contents; }
   [data-screen="chapter"] { overflow: visible; min-width: 0; height: auto; min-height: 100%; }
@@ -67,7 +80,6 @@
   .fy-chapter-notes-sheet .fy-page-sheet__grab, .fy-chapter-block-sheet .fy-page-sheet__grab { display: none; }
   .fy-chapter-notes-sheet .fy-ch__side, .fy-chapter-block-sheet .fy-ch__side { width: 100%; gap: 18px; overflow: visible; }
   .fy-chapter-block-sheet .fy-page-sheet__head h2 { font: 600 18px var(--font-sans); }
-  .fy-chapter-block-sheet .fy-ab__blocktitle { display: none; }
   .fy-chapter-notes-sheet :is(button,a,select,input), .fy-chapter-block-sheet :is(button,a,select,input) { min-height: 44px; }
   .fy-chapter-notes-sheet .fy-bible__versions li { display: flex; justify-content: space-between; gap: 12px; }
   .fy-chapter-notes-sheet .fy-bible__versions button { width: 50%; }
