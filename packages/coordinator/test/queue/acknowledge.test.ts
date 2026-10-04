@@ -43,6 +43,20 @@ describe("queue command acknowledgement", () => {
     ]);
   });
 
+  it("journals nothing more once the request has ended, and counts what was put to the queue", async () => {
+    let n = 0;
+    let ended = false;
+    const result = await enqueueInputs([input("a"), input("b"), input("c")], async () => {
+      n += 1;
+      ended = n === 2;
+      return job(`jb_01J8E0000000000000000000J${n}`);
+    }, () => ended);
+    assert.equal(n, 2, "the third input was never journalled");
+    assert.equal(result.requestedCount, 2);
+    assert.deepEqual(result.acceptedJobIds, ["jb_01J8E0000000000000000000J1", "jb_01J8E0000000000000000000J2"]);
+    assert.deepEqual(result.failures, []);
+  });
+
   it("represents full rejection and zero-work batches honestly", async () => {
     const rejected = await enqueueInputs([input("a")], async () => {
       throw new Error("no");

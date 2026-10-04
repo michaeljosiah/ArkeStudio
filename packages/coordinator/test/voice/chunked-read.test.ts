@@ -395,6 +395,41 @@ describe("a read over the reader's cap (issue 1208)", () => {
     }
   });
 
+  it("a page that fails while its batch is still being journalled queues nothing more, and cancels what it had (codex on PR 1560)", async () => {
+    const h = await harness();
+    try {
+      const { pieces } = await h.narrate();
+      h.reader.refuse = pieces[0]!;
+      h.reader.holdUntilCancelled = true;
+      // The second job's journal write waits for the page to have failed: the first piece is
+      // queued, sent and refused while the rest of the batch is still to come. Every job
+      // journalled after that would be pumped at once, before the batch could name it to cancel.
+      const queue = (h.coordinator as unknown as { jobQueue: { enqueue(input: unknown): Promise<unknown> } }).jobQueue;
+      const enqueue = queue.enqueue.bind(queue);
+      let journalled = 0;
+      queue.enqueue = async (input) => {
+        journalled += 1;
+        if (journalled === 2) await until(() => h.audio(PAGE).some((event) => event.status === "failed"), "the first piece to fail the page", PATIENCE);
+        return enqueue(input);
+      };
+      const page = (confirmationToken?: string) =>
+        h.send({ kind: "read-sheet-page", requestId: PAGE, worldId: WORLD_ID, sheetId: "maren-kest", sections: ["Essence", "Appearance"], ...(confirmationToken !== undefined ? { confirmationToken } : {}) });
+      await page();
+      const asked = h.audio(PAGE).find((event) => event.status === "confirmation-required")!;
+      await page(asked.confirmationToken);
+      await until(() => h.events.some((event) => event.type === "queue.enqueue-result" && event.requestId === PAGE), "the batch to return", PATIENCE);
+      await until(() => h.jobs(PAGE).every((status) => status === "failed" || status === "cancelled"), "every job the page queued to settle", PATIENCE);
+      await settle();
+      assert.equal(journalled, 2, "the batch stopped once the page had failed");
+      assert.deepEqual(h.jobs(PAGE).sort(), ["cancelled", "failed"], "the piece journalled behind the failure was cancelled");
+      assert.ok(h.reader.sent.every((text) => pieces.slice(0, 2).includes(text)), `nothing behind it reached the reader: ${JSON.stringify(h.reader.sent.map((text) => pieces.indexOf(text)))}`);
+      assert.equal(h.audio(PAGE).filter((event) => event.status === "failed").length, 1, "the page failed once, the batch's shortfall no second time");
+      assert.equal(h.audio(PAGE).filter((event) => event.status === "ready").length, 0);
+    } finally {
+      await h.coordinator.stop();
+    }
+  });
+
   it("a page block whose join cannot be written fails the page the same way: nothing its other blocks say afterwards is news (codex on PR 1210)", async () => {
     const h = await harness();
     try {
