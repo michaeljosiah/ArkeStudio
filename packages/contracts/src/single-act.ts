@@ -21,7 +21,7 @@ export const SingleActUndoSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("restore-version"), path: z.string().min(1), version: z.number().int().min(1) }).strict(),
   z.object({ kind: z.literal("restore-derived-art-direction"), path: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("retire"), path: z.string().min(1) }).strict(),
-  z.object({ kind: z.literal("rename-sheet"), path: z.string().min(1), name: z.string().min(1).max(200) }).strict(),
+  z.object({ kind: z.literal("rename-sheet"), path: z.string().min(1), name: z.string().min(1).max(200), shortName: z.string().max(200).nullable().optional() }).strict(),
   z.object({ kind: z.literal("set-sheet-status"), path: z.string().min(1), status: z.enum(["sketch", "locked"]) }).strict(),
 ]);
 export type SingleActUndo = z.infer<typeof SingleActUndoSchema>;

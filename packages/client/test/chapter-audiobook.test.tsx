@@ -757,7 +757,8 @@ describe("the Audiobook view (turn 146)", () => {
     const rows = all(m, ".fy-ab__block");
     assert.equal(rows.length, 5);
     const mark = rows[2]!.querySelector(".fy-ab__mark")!;
-    assert.equal(mark.textContent, FIXTURE_STATE.world!.sheets.find((s) => s.id === "maren-kest")!.name, "the speaker's name stays");
+    assert.equal(mark.textContent, "Maren", "the speaker's name stays, as the short name the sheet defaults to (design turn 194, rule 12b)");
+    assert.equal(rows[2]!.querySelector(".fy-ab__speaker")?.getAttribute("title"), "Maren Kest · narrator", "the full name and the missing voice in the tooltip");
     assert.ok(mark.className.includes("fy-ab__mark--warn"), "and it is said to have no voice");
     assert.deepEqual(rows.map((row) => row.getAttribute("data-state")), ["made", "made", "made", "made", "made"], "the coordinator made the line in the narrator's stead, and this side agrees");
   });
@@ -1126,7 +1127,43 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(rows.length, 5, "the line splits its paragraph: the quote, then the rest");
     const marks = rows.map((row) => row.querySelector(".fy-ab__mark")!.textContent);
     assert.equal(marks[0], "title");
-    assert.ok(marks[2] === "Maren Kest" || marks[2] === FIXTURE_STATE.world!.sheets.find((s) => s.id === "maren-kest")?.name, `the speaker, not the narrator: ${marks[2]}`);
+    assert.equal(marks[2], "Maren", "the speaker, not the narrator, by the first word of the name");
+  });
+
+  it("a character goes by a short name in the margin, the filter and the panel title, the full name in the tooltip; two who share one go by their full names (design turn 194, rule 12b)", async () => {
+    const named = (sheets: Array<{ id: string; name: string; shortName?: string }>) => {
+      const base = inkbound("cast");
+      const kest = base.world!.sheets.find((sheet) => sheet.id === "maren-kest")!;
+      return { ...base, world: { ...base.world!, sheets: [...base.world!.sheets.filter((sheet) => sheet.id !== "maren-kest"), ...sheets.map((sheet) => ({ ...kest, ...sheet }))] } };
+    };
+    const shown = async (state: ClientState) => {
+      const m = await mount(state);
+      await answerOpen(m, { voices: CAST });
+      const row = all(m, ".fy-ab__block").find((candidate) => candidate.getAttribute("data-speaker") === "maren-kest")!;
+      return { m, row, label: row.querySelector(".fy-ab__mark")!.textContent, tooltip: row.querySelector(".fy-ab__speaker")!.getAttribute("title") };
+    };
+    // The quoted nickname inside the name.
+    const nick = await shown(named([{ id: "maren-kest", name: 'Maren "Mare" Kest' }]));
+    assert.equal(nick.label, "Mare");
+    assert.equal(nick.tooltip, 'Maren "Mare" Kest', "the full name is the tooltip");
+    await act(async () => nick.row.click());
+    assert.equal(q(nick.m, '[data-testid="audiobook-block-title"]')?.textContent, "Block 3 · Mare", "the panel's title");
+    assert.equal(q(nick.m, '[data-testid="audiobook-block-title"]')?.getAttribute("title"), 'Block 3 · Maren "Mare" Kest', "and its tooltip");
+    await act(async () => q(nick.m, '[data-testid="audiobook-filter"]')!.click());
+    assert.ok(all(nick.m, '.fy-ab__filtermenu [role="menuitemradio"]').some((option) => option.textContent === "Mare1" && option.getAttribute("title") === 'Maren "Mare" Kest'), "the filter names them so, the full name in its tooltip");
+    // One written on the sheet wins.
+    const written = await shown(named([{ id: "maren-kest", name: 'Maren "Mare" Kest', shortName: "Rena" }]));
+    assert.equal(written.label, "Rena");
+    // Two who would share one go by their full names.
+    const twins = await shown(named([{ id: "maren-kest", name: "Maren Kest" }, { id: "maren-oyelaran", name: "Maren Oyelaran" }]));
+    assert.equal(twins.label, "Maren Kest");
+    assert.equal(twins.tooltip, "Maren Kest");
+    // A pin still names the full name: display only.
+    await act(async () => (twins.row.querySelector("button.fy-ab__speaker") as HTMLElement).click());
+    await act(async () => (all(twins.m, ".fy-ab__menu-opt").find((option) => option.textContent?.includes("Maren Kest")) ?? all(twins.m, ".fy-ab__menu-opt")[0]!).click());
+    const asked = twins.m.sent.findLast((message) => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }> | undefined;
+    assert.ok(asked !== undefined, "the choice writes a pin");
+    assert.equal(asked.speaker, "Maren Kest", "a pin writes the full name: the short one is display only");
   });
 
   it("under one reader a paragraph is one block, its turns rows: the margin names the first, a rule names the next, and the words stay the paragraph's (design turn 190)", async () => {
@@ -1136,7 +1173,7 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(rows.length, 4, "the line and its tag are one block, not two");
     const merged = rows.find((row) => row.getAttribute("data-block") === "p1.0")!;
     assert.ok(merged.className.includes("fy-ab__block--merged"), "bracketed as a block of several turns");
-    assert.equal(merged.querySelector(".fy-ab__mark")!.textContent, FIXTURE_STATE.world!.sheets.find((s) => s.id === "maren-kest")!.name, "the first turn's speaker is the margin's");
+    assert.equal(merged.querySelector(".fy-ab__mark")!.textContent, "Maren", "the first turn's speaker is the margin's");
     const breaks = [...merged.querySelectorAll(".fy-ab__turn")] as HTMLElement[];
     assert.deepEqual(breaks.map((turn) => turn.getAttribute("data-who")), ["narrator"], "each later turn begins at a rule that names its speaker");
     assert.equal(merged.querySelector(".fy-ab__text")!.textContent, "“You hear it too,” she said.", "a break holds no text, so offsets still count the paragraph's words");
@@ -1348,7 +1385,7 @@ describe("the director reads the book (design turn 184)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 5, dropped: 0, hash: HASH, chapterVersion: 4, proposalId: "card-2", cast: { lines: 1, speakers: 1 }, castRecord: CAST, proposed: { "p1.0": { delivery: "cold" as const, speed: 1, cues: [] } } }));
     // One reader, one block (design turn 190): the held cast's line sits inside its paragraph's block,
     // which names its speaker, and the proposal lands on that block.
-    assert.match(q(m, '[data-block="p1.0"]')?.textContent ?? "", /Maren Kest/, "the held cast's line has its speaker");
+    assert.match(q(m, '[data-block="p1.0"]')?.textContent ?? "", /Maren/, "the held cast's line has its speaker");
     assert.equal(q(m, '[data-block="p1.0"]')?.getAttribute("data-proposed"), "true", "the proposal lands on the block its cast made");
     await openArke(m);
     await act(async () => all(m, '[data-testid="direction-card"] button').find((b) => b.textContent === "Discard")!.click());

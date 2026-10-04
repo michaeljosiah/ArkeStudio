@@ -110,6 +110,7 @@ export function editSheetContent(input: {
       ...(role !== undefined ? { role } : {}),
       ...(billing !== undefined ? { billing } : {}),
       ...(sheet.neverDepicted !== undefined ? { neverDepicted: sheet.neverDepicted } : {}),
+      ...(sheet.shortName !== undefined ? { shortName: sheet.shortName } : {}),
       ...(region !== undefined ? { region } : {}),
       // The live version, not 1: the committer stamps the real one either way, and restating what
       // the sheet actually says keeps the staged file readable as the thing it is a version of.
@@ -271,6 +272,14 @@ export async function duplicateSheet(
     created: store.now().slice(0, 10),
     updated: store.now().slice(0, 10),
   });
+  // A copy goes by its own name: carrying the source's short name would give two characters the
+  // same one, and rows would fall back to their full names (design turn 194, rule 12b).
+  if ("shortName" in copy.data) {
+    const next = { ...copy.data };
+    delete next["shortName"];
+    copy.data = next;
+    copy.setData({});
+  }
 
   // A duplicate inherits the source's frontmatter, ownership included, so duplicating a guest
   // makes another guest of the same production. The proposal has to say so or the copy shows on
@@ -310,16 +319,19 @@ export async function stageSheetStatus(
 export async function stageSheetRename(
   store: WorldStore,
   gate: ProposalManager,
-  input: { path: string; name: string },
+  input: { path: string; name: string; shortName?: string | null },
 ): Promise<Proposal> {
   const live = await readLive(store, input.path);
   if (live === null) throw new Error(`${input.path} does not exist`);
   const doc = MarkdownFile.parse(live);
   const oldName = String(doc.data["name"]);
-  const content = sheetRenameContent(live, input.name);
+  const content = sheetRenameContent(live, input.name, input.shortName);
   return gate.stage({
     kind: "sheet-edit",
-    summary: `Rename ${oldName} to ${input.name} — the id and every citation stay`,
+    summary:
+      input.name.trim() === oldName && input.shortName !== undefined
+        ? `Call ${oldName} ${input.shortName?.trim() ? input.shortName.trim() : "by the default short name"} in rows and filters — the name, the id and every citation stay`
+        : `Rename ${oldName} to ${input.name} — the id and every citation stay`,
     source: "form",
     targets: [{ path: input.path, content }],
   });
@@ -367,9 +379,25 @@ export function sheetStatusContent(content: string, status: "sketch" | "locked")
   return doc.serialize();
 }
 
-export function sheetRenameContent(content: string, name: string): string {
+/**
+ * The sheet renamed, and — for a character — its short name set (`shortName` text), put back to the
+ * default (`null` or empty) or left alone (absent). Frontmatter only.
+ */
+export function sheetRenameContent(content: string, name: string, shortName?: string | null): string {
   const doc = MarkdownFile.parse(content);
   doc.setData({ name: name.trim() });
+  if (shortName === undefined) return doc.serialize();
+  const written = shortName === null ? "" : shortName.trim();
+  if (written === "") {
+    // Deleting the key, not setting it empty: absent is what "the default" means.
+    const next = { ...doc.data };
+    delete next["shortName"];
+    doc.data = next;
+    doc.setData({});
+  } else {
+    if (doc.data["type"] !== "character") throw new Error("Only a character has a short name.");
+    doc.setData({ shortName: written });
+  }
   return doc.serialize();
 }
 

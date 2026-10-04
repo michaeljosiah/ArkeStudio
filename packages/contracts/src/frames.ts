@@ -54,7 +54,7 @@ import { ReferenceAngleSchema } from "./reference.js";
 import { HarnessEngineSchema } from "./harness.js";
 import { BackgroundNotificationPreferenceSchema, NarratorSettingsSchema, ThemePreferenceSchema } from "./settings.js";
 import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
-import { CHARACTER_ROLE_MAX, FrameRateSchema, ProductionFormatSchema, ProductionMediumSchema, ChapterImpliesWriteSchema } from "./world.js";
+import { CHARACTER_ROLE_MAX, SHORT_NAME_MAX, FrameRateSchema, ProductionFormatSchema, ProductionMediumSchema, ChapterImpliesWriteSchema } from "./world.js";
 import { DeliverySchema } from "./voice.js";
 import { WorldChatContextSchema, WorldChatInitiativeSchema } from "./world-chat.js";
 import { ProductionSetupCommandSchema } from "./production-setup.js";
@@ -1196,6 +1196,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
       path: z.string().min(1),
       name: z.string().min(1).max(200),
+      /** A character's short name (design turn 194, rule 12b): absent leaves it, empty or null puts the default back. */
+      shortName: z.string().trim().max(SHORT_NAME_MAX).nullable().optional(),
     })
     .strict(),
   /** The human's own action: assigning (or clearing) a voice commits straight to the sheet —

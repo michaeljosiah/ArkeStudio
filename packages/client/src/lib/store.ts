@@ -3543,9 +3543,10 @@ export function setSheetStatus(worldId: string, path: string, status: "sketch" |
   return send({ kind: "set-sheet-status", worldId, requestId, path, status }) ? requestId : null;
 }
 
-export function renameSheet(worldId: string, path: string, name: string): string | null {
+/** Rename a sheet, and for a character set its short name too (null or empty puts the default back; absent leaves it). */
+export function renameSheet(worldId: string, path: string, name: string, shortName?: string | null): string | null {
   const requestId = ulid();
-  return send({ kind: "rename-sheet", worldId, requestId, path, name }) ? requestId : null;
+  return send({ kind: "rename-sheet", worldId, requestId, path, name, ...(shortName !== undefined ? { shortName } : {}) }) ? requestId : null;
 }
 
 export function assignVoice(

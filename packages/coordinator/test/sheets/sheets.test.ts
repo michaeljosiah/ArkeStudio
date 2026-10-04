@@ -17,6 +17,7 @@ import {
 } from "../../src/sheets/authoring.js";
 import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
 import { WorldStore } from "../../src/world/store.js";
+import { SHEET_SHORT_NAME_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { makeTempWorld } from "../world/helpers.js";
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
@@ -80,6 +81,42 @@ describe("identity and rename (R-2, R-3, D3, D4)", () => {
     assert.equal(citedAfter.n, citedBefore.n, "every citation still resolves");
     const sheet = store.getBundle().sheets.find((s) => s.id === "maren-kest");
     assert.equal(sheet?.name, "Maren Kestrel", "the display name comes from frontmatter");
+    await store.close();
+  });
+});
+
+describe("a character's short name (design turn 194, rule 12b)", () => {
+  it("is written on the sheet, raises the world to 59, survives a rename, and goes back to the default when cleared", async () => {
+    const { dir, store, gate } = await open();
+    const before = store.getBundle().meta.schemaVersion;
+    assert.ok(before < SHEET_SHORT_NAME_SCHEMA_VERSION, "no short name, no boundary");
+    const write = async (shortName: string | null | undefined, name = "Maren Kest") => {
+      const staged = await stageSheetRename(store, gate, { path: "characters/maren-kest.md", name, ...(shortName !== undefined ? { shortName } : {}) });
+      assert.equal((await gate.accept(staged.id)).status, "accepted");
+      return store.getBundle().sheets.find((s) => s.id === "maren-kest")!;
+    };
+    const set = await write("  Mare ");
+    assert.equal(set.shortName, "Mare", "trimmed");
+    assert.equal(set.name, "Maren Kest", "the full name is untouched");
+    assert.equal(set.id, "maren-kest", "the slug never follows");
+    assert.equal(store.getBundle().meta.schemaVersion, SHEET_SHORT_NAME_SCHEMA_VERSION, "fenced with the first sheet that carries one");
+    assert.equal((await write(undefined, "Maren Kestrel")).shortName, "Mare", "a rename that says nothing of it leaves it");
+    const cleared = await write(null, "Maren Kestrel");
+    assert.equal(cleared.shortName, undefined, "absent is the default");
+    assert.ok(!("shortName" in MarkdownFile.parse(await readFile(join(dir, "characters", "maren-kest.md"), "utf8")).data), "the key is gone, not empty");
+    await store.close();
+  });
+
+  it("is a character's alone, and a duplicate does not inherit it", async () => {
+    const { store, gate } = await open();
+    await assert.rejects(stageSheetRename(store, gate, { path: "locations/the-vigil.md", name: "The Vigil", shortName: "Vigil" }), /Only a character has a short name/);
+    const named = await stageSheetRename(store, gate, { path: "characters/maren-kest.md", name: "Maren Kest", shortName: "Mare" });
+    await gate.accept(named.id);
+    const copy = await duplicateSheet(store, gate, { path: "characters/maren-kest.md", newName: "Maren Kest (copy)" });
+    assert.equal((await gate.accept(copy.id)).status, "accepted");
+    const made = store.getBundle().sheets.find((s) => s.id === "maren-kest-copy");
+    assert.ok(made !== undefined, "the copy exists");
+    assert.equal(made.shortName, undefined, "the copy goes by its own name");
     await store.close();
   });
 });
