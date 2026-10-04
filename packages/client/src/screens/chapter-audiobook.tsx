@@ -147,6 +147,8 @@ export interface ChapterAudiobookInput {
   listenLeads?: boolean;
   /** Illustrate this chapter (design turn 191b), beside Direct: its press, whether it is working, and whether a proposal is held (`Illustrate again`). */
   illustrate?: { press: () => void; busy: boolean; again: boolean };
+  /** The chapter's Looks (design turn 193a, rule 5): a head press beside Illustrate that opens the Looks sheet. */
+  looks?: { open: () => void };
 }
 
 /** What a press asks for once the save lands: the chapter, these blocks alone, a direction, or a card's acceptance. */
@@ -968,6 +970,12 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         {input.illustrate !== undefined && rows.length > 0 && (
           <Button variant="secondary" disabled={locked || connection !== "open" || input.illustrate.busy} onClick={input.illustrate.press} data-testid="illustrate-chapter">
             Illustrate<span className="fy-ab__presstail">{input.illustrate.again ? " again" : " this chapter"}</span>
+          </Button>
+        )}
+        {/* The chapter's Looks (design turn 193a): who wears what in this chapter's pictures, beside Illustrate. */}
+        {input.looks !== undefined && rows.length > 0 && (
+          <Button variant="secondary" disabled={connection !== "open"} onClick={input.looks.open} data-testid="audiobook-looks-open">
+            Looks
           </Button>
         )}
         {counts.toMake.length > 0 && (

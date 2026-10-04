@@ -444,7 +444,7 @@ export async function acceptCharacterLook(
     review?: ReviewDecision;
     /**
      * A look made for a chapter's pictures (design turn 193, R-112): its framing, the main photo it
-     * was made from (for `older face`, R-113) and its close view (R-109). Each is a field the
+     * was made from (for `older face`, R-113) and its close view (R-118). Each is a field the
      * builds before turn 193 read as an unreadable kit, so the world is raised before the first.
      */
     framing?: "full-body" | "portrait";
@@ -485,7 +485,7 @@ export async function acceptCharacterLook(
 }
 
 /**
- * A close view filed on a look already accepted (design turn 193, R-109): Make close view on a look
+ * A close view filed on a look already accepted (design turn 193, R-118): Make close view on a look
  * made without one. The look keeps its own image and id; only the second image is added, and it is
  * never replaced silently — a look that has one is refused, so a paid picture is not lost.
  */

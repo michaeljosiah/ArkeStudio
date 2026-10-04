@@ -142,7 +142,9 @@ export type AudiobookAsk =
   | { state: "suggested"; suggestion: import("@arke-studio/contracts").PictureSuggestion }
   /** A suggested picture on its block (R-99), or held with the reason it was not made. */
   | { state: "made"; sessionId?: string }
-  | { state: "failed"; reason: string; sessionId?: string };
+  | { state: "failed"; reason: string; sessionId?: string }
+  /** Which chapters (by number) of the book chose each kit look (design turn 193, R-114). */
+  | { state: "looks"; usage: Record<string, number[]> };
 
 /**
  * `Illustrate this chapter` (design turn 191b, 191d, SPEC-047 R-101, R-102), keyed like a run: the proposal the
@@ -2130,6 +2132,8 @@ function handleFrame(json: string): void {
           },
         };
       }
+    } else if (event.type === "audiobook.looks") {
+      if (audiobookAsks[event.requestId] !== undefined) audiobookAsks = { ...audiobookAsks, [event.requestId]: { state: "looks", usage: event.usage } };
     } else if (event.type === "audiobook.picture-suggestion") {
       if (audiobookAsks[event.requestId] !== undefined) {
         audiobookAsks = { ...audiobookAsks, [event.requestId]: event.suggestion !== undefined ? { state: "suggested", suggestion: event.suggestion } : { state: "refused", refused: event.refused ?? "no picture suggested" } };
@@ -4139,7 +4143,7 @@ export function makeChapterLook(
     : null;
 }
 
-/** A candidate accepted as the character's look, with its close view, and chosen for the chapter that asked (R-112, R-109). */
+/** A candidate accepted as the character's look, with its close view, and chosen for the chapter that asked (R-112, R-118). */
 export function acceptChapterLook(
   worldId: string,
   sheetId: string,
@@ -4147,6 +4151,14 @@ export function acceptChapterLook(
   options: { closeTakeId?: string; closeFor?: string; choose?: { productionId: string; chapterFile: string; key: string; name?: string; sheet?: string } } = {},
 ): void {
   send({ kind: "accept-character-look", worldId, sheetId, takeId, ...options });
+}
+
+/** Which chapters of the book chose each kit look (R-114), answered under the id returned and held in `audiobookAsks`. */
+export function readAudiobookLooks(worldId: string, productionId: string): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "read-audiobook-looks", worldId, productionId, requestId })) return null;
+  emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
+  return requestId;
 }
 
 /** A kit look chosen for a character in this chapter, or the choice taken away with null (R-112). Answered as `audiobook.record`. */

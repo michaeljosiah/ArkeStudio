@@ -15,7 +15,7 @@ import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 /**
- * Making a look (design turn 193, SPEC-047 R-109, R-112): candidates through the kit's own look
+ * Making a look (design turn 193, SPEC-047 R-118, R-112): candidates through the kit's own look
  * machinery, a full-body look accepted as a kit look of kind costume with its main photo and its
  * close view, and chosen for the chapter by pointer — the look left unattached (SPEC-017 R-18).
  */
@@ -143,7 +143,7 @@ describe("the candidates of a look for a chapter", () => {
   });
 });
 
-describe("a look filed in the kit (R-112, R-109)", () => {
+describe("a look filed in the kit (R-112, R-118)", () => {
   it("keeps its framing, the main photo it was made from and its close view, and raises the world past the builds that read them as an unreadable kit", () =>
     withHarness(async ({ store, schemaVersion }) => {
       const before = schemaVersion();
@@ -244,6 +244,16 @@ describe("choosing a look for a character in a chapter (R-112)", () => {
       await choose(send, null);
       done = answer(events);
       assert.equal(done.record!.look!.characters["maren-kest"]!.lookId, undefined);
+    }));
+
+  it("gives the chapter a Cast page look's clothing, never its directions to the image model (Na Love or Juju)", () =>
+    withHarness(async ({ store, send, events }) => {
+      const prompt = "OUTFIT FOR THIS LOOK, overriding any clothing named earlier in this prompt. Full-length standing figure, head to shoes fully in frame, plain dark neutral studio backdrop, even soft light. Maren wears an oilskin coat, dark and stiff with salt, and sea boots. No agbada, no lace. Upright, looking at the camera.";
+      await acceptCharacterLook(store(), "maren-kest", { id: "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2G6", file: "takes/tk_x/look.png", kind: "costume", prompt, takeId: "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2G6", artDirectionVersion: 3 });
+      await choose(send, "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2G6");
+      const done = answer(events);
+      assert.equal(done.refused, undefined);
+      assert.equal(done.record!.look!.characters["maren-kest"]!.text, "Maren wears an oilskin coat, dark and stiff with salt, and sea boots.");
     }));
 
   it("says why in one clause for a look that is gone and for a character with no sheet, and writes nothing", () =>

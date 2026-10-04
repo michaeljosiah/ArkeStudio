@@ -14,7 +14,7 @@ import {
   pictureLookFor,
   type AudiobookLook,
 } from "../src/audiobook-look.js";
-import { CharacterLookSchema, ReferenceKitSchema, chapterLooksOf, lookOlderFace, type ReferenceKit } from "../src/reference.js";
+import { CharacterLookSchema, ReferenceKitSchema, chapterLooksOf, lookClothing, lookName, lookOlderFace, type ReferenceKit } from "../src/reference.js";
 
 /**
  * Looks per character (design turn 193, SPEC-047 R-112..R-117): a kit look chosen by pointer, the
@@ -105,6 +105,16 @@ describe("a derive over a look that has a choice", () => {
     const carried = { odile: { name: "Odile", sheet: "odile", lookId: "tk_grey", text: "Grey wool.", from: "01-the-lamp" } };
     const { look } = mergeLook(null, { characters: [] }, stamp, carried);
     assert.deepEqual(look.characters["odile"], { name: "Odile", sheet: "odile", text: "Grey wool.", lookId: "tk_grey", from: "01-the-lamp" });
+  });
+
+  it("is carried only to a character the look held nothing for, so a choice of no look survives a derive again", () => {
+    const carried = { "maren-kest": { name: "Maren", sheet: "maren-kest", lookId: "tk_storm", text: "Storm coat.", from: "03-the-stair" } };
+    const none = chooseLook(CHOSEN, { key: "maren-kest" }, null, stamp)!;
+    assert.equal(none.characters["maren-kest"]!.lookId, undefined);
+    const again = mergeLook(none, { characters: [{ key: "maren-kest", name: "Maren", text: "Oilskin coat." }] }, stamp, carried).look;
+    assert.equal(again.characters["maren-kest"]!.lookId, undefined, "the author chose the main photo; Derive again leaves it");
+    const first = mergeLook(LOOK, { characters: [{ key: "ghost", name: "Ghost", text: "A sheet." }] }, stamp, { ghost: { name: "Ghost", lookId: "tk_g", text: "A sheet.", from: "01-the-lamp" } }).look;
+    assert.equal(first.characters["ghost"]!.lookId, "tk_g", "a character the look never held does start with it");
   });
 
   it("is not carried over a choice the chapter already holds", () => {
@@ -222,5 +232,31 @@ describe("a kit look made for a chapter", () => {
   it("is offered to a chapter when it is a costume, newest first, whether or not it was made for chapters", () => {
     assert.deepEqual(chapterLooksOf(kit("mains/new.png")).map((look) => look.id), ["tk_a", "tk_old"]);
     assert.deepEqual(chapterLooksOf(null), []);
+  });
+});
+
+describe("a look's clothing line", () => {
+  // The three looks the Cast page made on Na Love or Juju before turn 193: exploration prompts, not clothing lines.
+  const ADE = "OUTFIT FOR THIS LOOK, overriding any clothing named earlier in this prompt. Full-length standing figure, head to shoes fully in frame, plain dark neutral studio backdrop, even soft light. Ade wears an unstructured soft cream linen shirt open at the collar with the sleeves pushed just above the wrist, a steel watch on his wrist, slim dark trousers and black leather lace-up shoes, a phone in one hand. No agbada, no kaftan, no embroidery, no lace. Upright, relaxed stance, hands natural, looking at the camera.";
+  const TUNDE = "OUTFIT FOR THIS LOOK, overriding any clothing named earlier in this prompt. Full-length standing figure, head to shoes fully in frame, plain dark neutral studio backdrop, even soft light. Tunde, shorter than Ade, thick through the chest and shoulders with a belly he is at peace with, wears a washed navy polo shirt with the collar open, faded blue jeans, clean white trainers and a good steel watch. No agbada, no kaftan, no embroidery, no lace. Easy, weighty stance, one hand in a pocket, looking at the camera.";
+  const IFE = "OUTFIT AND HAIR FOR THIS LOOK, overriding any clothing or hair named earlier in this prompt or shown in the references. The second reference is Ife's character sheet: take her build and proportions from the standing figure in it, exactly, and her face from the first reference; ignore that figure's clothing, hair and backdrop. Full-length standing figure facing the camera, head to shoes fully in frame, plain dark neutral studio backdrop, even soft light. She wears long knotless braids gathered off her neck in a low twist (not straight hair), a low-backed cream-gold silk slip dress, bare shoulders, heavy old-gold hoop earrings and stacked old-gold bangles, gold strappy heeled sandals, a small structured gold clutch in one hand and a phone in the other. Poised, one foot slightly forward, looking at the camera.";
+
+  it("keeps what a Cast page look says is worn and drops what it told the image model", () => {
+    assert.equal(lookClothing({ prompt: ADE }), "Ade wears an unstructured soft cream linen shirt open at the collar with the sleeves pushed just above the wrist, a steel watch on his wrist, slim dark trousers and black leather lace-up shoes, a phone in one hand.");
+    assert.match(lookClothing({ prompt: TUNDE }), /^Tunde, shorter than Ade, .* wears a washed navy polo shirt .* steel watch\.$/);
+    const ife = lookClothing({ prompt: IFE });
+    assert.match(ife, /^She wears long knotless braids .* phone in the other\.$/);
+    for (const line of [lookClothing({ prompt: ADE }), lookClothing({ prompt: TUNDE }), ife]) assert.doesNotMatch(line, /OUTFIT|reference|backdrop|camera|agbada/);
+  });
+
+  it("is the prompt itself for a look made for a chapter, which was made from that line", () => {
+    assert.equal(lookClothing({ prompt: "Storm coat, hood up; two braids.", framing: "full-body" }), "Storm coat, hood up; two braids.");
+    assert.equal(lookClothing({ prompt: "Grey wool coat. No jewellery." }), "Grey wool coat. No jewellery.".replace(" No jewellery.", ""), "a plain line keeps its sentences bar a bare negative");
+  });
+
+  it("names a look by the first thing worn", () => {
+    assert.equal(lookName({ prompt: ADE }), "Unstructured soft cream…");
+    assert.equal(lookName({ prompt: TUNDE }), "Washed navy polo shirt with…");
+    assert.equal(lookName({ prompt: "Storm coat, hood up; two braids.", framing: "full-body" }), "Storm coat");
   });
 });

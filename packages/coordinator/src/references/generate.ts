@@ -379,7 +379,7 @@ export function characterLookRequests(
   const { references: identityReferences, referenceRoles } = withStaged(carried, "identity", input.staged, model);
   const tier = tierFor(model, input.tier);
   const estimatedMicroUsd = pricedCharacterImage(model, "character-look", identityReferences.length, tier);
-  // The two framings say what the picture is for (R-109, R-112): a figure whose clothes can be read
+  // The two framings say what the picture is for (R-118, R-112): a figure whose clothes can be read
   // from head to toe, or the same person in the same clothes from the shoulders up. Without a
   // framing the prompt is the Cast page's exploration, unchanged.
   const framed =

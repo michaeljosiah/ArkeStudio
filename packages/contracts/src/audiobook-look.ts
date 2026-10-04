@@ -98,7 +98,7 @@ export function lookKey(who: { sheet?: string | undefined; name: string }): stri
 export const lookByAuthor = (line: { by?: "author" | undefined }): boolean => line.by === "author";
 
 /**
- * Which image of a look rides (design turn 193, R-109): the full-body image, or the close view
+ * Which image of a look rides (design turn 193, R-118): the full-body image, or the close view
  * (head and shoulders). The frame decides — never both.
  */
 export const LookViewSchema = z.enum(["full", "close"]);
@@ -177,7 +177,7 @@ export function lookDigest(lines: ReadonlyArray<{ key: string | null; text: stri
 
 /**
  * What a picture keeps of the look it was made under (R-98): the digest of its lines and who was
- * in it, and for each person the kit look that rode and which of its images (R-112, R-109).
+ * in it, and for each person the kit look that rode and which of its images (R-112, R-118).
  */
 export const PictureLookSchema = z
   .object({
@@ -190,7 +190,7 @@ export type PictureLook = z.infer<typeof PictureLookSchema>;
 
 /**
  * The look to stamp on a picture made now, from the chapter's look and the people in it. `picks`
- * says which image of the chapter's chosen look rides for each person (the frame decides, R-109)
+ * says which image of the chapter's chosen look rides for each person (the frame decides, R-118)
  * and any look chosen for this picture alone (R-115); a person who rode the main photo has none.
  */
 export function pictureLookFor(
@@ -295,7 +295,8 @@ export function mergeLook(
   for (const entry of derived.characters) {
     if (characters[entry.key] !== undefined) continue;
     if (Object.keys(characters).length >= LOOK_CHARACTERS_MAX) break;
-    const take = carried?.[entry.key];
+    // Carried only to a character the look held nothing for: one the author set to no look stays so after a derive again.
+    const take = held?.characters[entry.key] === undefined ? carried?.[entry.key] : undefined;
     if (take !== undefined) {
       // Carrying a look copies nothing and costs nothing: the choice and its words, from the chapter it was made in.
       const same = entry.text.replace(/\s+/g, " ").trim() === take.text.replace(/\s+/g, " ").trim();
@@ -320,7 +321,7 @@ export function mergeLook(
   }
   // A character the chapter names but the reading found no clothing for still starts with the look carried to them.
   for (const [key, take] of Object.entries(carried ?? {})) {
-    if (characters[key] !== undefined || Object.keys(characters).length >= LOOK_CHARACTERS_MAX) continue;
+    if (characters[key] !== undefined || held?.characters[key] !== undefined || Object.keys(characters).length >= LOOK_CHARACTERS_MAX) continue;
     characters[key] = { name: take.name, ...(take.sheet !== undefined ? { sheet: take.sheet } : {}), text: take.text, lookId: take.lookId, from: take.from };
   }
   let place: LookLine | undefined;

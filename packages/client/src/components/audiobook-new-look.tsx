@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { chapterLooksOf, estimateCharacterImageMicroUsd, mainPhotoFor, priceLabel, type CharacterLook, type Take } from "@arke-studio/contracts";
+import { chapterLooksOf, estimateCharacterImageMicroUsd, lookName, mainPhotoFor, priceLabel, type CharacterLook, type Take } from "@arke-studio/contracts";
 import { resolveModel, worldModel } from "./dispatch-bar.js";
 import { EditorDialog } from "./editor-dialog.js";
 import { mediaUrl } from "../lib/media.js";
@@ -7,7 +7,7 @@ import { acceptChapterLook, makeChapterLook, useStore } from "../lib/store.js";
 import { Button, Checkbox, Textarea, cx } from "./ui.js";
 
 /**
- * Making a look (design turn 193b, SPEC-047 R-112, R-109): a character's main photo and a clothing
+ * Making a look (design turn 193b, SPEC-047 R-112, R-118): a character's main photo and a clothing
  * line become three full-length candidates on a plain ground, under the book's art direction, with
  * the main photo as the face reference; the author chooses one, an optional close view of it (head
  * and shoulders, ~$0.04, on by default) is made beside the candidates, and Accept look files both as
@@ -158,7 +158,7 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
           {looks.length === 0 && <span className="fy-mono">none yet</span>}
           {looks.map((look: CharacterLook) => (
             <span key={look.id} className="fy-newlook__look fy-mono" data-testid="new-look-existing">
-              {look.prompt.length > 40 ? `${look.prompt.slice(0, 40)}…` : look.prompt} · {look.closeFile !== undefined ? "full, close" : "full"}
+              {lookName(look)} · {look.closeFile !== undefined ? "full, close" : "full"}
             </span>
           ))}
         </div>

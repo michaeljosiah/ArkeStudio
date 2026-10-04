@@ -1484,6 +1484,23 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(q(m, '[data-testid="illustrate-chapter"]')?.textContent, "Illustrate again");
   });
 
+  it("has Looks in the head beside Illustrate, opening the chapter's Looks sheet (design turn 193a)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m, { voices: CAST });
+    const looks = q(m, '[data-testid="audiobook-looks-open"]');
+    assert.equal(looks?.textContent, "Looks");
+    assert.equal(looks?.parentElement, q(m, '[data-testid="illustrate-chapter"]')?.parentElement, "beside Illustrate this chapter");
+    assert.equal(document.body.querySelector('[data-testid="look-sheet"]'), null, "closed until pressed");
+    await act(async () => looks!.click());
+    assert.ok(document.body.querySelector('[data-testid="look-sheet"]'), "the Looks sheet opens on the body");
+    assert.equal(sentOf(m, "read-audiobook-looks").length, 1, "which chapters chose which look is asked when it opens");
+    await act(async () => (document.body.querySelector('[data-testid="look-done"]') as HTMLButtonElement).click());
+    assert.equal(document.body.querySelector('[data-testid="look-sheet"]'), null);
+    // The rail's Voices reaches them too (rule 18), which is how Manuscript does.
+    await act(async () => q(m, '[data-testid="voices-looks"]')!.click());
+    assert.ok(document.body.querySelector('[data-testid="look-sheet"]'), "Looks from the Voices panel");
+  });
+
   it("opens the proposal as a sheet over the main area, beside the dock: its pace, what needs a look, the dashed chips on the blocks, one Accept", async () => {
     const m = await proposedMount();
     assert.deepEqual(all(m, '[data-testid="illustration-chip"]').map((chip) => chip.textContent), ["The bell", "The line", "The tide"], "a dashed chip on each block it would go on");
@@ -1545,6 +1562,23 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.deepEqual([sent.proposalId, sent.blocks, sent.confirmedMicroUsd, sent.chapterFile], ["ill-1", ["p3.0"], 40_000, "01-neap"], "the held row and the skipped row are not asked for");
     assert.equal(q(m, '[data-testid="illustration-sheet"]'), null, "accepted: the sheet goes and the dock counts");
     assert.equal(q(m, '[data-testid="illustration-status"]')!.dataset.state, "making");
+  });
+
+  it("makes a look from a held row over the proposal for a character with a main photo, and sends one without to their page (design turn 193h)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    const maren = { key: "maren-kest", name: "Maren", sheet: "maren-kest", kind: "character" as const, reference: null, carried: false };
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { who: [maren], needs: ["Maren"] }), PROPOSAL.rows[1]!] } }));
+    const [held, sereth] = all(m, '[data-testid="illustration-row"]');
+    await act(async () => (held!.querySelector('[data-testid="illustration-needs"]') as HTMLButtonElement).click());
+    assert.ok(document.body.querySelector('[data-testid="new-look-sheet"]'), "the make-a-look sheet opens over the proposal");
+    assert.match(document.body.querySelector(".fy-newlook")?.textContent ?? "", /New look · Maren/);
+    assert.equal(sentOf(m, "generate-character-looks").length, 0, "nothing is made until Make");
+    await act(async () => (document.body.querySelector('[data-testid="new-look-cancel"]') as HTMLButtonElement).click());
+    assert.equal(document.body.querySelector('[data-testid="new-look-sheet"]'), null);
+    assert.ok(q(m, '[data-testid="illustration-sheet"]'), "the proposal is still there");
+    await act(async () => (sereth!.querySelector('[data-testid="illustration-needs"]') as HTMLButtonElement).click());
+    assert.equal(document.body.querySelector('[data-testid="new-look-sheet"]'), null, "Sereth has no main photo to make a look from: his page instead");
   });
 
   it("holds a row for a character with no picture: Make a look stands where Skip would, and it goes only if the author says without", async () => {
