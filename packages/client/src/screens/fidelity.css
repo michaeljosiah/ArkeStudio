@@ -230,7 +230,11 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
  */
 :root {
   --content-max: var(--width-max);   /* a production page's content, beside the rail: 1080 */
-  --content-max-chapter: 940px;      /* the chapter: 640 prose, 28 gap, 250 rail, the head over them */
+  --content-max-chapter: 940px;      /* the Manuscript: 640 prose, 28 gap, 250 rail, the head over them */
+  /* The Audiobook view takes the whole room (193, amending 188): the block's panel is a third of the
+     room between 420 and 520 (cqw is the chapter column's width), the list's text stops at 920. */
+  --ab-panel: clamp(420px, 34cqw, 520px);
+  --ab-list-max: 920px;
   --page-max: 1440px;                /* a world page has no rail: the frame the 1080 sits in */
 }
 /*
