@@ -59,6 +59,8 @@ export interface ArkeExportReadRecord {
 }
 
 export interface TargetReadDeps {
+  readonly getBenchRows?: (sessionId?: string) => readonly ProductionReadRow[];
+  readonly getGenerationRouteRows?: () => readonly ProductionReadRow[];
   readonly getAudioRights?: () => Promise<readonly AudioRightsEvent[]>;
   readonly getFrameRunRows?: (productionId: string) => readonly ProductionReadRow[] | Promise<readonly ProductionReadRow[]>;
   readonly getBuildItems?: () => readonly ArkeBuildItemRead[];
@@ -831,6 +833,24 @@ export class WorldChatTargetReads {
         readTarget = target("takes", productionId);
         rows = takeRows(production);
         revisionOrDigest = takesFence(production);
+        break;
+      }
+      case "list_generation_routes": {
+        assertArgs(args, []);
+        if (!this.deps.getGenerationRouteRows) throw new TargetReadError("Generation routes are unavailable.");
+        rows = [...this.deps.getGenerationRouteRows()];
+        readTarget = target("generation-routes", lease.worldId);
+        revisionOrDigest = productionReadFence(rows);
+        break;
+      }
+      case "list_bench_sessions":
+      case "get_bench_session": {
+        assertArgs(args, tool === "get_bench_session" ? ["sessionId"] : []);
+        const sessionId = tool === "get_bench_session" ? requireString(args, "sessionId") : undefined;
+        if (!this.deps.getBenchRows) throw new TargetReadError("Bench records are unavailable.");
+        rows = [...this.deps.getBenchRows(sessionId)];
+        readTarget = target("bench", sessionId ?? lease.worldId);
+        revisionOrDigest = productionReadFence(rows);
         break;
       }
       case "list_frame_runs": {

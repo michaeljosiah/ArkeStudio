@@ -13,6 +13,7 @@ import {
   CandidateIdSchema,
   CanonIdSchema,
   CheckReceiptIdSchema,
+  ChatAttachmentIdSchema,
   EpisodeIdSchema,
   FrameRunIdSchema,
   SceneIdSchema,
@@ -1132,10 +1133,21 @@ export const ProductionExportCancelModelActionSchema = z
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
+export const BenchChatReferenceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("artifact"), artifactId: ArtifactIdSchema, role: z.enum(["reference", "start-frame", "end-frame"]) }).strict(),
+  z.object({ kind: z.literal("take"), sessionId: SessionIdSchema, takeId: TakeIdSchema, role: z.enum(["reference", "start-frame", "end-frame"]) }).strict(),
+  z.object({ kind: z.literal("kit"), sheetId: SlugSchema, image: z.enum(["main-photo", "character-sheet", "establish"]), role: z.enum(["reference", "start-frame", "end-frame"]) }).strict(),
+  z.object({ kind: z.literal("attachment"), attachmentId: ChatAttachmentIdSchema, role: z.enum(["reference", "start-frame", "end-frame"]) }).strict(),
+  z.object({ kind: z.literal("session-token"), token: z.string().regex(/^(Image|Video|Audio) [1-9][0-9]*$/), role: z.enum(["reference", "start-frame", "end-frame"]) }).strict(),
+]);
+export type BenchChatReference = z.infer<typeof BenchChatReferenceSchema>;
+
 export const BenchGenerationModelActionSchema = z
   .object({
     kind: z.literal("bench-generation"),
-    sessionId: SessionIdSchema,
+    sessionId: SessionIdSchema.optional(),
+    /** Rerun repeats this take's immutable request through a new quoted card. */
+    rerunTakeId: TakeIdSchema.optional(),
     composer: z
       .object({
         mode: BenchModeSchema,
@@ -1143,11 +1155,19 @@ export const BenchGenerationModelActionSchema = z
         model: z.string().trim().min(1).max(300),
         params: BenchParamsSchema,
         brief: z.string().max(100_000),
+        references: z.array(BenchChatReferenceSchema).max(16).optional(),
       })
       .strict(),
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
+
+export const BenchKeepModelActionSchema = z.object({ kind: z.literal("bench-keep"), sessionId: SessionIdSchema, takeId: TakeIdSchema,
+  checkReceiptIds: CompleteReadIdsSchema }).strict();
+export const BenchSelectModelActionSchema = z.object({ kind: z.literal("bench-select"), sessionId: SessionIdSchema, takeId: TakeIdSchema,
+  checkReceiptIds: CompleteReadIdsSchema }).strict();
+export const BenchDiscardModelActionSchema = z.object({ kind: z.literal("bench-discard"), sessionId: SessionIdSchema, takeId: TakeIdSchema,
+  checkReceiptIds: CompleteReadIdsSchema }).strict();
 
 export const PropAuthoringModelActionSchema = z.object({
   kind: z.literal("prop-authoring"), change: PropAuthoringChangeSchema, checkReceiptIds: CompleteReadIdsSchema,
@@ -1277,6 +1297,9 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionCutExportModelActionSchema,
   ProductionExportCancelModelActionSchema,
   BenchGenerationModelActionSchema,
+  BenchKeepModelActionSchema,
+  BenchSelectModelActionSchema,
+  BenchDiscardModelActionSchema,
   PropAuthoringModelActionSchema,
   PropReferenceModelActionSchema,
   ImageGenerationActionSchema,
@@ -1379,6 +1402,9 @@ export const WorldChatProductionInteractiveExportActionSchema = preparedAction("
 export const WorldChatProductionCutExportActionSchema = preparedAction("world-chat-production-cut-export", ProductionCutExportModelActionSchema);
 export const WorldChatProductionExportCancelActionSchema = preparedAction("world-chat-production-export-cancel", ProductionExportCancelModelActionSchema);
 export const WorldChatBenchGenerationActionSchema = preparedAction("world-chat-bench-generation", BenchGenerationModelActionSchema);
+export const WorldChatBenchKeepActionSchema = preparedAction("world-chat-bench-keep", BenchKeepModelActionSchema);
+export const WorldChatBenchSelectActionSchema = preparedAction("world-chat-bench-select", BenchSelectModelActionSchema);
+export const WorldChatBenchDiscardActionSchema = preparedAction("world-chat-bench-discard", BenchDiscardModelActionSchema);
 
 export type WorldChatWorldMetadataAction = z.infer<typeof WorldChatWorldMetadataActionSchema>;
 export type WorldChatCanonAction = z.infer<typeof WorldChatCanonActionSchema>;
@@ -1457,6 +1483,9 @@ export type WorldChatProductionInteractiveExportAction = z.infer<typeof WorldCha
 export type WorldChatProductionCutExportAction = z.infer<typeof WorldChatProductionCutExportActionSchema>;
 export type WorldChatProductionExportCancelAction = z.infer<typeof WorldChatProductionExportCancelActionSchema>;
 export type WorldChatBenchGenerationAction = z.infer<typeof WorldChatBenchGenerationActionSchema>;
+export type WorldChatBenchKeepAction = z.infer<typeof WorldChatBenchKeepActionSchema>;
+export type WorldChatBenchSelectAction = z.infer<typeof WorldChatBenchSelectActionSchema>;
+export type WorldChatBenchDiscardAction = z.infer<typeof WorldChatBenchDiscardActionSchema>;
 
 /** Existing World Chat outputs after coordinator validation, before an authority prepares them. */
 export const WorldChatProposalActionSchema = z
@@ -1586,5 +1615,8 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionCutExportActionSchema,
   WorldChatProductionExportCancelActionSchema,
   WorldChatBenchGenerationActionSchema,
+  WorldChatBenchKeepActionSchema,
+  WorldChatBenchSelectActionSchema,
+  WorldChatBenchDiscardActionSchema,
 ]);
 export type WorldChatPreparedAction = z.infer<typeof WorldChatPreparedActionSchema>;

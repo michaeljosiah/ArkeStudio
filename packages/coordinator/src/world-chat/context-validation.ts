@@ -14,6 +14,9 @@ export function worldChatContextExists(bundle: WorldBundle, context: WorldChatCo
       return bundle.canon.some((entry) => entry.id === context.entryId);
     case "sheet":
       return bundle.sheets.some((sheet) => sheet.id === context.sheetId && sheet.type === context.sheetKind);
+    case "bench":
+      // The owning coordinator resolves private Bench journals by session identity.
+      return false;
     case "attachment":
       // A new conversation cannot already own a private attachment. Existing conversations resolve
       // this arm against their folded attachment list because the world bundle cannot see it.

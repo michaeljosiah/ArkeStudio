@@ -5,6 +5,8 @@ import { describe, it } from "node:test";
 import { ART_DIRECTION_PATH, JobSchema, LOCAL_ACTOR_ID, newId, orderedShots, orderedTrackClips, stageShot, ulid, type ArkeGenerationBody, type ClientMessage, type DomainEvent, type Job, type ModelManifest, type SessionId } from "@arke-studio/contracts";
 import { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { openBenchSession } from "../../src/bench/service.js";
+import { productionReadFence } from "../../src/world-chat/production-reads.js";
+import { benchReadRows } from "../../src/bench/chat-reads.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { setOwner } from "../../src/artifacts/filing.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
@@ -309,7 +311,7 @@ describe("PR 815 coordinator regressions", () => {
       };
       let dispatched = 0;
       const adapters = worldChatActionAdapters(w.store, w.gate, () => AT, {
-        getJobs: () => [], quoteBenchGeneration: async () => ({ authorityRevision: 7, body }),
+        getJobs: () => [], getGenerationRouteRows: () => [], quoteBenchGeneration: async () => ({ authorityRevision: 7, body }),
         dispatchBenchGeneration: async (_action, actionId) => {
           dispatched++;
           const takeId = newId("tk");
@@ -338,7 +340,9 @@ describe("PR 815 coordinator regressions", () => {
           kind: "bench-generation", sessionId, composer: { mode: "image", provider: "fal", model: "flux",
             params: { kind: "image", aspect: "16:9", count: 1 }, brief: "Ledger studies" }, checkReceiptIds: [newId("check")],
         } },
-        baseObservations: [{ requirement: "jobs", target: WORLD_ID, revisionOrDigest: jobsFence([], WORLD_ID), complete: true }], createdAt: AT,
+        baseObservations: [{ requirement: "jobs", target: WORLD_ID, revisionOrDigest: jobsFence([], WORLD_ID), complete: true },
+          { requirement: "generation-routes", target: WORLD_ID, revisionOrDigest: productionReadFence([]), complete: true },
+          { requirement: "bench", target: sessionId, revisionOrDigest: productionReadFence(benchReadRows(w.worldDir, sessionId)), complete: true }], createdAt: AT,
       });
       const seq = foldConversation(conversationId, AT, (await log.read()).events).view.seq;
       await lifecycle.decide({ kind: "conversation-action-decide", worldId: WORLD_ID, conversationId,

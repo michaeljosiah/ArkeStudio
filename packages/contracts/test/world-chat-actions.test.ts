@@ -45,6 +45,20 @@ describe("the craft loop's actions (design turn 128, issue 896)", () => {
 });
 
 describe("World Chat authored action contracts", () => {
+  it("accepts an implicit Bench session and typed reference roles while refusing authored file paths", () => {
+    const action = { kind: "bench-generation", checkReceiptIds: [CHECK], composer: {
+      mode: "image", brief: "A tide clock", provider: "fal", model: "read-image-model", params: { kind: "image", count: 1 },
+      references: [{ kind: "kit", sheetId: "maren-kest", image: "main-photo", role: "reference" }],
+    } };
+    assert.ok(ModelWorldChatActionSchema.safeParse(action).success);
+    assert.equal(ModelWorldChatActionSchema.safeParse({ ...action, composer: { ...action.composer,
+      references: [{ kind: "world-file", path: "private.png", role: "reference" }] } }).success, false);
+    assert.equal(ModelWorldChatActionSchema.safeParse({ ...action, composer: { ...action.composer,
+      references: [{ ...action.composer.references[0], role: "invented-role" }] } }).success, false);
+    assert.ok(ModelWorldChatActionSchema.safeParse({ ...action, composer: { ...action.composer, references: undefined },
+      sessionId: "sess_01J8F3K2QW9VZX4N7M0RTYB6HC" }).success, "legacy prepared composers stay readable");
+  });
+
   it("keeps visual facts on the human scene path and rejects chat insert and edit attempts", () => {
     const visualFacts = { onScreenCharacters: [], composition: "wide", confirmedAt: "2026-10-03T12:00:00Z" };
     const commands = [

@@ -56,7 +56,7 @@ it("persists Bench take identities and exact inputs before approval without rese
   assert.equal((await quotes().dispatch(action, id)).status, "queued");
   assert.deepEqual(admitted, frozen.inputs);
   assert.ok((await opened.store.fold())!.takes.every(take => take.status === "queued" && take.error === undefined));
-  assert.deepEqual((await opened.store.fold())!.takes.map(take => take.id), frozen.materialization.map((take: { id: string }) => take.id));
+  assert.deepEqual((await opened.store.fold())!.takes.map(take => take.id), frozen.materialization.reserved.map((take: { id: string }) => take.id));
   assert.equal((await quotes().dispatch(action, id)).status, "running");
   assert.equal(admitted.length, 2, "a fresh dependency composition rejoins rather than admitting again");
 });

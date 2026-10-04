@@ -1,4 +1,4 @@
-import { editShot, worldChatContextSchemaVersion, PRODUCTION_CHAT_CONTEXT_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { editShot, newId, worldChatContextSchemaVersion, BENCH_CHAT_SCHEMA_VERSION, PRODUCTION_CHAT_CONTEXT_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { parseSceneRecord } from "../../src/productions/scene-record.js";
 import { sha256 } from "../../src/world/text-files.js";
 import assert from "node:assert/strict";
@@ -36,6 +36,19 @@ it("fences new production context kinds before persisting them and leaves ordina
   const conversation = await new WorldChatService(dir, CLOCK).create({ title: "Shot", entryContext: context });
   assert.equal((await readWorldMeta(dir)).schemaVersion, PRODUCTION_CHAT_CONTEXT_SCHEMA_VERSION);
   await assert.rejects(readWorldMeta(dir, { supports: PRODUCTION_CHAT_CONTEXT_SCHEMA_VERSION - 1 }), /newer|schema|version/i);
+  assert.deepEqual((await new WorldChatService(dir, CLOCK).load(conversation.id))?.entryContext, context);
+});
+
+it("raises the Bench conversation boundary lazily and refuses older readers without modifying its records", async () => {
+  const { dir, store } = await open();
+  assert.equal((await readWorldMeta(dir)).schemaVersion, 1);
+  const context = { kind: "bench" as const, sessionId: newId("sess") };
+  await store.ensureSchemaVersion(worldChatContextSchemaVersion(context), "world-chat");
+  const conversation = await new WorldChatService(dir, CLOCK).create({ title: "Bench", entryContext: context });
+  const before = await readFile(join(dir, "world.json"), "utf8");
+  assert.equal((await readWorldMeta(dir)).schemaVersion, BENCH_CHAT_SCHEMA_VERSION);
+  await assert.rejects(readWorldMeta(dir, { supports: BENCH_CHAT_SCHEMA_VERSION - 1 }), /newer|schema|version/i);
+  assert.equal(await readFile(join(dir, "world.json"), "utf8"), before);
   assert.deepEqual((await new WorldChatService(dir, CLOCK).load(conversation.id))?.entryContext, context);
 });
 

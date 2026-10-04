@@ -314,6 +314,23 @@ async function apply(event: DomainEvent): Promise<void> {
   });
 }
 
+it("opens Arke from a world Bench and sends into that session's conversation without a production", async () => {
+  const { subject: _subject, ...session } = shotSession();
+  const bench = await openBench(session);
+  assert.equal(bench.sent.some(message => message.kind === "world-chat-create"), false);
+  await pressLabelled(bench, "Ask Arke");
+  const editor = dq(bench, '[role="textbox"]');
+  const key = Object.keys(editor).find(name => name.startsWith("__reactProps$"))!;
+  const props = (editor as unknown as Record<string, { onInput(event: { currentTarget: HTMLElement }): void }>)[key]!;
+  Object.defineProperty(editor, "innerText", { configurable: true, value: "A slow piano cue for the title" });
+  await act(async () => props.onInput({ currentTarget: editor }));
+  await act(async () => dq(bench, '[aria-label="Send"]').click());
+  const create = bench.sent.findLast(message => message.kind === "world-chat-create");
+  assert.equal(create?.kind, "world-chat-create");
+  if (create?.kind === "world-chat-create") assert.deepEqual(create.entryContext, { kind: "bench", sessionId: SESSION_ID });
+  assert.equal(bench.sent.some(message => message.kind === "bench-dispatch"), false);
+});
+
 describe("voice references (design 142: an option chip, not a disclosure)", () => {
   it("is a chip that reads the state, and a blocker is one refusal line beside a disabled Generate", async () => {
     const bench = await openBench(shotSession("video"), SESSION_ID, state => {

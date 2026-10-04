@@ -99,12 +99,16 @@ export class BenchStore {
     const meta = BenchSessionMetaSchema.parse({ schemaVersion: 1, id, createdAt, ...(subject ? { subject } : {}) });
     await mkdir(toExtendedLength(this.dir), { recursive: true });
     // wx: a second create must not silently rewrite the identity of an existing session.
-    await writeFile(toExtendedLength(this.metaPath), JSON.stringify(meta, null, 2), {
-      encoding: "utf8",
-      flag: "wx",
-    }).catch((err: NodeJS.ErrnoException) => {
-      if (err.code !== "EEXIST") throw err;
-    });
+    let handle;
+    try { handle = await open(toExtendedLength(this.metaPath), "wx"); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const existing = await this.readMeta();
+      if (!existing || existing.id !== id) throw new Error("The existing Bench header is damaged or belongs to another session.");
+      return existing;
+    }
+    try { await handle.writeFile(JSON.stringify(meta, null, 2), "utf8"); await handle.sync(); }
+    finally { await handle.close(); }
     return meta;
   }
 

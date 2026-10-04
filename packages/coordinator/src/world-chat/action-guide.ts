@@ -31,7 +31,7 @@ export type ModelActionKind = ModelWorldChatAction["kind"];
  * The registry speaks in categories — "canon", "timeline" — and the model calls tools. Told only
  * the category, it has to guess which read satisfies it, and a guess that misses is refused as an
  * incomplete read after the whole turn is written. Keyed by the enum so a new category cannot
- * ship without its tools; `bench` has none yet (SPEC-050 R-28).
+ * ship without its tools; Bench and route records have their own leased reads (SPEC-050 R-28).
  */
 const READ_TOOLS: Record<ArkeReadRequirement, readonly ArkeTargetReadTool[]> = {
   "world-metadata": ["get_world_metadata"],
@@ -67,7 +67,8 @@ const READ_TOOLS: Record<ArkeReadRequirement, readonly ArkeTargetReadTool[]> = {
   jobs: ["list_jobs"],
   "founding-build": ["list_build_items"],
   exports: ["list_exports"],
-  bench: [],
+  bench: ["list_bench_sessions", "get_bench_session"],
+  "generation-routes": ["list_generation_routes"],
 };
 
 export function readToolsFor(requirements: readonly ArkeReadRequirement[]): readonly ArkeTargetReadTool[] {
@@ -150,6 +151,7 @@ export function actionGuideScopes(context: WorldChatContext | undefined): readon
   switch (context?.kind) {
     case "production-setup":
       return [];
+    case "bench":
     case "production":
     case "episode":
     case "scene":
@@ -216,15 +218,17 @@ export function renderActionGuide(
     generate: ["production-frame-run-start", "production-scene-dispatch", "production-frame-run-resume", "production-frame-run-retry-step", "production-frame-run-retry-cell", "production-frame-run-pause", "production-frame-run-cancel", "production-plan-cancel"],
     cut: ["audio-spine-command", "production-cut-export"],
   };
+  priorities.bench = ["bench-generation", "bench-keep", "bench-select", "bench-discard"];
   const first = priorities[context?.kind ?? "world"] ?? [];
   const rank = (kind: ModelActionKind) => { const index = first.indexOf(kind); return index < 0 ? first.length : index; };
   const entries = ACTION_GUIDE_ENTRIES.filter((entry) => scopes.includes(entry.scope)).sort((a, b) => rank(a.kind) - rank(b.kind));
   const timelineGuide = scopes.includes("production")
     ? "For editorRequests, first call get_timeline with productionId this turn and follow nextCursor until complete=true. Its final complete receipt is required even when the entry brief describes clips. Read list_editor_requests for pending decisions and history. Take review based on metadata alone must say metadata-only in its reason; never imply pixels or audio were inspected."
     : "";
-  const full = [FULL_HEAD, timelineGuide, ...entries.map(fullEntry)].filter(Boolean).join("\n");
+  const benchGuide = "Bench has image, video, voice (speech) and music modes; no sound-effects/SFX mode. Refuse sound-effect requests by name; never substitute music. Before bench-generation read list_generation_routes and list_jobs completely. For instrumental music, request no vocals in the brief and use only the [instrumental] structure tag as lyrics; never invent sung words. Bench text fragments name their owner and JSON path; follow all pages and reconstruct the full text before quoting a rerun. Omit sessionId to propose a new session; it is created only on approval. Reusing a session or rerunning/selecting/keeping/discarding a take requires a complete get_bench_session receipt for that exact session. Include the complete composer, all reference roles and requested count; never drop a reference silently. A rerun repeats the frozen take composer and references and always prepares a new card.";
+  const full = [FULL_HEAD, timelineGuide, benchGuide, ...entries.map(fullEntry)].filter(Boolean).join("\n");
   if (full.length <= Math.floor(budgetChars / 5)) return { text: full, mode: "full" };
-  return { text: [COMPACT_HEAD, timelineGuide, ...entries.map(compactEntry)].filter(Boolean).join("\n"), mode: "compact" };
+  return { text: [COMPACT_HEAD, timelineGuide, benchGuide, ...entries.map(compactEntry)].filter(Boolean).join("\n"), mode: "compact" };
 }
 
 /** What describe_action answers: one entry, whole, or null for a kind the schema does not take. */

@@ -104,6 +104,8 @@ const WHY_NOT_DELETABLE: Record<WorldChatDeletionBlock, string> = {
   "unresolved-proposals": "its proposals are still waiting",
   "pending-actions": "its actions are still waiting",
   "pending-inputs": "its messages are still waiting to send",
+  "bench-references": "Bench still uses its attachment files",
+  "bench-references-unavailable": "Bench references need recovery before deletion",
 };
 
 /**
@@ -1055,6 +1057,8 @@ function aboutLabel(context: NonNullable<WorldChatSummary["entryContext"]>, worl
       return `about ${world?.sheets.find(sheet => sheet.id === context.sheetId)?.name ?? context.sheetId}`;
     case "attachment":
       return "about an attachment";
+    case "bench":
+      return "Bench conversation";
     case "production":
       return `Development · ${context.productionId}`;
     case "episode":

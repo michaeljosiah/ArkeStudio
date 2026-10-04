@@ -949,6 +949,7 @@ export function ProductionConversation({
   const [attachmentTrouble, setAttachmentTrouble] = useState<readonly { name: string; reason: string }[]>([]);
   const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
+  const hasContext = entry !== undefined || !!productionId;
   const contextKey = JSON.stringify(context);
   const wrapping = wrappingKeys.has(contextKey);
   const setWrapping = (next: boolean) =>
@@ -1074,7 +1075,7 @@ export function ProductionConversation({
    */
   const handedOver = useRef(false);
   useEffect(() => {
-    if (!openWith || handedOver.current || !worldId || !productionId) return;
+    if (!openWith || handedOver.current || !worldId || !hasContext) return;
     /*
      * The latch is a per-mount ref, but `openWith` rides in history state, which outlives the
      * mount — so Back onto this screen replayed the opening line as a fresh paid turn
@@ -1113,7 +1114,7 @@ export function ProductionConversation({
     /** The request a line lost on the way goes again under — or, opening a thread, its create. */
     again?: string,
   ): boolean => {
-    if (!text || !worldId || !productionId) return false;
+    if (!text || !worldId || !hasContext) return false;
     // A second line said while the first is still opening its thread would open a second one,
     // and one said over a running turn starts a second turn the first can no longer stop.
     // Nor over a line just sent that the thread has not shown yet (codex on PR 1232): the runner
@@ -1155,7 +1156,7 @@ export function ProductionConversation({
   };
   const submit = () => {
     const text = message.trim();
-    if (!text || !worldId || !productionId) return;
+    if (!text || !worldId || !hasContext) return;
     // The field keeps its words while a thread is still opening; say() would drop them.
     if (opening) return;
     // The words leave the box only once they have gone (codex on PR 1232): a line held back —
@@ -1795,6 +1796,7 @@ function sameContext(a: WorldChatContext | undefined, b: WorldChatContext): bool
       "episodeId" in c ? c.episodeId : null,
       "sceneId" in c ? c.sceneId : null,
       "shotId" in c ? c.shotId : null,
+      "sessionId" in c ? c.sessionId : null,
     ]);
   return key(a) === key(b);
 }

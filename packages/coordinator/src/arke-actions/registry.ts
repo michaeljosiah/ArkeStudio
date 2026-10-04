@@ -1,3 +1,4 @@
+import { WorldChatBenchKeepActionSchema, WorldChatBenchSelectActionSchema, WorldChatBenchDiscardActionSchema } from "@arke-studio/contracts";
 import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema } from "@arke-studio/contracts";
 import {
   ClientMessageSchema,
@@ -762,6 +763,10 @@ const COMMAND_MODEL_PATHS = {
   "stop-extraction": ["artifact-extraction-stop"],
   "resolve-extraction": ["artifact-extraction-review"],
   "bench-dispatch": ["bench-generation"],
+  "bench-rerun": ["bench-generation"],
+  "bench-keep": ["bench-keep"],
+  "bench-select-take": ["bench-select"],
+  "bench-discard": ["bench-discard"],
   "generate-world-image": ["image-generation"],
   "generate-master-look": ["image-generation"],
   "run-build-item": ["build-item-run"],
@@ -1220,10 +1225,16 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     kind: "world-chat-build-item-run", schema: WorldChatBuildItemRunActionSchema,
     ...action("world", "generation", "job-queue", "spend-and-compute", ["world-metadata", "sheets", "art-direction", "references", "jobs", "founding-build"]),
   },
+  "world-chat-bench-keep": { kind: "world-chat-bench-keep", schema: WorldChatBenchKeepActionSchema,
+    ...action("world", "command", "bench", "authored-change", ["bench", "artifacts"]) },
+  "world-chat-bench-select": { kind: "world-chat-bench-select", schema: WorldChatBenchSelectActionSchema,
+    ...action("world", "command", "bench", "authored-change", ["bench"]) },
+  "world-chat-bench-discard": { kind: "world-chat-bench-discard", schema: WorldChatBenchDiscardActionSchema,
+    ...action("world", "destructive", "bench", "destructive-change", ["bench"]) },
   "world-chat-bench-generation": {
     kind: "world-chat-bench-generation",
     schema: WorldChatBenchGenerationActionSchema,
-    ...action("world", "generation", "bench", "spend-and-compute", ["jobs"]),
+    ...action("world", "generation", "bench", "spend-and-compute", ["jobs", "generation-routes"]),
   },
 } as const;
 
@@ -1242,7 +1253,7 @@ export const ARKE_AUTHORITY_ACTION_REGISTRY = {
   "bench-generation": {
     kind: "bench-generation",
     schema: BenchGenerationModelActionSchema,
-    ...action("world", "generation", "bench", "spend-and-compute", ["jobs"]),
+    ...action("world", "generation", "bench", "spend-and-compute", ["jobs", "generation-routes"]),
   },
   "audio-spine-command": {
     kind: "audio-spine-command",

@@ -96,6 +96,15 @@ reservation admission without resubmission, empty provider results, and JPEG/Web
 with staging cleanup. Background finalization checks use a real prop state and verify that
 chat-generated character sheets remain pending for separate selection.
 
+Bench chat changes also run coordinator `test/bench/chat.test.ts`,
+`test/bench/conversation-quotes.test.ts`, `test/bench/subject-coordinator.test.ts`,
+`test/world-chat/generation-quotes.test.ts` and `test/world-chat/service.test.ts`; contracts
+`test/world-chat-actions.test.ts`; client `test/bench-subject-session.test.tsx`. They exercise
+approval-only session creation, Deny without side effects, crash rejoining without another
+purchase, complete reference composers, immutable reruns, paged route privacy and stale
+cursors, Keep/Select/Discard through the action lifecycle, source hashes and attachment
+retention. The client regression sends a message from world Bench without a production id.
+
 Production Chat generation also runs coordinator `test/world-chat/production-generation.test.ts`,
 `test/world-chat/production-take-filing.test.ts`, `test/world-chat/actions.test.ts`,
 `test/bench/subject.test.ts`, `test/bench/subject-coordinator.test.ts` and
