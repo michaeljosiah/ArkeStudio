@@ -5,13 +5,15 @@ import { mediaUrl } from "../lib/media.js";
 import { clock } from "./player.js";
 import { Button } from "./ui.js";
 
-function useCardExport(action: ConversationActionCard) {
+type ExportContext = Pick<ConversationActionCard, "worldId" | "productionId" | "authority" | "exportState">;
+
+function useCardExport(action: ExportContext) {
   const record = useExports()[action.authority.id];
   const candidate = record?.worldId === action.worldId && record.productionId === action.productionId ? record : action.exportState;
   const parsed = ConversationExportStateSchema.safeParse(candidate ? { status: candidate.status, percent: candidate.percent, output: candidate.output } : null);
   return parsed.success ? parsed.data : null;
 }
-export function ProductionExportCard({ preview, action }: { preview: Extract<ProductionCardPreview, { kind: "export" }>; action: ConversationActionCard }) {
+export function ProductionExportCard({ preview, action }: { preview: Extract<ProductionCardPreview, { kind: "export" }>; action: ExportContext }) {
   const record = useCardExport(action);
   return <div className="fy-production-preview" aria-label="Export preview"><dl>{[
     ["Preset", preview.preset.replaceAll("-", " ")], ["Duration", preview.durationSec === null ? "Unavailable" : clock(preview.durationSec)],

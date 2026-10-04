@@ -9,14 +9,16 @@ import { Portrait, characterPortraitPath, locationPortraitPath } from "./portrai
 import { ProductionTimelineCard } from "./production-timeline-card.js";
 import { ProductionExportCard } from "./production-export-card.js";
 
+export type ProductionCardContext = Pick<ConversationActionCard, "worldId" | "productionId" | "actionKind" | "targets" | "shown" | "authority" | "exportState">;
+
 const EMPTY = new Set<string>();
 const nothing = () => {};
 /** The native surfaces consume a frozen scene. Their write controls remain locked in a preview. */
-export function ProductionCardBody({ preview, action }: { preview: ProductionCardPreview; action: ConversationActionCard }) {
+export function ProductionCardBody({ preview, action, onSelectShot }: { preview: ProductionCardPreview; action: ProductionCardContext; onSelectShot?: (id: string) => void }) {
   const world = useStore().state?.world;
   const production = world?.meta.worldId === action.worldId ? world.productions.find(p => p.meta.id === action.productionId) : undefined;
   const changes = useMemo(() => preview.kind === "scene" ? shotChanges(preview.before, preview.after) : null, [preview]);
-  const marks = useMemo(() => new Map(changes?.shots.map(row => [row.shot.id, [row.inserted ? "Inserted" : "", row.moved ? `Moved from ${row.from}` : "", row.changed ? "Changed" : ""].filter(Boolean).join(" · ")]) ?? []), [changes]);
+  const marks = useMemo(() => new Map(changes?.shots.map(row => [row.shot.id, [row.inserted ? "Inserted" : "", row.moved ? `Moved ↑ ${row.from} → ${row.shot.number}` : "", row.changed ? "Changed" : ""].filter(Boolean).join(" · ")]) ?? []), [changes]);
   const newShots = useMemo(() => new Set(changes?.shots.filter(row => row.inserted).map(row => row.shot.id) ?? []), [changes]);
   const reviewShots = useMemo(() => preview.kind === "scene" ? new Map(orderedShots(preview.after).map(shot => [shot.id, {
     framing: Object.values(effectiveFraming(preview.after, shot)).filter(Boolean).join(" · "),
@@ -78,8 +80,8 @@ export function ProductionCardBody({ preview, action }: { preview: ProductionCar
         digests={new Map()} aspect={production.meta.aspect ?? "16:9"} capSec={60} boardPack={pack} showBoards={boardChanged}
         stagedShotIds={EMPTY} newShotIds={newShots} stagedBoards={false} locked generatorPending={false} onCommand={() => false}
         refusalVersion={0} frameRun={null} jobs={[]} worldId={world.meta.worldId} reviewMarks={marks} reviewShots={reviewShots}
-        onViewBoardSheet={nothing} onGenerateFrame={nothing} onEditShot={nothing} onOpenShotInGenerator={nothing}
-        onPreviewShot={nothing} onTalkToArke={nothing} onPlanVideo={nothing} onRenderBoard={nothing} />
+        onViewBoardSheet={nothing} onGenerateFrame={nothing} onEditShot={onSelectShot ?? nothing} onOpenShotInGenerator={nothing}
+        onPreviewShot={onSelectShot ?? nothing} onTalkToArke={nothing} onPlanVideo={nothing} onRenderBoard={nothing} />
     </div> : <ol aria-label="Resulting shot list">{changes?.shots.map(row => <li key={row.shot.id}><strong>{row.shot.number}. {row.shot.title}</strong> · {row.shot.durationSec ?? 4}s · {marks.get(row.shot.id)}</li>)}</ol>}
     {changes?.removed.length ? <ol aria-label="Removed shots">{changes.removed.map(shot => <li key={shot.id} data-removed><del>{shot.number}. {shot.title}</del> · Removed</li>)}</ol> : null}
     {world && production && stageChanged.map(shot => <section key={shot.id} className="fy-production-preview__stage" aria-label={`Stage preview for shot ${shot.number}`}>

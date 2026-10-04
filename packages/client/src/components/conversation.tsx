@@ -1,3 +1,5 @@
+import { ProductionStudio } from "./production-studio.js";
+import { StudioCard, StudioShow, StudioSidebar, StudioToggle } from "./production-studio-context.js";
 import { FrameRunReport, ConversationFrameRunCard } from "./conversation-frame-run-card.js";
 import { StagePlayblastReceipt } from "./production-stage-card.js";
 import { TimelineCardHistory } from "./timeline-card-history.js";
@@ -358,7 +360,7 @@ export function ConversationPermissionCard({
     </div>
   ) : null;
   return (
-    <article
+    <StudioCard id={action.actionId}><article
       ref={card}
       tabIndex={-1}
       className="fy-actioncard"
@@ -373,6 +375,7 @@ export function ConversationPermissionCard({
         </div>
         <span className="fy-actioncard__status">{ACTION_STATUS[action.status]}</span>
       </div>
+      <StudioShow action={action} />
       <p className="fy-actioncard__consequence">{action.shown.consequence}</p>
       {terminal ? (
         <details className="fy-actioncard__details">
@@ -436,7 +439,7 @@ export function ConversationPermissionCard({
         <p className="fy-actioncard__unsupported">This card type is not available in this version. Nothing can be approved.</p>
       )}
       <div className="fy-actioncard__live" aria-live="assertive" role="status">{announcement}</div>
-    </article>
+    </article></StudioCard>
   );
 }
 
@@ -794,8 +797,6 @@ export function ProductionConversation({
   } | null>(null);
   const [busyMedia, setBusyMedia] = useState<string | null>(null);
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
-  /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
-  const [pointsOpen, setPointsOpen] = useState(false);
   const phone = useMediaQuery("(max-width: 899px)");
   const compact = useMediaQuery("(max-width: 1099px)");
   const [modelsOpen, setModelsOpen] = useState(false);
@@ -1293,9 +1294,37 @@ export function ProductionConversation({
     />
   );
 
+  const responsive = contextSummary !== undefined;
+  const pointCount = points.filter(point => point.kind === "point").length;
+  const groups = groupPointsBySubject(points);
+  const openCount = points.filter(point => point.kind === "question").length;
+  const sideTitle = stagedTitle ?? "What it understood";
+  const rail = <>
+    <div className="fy-develop-side__head" style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+      <div style={{ font: "600 15px var(--font-sans)" }}>What it understood</div>
+      <span className="fy-mono">{(compact ? pointCount : points.length) > 0 ? (compact ? pointCount : points.length) + " so far" : "no new notes"}</span>
+    </div>
+    <div className="fy-develop-side__points">
+      {responsive && phone && <p className="fy-develop-side__summary">{pointCount} so far · saying more changes them</p>}
+      <ConversationPoints points={points} empty={pointsEmpty ?? "Nothing understood yet."} onMedia={openMedia} busyId={busyMedia}
+        {...(worldId && conversationId ? {
+          onSave: (point: WorldChatPoint) => saveWorldChatPoint(worldId, conversationId, point.id, point.revision),
+          onReject: (point: WorldChatPoint) => rejectWorldChatPoint(worldId, conversationId, point.id, point.revision),
+        } : {})} />
+      {loaded?.productionSetup?.status === "created" && <details className="fy-develop-setup">
+        <summary>From production setup</summary>
+        <p>The outline and open questions at creation. Current production records are in Overview and Scenes.</p>
+        <ProductionSetupOutline draft={loaded.productionSetup.draft} sheetName={id => state?.world?.sheets.find(sheet => sheet.id === id)?.name ?? id} />
+      </details>}
+      {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
+    </div>
+    <WrapUp worldId={worldId} conversationId={conversationId} seq={loaded?.seq ?? null}
+      carried={carriedPoints} status={loaded?.status ?? null} subjectKey={contextKey}
+      wrapping={wrapping} onWrappingChange={setWrapping} brief={responsive && compact} />
+  </>;
   if (dock) {
     return (
-      <>
+      <ProductionStudio world={state?.world} productionId={productionId} entry={context} workspace={loaded} docked understanding={rail} proposal={side}>
       <aside
         className="fy-arke"
         data-dock="conversation"
@@ -1318,6 +1347,7 @@ export function ProductionConversation({
               <span className="fy-mono">{dock.subject}</span>
             </button>
           )}
+          <StudioToggle />
           {dock.onPutAway === undefined ? null : (
             <IconButton className="fy-arke__pin" label="Unpin the assistant" onClick={dock.onPutAway}>
               <Pin size={13} />
@@ -1327,56 +1357,7 @@ export function ProductionConversation({
         <div className="fy-arke__log" aria-live="polite">
           {transcript}
         </div>
-        {!dock.conversationFirst || side !== undefined || points.length > 0 || carriedPoints > 0 ? (
-          <div className="fy-arke__strip">
-            {side ?? (
-            <>
-              {/* The understanding is still here, put away rather than dropped: a column this
-                  narrow cannot hold it open beside a transcript, and the wrap-up beneath it is
-                  the only way a conversation becomes anything (turn 92). */}
-              {pointsEmpty !== undefined && (!dock.conversationFirst || points.length > 0) && (
-                <details
-                  className="fy-arke__points"
-                  open={pointsOpen}
-                  onToggle={(event) => setPointsOpen(event.currentTarget.open)}
-                >
-                  <summary>
-                    What it understood <span className="fy-mono">{points.length > 0 ? points.length : "no new notes"}</span>
-                  </summary>
-                  <ConversationPoints
-                    points={points}
-                    empty={pointsEmpty}
-                    onMedia={openMedia}
-                    busyId={busyMedia}
-                    {...(worldId && conversationId
-                      ? {
-                          onSave: (point: WorldChatPoint) =>
-                            saveWorldChatPoint(worldId, conversationId, point.id, point.revision),
-                          onReject: (point: WorldChatPoint) =>
-                            rejectWorldChatPoint(worldId, conversationId, point.id, point.revision),
-                        }
-                      : {})}
-                  />
-                  {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
-                </details>
-              )}
-              {!dock.conversationFirst || carriedPoints > 0 ? (
-                <WrapUp
-                  worldId={worldId}
-                  conversationId={conversationId}
-                  seq={loaded?.seq ?? null}
-                  carried={carriedPoints}
-                  status={loaded?.status ?? null}
-                  subjectKey={contextKey}
-                  wrapping={wrapping}
-                  onWrappingChange={setWrapping}
-                  onRefused={() => setPointsOpen(true)}
-                />
-              ) : null}
-            </>
-            )}
-          </div>
-        ) : null}
+        <div className="fy-arke__strip"><StudioSidebar /></div>
         <div className="fy-arke__foot">
           {modelStatus}
           {dock.subjectLine !== undefined && <div className="fy-mono fy-arke__subject">{dock.subjectLine}</div>}
@@ -1439,39 +1420,11 @@ export function ProductionConversation({
           {dock.note !== undefined && <div className="fy-mono">{dock.note}</div>}
         </div>
       </aside>
-      </>
+      </ProductionStudio>
     );
   }
 
-  const responsive = contextSummary !== undefined;
-  const pointCount = points.filter(point => point.kind === "point").length;
-  const groups = groupPointsBySubject(points);
-  const openCount = points.filter(point => point.kind === "question").length;
-  const sideTitle = stagedTitle ?? "What it understood";
-  const rail = side ?? (pointsEmpty === undefined ? null : <>
-    <div className="fy-develop-side__head" style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-      <div style={{ font: "600 15px var(--font-sans)" }}>What it understood</div>
-      <span className="fy-mono">{(compact ? pointCount : points.length) > 0 ? (compact ? pointCount : points.length) + " so far" : "no new notes"}</span>
-    </div>
-    <div className="fy-develop-side__points">
-      {responsive && phone && <p className="fy-develop-side__summary">{pointCount} so far · saying more changes them</p>}
-      <ConversationPoints points={points} empty={pointsEmpty} onMedia={openMedia} busyId={busyMedia}
-        {...(worldId && conversationId ? {
-          onSave: (point: WorldChatPoint) => saveWorldChatPoint(worldId, conversationId, point.id, point.revision),
-          onReject: (point: WorldChatPoint) => rejectWorldChatPoint(worldId, conversationId, point.id, point.revision),
-        } : {})} />
-      {loaded?.productionSetup?.status === "created" && <details className="fy-develop-setup">
-        <summary>From production setup</summary>
-        <p>The outline and open questions at creation. Current production records are in Overview and Scenes.</p>
-        <ProductionSetupOutline draft={loaded.productionSetup.draft} sheetName={id => state?.world?.sheets.find(sheet => sheet.id === id)?.name ?? id} />
-      </details>}
-      {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
-    </div>
-    <WrapUp worldId={worldId} conversationId={conversationId} seq={loaded?.seq ?? null}
-      carried={carriedPoints} status={loaded?.status ?? null} subjectKey={contextKey}
-      wrapping={wrapping} onWrappingChange={setWrapping} brief={responsive && compact} />
-  </>);
-  return <>
+  return <ProductionStudio world={state?.world} productionId={productionId} entry={context} workspace={loaded} docked={false} understanding={rail} proposal={side}>
     <div className="fy-story__chat">
       {(eyebrow || heading) && <div className="fy-story__chathead">
         {eyebrow && <div className="fy-eyebrow-sm">{eyebrow}</div>}
@@ -1494,15 +1447,15 @@ export function ProductionConversation({
         {(!responsive || !compact) && footer}
       </HeldBar>
     </div>
-    {rail && <div className="fy-story__side">
+    <div className="fy-story__side">
       <ResponsiveSheet sheet={responsive && phone} open={sideOpen} onClose={() => setSideOpen(false)} title={sideTitle} className="fy-develop-sheet">
-        <div className={responsive ? "fy-develop-side" : "fy-story-side"}>{rail}</div>
+        <StudioSidebar />
       </ResponsiveSheet>
-    </div>}
+    </div>
     <PageSheet open={responsive && compact && modelsOpen} onClose={() => setModelsOpen(false)} title="Story author" className="fy-develop-model-sheet">
       <p>In context: {contextSummary}</p>
     </PageSheet>
-  </>;
+  </ProductionStudio>;
 }
 
 /**
