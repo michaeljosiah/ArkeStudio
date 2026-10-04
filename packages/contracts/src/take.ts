@@ -2,7 +2,8 @@ import { DialogueDispatchAssessmentSchema } from "./dialogue-assessment.js";
 import { AudioAssetProvenanceSchema } from "./audio.js";
 import { RecipeIdentitySchema } from "./comfyui.js";
 import { z } from "zod";
-import { normalizeAspect, parseAspect } from "./manifest.js";
+import { CODEX_IMAGE_PLAN_LABEL, normalizeAspect, parseAspect } from "./manifest.js";
+import { formatMicroUsd } from "./money.js";
 import { PropIdSchema, PropStateIdSchema, PropStateProvenanceSchema } from "./prop.js";
 import {
   IsoDateTimeSchema,
@@ -61,6 +62,11 @@ export const TakeCostSchema = z
   })
   .strict();
 export type TakeCost = z.infer<typeof TakeCostSchema>;
+
+/** The stored source, not a numeric zero, explains how an image was funded. */
+export function takeCostCopy(cost: TakeCost): string {
+  return cost.actualSource === "included-plan" ? CODEX_IMAGE_PLAN_LABEL : formatMicroUsd(cost.actualMicroUsd ?? cost.estimatedMicroUsd);
+}
 
 /** Descriptive provenance captured on copy; no foreign identity or live dependency (issue 960). */
 export const BorrowedImageOriginSchema = z.object({

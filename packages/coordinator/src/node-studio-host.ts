@@ -54,7 +54,7 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
     const calls = new ProviderCallStore(join(options.appRoot, "provider-calls", "calls.jsonl"), secrets);
     codexImage = lazyCodexImageRunner({ deps: { ledger }, onTrace: harnessTrace(options.appRoot),
       discovery: async () => {
-        const path = (await new AppSettingsFile(join(options.appRoot, "settings.json")).load().catch(() => null))?.harness.codexPath;
+        const path = process.env["ARKE_CODEX_CMD"] ?? (await new AppSettingsFile(join(options.appRoot, "settings.json")).load().catch(() => null))?.harness.codexPath;
         return path ? { configuredPath: path } : {};
       } });
     const clients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: calls, codexImage });

@@ -314,6 +314,25 @@ async function apply(event: DomainEvent): Promise<void> {
   });
 }
 
+it("clears requested image dimensions when a world Bench switches to Codex", async () => {
+  const { subject: _subject, ...session } = shotSession();
+  session.composer.params = { kind: "image", count: 1, tier: "2K", aspect: "16:9" };
+  const bench = await openBench(session, SESSION_ID, state => {
+    state.app.manifest!.models.push({ ...IMAGE_MODEL, id: "codex-image", provider: "codex", displayName: "Codex Image",
+      limits: { providerSelectedSize: true }, pricing: { kind: "included-plan" } });
+    state.app.providers = state.app.providers.filter(provider => provider.id !== "codex");
+    state.app.providers.push({ id: "codex", configured: true, validation: "valid", probes: [{ capability: "image", available: true }], fault: null });
+  });
+  const select = q(bench, 'select[aria-label="Model"]');
+  const key = Object.keys(select).find(name => name.startsWith("__reactProps$"))!;
+  const props = (select as unknown as Record<string, { onChange(event: { target: { value: string } }): void }>)[key]!;
+  await act(async () => props.onChange({ target: { value: "codex/codex-image" } }));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+  const sent = bench.sent.findLast(message => message.kind === "bench-compose");
+  assert.equal(sent?.kind, "bench-compose");
+  if (sent?.kind === "bench-compose") assert.deepEqual(sent.params, { kind: "image", count: 1 });
+});
+
 it("opens Arke from a world Bench and sends into that session's conversation without a production", async () => {
   const { subject: _subject, ...session } = shotSession();
   const bench = await openBench(session);

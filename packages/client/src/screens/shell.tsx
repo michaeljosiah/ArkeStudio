@@ -629,7 +629,7 @@ function BuildCard({
             Assign {selection.plan.voice.label} ({selection.plan.voice.provider}) to {selection.plan.title}; no new audition.
           </p>)}
           {plan.work && <details><summary>Work and reused selections</summary>{plan.work.map(item => <p key={item.key}>
-            {item.name} · {item.kind.replaceAll("-", " ")} · {item.authorized ? formatMicroUsd(item.estimatedMicroUsd) : "not authorized"}
+            {item.name} · {item.kind.replaceAll("-", " ")} · {item.authorized ? includedImages && ["main-photo", "establishing-view", "sheet-image", "key-art"].includes(item.kind) ? CODEX_IMAGE_PLAN_LABEL : formatMicroUsd(item.estimatedMicroUsd) : "not authorized"}
           </p>)}</details>}
           <p className="fy-actioncard__consequence">
             {counts

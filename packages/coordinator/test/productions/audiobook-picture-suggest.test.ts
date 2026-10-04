@@ -34,6 +34,15 @@ const suggestion = (events: DomainEvent[]): SuggestionEvent => {
 const madeEvents = (events: DomainEvent[]): MadeEvent[] => events.filter((event): event is MadeEvent => event.type === "audiobook.picture-made");
 
 describe("Suggest picture (R-99)", () => {
+  it("carries the included-plan identity into a zero-dollar picture authorization", () =>
+    withHarness(async ({ events, send, enqueued }) => {
+      await suggest(send);
+      const picked = suggestion(events).suggestion!;
+      assert.equal(picked.model.plan, "included-plan");
+      assert.equal(picked.estimatedMicroUsd, 0);
+      assert.equal(picked.aspect, undefined);
+      assert.equal(enqueued.length, 0);
+    }, { model: { ...IMAGE, id: "codex-image", provider: "codex", limits: { providerSelectedSize: true }, pricing: { kind: "included-plan" } } }));
   it("reads the look first, drafts one prompt, and says who rides, the model, the ratio and the price", () =>
     withHarness(async ({ events, send, seen, schemaVersion, store }) => {
       await suggest(send);

@@ -7,6 +7,7 @@ import {
   STANDARD_ASPECTS,
   storyProgressDay,
   targetWords,
+  takeCostCopy,
   type ModelChoices,
 } from "@arke-studio/contracts";
 import { useEffect, useState } from "react";
@@ -19,7 +20,7 @@ import { PageSheet } from "../components/page-sheet.js";
 import { ChevronRight } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
-import { seconds, usd } from "../lib/format.js";
+import { seconds } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, useProduction } from "../lib/selectors.js";
 import {
   attachHostFiles,
@@ -352,7 +353,7 @@ export function ProductionDashboardScreen() {
                   <span className="fy-listrow__text">
                     {t.coversShots.map((s) => s.replace("sh_", "shot ")).join(", ")} · {decisions[t.id]}
                   </span>
-                  <span className="fy-mono">{usd(t.cost.actualMicroUsd ?? t.cost.estimatedMicroUsd)}</span>
+                  <span className="fy-mono">{takeCostCopy(t.cost)}</span>
                 </div>
               ))}
             </div>

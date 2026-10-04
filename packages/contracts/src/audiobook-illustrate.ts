@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LOOK_LINE_MAX, LookViewSchema, PictureLookSchema } from "./audiobook-look.js";
+import { CODEX_IMAGE_PLAN_LABEL } from "./manifest.js";
 
 /**
  * Pictures proposed by Arke (design turn 191, SPEC-047 R-99..R-102): a suggestion for one block
@@ -52,6 +53,7 @@ export const PictureModelSchema = z
     name: z.string().min(1),
     /** How many reference pictures it takes: the limit that decides which of `who` ride. */
     references: z.number().int().min(0),
+    plan: z.literal("included-plan").optional(),
   })
   .strict();
 export type PictureModel = z.infer<typeof PictureModelSchema>;
@@ -131,7 +133,8 @@ export const PictureSuggestionSchema = z
 export type PictureSuggestion = z.infer<typeof PictureSuggestionSchema>;
 
 /** Price as a card says it: `~$0.04`, to the cent and rounded up — an estimate that errs low is not trusted — and `free` for nothing. */
-export function priceLabel(microUsd: number): string {
+export function priceLabel(microUsd: number, plan?: "included-plan"): string {
+  if (plan === "included-plan") return CODEX_IMAGE_PLAN_LABEL;
   if (microUsd <= 0) return "free";
   return `~$${(Math.ceil(microUsd / 10_000) / 100).toFixed(2)}`;
 }

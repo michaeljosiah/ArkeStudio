@@ -5346,6 +5346,11 @@ export class Coordinator {
       await tool.refresh();
       if (tool.current().state === "ready") await this.providerService.validate(provider);
     }
+    // Codex owns its login outside Arke and has no install/sign-in tool service. Its probe
+    // restores availability on every launch before model eligibility is published.
+    if (this.opts.validators?.codex && this.opts.manifest?.models.some(model => model.provider === "codex")) {
+      await this.providerService.validate("codex");
+    }
     const settings = this.appSettings ? await this.appSettings.load() : null;
     // Before the manifest is read: the first snapshot already prices as the author's plans say.
     if (settings) this.providerPlans = settings.plans;

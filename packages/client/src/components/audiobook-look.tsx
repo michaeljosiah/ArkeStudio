@@ -136,7 +136,7 @@ function CharacterRow({ row, kit, slug, orderOf, usage, off, onWrite, onNewLook,
   const photo = kit === null ? null : mainPhotoFor(kit);
   const model = useStore().state;
   const resolved = resolveModel(model, "image", undefined, worldModel(model, "image")).model;
-  const closeCost = resolved === null ? "" : priceLabel(estimateCharacterImageMicroUsd(resolved, "character-look", 1, 2));
+  const closeCost = resolved === null ? "" : priceLabel(estimateCharacterImageMicroUsd(resolved, "character-look", 1, 2), resolved.pricing.kind === "included-plan" ? "included-plan" : undefined);
   const from = line.from !== undefined ? orderOf(line.from) : null;
   const closeTake = chosen === null ? null : closeTakeFor(chosen.id);
   const here = (id: string): string | null => {

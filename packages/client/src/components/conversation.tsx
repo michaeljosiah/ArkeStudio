@@ -12,7 +12,7 @@ import type {
   WorldChatSubject,
   WorldChatWorkspace,
 } from "@arke-studio/contracts";
-import { findHarnessModel, harnessModelManifestEntry, PROVIDERS, proposalDecisionOf, isRemoteHostConversationAction } from "@arke-studio/contracts";
+import { CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan, findHarnessModel, harnessModelManifestEntry, PROVIDERS, proposalDecisionOf, isRemoteHostConversationAction } from "@arke-studio/contracts";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { OnYourPC } from "./on-your-pc.js";
 import { Composer } from "./composer.js";
@@ -397,7 +397,7 @@ export function ConversationPermissionCard({
               <p>
                 {action.receipt.generation.completed} completed · {action.receipt.generation.failed} failed · {action.receipt.generation.cancelled} cancelled · {action.receipt.generation.unattempted} unattempted
               </p>
-              <p>Actual cost: {action.receipt.generation.actualMicroUsd === null ? "Not reported" : `$${(action.receipt.generation.actualMicroUsd / 1_000_000).toFixed(4)}`}</p>
+              <p>{action.shown.body.family === "generation" && usesCodexImagePlan(action.shown.body) ? `${CODEX_IMAGE_PLAN_LABEL} · allowance used is unknown` : `Actual cost: ${action.receipt.generation.actualMicroUsd === null ? "Not reported" : `$${(action.receipt.generation.actualMicroUsd / 1_000_000).toFixed(4)}`}`}</p>
               {action.receipt.generation.results.map((result) => (
                 <div key={result.id} className="fy-actioncard__line">
                   {result.status === "completed" && result.mediaPath ? (
