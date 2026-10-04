@@ -145,9 +145,10 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
   // opens on (turn 145); the launch announcement remembers the version it announced, for as long
   // as the window lives (turn 152); publication preferences keep only position and caption id,
   // keyed by edition and manifest digest; paired-device notifications keep one on/off preference,
-  // and so does Read replies (turn 183). Each strips that one word; keys, auth and decryption
-  // still fail.
+  // and so does Read replies (turn 183); a chapter's Arke dock keeps open or closed per view
+  // (turn 194). Each strips that one word; keys, auth and decryption still fail.
   const stripped = new Map([
+    [join("lib", "chapter-dock.ts"), "localStorage"],
     [join("lib", "dev-session.ts"), "sessionStorage"],
     [join("lib", "continuity.ts"), "sessionStorage"],
     [join("lib", "storyboard-layout.ts"), "localStorage"],

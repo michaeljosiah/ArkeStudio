@@ -328,6 +328,8 @@ export const Scroll = icon(
 export const Message = icon(
   <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />,
 );
+/** The Arke press at the end of the chapter's Audiobook toolbar (design turn 194): a square bubble. */
+export const Chat = icon(<path d="M4 5h16v11H9l-5 4z" />);
 export const Folder = icon(
   <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />,
 );

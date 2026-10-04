@@ -59,7 +59,7 @@ import { DirectedText, type TurnBreak, MarkerMenu, VIEW_HASH, cueLabel, heldWord
 // for the callers and tests that name them from the audiobook.
 export { cueLabel, markerLabel, type MarkerAt };
 import { useMediaQuery } from "../lib/media-query.js";
-import { ChevronDown, Mic, Pin, Play, Plus, Waveform } from "../components/icons.js";
+import { ChevronDown, Mic, Pin, Play, PlaySolid, Plus, Waveform } from "../components/icons.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { Button } from "../components/ui.js";
 import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, usePlayback, useQueueAt } from "../lib/audio.js";
@@ -145,10 +145,14 @@ export interface ChapterAudiobookInput {
   beforeRead?: (intent: AudiobookIntent) => boolean;
   /** Listen is the head's primary (`listenLeads`): Direct and Read the chapter stand back beside it. */
   listenLeads?: boolean;
-  /** Illustrate this chapter (design turn 191b), beside Direct: its press, whether it is working, and whether a proposal is held (`Illustrate again`). */
-  illustrate?: { press: () => void; busy: boolean; again: boolean };
-  /** The chapter's Looks (design turn 193a, rule 5): a head press beside Illustrate that opens the Looks sheet. */
-  looks?: { open: () => void };
+  /**
+   * Illustrate this chapter (design turn 191b), in the Direct and illustrate menu (194): its press,
+   * whether it is working, whether a proposal is held (`Illustrate again`), the state the menu says
+   * beside it, and — while it reads or makes — the count and Stop the toolbar shows in the menu's place.
+   */
+  illustrate?: { press: () => void; busy: boolean; again: boolean; state?: string; running?: { line: string; stop?: () => void } };
+  /** The chapter's Looks (design turn 193a), in the same menu (194): opens the Looks sheet; `state` is what it says beside it. */
+  looks?: { open: () => void; state?: string };
 }
 
 /** What a press asks for once the save lands: the chapter, these blocks alone, a direction, or a card's acceptance. */
@@ -926,68 +930,110 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         </span>
       );
     }
+    // Direct, Illustrate this chapter and Looks are one menu (design turn 194, rule 3), each with
+    // its state at the right; the presses and their handlers are the ones the head carried. While a
+    // run directs or illustrates, its count — and Stop where the run has one — stands in the menu's
+    // place, as the head did: a menu of things that cannot be pressed says nothing.
+    const directing = directionRun?.state === "directing" || directionRun?.state === "accepting";
+    const running = directing
+      ? { line: directionRun?.state === "accepting" ? "accepting…" : "directing…" }
+      : input.illustrate?.running;
+    const menu = rows.length === 0 ? null : running !== undefined ? (
+      <span className="fy-ab__control" data-testid="audiobook-run-line">
+        <span className="fy-mono">{running.line}</span>
+        {"stop" in running && running.stop !== undefined && (
+          <button type="button" className="fy-ab__pill" onClick={running.stop} data-testid="audiobook-run-stop">
+            Stop
+          </button>
+        )}
+      </span>
+    ) : (
+      <ToolMenu
+        label="Direct and illustrate"
+        testId="direct-illustrate"
+        items={[
+          {
+            key: "direct",
+            label: directedBlocks > 0 ? "Direct again" : "Direct this chapter",
+            state: proposal !== null ? "proposed" : directedBlocks > 0 ? "directed" : "",
+            // A held proposal answers the press until it is accepted or discarded (turn 184b).
+            disabled: !directable || locked || connection !== "open",
+            press: directPress,
+            testId: "direct-audiobook",
+          },
+          ...(input.illustrate !== undefined
+            ? [{
+                key: "illustrate",
+                label: input.illustrate.again ? "Illustrate again" : "Illustrate this chapter",
+                state: input.illustrate.state ?? "",
+                disabled: locked || connection !== "open" || input.illustrate.busy,
+                press: input.illustrate.press,
+                testId: "illustrate-chapter",
+              }]
+            : []),
+          ...(input.looks !== undefined
+            ? [{ key: "looks", label: "Looks", state: input.looks.state ?? "", disabled: connection !== "open", press: input.looks.open, testId: "audiobook-looks-open" }]
+            : []),
+        ]}
+      />
+    );
     return (
       <span className="fy-ab__control">
-        {mixPlaying ? (
-          <>
-            <span className="fy-mono" data-testid="audiobook-mix-at">
-              {sounding?.mark ?? ""} · {clock(mixAt ?? 0)}
-            </span>
-            <Button variant="ghost" onClick={stopPlaying}>
-              Stop
-            </Button>
-          </>
-        ) : playing ? (
-          <>
-            <span className="fy-mono">
-              {sounding?.mark ?? ""} · {(at ?? 0) + 1} of {playable.length}
-            </span>
-            <Button variant="ghost" disabled={at === null || at + 1 >= playable.length} onClick={() => jumpQueue((at ?? 0) + 1)}>
-              Skip
-            </Button>
-            <Button variant="ghost" onClick={stopPlaying}>
-              Stop
-            </Button>
-          </>
-        ) : (
-          playable.length > 0 && (
-            <Button variant="ghost" onClick={play} disabled={mixPlayer.pending} data-testid="audiobook-play">
-              {mixPlayer.pending ? "Mixing…" : "Play"}
-            </Button>
-          )
-        )}
-        {mixPlayer.refused !== null && !mixPlaying && <span className="fy-mono fy-ch__who-where--warn">{mixPlayer.refused}</span>}
-        {/* Direct this chapter in the head beside the read (design turn 184a), as well as the
-            dock's prompt: the same sheet. A held proposal answers it until accepted or discarded.
-            Never the primary: the read is, until a block is made and Listen takes it (turn 188). */}
-        {directable && (
-          <Button variant="secondary" disabled={locked || connection !== "open"} onClick={directPress} data-testid="direct-audiobook">
-            {/* The tail is its own box so a tight centre can drop it and keep the head on one row. */}
-            Direct<span className="fy-ab__presstail">{directedBlocks > 0 ? " again" : " this chapter"}</span>
-          </Button>
-        )}
-        {/* Illustrate this chapter beside Direct (design turn 191b): the same sort of press, read and held. */}
-        {input.illustrate !== undefined && rows.length > 0 && (
-          <Button variant="secondary" disabled={locked || connection !== "open" || input.illustrate.busy} onClick={input.illustrate.press} data-testid="illustrate-chapter">
-            Illustrate<span className="fy-ab__presstail">{input.illustrate.again ? " again" : " this chapter"}</span>
-          </Button>
-        )}
-        {/* The chapter's Looks (design turn 193a): who wears what in this chapter's pictures, beside Illustrate. */}
-        {input.looks !== undefined && rows.length > 0 && (
-          <Button variant="secondary" disabled={connection !== "open"} onClick={input.looks.open} data-testid="audiobook-looks-open">
-            Looks
-          </Button>
-        )}
+        {menu}
+        {/* The read leads until a block is made and Listen takes the fill (turn 188). Short of room
+            it says `Read · price` (194, rule 1): the tails are their own boxes so the centre's
+            container query can drop them and keep the toolbar on one line. */}
         {counts.toMake.length > 0 && (
-          <Button variant={input.listenLeads === true ? "secondary" : "primary"} disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
-            Read the chapter · {counts.toMake.length} block{counts.toMake.length === 1 ? "" : "s"}
-            {grouping.groups.length > 0 ? ` · ${grouping.requests} request${grouping.requests === 1 ? "" : "s"}` : ""}
-            {chapterEstimate > 0 ? ` · ${tokenPriced ? "~" : ""}${formatMicroUsd(chapterEstimate)}` : plan !== null ? ` · ${plan}` : ""}
-          </Button>
+          <button type="button" className={`fy-ab__pill${input.listenLeads === true ? "" : " fy-ab__pill--pri"}`} disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
+            <span>Read<span className="fy-ab__presstail"> the chapter</span></span>
+            {SPOKEN_GAP}
+            {(() => {
+              const price = chapterEstimate > 0 ? `${tokenPriced ? "~" : ""}${formatMicroUsd(chapterEstimate)}` : plan;
+              return (
+                <em>
+                  <span className="fy-ab__presstail">· {counts.toMake.length} block{counts.toMake.length === 1 ? "" : "s"}{grouping.groups.length > 0 ? ` · ${grouping.requests} request${grouping.requests === 1 ? "" : "s"}` : ""}{price !== null ? " " : ""}</span>
+                  {price !== null ? `· ${price}` : ""}
+                </em>
+              );
+            })()}
+          </button>
         )}
       </span>
     );
   })();
+
+  // The chapter's Play, the mix as it will be heard (146's check), is the round press at the left of
+  // the foot line (design turn 194, rule 4); while it plays the foot says the block and the time,
+  // and the press stops it. Listen stays the book in the player.
+  const footPlay = mixPlaying ? (
+    <>
+      <button type="button" className="fy-ab__footplay" onClick={stopPlaying} aria-label="Stop" data-testid="audiobook-stop">
+        <span className="fy-ab__footplay-dot fy-ab__footplay-dot--stop" aria-hidden="true" />
+      </button>
+      <span className="fy-ab__footplay-at" data-testid="audiobook-mix-at">
+        {sounding?.mark ?? ""} · {clock(mixAt ?? 0)}
+      </span>
+    </>
+  ) : playing ? (
+    <>
+      <button type="button" className="fy-ab__footplay" onClick={stopPlaying} aria-label="Stop" data-testid="audiobook-stop">
+        <span className="fy-ab__footplay-dot fy-ab__footplay-dot--stop" aria-hidden="true" />
+      </button>
+      <span className="fy-ab__footplay-at">
+        {sounding?.mark ?? ""} · {(at ?? 0) + 1} of {playable.length}
+      </span>
+      <button type="button" className="fy-ab__footlink" disabled={at === null || at + 1 >= playable.length} onClick={() => jumpQueue((at ?? 0) + 1)}>
+        Skip
+      </button>
+    </>
+  ) : (
+    <button type="button" className="fy-ab__footplay" onClick={play} disabled={playable.length === 0 || mixPlayer.pending} data-testid="audiobook-play">
+      <span className="fy-ab__footplay-dot" aria-hidden="true">
+        <PlaySolid size={10} />
+      </span>
+      {mixPlayer.pending ? "Mixing…" : "Play"}
+    </button>
+  );
 
   const note =
     record === "unreadable"
@@ -1073,6 +1119,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     setFilter,
     filters,
     head,
+    /** The foot line's Play (design turn 194, rule 4), and why the mix could not play where it could not. */
+    footPlay,
+    mixRefused: mixPlaying ? null : mixPlayer.refused,
     note,
     selected,
     setSelected,
@@ -1172,8 +1221,8 @@ export function ReadingMenu({ reading, narrator, disabled, onReading, onNarrator
         onClick={() => setOpen((was) => !was)}
         data-testid="audiobook-reading"
       >
-        <span className="fy-ab__reading-k">{label}</span> · {narrator}
-        <ChevronDown size={10} aria-hidden="true" />
+        <span className="fy-ab__reading-k">{label} ·</span> <b>{narrator}</b>
+        <ChevronDown size={13} stroke={2} aria-hidden="true" />
       </button>
       {open && (
         <div ref={menu} className="fy-ab__menu fy-ab__reading-menu" role="menu" aria-label="Reading" onKeyDown={onKey}>
@@ -1586,34 +1635,171 @@ export function ReadSheet({ sheet }: { sheet: NonNullable<ReturnType<typeof useC
   );
 }
 
-/** The row over the blocks (R-33): everyone, the narrator, each speaker with a count. Choosing one dims the rest. */
-export function AudiobookFilterRow({ filters, filter, onFilter }: {
-  filters: { everyone: number; narrator: number; speakers: { key: string; label: string; colour: number | null; count: number }[] };
+/**
+ * A toolbar press and what it opens under it (design turn 194): open on press, closed by Escape —
+ * focus back on the press — or by a press outside both. The reading menu's own rule, shared by the
+ * Direct and illustrate menu, the speaker filter and the notes.
+ */
+function usePopover() {
+  const [open, setOpen] = useState(false);
+  const press = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: MouseEvent) => {
+      if (panel.current?.contains(event.target as Node) || press.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [open]);
+  const close = (refocus: boolean) => {
+    setOpen(false);
+    if (refocus) press.current?.focus();
+  };
+  const onKey = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close(true);
+      return;
+    }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const items = [...(panel.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not([aria-disabled="true"])') ?? [])];
+    if (items.length === 0) return;
+    event.preventDefault();
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    items[(at + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
+  };
+  return { open, setOpen, press, panel, close, onKey };
+}
+
+/**
+ * The space between a press's label and its data. The pill's flex gap draws it (194's 6), and a
+ * flex gap is no character: without this the press reads, and is announced, as `Notes2`.
+ */
+const SPOKEN_GAP = <span className="fy-sr-only"> </span>;
+
+/** One item of a toolbar menu: the label, its state at the right in mono, and its press. */
+export interface ToolMenuItem { key: string; label: string; state: string; disabled: boolean; press: () => void; testId?: string }
+
+/**
+ * Direct and illustrate (design turn 194, rule 3): one press, its menu drawn with the reading
+ * menu's primitive, each item saying where it stands. The items keep the head's handlers.
+ */
+export function ToolMenu({ label, items, testId }: { label: string; items: readonly ToolMenuItem[]; testId?: string }) {
+  const pop = usePopover();
+  useEffect(() => {
+    if (pop.open) pop.panel.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')?.focus();
+  }, [pop.open]);
+  return (
+    <span className="fy-ab__tool">
+      <button
+        ref={pop.press}
+        type="button"
+        className={`fy-ab__pill${pop.open ? " fy-ab__pill--on" : ""}`}
+        aria-haspopup="menu"
+        aria-expanded={pop.open}
+        onClick={() => pop.setOpen((was) => !was)}
+        {...(testId !== undefined ? { "data-testid": testId } : {})}
+      >
+        {label}
+        <ChevronDown size={13} stroke={2} aria-hidden="true" />
+      </button>
+      {pop.open && (
+        <div ref={pop.panel} className="fy-ab__menu fy-ab__toolmenu fy-ab__toolmenu--end" role="menu" aria-label={label} onKeyDown={pop.onKey}>
+          {items.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              role="menuitem"
+              aria-disabled={item.disabled}
+              className="fy-ab__menu-opt"
+              onClick={() => {
+                if (item.disabled) return;
+                pop.close(false);
+                item.press();
+              }}
+              {...(item.testId !== undefined ? { "data-testid": item.testId } : {})}
+            >
+              <span className="fy-ab__menu-label">{item.label}</span>
+              {item.state !== "" && <span className="fy-ab__menu-meta">{item.state}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
+/**
+ * The speakers as one filter (design turn 194, rule 6; R-33): `Everyone · 122 ▾` opens the
+ * speakers with their colour and count; choosing one names it on the press and dims the rest.
+ */
+export function AudiobookFilterMenu({ filters, filter, onFilter }: {
+  filters: { everyone: number; narrator: number; speakers: { key: string; label: string; full?: string; colour: number | null; count: number }[] };
   filter: AudiobookFilter;
   onFilter: (filter: AudiobookFilter) => void;
 }) {
+  const pop = usePopover();
+  useEffect(() => {
+    if (pop.open) (pop.panel.current?.querySelector<HTMLElement>('[aria-checked="true"]') ?? pop.panel.current?.querySelector<HTMLElement>('[role="menuitemradio"]'))?.focus();
+  }, [pop.open]);
   if (filters.everyone === 0) return null;
-  const chip = (key: string, label: string, count: number, on: boolean, next: AudiobookFilter, tone: string | null) => (
-    <button
-      key={key}
-      type="button"
-      className={`fy-ab__fchip${tone !== null ? ` fy-voice--${tone}` : ""}${on ? " fy-ab__fchip--on" : ""}`}
-      aria-pressed={on}
-      onClick={() => onFilter(on && next !== null ? null : next)}
-    >
-      {tone !== null && <i className="fy-ab__speaker-dot" aria-hidden="true" />}
-      {label}
-      <span className="fy-ab__fcount">{count}</span>
-    </button>
-  );
+  const options: Array<{ key: string; label: string; full?: string; count: number; on: boolean; next: AudiobookFilter; tone: string | null }> = [
+    { key: "everyone", label: "Everyone", count: filters.everyone, on: filter === null, next: null, tone: null },
+    ...(filters.narrator > 0 ? [{ key: "narrator", label: "Narrator", count: filters.narrator, on: filter === "narrator", next: "narrator" as const, tone: "narrator" }] : []),
+    ...filters.speakers.map((who) => ({
+      key: who.key,
+      label: who.label,
+      ...(who.full !== undefined && who.full !== who.label ? { full: who.full } : {}),
+      count: who.count,
+      on: typeof filter === "object" && filter !== null && filter.speaker === who.key,
+      next: { speaker: who.key },
+      tone: who.colour === null ? "none" : String(who.colour),
+    })),
+  ];
+  const chosen = options.find((option) => option.on) ?? options[0]!;
   return (
-    <div className="fy-ab__filter" role="group" aria-label="Speakers" data-testid="audiobook-filter">
-      {chip("everyone", "Everyone", filters.everyone, filter === null, null, null)}
-      {filters.narrator > 0 && chip("narrator", "Narrator", filters.narrator, filter === "narrator", "narrator", "narrator")}
-      {filters.speakers.map((who) =>
-        chip(who.key, who.label, who.count, typeof filter === "object" && filter !== null && filter.speaker === who.key, { speaker: who.key }, who.colour === null ? "none" : String(who.colour)),
+    <span className="fy-ab__tool">
+      <button
+        ref={pop.press}
+        type="button"
+        className={`fy-ab__pill${pop.open ? " fy-ab__pill--on" : ""}`}
+        aria-haspopup="menu"
+        aria-expanded={pop.open}
+        onClick={() => pop.setOpen((was) => !was)}
+        {...(chosen.full !== undefined ? { title: chosen.full } : {})}
+        data-testid="audiobook-filter"
+      >
+        {chosen.label}
+        {SPOKEN_GAP}
+        <em>{chosen.count}</em>
+        <ChevronDown size={13} stroke={2} aria-hidden="true" />
+      </button>
+      {pop.open && (
+        <div ref={pop.panel} className="fy-ab__menu fy-ab__toolmenu fy-ab__filtermenu" role="menu" aria-label="Speakers" onKeyDown={pop.onKey}>
+          {options.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              role="menuitemradio"
+              aria-checked={option.on}
+              className={`fy-ab__menu-opt${option.tone !== null ? ` fy-voice--${option.tone}` : ""}${option.on ? " fy-ab__menu-opt--on" : ""}`}
+              {...(option.full !== undefined ? { title: option.full } : {})}
+              onClick={() => {
+                pop.close(true);
+                if (!option.on) onFilter(option.next);
+              }}
+            >
+              <i className={`fy-ab__speaker-dot${option.tone === null ? " fy-ab__speaker-dot--all" : ""}`} aria-hidden="true" />
+              <span className="fy-ab__menu-label">{option.label}</span>
+              <span className="fy-ab__menu-meta">{option.count}</span>
+            </button>
+          ))}
+        </div>
       )}
-    </div>
+    </span>
   );
 }
 
@@ -2432,19 +2618,46 @@ export function useProductionReading(worldId: string, productionId: string): boo
   return book?.state === "reading" || Object.entries(runs).some(([key, run]) => key.startsWith(`${worldId}/${productionId}/`) && run.state === "reading");
 }
 
-export function ReadingNotes({ worldId, productionId, chapterFile, notes, disabled: off }: {
+/**
+ * The book note and the chapter note behind one press (design turn 194, rule 5): `Notes · 2`
+ * counts the notes set, `Notes` alone when none is. It opens a 520 sheet under the press, the two
+ * fields with their counts as built, each written when it is left; Escape or a press outside closes
+ * it. The fields hold, and so does the press, offline or while the book is read (codex on PR 1479).
+ */
+export function NotesPress({ worldId, productionId, chapterFile, notes, disabled: off }: {
   worldId: string;
   productionId: string;
   chapterFile: string;
   notes: AudiobookReadingNotes;
   disabled: boolean;
 }) {
-  const disabled = off || useProductionReading(worldId, productionId);
+  // Asked on every render: behind `off ||` the hook was skipped while offline, and the hooks after
+  // it shifted the moment the connection came back.
+  const reading = useProductionReading(worldId, productionId);
+  const disabled = off || reading;
+  const pop = usePopover();
+  const set = [notes.book, notes.chapter].filter((note) => note !== undefined && note !== "").length;
   return (
-    <div className="fy-ab__notes" data-testid="reading-notes">
-      <NoteRow label="Book note" value={notes.book} disabled={disabled} onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note)} />
-      <NoteRow label="Chapter note" value={notes.chapter} disabled={disabled} area onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note, chapterFile)} />
-    </div>
+    <span className="fy-ab__tool">
+      <button
+        ref={pop.press}
+        type="button"
+        className={`fy-ab__pill${pop.open ? " fy-ab__pill--on" : ""}`}
+        aria-expanded={pop.open}
+        aria-haspopup="dialog"
+        disabled={disabled}
+        onClick={() => pop.setOpen((was) => !was)}
+        data-testid="reading-notes-press"
+      >
+        Notes{set > 0 && <>{SPOKEN_GAP}<em>{set}</em></>}
+      </button>
+      {pop.open && (
+        <div ref={pop.panel} className="fy-ab__notes" role="dialog" aria-label="Notes" data-testid="reading-notes" onKeyDown={pop.onKey}>
+          <NoteRow label="Book note" value={notes.book} disabled={disabled} stacked area onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note)} />
+          <NoteRow label="Chapter note" value={notes.chapter} disabled={disabled} stacked area onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note, chapterFile)} />
+        </div>
+      )}
+    </span>
   );
 }
 
@@ -2453,7 +2666,7 @@ export function ReadingNotes({ worldId, productionId, chapterFile, notes, disabl
  * a chapter note runs to 300 characters, and on one line it was cut off however wide the window
  * (turn 188). Enter still leaves the field, as it does on the single line.
  */
-function NoteRow({ label, value, disabled, onCommit, max = CADENCE_NOTE_MAX, multiline = false, area = false }: { label: string; value: string | undefined; disabled: boolean; onCommit: (note: string | null) => void; max?: number; multiline?: boolean; area?: boolean }) {
+function NoteRow({ label, value, disabled, onCommit, max = CADENCE_NOTE_MAX, multiline = false, area = false, stacked = false }: { label: string; value: string | undefined; disabled: boolean; onCommit: (note: string | null) => void; max?: number; multiline?: boolean; area?: boolean; /** The label and count over the field (194e's notes sheet). */ stacked?: boolean }) {
   const [draft, setDraft] = useState<string | null>(null);
   const shown = draft ?? value ?? "";
   const commit = () => {
@@ -2472,7 +2685,7 @@ function NoteRow({ label, value, disabled, onCommit, max = CADENCE_NOTE_MAX, mul
     onBlur: commit,
   };
   return (
-    <label className={multiline ? "fy-ab__booknote" : area ? "fy-vd__note fy-vd__note--area" : "fy-vd__note"}>
+    <label className={`${multiline ? "fy-ab__booknote" : area ? "fy-vd__note fy-vd__note--area" : "fy-vd__note"}${stacked ? " fy-vd__note--stacked" : ""}`}>
       <span className="fy-vd__note-k">{label}</span>
       {multiline ? (
         <textarea {...props} rows={2} onChange={(event) => setDraft(event.target.value)} />
