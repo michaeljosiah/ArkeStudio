@@ -1337,6 +1337,21 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     })
     .strict(),
   /**
+   * The looks a book's chapters have chosen (design turn 193, SPEC-047 R-114), answered to the
+   * window that asked: for each kit look, the chapters (by their number) that chose it, so a
+   * picker can say `chapters 3, 5`. Nothing was changed or spent.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.looks"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      usage: z.record(z.string().min(1).max(120), z.array(z.number().int().min(0)).max(400)),
+    })
+    .strict(),
+  /**
    * A picture suggested for a block (design turn 191a, SPEC-047 R-99), answered to the window that
    * asked: the prompt with who is in it, their look, the model, the ratio and the price — or why
    * not. Nothing was made or spent.

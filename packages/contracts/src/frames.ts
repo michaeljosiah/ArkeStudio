@@ -3403,6 +3403,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * Which chapters of the book chose each kit look (design turn 193, SPEC-047 R-114): read from the
+   * chapters' records, nothing changed. Answered as `audiobook.looks` under the same id.
+   */
+  z.object({ kind: z.literal("read-audiobook-looks"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /**
    * A kit look chosen for a character in this chapter (design turn 193, SPEC-047 R-112), or the
    * choice taken away with null. Chosen by pointer; the look stays unattached (SPEC-017 R-18). The
    * character's line becomes the look's own clothing line. Answered as `audiobook.record`.

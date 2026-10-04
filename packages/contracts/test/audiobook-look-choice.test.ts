@@ -107,6 +107,16 @@ describe("a derive over a look that has a choice", () => {
     assert.deepEqual(look.characters["odile"], { name: "Odile", sheet: "odile", text: "Grey wool.", lookId: "tk_grey", from: "01-the-lamp" });
   });
 
+  it("is carried only to a character the look held nothing for, so a choice of no look survives a derive again", () => {
+    const carried = { "maren-kest": { name: "Maren", sheet: "maren-kest", lookId: "tk_storm", text: "Storm coat.", from: "03-the-stair" } };
+    const none = chooseLook(CHOSEN, { key: "maren-kest" }, null, stamp)!;
+    assert.equal(none.characters["maren-kest"]!.lookId, undefined);
+    const again = mergeLook(none, { characters: [{ key: "maren-kest", name: "Maren", text: "Oilskin coat." }] }, stamp, carried).look;
+    assert.equal(again.characters["maren-kest"]!.lookId, undefined, "the author chose the main photo; Derive again leaves it");
+    const first = mergeLook(LOOK, { characters: [{ key: "ghost", name: "Ghost", text: "A sheet." }] }, stamp, { ghost: { name: "Ghost", lookId: "tk_g", text: "A sheet.", from: "01-the-lamp" } }).look;
+    assert.equal(first.characters["ghost"]!.lookId, "tk_g", "a character the look never held does start with it");
+  });
+
   it("is not carried over a choice the chapter already holds", () => {
     const carried = { "maren-kest": { name: "Maren", sheet: "maren-kest", lookId: "tk_other", text: "Another coat.", from: "01-the-lamp" } };
     const { look } = mergeLook(CHOSEN, { characters: [{ key: "maren-kest", name: "Maren", text: "x" }] }, stamp, carried);

@@ -329,6 +329,7 @@ import {
 import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiobookBook } from "./productions/audiobook-book.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
 import { anyNarrator, audiobookListening, setAudiobookPicture } from "./productions/audiobook-listening.js";
+import { bookLookChoices, lookUsage } from "./productions/audiobook-look-book.js";
 import { chooseChapterLook, deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
 import { makeAdapterIllustrateDeriver, proposeIllustrations, type IllustrateDeriver } from "./productions/audiobook-illustrate.js";
 import { clipPrompt, depictable, makeAdapterPictureDeriver, pictureAspect, pictureRoom, pictureWho, promptRoom, suggestPicture, type PictureDeriver } from "./productions/audiobook-picture-suggest.js";
@@ -15283,6 +15284,15 @@ export class Coordinator {
           void this.appLog?.append({ kind: "audiobook.look-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
         }
+        return;
+      }
+      case "read-audiobook-looks": {
+        // Which chapters chose each kit look (turn 193, R-114): read from the records, answered
+        // to the window that asked, nothing changed.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const usage = lookUsage(await bookLookChoices(store, msg.productionId));
+        this.emit({ at: new Date().toISOString(), type: "audiobook.looks", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, usage });
         return;
       }
       case "choose-audiobook-look": {

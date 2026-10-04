@@ -1484,6 +1484,18 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(q(m, '[data-testid="illustrate-chapter"]')?.textContent, "Illustrate again");
   });
 
+  it("has Looks in the head beside Illustrate, opening the chapter's Looks sheet (design turn 193a)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    const looks = q(m, '[data-testid="audiobook-looks-open"]');
+    assert.equal(looks?.textContent, "Looks");
+    assert.equal(looks?.parentElement, q(m, '[data-testid="illustrate-chapter"]')?.parentElement, "beside Illustrate this chapter");
+    assert.equal(document.body.querySelector('[data-testid="look-sheet"]'), null, "closed until pressed");
+    await act(async () => looks!.click());
+    assert.ok(document.body.querySelector('[data-testid="look-sheet"]'), "the Looks sheet opens on the body");
+    assert.equal(sentOf(m, "read-audiobook-looks").length, 1, "which chapters chose which look is asked when it opens");
+  });
+
   it("opens the proposal as a sheet over the main area, beside the dock: its pace, what needs a look, the dashed chips on the blocks, one Accept", async () => {
     const m = await proposedMount();
     assert.deepEqual(all(m, '[data-testid="illustration-chip"]').map((chip) => chip.textContent), ["The bell", "The line", "The tide"], "a dashed chip on each block it would go on");

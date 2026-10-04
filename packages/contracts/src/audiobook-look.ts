@@ -295,7 +295,8 @@ export function mergeLook(
   for (const entry of derived.characters) {
     if (characters[entry.key] !== undefined) continue;
     if (Object.keys(characters).length >= LOOK_CHARACTERS_MAX) break;
-    const take = carried?.[entry.key];
+    // Carried only to a character the look held nothing for: one the author set to no look stays so after a derive again.
+    const take = held?.characters[entry.key] === undefined ? carried?.[entry.key] : undefined;
     if (take !== undefined) {
       // Carrying a look copies nothing and costs nothing: the choice and its words, from the chapter it was made in.
       const same = entry.text.replace(/\s+/g, " ").trim() === take.text.replace(/\s+/g, " ").trim();
@@ -320,7 +321,7 @@ export function mergeLook(
   }
   // A character the chapter names but the reading found no clothing for still starts with the look carried to them.
   for (const [key, take] of Object.entries(carried ?? {})) {
-    if (characters[key] !== undefined || Object.keys(characters).length >= LOOK_CHARACTERS_MAX) continue;
+    if (characters[key] !== undefined || held?.characters[key] !== undefined || Object.keys(characters).length >= LOOK_CHARACTERS_MAX) continue;
     characters[key] = { name: take.name, ...(take.sheet !== undefined ? { sheet: take.sheet } : {}), text: take.text, lookId: take.lookId, from: take.from };
   }
   let place: LookLine | undefined;

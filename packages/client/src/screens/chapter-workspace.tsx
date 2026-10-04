@@ -1175,6 +1175,7 @@ export function ChapterWorkspace({
     locked: locked || record === null,
     listenLeads: listenLeads(production, chapter.id),
     illustrate: { press: illustration.press, busy: illustration.busy, again: illustration.run?.state === "proposed" },
+    looks: { open: () => setIllustrationLookOpen(true) },
     // The press waits out the autosave (turn 126's fourth rule, codex on PR 1180): a read of
     // the words on disk while newer ones are on their way would make takes stale on arrival.
     beforeRead: (intent) => {

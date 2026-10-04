@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { DomainEventSchema } from "../src/events.js";
 import { ClientMessageSchema } from "../src/frames.js";
 
 /**
@@ -32,5 +33,12 @@ describe("the frames a look is made and chosen by", () => {
     assert.ok(ClientMessageSchema.safeParse({ ...choose, lookId: TAKE }).success);
     assert.ok(ClientMessageSchema.safeParse({ ...choose, lookId: null }).success);
     assert.equal(ClientMessageSchema.safeParse({ ...choose }).success, false, "a choice names the look or null");
+  });
+
+  it("asks which chapters chose each look, and is answered with their numbers by look", () => {
+    assert.ok(ClientMessageSchema.safeParse({ kind: "read-audiobook-looks", worldId: WORLD, productionId: "saltlight", requestId: REQ }).success);
+    const answer = { at: "2026-10-04T09:00:00.000Z", type: "audiobook.looks", requestId: REQ, worldId: WORLD, productionId: "saltlight", usage: { [TAKE]: [1, 3] } };
+    assert.ok(DomainEventSchema.safeParse(answer).success);
+    assert.equal(DomainEventSchema.safeParse({ ...answer, usage: { [TAKE]: ["one"] } }).success, false);
   });
 });
