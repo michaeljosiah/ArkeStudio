@@ -6,7 +6,11 @@ import { ArkeReadObservationSchema, ConversationActionSemanticIdSchema, type Ark
 import { AudioPolicySchema, FailureModesSchema, KeyArtIntentSchema } from "./art-direction.js";
 import { BenchModeSchema, BenchParamsSchema } from "./bench.js";
 import { BibleEditSchema } from "./bible.js";
-import { ExportPresetSchema } from "./cut.js";
+import { DialogueTimingIntentSchema, ExportPresetSchema } from "./cut.js";
+import { CadencePlanObjectSchema } from "./cadence.js";
+import { PerformanceIdSchema } from "./performance.js";
+import { DeliverySchema } from "./voice.js";
+import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { ModelEditorRequestSchema, ModelSceneEditSchema } from "./editor-request.js";
 import {
   ArtifactIdSchema,
@@ -14,6 +18,7 @@ import {
   CanonIdSchema,
   CheckReceiptIdSchema,
   ChatAttachmentIdSchema,
+  ConversationActionIdSchema,
   EpisodeIdSchema,
   FrameRunIdSchema,
   SceneIdSchema,
@@ -31,7 +36,7 @@ import { SceneCommandSchema } from "./scene-operations.js";
 import { SceneRecordSchema, type SceneRecord } from "./scene-flow.js";
 import { AudioSpineCommandSchema } from "./spine.js";
 import { SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
-import { TimelineTrackIdSchema } from "./timeline.js";
+import { TimelineClipIdSchema, TimelineTrackIdSchema } from "./timeline.js";
 import {
   CHARACTER_ROLE_MAX,
   FrameRateSchema,
@@ -48,6 +53,7 @@ const CandidateRevisionSchema = z
 
 const CompleteReadIdsSchema = z.array(CheckReceiptIdSchema).min(1).max(8);
 export const TurnActionRefSchema = z.string().regex(/^[a-z][a-z0-9-]{0,31}$/);
+export const PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION = 57;
 const ActionSequencingShape = { ref: TurnActionRefSchema.optional(), after: z.array(TurnActionRefSchema).max(24).optional() };
 export const CHAT_SEQUENCING_SCHEMA_VERSION = 55;
 const SemanticIdsSchema = z.array(ConversationActionSemanticIdSchema).max(40);
@@ -1020,6 +1026,43 @@ const ProductionStagePlayblastModelActionSchema = z
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
+/** The person approves a sealed quote; the model supplies no price, rights, QC or upload consent. */
+export const ProductionAudioGenerationRequestSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("voice-line"), shotId: ShotIdSchema, modelId: z.string().min(1).optional(), delivery: DeliverySchema.optional() }).strict(),
+  z.object({ operation: z.literal("performance"), sceneId: SceneIdSchema, shotId: ShotIdSchema, blockId: z.string().min(1).optional(),
+    direction: CadencePlanObjectSchema.omit({ schemaVersion: true, sourceTextHash: true }).optional() }).strict(),
+  z.object({ operation: z.literal("table-read"), sceneId: SceneIdSchema }).strict(),
+  z.object({ operation: z.literal("voice-sample"), sheetId: SlugSchema, modelId: z.string().min(1), script: z.string().trim().min(1).max(2000),
+    durationSec: z.number().int().min(5).max(10) }).strict(),
+  z.object({ operation: z.literal("prepare-voice-sample"), sheetId: SlugSchema, source: VoiceSampleSourceSchema }).strict(),
+]);
+export const ProductionAudioGenerationModelActionSchema = z.object({ kind: z.literal("production-audio-generation"),
+  productionId: SlugSchema, request: ProductionAudioGenerationRequestSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+export const ProductionPerformanceCommandSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("propose-duration"), performanceId: PerformanceIdSchema,
+    leadInSec: z.number().finite().nonnegative(), timing: DialogueTimingIntentSchema }).strict(),
+  z.object({ operation: z.literal("place-selected"), performanceId: PerformanceIdSchema,
+    leadInSec: z.number().finite().nonnegative(), timing: DialogueTimingIntentSchema }).strict(),
+  z.object({ operation: z.literal("clear-selection"), lineKey: z.string().min(1).max(300) }).strict(),
+]);
+export const ProductionPerformanceModelActionSchema = z.object({ kind: z.literal("production-performance-command"),
+  productionId: SlugSchema, command: ProductionPerformanceCommandSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+/** Audio edits share the canonical typed timeline vocabulary and its editor-request decision. */
+export const ProductionAudioEditModelActionSchema = z.object({ kind: z.literal("production-audio-edit"),
+  productionId: SlugSchema, request: ModelEditorRequestSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+export const ProductionAudioCueModelActionSchema = z.object({ kind: z.literal("production-audio-cue"), productionId: SlugSchema,
+  source: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("generation"), actionRef: TurnActionRefSchema, outputIndex: z.number().int().min(0).max(23).default(0) }).strict(),
+    z.object({ kind: z.literal("bench-take"), sessionId: SessionIdSchema, takeId: TakeIdSchema }).strict(),
+    z.object({ kind: z.literal("artifact"), artifactId: ArtifactIdSchema }).strict(),
+    z.object({ kind: z.literal("take"), takeId: TakeIdSchema }).strict(),
+  ]),
+  trackId: TimelineTrackIdSchema, clipId: TimelineClipIdSchema.optional(), startFrame: z.number().int().nonnegative(),
+  durationFrames: z.number().int().positive(), sourceInFrames: z.number().int().nonnegative().default(0),
+  gainDb: z.number().min(-60).max(12).default(0), role: z.enum(["dialogue", "music", "ambience"]),
+  checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+
 export const AudioSpineModelActionSchema = z
   .object({
     kind: z.literal("audio-spine-command"),
@@ -1158,6 +1201,8 @@ export type BenchChatReference = z.infer<typeof BenchChatReferenceSchema>;
 export const BenchGenerationModelActionSchema = z
   .object({
     kind: z.literal("bench-generation"),
+    productionId: SlugSchema.optional(),
+    cueRole: z.enum(["music", "ambience"]).optional(),
     sessionId: SessionIdSchema.optional(),
     /** Rerun repeats this take's immutable request through a new quoted card. */
     rerunTakeId: TakeIdSchema.optional(),
@@ -1317,6 +1362,10 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   PropReferenceModelActionSchema.extend(ActionSequencingShape),
   ImageGenerationActionSchema.extend(ActionSequencingShape),
   BuildItemRunActionSchema.extend(ActionSequencingShape),
+  ProductionAudioGenerationModelActionSchema.extend(ActionSequencingShape),
+  ProductionPerformanceModelActionSchema.extend(ActionSequencingShape),
+  ProductionAudioEditModelActionSchema.extend(ActionSequencingShape),
+  ProductionAudioCueModelActionSchema.extend(ActionSequencingShape),
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
 
@@ -1423,6 +1472,15 @@ export const WorldChatProductionTakeTrimActionSchema = preparedAction("world-cha
 export const WorldChatProductionStageConstructActionSchema = preparedAction("world-chat-production-stage-construct", ProductionStageConstructModelActionSchema);
 export const WorldChatProductionStagePlayblastActionSchema = preparedAction("world-chat-production-stage-playblast", ProductionStagePlayblastModelActionSchema);
 export const WorldChatAudioSpineActionSchema = preparedAction("world-chat-audio-spine-command", AudioSpineModelActionSchema);
+export const WorldChatProductionAudioGenerationActionSchema = preparedAction("world-chat-production-audio-generation", ProductionAudioGenerationModelActionSchema);
+export const WorldChatProductionPerformanceActionSchema = preparedAction("world-chat-production-performance-command", ProductionPerformanceModelActionSchema).extend({
+  frozen: z.object({ sceneVersion: z.number().int().positive().nullable(), timelineRevision: z.number().int().nonnegative().nullable(),
+    timelineHash: z.string().nullable(), selectionHash: z.string().nullable(), reviewHash: z.string().nullable(), performanceHash: z.string().nullable() }).strict(),
+});
+export const WorldChatProductionAudioCueActionSchema = preparedAction("world-chat-production-audio-cue", ProductionAudioCueModelActionSchema).extend({
+  sourceActionId: ConversationActionIdSchema.optional(),
+  timelineRevision: z.number().int().nonnegative(), timelineHash: z.string().min(1),
+});
 export const WorldChatProductionRoutingActionSchema = preparedAction("world-chat-production-routing", ProductionRoutingModelActionSchema);
 export const WorldChatProductionTraversalActionSchema = preparedAction("world-chat-production-routing-traversal", ProductionTraversalModelActionSchema);
 export const WorldChatProductionBranchCanonActionSchema = preparedAction("world-chat-production-branch-canon", ProductionBranchCanonModelActionSchema);
@@ -1646,5 +1704,8 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatBenchKeepActionSchema,
   WorldChatBenchSelectActionSchema,
   WorldChatBenchDiscardActionSchema,
+  WorldChatProductionAudioGenerationActionSchema,
+  WorldChatProductionPerformanceActionSchema,
+  WorldChatProductionAudioCueActionSchema,
 ]);
 export type WorldChatPreparedAction = z.infer<typeof WorldChatPreparedActionSchema>;

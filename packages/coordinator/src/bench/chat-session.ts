@@ -1,10 +1,10 @@
 import { conversationActionDigest } from "../arke-actions/digest.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { BenchEventSchema, BenchReservedTakeSchema, SessionIdSchema, ConversationIdSchema,
-  benchTokenFor, characterSheetFor, mainPhotoFor, foldBenchSession,
+import { BenchEventSchema, BenchReservedTakeSchema, BenchSubjectSchema, PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, SessionIdSchema, ConversationIdSchema,
+  benchTokenFor, characterSheetFor, mainPhotoFor, foldBenchSession, sameBenchSubjectIdentity,
   type BenchChatReference, type BenchEvent, type BenchReferenceToken, type BenchSession,
-  type BenchTake, type BenchReservedTake, type WorldChatBenchGenerationAction } from "@arke-studio/contracts";
+  type BenchTake, type BenchReservedTake, type BenchSubject, type WorldChatBenchGenerationAction } from "@arke-studio/contracts";
 import { readBenchRecord, readBenchSession } from "./chat-reads.js";
 import { BenchStore, sessionDir } from "./store.js";
 import { resolveArtifactSource, resolveTakeSource, resolveTokenEntry } from "./service.js";
@@ -31,10 +31,10 @@ export function completeBenchChatAction(worldDir: string, action: Action): Actio
 }
 interface BenchChatMaterialization {
   reserved: BenchReservedTake[];
-  initialization: { sessionId: string; createdAt: string; fresh: boolean; events: BenchEvent[] };
+  initialization: { sessionId: string; createdAt: string; fresh: boolean; events: BenchEvent[]; subject?: BenchSubject };
 }
 export const BenchChatMaterializationSchema: z.ZodType<BenchChatMaterialization, z.ZodTypeDef, unknown> = z.object({ reserved: z.array(BenchReservedTakeSchema), initialization: z.object({
-  sessionId: SessionIdSchema, createdAt: z.string(), fresh: z.boolean(), events: z.array(BenchEventSchema),
+  sessionId: SessionIdSchema, createdAt: z.string(), fresh: z.boolean(), events: z.array(BenchEventSchema), subject: BenchSubjectSchema.optional(),
 }).strict() }).strict();
 const initializationPrefix = (id: string) => `chat-composer:${id}:`;
 
@@ -109,11 +109,16 @@ async function reference(store: WorldStore, ref: BenchChatReference, session: Be
 export async function prepareBenchChatSession(store: WorldStore, action: Action, id: string, at: string, scope?: GenerationQuoteScope) {
   const sessionId = benchChatSessionId(action, id);
   const record = readBenchRecord(store.dir, sessionId);
+  const production = action.productionId ? store.getBundle().productions.find(p => p.meta.id === action.productionId) : undefined;
+  if (action.productionId && (!production || action.composer.mode !== "music")) throw new Error("A production audio Bench requires a current production and music mode.");
+  const subject: BenchSubject | undefined = production ? { kind: "production", productionId: production.meta.id, productionTitle: production.meta.title, role: action.cueRole ?? "music" } : undefined;
+  if (subject && record && (!record.meta.subject || !sameBenchSubjectIdentity(record.meta.subject, subject))) throw new Error("This Bench belongs to another production or audio role.");
   if (action.sessionId && !record) throw new Error("That Bench session is no longer available.");
-  if (!action.sessionId && record && (record.meta.createdAt !== at || record.meta.subject || record.events.some(e => !e.requestId?.startsWith(initializationPrefix(id))))) {
+  const sameSubject = record?.meta.subject && subject ? sameBenchSubjectIdentity(record.meta.subject, subject) : record?.meta.subject === subject;
+  if (!action.sessionId && record && (record.meta.createdAt !== at || !sameSubject || record.events.some(e => !e.requestId?.startsWith(initializationPrefix(id))))) {
     throw new Error("The proposed Bench identity is already in use.");
   }
-  const meta = record?.meta ?? { schemaVersion: 1 as const, id: sessionId, createdAt: at };
+  const meta = record?.meta ?? { schemaVersion: 1 as const, id: sessionId, createdAt: at, ...(subject ? { subject } : {}) };
   const baseline = record?.events.filter(event => !event.requestId?.startsWith(initializationPrefix(id))) ?? [];
   const session = foldBenchSession(meta, baseline);
   const events: BenchEvent[] = [];
@@ -159,16 +164,17 @@ export async function prepareBenchChatSession(store: WorldStore, action: Action,
       throw new Error("The approved Bench initialization record changed.");
     }
   }
-  return { session, revision: baseline.length, fromTake, initialization: { sessionId, createdAt: at, fresh: !action.sessionId, events } };
+  return { session, revision: baseline.length, fromTake, initialization: { sessionId, createdAt: at, fresh: !action.sessionId, events, ...(subject ? { subject } : {}) } };
 }
 
 export async function materializeBenchChatSession(store: WorldStore, id: string, materialization: unknown) {
   // Quotes prepared by older app versions carry just their reserved takes.
   if (Array.isArray(materialization)) return;
   const { initialization } = BenchChatMaterializationSchema.parse(materialization);
+  if (initialization.subject?.kind === "production") await store.ensureSchemaVersion(PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, "production-chat-audio");
   const bench = new BenchStore(sessionDir(store.dir, initialization.sessionId));
   await store.ownedWrite(async () => {
-    if (initialization.fresh) await bench.create(initialization.sessionId, initialization.createdAt);
+    if (initialization.fresh) await bench.create(initialization.sessionId, initialization.createdAt, initialization.subject);
     else if (!readBenchSession(store.dir, initialization.sessionId)) throw new Error("That Bench is unavailable.");
     for (const [index, event] of initialization.events.entries()) await bench.append(event, {
       at: initialization.createdAt, requestId: `${initializationPrefix(id)}${index}`,

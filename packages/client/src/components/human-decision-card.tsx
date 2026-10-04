@@ -12,6 +12,7 @@ import { SceneStage } from "../screens/scene-workspace/stage.js";
 import { SelectionProvider } from "../screens/scene-workspace/selection.js";
 import { useSceneWriter } from "../screens/scene-workspace/scene-writer.js";
 import { VoiceSampleFlow } from "./character-voice-sample.js";
+import { PerformanceReviewControls } from "./performance-review.js";
 import { ExtractionReviewCandidates } from "./extraction-review.js";
 import { OnYourPC } from "./on-your-pc.js";
 import { Button } from "./ui.js";
@@ -43,6 +44,11 @@ export function HumanDecisionCardView({ card }: { card: HumanDecisionCard }) {
     case "voice-sample": {
       const sheet = world.sheets.find(value => value.id === control.review.sheetId);
       if (sheet) content = <VoiceSampleFlow key={control.review.operationId} world={world} sheet={sheet} initialReview={control.review} inline onClose={() => {}} />;
+      break;
+    }
+    case "performance-review": {
+      const production = world.productions.find(value => value.meta.id === control.productionId);
+      if (production) content = <PerformanceReviewControls key={control.performanceId} world={world} production={production} performanceId={control.performanceId} />;
       break;
     }
     case "stage-host": case "stage-review": {

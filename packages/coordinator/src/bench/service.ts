@@ -494,7 +494,7 @@ function productionProvenanceFor(
 ): Provenance | undefined {
   if (session.subject === undefined) return undefined;
   if (fromTake?.request.productionProvenance !== undefined) return fromTake.request.productionProvenance;
-  const sheets: Record<string, number> = { ...session.subject.promptSheetVersions };
+  const sheets: Record<string, number> = { ...(session.subject.kind === "production" ? {} : session.subject.promptSheetVersions) };
   for (const reference of references) {
     if (reference.sheetId === undefined) continue;
     const version = reference.sheetVersion ?? bundle.sheets.find((sheet) => sheet.id === reference.sheetId)?.version;
@@ -514,6 +514,7 @@ function productionFilingFor(
 ): { ok: true; make: (coveredDurationSec?: number) => NonNullable<BenchRequestSnapshot["filing"]> } | { ok: false; reason: string } {
   const subject = session.subject;
   if (subject === undefined) return { ok: false, reason: "this session has no production subject" };
+  if (subject.kind === "production") return { ok: false, reason: "Production music files as an artifact, without a shot selection." };
   const production = bundle.productions.find((candidate) => candidate.meta.id === subject.productionId);
   const scene = production?.scenes.find((candidate) => candidate.id === subject.sceneId);
   if (production === undefined || scene === undefined) {
@@ -616,6 +617,7 @@ function filingMatchesCurrentSubject(
   subject: NonNullable<BenchSession["subject"]>,
   coveredDurationSec?: number,
 ): boolean {
+  if (subject.kind === "production") return false;
   if (filing === undefined || filing.productionId !== subject.productionId || filing.sceneId !== subject.sceneId) {
     return false;
   }
@@ -731,7 +733,8 @@ export function planBenchDispatch(
     }
     if (params.sound !== true) return { ok: false, reason: "A board subject must keep sound on." };
   }
-  if (session.subject !== undefined && !aspectSupport(model, session.subject.aspect).ok) {
+  if (session.subject?.kind === "production" && (composer.mode !== "music" || !bundle.productions.some(p => p.meta.id === session.subject!.productionId))) return { ok: false, reason: "This production audio Bench requires music mode and its owning production." };
+  if (session.subject !== undefined && session.subject.kind !== "production" && !aspectSupport(model, session.subject.aspect).ok) {
     return { ok: false, reason: `${model.displayName} cannot make the production aspect ${session.subject.aspect}.` };
   }
   if (composer.brief.trim().length === 0) return { ok: false, reason: "An empty brief is not a brief." };
@@ -799,7 +802,7 @@ export function planBenchDispatch(
   })) : [];
   const standaloneAudioCount = mediaReferences.filter(ref => ref.kind === "audio").length;
 
-  const filingPlan = session.subject === undefined ? null : productionFilingFor(session, bundle, composer.mode);
+  const filingPlan = session.subject === undefined || session.subject.kind === "production" ? null : productionFilingFor(session, bundle, composer.mode);
   if (filingPlan !== null && !filingPlan.ok) return filingPlan;
 
   // The Keyframe lane (issue 305 §3): resolve the snapshot's own frames (re-run) or the live
@@ -918,7 +921,7 @@ export function planBenchDispatch(
   });
   const resolvedAudio = params.kind !== "video" ? undefined
     : options.fromTake ? options.fromTake.request.audioReferences
-    : session.subject ? planSubjectCharacterAudio({
+    : session.subject && session.subject.kind !== "production" ? planSubjectCharacterAudio({
       world: bundle, subject: session.subject, model, imageCount, videoCount: videoPaths.length,
       taskMode, disabled: params.audioReferencesDisabled,
       ...(options.performanceReferences?.length ? { performanceReferences: options.performanceReferences } : {}) })
@@ -990,6 +993,7 @@ export function planBenchDispatch(
     keyframes,
     provider: model.provider,
     model: model.id,
+    ...(session.subject?.kind === "production" ? { productionAudio: { productionId: session.subject.productionId, role: session.subject.role } } : {}),
     ...(recipeVersion !== undefined ? { recipeVersion } : {}),
     ...(adapterRecipe ? { recipe: adapterRecipe } : {}),
     ...(referenceRoute !== undefined ? { referenceRoute } : {}),
@@ -1097,6 +1101,7 @@ export function planBenchDispatch(
   if (
     options.fromTake !== undefined &&
     session.subject !== undefined &&
+    session.subject.kind !== "production" &&
     !filingMatchesCurrentSubject(
       options.fromTake.request.filing,
       session.subject,

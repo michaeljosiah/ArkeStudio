@@ -3,6 +3,7 @@ import { ArtifactIdSchema, ConversationActionIdSchema, ConversationIdSchema, Iso
   ProposalIdSchema, SceneIdSchema, ShotIdSchema, SlugSchema, TurnIdSchema, UlidSchema } from "./ids.js";
 import { StageConstructionDraftSchema, type StageConstructionDraft } from "./stage-construction.js";
 import { VoiceSampleReviewSchema, type VoiceSampleReview } from "./voice-sample.js";
+import { PerformanceIdSchema } from "./performance.js";
 
 /** A constructed draft is a review authority, not an accepted scene (SPEC-051 R-19..R-22). */
 export const STAGE_REVIEW_SCHEMA_VERSION = 56;
@@ -32,6 +33,7 @@ export type HumanDecisionControl =
   | { kind: "editor-request"; productionId: string; requestId: string }
   | { kind: "extraction"; artifactId: string }
   | { kind: "voice-sample"; review: VoiceSampleReview }
+  | { kind: "performance-review"; productionId: string; performanceId: string }
   | { kind: "stage-host"; productionId: string; sceneId: string; shotId: string; actionId: string; mode: "construct" | "playblast"; instruction?: string; preserve?: "blocking" | "camera" | "none" }
   | { kind: "stage-review"; review: StageReview };
 
@@ -44,6 +46,7 @@ export const HumanDecisionControlSchema: z.ZodType<HumanDecisionControl> = z.dis
   z.object({ kind: z.literal("editor-request"), productionId: SlugSchema, requestId: z.string().min(1).max(100) }).strict(),
   z.object({ kind: z.literal("extraction"), artifactId: ArtifactIdSchema }).strict(),
   z.object({ kind: z.literal("voice-sample"), review: VoiceSampleReviewSchema }).strict(),
+  z.object({ kind: z.literal("performance-review"), productionId: SlugSchema, performanceId: PerformanceIdSchema }).strict(),
   z.object({ kind: z.literal("stage-host"), productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema,
     actionId: ConversationActionIdSchema, mode: z.enum(["construct", "playblast"]),
     instruction: z.string().max(4000).optional(), preserve: z.enum(["blocking", "camera", "none"]).optional() }).strict(),

@@ -208,12 +208,15 @@ export class GenerationQuotes {
       if (!job) return [];
       const take = this.store.getBundle().referenceTakes.find(take => take.jobId === job.id);
       const production = this.store.getBundle().productions.find(production => production.meta.id === job.productionId);
-      const productionOwned = job.params.generationQuoteProduction === true || typeof job.params.frameRun === "string";
+      const productionOwned = job.params.generationQuoteProduction === true || typeof job.params.frameRun === "string" || job.target.kind === "voice-line";
       const productionTake = productionOwned ? production?.takes.find(take => take.jobId === job.id && take.media) : undefined;
+      const performance = job.target.kind === "performance-generation" ? production?.performances.find(value => value.id === job.target.id) : undefined;
       const owner = take?.reference?.sheetId ?? take?.prop?.propId;
-      const mediaPath = productionOwned ? productionTake?.media ? `productions/${job.productionId}/takes/${productionTake.id}/${productionTake.media}` : undefined
+      const mediaPath = performance ? `productions/${job.productionId}/performances/${performance.id}/${performance.file}`
+        : job.target.kind === "table-read-cache" && typeof job.params.tableReadCacheFile === "string" ? job.params.tableReadCacheFile
+        : productionOwned ? productionTake?.media ? `productions/${job.productionId}/takes/${productionTake.id}/${productionTake.media}` : undefined
         : take?.media && owner ? `references/${owner}/takes/${take.id}/${take.media}` : job.landedFiles?.[0];
-      return [{ id: productionTake?.id ?? take?.id ?? job.id, medium: job.capability === "video" ? "video" as const : "image" as const,
+      return [{ id: performance?.id ?? productionTake?.id ?? take?.id ?? job.id, medium: job.capability === "video" ? "video" as const : job.capability === "voice-tts" || job.capability === "music" ? "audio" as const : "image" as const,
       status: job.status === "succeeded" && job.finalization?.status !== "failed" && mediaPath ? "completed" as const : job.status === "cancelled" ? "cancelled" as const : "failed" as const,
       description: job.error ?? (job.finalization?.status === "failed" ? "Result filing needs retry in Activity."
         : job.status === "succeeded" && !mediaPath ? "The provider returned no landed media." : "Generation settled."),
