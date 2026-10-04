@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { pictureLookChanged, type AudiobookLook, type ClientMessage, type DomainEvent, type ManifestModel, type WorldBundle } from "@arke-studio/contracts";
+import { lookViewFor, pictureLookChanged, ridingPicks, type AudiobookLook, type ClientMessage, type DomainEvent, type ManifestModel, type WorldBundle } from "@arke-studio/contracts";
 import { BenchStore, sessionDir } from "../../src/bench/store.js";
 import { AUDIOBOOK_LOOK_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readAudiobook } from "../../src/productions/audiobook.js";
 import { buildPicturePrompt, clipPrompt, pictureAspect, pictureQuote, pictureWho, promptRoom } from "../../src/productions/audiobook-picture-suggest.js";
+import { acceptCharacterLook } from "../../src/references/kit.js";
+import { pngBytes } from "../queue/fake-provider.js";
 import { CHAPTER, IMAGE, LEDGER, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
+
+const LOOK_ID = "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2K1";
+const CLOSE_ID = "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2K2";
 
 /**
  * Suggest picture and Generate (design turn 191a, SPEC-047 R-99, R-100): one editable prompt drafted
@@ -122,6 +127,36 @@ describe("who rides as a reference (R-100)", () => {
     assert.equal(none[0]!.reference, "references/maren/head-front.png", "the picture is still named, for the card");
   });
 
+  it("rides a chapter's chosen look in place of the main photo, the close view only for a frame that shows faces, never both (R-119, R-118)", () => {
+    const looks = [
+      { id: "tk_storm", file: "takes/tk_storm/storm.png", kind: "costume", prompt: "Storm coat.", acceptedAt: "2026-10-03T09:00:00.000Z", closeFile: "takes/tk_close/close.png" },
+      { id: "tk_bare", file: "takes/tk_bare/bare.png", kind: "costume", prompt: "Harbour coat.", acceptedAt: "2026-10-03T09:00:00.000Z" },
+    ];
+    const bundle = { getBundle: () => ({ ...world(["maren", "bray"]), referenceKits: world(["maren", "bray"]).referenceKits.map((kit) => ({ ...kit, looks })) }) as never };
+    const look = (maren: string | undefined, bray: string | undefined): AudiobookLook => ({
+      chapterHash: "h",
+      at: "2026-10-03T09:00:00.000Z",
+      characters: {
+        maren: { name: "Maren", sheet: "maren", text: "Storm coat.", ...(maren !== undefined ? { lookId: maren } : {}) },
+        bray: { name: "Bray", sheet: "bray", text: "Harbour coat.", ...(bray !== undefined ? { lookId: bray } : {}) },
+      },
+    });
+    const two = chosen.slice(0, 2);
+    const wide = pictureWho(bundle, IMAGE, two, { look: look("tk_storm", "tk_bare"), frame: "Wide · from behind" });
+    assert.deepEqual(wide.map((who) => [who.reference, who.look]), [["references/maren/takes/tk_storm/storm.png", { lookId: "tk_storm", view: "full" }], ["references/bray/takes/tk_bare/bare.png", { lookId: "tk_bare", view: "full" }]]);
+    const close = pictureWho(bundle, IMAGE, two, { look: look("tk_storm", "tk_bare"), frame: "Medium two-shot across the table" });
+    assert.deepEqual(close.map((who) => [who.reference, who.look?.view]), [["references/maren/takes/tk_close/close.png", "close"], ["references/bray/takes/tk_bare/bare.png", "full"]], "a look with no close view rides full body");
+    assert.ok(close.every((who) => who.carried), "one reference a person, so both fit a model that takes two");
+    const none = pictureWho(bundle, IMAGE, two, { look: look(undefined, "tk_gone"), frame: "Close-up" });
+    assert.deepEqual(none.map((who) => [who.reference, who.look]), [["references/maren/head-front.png", undefined], ["references/bray/head-front.png", undefined]], "no look chosen, or one the kit no longer holds: the main photo rides");
+    assert.deepEqual(ridingPicks(close), { maren: { lookId: "tk_storm", view: "close" }, bray: { lookId: "tk_bare", view: "full" } });
+  });
+
+  it("takes the close view for Two-shot, Medium close-up, Close-up and Extreme close-up, the full body for the rest", () => {
+    for (const frame of ["Two-shot", "Medium two-shot across the table", "Medium close-up", "Close-up · her face", "Extreme close-up, Ife's eyes"]) assert.equal(lookViewFor(frame), "close", frame);
+    for (const frame of ["Establishing", "Wide · from behind", "Medium wide", "Medium", "Detail, her fingers on his forearm", "Over the shoulder", undefined]) assert.equal(lookViewFor(frame), "full", String(frame));
+  });
+
   it("lists a sheet with no picture as having none, so the card can say `Make a reference`", () => {
     const who = pictureWho({ getBundle: () => world(["maren"]) as never }, IMAGE, chosen);
     assert.deepEqual(who.map((entry) => [entry.key, entry.reference, entry.carried]), [["maren", "references/maren/head-front.png", true], ["bray", null, false], ["odile", null, false], ["stair", null, false]]);
@@ -197,6 +232,36 @@ describe("Generate (R-99)", () => {
       const look: AudiobookLook = { ...(record.look as AudiobookLook), characters: { ...record.look!.characters, "maren-kest": { ...record.look!.characters["maren-kest"]!, text: "A red coat." } } };
       assert.equal(pictureLookChanged(picture.look, look), true);
     }));
+
+  it("sends the chosen look's image and not the main photo, and the picture keeps which look rode (R-119)", () =>
+    withHarness(
+      async ({ events, send, enqueued, store }) => {
+        await acceptCharacterLook(store()!, "maren-kest", { id: LOOK_ID, file: `takes/${LOOK_ID}/look.png`, kind: "costume", prompt: "Storm coat, hood up.", takeId: LOOK_ID, artDirectionVersion: 1, framing: "full-body", close: { file: `takes/${CLOSE_ID}/close.png`, takeId: CLOSE_ID } });
+        await suggest(send);
+        const before = suggestion(events).suggestion!;
+        assert.equal(before.who[0]!.reference, "references/maren-kest/head-front.png", "no look chosen yet: the main photo");
+        await send({ kind: "choose-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, key: "maren-kest", sheet: "maren-kest", lookId: LOOK_ID, requestId: "01J00000000000000000000003" });
+        await suggest(send);
+        const after = suggestion(events).suggestion!;
+        assert.deepEqual([after.who[0]!.reference, after.who[0]!.look], [`references/maren-kest/takes/${LOOK_ID}/look.png`, { lookId: LOOK_ID, view: "full" }], "no frame named: the full body");
+        assert.deepEqual(after.look?.looks, { "maren-kest": { lookId: LOOK_ID, view: "full" } });
+        await make(send);
+        const done = madeEvents(events).at(-1)!;
+        assert.equal(done.state, "made", done.reason);
+        assert.deepEqual((enqueued[0]!.params as { references?: string[] }).references, [`references/maren-kest/takes/${LOOK_ID}/look.png`], "the look, never the main photo beside it");
+        const picture = done.record!.pictures!["p0.0"]!;
+        assert.deepEqual(picture.look?.looks, { "maren-kest": { lookId: LOOK_ID, view: "full" } });
+        assert.equal(pictureLookChanged(picture.look, done.record!.look), false);
+      },
+      {
+        prepare: async (worldDir) => {
+          for (const [id, name] of [[LOOK_ID, "look.png"], [CLOSE_ID, "close.png"]] as const) {
+            await mkdir(join(worldDir, "references", "maren-kest", "takes", id), { recursive: true });
+            await writeFile(join(worldDir, "references", "maren-kest", "takes", id, name), pngBytes());
+          }
+        },
+      },
+    ));
 
   it("refuses a price that has moved past the one the press showed, and spends nothing", () =>
     withHarness(async ({ events, send, enqueued }) => {
