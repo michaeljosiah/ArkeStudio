@@ -80,6 +80,16 @@ Use Node 22.12 or later; CI uses Node 22. Run `npm ci` from the repository root.
 
 ## Select the checks
 
+For design-only production conversation work, turn 196 in the design master is the reference
+for the thirteen card families and Studio layouts (#1424). Generate its companion with
+`npm run design:review`, check it with `npm run design:review -- --check`, and run
+`node design-system/check-master.mjs --render` with Chrome installed (`CHROME` overrides the
+binary path). Inspect the desktop, 984px Fold and 390px phone frames, including Show/Back,
+pinned canvas, Stage conversation access, group approval stopping and all forty shot rows.
+This verifies the drawing and loaded Geist fonts; it is not installed-app acceptance for
+#1427. Card implementation (#1425) and Studio implementation (#1426) need their renderer
+and command behavior checks when built.
+
 From the repository root, the complete code gate is:
 
 ```powershell

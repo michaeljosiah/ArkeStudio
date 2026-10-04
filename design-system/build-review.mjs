@@ -28,6 +28,50 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  { group: "Production conversation · drawn", screen: "Turn group · eligible and individual decisions", frame: "196a", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Production · readable details", frame: "196b", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Script · screenplay changes", frame: "196c", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Shot list · resulting shots and change marks", frame: "196d", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Cast and place · missing reference kit", frame: "196e", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Board · cells and boundary", frame: "196f", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Stage · blockout, camera path, playblast", frame: "196g", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Takes · current and candidates", frame: "196h", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Frame run · results arrive per step", frame: "196i", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Timeline · before, after, ghost clips", frame: "196j", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Export · rendering and completed states", frame: "196k", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Readiness · current checklist and next steps", frame: "196l", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Human decision · native Keep and rights controls", frame: "196m", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Desktop · 420 px transcript, live pending overlay", frame: "196n", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Fold · transcript and canvas stay side by side", frame: "196o", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Phone · Show opens canvas, Back returns to its card", frame: "196p", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Phone Stage · conversation remains reachable", frame: "196q", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Without Studio · widenable dock and toggle", frame: "196r", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Development · Understanding and Proposal are canvas tabs", frame: "196s", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Approve all · dependency progress, stopped, zero eligible", frame: "196t", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Shared frame · completed, stale, unsupported and privacy", frame: "196u", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
+  { group: "Production conversation · drawn", screen: "Forty-shot review · every shot available at full size", frame: "196v", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
+    controls: [], notes: ["Turn 196 · issue #1424. Design only; implementation follows in #1425 (bodies) and #1426 (Studio). The binding rules beside the frame govern approval, preview and device behavior."] },
   { group: "Arrive", screen: "Founding conversation", frame: "189a", route: "#/new", status: "drifted", checked: "2026-10-03",
     controls: ["Send"],
     notes: ["Issue 1324: a writing model before the first turn; no empty content, voices, images or readiness sections. Send immediately holds the composer until the coordinator answers.",
@@ -505,7 +549,7 @@ const screensHtml = sections.map((s) => {
         <a class="screen__frame" href="Arke%20Studio.dc.html#${s.frame}">${s.frame} in the master →</a>
       </div>
       <p class="screen__caption">${toMaster(s.caption)}</p>
-      <div class="stage" data-width="${width}"><div class="stage__scale" style="width:${width}px">${s.root}</div></div>
+      <div class="stage" id="${s.frame}" data-width="${width}"><div class="stage__scale" style="width:${width}px">${s.root}</div></div>
       <div class="built built--${s.status}"><div class="built__head"><span class="tag tag--${s.status}">${status}</span><span class="built__label">what shipped</span></div>${notes}</div>
       ${rules}
     </section>`;
