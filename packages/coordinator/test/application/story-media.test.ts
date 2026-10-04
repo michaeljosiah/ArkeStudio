@@ -57,7 +57,7 @@ async function harness(t: TestContext) {
   };
   const ledger = new Set<string>();
   const queue = new JobQueue({journal: new JobJournal(join(root, "jobs.jsonl")), journalPath: join(root, "unused.jsonl"),
-    clients: {fal: fake, kokoro: fake, [speech.provider]: fake}, getKey: async () => "fake-key", emit() {},
+    clients: {fal: fake, kokoro: fake, codex: fake, [speech.provider]: fake}, getKey: async () => "fake-key", emit() {},
     ledger: {readJobIds: async () => ledger, has: async id => ledger.has(id), append: async row => {ledger.add(row.jobId);}},
     landInWorld: async (_id, fn) => {await fn(worldDir); return true;}, pollIntervalMs: 5, baseIntervalMs: 1});
   await queue.start();
@@ -73,6 +73,17 @@ async function harness(t: TestContext) {
   return {engine, state, queue, chapter, fake, worldDir, async restart() {await engine.close(); engine = make(); return engine;},
     async finished() {await until(() => queue.listJobs().every(j => ["succeeded", "failed"].includes(j.status)), "story media completion"); assert.ok(queue.listJobs().every(j => j.status === "succeeded"));}};
 }
+
+it("admits an included-plan Codex page illustration through the durable queue", async t => {
+  const h = await harness(t);
+  const model = SHIPPED_MANIFEST.models.find(m => m.id === "codex-image")!;
+  await h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: "plan-page", model, instruction: "A moonlit harbour", baseHash: h.chapter.hash});
+  await h.finished();
+  assert.equal(h.queue.listJobs()[0]!.provider, "codex");
+  assert.equal(h.queue.listJobs()[0]!.estimatedMicroUsd, 0);
+  assert.equal(h.fake.submitCount, 1);
+});
 
 it("page artwork is durable, replayed once, review-gated and invalidated by a changed chapter", async t => {
   const h = await harness(t);

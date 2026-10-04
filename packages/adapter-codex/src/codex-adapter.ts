@@ -305,6 +305,9 @@ export class CodexAdapter implements HarnessAdapter {
       const id = object(response.thread).id;
       if (typeof id !== "string" || this.imageJobs.has(id) || this.threads.has(id)) throw new Error("Codex returned an unusable thread for image generation.");
       threadId = id;
+      if (response.model !== selected.id || response.modelProvider !== selected.provider || (Array.isArray(response.instructionSources) && response.instructionSources.length > 0)) {
+        throw new Error("Codex changed the selected model or loaded instructions outside this image thread.");
+      }
       let settle!: (error?: Error) => void;
       const settled = new Promise<void>((resolve, reject) => { settle = error => error ? reject(error) : resolve(); });
       // Cancelling while turn/start is pending rejects this before anything awaits it.

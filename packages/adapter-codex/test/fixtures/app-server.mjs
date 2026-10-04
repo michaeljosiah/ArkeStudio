@@ -36,7 +36,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     else result(id, { data: [{ id: scenario === 'alias-collision' ? 'text-only' : 'catalog-alias', model: 'image-model', displayName: 'Image Model', inputModalities: scenario === 'empty-input' ? [] : scenario === 'image-input-only' ? ['image'] : ['text', 'image'], isDefault: true }], nextCursor: 'page2' });
   } else if (method === 'thread/start') {
     const thread = { id: scenario === 'duplicate-thread' ? 'thread-1' : `thread-${++sequence}`, model: params.model }; threads.set(thread.id, thread);
-    const respond = () => result(id, { thread, model: scenario === 'substitute' ? 'wrong-model' : params.model, modelProvider: params.modelProvider, instructionSources: scenario === 'instructions' ? ['private-instructions'] : [] });
+    const respond = () => result(id, { thread, model: scenario === 'substitute' ? 'wrong-model' : params.model, modelProvider: scenario === 'substitute-provider' ? 'wrong-provider' : params.modelProvider, instructionSources: scenario === 'instructions' ? ['private-instructions'] : [] });
     if (scenario === 'slow-create') setTimeout(respond, 150); else respond();
   } else if (method === 'thread/archive') result(id, {});
   else if (method === 'thread/unsubscribe') result(id, {});

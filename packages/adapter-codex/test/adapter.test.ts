@@ -402,6 +402,14 @@ test("admitting image work re-arms recovery after each healthy replacement", asy
   assert.equal(spawns, 3);
 });
 
+for (const scenario of ["substitute", "substitute-provider", "instructions"]) test(`image generation rejects ${scenario} before starting a turn`, async t => {
+  const f = await fixture(scenario); t.after(f.cleanup);
+  await assert.rejects(f.adapter.generateImage({ prompt: "a lighthouse" }), /changed the selected model|loaded instructions/);
+  const requests = await f.requests();
+  assert.equal(requests.some(request => request.method === "turn/start"), false);
+  assert.ok(requests.some(request => request.method === "thread/unsubscribe"));
+});
+
 test("image generation refuses logins the app-server does not support it for", async t => {
   for (const scenario of ["image-apikey", "image-logged-out", "image-unsupported"]) {
     const f = await fixture(scenario); t.after(f.cleanup);

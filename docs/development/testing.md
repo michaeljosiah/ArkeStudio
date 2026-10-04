@@ -90,10 +90,12 @@ Coordinator `test/harness/stage-model-journey.test.ts` carries a live Stage mode
 Codex image changes run adapter-codex `test/adapter.test.ts`, providers
 `test/codex-client.test.ts` and `test/manifest.test.ts`, contracts `test/provider-plans.test.ts`,
 coordinator `test/harness/codex-image-runner.test.ts`, `test/spec008/codex-image-startup.test.ts`,
-`test/queue/dispatcher.test.ts`, `test/world-chat/generation-quotes.test.ts` and the audiobook
+`test/queue/dispatcher.test.ts`, `test/application/story-media.test.ts`, `test/world-chat/generation-quotes.test.ts` and the audiobook
 picture/illustration suites. Client coverage includes `test/dispatch-bar.test.tsx`,
 `test/providers.test.tsx`, `test/queue-toaster.test.ts`, Bench, founding-build and audiobook
 picture tests. The ordinary suites use fixtures and consume no account allowance.
+Startup coverage holds the Codex probe pending while the transport opens, then verifies that
+the real founding-service wiring accepts validated external sign-in without a stored API key.
 For a live check, use an installed Codex with ChatGPT sign-in and a synthetic one-image reference;
 verify the returned image visually and stop the adapter in `finally`. Record only the version,
 image-item field names/types, byte count and MIME type, never account details or image payloads
