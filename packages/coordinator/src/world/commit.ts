@@ -394,6 +394,14 @@ export const AUDIOBOOK_LOOKS_SCHEMA_VERSION = 52;
  * first sheet that carries one — whoever wrote it, a form, a conversation or an external edit.
  */
 export const SHEET_SHORT_NAME_SCHEMA_VERSION = 59;
+/**
+ * The shot a picture was made from (design turn 194g, SPEC-047 R-120, R-121): `shot` on a picture
+ * in the chapter's strict audiobook record, so a made picture's card keeps its frame, who was not
+ * in it and its checks. A build before it reads such a record as unreadable — every take of the
+ * chapter lost to a run that would make them again — so the world is raised before the first.
+ * Sixty is production readiness's (SPEC-051 T-9), so this is 61.
+ */
+export const AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION = 61;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

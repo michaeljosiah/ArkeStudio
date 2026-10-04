@@ -1,5 +1,5 @@
 import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
-import type { AudiobookReader, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
+import type { AudiobookReader, PictureShot, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
 import { isRemoteSession, remoteSocketUrl, remoteSocketProtocols } from "./remote-session.js";
@@ -5611,9 +5611,9 @@ export function suggestAudiobookPicture(worldId: string, productionId: string, c
 }
 
 /** A suggestion made (R-99): the prompt as the author left it and the price the press showed; made through the Bench and filed on the block. */
-export function makeAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, input: { prompt: string; who: readonly string[]; frame?: string; confirmedMicroUsd: number }): string | null {
+export function makeAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, input: { prompt: string; who: readonly string[]; frame?: string; shot?: PictureShot; confirmedMicroUsd: number }): string | null {
   const requestId = ulid();
-  if (!send({ kind: "make-audiobook-picture", worldId, productionId, chapterFile, block, prompt: input.prompt, who: [...input.who], ...(input.frame !== undefined ? { frame: input.frame } : {}), confirmedMicroUsd: input.confirmedMicroUsd, requestId })) return null;
+  if (!send({ kind: "make-audiobook-picture", worldId, productionId, chapterFile, block, prompt: input.prompt, who: [...input.who], ...(input.frame !== undefined ? { frame: input.frame } : {}), ...(input.shot !== undefined ? { shot: input.shot } : {}), confirmedMicroUsd: input.confirmedMicroUsd, requestId })) return null;
   emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
   return requestId;
 }

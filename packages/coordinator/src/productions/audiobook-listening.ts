@@ -18,6 +18,7 @@ import {
   type ListeningChapter,
   type ListeningInputBlock,
   type PictureLook,
+  type PictureShot,
 } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -154,8 +155,11 @@ export async function setAudiobookPicture(
   chapterFile: string,
   block: string,
   picture: { file: string; source: AudiobookPictureSource } | null,
-  /** A picture Arke made keeps the look it was made under (design turn 191c, R-98), to be marked when that changes. */
-  made: { look?: PictureLook } = {},
+  /**
+   * A picture Arke made keeps the look it was made under (design turn 191c, R-98), to be marked
+   * when that changes, and the shot it was made from (194g), for its card.
+   */
+  made: { look?: PictureLook; shot?: PictureShot } = {},
 ): Promise<ChapterAudiobook> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   const summary = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
@@ -176,7 +180,7 @@ export async function setAudiobookPicture(
     const here = new Set([block, ...Object.entries(held).filter(([key, entry]) => placePictures(blocks, { [key]: entry }).placed[0]?.index === index).map(([key]) => key)]);
     const rest: Record<string, AudiobookPicture> = Object.fromEntries(Object.entries(held).filter(([key]) => !here.has(key)));
     if (picture === null && Object.keys(rest).length === Object.keys(held).length) return null;
-    const next: Record<string, AudiobookPicture> = picture === null ? rest : { ...rest, [block]: { file: picture.file, source: picture.source, textHash: audiobookTextHash(planned.block.text), at: store.now(), ...(made.look !== undefined ? { look: made.look } : {}) } };
+    const next: Record<string, AudiobookPicture> = picture === null ? rest : { ...rest, [block]: { file: picture.file, source: picture.source, textHash: audiobookTextHash(planned.block.text), at: store.now(), ...(made.look !== undefined ? { look: made.look } : {}), ...(made.shot !== undefined ? { shot: made.shot } : {}) } };
     const { pictures: _old, ...without } = current;
     return { ...without, updatedAt: store.now(), ...(Object.keys(next).length > 0 ? { pictures: next } : {}) };
   });

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { act, useState, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -7,7 +10,7 @@ import { parseHTML } from "linkedom";
 import type { ClientState, ModelInfo } from "@arke-studio/contracts";
 import { Composer } from "../src/components/composer.js";
 import { ModelChip } from "../src/components/model-chip.js";
-import { filterGroups, formatDollars, matchSpan, modelCard, modelGroups, modelMatches, squash } from "../src/components/model-picker-data.js";
+import { filterGroups, formatDollars, matchSpan, modelCard, modelGroups, modelMatches, providerHeading, providerMarkLetter, squash } from "../src/components/model-picker-data.js";
 import { readRecentModels, rememberRecentModel } from "../src/lib/recent-models.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -165,6 +168,26 @@ describe("the picker's groups", () => {
     await open();
     assert.equal(menu()!.querySelectorAll(".fy-mpick__grp .fy-mark").length, 4);
     assert.ok(chip().querySelector(".fy-mchip__name"));
+  });
+
+  it("names OpenCode's own provider OpenCode Zen on a Z plate when the harness states no name, or only the id (195b, local.15)", async () => {
+    const unnamed = MODELS.map((model) => (model.provider === "opencode" ? { ...model, providerName: undefined } : model)) as ModelInfo[];
+    const idOnly = MODELS.map((model) => (model.provider === "opencode" ? { ...model, providerName: "opencode" } : model));
+    for (const models of [unnamed, idOnly]) {
+      await mount(<Holder start="opencode/fledge" chip={{ state: state({ harnessModels: models }) }} />);
+      assert.equal(chip().querySelector(".fy-mark")?.textContent, "Z", "the chip wears Zen's letter");
+      await open();
+      assert.deepEqual(headings(), ["OpenAI", "Anthropic", "OpenCode Zen", "mystery-co"], "never the id where a name is known");
+      const marks = [...menu()!.querySelectorAll(".fy-mpick__grp")].map((heading) => heading.querySelector(".fy-mark")?.textContent);
+      assert.deepEqual(marks, ["O", "", "Z", "M"], "OpenAI's letter, Anthropic's logo, Zen's Z, the id's letter");
+      await act(async () => root!.unmount());
+      root = undefined;
+      container.remove();
+    }
+    assert.equal(providerHeading("openai", [{ id: "x", provider: "openai", displayName: "X" }]), "OpenAI");
+    assert.equal(providerHeading("openrouter", [{ id: "x", provider: "openrouter", displayName: "X" }]), "OpenRouter");
+    assert.equal(providerHeading("acme", [{ id: "x", provider: "acme", providerName: "Acme Cloud", displayName: "X" }]), "Acme Cloud", "the harness's own name first");
+    assert.equal(providerMarkLetter("openrouter", "OpenRouter"), "O");
   });
 
   it("keeps a remembered choice the catalogue lost at the top, ticked and unpickable", async () => {
@@ -401,6 +424,26 @@ describe("the effort", () => {
     const odd = MODELS.map((model) => model.id === "gpt-5.4" ? { ...model, variants: { names: ["low", "deep-think"] } } : model);
     await mount(<Holder chip={{ state: state({ harnessModels: odd }), variant: "deep-think" }} />);
     assert.equal(chips()[1]!.textContent, "Deep Think");
+  });
+});
+
+describe("the chips in a narrow tool row (195a, local.15)", () => {
+  // linkedom lays nothing out: this reads the rules the row is laid out by. In the 331 production dock
+  // both chips stood at full width and the effort ran under send; the headless render in the PR checks the pixels.
+  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/components/model-chip.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const body = (selector: string) => [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1]!.trim() === selector)?.[2] ?? "";
+  it("lets the chips shrink inside the row so send stays whole", () => {
+    assert.match(body(".fy-mchip"), /min-width: 0/);
+    assert.match(body(".fy-mchip > .fy-mchip__btn"), /min-width: 0; flex: 0 1 auto/);
+  });
+  it("ellipses the model's name first, down to a floor, and only then the effort", () => {
+    assert.match(body(".fy-mchip > .fy-mchip__btn:not(.fy-mchip__btn--effort):not(.fy-mchip__btn--fixed)"), /min-width: 76px/);
+    assert.match(body(".fy-mchip > .fy-mchip__btn--effort"), /flex-shrink: 0\.001/);
+    assert.match(body(".fy-mchip__name"), /overflow: hidden; text-overflow: ellipsis/);
+  });
+  it("lets Read replies give way to its speaker before either chip, where it shares the row", () => {
+    assert.match(body(".fy-cx__left > .fy-cx__tool"), /flex: 0 100 auto; min-width: 29px; overflow: hidden/);
+    assert.match(body(".fy-cx__left > .fy-cx__tool > svg"), /flex: none/);
   });
 });
 

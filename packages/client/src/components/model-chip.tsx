@@ -9,7 +9,7 @@ import { ProviderMark } from "../screens/settings-parts.js";
 import { harnessModelLabel } from "./harness-models.js";
 import { ChipChevron, PickerTick } from "./model-chip-icons.js";
 import { ModelPicker } from "./model-picker.js";
-import { modelGroups, providerHeading, recentModels } from "./model-picker-data.js";
+import { modelGroups, providerHeading, providerMarkLetter, recentModels } from "./model-picker-data.js";
 import { cx } from "./ui.js";
 import { useOverlaysOpened } from "../lib/overlays.js";
 import { useMediaQuery } from "../lib/media-query.js";
@@ -482,7 +482,7 @@ export function ModelChip({
           show("model");
         }}
       >
-        {current !== undefined && <ProviderMark id={current.provider} label={providerHeading(current.provider, [current])} size="xs" />}
+        {current !== undefined && <ProviderMark id={current.provider} label={providerHeading(current.provider, [current])} letter={providerMarkLetter(current.provider, providerHeading(current.provider, [current]))} size="xs" />}
         <span className="fy-mchip__name">{label}</span>
         <ChipChevron />
       </button>

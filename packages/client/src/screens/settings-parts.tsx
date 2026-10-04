@@ -198,14 +198,14 @@ const MARK_SRC: Partial<Record<string, string>> = {
  * black glyph on nothing and would disappear against a dark pane. A source with no bundled mark
  * keeps a monogram in the same slot, so nothing in the layout depends on having one.
  */
-export function ProviderMark({ id, label, size = "sm" }: { id: string; label: string; size?: "xs" | "sm" | "lg" }) {
+export function ProviderMark({ id, label, size = "sm", letter }: { id: string; label: string; size?: "xs" | "sm" | "lg"; /** The monogram, where the name's first letter is not the one drawn. */ letter?: string }) {
   const src = MARK_SRC[id];
   return (
     <span
       className={cx("fy-mark", size === "lg" && "fy-mark--lg", size === "xs" && "fy-mark--xs", src === undefined && "fy-mark--letter")}
       aria-hidden="true"
     >
-      {src !== undefined ? <img src={src} alt="" /> : label.slice(0, 1).toUpperCase()}
+      {src !== undefined ? <img src={src} alt="" /> : (letter ?? label.slice(0, 1).toUpperCase())}
     </span>
   );
 }

@@ -1,15 +1,14 @@
 import {
   PICTURE_PROMPT_MAX,
-  aspectOffered,
-  estimateMicroUsd,
-  imageOutputFor,
   lookLinesFor,
   lookName,
   lookViewFor,
   neutralClothing,
   normalizeSpeechText,
+  pictureAspect,
   pictureLookFor,
   pictureMood,
+  pictureQuote,
   referenceBudget,
   ridingPicks,
   sheetReferencePicture,
@@ -130,21 +129,8 @@ export function clipPrompt(text: string, max: number): string {
   return (space > max / 2 ? cut.slice(0, space) : cut).trimEnd();
 }
 
-/** The shape a picture is asked for: widescreen where the model offers it, as the player letterboxes. */
-export function pictureAspect(model: ManifestModel): string | undefined {
-  return model.unverified !== true && aspectOffered(model, "16:9") ? "16:9" : undefined;
-}
-
-/** What a picture would cost on this model with this many reference pictures riding, from the same figures the Bench plans with. */
-export function pictureQuote(model: ManifestModel, referenceImages: number, aspect = pictureAspect(model)): number {
-  const output = imageOutputFor(model, { landscape: true, ...(aspect !== undefined ? { aspect } : {}) });
-  return estimateMicroUsd(model, {
-    images: 1,
-    megapixels: (output.width * output.height) / 1_000_000,
-    referenceImages,
-    ...(output.resolution !== undefined ? { resolution: output.resolution } : {}),
-  });
-}
+// The shape and the price live in contracts, where a made picture's card prices Make again too.
+export { pictureAspect, pictureQuote };
 
 /** The longest prompt the Bench will take once the references and the look are written around it. */
 export function promptRoom(model: ManifestModel): number {

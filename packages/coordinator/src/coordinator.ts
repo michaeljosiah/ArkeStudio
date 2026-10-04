@@ -1708,7 +1708,7 @@ export class Coordinator {
           }
           progress.spentMicroUsd += made.costMicroUsd ?? made.estimatedMicroUsd;
           const stamp = pictureLookFor(record?.look ?? null, who.filter((entry) => entry.kind === "character").map((entry) => entry.key), ridingPicks(who));
-          const next = await setAudiobookPicture(store, productionId, chapter.file, row.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, stamp !== undefined ? { look: stamp } : {});
+          const next = await setAudiobookPicture(store, productionId, chapter.file, row.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, { ...(stamp !== undefined ? { look: stamp } : {}), ...(row.shot !== undefined ? { shot: row.shot } : {}) });
           progress.made.push(row.block);
           this.refreshIfStillOpen(store);
           this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record: next });
@@ -15197,7 +15197,8 @@ export class Coordinator {
           });
           if (!made.ok) return fail(made.reason, made.sessionId);
           const stamp = pictureLookFor(look, characters.map((person) => person.key), ridingPicks(who));
-          const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, stamp !== undefined ? { look: stamp } : {});
+          // The shot the press was made from rides on the picture, so its card still says it (design turn 194g).
+          const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, { ...(stamp !== undefined ? { look: stamp } : {}), ...(msg.shot !== undefined ? { shot: msg.shot } : {}) });
           this.refreshIfStillOpen(store);
           // The record the picture now stands in goes to every window as any record write does: the margin's chip and the panel read it from there, and the card's own word is only that it is done.
           this.emit({ at: at(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, requestId: msg.requestId, record });

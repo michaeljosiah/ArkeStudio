@@ -1399,9 +1399,13 @@ export function ProductionConversation({
         // A model nobody named has no session for an effort to apply to: choosing one names it.
         if (effectiveLanguageModelId === undefined) setLanguageModelId(effortRef);
       }}
-      {...((modelSet || (variantSet && effectiveLanguageModelId !== undefined)) && worldId && languageUnavailableReason === undefined
+      // Every chat in this production stands in the picker's foot wherever the conversation can
+      // remember a choice (design turn 195, rule 2; 195b): this chat's own model, or — with nothing
+      // chosen here and nothing kept for the production — the model in force, the harness's default
+      // included. Only a production that keeps one already offers Clear instead.
+      {...((modelSet || (variantSet && effectiveLanguageModelId !== undefined) || (languageModelId === undefined && rememberedLanguageModel === undefined && effortRef !== undefined)) && worldId && languageUnavailableReason === undefined
         ? { onRemember: () => {
-            const kept = languageModelId ?? effectiveLanguageModelId;
+            const kept = languageModelId ?? effectiveLanguageModelId ?? effortRef;
             if (kept === undefined) return;
             // Only a model chosen here waits for its save to land; an effort alone leaves the model as it is.
             if (languageModelId !== undefined) pendingRemember.current = kept;

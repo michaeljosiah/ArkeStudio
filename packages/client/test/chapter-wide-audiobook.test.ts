@@ -120,3 +120,11 @@ describe("the Illustrate proposal is a sheet over the main area (turn 193)", () 
     assert.ok(rule(".fy-ills__foot .ui-btn--primary").length > 0, "Accept takes the foot on a phone");
   });
 });
+
+describe("the toolbar's menus mark focus by their filled row (turn 194, local.15)", () => {
+  it("draws no ring round the item a menu focuses as it opens: the soft fill is its mark", () => {
+    const focused = rules(fidelity).filter((candidate) => candidate.selector.split(",").map((part) => part.trim()).includes(".fy-ab__menu-opt:focus-visible"));
+    assert.ok(focused.some((candidate) => /background: var\(--secondary\)/.test(candidate.body)), "the filled row, as hover");
+    assert.ok(focused.some((candidate) => /box-shadow: none/.test(candidate.body)), "and not the global focus ring, which drew a thick box in the filter");
+  });
+});

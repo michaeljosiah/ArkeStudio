@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { Check } from "./icons.js";
 import { CLOSE_FRAMES, frameWord, lookName, priceLabel, type PictureShot, type PictureSuggestion, type PictureWho, type ReferenceKit, type WorldBundle } from "@arke-studio/contracts";
@@ -74,7 +74,8 @@ function InFrameRow({ who, kits, slug, shot, onMake }: { who: PictureWho; kits: 
           </span>
         )}
       </span>
-      {who.kind === "character" && who.reference !== null && (
+      {/* A look's image rode for the frame: with no frame kept (a picture made before 194g), nothing says why. */}
+      {who.kind === "character" && who.reference !== null && (shot !== undefined || who.look === undefined) && (
         <span className="fy-mono fy-pcard__why" data-testid="picture-card-why">
           {rideReason(who, shot, look?.closeFile !== undefined)}
         </span>
@@ -84,12 +85,26 @@ function InFrameRow({ who, kits, slug, shot, onMake }: { who: PictureWho; kits: 
 }
 
 /**
+ * The block's picture as the press that picks another from the world (186c's chooser). 194 draws
+ * no Choose in the card's foot, so the picture itself is where choosing lives; it looks as drawn
+ * and says what it does to the pointer and to a screen reader.
+ */
+export function PicturePress({ onChoose, children }: { onChoose: (() => void) | undefined; children: ReactNode }) {
+  if (onChoose === undefined) return <>{children}</>;
+  return (
+    <button type="button" className="fy-pcard__pick" aria-label="Choose another picture" title="Choose another picture" onClick={onChoose} data-testid="audiobook-picture-open">
+      {children}
+    </button>
+  );
+}
+
+/**
  * The card (193c; 194g): the picture's slot — the picture itself once one is set — beside Frame,
  * Rides and the model, then In frame, Not in frame, the prompt folded to three lines until it is
  * pressed, and the checks; Remove (or Discard), Edit prompt and Generate — Make again once a
  * picture is set — in the panel's foot.
  */
-export function PictureCard({ world, worldId, state, onEdit, offline, picture = null, onRemove }: {
+export function PictureCard({ world, worldId, state, onEdit, offline, picture = null, onRemove, onChoose }: {
   world: Pick<WorldBundle, "meta" | "referenceKits" | "sheets">;
   worldId: string;
   state: PictureSuggestionState;
@@ -98,6 +113,8 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   /** The picture set on the block, drawn in the slot. */
   picture?: string | null;
   onRemove?: () => void;
+  /** Pick another picture from the world: the picture is the press. */
+  onChoose?: () => void;
 }) {
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
@@ -134,7 +151,9 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
     <div className="fy-sugg fy-pcard" data-testid="suggest-card">
       <div className="fy-pcard__top">
         {picture !== null ? (
-          <img className="fy-pcard__img" src={picture} alt="" data-testid="picture-card-picture" />
+          <PicturePress onChoose={busy ? undefined : onChoose}>
+            <img className="fy-pcard__img" src={picture} alt="" data-testid="picture-card-picture" />
+          </PicturePress>
         ) : (
           <div className="fy-pcard__slot" aria-hidden="true">
             <span className="fy-mono">{suggestion.aspect ?? ""}</span>

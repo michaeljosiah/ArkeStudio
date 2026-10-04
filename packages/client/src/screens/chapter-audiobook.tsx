@@ -1550,7 +1550,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
                 stale, flagged, waiting, awaiting recording — and nothing on a made block but the play
                 a fine pointer finds on hover. On touch the row's press selects it and its sheet plays. */}
             <span className="fy-ab__marks">
-              {picture !== undefined && slug !== undefined ? <PictureChip slug={slug} picture={picture} estimated={pictures?.estimated === true} /> : proposedPicture !== undefined ? <ProposedChip title={proposedPicture.title} /> : null}
+              {picture !== undefined && slug !== undefined ? <PictureChip slug={slug} picture={picture} /> : proposedPicture !== undefined ? <ProposedChip title={proposedPicture.title} /> : null}
               {row.state !== "made" && (
                 <span className={`fy-ab__state fy-ab__state--${row.state.replace(" ", "-")}`} data-testid="audiobook-state">{row.state === "not made" ? "waiting" : STATE_LABEL[row.state]}</span>
               )}
@@ -1662,8 +1662,22 @@ function usePopover() {
       if (panel.current?.contains(event.target as Node) || press.current?.contains(event.target as Node)) return;
       setOpen(false);
     };
+    // Escape closes it wherever the focus is. The panel's own key handler only heard it from inside:
+    // Notes opens without taking the focus, so its Escape went to the press and the sheet stayed
+    // open (local.15). Captured, so only this goes — the block drawer or dock behind it stays.
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      press.current?.focus();
+    };
     document.addEventListener("mousedown", away);
-    return () => document.removeEventListener("mousedown", away);
+    document.addEventListener("keydown", escape, true);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", escape, true);
+    };
   }, [open]);
   const close = (refocus: boolean) => {
     setOpen(false);

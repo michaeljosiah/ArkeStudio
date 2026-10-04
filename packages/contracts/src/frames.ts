@@ -11,7 +11,7 @@ import { isManuscriptLanguage } from "./manuscript.js";
 import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema } from "./audiobook.js";
 import { AudiobookPictureSourceSchema } from "./audiobook-pictures.js";
 import { LOOK_LINE_MAX, LookTargetSchema } from "./audiobook-look.js";
-import { PICTURE_PROMPT_MAX } from "./audiobook-illustrate.js";
+import { PICTURE_PROMPT_MAX, PictureShotSchema } from "./audiobook-illustrate.js";
 import { BedInputSchema, BlockSoundInputSchema, BlockTimingInputSchema, ReactionInputSchema } from "./audiobook-timing.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
@@ -3367,6 +3367,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       who: z.array(z.string().min(1).max(120)).max(24),
       /** The frame the suggestion named (design turn 193, R-118): which of each look's images rides. */
       frame: z.string().max(120).optional(),
+      /** The suggestion's shot, kept on the picture it makes so its card still shows it (design turn 194g). */
+      shot: PictureShotSchema.optional(),
       confirmedMicroUsd: z.number().int().min(0),
       requestId: UlidSchema,
     })

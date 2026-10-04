@@ -7,7 +7,6 @@ import { Link, useParams, useNavigate, useSearchParams } from "react-router";
 import {
   chapterParagraphs,
   countWords,
-  formatRunningTime,
   paragraphSpans,
   passageOf,
   passageDiff,
@@ -54,7 +53,7 @@ import { passageAction, passageActions, type PassageAction } from "../lib/passag
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
 import { ListenButton, listenLeads } from "../components/audiobook-player.js";
-import { BlockPicturePanel, useChapterPictures } from "../components/audiobook-picture.js";
+import { BlockPicturePanel, pictureStart, useChapterPictures } from "../components/audiobook-picture.js";
 import { IllustrationSheet, IllustrationStatus, useIllustration, useIllustrationSheet } from "../components/audiobook-illustrate.js";
 import { LookSheet } from "../components/audiobook-look.js";
 import { NewLookSheet } from "../components/audiobook-new-look.js";
@@ -2340,7 +2339,7 @@ export function ChapterWorkspace({
                     tab={panelTab}
                     onTab={setChosenTab}
                     facts={{
-                      ...(shownPicture !== undefined ? { picture: `${chapterPictures.estimated ? "~" : ""}${formatRunningTime(shownPicture.at)}` } : {}),
+                      ...(shownPicture !== undefined ? { picture: pictureStart(shownPicture) } : {}),
                       ...(panelTakes > 0 ? { voice: `v${panelTakes}` } : {}),
                     }}
                     onClose={() => audiobook.setSelected(null)}
