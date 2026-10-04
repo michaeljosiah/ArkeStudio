@@ -10,7 +10,6 @@ import { ProductionStudio } from "../src/components/production-studio.js";
 import { StudioCard, StudioSidebar, StudioToggle, useProductionStudio } from "../src/components/production-studio-context.js";
 import { ConversationPermissionCard } from "../src/components/conversation.js";
 import { HumanDecisionCardView } from "../src/components/human-decision-card.js";
-import { SceneDock } from "../src/screens/scene-workspace/responsive-chrome.js";
 import { studioActionFocus } from "../src/lib/production-studio.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -162,13 +161,8 @@ it("renders to a string beside a global document, its side holding what a closed
   assert.match(html("Staged work"), /<aside><div><p>Staged work<\/p><\/div><\/aside>/, "the understanding gives way to a decision");
 });
 
-it("a phone Stage keeps its Conversation control reachable", async () => {
-  Object.assign(dom.window, { matchMedia: (query: string) => ({ matches: query.includes("max-width"), addEventListener() {}, removeEventListener() {} }) });
-  const container = dom.document.createElement("div"); dom.document.body.append(container); const root = createRoot(container); roots.push(root);
-  await act(async () => root.render(<SceneDock open={false} onOpen={() => {}} onClose={() => {}} stage>Conversation</SceneDock>));
-  assert.ok([...dom.document.querySelectorAll("button")].some(b => b.textContent === "Conversation"));
-  Object.assign(dom.window, { matchMedia: undefined });
-});
+// A phone Stage's Conversation press (R-68) lives in the shot page's head, as design 196q draws it,
+// not on the dock's floating rail: scenes-layout.test.tsx drives it on the real page.
 
 it("Stage, board, take and Cut targets choose their native canvas level", () => {
   const action = card();

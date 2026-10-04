@@ -111,6 +111,17 @@ it("opens a shot's page actions and inspector without leaving a floating button 
   await click(textButton('Ask Arke', '.fy-scene-page-menu[open]')); assert.ok(find('.fy-scene-dock[open]'));
 });
 
+it("keeps the conversation one press away on a phone's Stage, in the head (SPEC-051 R-68, design 196q)", async () => {
+  await mount('/sc_04/shots/sh_12?view=stage');
+  // Compared as a boolean: a failing equality on a linkedom element prints the whole document.
+  assert.equal(find('.fy-sw__rail') === null, true, "nothing floats over the picture");
+  await click(textButton('Conversation', '.fy-scene-back')); assert.ok(find('.fy-scene-dock[open]'));
+  await act(async () => root?.unmount()); dom.document.body.replaceChildren();
+  await mount('/sc_04/shots/sh_12');
+  assert.equal(textButton('Conversation', '.fy-scene-back') === undefined, true, "the shot page keeps its floating Arke");
+  assert.equal(find('.fy-sw__rail') === null, false);
+});
+
 it("starts a Fold with both rails put away and shows Flow as a touch list", async () => {
   await mount('/sc_04', 984);
   assert.ok(find('.fy-production-drawer-toggle')); assert.equal(find('.fy-production-drawer[open]'), null);
