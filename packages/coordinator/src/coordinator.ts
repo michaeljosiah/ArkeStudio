@@ -171,7 +171,9 @@ import {
   type IllustrationProgress,
   type IllustrationProposal,
   type IllustrationRow,
+  illustrationRowGoes,
   illustrationTotal,
+  pictureRefusal,
   type AudiobookReader,
   type ManifestModel,
   CADENCE_NOTE_MAX,
@@ -1688,7 +1690,9 @@ export class Coordinator {
           });
           if (!made.ok) {
             if (control.signal.aborted) break;
-            progress.failed.push({ block: row.block, reason: made.reason });
+            // In plain words on the row (`refused by the image safety check`); the provider's own is in the app log.
+            void this.appLog?.append({ kind: "audiobook.illustration-picture-failed", chapter: chapter.file, block: row.block, message: made.reason });
+            progress.failed.push({ block: row.block, reason: pictureRefusal(made.reason) });
             continue;
           }
           progress.spentMicroUsd += made.costMicroUsd ?? made.estimatedMicroUsd;
@@ -1708,7 +1712,13 @@ export class Coordinator {
     delete progress.current;
     progress.state = control.signal.aborted ? "stopped" : "done";
     // What was made belongs to its blocks now; what is left is the proposal still, for another try.
-    const remaining = proposal.rows.filter((row) => !progress.made.includes(row.block));
+    // A row this run could not make keeps why, so a window that opens the proposal later holds it
+    // with its reason instead of offering it as an ordinary picture (2026-10-04); a row the run did
+    // not reach keeps whatever it held before.
+    const reasons = new Map(progress.failed.map((entry) => [entry.block, entry.reason]));
+    const remaining = proposal.rows
+      .filter((row) => !progress.made.includes(row.block))
+      .map((row) => (reasons.has(row.block) ? { ...row, refused: (reasons.get(row.block) || "not made").slice(0, 200) } : row));
     this.makingIllustrations.delete(key);
     if (remaining.length > 0 && !store.closingSignal.aborted) {
       const event: Extract<DomainEvent, { type: "illustration.finished" }> = { at: new Date().toISOString(), type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...proposal, rows: remaining } };
@@ -15265,9 +15275,10 @@ export class Coordinator {
         const proposal = held.proposal;
         const wanted = new Set(msg.blocks);
         const without = new Set(msg.without ?? []);
-        const rows = proposal.rows.filter((row) => wanted.has(row.block) && ((row.needs?.length ?? 0) === 0 || without.has(row.block)));
+        // A row held for a missing reference, or one a run's picture was refused for, goes only if named in `without`.
+        const rows = proposal.rows.filter((row) => wanted.has(row.block) && illustrationRowGoes(row, new Set(), without));
         if (rows.length === 0) return refuse("nothing to make");
-        const total = illustrationTotal(rows, new Set(), new Set()).microUsd;
+        const total = illustrationTotal(rows, new Set(), without).microUsd;
         // One confirm of the total (R-102): the price Accept showed is the most the run may spend.
         if (total > msg.confirmedMicroUsd) return refuse(`the price moved · ${priceLabel(total)}`);
         const current = await planAudiobook(store, msg.productionId, chapter.id, { narrator: await anyNarrator(store, msg.productionId) }).catch(() => null);

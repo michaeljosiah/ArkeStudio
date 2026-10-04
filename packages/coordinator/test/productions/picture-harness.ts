@@ -54,6 +54,8 @@ export interface HarnessOptions {
   model?: ManifestModel | null;
   /** All jobs land, or this says what the nth job (from 0) does. */
   land?: boolean | "fail" | ((n: number) => Landing);
+  /** What a failed job says, as the provider would. */
+  failure?: string;
   prepare?: (worldDir: string) => Promise<void>;
 }
 
@@ -108,7 +110,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
       await new Promise((resolve) => setTimeout(resolve, 15));
       try {
         if (what === "fail") {
-          await bench.append({ type: "take-status", takeId: takeId as never, status: "failed", error: "the provider refused the prompt" }, { at: CLOCK });
+          await bench.append({ type: "take-status", takeId: takeId as never, status: "failed", error: options.failure ?? "the provider refused the prompt" }, { at: CLOCK });
           return { id };
         }
         await mkdir(join(worldDir, input.landing.dir), { recursive: true });

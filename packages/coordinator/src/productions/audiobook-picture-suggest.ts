@@ -6,6 +6,7 @@ import {
   lookLinesFor,
   lookName,
   lookViewFor,
+  neutralClothing,
   normalizeSpeechText,
   pictureLookFor,
   pictureMood,
@@ -97,8 +98,19 @@ export function briefLines(store: Pick<WorldStore, "getBundle">, look: Audiobook
   return lookLinesFor(look, keys).map((line): BriefLine => {
     const sheet = line.key === null ? undefined : look?.characters[line.key]?.sheet;
     const chosen = line.lookId === undefined || sheet === undefined ? undefined : kits.find((kit) => kit.sheetId === sheet)?.looks?.find((candidate) => candidate.id === line.lookId);
-    return { label: line.label, key: line.key, text: line.text, ...(chosen !== undefined ? { look: lookName(chosen) } : {}) };
+    // The look's image carries the clothes, so its line is given neutrally (rule 4, 2026-10-04): the
+    // garment and its colour, never the skin, the cut or the body a model would copy word for word.
+    return { label: line.label, key: line.key, text: chosen !== undefined ? neutralClothing(line.text) : line.text, ...(chosen !== undefined ? { look: lookName(chosen) } : {}) };
   });
+}
+
+/**
+ * A drafted prompt held to rule 4 where a look image rides (2026-10-04): whatever the model wrote
+ * of skin, cut or the body under the clothes is taken out, as the brief told it, because a provider's
+ * safety check refuses the picture for those words while the image itself shows the dress.
+ */
+export function neutralWhereLooksRide(prompt: string, who: readonly PictureWho[]): string {
+  return who.some((entry) => entry.kind === "character" && entry.look !== undefined && entry.reference !== null) ? neutralClothing(prompt) : prompt;
 }
 
 /** A prompt held to its cap: cut after the last whole sentence that fits, else at a word. */
@@ -264,8 +276,9 @@ export async function suggestPicture(store: WorldStore, room: PictureRoom, block
     if (options.signal?.aborted) throw new Error("stopped");
     const prompt = clipPrompt(raw.prompt, maxChars);
     if (prompt === "") throw new Error("the writing service gave no picture");
-    const held = holdBrief(raw, { people: visible, places: room.places, prompt, fallback: () => namedIn(planned.block, visible) });
-    const who = pictureWho(store, options.model, briefRiders(held), { look: room.look, frame: held.frame });
+    const drafted = holdBrief(raw, { people: visible, places: room.places, prompt, fallback: () => namedIn(planned.block, visible) });
+    const who = pictureWho(store, options.model, briefRiders(drafted), { look: room.look, frame: drafted.frame });
+    const held = { ...drafted, prompt: neutralWhereLooksRide(drafted.prompt, who) };
     const used = lookLinesFor(room.look, [...held.inFrame.map((person) => person.key), ...held.details.map((detail) => detail.of)], ridingPicks(who));
     const checks = pictureChecks({ held, who, people: visible, lines: used, block: planned.block.text, mood: room.mood });
     return { held, who, used, checks };

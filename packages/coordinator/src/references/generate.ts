@@ -9,6 +9,7 @@ import {
   lockedTiles,
   modelForCapability,
   nativeResolution,
+  neutralClothing,
   type AppSettings,
   type Capability,
   type CharacterImageWorkflow,
@@ -382,12 +383,19 @@ export function characterLookRequests(
   // The two framings say what the picture is for (R-118, R-112): a figure whose clothes can be read
   // from head to toe, or the same person in the same clothes from the shoulders up. Without a
   // framing the prompt is the Cast page's exploration, unchanged.
+  // A close view is ONE portrait (2026-10-04): with the main photo and the full body both riding,
+  // GPT Image 2 drew Tunde's as the two side by side, a full figure and a crop. So the request says
+  // what the picture is and everything it must not be.
   const framed =
     input.framing === "full-body"
-      ? " Full body, head to toe, standing, plain neutral background, one figure alone, clothes and hair fully visible."
+      ? " Full body, head to toe, standing, plain neutral background, one figure alone, clothes and hair fully visible. One single picture: no panels, no collage, no second figure."
       : input.framing === "close"
-        ? " Head and shoulders of the same person in the same clothes, hair and light as the full-body picture, plain neutral background, face and identity clear, relaxed natural expression."
+        ? " ONE head-and-shoulders portrait of this one person, framed from the top of the head to just below the shoulders, in the same clothes, hair and light as the full-body reference picture. A single image with one figure: no panels, no split screen, no side-by-side, no collage, no grid, no inset, no full-body figure and no second person. Plain neutral background, face and identity clear, relaxed natural expression."
         : "";
+  // A look request the app writes names the clothes neutrally (2026-10-04): the garment and its
+  // colour, never skin, cut or body — a close view of Ife's look line was refused by the safety
+  // check. The look's own words are kept as its `lookPrompt`; only the request is plain.
+  const clothing = input.framing === undefined ? input.prompt : neutralClothing(input.prompt);
   return Array.from({ length: input.count }, (_, index) => ({
     estimatedMicroUsd,
     input: {
@@ -397,7 +405,7 @@ export function characterLookRequests(
       provider: model.provider,
       model: model.id,
       params: {
-        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}.${framed} ${input.mode === "stay-close" ? "Stay close to the accepted identity and proportions." : "Push the styling while preserving the accepted identity."} Optional ${input.kind.replace("-", " ")} exploration; do not redefine identity.${imageConstraintSuffix(direction)}`,
+        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${clothing}.${framed} ${input.mode === "stay-close" ? "Stay close to the accepted identity and proportions." : "Push the styling while preserving the accepted identity."} Optional ${input.kind.replace("-", " ")} exploration; do not redefine identity.${imageConstraintSuffix(direction)}`,
         references: identityReferences,
         referenceRoles,
         output: characterImageOutput(model, "character-look", tier),

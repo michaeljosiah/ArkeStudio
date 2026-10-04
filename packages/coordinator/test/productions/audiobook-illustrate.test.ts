@@ -316,8 +316,30 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
         const left = finished(h.events).proposal!;
         assert.ok(left.rows.some((row) => row.block === free[1]!.block), "offered again");
         assert.ok(!left.rows.some((row) => row.block === free[0]!.block), "what was made is not offered");
+        // Held with its reason on the row itself (2026-10-04), so a window that opens the proposal
+        // later holds it too; it is made again only when the author names it.
+        assert.equal(left.rows.find((row) => row.block === free[1]!.block)!.refused, "the provider refused the prompt");
+        const made = h.enqueued.length;
+        await accept(h.send, left, { blocks: [free[1]!.block], confirmedMicroUsd: 10_000_000 });
+        assert.equal(progressOf(h.events).at(-1)!.refused, "nothing to make", "not named: not made");
+        assert.equal(h.enqueued.length, made);
+        await accept(h.send, left, { blocks: [free[1]!.block], without: [free[1]!.block], confirmedMicroUsd: 10_000_000 });
+        assert.deepEqual(progressOf(h.events).at(-1)!.progress.made, [free[1]!.block], "tried again when the author says so");
       },
       { illustrate: says(MARENS), land: (n) => (n === 1 ? "fail" : "land") },
+    ));
+
+  it("says a safety refusal in plain words on the row it holds", () =>
+    withHarness(
+      async (h) => {
+        const proposal = await proposed(h);
+        const free = rowsWithoutNeeds(proposal);
+        await accept(h.send, proposal, { blocks: free.map((row) => row.block), confirmedMicroUsd: 10_000_000 });
+        const last = progressOf(h.events).at(-1)!.progress;
+        assert.deepEqual(last.failed, [{ block: free[0]!.block, reason: "refused by the image safety check" }]);
+        assert.equal(finished(h.events).proposal!.rows.find((row) => row.block === free[0]!.block)!.refused, "refused by the image safety check");
+      },
+      { illustrate: says(MARENS), land: (n) => (n === 0 ? "fail" : "land"), failure: "openai: the safety system refused the prompt (moderation blocked) — recompose the prompt away from what it flagged and try again" },
     ));
 
   it("stops where it stands: the picture in hand cancelled, what is made kept, nothing more asked for", () =>

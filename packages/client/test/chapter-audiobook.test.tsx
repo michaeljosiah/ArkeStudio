@@ -1635,6 +1635,35 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(sentOf(m, "accept-illustration").length, 2, "asked again, on a new confirm");
   });
 
+  it("holds a picture the provider refused in a reopened sheet, with its reason, until Try again or Skip (2026-10-04)", async () => {
+    // What a window that opens later is replayed: the proposal left after the run, the refused row carrying why.
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    const refused = { ...PROPOSAL, rows: [PROPOSAL.rows[0]!, PROPOSAL.rows[1]!, row("p3.0", { title: "The tide", at: 150, refused: "refused by the image safety check" })] };
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: refused }));
+    const tide = q(m, '[data-testid="illustration-row"][data-block="p3.0"]')!;
+    assert.equal(tide.dataset.state, "refused", "not an ordinary proposed picture");
+    assert.ok(tide.className.includes("fy-ills__card--held"));
+    assert.equal(tide.querySelector('[data-testid="illustration-row-reason"]')?.textContent, "refused by the image safety check");
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 1 to make · 1 needs a look · 1 refused");
+    assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.04", "the total is what will be made");
+    await act(async () => (tide.querySelector('[data-testid="illustration-retry"]') as HTMLButtonElement).click());
+    assert.equal(q(m, '[data-testid="illustration-row"][data-block="p3.0"]')!.dataset.state, "ready", "Try again puts it back in the run");
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 2 to make · 1 needs a look");
+    assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.08");
+    await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
+    const sent = sentOf(m, "accept-illustration")[0]!;
+    assert.deepEqual([sent.blocks, sent.without, sent.confirmedMicroUsd], [["p0.0", "p3.0"], ["p3.0"], 80_000], "named, so the coordinator makes it");
+  });
+
+  it("does not send a refused row the author left held", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [PROPOSAL.rows[0]!, row("p3.0", { at: 150, refused: "refused by the image safety check" })] } }));
+    await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
+    assert.deepEqual(sentOf(m, "accept-illustration")[0]!.blocks, ["p0.0"]);
+  });
+
   it("discards at no cost, and says in one clause why an accept was refused", async () => {
     const m = await proposedMount();
     await act(async () => __applyEventForTest({ at: AT, type: "illustration.progress", ...ids, progress: { proposalId: "ill-1", state: "done", total: 0, made: [], failed: [], spentMicroUsd: 0, confirmedMicroUsd: 0 }, refused: "the prose moved · illustrate again" }));

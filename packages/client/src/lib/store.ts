@@ -1,4 +1,4 @@
-import { illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
+import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
 import type { AudiobookReader, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
@@ -5648,7 +5648,8 @@ export function acceptIllustration(worldId: string, productionId: string, chapte
   if (run === undefined || run.state !== "proposed" || run.proposal === undefined) return false;
   const total = illustrationTotal(run.proposal.rows, new Set(run.skipped), new Set(run.without));
   if (total.count === 0) return false;
-  const blocks = run.proposal.rows.filter((row) => !run.skipped.includes(row.block) && ((row.needs?.length ?? 0) === 0 || run.without.includes(row.block))).map((row) => row.block);
+  // A row held for a reference, or one a run's picture was refused for, goes only once the author named it (2026-10-04).
+  const blocks = run.proposal.rows.filter((row) => illustrationRowGoes(row, new Set(run.skipped), new Set(run.without))).map((row) => row.block);
   const sent = send({ kind: "accept-illustration", worldId, productionId, chapterFile, proposalId: run.proposal.proposalId, blocks, ...(run.without.length > 0 ? { without: run.without } : {}), confirmedMicroUsd: total.microUsd });
   if (sent) {
     const { reason: _reason, ...rest } = run;

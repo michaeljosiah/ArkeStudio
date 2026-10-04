@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ChapterAudiobookSchema, type ClientMessage, type DomainEvent, type ManifestModel } from "@arke-studio/contracts";
+import { ChapterAudiobookSchema, estimateCharacterImageMicroUsd, priceLabel, type ClientMessage, type DomainEvent, type ManifestModel } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -32,13 +32,15 @@ const MODEL: ManifestModel = {
   pricing: { kind: "perImage", microUsdPerImage: 40000 },
 };
 
-type Harness = { store: () => WorldStore; worldDir: string; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void>; schemaVersion: () => number };
+type Harness = { store: () => WorldStore; worldDir: string; events: DomainEvent[]; order: string[]; send: (message: ClientMessage) => Promise<void>; schemaVersion: () => number };
 async function withHarness(run: (h: Harness) => Promise<void>): Promise<void> {
   const { root, worldDir } = await makeTempRoot();
   await mkdir(join(worldDir, "productions", LEDGER, ".voices"), { recursive: true });
   const provider = new FsWorldProvider(root, { clock: () => CLOCK });
   await provider.loadWorld(WORLD_ID);
   const events: DomainEvent[] = [];
+  /** Events and snapshots in the order they left: an answer must not wait behind a whole world. */
+  const order: string[] = [];
   const coordinator = new Coordinator({
     provider,
     adapter: null,
@@ -48,12 +50,15 @@ async function withHarness(run: (h: Harness) => Promise<void>): Promise<void> {
     cipher: devCipher(),
     credentialsFileName: "credentials.dev.dat",
     manifest: { manifestVersion: 1, generated: "2026-10-04", models: [] },
-    observeEvent: (event) => events.push(event),
+    observeEvent: (event) => {
+      events.push(event);
+      order.push(event.type);
+    },
   });
   const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
-  coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
+  coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot: () => void order.push("snapshot") });
   try {
-    await run({ worldDir, events, send, store: () => provider.openStore!()!, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion });
+    await run({ worldDir, events, order, send, store: () => provider.openStore!()!, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion });
   } finally {
     await provider.close();
   }
@@ -136,10 +141,40 @@ describe("the candidates of a look for a chapter", () => {
     });
     const params = close!.input.params;
     assert.deepEqual(params["references"], ["references/maren-kest/head-front.png", "references/maren-kest/takes/tk_B/b.png"], "the face first, then the clothes it is to keep");
-    assert.match(String(params["prompt"]), /Head and shoulders of the same person in the same clothes/);
+    assert.match(String(params["prompt"]), /ONE head-and-shoulders portrait of this one person/);
+    assert.match(String(params["prompt"]), /in the same clothes, hair and light as the full-body reference picture/);
     assert.equal(params["lookFraming"], "close");
     assert.equal(params["lookOfTake"], "tk_B");
     assert.throws(() => characterLookRequests(meta, direction as never, sheet, kit, MODEL, { kind: "costume", mode: "stay-close", prompt: "x", count: 1, generationKey: "g3", framing: "close" }), /close view is made from a look/);
+  });
+
+  // Tunde's close view came back as two panels, a full figure beside a crop (0.5.60-local.14).
+  it("asks for one portrait: a single image, one figure, no panels, no collage, no second figure", () => {
+    const [close] = characterLookRequests(meta, direction as never, sheet, kit, MODEL, { kind: "costume", mode: "stay-close", prompt: "Washed navy polo shirt, faded jeans, white trainers, a steel watch.", count: 1, generationKey: "g5", framing: "close", closeOf: { file: "references/maren-kest/takes/tk_T/t.png", lookId: "tk_T" } });
+    const prompt = String(close!.input.params["prompt"]);
+    for (const words of [/A single image with one figure/, /no panels/, /no split screen/, /no side-by-side/, /no collage/, /no grid/, /no inset/, /no full-body figure/, /no second person/]) assert.match(prompt, words);
+    assert.doesNotMatch(prompt, /Full body, head to toe/, "never the full-body framing");
+  });
+
+  // Ife's close view, and her look's candidates, were refused by the safety check for the look line's own words.
+  it("names the clothes neutrally in the requests the app writes, and keeps the look's own words as its prompt", () => {
+    const line = "Long knotless braids in a low twist, a low-backed cream-gold silk slip dress, bare shoulders, heavy old-gold hoops and stacked bangles.";
+    for (const framing of ["close", "full-body"] as const) {
+      const [request] = characterLookRequests(meta, direction as never, sheet, kit, MODEL, { kind: "costume", mode: "stay-close", prompt: line, count: 1, generationKey: "g6", framing, ...(framing === "close" ? { closeOf: { file: "references/maren-kest/takes/tk_I/i.png", lookId: "tk_I" } } : {}) });
+      const prompt = String(request!.input.params["prompt"]);
+      for (const words of ["bare shoulders", "low-backed", "slip dress"]) assert.ok(!prompt.includes(words), `${framing}: ${words}`);
+      assert.match(prompt, /a cream-gold silk evening dress, heavy old-gold hoops and stacked bangles/);
+      assert.equal(request!.input.params["lookPrompt"], line, "the look keeps the author's words");
+    }
+  });
+
+  // The design said ~$0.04; GPT Image 2 is $0.053 a picture and $0.10 a reference picture. The sheet shows what the job is priced at.
+  it("prices a close view at one picture from two references, the figure the sheet shows", () => {
+    const real: ManifestModel = { ...MODEL, id: "gpt-image-2", provider: "openai", pricing: { kind: "perImage", microUsdPerImage: 53_000, microUsdPerReferenceImage: 100_000 } } as ManifestModel;
+    const [close] = characterLookRequests(meta, direction as never, sheet, kit, real, { kind: "costume", mode: "stay-close", prompt: "Storm coat.", count: 1, generationKey: "g7", framing: "close", closeOf: { file: "references/maren-kest/takes/tk_S/s.png", lookId: "tk_S" } });
+    assert.equal(close!.estimatedMicroUsd, 253_000);
+    assert.equal(close!.estimatedMicroUsd, estimateCharacterImageMicroUsd(real, "character-look", 1, 2), "the sheet's own estimate");
+    assert.equal(priceLabel(close!.estimatedMicroUsd), "~$0.26");
   });
 });
 
@@ -244,6 +279,18 @@ describe("choosing a look for a character in a chapter (R-112)", () => {
       await choose(send, null);
       done = answer(events);
       assert.equal(done.record!.look!.characters["maren-kest"]!.lookId, undefined);
+    }));
+
+  // 0.5.60-local.14: the choice was written, but the open sheet waited on a whole world's snapshot before its answer.
+  it("answers a choice and a line written before it broadcasts the world's snapshot", () =>
+    withHarness(async ({ store, send, order }) => {
+      await acceptCharacterLook(store(), "maren-kest", { id: "council-coat", file: "looks/c.png", kind: "costume", prompt: "Formal council coat", takeId: "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2G5", artDirectionVersion: 3 });
+      order.length = 0;
+      await choose(send, "council-coat");
+      assert.deepEqual(order.filter((entry) => entry === "audiobook.record" || entry === "snapshot").slice(0, 2), ["audiobook.record", "snapshot"]);
+      order.length = 0;
+      await send({ kind: "set-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, target: { kind: "mood" }, text: "Grey dawn light.", requestId: "01J00000000000000000000002" });
+      assert.deepEqual(order.filter((entry) => entry === "audiobook.record" || entry === "snapshot").slice(0, 2), ["audiobook.record", "snapshot"]);
     }));
 
   it("gives the chapter a Cast page look's clothing, never its directions to the image model (Na Love or Juju)", () =>

@@ -249,6 +249,12 @@ export const IllustrationRowSchema = z
     needs: z.array(z.string().min(1).max(120)).max(24).optional(),
     /** The row's frame, who is in it and not, the expressions, details and checks (design turn 193k, R-120, R-121). */
     shot: PictureShotSchema.optional(),
+    /**
+     * Why an accepted run did not make this picture, in plain words (`refused by the image safety
+     * check`): the row is held, never offered again as an ordinary one, until the author tries it
+     * again (by naming it in `without`, as a row held for a reference is sent) or skips it.
+     */
+    refused: z.string().min(1).max(200).optional(),
   })
   .strict();
 export type IllustrationRow = z.infer<typeof IllustrationRowSchema>;
@@ -271,21 +277,36 @@ export const IllustrationProposalSchema = z
   .strict();
 export type IllustrationProposal = z.infer<typeof IllustrationProposalSchema>;
 
-/** What the card says it will spend: every row that is not skipped and not held (or held and sent without). */
-export function illustrationTotal(rows: readonly Pick<IllustrationRow, "block" | "estimatedMicroUsd" | "needs">[], skipped: ReadonlySet<string>, without: ReadonlySet<string>): { count: number; microUsd: number; held: number } {
+/**
+ * What the card says it will spend: every row that is not skipped and not held — for a missing
+ * reference (`held`) or because a run's picture was refused (`refused`) — unless the author named
+ * it in `without` (sent without the reference, or tried again).
+ */
+export function illustrationTotal(rows: readonly Pick<IllustrationRow, "block" | "estimatedMicroUsd" | "needs" | "refused">[], skipped: ReadonlySet<string>, without: ReadonlySet<string>): { count: number; microUsd: number; held: number; refused: number } {
   let count = 0;
   let microUsd = 0;
   let held = 0;
+  let refused = 0;
   for (const row of rows) {
     if (skipped.has(row.block)) continue;
-    if ((row.needs?.length ?? 0) > 0 && !without.has(row.block)) {
+    if (!without.has(row.block) && (row.needs?.length ?? 0) > 0) {
       held += 1;
+      continue;
+    }
+    if (!without.has(row.block) && row.refused !== undefined) {
+      refused += 1;
       continue;
     }
     count += 1;
     microUsd += row.estimatedMicroUsd;
   }
-  return { count, microUsd, held };
+  return { count, microUsd, held, refused };
+}
+
+/** Whether a row goes when the proposal is accepted: not skipped, and not held unless the author named it in `without`. */
+export function illustrationRowGoes(row: Pick<IllustrationRow, "block" | "needs" | "refused">, skipped: ReadonlySet<string>, without: ReadonlySet<string>): boolean {
+  if (skipped.has(row.block)) return false;
+  return without.has(row.block) || ((row.needs?.length ?? 0) === 0 && row.refused === undefined);
 }
 
 /** Where a made-one-at-a-time run stands (191d), and what each picture came to. */

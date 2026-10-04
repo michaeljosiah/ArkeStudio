@@ -202,6 +202,96 @@ export function lookName(look: Pick<CharacterLook, "prompt" | "framing">): strin
   return name === "" ? "Look" : `${name[0]!.toUpperCase()}${name.slice(1)}`;
 }
 
+// ---------------------------------------------------------------------------
+// Clothing named neutrally (2026-10-04, after 0.5.60-local.14)
+// ---------------------------------------------------------------------------
+
+/** A body part a line can say is bare. */
+const BARE_PART = "(?:shoulders?|back|arms?|legs?|skin|neck|midriff|stomach|chest|thighs?|collarbones?|décolletage)";
+/** Words for how much a garment shows, its cut, or the body under it: never in a picture's words once the look image rides. */
+const CUT_WORDS = [
+  "low[- ]backed", "open[- ]backed", "backless", "strapless", "off[- ]the[- ]shoulder", "one[- ]shoulder(?:ed)?", "spaghetti[- ]strap(?:ped|s)?",
+  "halter[- ]?neck(?:ed)?", "plunging(?: neckline)?", "low[- ]cut", "deep[- ]cut", "deep[- ]v", "low[- ]necked", "sweetheart neckline",
+  // Only words that say how a garment shows the body: "sheer" before a cloth, never a sheer drop.
+  "sheer(?= (?:silk|chiffon|fabric|lace|mesh|organza|tulle|dress|blouse|top|gown|robe|slip))", "see[- ]through", "skin[- ]tight", "figure[- ]hugging",
+  "body[- ]hugging", "curve[- ]hugging", "form[- ]fitting", "body[- ]?con", "tight[- ]fitting", "revealing", "sexy", "sultry", "seductive", "racy", "skimpy", "cut[- ]?outs?",
+];
+/** A phrase that is only about skin or the body: bare shoulders, a slit to the thigh, the back beneath her braids. */
+const EXPOSURE_PHRASES = [
+  `(?:with |and |showing |leaving |baring |revealing |her |his |their |its )*(?:bare|exposed|naked) ${BARE_PART}`,
+  `${BARE_PART} (?:left )?(?:bare|exposed)`,
+  "(?:with )?(?:a )?(?:thigh[- ]high|high|side|deep|leg) slit(?: to the (?:thigh|hip))?",
+  "slit to the (?:thigh|hip)",
+  "(?:showing|revealing|baring) (?:off )?(?:her |his |their )?(?:skin|cleavage|figure|curves|legs|body)",
+  "cleavage", "décolletage", "voluptuous",
+  "(?:bare |exposed )?(?:beneath|under|below) (?:her|his|their) braids",
+];
+const CUT = new RegExp(`\\b(?:${CUT_WORDS.join("|")})\\b[ ,]*`, "gi");
+const EXPOSURE = new RegExp(`(?:^|\\s|,)(?:${EXPOSURE_PHRASES.join("|")})(?=$|[\\s,;.)])`, "gi");
+const SHOWS = new RegExp(`\\b(?:${[...CUT_WORDS, ...EXPOSURE_PHRASES].join("|")})(?=$|[\\s,;.)])`, "i");
+/** A garment named in a clause: what keeps the clause when its cut is taken out. */
+const GARMENT = /\b(dress|gown|slip|shirt|blouse|top|skirt|trousers|jeans|suit|jacket|coat|robe|wrapper|agbada|kaftan|tunic|sweater|jumper|vest|camisole|bodysuit|jumpsuit|outfit)\b/i;
+
+/** The clauses of a line: split on commas and semicolons outside brackets, each with the separator after it. */
+function clauses(text: string): Array<{ words: string; after: string }> {
+  const out: Array<{ words: string; after: string }> = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (char === "(") depth += 1;
+    else if (char === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0 && (char === "," || char === ";")) {
+      out.push({ words: text.slice(start, index), after: char });
+      start = index + 1;
+    }
+  }
+  out.push({ words: text.slice(start), after: "" });
+  return out;
+}
+
+/**
+ * Clothing named neutrally (2026-10-04): the garment and its colour — `her cream-gold silk evening
+ * dress` — never how much skin it shows, its cut, or the body under it. On Na Love or Juju the
+ * pictures of Ife at the club table and her close view were refused by the image provider's safety
+ * check: their words repeated `bare shoulders`, `low-backed silk slip dress` and `beneath her
+ * braids` while her full-body look image, the same dress, rode as the reference. The look image
+ * carries the clothes; the words only have to name them. A clause that is only about skin goes; a
+ * clause that names a garment keeps the garment and loses the cut. A slip dress is named an evening
+ * dress, which is what it is in a picture.
+ */
+export function neutralClothing(text: string): string {
+  const sentences = text.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+/);
+  const kept = sentences.map((sentence) => {
+    const parts = clauses(sentence).flatMap(({ words, after }) => {
+      if (!SHOWS.test(words)) return [{ words, after }];
+      // A clause that names nothing worn is only about the body: it goes, its separator with it.
+      if (!GARMENT.test(words.replace(EXPOSURE, " "))) return [];
+      const cleaned = words.replace(EXPOSURE, " ").replace(CUT, "").replace(/\s+(?:with|and)\s*$/i, "").replace(/\s{2,}/g, " ");
+      return [{ words: cleaned, after }];
+    });
+    let joined = parts.map((part, index) => `${part.words}${index < parts.length - 1 ? part.after : ""}`).join("");
+    // A sentence whose last clause went keeps its full stop.
+    const stop = /[.!?]$/.test(sentence.trim()) && !/[.!?]$/.test(joined.trim()) ? sentence.trim().slice(-1) : "";
+    joined = `${joined.trim().replace(/[,;]\s*$/, "")}${stop}`;
+    return joined;
+  });
+  return kept
+    .filter((sentence) => sentence.replace(/[.!?\s]/g, "") !== "")
+    .join(" ")
+    .replace(/\bslip[- ]dress\b/gi, "evening dress")
+    .replace(/\b([Aa]) evening\b/g, "$1n evening")
+    .replace(/\s+([,;.])/g, "$1")
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/** Whether a line says how much a garment shows, its cut, or names bare skin. */
+export function namesExposure(text: string): boolean {
+  return SHOWS.test(text);
+}
+
 function clipWords(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1).replace(/\s+\S*$/, "")}…`;
