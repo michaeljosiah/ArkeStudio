@@ -5,7 +5,18 @@ import type { ConversationActionRecord } from "./arke-actions.js";
 
 /** Frozen review content is part of the approval digest (SPEC-051 R-50..R-55). */
 export const PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION = 62;
-export const ProductionCardPreviewSchema = z.discriminatedUnion("kind", [
+// Spelled out and annotated (TS7056): inferred, this union carried the whole scene record into every
+// schema that holds a card, and the engine's declaration bundle refused WorldChatLoadedSchema as too
+// long to serialize, which stopped the desktop build.
+export type ProductionCardPreview =
+  | {
+      kind: "production"; title: string; medium: string; productionKind: string;
+      aspect: string | null; frameRate: number; series: string | null;
+      season: string | null; episodes: number;
+      style: string | null; model: string | null;
+    }
+  | { kind: "scene"; before: SceneRecord | null; after: SceneRecord };
+export const ProductionCardPreviewSchema: z.ZodType<ProductionCardPreview, z.ZodTypeDef, unknown> = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("production"), title: z.string(), medium: z.string(), productionKind: z.string(),
     aspect: z.string().nullable(), frameRate: z.number().positive(), series: z.string().nullable(),
@@ -14,7 +25,6 @@ export const ProductionCardPreviewSchema = z.discriminatedUnion("kind", [
   }).strict(),
   z.object({ kind: z.literal("scene"), before: SceneRecordSchema.nullable(), after: SceneRecordSchema }).strict(),
 ]);
-export type ProductionCardPreview = z.infer<typeof ProductionCardPreviewSchema>;
 
 export function shotChanges(before: SceneRecord | null, after: SceneRecord) {
   const old = before ? orderedShots(before) : [];
