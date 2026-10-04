@@ -2168,8 +2168,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sceneId: SceneIdSchema,
       baseVersion: z.number().int().min(1),
       command: SceneCommandSchema,
+      /** Correlates the person's Keep with its constructed review authority. */
+      stageReviewId: z.string().uuid().optional(),
     })
     .strict(),
+  z.object({ kind: z.literal("stage-review-discard"), worldId: UlidSchema, reviewId: z.string().uuid() }).strict(),
   z
     .object({
       kind: z.literal("create-chapter"),

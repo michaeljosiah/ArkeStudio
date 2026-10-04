@@ -30,6 +30,8 @@ import { withModelValidation } from "./harness/model-validation.js";
 import { HarnessModelCatalog, selectHarnessModel, type LanguageModelSelection } from "./harness/model-catalog.js";
 import { prepareReferences, validateSeedanceReferences } from "./media/prepare-references.js";
 import { stageConstructionHandoff } from "./world-chat/actions.js";
+import { projectHumanDecisions } from "./world-chat/human-decisions.js";
+import { discardStageReview, keepStageReview, keptStageReviewIds, listStageReviews, recoverRetainedStageReviews, retainStageReview } from "./productions/stage-review.js";
 import { handleProductionSetupCommand } from "./productions/setup-command.js";
 import { recoverProductionSetups } from "./productions/setup.js";
 import { saveProductionNarrative } from "./productions/narrative.js";
@@ -9995,21 +9997,12 @@ export class Coordinator {
          * refusal and snapshot bookkeeping still named the old one.
          */
         if (!store || store.worldId !== msg.worldId) return;
-        await applySceneCommand(
-          store,
-          {
-            productionId: msg.productionId,
-            sceneFile: msg.sceneFile,
-            sceneId: msg.sceneId,
-            baseVersion: msg.baseVersion,
-            command: sceneCommandFrom(msg.command),
-          },
-          {
-            // Plan status is folded from the journal joined with live queue facts, so the probe
-            // comes from here rather than from the write path reaching for the dispatcher.
-            activePlans: (productionId) => this.activeScenePlans(store, productionId),
-          },
-        ).catch((err: unknown) => {
+        const input = {
+          productionId: msg.productionId, sceneFile: msg.sceneFile, sceneId: msg.sceneId,
+          baseVersion: msg.baseVersion, command: sceneCommandFrom(msg.command),
+        };
+        const deps = { activePlans: (productionId: string) => this.activeScenePlans(store, productionId) };
+        await (msg.stageReviewId ? keepStageReview(store, msg.stageReviewId, input, deps) : applySceneCommand(store, input, deps)).catch((err: unknown) => {
           // Said, never swallowed: the surfaces repaint from the snapshot, so a silent refusal
           // throws away the edit with nothing to show for it (the save-scene lesson).
           this.emit({
@@ -11091,10 +11084,24 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId) return;
         let approved = false;
         const emit = (event: Extract<DomainEvent,{type:"stage.construction"}>) => {
-          this.emit(event);
-          if (approved && (event.status === "ready" || event.status === "failed") && msg.conversationId && msg.actionId) {
-            this.trackBackground(this.conversationActionLifecycle(store).completeHostAction({ conversationId: msg.conversationId, actionId: msg.actionId, payload: { kind: "stage-constructor-result", shotId: msg.shotId, sceneId: msg.sceneId, status: event.status, detail: event.detail } }).then(() => this.refreshConversationOutcome(store, msg.conversationId!)));
-          }
+          if (!approved || !msg.conversationId || !msg.actionId || (event.status !== "ready" && event.status !== "failed")) { this.emit(event); return; }
+          const conversationId = msg.conversationId, actionId = msg.actionId;
+          this.trackBackground((async () => {
+            if (!this.stillOpen(store)) return;
+            let result = event;
+            if (event.status === "ready" && event.draft) {
+              try {
+                await retainStageReview(store, { id: msg.requestId, worldId: msg.worldId, productionId: msg.productionId,
+                  sceneId: msg.sceneId, shotId: msg.shotId, baseVersion: msg.baseVersion, conversationId, actionId,
+                  createdAt: event.at, draft: event.draft, status: "pending" });
+              } catch { result = { ...event, status: "failed", draft: undefined, detail: "The Stage draft could not be retained. Reopen the world and construct again before Keep." }; }
+            }
+            if (!this.stillOpen(store)) return;
+            this.emit(result);
+            await this.conversationActionLifecycle(store).completeHostAction({ conversationId, actionId,
+              payload: { kind: "stage-constructor-result", shotId: msg.shotId, sceneId: msg.sceneId, status: result.status, detail: result.detail } });
+            await this.refreshConversationOutcome(store, conversationId);
+          })());
         };
         const fail = (detail: string) => emit({ type: "stage.construction", at: store.now(), worldId: msg.worldId, requestId: msg.requestId, sceneId: msg.sceneId, shotId: msg.shotId, baseVersion: msg.baseVersion, status: "failed", round: 0, detail });
         if (msg.actionId || msg.conversationId) {
@@ -11109,7 +11116,11 @@ export class Coordinator {
         // Claimed before the model decision, which may wait on discovery: a Stop in that wait
         // has to find the request, or the build starts after it.
         let claimed: AbortSignal;
-        try { claimed = this.stageConstructor.begin(msg); } catch (error) { fail(describeCoordinatorError(error)); return; }
+        try { claimed = this.stageConstructor.begin(msg); } catch (error) {
+          // Another renderer can show the same handoff. Its refusal must not fail the first
+          // renderer's live authority, which is still constructing the reviewed draft.
+          approved = false; fail(describeCoordinatorError(error)); return;
+        }
         const selected = await this.languageModelFor({ kind: "production", productionId: msg.productionId }, undefined, "stage-designer", claimed);
         const configured = selected.sessionModel;
         if (selected.reason || !configured) {
@@ -11122,6 +11133,14 @@ export class Coordinator {
           scratchRoot: this.opts.appRoot ? join(this.opts.appRoot, ".stage") : `${this.opts.changeLogPath}.stage`,
           emit, current: () => this.opts.provider.openStore?.() === store,
         }).catch(error => fail(describeCoordinatorError(error))));
+        return;
+      }
+      case "stage-review-discard": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await discardStageReview(store, msg.reviewId).catch(error => this.emit({ at: store.now(), type: "command.failed",
+          command: msg.kind, requestId: msg.reviewId, reason: describeCoordinatorError(error) }));
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "stage-playblast": {
@@ -15561,7 +15580,7 @@ export class Coordinator {
       case "resolve-extraction": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
-        if (!gate || !store) return;
+        if (!gate || !store || store.worldId !== msg.worldId) return;
         const artifact = store.getBundle().artifacts.find((a) => a.id === msg.artifactId);
         if (!artifact) return;
         await resolveCandidate(store, gate, artifact, msg.candidateHash, msg.decision).catch((err) => {
@@ -15569,6 +15588,8 @@ export class Coordinator {
             kind: "extraction.resolve-failed",
             message: err instanceof Error ? err.message : String(err),
           });
+          this.emit({ at: store.now(), type: "command.failed", command: msg.kind, requestId: msg.artifactId,
+            reason: "This extracted fact could not be decided. Review its current source and try again." });
         });
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -18099,6 +18120,7 @@ export class Coordinator {
             const review = msg.kind === "resume-character-voice-sample" ? await resumeCharacterSample(store, msg.sheetId, msg.operationId) : await prepareCharacterSample(store, this.opts.audioMediaTools!, msg);
             this.emit({ at: new Date().toISOString(), type: "voice.sample-result", requestId: msg.requestId,
               worldId: msg.worldId, sheetId: msg.sheetId, status: "prepared", review });
+            await this.refreshSelectedHumanDecisions(store);
           } else {
             if (msg.kind === "accept-character-voice-sample") await acceptCharacterSample(store, msg);
             else if (msg.kind === "clear-character-voice-sample") await clearCharacterSample(store, msg.sheetId, msg.expectedHash);
@@ -19011,6 +19033,7 @@ export class Coordinator {
       productionId,
       states,
     });
+    await this.refreshSelectedHumanDecisions(store);
   }
 
   /** A settled plan job unblocks its dependents (SPEC-024 R-18): refresh, advance, push state. */
@@ -20411,7 +20434,11 @@ export class Coordinator {
    * none of them would otherwise be noticed.
    */
   private async refreshConversations(store: WorldStore): Promise<void> {
-    const { summaries, activeActions } = await store.ownedWrite(() => discoverConversations(store.dir));
+    let discovery = await store.ownedWrite(() => discoverConversations(store.dir));
+    if (await recoverRetainedStageReviews(store, discovery.activeActions, this.conversationActionLifecycle(store))) {
+      discovery = await store.ownedWrite(() => discoverConversations(store.dir));
+    }
+    const { summaries, activeActions } = discovery;
     if (!this.stillOpen(store)) return;
     this.readModel.setConversations(summaries);
     const constructions = await Promise.all(activeActions.filter(action => action.actionKind === "world-chat-production-stage-construct" && action.status === "awaiting-host").map(async action => {
@@ -20428,6 +20455,7 @@ export class Coordinator {
         action.baseObservations.find((observation) => observation.requirement === "scenes" && observation.target.startsWith(prefix))?.target.slice(prefix.length);
       return shotId && sceneId ? [{ worldId: action.worldId, conversationId: action.conversationId, actionId: action.actionId, productionId: action.productionId, sceneId, shotId }] : [];
     }));
+    await this.refreshStageReviews(store);
   }
 
   private async refreshConversationOutcome(store: WorldStore, conversationId: ConversationId): Promise<void> {
@@ -20508,7 +20536,10 @@ export class Coordinator {
     onlyIfStillSelected?: ConversationId,
   ): Promise<void> {
     const service = new WorldChatService(store.dir);
-    const loaded = await store.ownedWrite(() => service.load(conversationId));
+    let loaded = await store.ownedWrite(() => service.load(conversationId));
+    if (loaded && this.stillOpen(store) && await recoverRetainedStageReviews(store, loaded.actions, this.conversationActionLifecycle(store))) {
+      loaded = await store.ownedWrite(() => service.load(conversationId));
+    }
     if (
       !this.stillOpen(store) ||
       (onlyIfStillSelected !== undefined && this.readModel.getState().worldChat?.conversationId !== onlyIfStillSelected)
@@ -20520,8 +20551,12 @@ export class Coordinator {
     }
     const bundle = store.getBundle();
     const sheets = new Map(bundle.sheets.map((s) => [s.id, s]));
+    const human = await projectHumanDecisions(store, loaded, bundle, this.jobQueue?.listJobs() ?? this.getState().app.jobs);
+    if (!this.stillOpen(store) || (onlyIfStillSelected !== undefined && this.getState().worldChat?.conversationId !== onlyIfStillSelected)) return;
+    this.readModel.setStageReviews(human.stageReviews);
     this.readModel.setWorldChat(
       projectWorkspace(loaded, new Map(), {
+        humanDecisions: human.cards, humanDecisionProblems: human.problems,
         sheetName: (slug) => sheets.get(slug)?.name ?? null,
         sheetVersion: (slug) => sheets.get(slug)?.version ?? null,
         // Asked of the runner, which is the only thing that knows a turn is happening now rather
@@ -20695,7 +20730,29 @@ export class Coordinator {
         reason: "The world display could not refresh. Reopen the world to see its current state." });
       return;
     }
+    const store = this.opts.provider.openStore?.();
+    if (store?.worldId === worldId) {
+      await this.refreshStageReviews(store);
+      await this.refreshSelectedHumanDecisions(store);
+    }
     this.transport.broadcastSnapshot();
+  }
+
+  private async refreshStageReviews(store: WorldStore): Promise<void> {
+    try {
+      const reviews = await listStageReviews(store), kept = await keptStageReviewIds(store);
+      const pending = reviews.filter(review => review.status === "pending" && !kept.has(review.id));
+      if (this.stillOpen(store)) this.readModel.setStageReviews(pending);
+    } catch {
+      if (this.stillOpen(store)) this.readModel.setStageReviews([]);
+      this.emit({ at: store.now(), type: "command.failed", command: "stage-review-read", requestId: null,
+        reason: "Stage review drafts could not be read. Reopen the world before Keep." });
+    }
+  }
+
+  private async refreshSelectedHumanDecisions(store: WorldStore): Promise<void> {
+    const id = this.getState().worldChat?.conversationId;
+    if (id && this.stillOpen(store)) await this.openWorldChat(store, id, id);
   }
 
   private async seed(): Promise<void> {

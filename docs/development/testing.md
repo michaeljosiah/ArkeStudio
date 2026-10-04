@@ -173,6 +173,16 @@ folded state, automatic plan policies disclose their authorization, and long pro
 does not alter frozen job prompts. A proven pre-authority refusal settles stale; an unreadable
 authority continues to require reconciliation.
 
+Production human controls also run coordinator `test/world-chat/human-decisions.test.ts`,
+`test/productions/stage-review.test.ts`, `test/arke-actions/human-decision-parity.test.ts`,
+`test/audio/character-sample.test.ts` and `test/audio/preparation.test.ts`, plus client
+`test/human-decisions.test.tsx`, `test/scene-stage.test.tsx` and `test/voice-sample-take.test.tsx`.
+These exercise ordinary screen commands settling the thread, read-only voice review discovery,
+inline rights attestations, retained Stage draft reopening, stale/duplicate Keep, discard,
+path containment and interrupted host completion without another construction. The parity
+fixture requires every pipeline human command's in-thread surface and keeps those commands
+out of model preparation. This scripted evidence does not replace installed-renderer acceptance.
+
 Book/audio standards experiments use the separate [publication interoperability checks](publication-interop.md#reproduce).
 They install their own locked development dependencies and exercise Readium, package closure and EPUBCheck.
 

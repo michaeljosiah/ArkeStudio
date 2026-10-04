@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { PlanState } from "@arke-studio/contracts";
+import type { HumanDecisionControl, PlanState } from "@arke-studio/contracts";
 import { Button, Callout } from "../../components/ui.js";
 import { usd } from "../../lib/format.js";
 import {
@@ -9,6 +9,19 @@ import {
   planReconfirm,
   subscribePlanStates,
 } from "../../lib/store.js";
+
+/** The same pass authorization fields on the scene and in its conversation (SPEC-051 R-20). */
+export function PlanGateControls({ worldId, control }: { worldId: string; control: Extract<HumanDecisionControl, { kind: "plan" }> }) {
+  return <>
+    <Button variant="primary" onClick={() => control.gate === "continue"
+      ? planContinue(worldId, control.productionId, control.planId, control.passIndex)
+      : planReconfirm(worldId, control.productionId, control.planId, control.passIndex)}>
+      {control.gate === "continue" ? `Continue · pass ${control.passIndex + 1} · ${usd(control.estimatedMicroUsd)}`
+        : `Reconfirm · pass ${control.passIndex + 1} runs past the ${usd(control.capMicroUsd)} cap`}
+    </Button>
+    <Button variant="ghost" onClick={() => planCancel(worldId, control.productionId, control.planId)}>Cancel plan</Button>
+  </>;
+}
 
 /** Durable multi-pass authorization stays with the scene after the dispatch route retires. */
 export function PlansPanel({
@@ -140,33 +153,11 @@ export function PlansPanel({
             {state.haltReason !== undefined && `halted: ${state.haltReason}`}
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            {state.next.kind === "await-continue" && (
-              <Button
-                variant="primary"
-                onClick={() =>
-                  planContinue(worldId, prodId, state.planId, (state.next as { passIndex: number }).passIndex)
-                }
-              >
-                Continue · pass {state.next.passIndex + 1} ·{" "}
-                {usd(state.passes[state.next.passIndex]?.estimatedMicroUsd ?? 0)}
-              </Button>
-            )}
-            {state.next.kind === "await-reconfirm" && (
-              <Button
-                variant="primary"
-                onClick={() =>
-                  planReconfirm(
-                    worldId,
-                    prodId,
-                    state.planId,
-                    (state.next as { passIndex: number }).passIndex,
-                  )
-                }
-              >
-                Reconfirm · pass {state.next.passIndex + 1} runs past the {usd(state.capMicroUsd)} cap
-              </Button>
-            )}
-            {state.status !== "completed" && state.status !== "cancelled" && (
+            {(state.next.kind === "await-continue" || state.next.kind === "await-reconfirm") && <PlanGateControls worldId={worldId}
+              control={{ kind: "plan", productionId: prodId, planId: state.planId, passIndex: state.next.passIndex,
+                gate: state.next.kind === "await-continue" ? "continue" : "reconfirm", capMicroUsd: state.capMicroUsd,
+                estimatedMicroUsd: state.passes[state.next.passIndex]?.estimatedMicroUsd ?? 0 }} />}
+            {state.next.kind !== "await-continue" && state.next.kind !== "await-reconfirm" && state.status !== "completed" && state.status !== "cancelled" && (
               <Button variant="ghost" onClick={() => planCancel(worldId, prodId, state.planId)}>
                 Cancel plan
               </Button>

@@ -6,7 +6,7 @@ import { newId, ulid, orderedShots, planCharacterAudio, characterAudioInstructio
 import { FAL_MODELS } from "../../../providers/src/fal-catalogue.generated.js";
 import { FalClient } from "../../../providers/src/clients/fal.js";
 import { readCharacterAudioInputs } from "../../src/audio/reference-inputs.js";
-import { prepareCharacterSample, resumeCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample } from "../../src/audio/character-sample.js";
+import { pendingCharacterSampleReviews, prepareCharacterSample, resumeCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample } from "../../src/audio/character-sample.js";
 import { createAudioMediaTools } from "../../src/audio/media-tools.js";
 import { audioHash } from "../../src/audio/qc.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -36,12 +36,16 @@ it("reviewed assignment survives reopen, leaves source and TTS intact, and clear
     sheetId: "maren-kest", requestId: ulid(), source: { kind: "artifact", artifactId } });
   await store.close(); store = await WorldStore.open(dir);
   assert.deepEqual(await resumeCharacterSample(store, "maren-kest", review.operationId), review);
+  const journal = await readFile(join(dir, "changes.jsonl"), "utf8");
+  assert.deepEqual(await pendingCharacterSampleReviews(store), { reviews: [review], problems: [] }, "the thread discovers the same frozen review after reopening");
+  assert.equal(await readFile(join(dir, "changes.jsonl"), "utf8"), journal, "reading human controls cannot assign audio or attest rights");
   const warnings = Object.values(review.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code);
   const accept = { kind: "accept-character-voice-sample" as const, worldId: store.worldId, sheetId: "maren-kest", requestId: ulid(),
     operationId: review.operationId, warningCodes: warnings, singleSpeaker: true, noMusic: true, rightsBasis: "self" as const };
   await assert.rejects(acceptCharacterSample(store, { ...accept, noMusic: false }), /one speaker and no music/);
   await acceptCharacterSample(store, accept);
   await acceptCharacterSample(store, accept); // Lost response does not create another acceptance.
+  assert.deepEqual(await pendingCharacterSampleReviews(store), { reviews: [], problems: [] }, "screen acceptance settles the matching thread authority");
   await store.close(); store = await WorldStore.open(dir);
   const sample = (await readKit(store, "maren-kest"))!.kit.designatedVoiceSample!;
   assert.ok("schemaVersion" in sample);

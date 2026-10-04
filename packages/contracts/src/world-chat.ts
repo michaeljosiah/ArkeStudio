@@ -1,6 +1,7 @@
 import { valueSchema } from "./value-schema.js";
 import { z } from "zod";
 import { ImageDisclosureSchema, ImageObservationSchema } from "./world-chat-images.js";
+import { HumanDecisionCardSchema } from "./human-decision.js";
 
 /** A browser upload stays below the authenticated websocket frame budget, including base64. */
 export const BROWSER_ATTACHMENT_MAX_BYTES = 16 * 1024 * 1024;
@@ -1880,6 +1881,9 @@ export type WorldChatTranscriptMessage = z.infer<typeof WorldChatTranscriptMessa
  */
 export const WorldChatWorkspaceSchema = z
   .object({
+    /** Live projections of existing human authorities; never part of a model turn result. */
+    humanDecisions: z.array(HumanDecisionCardSchema).optional(),
+    humanDecisionProblems: z.array(z.string().min(1).max(500)).optional(),
     imageDisclosures: z.array(ImageDisclosureSchema).optional(),
     imageReceipts: z.array(WorldChatCheckReceiptSchema).optional(),
     productionSetup: ProductionSetupStateSchema.optional(),

@@ -34,6 +34,7 @@ import {
   stagePlayblastIsStale,
   type ClientMessage,
   type ProductionBundle,
+  type StageReview,
   type SceneRecord,
   type ResolvedShotStaging,
   type Shot,
@@ -45,7 +46,7 @@ import { StageUnderlay } from "./stage-underlay.js";
 import { Eyebrow, Link, Row, Stepper, Triad, Value, StageEditContext, fieldEscape, sameLine } from "./stage-inspector.js";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
-import { send, subscribeStageConstruction, beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
+import { send, useStore, subscribeStageConstruction, beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
 import { Button } from "../../components/ui.js";
 import { ChevronLeft, ChevronRight, Lamp, Minimize2, Minus, PauseSolid, PlaySolid, Plus, X } from "../../components/icons.js";
 
@@ -123,6 +124,7 @@ export function SceneStage({
   onRenderShot,
   playblastRequest,
   constructionRequest,
+  review,
   fullscreen = null,
   head = true,
 }: {
@@ -135,10 +137,11 @@ export function SceneStage({
   generatorPending: boolean;
   /** Counts up on every refused scene write, so a wait can end on a refusal as well as a landing. */
   refusalVersion: number;
-  onCommand: (command: Command) => boolean;
+  onCommand: (command: Command, stageReviewId?: string) => boolean;
   onRenderShot: (shotId: string) => void;
   constructionRequest?: { actionId: string; conversationId: string; shotId: string; instruction: string; preserve: "blocking" | "camera" | "none" };
   playblastRequest?: { actionId: string; conversationId: string; shotId: string };
+  review?: StageReview;
   /** In full screen the way out sits on this head row (turn 144); null means the page is not in it. */
   fullscreen?: { leave: () => void } | null;
   /**
@@ -153,6 +156,11 @@ export function SceneStage({
   const selected = selectedShotId(subject);
   const index = Math.max(0, shots.findIndex((candidate) => candidate.id === selected));
   const shot: Shot | null = shots[index] ?? null;
+  const { state } = useStore();
+  const retained = review ?? state?.stageReviews?.filter(value => value.worldId === world.meta.worldId &&
+    value.productionId === production.meta.id && value.sceneId === scene.id && value.shotId === shot?.id).at(-1);
+  const retainedReviewId = useRef<string | null>(null);
+  const hydratedReviewId = useRef<string | null>(null);
   const previous = index > 0 ? shots[index - 1] ?? null : null;
   const sheets = world.sheets;
   const persisted = shot?.staging ?? null;
@@ -602,8 +610,23 @@ export function SceneStage({
       setDraft({ ...result.draft.staging, version: persisted?.version ?? 1, cast: result.draft.cast, sets: result.draft.sets });
     }
     if (result.status === "inspect") setInspectionRound(result.round);
+    if (result.status === "ready" && constructionRequest) retainedReviewId.current = pending.id;
     if (result.status === "ready" || result.status === "failed") { setConstructing(false); setInspectionRound(null); }
   }), [world.meta.worldId, shot?.id, scene.id, scene.version, persisted?.version]);
+  useEffect(() => {
+    if (retained && retained.id !== hydratedReviewId.current) {
+      hydratedReviewId.current = retained.id; retainedReviewId.current = retained.id;
+      aiDraftVersion.current = retained.baseVersion;
+      cameraDirty.current = true; blockingDirty.current = true; scopeDirty.current = true;
+      setScope("shot");
+      setDraft({ ...retained.draft.staging, version: persisted?.version ?? 1, cast: retained.draft.cast, sets: retained.draft.sets });
+      setNote(retained.draft.assessment);
+    } else if (!retained && state?.stageReviews !== undefined && hydratedReviewId.current && retainedReviewId.current && !constructing) {
+      retainedReviewId.current = null; hydratedReviewId.current = null; aiDraftVersion.current = null;
+      cameraDirty.current = false; blockingDirty.current = false; scopeDirty.current = false;
+      setDraft(null);
+    }
+  }, [retained, state?.stageReviews, constructing, persisted?.version]);
   useEffect(() => {
     if (inspectionRound === null || !data || !constructing) return;
     let live = true;
@@ -701,9 +724,13 @@ export function SceneStage({
       };
     }
     if (sharedChanged) command.blocking = { cast: working.cast, sets: working.sets };
-    if (onCommand(command)) aiDraftVersion.current = null;
+    if (onCommand(command, retainedReviewId.current ?? undefined)) aiDraftVersion.current = null;
   };
   const discard = () => {
+    if (retainedReviewId.current && !send({ kind: "stage-review-discard", worldId: world.meta.worldId, reviewId: retainedReviewId.current })) {
+      setNote("The studio is disconnected. The draft is still waiting for review."); return;
+    }
+    retainedReviewId.current = null;
     aiDraftVersion.current = null;
     cameraDirty.current = false;
     blockingDirty.current = false;

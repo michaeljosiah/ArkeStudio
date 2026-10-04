@@ -8591,6 +8591,9 @@ p.fy-ab__menu-eb { margin: 0; }
    between them does not appear to change surface. */
 .fy-voicesheet { position: fixed; z-index: 40; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 660px; max-width: calc(100% - 48px); max-height: calc(100vh - 72px); display: flex; flex-direction: column; background: var(--background); border: 1px solid var(--border); border-radius: 15px; box-shadow: var(--shadow-lg); overflow: hidden; }
 .fy-voicesheet--wide { width: 760px; }
+/* Rights review uses the same sheet controls inside a conversation (SPEC-051 R-20). */
+.fy-actioncard .fy-voicesheet--inline { position: static; z-index: auto; inset: auto; transform: none; width: 100%; max-width: 100%; max-height: none; box-shadow: none; }
+.fy-actioncard .fy-voicesheet--inline::before { display: none; }
 .fy-voicesheet__head { display: flex; align-items: center; gap: 12px; padding: 20px 22px 14px; }
 .fy-voicesheet__head strong { display: block; font: 650 18px var(--font-sans); letter-spacing: -.02em; }
 .fy-voicesheet__head .fy-mono { display: block; margin-top: 2px; color: var(--neutral-400); }

@@ -1,5 +1,7 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { dirname } from "node:path";
+import { z } from "zod";
 import { CharacterVoiceSampleSchema, ReferenceKitSchema, SlugSchema, VoiceSampleReviewSchema,
   estimateMicroUsd, supportsCharacterSpeakingVideo, type ClientMessage, type ManifestModel, type VoiceSampleReview } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
@@ -9,6 +11,7 @@ import { sha256 } from "../world/text-files.js";
 import { appendAudioRights } from "./rights.js";
 import { acceptPreparedAudio, audioWorldPath, prepareAudio, resolveAudioSource, type PreparedAudioCandidate } from "./storage.js";
 import type { AudioMediaTools } from "./media-tools.js";
+import { containedWorldFilePath } from "../world/contained-file.js";
 
 type Prepare = Extract<ClientMessage, { kind: "prepare-character-voice-sample" }>;
 type Accept = Extract<ClientMessage, { kind: "accept-character-voice-sample" }>;
@@ -47,6 +50,33 @@ export async function resumeCharacterSample(store: WorldStore, sheetId: string, 
   await audioWorldPath(store.dir, context.candidate.stagedFile);
   return VoiceSampleReviewSchema.parse({ operationId, sheetId, sourceFile: source.file,
     preparedFile: context.candidate.stagedFile, provenance: context.candidate.provenance });
+}
+
+/** Read existing preparations for a human surface; discovery never prepares or assigns audio. */
+export async function pendingCharacterSampleReviews(store: WorldStore): Promise<{ reviews: VoiceSampleReview[]; problems: string[] }> {
+  let names: string[];
+  try {
+    const check = await containedWorldFilePath(store.dir, ".staging/audio/.containment-check", false, "audio", true);
+    names = await readdir(dirname(check));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { reviews: [], problems: [] };
+    return { reviews: [], problems: ["Prepared voice reviews could not be read. Reopen the world before deciding."] };
+  }
+  const reviews: VoiceSampleReview[] = [], problems: string[] = [];
+  for (const id of names.filter(name => z.string().uuid().safeParse(name).success)) {
+    let context: { sheetId?: string };
+    try {
+      context = JSON.parse(await readFile(await containedWorldFilePath(store.dir, contextPath(id)), "utf8"));
+    } catch (error) {
+      // Other audio consumers share this directory and have no character.json.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      problems.push("A prepared character sample could not be read. Review its source on the Voice screen.");
+      continue;
+    }
+    try { reviews.push(await resumeCharacterSample(store, SlugSchema.parse(context.sheetId), id)); }
+    catch { problems.push("A prepared character sample is unavailable or its source changed. Prepare it again before assigning."); }
+  }
+  return { reviews, problems: [...new Set(problems)] };
 }
 
 export async function acceptCharacterSample(store: WorldStore, request: Accept): Promise<void> {

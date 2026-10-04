@@ -176,6 +176,7 @@ export interface ArkeActionDescriptor<K extends string, TAction extends { kind: 
   readonly permissionReason: ArkePermissionReason;
   readonly requiredReads: readonly ArkeReadRequirement[];
   readonly support: ArkeActionSupport;
+  readonly inThreadCard?: "plan" | "stage" | "voice-sample" | "proposal" | "editor-request" | "extraction";
 }
 
 export interface ArkeSupportedClientCommand<K extends ClientMessageKind>
@@ -192,6 +193,8 @@ export interface ArkeExcludedClientCommand<K extends ClientMessageKind> {
   readonly schema: ZodType<ClientMessageOfKind<K>>;
   readonly classification: Exclude<ArkeCommandClassification, "supported-by-arke">;
   readonly reason: string;
+  /** SPEC-051 R-23: the human control surface, without exposing it to model preparation. */
+  readonly inThreadCard?: "plan" | "stage" | "voice-sample" | "proposal" | "editor-request" | "extraction";
 }
 
 export type ArkeClientCommandDescriptor<K extends ClientMessageKind = ClientMessageKind> =
