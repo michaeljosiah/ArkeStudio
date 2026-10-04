@@ -797,6 +797,8 @@ export function ProductionConversation({
   } | null>(null);
   const [busyMedia, setBusyMedia] = useState<string | null>(null);
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
+  /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
+  const [pointsOpen, setPointsOpen] = useState(false);
   const phone = useMediaQuery("(max-width: 899px)");
   const compact = useMediaQuery("(max-width: 1099px)");
   const [modelsOpen, setModelsOpen] = useState(false);
@@ -1323,8 +1325,35 @@ export function ProductionConversation({
       wrapping={wrapping} onWrappingChange={setWrapping} brief={responsive && compact} />
   </>;
   if (dock) {
+    // The dock keeps its own, narrower understanding: put away rather than dropped, because a
+    // column this narrow cannot hold it open beside a transcript, and the wrap-up beneath it is
+    // the only way a conversation becomes anything (turn 92). A conversation-first dock shows
+    // neither until there is something to show. The Studio moves this one instance; it does not
+    // replace it with the full page's rail.
+    const dockRail = <>
+      {pointsEmpty !== undefined && (!dock.conversationFirst || points.length > 0) && (
+        <details className="fy-arke__points" open={pointsOpen} onToggle={(event) => setPointsOpen(event.currentTarget.open)}>
+          <summary>
+            What it understood <span className="fy-mono">{points.length > 0 ? points.length : "no new notes"}</span>
+          </summary>
+          <ConversationPoints points={points} empty={pointsEmpty} onMedia={openMedia} busyId={busyMedia}
+            {...(worldId && conversationId ? {
+              onSave: (point: WorldChatPoint) => saveWorldChatPoint(worldId, conversationId, point.id, point.revision),
+              onReject: (point: WorldChatPoint) => rejectWorldChatPoint(worldId, conversationId, point.id, point.revision),
+            } : {})} />
+          {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
+        </details>
+      )}
+      {!dock.conversationFirst || carriedPoints > 0 ? (
+        <WrapUp worldId={worldId} conversationId={conversationId} seq={loaded?.seq ?? null}
+          carried={carriedPoints} status={loaded?.status ?? null} subjectKey={contextKey}
+          wrapping={wrapping} onWrappingChange={setWrapping} onRefused={() => setPointsOpen(true)} />
+      ) : null}
+    </>;
+    const stagedDecision = loaded?.humanDecisions?.some((card) => card.worldId === worldId && card.body.control.kind === "proposal") ?? false;
+    const strip = !dock.conversationFirst || side !== undefined || stagedDecision || points.length > 0 || carriedPoints > 0;
     return (
-      <ProductionStudio world={state?.world} productionId={productionId} entry={context} workspace={loaded} docked understanding={rail} proposal={side}>
+      <ProductionStudio world={state?.world} productionId={productionId} entry={context} workspace={loaded} docked understanding={dockRail} proposal={side}>
       <aside
         className="fy-arke"
         data-dock="conversation"
@@ -1357,7 +1386,7 @@ export function ProductionConversation({
         <div className="fy-arke__log" aria-live="polite">
           {transcript}
         </div>
-        <div className="fy-arke__strip"><StudioSidebar /></div>
+        {strip && <div className="fy-arke__strip"><StudioSidebar /></div>}
         <div className="fy-arke__foot">
           {modelStatus}
           {dock.subjectLine !== undefined && <div className="fy-mono fy-arke__subject">{dock.subjectLine}</div>}

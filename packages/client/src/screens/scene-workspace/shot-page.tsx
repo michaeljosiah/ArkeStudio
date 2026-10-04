@@ -342,7 +342,8 @@ function ShotWorkspace({
     <SelectionProvider value={selection}>
       <div className="fy-sw" data-screen="shot" data-testid="shot-page" data-dock={dock ? "true" : "false"} data-full={fullscreen ? "true" : undefined} style={{ "--shot-aspect": aspect.replace(":", " / ") } as CSSProperties}>
         <main className="fy-sw__centre">
-          {phone && <SceneBackRow context={`Scene ${scene.number} · ${scene.title}`} title={`Shot ${shot.number} · ${shot.title}`} onBack={() => navigate(`${scenePath}?shot=${shot.id}`)}>
+          {phone && <SceneBackRow context={`Scene ${scene.number} · ${scene.title}`} title={`Shot ${shot.number} · ${shot.title}`} onBack={() => navigate(`${scenePath}?shot=${shot.id}`)}
+            {...(view === "stage" ? { beside: <button type="button" className="fy-scene-back__press" aria-haspopup="dialog" onClick={() => setDock(true)}>Conversation</button> } : {})}>
             <button type="button" disabled={disabled || generatorPending} onClick={() => openGenerator()}>Open in generator</button>
             <button type="button" onClick={() => navigate(`${scenePath}?shot=${shot.id}&view=preview`)}>Play from here</button>
             <button type="button" disabled={disabled} onClick={() => write({ kind: "duplicate-shot", shotId: shot.id })}>Duplicate</button>

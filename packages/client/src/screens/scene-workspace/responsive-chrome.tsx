@@ -9,13 +9,14 @@ import { ChevronLeft, More, Pin, Sparkle } from "../../components/icons.js";
  * context over the title, unless `back` names where the chevron goes: then the bar is 194h's one
  * line, the chevron and the title, and the context is said only to a screen reader, by the press.
  */
-export function SceneBackRow({ context, back, title, onBack, press, children }: { context?: string; /** The one-line bar (194h): what the back press returns to, as its label says it. */ back?: string; title: string; onBack: () => void; /** One press in the place of the ⋯ menu, for a page whose menu would hold only that press (design turn 194, rule 15). */ press?: ReactNode; children?: ReactNode }) {
+export function SceneBackRow({ context, back, title, onBack, press, beside, children }: { context?: string; /** The one-line bar (194h): what the back press returns to, as its label says it. */ back?: string; title: string; onBack: () => void; /** One press in the place of the ⋯ menu, for a page whose menu would hold only that press (design turn 194, rule 15). */ press?: ReactNode; /** One labelled press before the ⋯ menu, which it does not replace (design 196q's Conversation). */ beside?: ReactNode; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const line = back !== undefined;
   return <>
     <header className={line ? "fy-scene-back fy-scene-back--line" : "fy-scene-back"}>
       <button type="button" aria-label={line ? `Back to ${back}` : "Back"} onClick={onBack}><ChevronLeft size={line ? 16 : 20} /></button>
       <div>{!line && <span>{context}</span>}<h1>{title}</h1></div>
+      {beside}
       {press ?? <button type="button" aria-label="Page actions" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><More size={line ? 16 : 20} /></button>}
     </header>
     {press === undefined && <PageSheet open={open} onClose={() => setOpen(false)} title={title} className="fy-scene-page-menu">
@@ -45,7 +46,7 @@ export function SceneDock({ open, onOpen, onClose, stage = false, children }: { 
     if (parent && conversationHost) { conversationHost.className = "fy-scene-dock-content"; parent.appendChild(conversationHost); }
   }, [compact, conversationHost]);
   useEffect(() => {
-    if (!phone) return;
+    if (!phone || stage) return;
     let frame = 0;
     const place = () => {
       cancelAnimationFrame(frame);
@@ -67,10 +68,12 @@ export function SceneDock({ open, onOpen, onClose, stage = false, children }: { 
     return () => { cancelAnimationFrame(frame); if (trigger.current) trigger.current.style.translate = "none"; window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
   }, [phone, stage]);
   const rail = <button ref={trigger} type="button" className="fy-sw__rail" title="Open Arke" aria-haspopup={compact ? "dialog" : undefined} onClick={onOpen}>
-    {phone ? <Sparkle size={16} /> : <span className="fy-sw__rail-dot" aria-hidden="true" />}<span className="fy-sw__rail-label">{phone ? stage ? "Conversation" : "Arke" : "Ask Arke"}</span><span className="fy-sw__rail-pin"><Pin size={13} /></span>
+    {phone ? <Sparkle size={16} /> : <span className="fy-sw__rail-dot" aria-hidden="true" />}<span className="fy-sw__rail-label">{phone ? "Arke" : "Ask Arke"}</span><span className="fy-sw__rail-pin"><Pin size={13} /></span>
   </button>;
+  // A phone's rail floats over the page, and nothing floats over Stage's picture (issue 1355). Its way
+  // into the conversation is the Conversation press in the page's head instead (design 196q).
   return <>
-    {compact ? rail : open ? null : rail}
+    {compact ? phone && stage ? null : rail : open ? null : rail}
     <div ref={inlineHost} className="fy-scene-dock-inline" hidden={compact || !open} />
     <PageSheet open={compact && open} keepMounted onClose={onClose} title="Arke" className="fy-scene-dock"><div ref={sheetHost} className="fy-scene-dock-content" /></PageSheet>
     {conversationHost ? createPortal(children, conversationHost) : children}

@@ -1,12 +1,22 @@
-import { createContext, useContext, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ConversationActionCard, HumanDecisionCard } from "@arke-studio/contracts";
 
 export type StudioControls = { active: boolean; canvasHost: HTMLElement | null; fullCardId: string | null;
   toggle(): void; widen(): void; show(action: ConversationActionCard, full: boolean): void;
-  showDecision(card: HumanDecisionCard): void; back(): void; sideHost(element: HTMLDivElement | null): void };
+  showDecision(card: HumanDecisionCard): void; back(): void; sideHost(element: HTMLDivElement | null): void;
+  /** What the side holds when there is no portal host to move into it: server rendering only. */
+  restingSide: ReactNode };
 export const ProductionStudioContext = createContext<StudioControls | null>(null);
 export const useProductionStudio = () => useContext(ProductionStudioContext);
+
+const subscribe = () => () => {};
+/**
+ * True once rendering on the client. A portal host is made only then: `typeof document` let the
+ * linkedom document a test installs globally through, and the server renderer — which those same
+ * tests use for their string snapshots — throws on a portal.
+ */
+export const useClientRender = () => useSyncExternalStore(subscribe, () => true, () => false);
 
 export function StudioToggle() {
   const studio = useProductionStudio();
@@ -18,12 +28,13 @@ export function StudioShow({ action }: { action: ConversationActionCard }) {
   return studio ? <div className="fy-studio-card-controls"><button type="button" onClick={() => studio.show(action, false)}>Show</button>
     <button type="button" onClick={() => studio.show(action, true)}>Open full size</button></div> : null;
 }
-export function StudioSidebar() { const studio = useProductionStudio(); return <div ref={studio?.sideHost} />; }
+export function StudioSidebar() { const studio = useProductionStudio(); return <div ref={studio?.sideHost}>{studio?.restingSide}</div>; }
 
 /** Reparent the one card instance: host work, decisions and unsaved reviews are never cloned. */
 export function StudioCard({ id, children }: { id: string; children: ReactNode }) {
   const studio = useProductionStudio(), home = useRef<HTMLDivElement>(null);
-  const [host] = useState(() => typeof document === "undefined" ? null : document.createElement("div"));
+  const client = useClientRender();
+  const [host] = useState(() => client ? document.createElement("div") : null);
   const moved = !!studio?.active && studio.fullCardId === id && !!studio.canvasHost;
   useLayoutEffect(() => {
     const target = moved ? studio?.canvasHost : home.current;

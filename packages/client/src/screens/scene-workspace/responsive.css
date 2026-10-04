@@ -190,6 +190,8 @@
   .fy-scene-back > div { flex: 1; min-width: 0; }
   .fy-scene-back span { display: block; font: var(--type-meta); color: var(--muted-foreground); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
   .fy-scene-back h1 { margin: 0; font: 600 var(--text-md)/1.25 var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* 196q: Stage's way into the conversation is a word in the head, since nothing floats over the picture. */
+  .fy-scene-back > .fy-scene-back__press { width: auto; padding: 0 10px; font: var(--type-ui); }
   /* 194h's one line: 44 high, the chevron at the 16 edge and the title beside it at 31, the right
      press's 30 face at the other 16 edge, both quiet. The back press keeps its 44 hit area by
      reaching under the title's first letters rather than pushing the title out to 48. */

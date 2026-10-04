@@ -119,10 +119,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+    # The `runner` context does not exist at job level. Naming it in this env block made the whole
+    # file invalid, so every push to main from #1592 on started no job at all, not just this one.
+    # Step-level env and `with` can read it.
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: 1
       ARKE_PRODUCTION_ACCEPTANCE_REAL_MEDIA: 1
-      ARKE_PRODUCTION_ACCEPTANCE_DIR: ${{ runner.temp }}/arke-production-acceptance
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -142,11 +144,13 @@ jobs:
       # additionally decodes provider fixtures and makes the native twelve-second review cut.
       - name: Make a film from Production Chat
         working-directory: packages/coordinator
+        env:
+          ARKE_PRODUCTION_ACCEPTANCE_DIR: ${{ runner.temp }}/arke-production-acceptance
         run: node --import tsx --test --test-timeout=240000 test/world-chat/production-acceptance.test.ts
       - name: Retain cards, spend and exported media
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: production-chat-${{ runner.os }}
-          path: ${{ env.ARKE_PRODUCTION_ACCEPTANCE_DIR }}
+          path: ${{ runner.temp }}/arke-production-acceptance
           if-no-files-found: warn

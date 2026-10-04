@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, it } from "node:test";
 import { act, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
 import { migrateLegacyScene, newId, orderedShots, type ConversationActionCard, type HumanDecisionCard, type WorldChatWorkspace } from "@arke-studio/contracts";
@@ -9,7 +10,6 @@ import { ProductionStudio } from "../src/components/production-studio.js";
 import { StudioCard, StudioSidebar, StudioToggle, useProductionStudio } from "../src/components/production-studio-context.js";
 import { ConversationPermissionCard } from "../src/components/conversation.js";
 import { HumanDecisionCardView } from "../src/components/human-decision-card.js";
-import { SceneDock } from "../src/screens/scene-workspace/responsive-chrome.js";
 import { studioActionFocus } from "../src/lib/production-studio.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -134,13 +134,35 @@ it("the proposal canvas opens the existing human card and returns to live state 
   await click("Production"); assert.ok(dom.document.querySelector('[aria-label="Current production outline"]'));
 });
 
-it("a phone Stage keeps its Conversation control reachable", async () => {
-  Object.assign(dom.window, { matchMedia: (query: string) => ({ matches: query.includes("max-width"), addEventListener() {}, removeEventListener() {} }) });
-  const container = dom.document.createElement("div"); dom.document.body.append(container); const root = createRoot(container); roots.push(root);
-  await act(async () => root.render(<SceneDock open={false} onOpen={() => {}} onClose={() => {}} stage>Conversation</SceneDock>));
-  assert.ok([...dom.document.querySelectorAll("button")].some(b => b.textContent === "Conversation"));
-  Object.assign(dom.window, { matchMedia: undefined });
+it("a closed Studio draws no canvas, so a docked screen is never rendered twice", async () => {
+  // Kept behind `hidden`, the canvas was a second copy of the screen under the dock: a Cut's clips
+  // and a storyboard's rows answered twice, and a 200-shot scene paid for both.
+  await setup();
+  assert.equal(dom.document.querySelector(".fy-production-studio"), null);
+  await click("Studio"); assert.ok(dom.document.querySelector(".fy-production-studio"));
+  await click("Close Studio"); assert.equal(dom.document.querySelector(".fy-production-studio"), null);
 });
+
+it("opens on a staged proposal, the newest thing a wrap-up leaves", async () => {
+  await setup(); await click("Studio");
+  const view = (text: string) => [...dom.document.querySelectorAll('.fy-production-studio nav button')].find(b => b.textContent === text);
+  assert.equal(view("Proposal")?.getAttribute("aria-pressed"), "true");
+  assert.equal(view("What it understood")?.getAttribute("aria-pressed"), "false");
+});
+
+it("renders to a string beside a global document, its side holding what a closed Studio rests there", () => {
+  // The string-rendering screen tests run with this linkedom document installed globally; a
+  // portal host made because `document` existed sent a portal to the server renderer, which throws.
+  const html = (proposal?: string) => renderToString(<MemoryRouter><ProductionStudio world={state.world} productionId={production.meta.id}
+    entry={{ kind: "production", productionId: production.meta.id }} workspace={workspace([card()])} docked
+    understanding={<p>Current notes</p>} {...(proposal ? { proposal: <p>{proposal}</p> } : {})}><aside><StudioSidebar /></aside></ProductionStudio></MemoryRouter>);
+  assert.match(html(), /<aside><div><p>Current notes<\/p><\/div><\/aside>/);
+  assert.doesNotMatch(html(), /class="fy-production-studio"/, "and no canvas behind it");
+  assert.match(html("Staged work"), /<aside><div><p>Staged work<\/p><\/div><\/aside>/, "the understanding gives way to a decision");
+});
+
+// A phone Stage's Conversation press (R-68) lives in the shot page's head, as design 196q draws it,
+// not on the dock's floating rail: scenes-layout.test.tsx drives it on the real page.
 
 it("Stage, board, take and Cut targets choose their native canvas level", () => {
   const action = card();
