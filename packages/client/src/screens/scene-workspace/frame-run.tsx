@@ -3,6 +3,7 @@ import { useMediaQuery } from "../../lib/media-query.js";
 import {
   aspectSupport,
   formatMicroUsd,
+  CODEX_IMAGE_PLAN_LABEL,
   isReplayableFinalization,
   lookHoldingScope,
   orderedShots,
@@ -528,7 +529,7 @@ function GenerateFramesDialogOpen({
                 {startPending !== null
                   ? "Starting frame run..."
                   : matchingOptions
-                    ? `${displayedCount} frame${displayedCount === 1 ? "" : "s"}${quote.estimatedMicroUsd === null ? "" : ` · ${formatMicroUsd(quote.estimatedMicroUsd)}`}`
+                    ? `${displayedCount} frame${displayedCount === 1 ? "" : "s"}${quote.estimatedMicroUsd === null ? "" : ` · ${knownModel?.pricing.kind === "included-plan" ? CODEX_IMAGE_PLAN_LABEL : formatMicroUsd(quote.estimatedMicroUsd)}`}`
                     : quotePending
                       ? "Checking current price..."
                       : "Quote unavailable"}

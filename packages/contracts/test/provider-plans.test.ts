@@ -178,6 +178,18 @@ describe("a read on a free credit", () => {
 });
 
 describe("spend counts free reads apart", () => {
+  it("counts all included-plan image outcomes apart without claiming measured allowance", () => {
+    const entries = (["succeeded", "failed", "cancelled"] as const).map((outcome, index) => ({
+      ts: at, worldId: "01K0000000000000000000000W", jobId: `jb_${index}`, provider: "codex", model: "codex-image",
+      outcome, estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "included-plan" as const,
+    }));
+    const summary = spendSummary(entries, 7, new Date(at));
+    assert.equal(summary.totalMicroUsd, 0);
+    assert.equal(summary.derivedEntries, 0);
+    assert.equal(summary.unmeteredRuns, 0);
+    assert.deepEqual(summary.byProvider, []);
+    assert.deepEqual(summary.plans, [{ provider: "codex", plan: "included-plan", entries: 3, microUsd: 0, tokens: 0, characters: 0 }]);
+  });
   it("keeps them out of the total and out of the unmetered count", () => {
     const quote = quoteSpeech(applyProviderPlans(manifest, free).models[0]!, "Hello", { at });
     const base = { worldId: "01K0000000000000000000000W", outcome: "succeeded" as const };

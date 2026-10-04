@@ -151,7 +151,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline }: {
               {suggestion.model.name}
               {suggestion.aspect !== undefined ? ` · ${suggestion.aspect}` : ""}
             </span>
-            <span>{priceLabel(suggestion.estimatedMicroUsd)}</span>
+            <span>{priceLabel(suggestion.estimatedMicroUsd, suggestion.model.plan)}</span>
           </div>
         </div>
       </div>
@@ -206,7 +206,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline }: {
           Edit prompt
         </Button>
         <Button variant="primary" disabled={offline || busy || prompt.trim() === ""} onClick={() => state.generate(suggestion, prompt)} data-testid="suggest-generate">
-          {busy ? "Generating…" : `Generate · ${priceLabel(suggestion.estimatedMicroUsd)}`}
+          {busy ? "Generating…" : `Generate · ${priceLabel(suggestion.estimatedMicroUsd, suggestion.model.plan)}`}
         </Button>
       </div>
     </div>

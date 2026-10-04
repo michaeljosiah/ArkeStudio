@@ -701,6 +701,9 @@ export function planBenchDispatch(
   // upscale goes back through Upscale, never through here.
   if (model.upscale !== undefined) return { ok: false, reason: `${model.displayName} upscales a take — choose it from the take's tools.` };
   const params = composer.params;
+  if (params.kind === "image" && model.limits.providerSelectedSize && (params.aspect !== undefined || params.tier !== undefined)) {
+    return { ok: false, reason: `${model.displayName} chooses the image dimensions. Clear the requested size and aspect before generating.` };
+  }
   // Through the map, not compared: `voice` dispatches against `voice-tts` (design 70).
   if (model.capability !== modeCapability(composer.mode)) {
     return { ok: false, reason: `${model.displayName} is a ${model.capability} model; this is a ${composer.mode} request.` };

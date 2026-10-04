@@ -3765,8 +3765,15 @@ export class Coordinator {
             nowIso: () => new Date().toISOString(),
             manifest: opts.manifest ?? null,
             loadSettings: async () => (this.appSettings ? this.appSettings.load() : null),
-            credentialFor: async (provider) =>
-              this.credentials ? this.credentials.get(provider as ProviderId) : null,
+            credentialFor: async (provider) => {
+              const credential = PROVIDERS[provider as ProviderId]?.credential;
+              if (credential === "none") return "";
+              if (credential === "external") {
+                const status = this.providerService.list().find(row => row.id === provider);
+                return status?.configured && status.validation === "valid" && status.probes.some(probe => probe.capability === "image" && probe.available) ? "" : null;
+              }
+              return this.credentials ? this.credentials.get(provider as ProviderId) : null;
+            },
             harnessReady: () => this.opts.adapter?.readiness().ready === true && this.authoring !== null,
             genesisDir: (genesisId) => this.opts.provider.genesisDir!(genesisId),
             reviewedBlueprint: async (genesisId) => {
@@ -4369,6 +4376,14 @@ export class Coordinator {
     // Local runtimes arrive in the background (R-5 revised): the app is usable throughout, and
     // every component can be skipped. Detection runs first, so a second launch fetches nothing.
     void this.setup?.run();
+
+    // An external image login restores itself without holding the transport behind a slow
+    // app-server. Until the probe publishes its result, Codex remains unavailable.
+    if (this.opts.validators?.codex && this.opts.manifest?.models.some(model => model.provider === "codex")) {
+      this.trackBackground(this.providerService.validate("codex").then(() => {
+        if (!this.stopping) this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
+      }).catch(() => {}));
+    }
 
     // The engine itself resolved before queue recovery (above). What remains is publishing its
     // combined readiness, and keeping it published as the supervised child moves through
@@ -9374,6 +9389,7 @@ export class Coordinator {
           providers: this.providerService.list(),
         });
         await this.providerService.validate(msg.provider);
+        this.jobQueue?.forgetUnknownPlanLimit(msg.provider);
         this.emit({
           at: new Date().toISOString(),
           type: "provider.status",
@@ -20936,7 +20952,7 @@ export class Coordinator {
 
       // Message handlers have now either committed their queue rows or recorded their refusal.
       // Only now may queue disposal cancel execution and suppress further journal transitions.
-      this.jobQueue?.dispose();
+      await this.jobQueue?.dispose();
       this.opts.voice?.dispose?.();
       await this.opts.comfyui?.service.dispose().catch(() => {});
       await Promise.allSettled(this.backgroundWork);

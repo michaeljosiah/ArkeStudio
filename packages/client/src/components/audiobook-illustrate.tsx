@@ -102,7 +102,7 @@ export function IllustrationStatus({ run, onReview, onStop, onDiscard }: { run: 
   if (run.state === "making" && progress !== undefined) {
     return line(
       "making",
-      `making pictures · ${progress.made.length} of ${progress.total} · ${spent(progress.spentMicroUsd)} of ${priceLabel(progress.confirmedMicroUsd)}`,
+      `making pictures · ${progress.made.length} of ${progress.total} · ${proposal.model.plan ? priceLabel(0, proposal.model.plan) : `${spent(progress.spentMicroUsd)} of ${priceLabel(progress.confirmedMicroUsd)}`}`,
       <Button variant="secondary" onClick={onStop} data-testid="illustration-stop">Stop</Button>,
       <div className="fy-ill__bar" role="progressbar" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.made.length}>
         <i style={{ width: `${progress.total === 0 ? 0 : Math.round((progress.made.length / progress.total) * 100)}%` }} />
@@ -115,7 +115,7 @@ export function IllustrationStatus({ run, onReview, onStop, onDiscard }: { run: 
   const total = illustrationTotal(proposal.rows, new Set(run.skipped), new Set(run.without));
   return line(
     "proposed",
-    `${proposal.rows.length} picture${proposal.rows.length === 1 ? "" : "s"} · ${priceLabel(total.microUsd)}`,
+    `${proposal.rows.length} picture${proposal.rows.length === 1 ? "" : "s"} · ${priceLabel(total.microUsd, proposal.model.plan)}`,
     <Button variant="ghost" onClick={onReview} data-testid="illustration-review">Review</Button>,
   );
 }
@@ -260,7 +260,7 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
         <header className="fy-ills__head">
           <h3 id="fy-ills-title" tabIndex={-1} ref={head}>Illustrate · Chapter {chapterOrder}</h3>
           <span className="fy-mono fy-ills__sum" data-testid="illustration-headline">{headline}</span>
-          <span className="fy-mono fy-ills__short">{total.count} · {priceLabel(total.microUsd)}</span>
+          <span className="fy-mono fy-ills__short">{total.count} · {priceLabel(total.microUsd, proposal.model.plan)}</span>
           <span className="fy-ills__push" />
           <Button variant="secondary" className="fy-ills__again" disabled={offline} onClick={onAgain} data-testid="illustration-again">Illustrate again</Button>
           <Button variant="secondary" onClick={onClose} data-testid="illustration-close">Close</Button>
@@ -295,7 +295,7 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
           <span className="fy-ills__push" />
           <Button variant="ghost" onClick={onDiscard} data-testid="illustration-discard">Discard</Button>
           <Button variant="primary" disabled={offline || total.count === 0} onClick={onAccept} data-testid="illustration-accept">
-            Accept · {priceLabel(total.microUsd)}
+            Accept · {priceLabel(total.microUsd, proposal.model.plan)}
           </Button>
         </footer>
       </section>

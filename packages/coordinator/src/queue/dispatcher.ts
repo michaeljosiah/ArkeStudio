@@ -21,6 +21,7 @@ import {
   credentialKindOf,
   formatMicroUsd,
   PROVIDERS,
+  usesCodexImagePlan,
   REFERENCE_FINALIZATION_TARGETS,
   isReplayableFinalization,
   ulid,
@@ -92,7 +93,7 @@ export interface DispatchClient {
   residency?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]>;
   listModels?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").LocalHarnessModel[]>;
   /** Release optional long-lived transports when the queue shuts down. */
-  dispose?(): void;
+  dispose?(): void | Promise<void>;
   submit(
     key: string,
     request: {
@@ -410,7 +411,7 @@ export function foldJobHistory(history: Iterable<Job>): Array<{ job: Job; prior:
 
 function landedName(job: Job, artifact: DispatchArtifact, index: number): string {
   const requested = index === 0 && job.landing?.name !== undefined ? job.landing.name : artifact.name;
-  if (!FORMAT_PRESERVING_IMAGE_TARGETS.has(job.target.kind)) return requested;
+  if (!FORMAT_PRESERVING_IMAGE_TARGETS.has(job.target.kind) && !(usesCodexImagePlan(job) && job.capability === "image")) return requested;
   const format = imageFormatOf(artifact.data);
   if (format === null) return requested;
   const extension = extname(requested);
@@ -472,6 +473,7 @@ export class JobQueue {
    * and puts it back, and the ledger's count still asks before a read the day cannot cover.
    */
   private readonly freeLimits = new Map<string, FreePlanLimit>();
+  private readonly planLimits = new Map<string, { message: string; resetsAt: number | null }>();
 
   constructor(private readonly opts: JobQueueOptions) {
     this.journal = opts.journal ?? new JobJournal(opts.journalPath);
@@ -1213,6 +1215,11 @@ export class JobQueue {
       return;
     }
     if (this.disposed || !this.stillQueued(job)) return;
+    const planLimit = usesCodexImagePlan(job) ? this.planLimits.get(job.provider) : undefined;
+    if (planLimit && (planLimit.resetsAt === null || planLimit.resetsAt > this.now())) {
+      await this.terminalize(job, "failed", `${planLimit.message} · not submitted`, undefined, "terminal");
+      return;
+    }
     // The rest of a batch once a free tier has refused for the day. On 2026-10-02 every block of
     // a chapter and two page reads went to Google to meet the same refusal. Failed rather than
     // held: a held read would sit in the journal for hours, resume unasked after the reset — on
@@ -1351,6 +1358,13 @@ export class JobQueue {
     }
     const message = describeCoordinatorError(err);
     const klass: FailureClass = classifyError(err);
+    if (usesCodexImagePlan(job) && typeof err === "object" && err !== null && (err as { planLimit?: unknown }).planLimit === true) {
+      const said = (err as { resetsAt?: unknown }).resetsAt;
+      const reset = typeof said === "string" ? Date.parse(said) : NaN;
+      this.planLimits.set(job.provider, { message, resetsAt: Number.isFinite(reset) ? reset : null });
+      await this.terminalize(job, "failed", message, undefined, "terminal");
+      return;
+    }
     // A daily limit, free or paid, is the key's, not the lane's pace: it must not slow other reads.
     const freeLimit = typeof err === "object" && err !== null && (err as { freeLimit?: unknown }).freeLimit === true;
     const dailyLimit = freeLimit || (typeof err === "object" && err !== null && (err as { dailyLimit?: unknown }).dailyLimit === true);
@@ -1920,6 +1934,11 @@ export class JobQueue {
     if (local) {
       actualMicroUsd = 0;
       actualSource = "local-zero"; // unmetered (SPEC-008 R-18)
+    } else if (usesCodexImagePlan(job)) {
+      // Zero additional API cost. Only jobs crossing the durable submission boundary may have
+      // consumed allowance; preparation failures and queued cancellations never did (SPEC-008 R-30).
+      actualMicroUsd = 0;
+      actualSource = job.attempt > 0 || job.providerJobId !== null ? "included-plan" : "manifest-derived";
     } else if (job.speechQuote?.unit === "token") {
       const reported = job.providerCostMicroUsd ?? (client?.declarations.reportsCost && costMicroUsd !== undefined ? Math.round(costMicroUsd) : undefined);
       ({ actualMicroUsd, actualSource } = speechSettlement({ ...job, providerCostMicroUsd: reported }));
@@ -1959,6 +1978,11 @@ export class JobQueue {
   }
 
   // ---- a free tier's day (design turn 182) ----------------------------------
+
+  /** An explicit connection test permits another try when the provider named no reset time. */
+  forgetUnknownPlanLimit(provider: string): void {
+    if (this.planLimits.get(provider)?.resetsAt === null) this.planLimits.delete(provider);
+  }
 
   /** The day a free tier said is used up for this model, or null once the reset it named has come. */
   freeLimitFor(provider: string, model: string): FreePlanLimit | null {
@@ -2057,7 +2081,8 @@ export class JobQueue {
         job.providerJobId != null ||
         (job.attempt > 0 && job.submissionRejected !== true));
     const reason = outcomeMayBeRemote
-      ? "Cancelled in Arke. The provider may still complete or charge for this request."
+      ? usesCodexImagePlan(job) ? "Cancelled in Arke. Codex may still complete this request and use your allowance."
+        : "Cancelled in Arke. The provider may still complete or charge for this request."
       : null;
     // A cancelled job still writes a ledger entry (R-15, D10).
     const latest = this.jobs.get(job.id);
@@ -2395,6 +2420,7 @@ export class JobQueue {
     // wording that said "charge" here would be a hold nobody can price honestly.
     const duplicateCost = local
       ? "re-runs it on this machine's own GPU time — no charge"
+      : usesCodexImagePlan(job) ? "may use your Codex allowance again"
       : job.estimatedMicroUsd > 0
         ? `may charge about ${formatMicroUsd(job.estimatedMicroUsd)} again`
         : "may create another charge of unknown size";
@@ -2404,6 +2430,8 @@ export class JobQueue {
       ...(failureClass !== undefined ? { failureClass } : {}),
       error: job.providerResultKind === "inline"
         ? `The provider accepted this request, but its inline result was not saved before restart. No automatic retry was made. Resubmitting ${duplicateCost}.`
+        : usesCodexImagePlan(job)
+        ? `Arke did not witness the image result. Codex may have used your allowance; how much is unknown. No automatic retry was made. Resubmitting ${duplicateCost}.`
         : local
         ? `Arke did not witness the submission result — the engine kept running while Arke restarted, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}.`
         : `Arke did not witness the submission result. ${job.provider} may have accepted and charged it, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}; the prior actual cost is unknown.`,
@@ -2592,7 +2620,8 @@ export class JobQueue {
       await this.terminalize(
         job,
         "cancelled",
-        "Abandoned in Arke. The provider may still complete or charge for the unwitnessed request.",
+        usesCodexImagePlan(job) ? "Abandoned in Arke. Codex may still complete the unwitnessed request and use your allowance."
+          : "Abandoned in Arke. The provider may still complete or charge for the unwitnessed request.",
       );
       this.emitQueueStatus(job.provider);
     } finally {
@@ -2676,10 +2705,13 @@ export class JobQueue {
   }
 
   /** Simulated kill for the crash suite, and clean shutdown: no further writes or events. */
-  dispose(): void {
+  private clientDisposal: Promise<void> | null = null;
+  dispose(): Promise<void> {
+    if (this.clientDisposal) return this.clientDisposal;
     this.stopAccepting();
     this.disposed = true;
-    for (const client of new Set(Object.values(this.opts.clients))) client.dispose?.();
+    this.clientDisposal = Promise.allSettled([...new Set(Object.values(this.opts.clients))]
+      .map(client => Promise.resolve().then(() => client.dispose?.()))).then(() => {});
     for (const controller of this.submitAborts.values()) controller.abort();
     this.submitAborts.clear();
     for (const release of this.gpuReservations.values()) release();
@@ -2698,9 +2730,11 @@ export class JobQueue {
     for (const timer of this.retryTimers) clearTimeout(timer);
     this.retryTimers.clear();
     this.busySince.clear();
+    return this.clientDisposal;
   }
 
   async waitForIdle(): Promise<void> {
+    await this.clientDisposal;
     await Promise.allSettled(this.activeRuns);
   }
 

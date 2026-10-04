@@ -19,6 +19,7 @@ import {
   durationLimitsFor,
   estimateMicroUsd,
   formatMicroUsd,
+  imagePriceCopy,
   frameTaskModes,
   imageOutputFor,
   durationOptions,
@@ -33,6 +34,7 @@ import {
   presetFault,
   supportedDeliveries,
   tiersFor,
+  takeCostCopy,
   voiceSourceFor,
   unresolvedBenchMentions,
   type BenchMode,
@@ -1024,7 +1026,7 @@ function BenchWorkspace({
         ? speechPriceCopy(model, estimate, freeCreditLeft(state?.app.ledger ?? []))
         : singing
           ? `up to ${formatMicroUsd(estimate)}`
-          : `~${formatMicroUsd(estimate)}`;
+          : model ? imagePriceCopy(model, estimate) : `~${formatMicroUsd(estimate)}`;
 
   /**
    * What each mode was last left in, so glancing at the other one costs nothing.
@@ -2386,6 +2388,10 @@ function BenchWorkspace({
                     const chosen = models.find((m) => `${m.provider}/${m.id}` === e.target.value);
                     if (!chosen) return;
                     let params = draft.params;
+                    if (params.kind === "image" && chosen.limits.providerSelectedSize) {
+                      const { tier: _tier, aspect: _aspect, ...rest } = params;
+                      params = rest;
+                    }
                     if (
                       params.kind === "voice" &&
                       (params.voiceProvider !== chosen.provider || params.voiceModel !== chosen.id)
@@ -3132,7 +3138,7 @@ function takeMeta(take: BenchTake): string {
     take.request.audioReferences.references.length > 0
       ? "voice refs rode"
       : undefined,
-    take.cost ? formatMicroUsd(take.cost.actualMicroUsd ?? take.cost.estimatedMicroUsd) : undefined,
+    take.cost ? takeCostCopy(take.cost) : undefined,
   ]
     .filter((part): part is string => part !== undefined)
     .join(" · ");

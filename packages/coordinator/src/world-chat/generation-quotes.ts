@@ -4,6 +4,7 @@ import { extname, join } from "node:path";
 import { z } from "zod";
 import {
   ArkeGenerationBodySchema, ConversationIdSchema, JobSchema, ModelWorldChatActionSchema, isReplayableFinalization, ulid,
+  CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan,
   type ArkeGenerationBody, type ConversationActionCard, type ModelWorldChatAction, type WorldBundle,
   SceneIdSchema, SlugSchema, CHAT_SEQUENCING_SCHEMA_VERSION,
 } from "@arke-studio/contracts";
@@ -118,10 +119,14 @@ export class GenerationQuotes {
       } });
     }
     const estimatedMicroUsd = inputs.reduce((sum, input) => sum + input.estimatedMicroUsd, 0);
+    const includesCodex = inputs.some(usesCodexImagePlan);
+    const cost = estimatedMicroUsd === 0
+      ? includesCodex ? CODEX_IMAGE_PLAN_LABEL : "No provider charge"
+      : `$${(estimatedMicroUsd / 1_000_000).toFixed(4)} estimated; actual cost may differ${includesCodex ? ` · ${CODEX_IMAGE_PLAN_LABEL}` : ""}`;
     const quoteExpiresAt = new Date(Date.parse(at) + 15 * 60_000).toISOString();
     const fingerprint = conversationActionDigest({ action, ...(scope ? { scope } : {}), inputs: this.source.compareInputs?.(inputs) ?? inputs, authority: resolved.authority ?? null, body: resolved.body, quoteExpiresAt });
     const body = ArkeGenerationBodySchema.parse({ ...resolved.body, quoteDigest: fingerprint, quoteExpiresAt,
-      estimatedMicroUsd, currency: "USD", cost: estimatedMicroUsd === 0 ? "No provider charge" : `$${(estimatedMicroUsd / 1_000_000).toFixed(4)} estimated; actual cost may differ`,
+      estimatedMicroUsd, currency: "USD", cost,
       estimateMayVary: estimatedMicroUsd !== 0,
     });
     return { fingerprint, inputs, body, materialization: resolved.materialization };

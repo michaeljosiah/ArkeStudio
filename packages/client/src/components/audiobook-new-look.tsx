@@ -84,10 +84,11 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
   const closeWaiting = closeOn && chosenTake !== null && closeTake === null && closeRequest !== undefined && closeFailed === null;
   const looks = chapterLooksOf(kit);
 
-  const priceOf = (images: number, references: number): string => (model === null ? "" : priceLabel(estimateCharacterImageMicroUsd(model, "character-look", images, references)));
+  const plan = model?.pricing.kind === "included-plan" ? "included-plan" : undefined;
+  const priceOf = (images: number, references: number): string => (model === null ? "" : priceLabel(estimateCharacterImageMicroUsd(model, "character-look", images, references), plan));
   const manyCost = priceOf(LOOK_CANDIDATES, LOOK_CANDIDATES);
   const closeCost = priceOf(1, 2);
-  const againCost = model === null ? "" : priceLabel(estimateCharacterImageMicroUsd(model, "character-look", LOOK_CANDIDATES, LOOK_CANDIDATES) + (closeOn ? estimateCharacterImageMicroUsd(model, "character-look", 1, 2) : 0));
+  const againCost = model === null ? "" : priceLabel(estimateCharacterImageMicroUsd(model, "character-look", LOOK_CANDIDATES, LOOK_CANDIDATES) + (closeOn ? estimateCharacterImageMicroUsd(model, "character-look", 1, 2) : 0), plan);
 
   const askClose = (takeId: string, again = false) => {
     if (asked[takeId] !== undefined && !again) return;

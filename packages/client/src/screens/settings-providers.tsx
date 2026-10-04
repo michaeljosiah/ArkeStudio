@@ -83,7 +83,12 @@ import {
  * Mistral and BreezeBlue are the hosted readers of the world's cloned voices (SPEC-046 R-29);
  * neither ships a mark yet, so both sit on the monogram the slot already falls back to (R-4).
  */
-export const KEYED_PROVIDERS: readonly ProviderId[] = ["fal", "higgsfield", "openai", "anthropic", "google", "elevenlabs", "mistral", "breezeblue", "fishaudio"];
+/**
+ * Providers whose row waits for a model: Codex has nothing to choose until the manifest routes an
+ * image to it, and a sign-in line with no model behind it is a dead end.
+ */
+const GATED_ON_A_MODEL: readonly ProviderId[] = ["codex"];
+export const KEYED_PROVIDERS: readonly ProviderId[] = ["fal", "higgsfield", "codex", "openai", "anthropic", "google", "elevenlabs", "mistral", "breezeblue", "fishaudio"];
 
 const ENGINES: readonly EngineId[] = ["comfyui", "ollama", "voxa"];
 
@@ -184,6 +189,51 @@ function ProviderWorkspaceLine({ id, workspaces }: { id: ProviderId; workspaces:
  * remedy for a supplier that cannot be reached (SPEC-042 R-4) — one control, in two places.
  */
 export function ProviderToolLine({ id }: { id: ProviderId }) {
+  return id === "codex" ? <CodexSignInLine id={id} /> : <HelperToolLine id={id} />;
+}
+
+/**
+ * Codex is the user's own install and login, so unlike the Higgsfield helper there is nothing for
+ * us to fetch or to start signing in: the row reports what the probe found and names the command.
+ */
+function CodexSignInLine({ id }: { id: ProviderId }) {
+  const { state } = useStore();
+  const [copied, setCopied] = useState(false);
+  const status = state?.app.providers.find((p) => p.id === id);
+  const { word, tone } = connectionWords(id, status);
+  const command = "codex login";
+  const copy = () => {
+    void navigator.clipboard?.writeText(command);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  if (isRemoteSession()) return <><FactRow what="Sign-in">{status?.configured === true ? "connected" : "not connected"}</FactRow><OnYourPC>keys and sign-ins</OnYourPC></>;
+  return (
+    <>
+      <FactRow
+        what="Sign-in"
+        does={
+          <ActionButton icon={<RefreshCw size={13} />} disabled={status?.validation === "testing"} onClick={() => validateProvider(id)}>
+            {status?.validation === "testing" ? "Testing…" : "Test connection"}
+          </ActionButton>
+        }
+      >
+        {word}
+      </FactRow>
+      <div className="fy-set__why">
+        <span className={cx("fy-set__dot", tone === "ok" && "fy-set__dot--ok", tone === "warn" && "fy-set__dot--warn")} />
+        <span>{probeWords(status) ?? "not checked yet"}</span>
+      </div>
+      <div className="fy-set__note">
+        Sign in with your ChatGPT account from a terminal: <code>{command}</code>{" "}
+        <button type="button" className="fy-set__link" onClick={copy}>{copied ? "copied" : "Copy"}</button>
+        {" · images count against your plan, not an API key."}
+      </div>
+    </>
+  );
+}
+
+function HelperToolLine({ id }: { id: ProviderId }) {
   const { state } = useStore();
   const setup = useSetup();
   const [copied, setCopied] = useState(false);
@@ -656,7 +706,9 @@ export function SettingsProvidersScreen() {
   const supporting = (engine: EngineId): SetupComponent[] =>
     componentsFor(all, engine).filter((c) => (c.provides ?? []).length === 0);
 
-  const services: Row[] = KEYED_PROVIDERS.map((id) => {
+  const manifestModels = state?.app.manifest?.models ?? [];
+  const keyed = KEYED_PROVIDERS.filter((id) => !GATED_ON_A_MODEL.includes(id) || manifestModels.some((m) => m.provider === id));
+  const services: Row[] = keyed.map((id) => {
     const status = providerStatus.find((s) => s.id === id);
     const { word, tone } = connectionWords(id, status);
     return { id, label: PROVIDER_TABLE[id].displayName, note: tone === "ok" ? null : word, kind: "service" };
@@ -692,7 +744,7 @@ export function SettingsProvidersScreen() {
 
   // First run has no key anywhere, so opening on the first provider is not a preference — it is
   // the only pane there is. Once something is connected, that is the one worth landing on.
-  const firstConnected = KEYED_PROVIDERS.find((id) => providerStatus.some((s) => s.id === id && s.configured));
+  const firstConnected = keyed.find((id) => providerStatus.some((s) => s.id === id && s.configured));
   const asked = searchParams.get("provider");
   // A diagnostics remedy addresses a component rather than a pane (SPEC-034 R-24). The
   // component declares its owner, so resolve it from there — recipe weights carry no engine

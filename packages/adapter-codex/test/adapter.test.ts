@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
 import type { HarnessEvent } from "@arke-studio/contracts";
-import { CodexAdapter, codexCredentialEnv, confinedConfig, type CodexAdapterOptions } from "../src/codex-adapter.js";
+import { CodexAdapter, CodexImageLimitError, codexCredentialEnv, confinedConfig, type CodexAdapterOptions } from "../src/codex-adapter.js";
 
 async function fixture(scenario = "normal", overrides: Partial<CodexAdapterOptions> = {}) {
   const root = await mkdtemp(join(tmpdir(), "arke-codex-adapter-")); const log = join(root, "rpc.jsonl");
@@ -362,4 +362,138 @@ test("duplicate live wire thread identities retire the connection without archiv
   assert.notEqual(fresh.sessionId, old.sessionId);
   await assert.rejects(f.adapter.sendMessage({ sessionId: old.sessionId, parts: [{ type: "text", text: "old context" }] }), /Unknown Codex session/);
   await f.adapter.sendMessage({ sessionId: fresh.sessionId, parts: [{ type: "text", text: "fresh context" }] });
+});
+
+test("the image flag is off for roster agents and only an explicit option turns it on", () => {
+  assert.equal(confinedConfig({}, false)["features.image_generation"], false);
+  assert.equal(confinedConfig({}, true, { imageGeneration: true })["features.image_generation"], true);
+});
+
+test("image status reports the login mode and capability from the app-server", async t => {
+  const f = await fixture("image-gen"); t.after(f.cleanup);
+  assert.deepEqual(await f.adapter.imageStatus(), { authMode: "chatgpt", planType: "plus", imageGeneration: true });
+  const key = await fixture("image-apikey"); t.after(key.cleanup);
+  assert.deepEqual(await key.adapter.imageStatus(), { authMode: "apiKey", imageGeneration: true });
+  const out = await fixture("image-logged-out"); t.after(out.cleanup);
+  assert.equal((await out.adapter.imageStatus()).authMode, "none");
+});
+
+test("a dedicated image thread returns inline bytes, enables only the image flag and ignores a reported path", async t => {
+  const f = await fixture("image-gen"); t.after(f.cleanup);
+  const image = await f.adapter.generateImage({ prompt: "a lighthouse" });
+  assert.equal(image.mimeType, "image/png"); assert.match(image.bytes.toString("latin1"), /fixture-image-bytes/); assert.equal(image.revisedPrompt, "revised");
+  const requests = await f.requests();
+  const start = requests.find(request => request.method === "thread/start")!.params;
+  assert.equal(start.config["features.image_generation"], true); assert.equal(start.config["features.shell_tool"], false);
+  assert.deepEqual(start.dynamicTools, []); assert.equal(start.ephemeral, true); assert.notEqual(start.cwd, f.root);
+  await eventually(async () => (await f.requests()).some(request => request.method === "thread/unsubscribe"));
+});
+
+test("admitting image work re-arms recovery after each healthy replacement", async t => {
+  let spawns = 0; let stopCurrent = () => {};
+  const f = await fixture("image-gen", { onSpawn: async child => { spawns++; stopCurrent = () => { child.kill(); }; } });
+  t.after(f.cleanup);
+  for (let expected = 2; expected <= 3; expected++) {
+    assert.equal((await f.adapter.generateImage({ prompt: "a lighthouse" })).mimeType, "image/png");
+    stopCurrent();
+    await eventually(() => spawns === expected && f.adapter.readiness().ready);
+  }
+  assert.equal((await f.adapter.generateImage({ prompt: "after two recoveries" })).mimeType, "image/png");
+  assert.equal(spawns, 3);
+});
+
+for (const scenario of ["substitute", "substitute-provider", "instructions"]) test(`image generation rejects ${scenario} before starting a turn`, async t => {
+  const f = await fixture(scenario); t.after(f.cleanup);
+  await assert.rejects(f.adapter.generateImage({ prompt: "a lighthouse" }), /changed the selected model|loaded instructions/);
+  const requests = await f.requests();
+  assert.equal(requests.some(request => request.method === "turn/start"), false);
+  assert.ok(requests.some(request => request.method === "thread/unsubscribe"));
+});
+
+test("image generation refuses logins the app-server does not support it for", async t => {
+  for (const scenario of ["image-apikey", "image-logged-out", "image-unsupported"]) {
+    const f = await fixture(scenario); t.after(f.cleanup);
+    await assert.rejects(f.adapter.generateImage({ prompt: "x" }), /not available for this login/);
+    assert.equal((await f.requests()).some(request => request.method === "thread/start"), false);
+  }
+});
+
+test("a plan limit is a typed error and unrecognised bytes are rejected", async t => {
+  const limit = await fixture("image-gen-limit"); t.after(limit.cleanup);
+  await assert.rejects(limit.adapter.generateImage({ prompt: "x" }), error => error instanceof CodexImageLimitError && error.resetsAt === 1900000000);
+  const junk = await fixture("image-gen-junk"); t.after(junk.cleanup);
+  await assert.rejects(junk.adapter.generateImage({ prompt: "x" }), /not a supported image/);
+});
+
+test("turn-level quota and login failures preserve their remedies", async t => {
+  const limit = await fixture("image-gen-turn-limit"); t.after(limit.cleanup);
+  await assert.rejects(limit.adapter.generateImage({ prompt: "x" }), error => error instanceof CodexImageLimitError && error.resetsAt === null);
+  const auth = await fixture("image-gen-turn-auth"); t.after(auth.cleanup);
+  await assert.rejects(auth.adapter.generateImage({ prompt: "x" }), /not available for this login/);
+});
+
+test("an admitted image turn has a deadline even if it never completes", async t => {
+  // The budget includes account/model/thread RPCs; a busy Windows shard must reach the turn.
+  const f = await fixture("image-gen-turn-hang", { imageTimeoutMs: 5000 }); t.after(f.cleanup);
+  await assert.rejects(f.adapter.generateImage({ prompt: "x" }), /timeout|aborted/i);
+  const requests = await f.requests();
+  assert.ok(requests.some(request => request.method === "turn/interrupt"));
+  assert.ok(requests.some(request => request.method === "thread/unsubscribe"));
+});
+
+test("a completed picture survives an internal deadline waiting for the final reply", async t => {
+  // 300 ms sometimes expired before item/completed on Windows CI, testing admission instead.
+  const f = await fixture("image-gen-picture-hang", { imageTimeoutMs: 5000 }); t.after(f.cleanup);
+  assert.equal((await f.adapter.generateImage({ prompt: "x" })).mimeType, "image/png");
+});
+
+test("reference images travel inline and a mislabelled one is refused", async t => {
+  const f = await fixture("image-gen"); t.after(f.cleanup);
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("reference-bytes")]);
+  await f.adapter.generateImage({ prompt: "like this", references: [{ contentType: "image/png", data: png }] });
+  const turn = (await f.requests()).find(request => request.method === "turn/start")!.params;
+  assert.deepEqual(turn.input.map((part: any) => part.type), ["text", "image"]);
+  assert.equal(turn.input[1].url, `data:image/png;base64,${png.toString("base64")}`);
+  await assert.rejects(f.adapter.generateImage({ prompt: "x", references: [{ contentType: "image/jpeg", data: png }] }), /not the format it claims/);
+});
+
+test("an ephemeral image thread is released with thread/unsubscribe, which the server accepts, never archive", async t => {
+  const f = await fixture("image-gen"); t.after(f.cleanup);
+  await f.adapter.generateImage({ prompt: "x" });
+  const methods = (await f.requests()).map(request => request.method);
+  assert.ok(methods.includes("thread/unsubscribe")); assert.equal(methods.includes("thread/archive"), false);
+});
+
+test("a picture that finished is kept when the turn fails afterwards", async t => {
+  const f = await fixture("image-gen-late-failure"); t.after(f.cleanup);
+  const image = await f.adapter.generateImage({ prompt: "x" });
+  assert.equal(image.mimeType, "image/png");
+});
+
+test("cancelling before turn/start is answered leaves no unhandled rejection and retires the uncertain process", async t => {
+  const f = await fixture("image-gen-hang-all"); t.after(f.cleanup);
+  const unhandled: unknown[] = []; const record = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", record); t.after(() => { process.off("unhandledRejection", record); });
+  const abort = new AbortController();
+  const run = f.adapter.generateImage({ prompt: "x", signal: abort.signal });
+  await eventually(async () => (await f.requests()).some(request => request.method === "turn/start"));
+  abort.abort();
+  await assert.rejects(run, /cancelled/i);
+  await delay(50);
+  assert.deepEqual(unhandled, []);
+  // The adapter replaces a retired process by itself, so the proof is a second initialize.
+  await eventually(async () => (await f.requests()).filter(request => request.method === "initialize").length === 2);
+});
+
+test("cancelling one image before its turn starts does not fail another that shares the connection", async t => {
+  const f = await fixture("image-gen-hang-first"); t.after(f.cleanup);
+  const abort = new AbortController();
+  const first = f.adapter.generateImage({ prompt: "first", signal: abort.signal }); first.catch(() => {});
+  await eventually(async () => (await f.requests()).filter(request => request.method === "turn/start").length === 1);
+  const second = f.adapter.generateImage({ prompt: "second" });
+  await eventually(async () => (await f.requests()).filter(request => request.method === "turn/start").length === 2);
+  abort.abort();
+  await assert.rejects(first, /cancelled/i);
+  assert.equal((await second).mimeType, "image/png");
+  assert.equal(f.adapter.readiness().ready, true);
 });

@@ -127,7 +127,7 @@ export type CloseViewState =
 
 /** The price of one close view on this model: one picture from two references, the main photo and the full body, as the job is priced. */
 export function closeViewCost(model: Parameters<typeof estimateCharacterImageMicroUsd>[0] | null): string {
-  return model === null ? "" : priceLabel(estimateCharacterImageMicroUsd(model, "character-look", 1, 2));
+  return model === null ? "" : priceLabel(estimateCharacterImageMicroUsd(model, "character-look", 1, 2), model.pricing.kind === "included-plan" ? "included-plan" : undefined);
 }
 
 /** One character: the look chosen (or the main photo), the picker over their looks, the line, and what to do about the rest. */

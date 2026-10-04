@@ -8,7 +8,7 @@ import { pictureLookChanged, type AudiobookPicture, type ClientMessage, type Dom
 import { readAudiobook } from "../../src/productions/audiobook.js";
 import { AUDIOBOOK_LOOK_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { buildIllustratePrompt, type IllustrateDeriver, type IllustrateDeriverInput, type RawIllustration } from "../../src/productions/audiobook-illustrate.js";
-import { CHAPTER, LEDGER, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
+import { CHAPTER, IMAGE, LEDGER, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
 
 /**
  * Illustrate this chapter (design turn 191b, 191d, SPEC-047 R-101, R-102): where the pictures go and
@@ -53,6 +53,17 @@ const says = (pick: (input: IllustrateDeriverInput) => string[], who: string[] =
   pictures: pick(input).map((block, index) => ({ block, title: `Moment ${index + 1}`, prompt: `Maren at moment ${index + 1}, grey light on the water.`, who, place: null })),
   summary: "Where the chapter turns.",
 });
+
+it("carries included-plan funding into the chapter illustration proposal before dispatch", () =>
+  withHarness(async ({ events, send, enqueued }) => {
+    await illustrate(send);
+    const proposal = finished(events).proposal!;
+    assert.equal(proposal.model.plan, "included-plan");
+    assert.ok(proposal.rows.length > 0);
+    assert.ok(proposal.rows.every(row => row.estimatedMicroUsd === 0));
+    assert.equal(enqueued.length, 0);
+  }, { model: { ...IMAGE, id: "codex-image", provider: "codex", limits: { providerSelectedSize: true }, pricing: { kind: "included-plan" } },
+    illustrate: says(input => nearest(input, [0, 60])) }));
 
 describe("Illustrate this chapter: the proposal (R-101)", () => {
   it("proposes where the pictures go and what each shows, priced, held and not made", () =>

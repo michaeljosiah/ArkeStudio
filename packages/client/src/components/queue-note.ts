@@ -1,4 +1,4 @@
-import { speechSettlement, type FoundingBuildState, type Job, type ModelManifest } from "@arke-studio/contracts";
+import { CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan, speechSettlement, type FoundingBuildState, type Job, type ModelManifest } from "@arke-studio/contracts";
 import { humanNumber, shortDate, usd } from "../lib/format.js";
 import type { QueueEnqueueResult } from "../lib/store.js";
 
@@ -153,6 +153,7 @@ function measuredCost(job: Job): number | null {
 function modelAndCost(jobs: readonly Job[], manifest: ModelManifest | null, spent: boolean): string {
   const estimate = jobs.reduce((sum, job) => sum + job.estimatedMicroUsd, 0);
   const name = modelName(jobs[0]!, manifest);
+  if (jobs.every(usesCodexImagePlan)) return `${name} · ${CODEX_IMAGE_PLAN_LABEL}`;
   // Local recipes already prefix their picker label; the receipt says it once, in the cost slot.
   if (estimate === 0) return `${name.replace(/^Local · /i, "")} · local`;
   if (!spent) return `${name} · ~${usd(estimate)}`;
@@ -171,6 +172,7 @@ function modelAndCost(jobs: readonly Job[], manifest: ModelManifest | null, spen
  * refusal, and a false zero over a charged failure (codex P1, PR 1087).
  */
 function failureCost(job: Job): string {
+  if (usesCodexImagePlan(job)) return job.attempt > 0 || job.providerJobId !== null ? "Codex allowance used is unknown" : "not submitted";
   if (job.estimatedMicroUsd === 0) return "not charged";
   const cost = measuredCost(job);
   if (cost !== null) return cost > 0 ? usd(cost) : "not charged";
@@ -426,7 +428,7 @@ export function historyNote(job: Job, manifest: ModelManifest | null): QueueNote
       id: `job:${job.id}`,
       tone: remote ? "warning" : "queued",
       title: title(subjectOf(job), noun(job.target.kind, 1), "cancelled"),
-      meta: `${modelName(job, manifest)} · ${measuredCost(job) !== null || job.speechQuote?.unit === "token" ? failureCost(job) : remote ? "charge unknown" : "not charged"}`,
+      meta: `${modelName(job, manifest)} · ${usesCodexImagePlan(job) || measuredCost(job) !== null || job.speechQuote?.unit === "token" ? failureCost(job) : remote ? "charge unknown" : "not charged"}`,
       ...(job.error ? { reason: job.error } : {}),
     };
   }

@@ -170,6 +170,18 @@ describe("making a look from the sheet", () => {
     assert.ok(bodyAll('[data-testid="look-sheet"]')[0], "Cancel returns to the Looks");
   });
 
+  it("keeps the Codex allowance on the close-view authorization button", async () => {
+    const current = state();
+    const codex: ManifestModel = { ...GPT, id: "codex-image", provider: "codex", displayName: "Codex Image", pricing: { kind: "included-plan" } };
+    current.app.manifest = { ...current.app.manifest!, models: [...current.app.manifest!.models, codex] };
+    current.app.routing = { ...current.app.routing, defaults: { ...current.app.routing.defaults, image: codex.id } };
+    current.app.providers = [...current.app.providers.filter(p => p.id !== "codex"), { id: "codex", configured: true, validation: "valid", probes: [{ capability: "image", available: true }], fault: null }];
+    await mount(LOOK({ text: HARBOUR.prompt, lookId: HARBOUR.id }), current);
+    const label = text(bodyAll('[data-testid="look-make-close"]')[0]);
+    assert.match(label, /Make close view · ChatGPT plan · uses Codex allowance/);
+    assert.doesNotMatch(label, /free|\$0/);
+  });
+
   it("offers Make close view on a look that has none, asks once, and files the close view it gets on that look", async () => {
     const m = await mount(LOOK({ text: HARBOUR.prompt, lookId: HARBOUR.id }));
     const make = bodyAll('[data-testid="look-make-close"]')[0]!;

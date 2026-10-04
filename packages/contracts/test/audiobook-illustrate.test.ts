@@ -88,6 +88,7 @@ describe("what the card says (191b)", () => {
     assert.equal(priceLabel(240_000), "~$0.24");
     assert.equal(priceLabel(1), "~$0.01");
     assert.equal(priceLabel(0), "free");
+    assert.equal(priceLabel(0, "included-plan"), "ChatGPT plan · uses Codex allowance");
   });
 });
 

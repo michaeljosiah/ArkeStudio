@@ -46,6 +46,22 @@ const model = (id: string) => {
 };
 
 describe("the shipped manifest (R-9, §3.2)", () => {
+  it("offers Codex against an included allowance, with one reference and no invented output controls", () => {
+    const codex = model("codex-image");
+    assert.equal(codex.provider, "codex");
+    assert.equal(PROVIDERS.codex.local, false);
+    assert.equal(codex.pricing.kind, "included-plan");
+    assert.equal(estimateMicroUsd(codex, { images: 4, referenceImages: 4 }), 0);
+    assert.equal(characterImageEstimateIsUsable(codex, 0), true);
+    assert.equal(characterImageEstimateIsUsable(codex, 1), false);
+    assert.match(modelPriceCopy(codex), /ChatGPT plan.*Codex allowance/);
+    assert.equal(modelCapabilityCopy(codex), "refs ×1");
+    assert.deepEqual(codex.limits, { providerSelectedSize: true });
+    assert.deepEqual(offeredAspects(codex), []);
+    assert.deepEqual(offeredAspects({ ...codex, limits: { ...codex.limits, aspects: ["16:9"] } }), []);
+    assert.deepEqual(aspectSupport(codex, "16:9"), { ok: false, supported: [] });
+    assert.equal(aspectOffered(codex, "1:1"), false);
+  });
   it("every model round-trips through the schema", () => {
     const reparsed = ModelManifestSchema.parse(JSON.parse(JSON.stringify(SHIPPED_MANIFEST)));
     assert.deepEqual(reparsed, SHIPPED_MANIFEST);
@@ -394,7 +410,8 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
         const offered = offeredAspects(m, { landscape });
         assert.deepEqual(new Set(offered), new Set(curated), m.id);
         const derived = imageOutputFor(m, { landscape }).aspect;
-        assert.ok(aspectOffered(m, derived), `${m.id} would reject its own default`);
+        assert.equal(aspectOffered(m, derived), m.limits.providerSelectedSize !== true,
+          `${m.id} accepts a derived shape only when it takes dimensions`);
         if (curated.length > 0) {
           assert.equal(offered[0], curated.includes(derived) ? derived : curated[0], m.id);
         }

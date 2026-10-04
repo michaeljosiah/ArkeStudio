@@ -587,8 +587,9 @@ export interface SpendSummary {
    * Reads on a key the author marked free, counted apart (design turn 182): never in the total,
    * which is money billed, and never as unmetered, which is a local run. A free-plan read is $0
    * with its tokens kept; a free-credit read is its estimate drawn from the month's allowance.
+   * Included-plan entries count terminal attempts; their consumed allowance is unknown.
    */
-  plans: Array<{ provider: string; plan: "free-plan" | "free-credit"; entries: number; microUsd: number; tokens: number; characters: number }>;
+  plans: Array<{ provider: string; plan: "free-plan" | "free-credit" | "included-plan"; entries: number; microUsd: number; tokens: number; characters: number }>;
 }
 
 export function spendSummary(ledger: LedgerEntry[], periodDays: number, now: Date): SpendSummary {
@@ -601,9 +602,10 @@ export function spendSummary(ledger: LedgerEntry[], periodDays: number, now: Dat
   let unmetered = 0;
   const plans = new Map<string, SpendSummary["plans"][number]>();
   for (const entry of inWindow) {
-    if (entry.actualSource === "free-plan" || entry.actualSource === "free-credit") {
-      // A failed attempt drew nothing it could show; counting it would inflate the reads.
-      if (entry.outcome !== "succeeded") continue;
+    if (entry.actualSource === "free-plan" || entry.actualSource === "free-credit" || entry.actualSource === "included-plan") {
+      // Speech counts successful reads. Included images count terminal attempts, with no claim
+      // about whether a failed/cancelled attempt consumed allowance.
+      if (entry.outcome !== "succeeded" && entry.actualSource !== "included-plan") continue;
       const key = `${entry.provider}:${entry.actualSource}`;
       const row = plans.get(key) ?? { provider: entry.provider, plan: entry.actualSource, entries: 0, microUsd: 0, tokens: 0, characters: 0 };
       row.entries += 1;

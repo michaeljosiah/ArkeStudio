@@ -11,6 +11,7 @@ import { BreezeBlueClient } from "./clients/breezeblue.js";
 import { FishAudioClient } from "./clients/fishaudio.js";
 import { ElevenLabsClient } from "./clients/elevenlabs.js";
 import { FalClient } from "./clients/fal.js";
+import { CodexClient, type CodexImageRunner } from "./clients/codex.js";
 import { HiggsfieldClient } from "./clients/higgsfield.js";
 import { KokoroClient, type KokoroSynthesize, type SidecarBaseUrl } from "./clients/kokoro.js";
 import { MistralClient } from "./clients/mistral.js";
@@ -32,6 +33,11 @@ export interface ProviderClientDeps {
    * as "Higgsfield is not installed" instead of as the shot having failed (R-4).
    */
   higgsfield?: CommandRunner;
+  /**
+   * Codex's image path, bound to the host's private app-server. Omitted where Codex cannot run:
+   * the client is then absent, so Codex reads as unavailable rather than failing every call.
+   */
+  codexImage?: CodexImageRunner;
   /**
    * Where the Voxa sidecar is listening, resolved per call. Omitted where local voice cannot
    * run at all — the Kokoro and whisper.cpp clients are then absent rather than present and
@@ -101,6 +107,11 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
       transport,
       (operation) => operation === "fetch-artifacts",
     ),
+    ...(deps.codexImage === undefined
+      ? {}
+      // No fetch seam and no subprocess seam: the app-server is the host's, so there is no wire
+      // of ours to record, and an unobserved fetch is never made.
+      : { codex: captureProviderClient("codex", () => new CodexClient(deps.codexImage!), fetchImpl, capture) }),
     openai: captureProviderClient("openai", (fetch) => new OpenAiClient(fetch), fetchImpl, capture, undefined, transport),
     anthropic: captureProviderClient(
       "anthropic",
@@ -175,6 +186,7 @@ export const PROVIDER_DECLARATIONS: Partial<Record<ProviderId, ClientDeclaration
     createProviderClients({
       fetch: (() => Promise.reject(new Error("declarations-only"))) as FetchLike,
       higgsfield: () => Promise.reject(new Error("declarations-only")),
+      codexImage: { status: () => Promise.reject(new Error("declarations-only")), generate: () => Promise.reject(new Error("declarations-only")) },
       // Wired so the table covers the sidecar-backed providers too. A null base URL is the
       // "not running" answer every one of their calls already handles, and reading declarations
       // makes no call at all.

@@ -19,6 +19,8 @@ import { ModelSamplingSchema } from "./local-sampling.js";
 // ---------------------------------------------------------------------------
 
 export const PricingSchema = z.discriminatedUnion("kind", [
+  /** Included account allowance, not a metered API price or a local runtime (SPEC-008 R-29). */
+  z.object({ kind: z.literal("included-plan") }).strict(),
   z
     .object({
       kind: z.literal("perSecond"),
@@ -126,6 +128,8 @@ export type SizeTier = z.infer<typeof SizeTierSchema>;
 
 export const ModelLimitsSchema = z
   .object({
+    /** The provider chooses dimensions; absence of aspect limits must not imply control. */
+    providerSelectedSize: z.literal(true).optional(),
     maxDurationSec: z.number().int().min(1).optional(),
     /**
      * Seconds → the provider's own word for that length. Video routes do not take a number of
@@ -603,6 +607,7 @@ export function estimateMicroUsd(model: ManifestModel, input: EstimateInput): nu
       const step = p.roundUpToMicroUsd;
       return step === undefined ? total : Math.ceil(total / step) * step;
     }
+    case "included-plan":
     case "unmetered":
       return 0;
   }
@@ -711,7 +716,7 @@ export function derivedAspect(model: ManifestModel, landscape: boolean): string 
 
 /** The shapes a row advertises, as curated — before the default is folded in. */
 function curatedAspects(model: ManifestModel): readonly string[] {
-  if (model.unverified === true) return [];
+  if (model.unverified === true || model.limits.providerSelectedSize) return [];
   const enumerated = model.limits.aspects;
   if (enumerated !== undefined && enumerated.length > 0) return enumerated;
   const range = model.aspectRange;
@@ -728,7 +733,8 @@ function curatedAspects(model: ManifestModel): readonly string[] {
  *
  * Prefer the orientation's default only when the model offers it. Recipe bucket lists are
  * exhaustive: adding a generic ratio made Krea 2 promise 3:2 while producing 4:3 (#975).
- * Validation still accepts the output builder's derived shapes through aspectOffered.
+ * Validation accepts the output builder's derived shapes through aspectOffered only when
+ * the provider takes dimensions; provider-selected sizes promise no particular shape.
  */
 export function offeredAspects(
   model: ManifestModel,
@@ -746,9 +752,11 @@ export function offeredAspects(
  * Whether this model would take that shape.
  *
  * The union of both orientations' defaults and the curated list, because the output builder
- * validates through here and must never reject a shape it would itself have produced.
+ * validates through here. A provider that chooses its own size accepts no requested shape;
+ * the output builder's nominal dimensions are not sent by that client.
  */
 export function aspectOffered(model: ManifestModel, aspect: string): boolean {
+  if (model.limits.providerSelectedSize) return false;
   if (curatedAspects(model).includes(aspect)) return true;
   return aspect === derivedAspect(model, true) || aspect === derivedAspect(model, false);
 }
@@ -762,6 +770,7 @@ export function aspectOffered(model: ManifestModel, aspect: string): boolean {
 function aspectOpinionless(model: ManifestModel): boolean {
   const enumerated = model.limits.aspects;
   return (
+    model.limits.providerSelectedSize !== true &&
     (enumerated === undefined || enumerated.length === 0) &&
     model.aspectRange === undefined &&
     model.unverified !== true
@@ -780,6 +789,7 @@ export function aspectSupport(
   model: ManifestModel,
   aspect: string,
 ): { ok: true } | { ok: false; supported: readonly string[] } {
+  if (model.limits.providerSelectedSize) return { ok: false, supported: [] };
   const canonical = normalizeAspect(aspect);
   const enumerated = model.limits.aspects;
   const offers = enumerated !== undefined && enumerated.length > 0 ? enumerated : STANDARD_ASPECTS;
@@ -1013,7 +1023,7 @@ export function estimateCharacterImageMicroUsd(
 export function characterImageEstimateIsUsable(model: ManifestModel, estimate: number): boolean {
   if (!Number.isInteger(estimate) || estimate < 0) return false;
   const pricing = model.pricing;
-  if (pricing.kind === "unmetered") return estimate === 0;
+  if (pricing.kind === "unmetered" || pricing.kind === "included-plan") return estimate === 0;
   const hasPositiveRate =
     pricing.kind === "perSecond"
       ? pricing.microUsdPerSecond > 0 || Object.values(pricing.byResolution ?? {}).some((rate) => rate > 0)
@@ -1154,6 +1164,8 @@ export function modelPriceCopy(model: ManifestModel): string {
   if (model.speechPlan === "free-credit") return `${modelPriceCopy({ ...model, speechPlan: undefined })} · free credit`;
   const pricing = model.pricing;
   switch (pricing.kind) {
+    case "included-plan":
+      return CODEX_IMAGE_PLAN_LABEL;
     case "unmetered":
       // Locality belongs to the selected runtime. A ComfyUI URL may be another machine.
       return "unmetered";
@@ -1187,6 +1199,17 @@ export function modelPriceCopy(model: ManifestModel): string {
       // the estimator uses, said as such rather than as a price the provider quotes.
       return `${formatMicroUsd(estimateMicroUsd(model, { images: 1 }))} per image at most`;
   }
+}
+
+/** The first included-plan route is deliberately narrow; other external logins still bill. */
+export const CODEX_IMAGE_PLAN_LABEL = "ChatGPT plan · uses Codex allowance";
+export function usesCodexImagePlan(value: { provider: string; model: string }): boolean {
+  return value.provider === "codex" && value.model === "codex-image";
+}
+
+/** Shared by the image controls and their confirmation surfaces. */
+export function imagePriceCopy(model: ManifestModel, estimate: number): string {
+  return model.pricing.kind === "included-plan" ? CODEX_IMAGE_PLAN_LABEL : `~${formatMicroUsd(estimate)}`;
 }
 
 /**

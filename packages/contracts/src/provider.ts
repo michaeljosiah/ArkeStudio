@@ -60,6 +60,7 @@ export function scopedModelId(
 export const ProviderIdSchema = z.enum([
   "fal",
   "higgsfield",
+  "codex",
   "openai",
   "anthropic",
   "elevenlabs",
@@ -121,6 +122,13 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     mapsReferenceKinds: ["image", "video", "audio"],
   },
   higgsfield: { displayName: "Higgsfield", capabilities: ["image", "video"], local: false, credential: "external" },
+  /**
+   * Images made by the user's own Codex sign-in, through the Codex app-server we already drive.
+   * Like Higgsfield there is no credential of ours: Codex holds the login and sign-in state is a
+   * probe. Its image route draws on Codex allowance; the manifest and ledger name that plan
+   * separately from local runs and API charges (SPEC-008 R-29..31).
+   */
+  codex: { displayName: "Codex", capabilities: ["image"], local: false, credential: "external" },
   openai: {
     displayName: "OpenAI",
     capabilities: ["llm", "image"],

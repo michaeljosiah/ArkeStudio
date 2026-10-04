@@ -5,7 +5,7 @@ import { createStudioHost } from "./application/studio-host.js";
 import { AppSettingsFile } from "./app-settings.js";
 import { ChildLedger } from "./child-ledger.js";
 import type { Cipher } from "./credentials/store.js";
-import { assembleHarness, type AssembledHarness } from "./harness/v2-launch.js";
+import { assembleHarness, lazyCodexImageRunner, type AssembledHarness } from "./harness/v2-launch.js";
 import { harnessTrace } from "./harness/trace.js";
 import { ProviderCallStore } from "./providers/call-store.js";
 import { SecretRegistry } from "./redact.js";
@@ -34,6 +34,7 @@ const unavailableCipher: Cipher = {
 export async function createNodeStudioHost(options: NodeStudioHostOptions) {
   const provider = new FsWorldProvider(options.appRoot);
   let wiring: AssembledHarness | undefined;
+  let codexImage: ReturnType<typeof lazyCodexImageRunner> | undefined;
   try {
     await provider.ensureAppRoot();
     const ledger = new ChildLedger(join(options.appRoot, "run", "children.json"));
@@ -51,7 +52,12 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
     }
     const secrets = new SecretRegistry();
     const calls = new ProviderCallStore(join(options.appRoot, "provider-calls", "calls.jsonl"), secrets);
-    const clients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: calls });
+    codexImage = lazyCodexImageRunner({ deps: { ledger }, onTrace: harnessTrace(options.appRoot),
+      discovery: async () => {
+        const path = process.env["ARKE_CODEX_CMD"] ?? (await new AppSettingsFile(join(options.appRoot, "settings.json")).load().catch(() => null))?.harness.codexPath;
+        return path ? { configuredPath: path } : {};
+      } });
+    const clients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: calls, codexImage });
     const host = createStudioHost({
       provider, appRoot: options.appRoot, appVersion: options.appVersion,
       adapter: options.adapter === undefined ? wiring!.adapter : options.adapter,
@@ -73,7 +79,7 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
     }
     return host;
   } catch (error) {
-    await Promise.allSettled([provider.close(), wiring?.supervisor?.stop(), wiring?.adapter?.dispose?.()]);
+    await Promise.allSettled([provider.close(), wiring?.supervisor?.stop(), wiring?.adapter?.dispose?.(), codexImage?.dispose()]);
     throw error;
   }
 }

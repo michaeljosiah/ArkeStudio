@@ -181,3 +181,12 @@ describe("classifyError: a witnessed 4xx is the provider's verdict, not the tran
     assert.equal(classifyError(new Error("fal: result fetch failed (HTTP 401)")), "provider-fault");
   });
 });
+
+describe("Codex sign-in loss", () => {
+  it("pauses the lane for a sign-in rather than failing the job (the message the Codex client throws)", () => {
+    assert.equal(
+      classifyError(new Error("codex: the credential was rejected — Codex is no longer signed in with ChatGPT")),
+      "provider-fault",
+    );
+  });
+});

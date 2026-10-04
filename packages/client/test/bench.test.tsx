@@ -102,6 +102,12 @@ function renderAt(path: string, state: ClientState): string {
 }
 
 describe("the bench screen (issue 305 §3)", () => {
+  it("keeps included-plan funding visible on a saved image take", () => {
+    const state = stateWithBench();
+    state.bench!.session!.takes[0]!.cost = { estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "included-plan" };
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, state);
+    assert.match(html, /ChatGPT plan · uses Codex allowance/);
+  });
   it("keeps the themed app frame and a way back while opening a session (issue 1000)", () => {
     const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench`, { ...FIXTURE_STATE, bench: null });
     assert.match(html, /class="fy-app" data-screen="bench"/);

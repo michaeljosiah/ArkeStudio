@@ -195,6 +195,17 @@ export class ProviderFreeLimitError extends ProviderRequestRejectedError {
   }
 }
 
+/** Included-plan allowance exhaustion is terminal and also stops siblings before submission. */
+export class ProviderPlanLimitError extends ProviderRequestRejectedError {
+  readonly failureClass = "terminal" as const;
+  readonly planLimit = true;
+
+  constructor(message: string, readonly resetsAt?: string) {
+    super(message);
+    this.name = "ProviderPlanLimitError";
+  }
+}
+
 /**
  * A paid key's own daily quota is used up (codex on PR 1475): terminal like the free tier's,
  * since minutes cannot clear it, but neither the free plan's words nor its remedy.
@@ -438,7 +449,7 @@ export interface ProviderClient {
   /** The language models a local runtime has pulled, for the writing harness's catalogue (issue 1247). */
   listModels?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").LocalHarnessModel[]>;
   /** Release optional long-lived transports. No provider call may occur after this. */
-  dispose?(): void;
+  dispose?(): void | Promise<void>;
   /**
    * The provider's lane has drained after `model`'s job settled (issue 846): a local engine may
    * put down what it loaded. Never awaited by a terminal row, and nothing the queue can see fails.

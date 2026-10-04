@@ -10,7 +10,7 @@ import type {
   StagedProposal,
   Take,
 } from "@arke-studio/contracts";
-import { activityJobLabels } from "@arke-studio/contracts";
+import { activityJobLabels, CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan, takeCostCopy } from "@arke-studio/contracts";
 import { humanNumber, seconds, shortDateTime, usd } from "../lib/format.js";
 import { Avatar, Badge, Button, Card, StatusDot, cx, type StatusDotTone } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
@@ -151,7 +151,7 @@ export function TakeStrip({
             <span className="dom-take__meta">
               <span className="mono">{take.id.slice(0, 8)}…</span>
               <span>{take.model}</span>
-              <span>{usd(take.cost.actualMicroUsd ?? take.cost.estimatedMicroUsd)}</span>
+              <span>{takeCostCopy(take.cost)}</span>
             </span>
             {decision === "accepted" && <Badge tone="success">accepted</Badge>}
             {decision === "rejected" && <Badge tone="danger">rejected</Badge>}
@@ -493,7 +493,7 @@ export function JobRow({ job, state }: { job: Job; state?: ClientState | null })
       <span className="dom-jobrow__model" title={`${job.provider}/${job.model}`}>
         {labels.model}
       </span>
-      <span className="dom-jobrow__cost">{usd(job.estimatedMicroUsd)} est.</span>
+      <span className="dom-jobrow__cost">{usesCodexImagePlan(job) ? CODEX_IMAGE_PLAN_LABEL : `${usd(job.estimatedMicroUsd)} est.`}</span>
       <span className="dom-jobrow__when">{shortDateTime(job.updatedAt)}</span>
       <Badge
         tone={

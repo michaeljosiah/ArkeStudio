@@ -3,6 +3,7 @@ import { SpeechAttemptSchema, SpeechQuoteSchema, SpeechUsageSchema } from "./spe
 import { JobEngineIdentitySchema, RecipeIdentitySchema } from "./comfyui.js";
 import { GenesisIdSchema, IsoDateTimeSchema, JobIdSchema, ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { CapabilitySchema } from "./provider.js";
+import { ActualCostSourceSchema } from "./take.js";
 
 /**
  * What a job or a ledger entry is scoped to (SPEC-031 R-55, amending SPEC-009): a world, or —
@@ -287,7 +288,7 @@ export const LedgerEntrySchema = z
     outcome: z.enum(["succeeded", "failed", "cancelled"]),
     estimatedMicroUsd: z.number().int().min(0),
     actualMicroUsd: z.number().int().min(0).nullable(),
-    actualSource: z.enum(["provider-reported", "usage-derived", "mixed-measured", "manifest-derived", "local-zero", "free-plan", "free-credit"]).optional(),
+    actualSource: ActualCostSourceSchema.optional(),
     speechQuote: SpeechQuoteSchema.optional(),
     speechUsage: SpeechUsageSchema.optional(),
     speechAttempts: z.array(SpeechAttemptSchema).optional(),

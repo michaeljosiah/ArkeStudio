@@ -46,6 +46,17 @@ const manifest = {
 } as unknown as ModelManifest;
 
 describe("queue notification", () => {
+  it("discloses the Codex allowance on queued, successful, failed and cancelled receipts", () => {
+    const image = job({ provider: "codex", model: "codex-image", estimatedMicroUsd: 0 });
+    for (const note of [enqueueNote(result(), [image], manifest), readyNote(image, manifest, undefined)]) {
+      assert.match(note!.meta, /ChatGPT plan.*Codex allowance/);
+      assert.doesNotMatch(note!.meta, /local|free|\$0/);
+    }
+    for (const status of ["failed", "cancelled"] as const) {
+      assert.match(historyNote({ ...image, status, attempt: 1 }, manifest).meta, /Codex allowance used is unknown/);
+      assert.match(historyNote({ ...image, status }, manifest).meta, /not submitted/);
+    }
+  });
   const batchIds = [
     "jb_01J8E0000000000000000000J1",
     "jb_01J8E0000000000000000000J2",

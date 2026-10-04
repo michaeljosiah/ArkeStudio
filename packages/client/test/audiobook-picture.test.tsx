@@ -241,6 +241,16 @@ const typeInto = async (el: HTMLTextAreaElement, value: string) => {
 };
 
 describe("Suggest picture (turn 191a)", () => {
+  it("authorizes an included-plan picture with an allowance label", async () => {
+    const m = await mount(2);
+    await press(q(m, '[data-testid="suggest-picture"]'));
+    await answerSuggestion(m, { suggestion: { ...SUGGESTION, estimatedMicroUsd: 0,
+      model: { provider: "codex", id: "codex-image", name: "Codex Image", references: 1, plan: "included-plan" } } });
+    const button = text(q(m, '[data-testid="suggest-generate"]'));
+    assert.match(button, /ChatGPT plan.*Codex allowance/);
+    assert.doesNotMatch(button, /free|\$0/);
+    assert.equal(asked(m, "make-audiobook-picture").length, 0);
+  });
   it("asks for the block's picture, says it is reading, then draws the prompt with who is in it, their look, the model and the price", async () => {
     const m = await mount(2);
     await press(q(m, '[data-testid="suggest-picture"]'));

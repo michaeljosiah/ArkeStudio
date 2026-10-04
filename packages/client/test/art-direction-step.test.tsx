@@ -253,6 +253,18 @@ async function answerPlan(mounted: MountedGenesis): Promise<void> {
 }
 
 describe("the chat-to-build handoff (issue 666)", () => {
+  it("discloses included allowance for each generated image in the build details", async () => {
+    const mounted = await mountGenesis(genesisBlueprint("Ink on paper."));
+    try {
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      await emitBuildPlan(latestPlanRequest(mounted).requestId, { ...BUILD_REVIEW, generations: 1,
+        imageModel: "Codex Image", imagePlan: "included-plan",
+        work: [{ key: "main-photo:maren", name: "Maren", kind: "main-photo", authorized: true, estimatedMicroUsd: 0 }] });
+      const details = [...mounted.container.querySelectorAll("details")].find(node => node.textContent?.includes("Work and reused selections"));
+      assert.match(details?.textContent ?? "", /Maren.*ChatGPT plan.*Codex allowance/);
+      assert.doesNotMatch(details?.textContent ?? "", /\$0|free/);
+    } finally { await unmountGenesis(mounted); }
+  });
   it("lets the form name an unnamed conversation and returns those values to chat for review", async () => {
     const draft = genesisBlueprint("Ink on paper.");
     delete draft.name;
