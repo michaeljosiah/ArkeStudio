@@ -1654,6 +1654,9 @@ export class Coordinator {
       this.emit({ at: new Date().toISOString(), type: "illustration.progress", ...ids, progress: { ...progress, made: [...progress.made], failed: [...progress.failed] } });
     };
     const model = await this.pictureModel(store);
+    // The rows the provider would not make: only these are held as refused, to be tried again. A row
+    // whose words changed or that has a picture now is not one Try again could make (codex on PR 1559).
+    const refusedHere = new Set<string>();
     try {
       if (!model) {
         for (const row of rows) progress.failed.push({ block: row.block, reason: "no picture model is on" });
@@ -1693,6 +1696,7 @@ export class Coordinator {
             // In plain words on the row (`refused by the image safety check`); the provider's own is in the app log.
             void this.appLog?.append({ kind: "audiobook.illustration-picture-failed", chapter: chapter.file, block: row.block, message: made.reason });
             progress.failed.push({ block: row.block, reason: pictureRefusal(made.reason) });
+            refusedHere.add(row.block);
             continue;
           }
           progress.spentMicroUsd += made.costMicroUsd ?? made.estimatedMicroUsd;
@@ -1715,7 +1719,7 @@ export class Coordinator {
     // A row this run could not make keeps why, so a window that opens the proposal later holds it
     // with its reason instead of offering it as an ordinary picture (2026-10-04); a row the run did
     // not reach keeps whatever it held before.
-    const reasons = new Map(progress.failed.map((entry) => [entry.block, entry.reason]));
+    const reasons = new Map(progress.failed.filter((entry) => refusedHere.has(entry.block)).map((entry) => [entry.block, entry.reason]));
     const remaining = proposal.rows
       .filter((row) => !progress.made.includes(row.block))
       .map((row) => (reasons.has(row.block) ? { ...row, refused: (reasons.get(row.block) || "not made").slice(0, 200) } : row));

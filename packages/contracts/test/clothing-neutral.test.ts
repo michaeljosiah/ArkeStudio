@@ -38,6 +38,11 @@ describe("neutralClothing", () => {
   it("drops a clause that is only skin and keeps a garment its cut is taken from", () => {
     assert.equal(neutralClothing("A strapless red gown with a thigh-high slit, bare legs, silver heels."), "A red gown, silver heels.");
   });
+
+  it("keeps the jewellery, shoes or hair a clause about skin also names (codex on PR 1559)", () => {
+    assert.equal(neutralClothing("A green wrapper, bare arms stacked with old-gold bangles, gold sandals."), "A green wrapper, stacked with old-gold bangles, gold sandals.");
+    assert.equal(neutralClothing("Ife turns, her back bare beneath her braids, and smiles."), "Ife turns, and smiles.");
+  });
 });
 
 describe("pictureRefusal", () => {

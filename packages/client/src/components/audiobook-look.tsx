@@ -370,8 +370,8 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
       setCloseAsked({});
       setCloseAccepted({});
       setDiscarded([]);
-      setChoosing({});
-      setWriting([]);
+      // Presses still on their way are kept: closed and opened again, the sheet still shows them
+      // until their answer or the record settles them (codex on PR 1559).
       return;
     }
     setUsageAsk(readAudiobookLooks(worldId, productionId));

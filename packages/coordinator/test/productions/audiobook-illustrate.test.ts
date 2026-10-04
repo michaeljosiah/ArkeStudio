@@ -379,6 +379,8 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
         const record = await readAudiobook(h.store()!, LEDGER, CHAPTER);
         assert.ok(record !== null && record !== "unreadable");
         assert.equal(record.pictures![free[1]!.block]!.source, "world", "the author's picture is as it was");
+        // Not a refusal Try again could undo (codex on PR 1559): no `refused` on the row.
+        assert.equal(finished(h.events).proposal!.rows.find((row) => row.block === free[1]!.block)?.refused, undefined);
       },
       { illustrate: says(MARENS) },
     ));
