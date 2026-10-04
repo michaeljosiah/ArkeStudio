@@ -425,7 +425,8 @@ test("turn-level quota and login failures preserve their remedies", async t => {
 });
 
 test("an admitted image turn has a deadline even if it never completes", async t => {
-  const f = await fixture("image-gen-turn-hang", { imageTimeoutMs: 300 }); t.after(f.cleanup);
+  // The budget includes account/model/thread RPCs; a busy Windows shard must reach the turn.
+  const f = await fixture("image-gen-turn-hang", { imageTimeoutMs: 5000 }); t.after(f.cleanup);
   await assert.rejects(f.adapter.generateImage({ prompt: "x" }), /timeout|aborted/i);
   const requests = await f.requests();
   assert.ok(requests.some(request => request.method === "turn/interrupt"));
@@ -433,7 +434,8 @@ test("an admitted image turn has a deadline even if it never completes", async t
 });
 
 test("a completed picture survives an internal deadline waiting for the final reply", async t => {
-  const f = await fixture("image-gen-picture-hang", { imageTimeoutMs: 300 }); t.after(f.cleanup);
+  // 300 ms sometimes expired before item/completed on Windows CI, testing admission instead.
+  const f = await fixture("image-gen-picture-hang", { imageTimeoutMs: 5000 }); t.after(f.cleanup);
   assert.equal((await f.adapter.generateImage({ prompt: "x" })).mimeType, "image/png");
 });
 
