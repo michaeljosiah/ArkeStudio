@@ -1,4 +1,4 @@
-import { productionShape, productionFrameRate, sceneCommandBatchCandidate,
+import { buildRenderPlan, PRESETS, productionShape, productionFrameRate, sceneCommandBatchCandidate,
   type Production, type ProductionCardPreview, type WorldBundle, type WorldChatPreparedAction } from "@arke-studio/contracts";
 import { sceneActionCommands } from "./action-sequencing.js";
 import { sceneCommandFrom } from "../productions/scene-commands.js";
@@ -29,6 +29,18 @@ export function productionCardPreview(world: WorldBundle, payload: WorldChatPrep
     const scene = world.productions.find(p => p.meta.id === payload.action.productionId)?.scenes.find(s => s.id === payload.action.sceneId);
     if (!scene) throw new Error("The board preview is unavailable.");
     return { kind: "scene", before: scene, after: scene };
+  }
+  if (payload.kind === "world-chat-production-cut-export") {
+    const production = world.productions.find(p => p.meta.id === payload.action.productionId);
+    if (!production) throw new Error("The export preview is unavailable.");
+    const action = payload.action;
+    const episodeId = action.scope.kind === "episode" ? action.scope.episodeId : null;
+    const plan = buildRenderPlan({ production, artifacts: world.artifacts, timeline: production.timeline, scope: action.scope, preset: action.preset,
+      ...(action.subtitles ? { subtitles: action.subtitles } : {}) });
+    return { kind: "export", preset: action.preset, durationSec: plan.ok ? plan.plan.totalSec : production.spine ? world.artifacts.find(a => a.id === production.spine?.trackArtifactId)?.mediaInfo?.durationSec ?? null : null,
+      subtitles: action.subtitles ? `${action.subtitles.mode} · ${action.subtitles.trackId}${action.subtitles.sidecar ? ` · ${action.subtitles.sidecar}` : ""}` : "None",
+      dimensions: `${PRESETS[action.preset].width} × ${PRESETS[action.preset].height}`, frameRate: productionFrameRate(production.meta),
+      scope: episodeId ? `Episode ${production.episodes.find(e => e.id === episodeId)?.title ?? episodeId}` : "Complete production" };
   }
   return undefined;
 }

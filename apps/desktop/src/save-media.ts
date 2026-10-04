@@ -113,3 +113,28 @@ export function saveMediaHandler(
     return await saveMedia({ resolve, ask: host.ask, copy: host.copy }, input);
   };
 }
+
+export interface RevealMediaHost {
+  allowedSender(): unknown;
+  worldSlug(): string | null;
+  providers(): { starting: MediaSource | null; live: MediaSource | null };
+  reveal(path: string): void;
+}
+
+/** Open names a completed world export; only the confined provider can supply its disk path. */
+export function revealMediaHandler(host: RevealMediaHost) {
+  return async (sender: unknown, input: { worldSlug?: unknown; path?: unknown } | null): Promise<{ ok: true } | { ok: false; reason: string }> => {
+    const refusal = { ok: false as const, reason: "That export is unavailable." };
+    const allowed = host.allowedSender(), slug = host.worldSlug();
+    if (!allowed || sender !== allowed || !slug || input?.worldSlug !== slug) return refusal;
+    const path = input.path;
+    if (typeof path !== "string" || !path.startsWith("exports/") || path.includes("\\") || path.includes(":") ||
+        path.split("/").some(part => !part || part === "." || part === "..")) return refusal;
+    const resolve = mediaLookup(host.providers());
+    if (!resolve) return refusal;
+    const hit = await resolve(slug, path).catch(() => null);
+    // A lookup can outlive a world switch or a replaced window. Recheck before the host effect.
+    if (!hit || host.allowedSender() !== allowed || host.worldSlug() !== slug) return refusal;
+    try { host.reveal(hit.path); return { ok: true }; } catch { return refusal; }
+  };
+}

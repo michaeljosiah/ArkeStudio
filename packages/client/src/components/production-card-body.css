@@ -40,3 +40,15 @@
 .fy-generation-card__grid figcaption { margin: 6px 0; font: var(--type-meta); overflow-wrap: anywhere; }
 .fy-generation-card__grid :is(.ui-btn, a), .fy-generation-card__job .ui-btn { min-height: 44px; }
 .fy-generation-card__job { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fy-production-timeline { min-width: 0; max-width: 100%; }
+.fy-production-timeline h4 { margin: 8px 0; }
+.fy-production-timeline__scroll { max-width: 100%; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border); }
+.fy-production-timeline__tracks { min-width: 660px; position: relative; }
+.fy-production-timeline .fy-track__label { width: 146px; }
+.fy-production-timeline :is(.fy-pictclip, .fy-typedclip):disabled { opacity: 1; }
+.fy-production-timeline :is(.fy-cut-lane-open, .fy-trackbtns, .fy-pictclip__grip, .fy-typedclip__grip) { display: none; }
+.fy-production-timeline [data-review-change="inserted"] { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fy-production-timeline [data-review-change="changed"] { outline: 2px solid var(--ring); outline-offset: -2px; }
+.fy-production-timeline [data-version="before"] [data-review-change] { opacity: .6; border-style: dashed; }
+.fy-production-timeline__range-lane { position: absolute; inset: 0 0 0 146px; z-index: 5; pointer-events: none; }
+.fy-production-timeline__range { position: absolute; top: 0; bottom: 0; border-inline: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }

@@ -212,6 +212,7 @@ export function PictureTrack({
   pendingSlot = null,
   onDrop,
   onFileDrop,
+  reviewMarks,
 }: {
   production?: ProductionBundle;
   artifacts?: readonly ArtifactSidecar[];
@@ -241,6 +242,7 @@ export function PictureTrack({
   /** A picture from the Library dropped on the base track (R-10); absent while the record cannot be edited. */
   onDrop?: (drop: { artifactId: string; frame: number }) => void;
   onFileDrop?: (files: File[], frame: number) => void;
+  reviewMarks?: ReadonlyMap<string, string>;
 }) {
   const [menu, setMenu] = useState<{ clipId: TimelineClipId; x: number; y: number } | null>(null);
   const [hover, setHover] = useState<{ frame: number; refused: boolean; files: boolean } | null>(null);
@@ -538,6 +540,7 @@ export function PictureTrack({
               slug={slug}
               frameRate={frameRate}
               data-clip={clip.id}
+              data-review-change={reviewMarks?.get(clip.id)}
               className={cx(
                 "fy-cutseg",
                 "fy-pictclip",

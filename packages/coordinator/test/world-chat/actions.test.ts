@@ -1,4 +1,6 @@
 import { freezeProductionTimeline, productionTimelineBody } from "../../src/world-chat/production-timeline.js";
+import { productionEditorCardPreview, readEditorRequestByAction } from "../../src/productions/editor-requests.js";
+import { ConversationActionService } from "../../src/application/conversation-actions.js";
 import { prepareConversationTakeReview } from "../../src/application/conversation-take-review.js";
 import { applyTimelineCommand } from "../../src/productions/timeline.js";
 import { productionFrameRate, storyTimelineFingerprint } from "@arke-studio/contracts";
@@ -2314,6 +2316,12 @@ describe("World Chat authority adapters", () => {
     const card = (await loaded(w.log)).actions.at(-1)!;
     const shown = JSON.stringify(card.shown);
     assert.equal(card.shown.body.family, "host-action");
+    assert.equal(card.shown.productionPreview?.kind, "export");
+    if (card.shown.productionPreview?.kind !== "export") assert.fail("Expected frozen export preview");
+    assert.equal(card.shown.productionPreview.preset, "review-cut");
+    assert.equal(card.shown.productionPreview.dimensions, "1280 × 720");
+    assert.equal(card.shown.productionPreview.subtitles, "None");
+    assert.equal(w.store.getBundle().meta.schemaVersion, 63);
     assert.match(shown, /Scope:/);
     assert.match(shown, /Preset:/);
     assert.match(shown, /Outputs:/);
@@ -2333,6 +2341,13 @@ describe("World Chat authority adapters", () => {
     const settled = (await loaded(w.log)).actions.at(-1)!;
     assert.equal(settled.receipt?.id, card.authority.id);
     assert.equal(JSON.stringify(settled).includes("C:\\private"), false);
+    const service = new ConversationActionService(w.store, { gate: w.gate, now: NOW, isWorldOpen: () => true, actions: w.actionDeps });
+    exportRecords.push({ id: card.authority.id, worldId: w.store.worldId, productionId: PRODUCTION, status: "done", percent: 100, output: "exports/review.mp4", error: null });
+    assert.deepEqual((await service.project([settled]))[0]!.exportState, { status: "done", percent: 100, output: "exports/review.mp4" });
+    exportRecords[0] = { ...exportRecords[0]!, output: "C:/private/review.mp4" };
+    assert.equal((await service.project([settled]))[0]!.exportState?.output, null);
+    exportRecords[0] = { ...exportRecords[0]!, worldId: ulid() };
+    assert.equal((await service.project([settled]))[0]!.exportState, undefined);
   });
 
   it("keeps partial multi-card delivery outcomes independent without claiming rollback", async () => {
@@ -2927,6 +2942,15 @@ describe("production whole cut from chat (SPEC-051 T-7)", () => {
     const sceneIds = production(w).scenes.slice(0,2).map(s => s.id).reverse();
     const card = await prepare(w, { operation: "assemble", sceneIds });
     assert.equal(card.actionKind, "world-chat-editor-request");
+    const preview = card.shown.productionPreview;
+    assert.equal(preview?.kind, "timeline");
+    if (preview?.kind !== "timeline") assert.fail("Expected frozen timeline preview");
+    assert.ok(preview.after.tracks[0]!.clips.length > 0);
+    const request = await readEditorRequestByAction(w.store, PRODUCTION, card.actionId);
+    assert.ok(request);
+    assert.deepEqual(productionEditorCardPreview(w.store, PRODUCTION, request, "2026-10-05T00:00:00Z"), preview, "the frozen compiler does not depend on projection time");
+    assert.equal(w.store.getBundle().meta.schemaVersion, 63);
+    await assert.rejects(readWorldMeta(w.store.dir, { supports: 62 }), /newer|version|schema/i);
     assert.equal(production(w).timeline?.status ?? "absent", "absent");
     assert.equal(card.shown.body.family, "command");
     if (card.shown.body.family !== "command") throw new Error("Wrong family");
@@ -2938,6 +2962,7 @@ describe("production whole cut from chat (SPEC-051 T-7)", () => {
     const sceneNumber = production(w).scenes.find(s => s.id === sceneIds[0])!.number;
     assert.ok(shotClips[0]!.source.kind === "shot" && shotClips[0]!.source.sceneNumber === sceneNumber);
     assert.equal(state.timeline.history.undo.length,1);
+    assert.deepEqual(state.timeline.tracks, preview.after.tracks, "Approve commits exactly the shown tracks");
     const undo = await prepare(w,{ operation: "undo" });
     assert.match(undo.shown.title,/Undo/);
     assert.equal(production(w).timeline?.status,"ready");

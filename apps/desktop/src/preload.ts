@@ -372,6 +372,10 @@ const bridge = {
    * uses. No filesystem path travels in either direction (SPEC-001 R-9); the answer is whether
    * it saved, whether the dialog was closed, or why not.
    */
+  async revealMedia(worldSlug: string, path: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const result = await ipcRenderer.invoke("arke:reveal-media", { worldSlug, path }).catch(() => null);
+    return result?.ok === true ? { ok: true } : { ok: false, reason: "That export is unavailable." };
+  },
   async saveMedia(
     worldSlug: string,
     path: string,
