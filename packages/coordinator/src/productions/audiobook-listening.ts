@@ -101,9 +101,9 @@ export async function anyNarrator(store: WorldStore, productionId: string): Prom
  * blocks' places on that mix's clock. Null for a chapter with none, or whose mix cannot be made
  * here — the takes then play back to back, as before timing.
  */
-async function timedListening(store: WorldStore, productionId: string, plan: AudiobookPlan, ffmpeg: FfmpegRunner | undefined): Promise<{ bars: Array<{ key: string; at: number; seconds: number }>; seconds: number; mix: { file: string; seconds: number } } | null> {
+async function timedListening(store: WorldStore, productionId: string, plan: AudiobookPlan, ffmpeg: FfmpegRunner | undefined, always = false): Promise<{ bars: Array<{ key: string; at: number; seconds: number }>; seconds: number; mix: { file: string; seconds: number } } | null> {
   const record = plan.record === "unreadable" ? null : plan.record;
-  if (!hasTiming(record)) return null;
+  if (!hasTiming(record) && !always) return null;
   try {
     const timing = chapterTiming(store, plan, "skip");
     const mix = chapterMix(timing);
@@ -116,7 +116,12 @@ async function timedListening(store: WorldStore, productionId: string, plan: Aud
   }
 }
 
-export async function audiobookListening(store: WorldStore, productionId: string, options: { ffmpeg?: FfmpegRunner } = {}): Promise<AudiobookListening> {
+/**
+ * `mixAll`: every chapter on its one mix, timing or none (design turn 197, rule 7) — the video
+ * takes its sound from the renderer the chapter's Play uses and nothing else, so a chapter with
+ * no timing is rendered as one too: its takes back to back, at the book's one loudness.
+ */
+export async function audiobookListening(store: WorldStore, productionId: string, options: { ffmpeg?: FfmpegRunner; mixAll?: boolean } = {}): Promise<AudiobookListening> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const cover = await bookCover(store);
@@ -134,10 +139,35 @@ export async function audiobookListening(store: WorldStore, productionId: string
     const record = plan.record === "unreadable" ? null : plan.record;
     const pictures = record?.pictures ?? {};
     const usable = await usablePictures(store, pictures);
-    const timed = await timedListening(store, productionId, plan, options.ffmpeg);
+    const timed = await timedListening(store, productionId, plan, options.ffmpeg, options.mixAll === true);
     chapters.push(listeningChapter({ chapterId: summary.id, order: summary.order, title: summary.title, blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file), ...(timed !== null ? { timed } : {}) }));
   }
   return { productionId, title: production.meta.title, cover, chapters };
+}
+
+/**
+ * Where a block's picture's subject stands (design turn 197b): set by dragging in the video's
+ * preview, kept on the picture — whichever key it is kept under, as a Remove finds it — and
+ * `null` back to the centre. A block with no picture refuses.
+ */
+export async function setAudiobookPictureFocus(store: WorldStore, productionId: string, chapterFile: string, block: string, focus: { x: number; y: number } | null): Promise<ChapterAudiobook> {
+  const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+  const summary = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
+  if (summary === undefined) throw new Error("that chapter is no longer in this production");
+  const plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId) });
+  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text }));
+  const index = blocks.findIndex((candidate) => candidate.key === block);
+  if (index < 0) throw new Error("that block is no longer in the chapter");
+  const round = (share: number) => Math.round(Math.min(1, Math.max(0, share)) * 1000) / 1000;
+  return updateAudiobook(store, productionId, plan.chapter, (current) => {
+    const held = current.pictures ?? {};
+    const shown = placePictures(blocks, held).placed.find((entry) => entry.index === index);
+    if (shown === undefined) throw new Error("that block has no picture");
+    const { focus: _old, ...rest } = shown.picture;
+    const next = focus === null ? rest : { ...rest, focus: { x: round(focus.x), y: round(focus.y) } };
+    if (JSON.stringify(next) === JSON.stringify(shown.picture)) return null;
+    return { ...current, updatedAt: store.now(), pictures: { ...held, [shown.key]: next } };
+  });
 }
 
 /**

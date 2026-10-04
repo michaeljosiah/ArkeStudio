@@ -61,7 +61,7 @@ export interface ArkeExportReadRecord {
   readonly error?: string | null;
   readonly createdAt?: string;
   readonly sourceFingerprint?: string;
-  readonly deliveryKind?: "video" | "manuscript" | "interactive";
+  readonly deliveryKind?: "video" | "manuscript" | "interactive" | "audiobook-video";
 }
 
 export interface TargetReadDeps {

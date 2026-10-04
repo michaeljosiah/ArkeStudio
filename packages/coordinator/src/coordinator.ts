@@ -332,7 +332,8 @@ import {
 } from "./productions/audiobook-direction.js";
 import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiobookBook } from "./productions/audiobook-book.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
-import { anyNarrator, audiobookListening, setAudiobookPicture } from "./productions/audiobook-listening.js";
+import { anyNarrator, audiobookListening, setAudiobookPicture, setAudiobookPictureFocus } from "./productions/audiobook-listening.js";
+import { audiobookVideoState, exportAudiobookVideo, forgetVideoJob, listVideoExports, pendingVideoJobs } from "./productions/audiobook-video.js";
 import { bookLookChoices, lookUsage } from "./productions/audiobook-look-book.js";
 import { chooseChapterLook, deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
 import { makeAdapterIllustrateDeriver, proposeIllustrations, type IllustrateDeriver } from "./productions/audiobook-illustrate.js";
@@ -449,6 +450,7 @@ import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError, scanWorld } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
 import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
+import type { AudiobookVideoOptions, AudiobookVideoProgress } from "@arke-studio/contracts";
 import { worldChatContextExists } from "./world-chat/context-validation.js";
 import { worldChatContextSchemaVersion } from "@arke-studio/contracts";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
@@ -3117,6 +3119,8 @@ export class Coordinator {
   private readonly performanceGenerations = new Map<string, AbortController>();
   /** SPEC-013: exports in flight, cancellable by id (R-21). */
   private readonly exports = new Map<string, ExportHandle>();
+  /** The audiobook video render going for a book, by `<world>/<production>`: two never run at once (design turn 197, rule 10). */
+  private readonly videoRenders = new Map<string, string>();
   /** Safe read projections for the target-read surface; output paths remain world-relative. */
   private readonly exportReads = new Map<string, ArkeExportReadRecord>();
   /** `worldId:productionId` whose export is being set up or is already running — one at a time. */
@@ -3622,7 +3626,7 @@ export class Coordinator {
         // The browser's download controls must survive reload and process restart.
         const worldId = this.readModel.getState().world?.meta.worldId;
         for (const record of this.exportReads.values()) {
-          if (record.worldId !== worldId || !record.id.startsWith("ms_") || record.status !== "done" ||
+          if (record.worldId !== worldId || !(record.id.startsWith("ms_") || record.id.startsWith("vb_")) || record.status !== "done" ||
             !record.productionId || !record.output) continue;
           replayed.push({ at: new Date().toISOString(), type: "export.progress", worldId: record.worldId,
             productionId: record.productionId, exportId: record.id, status: "done", percent: 100,
@@ -3634,6 +3638,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || this.stopping) return;
         await this.durableExportReads(store.worldId);
+        this.resumeAudiobookVideos(store);
         await this.conversationActions(store).recover();
         if (!this.stillOpen(store)) return;
         // Recovery may find nothing to append while the durable card log is still newer than the
@@ -4147,6 +4152,93 @@ export class Coordinator {
     } catch {
       /* host observers cannot interrupt domain event delivery */
     }
+  }
+
+  /**
+   * The audiobook as a video (design turn 197): one render a book at a time, registered with the
+   * other exports so Cancel and shutdown reach it, followed in Activity through `export.progress`
+   * with a percent of the chapters' length, and answered as `audiobook.video-exported`.
+   *
+   * A Cancel keeps the chapters finished and forgets the render; the app closing under it keeps
+   * its note, so the next start resumes it from the chapter not yet made (rule 10).
+   */
+  private async runAudiobookVideo(store: WorldStore, productionId: string, exportId: string, options: AudiobookVideoOptions, requestId?: string): Promise<void> {
+    const key = `${store.worldId}/${productionId}`;
+    if (this.videoRenders.has(key) || this.exports.has(exportId)) return;
+    this.videoRenders.set(key, exportId);
+    const control = new AbortController();
+    let cancelledByHand = false;
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    let sourceFingerprint: string | undefined;
+    let last: AudiobookVideoProgress | undefined;
+    const progress = (status: "running" | "done" | "cancelled" | "failed", percent: number, output: string | null, error: string | null) =>
+      this.publishExportProgress(store, {
+        at: this.nowIso(), type: "export.progress", worldId: store.worldId, productionId, exportId,
+        ...(sourceFingerprint !== undefined ? { sourceFingerprint } : {}),
+        deliveryKind: "audiobook-video", status, percent, output: safeExportOutput(output),
+        ...(last !== undefined ? { video: last } : {}),
+        error: error === null ? null : scrubAbsolutePaths(this.secrets.scrub(error)),
+      });
+    // Progress is said at most every half second: an encode reports several times a second.
+    let said = 0;
+    const done = (async () => {
+      try {
+        await progress("running", 0, null, null);
+        const result = await exportAudiobookVideo(store, productionId, options, {
+          ffmpeg: this.opts.ffmpeg,
+          clock: () => this.nowIso(),
+          exportId,
+          signal: control.signal,
+          ...(this.opts.appRoot !== undefined ? { appRoot: this.opts.appRoot } : {}),
+          onProgress: ({ percent, ...place }) => {
+            last = place;
+            const now = Date.now();
+            if (now - said < 500) return;
+            said = now;
+            void progress("running", percent, null, null);
+          },
+        }).catch((err: unknown): { ok: false; blockers: string[] } => {
+          void this.appLog?.append({ kind: "audiobook.video-failed", production: productionId, message: err instanceof Error ? err.message : String(err) });
+          return { ok: false, blockers: [control.signal.aborted ? "the render was cancelled" : describeCoordinatorError(err)] };
+        });
+        if (result.ok) {
+          sourceFingerprint = `video:${exportId}:${result.made}:${result.files.length}`;
+          if (last !== undefined) last = { ...last, doneSec: last.totalSec, leftSec: 0 };
+          await progress("done", 100, `${result.dir}/${result.files[0]!.name}`, null);
+        } else if (control.signal.aborted) await progress("cancelled", 0, null, null);
+        else await progress("failed", 0, null, result.blockers.join("; "));
+        if (cancelledByHand) await forgetVideoJob(store, productionId);
+        this.emit({ at: this.nowIso(), type: "audiobook.video-exported", ...(requestId !== undefined ? { requestId } : {}), worldId: store.worldId, productionId, exportId, result });
+        return result.ok ? { status: "done" as const, output: result.dir } : control.signal.aborted ? { status: "cancelled" as const } : { status: "failed" as const, error: result.blockers.join("; ") };
+      } finally {
+        this.exports.delete(exportId);
+        this.videoRenders.delete(key);
+        store.closingSignal.removeEventListener("abort", onClose);
+      }
+    })();
+    this.exports.set(exportId, {
+      id: exportId,
+      cancel: () => {
+        // Shutdown and a closing world cancel too; only a person's Cancel forgets the render.
+        if (!this.stopping && !store.closingSignal.aborted) cancelledByHand = true;
+        control.abort();
+      },
+      done,
+    });
+    await done;
+  }
+
+  /** Renders the app closed under, started again from the next chapter not yet made (rule 10). */
+  private resumeAudiobookVideos(store: WorldStore): void {
+    if (this.opts.ffmpeg === undefined) return;
+    void pendingVideoJobs(store).then((jobs) => {
+      for (const job of jobs) {
+        if (this.stopping || !this.stillOpen(store) || this.videoRenders.has(`${store.worldId}/${job.productionId}`)) continue;
+        void this.appLog?.append({ kind: "audiobook.video-resumed", production: job.productionId, exportId: job.exportId });
+        void this.runAudiobookVideo(store, job.productionId, job.exportId, job.options);
+      }
+    }, () => {});
   }
 
   private async publishExportProgress(store: WorldStore, event: ExportProgressEvent): Promise<void> {
@@ -13981,7 +14073,64 @@ export class Coordinator {
       case "open-exports-folder": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        this.opts.openPath?.(msg.dir === undefined || msg.dir === "." || msg.dir === ".." ? join(store.dir, "exports") : join(store.dir, "exports", msg.dir));
+        const folder = msg.dir === undefined || msg.dir === "." || msg.dir === ".." ? join(store.dir, "exports") : join(store.dir, "exports", msg.dir);
+        // A video in its folder opens in the system's own player (design turn 197e); only a file
+        // that is there, named as one, never a path.
+        if (msg.file !== undefined) {
+          const file = join(folder, msg.file);
+          if (await stat(toExtendedLength(file)).then((info) => info.isFile(), () => false)) this.opts.openPath?.(file);
+          return;
+        }
+        this.opts.openPath?.(folder);
+        return;
+      }
+      case "export-audiobook-video": {
+        // The audiobook as a video (design turn 197): rendered on this machine, one chapter at a
+        // time, through the ffmpeg the Cut's exports use. Answered when it ends; a second render
+        // of a book already rendering is the same render, so the press only follows it.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        const running = this.videoRenders.get(`${store.worldId}/${msg.productionId}`);
+        if (running !== undefined) {
+          this.emit({ at: this.nowIso(), type: "audiobook.video-exported", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, exportId: msg.exportId, result: { ok: false, blockers: ["this book is already rendering"] } });
+          return;
+        }
+        await this.runAudiobookVideo(store, msg.productionId, msg.exportId, msg.options, msg.requestId);
+        return;
+      }
+      case "read-audiobook-video": {
+        // What a render would make (design turn 197a): the chapters read whole, which are in the
+        // cache already, and this machine's measured rates, for the size and time before Render.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId };
+        try {
+          const state = await audiobookVideoState(store, msg.productionId, msg.options, {
+            ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}),
+            ...(this.opts.appRoot !== undefined ? { appRoot: this.opts.appRoot } : {}),
+            running: this.videoRenders.get(`${store.worldId}/${msg.productionId}`) ?? null,
+          });
+          this.emit({ at: this.nowIso(), type: "audiobook.video-state", ...ids, state });
+        } catch (err) {
+          this.emit({ at: this.nowIso(), type: "audiobook.video-state", ...ids, state: null, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "set-audiobook-picture-focus": {
+        // Where a picture's subject stands (design turn 197b): kept on the picture, answered as the record.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
+        try {
+          const record = await setAudiobookPictureFocus(store, msg.productionId, chapter.file, msg.block, msg.focus);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: this.nowIso(), type: "audiobook.record", ...ids, record });
+        } catch (err) {
+          this.emit({ at: this.nowIso(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
+        }
         return;
       }
       case "export-audiobook-player": {
@@ -14018,7 +14167,7 @@ export class Coordinator {
       case "list-web-packages": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        const packages = await listWebPackages(store).catch(() => []);
+        const packages = [...(await listWebPackages(store).catch(() => [])), ...(await listVideoExports(store).catch(() => []))].sort((a, b) => (a.exportedAt < b.exportedAt ? 1 : -1));
         this.emit({ at: new Date().toISOString(), type: "web-packages.listed", requestId: msg.requestId, worldId: msg.worldId, packages });
         return;
       }

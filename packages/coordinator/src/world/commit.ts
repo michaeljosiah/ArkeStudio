@@ -402,6 +402,13 @@ export const SHEET_SHORT_NAME_SCHEMA_VERSION = 59;
  * Sixty is production readiness's (SPEC-051 T-9), so this is 61.
  */
 export const AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION = 61;
+/**
+ * Where a picture's subject stands (design turn 197b): `focus` on a picture in the chapter's
+ * strict audiobook record, which the video's vertical crop and Slow push follow. A build before
+ * it reads such a record as unreadable, so the world is raised before the first. Sixty-two and
+ * sixty-three are the production cards' (SPEC-051), so this is 64.
+ */
+export const AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION = 64;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

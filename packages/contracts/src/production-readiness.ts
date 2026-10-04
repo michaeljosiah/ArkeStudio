@@ -27,7 +27,7 @@ export const ReadinessExportSchema = z.object({
   id: z.string(), worldId: z.string(), productionId: z.string().optional(), episodeId: z.string().optional(),
   status: z.enum(["running", "done", "cancelled", "failed"]), createdAt: z.string().optional(), output: z.string().nullable().optional(),
   sourceFingerprint: z.string().max(200).optional(),
-  deliveryKind: z.enum(["video", "manuscript", "interactive"]).optional(),
+  deliveryKind: z.enum(["video", "manuscript", "interactive", "audiobook-video"]).optional(),
 }).strict();
 export type ReadinessExport = z.infer<typeof ReadinessExportSchema>;
 export const ProductionReadinessSchema = z.object({

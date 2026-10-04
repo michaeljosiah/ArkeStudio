@@ -55,6 +55,27 @@ describe("the desktop export ffmpeg runner", () => {
     assert.deepEqual(progress, [12]);
   });
 
+  it("gives the clock uncapped beside the capped progress, and proves the font before a graph read from a file", async () => {
+    const { children, calls, spawn } = fakeSpawn();
+    const progress: number[] = [];
+    const seconds: number[] = [];
+    const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true, validHash).run(
+      ["-/filter_complex", "graph.txt", "-progress", "pipe:2", "out.mp4"],
+      (value) => progress.push(value),
+      new AbortController().signal,
+      (value) => seconds.push(value),
+    );
+    await waitForImmediate();
+    assert.ok(calls[0]!.args.join(" ").includes("text=probe"), "a graph in a file may draw: the font is proved first");
+    children[0]!.emit("exit", 0);
+    await waitForImmediate();
+    children[1]!.stderr.emit("data", Buffer.from("out_time=00:02:05.500000\n"));
+    children[1]!.emit("exit", 0);
+    await pending;
+    assert.deepEqual(progress, [99]);
+    assert.deepEqual(seconds, [125.5]);
+  });
+
   it("caches only a successful drawtext probe", async () => {
     const { children, calls, spawn } = fakeSpawn();
     const runner = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true, validHash);

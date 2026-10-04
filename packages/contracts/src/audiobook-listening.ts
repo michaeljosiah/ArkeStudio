@@ -53,6 +53,8 @@ export const ListeningPictureSchema = z
     seconds: z.number().min(0),
     /** Held for less than twenty seconds (R-69): flagged in the chapter's view, never dropped. */
     short: z.boolean(),
+    /** Where its subject stands (design turn 197): the video's vertical crop and Slow push follow it. */
+    focus: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).strict().optional(),
   })
   .strict();
 export type ListeningPicture = z.infer<typeof ListeningPictureSchema>;
@@ -242,6 +244,7 @@ export function listeningChapter(input: {
     at: entry.at,
     seconds: entry.seconds,
     short: entry.short,
+    ...(entry.picture.focus !== undefined ? { focus: entry.picture.focus } : {}),
   }));
   const first = pictures[0];
   const opening = first !== undefined && first.at === 0 ? first.file : (input.cover ?? first?.file ?? null);
