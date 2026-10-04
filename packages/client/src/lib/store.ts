@@ -4168,8 +4168,8 @@ export function chooseAudiobookLook(worldId: string, productionId: string, chapt
   return send({ kind: "choose-audiobook-look", worldId, productionId, chapterFile, ...who, lookId, requestId }) ? requestId : null;
 }
 
-export function rejectReferenceTake(worldId: string, takeId: string, field: string, note?: string): void {
-  send({
+export function rejectReferenceTake(worldId: string, takeId: string, field: string, note?: string): boolean {
+  return send({
     kind: "reject-reference-take",
     worldId,
     takeId,

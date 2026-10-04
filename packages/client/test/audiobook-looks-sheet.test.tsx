@@ -265,6 +265,12 @@ describe("the close view, once asked for (2026-10-04)", () => {
     assert.equal(text(bodyAll('[data-testid="look-make-close"]')[0]), "Making close view…", "the new request is being made");
   });
 
+  it("offers no paid Try again for a close view made and paid for whose filing failed", async () => {
+    await mount(chosenHarbour(), withJobs(state(), [{ ...(job("01J8Z3X4Y5Z6A7B8C9D0E1F2J1", { lookFraming: "close", lookOfLook: HARBOUR.id }, "succeeded") as object), finalization: { status: "failed", error: "disk full", updatedAt: AT } }]));
+    assert.equal(text(bodyAll('[data-testid="look-close-reason"]')[0]), "Close view made, not filed · see Activity");
+    assert.equal(bodyAll('[data-testid="look-close-retry"]').length, 0, "Activity retries it at no charge");
+  });
+
   it("shows a refusal from an earlier opening of the sheet too", async () => {
     await mount(chosenHarbour(), withJobs(state(), [job("01J8Z3X4Y5Z6A7B8C9D0E1F2J1", { lookFraming: "close", lookOfLook: HARBOUR.id, lookBatch: "an-earlier-request" }, "failed", SAFETY)]));
     assert.equal(text(bodyAll('[data-testid="look-close-reason"]')[0]), "Close view refused by the image safety check");

@@ -4,7 +4,7 @@ import { resolveModel, worldModel } from "./dispatch-bar.js";
 import { EditorDialog } from "./editor-dialog.js";
 import { mediaUrl } from "../lib/media.js";
 import { acceptChapterLook, makeChapterLook, useStore } from "../lib/store.js";
-import { lookJobState, lookJobs, useQueueRefusals } from "./look-jobs.js";
+import { lookJobState, lookJobs, useQueueRefusals, type LookJobState } from "./look-jobs.js";
 import { Button, Checkbox, Textarea, cx } from "./ui.js";
 
 /**
@@ -73,12 +73,14 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
   // The batch's jobs and the close view's: a job that ended without a picture is a slot that says
   // why, never one left making (2026-10-04, a close view the safety system refused).
   const batchJobs = batch === null ? [] : lookJobs(jobs, (params) => params["lookBatch"] === batch && params["lookFraming"] === "full-body");
-  const batchFailures = batchJobs.map(lookJobState).filter((state): state is { state: "failed"; reason: string } => state?.state === "failed");
+  const batchFailures = batchJobs.map(lookJobState).filter((state): state is Extract<LookJobState, { state: "failed" }> => state?.state === "failed");
   const batchRefused = batch === null ? undefined : queueRefused[batch];
   const closeRequest = chosenTake === null ? undefined : asked[chosenTake.id];
   const closeJob = closeRequest === undefined ? undefined : lookJobs(jobs, (params) => params["lookBatch"] === closeRequest)[0];
   const closeEnded = lookJobState(closeJob);
   const closeFailed = closeTake !== null || closeRequest === undefined ? null : (queueRefused[closeRequest]?.reason ?? (closeEnded?.state === "failed" ? closeEnded.reason : null));
+  // A picture made and paid for whose filing failed is Activity's to retry, at no charge: no paid Try again.
+  const closeRetry = closeFailed !== null && !(closeEnded?.state === "failed" && !closeEnded.retry && queueRefused[closeRequest ?? ""] === undefined);
   const closeWaiting = closeOn && chosenTake !== null && closeTake === null && closeRequest !== undefined && closeFailed === null;
   const looks = chapterLooksOf(kit);
 
@@ -183,9 +185,11 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
               {closeFailed !== null && (
                 <>
                   <span className="fy-mono fy-ch__who-where--warn" data-testid="new-look-close-reason">{closeFailed}</span>
-                  <button type="button" className="fy-sugg__make" disabled={off} onClick={() => askClose(chosenTake.id, true)} data-testid="new-look-close-retry">
-                    Try again · {closeCost}
-                  </button>
+                  {closeRetry && (
+                    <button type="button" className="fy-sugg__make" disabled={off} onClick={() => askClose(chosenTake.id, true)} data-testid="new-look-close-retry">
+                      Try again · {closeCost}
+                    </button>
+                  )}
                 </>
               )}
             </div>

@@ -1720,9 +1720,17 @@ export class Coordinator {
     // with its reason instead of offering it as an ordinary picture (2026-10-04); a row the run did
     // not reach keeps whatever it held before.
     const reasons = new Map(progress.failed.filter((entry) => refusedHere.has(entry.block)).map((entry) => [entry.block, entry.reason]));
+    // A row that failed this run for any other reason loses an older refusal: that is not why it was
+    // not made now, and Try again is not what it needs (codex on PR 1559).
+    const otherwise = new Set(progress.failed.filter((entry) => !refusedHere.has(entry.block)).map((entry) => entry.block));
     const remaining = proposal.rows
       .filter((row) => !progress.made.includes(row.block))
-      .map((row) => (reasons.has(row.block) ? { ...row, refused: (reasons.get(row.block) || "not made").slice(0, 200) } : row));
+      .map((row) => {
+        if (reasons.has(row.block)) return { ...row, refused: (reasons.get(row.block) || "not made").slice(0, 200) };
+        if (!otherwise.has(row.block) || row.refused === undefined) return row;
+        const { refused: _old, ...rest } = row;
+        return rest;
+      });
     this.makingIllustrations.delete(key);
     if (remaining.length > 0 && !store.closingSignal.aborted) {
       const event: Extract<DomainEvent, { type: "illustration.finished" }> = { at: new Date().toISOString(), type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...proposal, rows: remaining } };

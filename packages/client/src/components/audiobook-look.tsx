@@ -121,7 +121,7 @@ const kitOf = (world: { referenceKits: readonly ReferenceKit[] } | null, sheet: 
 export type CloseViewState =
   | { kind: "none" }
   | { kind: "making" }
-  | { kind: "failed"; reason: string }
+  | { kind: "failed"; reason: string; retry: boolean }
   | { kind: "made"; take: { id: string; path: string } }
   | { kind: "accepted"; path: string };
 
@@ -203,9 +203,11 @@ function CharacterRow({ row, kit, slug, orderOf, usage, off, onWrite, onNewLook,
           {chosen !== null && close.kind === "failed" && (
             <div className="fy-look__facts fy-mono" data-testid="look-close-failed">
               <span className="fy-ch__who-where--warn" data-testid="look-close-reason">Close view {close.reason}</span>
-              <button type="button" className="fy-sugg__make" disabled={off} onClick={() => onMakeClose(row, chosen)} data-testid="look-close-retry">
-                {priced("Try again")}
-              </button>
+              {close.retry && (
+                <button type="button" className="fy-sugg__make" disabled={off} onClick={() => onMakeClose(row, chosen)} data-testid="look-close-retry">
+                  {priced("Try again")}
+                </button>
+              )}
             </div>
           )}
           {chosen !== null && close.kind === "made" && (
@@ -284,6 +286,19 @@ export function withChoices(look: AudiobookLook | null, choosing: Record<string,
     characters[key] = { ...rest, text: lookClothing(chosen), lookId: press.lookId, ...(line.lookId === undefined ? { reading: line.text } : {}) };
   }
   return { ...look, characters };
+}
+
+/** The look with line writes not yet answered laid over it: a sheet closed and opened again still shows the words written (codex on PR 1559). */
+export function withWrites(look: AudiobookLook | null, writing: ReadonlyArray<{ target: LookTarget; text: string | null }>): AudiobookLook | null {
+  if (look === null || writing.length === 0) return look;
+  let next = look;
+  for (const { target, text } of writing) {
+    if (text === null) continue;
+    if (target.kind === "place" && next.place !== undefined) next = { ...next, place: { ...next.place, text } };
+    else if (target.kind === "mood" && next.mood !== undefined) next = { ...next, mood: { ...next.mood, text } };
+    else if (target.kind === "character" && next.characters[target.key] !== undefined) next = { ...next, characters: { ...next.characters, [target.key]: { ...next.characters[target.key]!, text } } };
+  }
+  return next;
 }
 
 export function LookSheet({ open, onClose, worldId, productionId, chapterFile, chapterOrder, record, blockKeys }: {
@@ -394,7 +409,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
     setWriting((held) => [...held, { requestId, target, text }]);
   };
   // What the sheet draws: the record, with the choices pressed and not yet answered laid over it.
-  const shownLook = withChoices(look, choosing, (sheet, lookId) => chapterLooksOf(kitOf(world, sheet)).find((candidate) => candidate.id === lookId) ?? null);
+  const shownLook = withWrites(withChoices(look, choosing, (sheet, lookId) => chapterLooksOf(kitOf(world, sheet)).find((candidate) => candidate.id === lookId) ?? null), writing);
   const rows = lookRows(shownLook, numberOf);
   // A character the look holds no line for, offered to add: a sheet of the world's, by name.
   const held = new Set(Object.keys(look?.characters ?? {}));
@@ -430,11 +445,11 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
     const take = pendingClose(sheet, chosen.id);
     if (take !== null) return { kind: "made", take };
     const request = closeAsked[chosen.id];
-    if (request !== undefined && queueRefused[request] !== undefined) return { kind: "failed", reason: queueRefused[request]!.reason };
+    if (request !== undefined && queueRefused[request] !== undefined) return { kind: "failed", reason: queueRefused[request]!.reason, retry: true };
     // A request asked here is followed by its own job; otherwise the newest close job of this look.
     const job = request !== undefined ? lookJobs(jobs, (params) => params["lookBatch"] === request)[0] : lookJobs(jobs, (params) => params["lookFraming"] === "close" && params["lookOfLook"] === chosen.id)[0];
     const ended = lookJobState(job);
-    if (ended?.state === "failed") return { kind: "failed", reason: ended.reason };
+    if (ended?.state === "failed") return { kind: "failed", reason: ended.reason, retry: ended.retry };
     return ended?.state === "making" || request !== undefined ? { kind: "making" } : { kind: "none" };
   };
   const makeClose = (row: Row, chosen: CharacterLook) => {
@@ -472,7 +487,9 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
                   setCloseAccepted((heldViews) => ({ ...heldViews, [chosen.id]: { path: take.path, under: world } }));
                 }}
                 onDiscardClose={(chosen, takeId, again) => {
-                  rejectReferenceTake(worldId, takeId, "close view", again ? "made again" : "discarded");
+                  // Hidden at once only when the command went (codex on PR 1559); a take another window
+                  // decided is gone from the snapshot anyway.
+                  if (!rejectReferenceTake(worldId, takeId, "close view", again ? "made again" : "discarded")) return;
                   setDiscarded((heldTakes) => [...heldTakes, takeId]);
                   setCloseAsked(({ [chosen.id]: _gone, ...rest }) => rest);
                   if (again) makeClose(row, chosen);
