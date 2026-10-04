@@ -165,6 +165,17 @@ const text = (m: Mounted): string => m.container.textContent ?? "";
 const q = (m: Mounted, selector: string): HTMLElement | null => m.container.querySelector(selector) as HTMLElement | null;
 const all = (m: Mounted, selector: string): HTMLElement[] => [...m.container.querySelectorAll(selector)] as HTMLElement[];
 
+/** Arke's dock, put away in the Audiobook view until the toolbar's press opens it (design turn 194, rule 13). */
+async function openArke(m: Mounted): Promise<void> {
+  if (q(m, '[data-testid="chapter-workspace"]')?.getAttribute("data-dock") === "true") return;
+  await act(async () => q(m, '[data-testid="audiobook-arke"]')!.click());
+}
+/** An item of the toolbar's Direct and illustrate menu (design turn 194, rule 3), the menu opened to reach it. */
+async function menuItem(m: Mounted, testId: string): Promise<HTMLElement | null> {
+  if (q(m, ".fy-ab__toolmenu") === null && q(m, '[data-testid="direct-illustrate"]') !== null) await act(async () => q(m, '[data-testid="direct-illustrate"]')!.click());
+  return q(m, `[data-testid="${testId}"]`);
+}
+
 async function answerOpen(m: Mounted, extra: { audiobook?: ChapterAudiobook; audiobookMissing?: string[]; voices?: ChapterVoices } = {}): Promise<void> {
   const ask = m.sent.findLast((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
   assert.ok(ask, "opening asks for the body");
@@ -550,17 +561,25 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(rows[2]!.className.includes("fy-voice--1") && rows[2]!.className.includes("fy-ab__block--line"), "Maren's line takes the first colour and the line's tint");
     assert.ok(rows[1]!.className.includes("fy-voice--narrator") && !rows[1]!.className.includes("fy-ab__block--line"), "narration is grey and untinted");
     assert.ok(rows[2]!.querySelector(".fy-ab__source"), "a made take shows how it was made");
-    const chips = all(m, ".fy-ab__fchip");
-    assert.deepEqual(chips.map((chip) => chip.textContent), ["Everyone5", "Narrator4", `${rows[2]!.querySelector(".fy-ab__mark")!.textContent}1`]);
-    await act(async () => chips[2]!.click());
+    // One filter press, its menu the speakers with their counts (design turn 194, rule 6).
+    const mark = rows[2]!.querySelector(".fy-ab__mark")!.textContent;
+    const press = () => q(m, '[data-testid="audiobook-filter"]')!;
+    assert.equal(press().textContent, "Everyone 5", "everyone, counted, on the press");
+    await act(async () => press().click());
+    const options = all(m, '.fy-ab__filtermenu [role="menuitemradio"]');
+    assert.deepEqual(options.map((option) => option.textContent), ["Everyone5", "Narrator4", `${mark}1`]);
+    assert.equal(options[0]!.getAttribute("aria-checked"), "true");
+    await act(async () => options[2]!.click());
     assert.deepEqual(
       all(m, ".fy-ab__block").map((row) => row.className.includes("fy-ab__block--dim")),
       [true, true, false, true, true],
       "one speaker chosen, everyone else is dimmed",
     );
-    assert.equal(all(m, ".fy-ab__fchip")[2]!.getAttribute("aria-pressed"), "true");
-    await act(async () => all(m, ".fy-ab__fchip")[2]!.click());
-    assert.ok(all(m, ".fy-ab__block").every((row) => !row.className.includes("fy-ab__block--dim")), "a second press clears it");
+    assert.equal(q(m, ".fy-ab__filtermenu"), null, "a choice closes the menu");
+    assert.equal(press().textContent, `${mark} 1`, "and names the speaker on the press");
+    await act(async () => press().click());
+    await act(async () => all(m, '.fy-ab__filtermenu [role="menuitemradio"]')[0]!.click());
+    assert.ok(all(m, ".fy-ab__block").every((row) => !row.className.includes("fy-ab__block--dim")), "Everyone clears it");
   });
 
   it("the speaker's chip opens a menu; a choice writes a pin, and the answer marks the block as set by hand (SPEC-012 R-62, R-63)", async () => {
@@ -957,6 +976,9 @@ describe("the Audiobook view (turn 146)", () => {
   it("Direct this chapter is the dock's prompt, its card is accepted whole, and the prompt becomes Direct again (SPEC-047 R-10, R-31)", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m);
+    // Arke is put away in this view until its toolbar press opens it (design turn 194, rule 13).
+    assert.equal(q(m, '[data-testid="chapter-workspace"]')!.getAttribute("data-dock"), "false");
+    await act(async () => q(m, '[data-testid="audiobook-arke"]')!.click());
     const prompt = all(m, ".fy-arke__prompt").find((b) => b.textContent === "Direct this chapter");
     assert.ok(prompt, `the dock offers the direction: ${all(m, ".fy-arke__prompt").map((b) => b.textContent).join(" | ")}`);
     assert.ok(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Which blocks are stale?"));
@@ -1063,6 +1085,7 @@ describe("the Audiobook view (turn 146)", () => {
     const held = record(NARRATION_KEYS, texts);
     held.direction["p0.0"] = directed("Maren counted the bells, twice.", "urgent");
     await answerOpen(m, { audiobook: held });
+    await act(async () => q(m, '[data-testid="audiobook-arke"]')!.click());
     assert.ok(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct this chapter"), "a direction authored for other words is none to the prompt");
     const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
     const proposed = { title: { delivery: "measured" as const, speed: 1, cues: [] } };
@@ -1119,9 +1142,12 @@ describe("the Audiobook view (turn 146)", () => {
     assert.match(press.textContent ?? "", /^Performed · George/);
     assert.equal(press.getAttribute("aria-haspopup"), "menu");
     assert.equal(press.getAttribute("aria-expanded"), "false");
-    const control = press.closest(".fy-ch__viewline")?.querySelector(".fy-ab__control");
-    assert.ok(control, "Play and the priced read sit on the same row");
-    assert.ok([...control.querySelectorAll("button")].some((b) => b.textContent === "Play"), "Play while a block has a made take");
+    assert.ok(press.closest(".fy-ch__viewline")?.querySelector('[data-testid="direct-illustrate"]'), "Direct and illustrate sits on the same row");
+    // The chapter's Play is the foot line's round press (design turn 194, rule 4).
+    const play = q(m, '[data-testid="audiobook-play"]') as HTMLButtonElement | null;
+    assert.ok(play?.closest('[data-testid="audiobook-foot"]'), "Play is in the foot line");
+    assert.equal(play!.textContent, "Play");
+    assert.equal(play!.disabled, false, "Play while a block has a made take");
     await act(async () => press.click());
     assert.equal(press.getAttribute("aria-expanded"), "true");
     const items = all(m, '[role="menu"][aria-label="Reading"] [role="menuitemradio"]');
@@ -1203,7 +1229,8 @@ describe("the director reads the book (design turn 184)", () => {
   it("the Direct sheet lists what the director reads, offers casting first under Performed, and Direct asks for what is ticked (184a)", async () => {
     const m = await mount(voiced(inkbound("performed")));
     await answerOpen(m);
-    await act(async () => all(m, ".fy-arke__prompt").find((b) => b.textContent === "Direct this chapter")!.click());
+    const item = (await menuItem(m, "direct-audiobook"))!;
+    await act(async () => item.click());
     const preview = m.sent.findLast((message) => message.kind === "preview-direction") as Extract<ClientMessage, { kind: "preview-direction" }>;
     assert.match(text(m), /reading…/, "the rows wait for the coordinator's answer");
     await act(async () =>
@@ -1229,20 +1256,34 @@ describe("the director reads the book (design turn 184)", () => {
     assert.equal(direct.cast, true, "the lines are cast in the same proposal");
     assert.equal(direct.chapterNote, true, "no chapter note stands, so drafting one is ticked");
     assert.equal(q(m, '[data-testid="direct-sheet"]'), null, "the sheet closes once it is sent");
+    assert.equal(q(m, '[data-testid="chapter-workspace"]')!.getAttribute("data-dock"), "true", "Direct opens the dock, where its card comes back");
   });
 
-  it("the book note and the chapter note are rows under the narrator line, with counts, written when left (R-53)", async () => {
+  it("the book note and the chapter note are behind the toolbar's Notes press, with counts, written when left (R-53, design turn 194)", async () => {
     const m = await mount(voiced(withBook(inkbound(), { note: BOOK_NOTE, chapterNotes: { neap: "Night at the rail desk." } })));
     await answerOpen(m);
+    assert.equal(q(m, '[data-testid="reading-notes"]'), null, "the notes are behind their press");
+    const press = q(m, '[data-testid="reading-notes-press"]')!;
+    assert.equal(press.textContent, "Notes 2", "the press counts the notes set");
+    await act(async () => press.click());
+    assert.equal(press.getAttribute("aria-expanded"), "true");
     const notes = q(m, '[data-testid="reading-notes"]')!;
     const inputs = [...notes.querySelectorAll("input, textarea")] as HTMLInputElement[];
     assert.deepEqual(inputs.map((input) => input.getAttribute("aria-label")), ["Book note", "Chapter note"]);
-    assert.equal(inputs[0]!.value, BOOK_NOTE);
+    // Both wrap now (194e): a textarea, whose value linkedom does not keep, so the count says it.
     assert.deepEqual([...notes.querySelectorAll(".fy-vd__note-count")].map((count) => count.textContent), [`${BOOK_NOTE.length} / 300`, "23 / 300"]);
     await act(async () => props(inputs[1]!).onChange({ target: { value: "Dawn, the empty quay." } }));
     await act(async () => props(inputs[1]!).onBlur());
     const set = m.sent.findLast((message) => message.kind === "set-audiobook-reading-note") as Extract<ClientMessage, { kind: "set-audiobook-reading-note" }>;
     assert.deepEqual({ note: set.note, chapterFile: set.chapterFile }, { note: "Dawn, the empty quay.", chapterFile: "01-neap" });
+    await act(async () => void notes.dispatchEvent(Object.assign(new Event("keydown", { bubbles: true }), { key: "Escape" })));
+    assert.equal(q(m, '[data-testid="reading-notes"]'), null, "Escape puts the notes away");
+  });
+
+  it("the Notes press says Notes alone when no note is set (design turn 194, rule 5)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    assert.equal(q(m, '[data-testid="reading-notes-press"]')!.textContent, "Notes");
   });
 
   it("a proposal draws dashed on the blocks; its block shows the proposed direction, Sent as with the notes held, and Hear block asks for the proposal's read (184b, 184d)", async () => {
@@ -1255,6 +1296,7 @@ describe("the director reads the book (design turn 184)", () => {
     assert.equal(block.getAttribute("data-proposed"), "true");
     assert.ok(block.querySelector(".fy-ab__text--proposed .fy-ab__mk--sound"), "the proposed sound is drawn, dashed");
     assert.equal(all(m, ".fy-ab__block")[0]!.getAttribute("data-proposed"), null, "a block the proposal leaves undirected is drawn as it is");
+    await openArke(m);
     assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /chapter note/);
     await act(async () => block.click());
     const panel = q(m, '[data-testid="audiobook-proposed"]')!;
@@ -1294,6 +1336,7 @@ describe("the director reads the book (design turn 184)", () => {
     // which names its speaker, and the proposal lands on that block.
     assert.match(q(m, '[data-block="p1.0"]')?.textContent ?? "", /Maren Kest/, "the held cast's line has its speaker");
     assert.equal(q(m, '[data-block="p1.0"]')?.getAttribute("data-proposed"), "true", "the proposal lands on the block its cast made");
+    await openArke(m);
     await act(async () => all(m, '[data-testid="direction-card"] button').find((b) => b.textContent === "Discard")!.click());
     assert.doesNotMatch(q(m, '[data-block="p1.0"]')?.textContent ?? "", /Maren Kest/, "discarded, the blocks are the record's again");
   });
@@ -1303,12 +1346,15 @@ describe("the director reads the book (design turn 184)", () => {
     await answerOpen(m);
     await act(async () => all(m, ".fy-ab__block")[1]!.click());
     assert.ok(q(m, '[data-testid="audiobook-block"]'));
-    await act(async () => all(m, ".fy-arke__prompt").find((b) => b.textContent === "Direct this chapter")!.click());
+    const item = (await menuItem(m, "direct-audiobook"))!;
+    await act(async () => item.click());
     assert.ok(q(m, '[data-testid="direct-sheet"]'), "the sheet takes the panel");
     assert.equal(q(m, '[data-testid="audiobook-block"]'), null, "the block pressed before is put down");
+    await act(async () => q(m, '[data-testid="reading-notes-press"]')!.click());
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "slack-water", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H2", toMake: 3, blocks: 3 }));
     const inputs = [...q(m, '[data-testid="reading-notes"]')!.querySelectorAll("input, textarea")] as HTMLInputElement[];
     assert.deepEqual(inputs.map((input) => input.disabled), [true, true], "another chapter being read holds both notes");
+    assert.equal((q(m, '[data-testid="reading-notes-press"]') as HTMLButtonElement).disabled, true, "and their press");
   });
 
   it("Hear block says the coordinator's count of reads once it has quoted (codex on PR 1479)", async () => {
@@ -1396,7 +1442,8 @@ describe("the director reads the book (design turn 184)", () => {
   it("cast first, Draft speaker notes is offered and ticked, and Direct asks for all three (2026-10-03)", async () => {
     const m = await mount(voiced(inkbound("performed")));
     await answerOpen(m);
-    await act(async () => q(m, '[data-testid="direct-audiobook"]')!.click());
+    const item = (await menuItem(m, "direct-audiobook"))!;
+    await act(async () => item.click());
     const preview = m.sent.findLast((message) => message.kind === "preview-direction") as Extract<ClientMessage, { kind: "preview-direction" }>;
     await act(async () =>
       __applyEventForTest({
@@ -1412,19 +1459,26 @@ describe("the director reads the book (design turn 184)", () => {
     assert.deepEqual({ cast: direct.cast, chapterNote: direct.chapterNote, speakerNotes: direct.speakerNotes }, { cast: true, chapterNote: true, speakerNotes: true });
   });
 
-  it("Direct this chapter sits in the head beside the read, and gives way to a held proposal (184a, 184b)", async () => {
+  it("Direct this chapter is the Direct and illustrate menu's first item, beside the read, and gives way to a held proposal (184a, 184b, 194d)", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m);
-    const head = q(m, '[data-testid="direct-audiobook"]');
-    assert.equal(head?.textContent, "Direct this chapter");
-    assert.equal(head?.classList.contains("ui-btn--primary"), false, "never the primary press (turn 188)");
-    assert.ok(q(m, '[data-testid="read-audiobook"]')?.classList.contains("ui-btn--primary"), "the read is, until a block is made");
-    assert.equal(head?.parentElement, q(m, '[data-testid="read-audiobook"]')?.parentElement, "beside Read the chapter");
-    await act(async () => head!.click());
+    const press = q(m, '[data-testid="direct-illustrate"]')!;
+    assert.equal(press.textContent, "Direct and illustrate");
+    assert.equal(press.getAttribute("aria-haspopup"), "menu");
+    assert.equal(press.classList.contains("fy-ab__pill--pri"), false, "never the filled press (turn 188)");
+    assert.ok(q(m, '[data-testid="read-audiobook"]')?.classList.contains("fy-ab__pill--pri"), "the read is, until a block is made");
+    assert.equal(press.closest(".fy-ab__control"), q(m, '[data-testid="read-audiobook"]')?.parentElement, "beside Read the chapter");
+    const item = (await menuItem(m, "direct-audiobook"))!;
+    assert.deepEqual(all(m, '.fy-ab__toolmenu [role="menuitem"] .fy-ab__menu-label').map((label) => label.textContent), ["Direct this chapter", "Illustrate this chapter", "Looks"], "one menu, three items");
+    await act(async () => item.click());
+    assert.equal(q(m, ".fy-ab__toolmenu"), null, "a choice closes the menu");
     assert.ok(q(m, '[data-testid="direct-sheet"]'), "the dock's sheet");
+    await openArke(m);
     assert.ok(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct this chapter"), "the dock keeps its prompt");
     await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 4, dropped: 0, hash: HASH, chapterVersion: 4, proposalId: "card-5", proposed: { "p0.0": { delivery: "cold" as const, speed: 1, cues: [] } } }));
-    assert.equal(q(m, '[data-testid="direct-audiobook"]'), null, "the card answers it until it is accepted or discarded");
+    const held = (await menuItem(m, "direct-audiobook"))!;
+    assert.equal(held.getAttribute("aria-disabled"), "true", "the card answers it until it is accepted or discarded");
+    assert.equal(held.querySelector(".fy-ab__menu-meta")?.textContent, "proposed");
   });
 });
 
@@ -1463,31 +1517,34 @@ describe("Illustrate this chapter (turn 191)", () => {
   const proposedMount = async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m);
+    // The run's status lives in the dock, put away in this view until it is opened (194, rule 13).
+    await openArke(m);
     await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: PROPOSAL }));
     return m;
   };
   const sentOf = <K extends ClientMessage["kind"]>(m: Mounted, kind: K) => m.sent.filter((message): message is Extract<ClientMessage, { kind: K }> => message.kind === kind);
 
-  it("sits in the head beside Direct, asks, and says it is reading; Illustrate again while a proposal is held", async () => {
+  it("is the Direct and illustrate menu's second item, asks, and the toolbar says it is reading; Illustrate again while a proposal is held (194d)", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m);
-    const head = q(m, '[data-testid="illustrate-chapter"]');
-    assert.equal(head?.textContent, "Illustrate this chapter");
-    assert.equal(head?.parentElement, q(m, '[data-testid="direct-audiobook"]')?.parentElement, "beside Direct this chapter");
-    assert.equal(head?.classList.contains("ui-btn--primary"), false);
-    await act(async () => head!.click());
+    const item = await menuItem(m, "illustrate-chapter");
+    assert.equal(item?.querySelector(".fy-ab__menu-label")?.textContent, "Illustrate this chapter");
+    assert.equal(item?.parentElement, q(m, '[data-testid="direct-audiobook"]')?.parentElement, "beside Direct this chapter, in one menu");
+    await act(async () => item!.click());
     assert.deepEqual(sentOf(m, "illustrate-chapter").map((message) => [message.productionId, message.chapterFile]), [["inkbound", "01-neap"]]);
     await act(async () => __applyEventForTest({ at: AT, type: "illustration.started", ...ids }));
-    assert.equal(text(m).includes("reading…"), true);
-    assert.equal((q(m, '[data-testid="illustrate-chapter"]') as HTMLButtonElement).disabled, true, "one reading at a time");
+    assert.equal(q(m, '[data-testid="audiobook-run-line"]')?.textContent, "illustrating…Stop", "the run's line and Stop stand in the menu's place");
+    assert.equal(q(m, '[data-testid="direct-illustrate"]'), null, "one reading at a time");
     await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: PROPOSAL }));
-    assert.equal(q(m, '[data-testid="illustrate-chapter"]')?.textContent, "Illustrate again");
+    const again = await menuItem(m, "illustrate-chapter");
+    assert.equal(again?.querySelector(".fy-ab__menu-label")?.textContent, "Illustrate again");
+    assert.equal(again?.querySelector(".fy-ab__menu-meta")?.textContent, "3 to make", "with what the proposal would make");
   });
 
-  it("has Looks in the head beside Illustrate, opening the chapter's Looks sheet (design turn 193a)", async () => {
+  it("has Looks in the Direct and illustrate menu, opening the chapter's Looks sheet (design turn 193a, 194d)", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m, { voices: CAST });
-    const looks = q(m, '[data-testid="audiobook-looks-open"]');
+    const looks = await menuItem(m, "audiobook-looks-open");
     assert.equal(looks?.textContent, "Looks");
     assert.equal(looks?.parentElement, q(m, '[data-testid="illustrate-chapter"]')?.parentElement, "beside Illustrate this chapter");
     assert.equal(document.body.querySelector('[data-testid="look-sheet"]'), null, "closed until pressed");
@@ -1546,6 +1603,7 @@ describe("Illustrate this chapter (turn 191)", () => {
     await act(async () => q(m, '[data-testid="illustration-close"]')!.click());
     const again = await mount(voiced(inkbound()), ROUTE, true);
     assert.equal(q(again, '[data-testid="illustration-sheet"]'), null, "a held proposal is not thrown over a window that has just opened");
+    await openArke(again);
     assert.equal(q(again, '[data-testid="illustration-status"]')?.dataset.state, "proposed");
   });
 
@@ -1616,9 +1674,11 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(q(m, '[data-testid="illustration-next"]'), null);
     assert.equal(q(m, '[data-testid="illustration-sheet"]'), null);
     assert.deepEqual(all(m, '[data-testid="illustration-chip"]').map((chip) => chip.textContent), ["The tide"], "a made picture is no longer dashed");
-    assert.equal((q(m, '[data-testid="illustrate-chapter"]') as HTMLButtonElement).disabled, true);
+    assert.equal(q(m, '[data-testid="audiobook-run-line"]')?.textContent, "making pictures · 1 of 2Stop", "the toolbar counts them in the menu's place (194, rule 3)");
     await act(async () => q(m, '[data-testid="illustration-stop"]')!.click());
     assert.deepEqual(sentOf(m, "stop-illustration").map((message) => message.chapterFile), ["01-neap"]);
+    await act(async () => q(m, '[data-testid="audiobook-run-stop"]')!.click());
+    assert.equal(sentOf(m, "stop-illustration").length, 2, "and the toolbar's Stop is the same stop");
   });
 
   it("keeps a picture that failed as the proposal, with its reason, offered again in the sheet", async () => {

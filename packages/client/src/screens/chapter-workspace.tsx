@@ -42,8 +42,9 @@ import {
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
-import { ChevronDown, FileText, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
+import { Chat, ChevronDown, FileText, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
+import { rememberDock, rememberedDocks } from "../lib/chapter-dock.js";
 import { PageReadControl, useProsePageRead, type PageRead, type PageReadBlock } from "../components/page-read.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
@@ -56,7 +57,7 @@ import { BlockPicturePanel, useChapterPictures } from "../components/audiobook-p
 import { IllustrationSheet, IllustrationStatus, useIllustration, useIllustrationSheet } from "../components/audiobook-illustrate.js";
 import { LookSheet } from "../components/audiobook-look.js";
 import { NewLookSheet } from "../components/audiobook-new-look.js";
-import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectSheet, DirectionCard, ReadSheet, PerformedSpeaker, ReadingMenu, ReadingNotes, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
+import { AudiobookBlocks, AudiobookFilterMenu, AudiobookSide, DirectSheet, DirectionCard, NotesPress, ReadSheet, PerformedSpeaker, ReadingMenu, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { BlockTimingPanel, TimingProposalCard, TimingSide, TimingView, betweenClocks, chapterTimingOf, proposedView, timingLanes, useTimingProposal } from "./chapter-timing.js";
 import { BedPanel, ReactionsPanel } from "../components/audiobook-beds.js";
@@ -249,6 +250,12 @@ function keepUntilSaved(key: string, held: ParkedDraft, requestId: string | null
     else held.conflict = true;
   });
   held.cancel = unsubscribe;
+}
+
+/** What the Looks item says (design turn 194d): how many of the chapter's characters have a look chosen. */
+function lookState(record: ChapterAudiobook | "unreadable" | null): string {
+  const chosen = record === null || record === "unreadable" ? 0 : Object.values(record.look?.characters ?? {}).filter((who) => who.lookId !== undefined).length;
+  return chosen > 0 ? `${chosen} chosen` : "";
 }
 
 /** The most paragraphs one page read carries — the frame's own cap, so a longer chapter reads its first thousand. */
@@ -1178,8 +1185,20 @@ export function ChapterWorkspace({
     connection,
     locked: locked || record === null,
     listenLeads: listenLeads(production, chapter.id),
-    illustrate: { press: illustration.press, busy: illustration.busy, again: illustration.run?.state === "proposed" },
-    looks: { open: () => setIllustrationLookOpen(true) },
+    // What the Direct and illustrate menu says of each (design turn 194, rule 3), and the run line
+    // that takes the menu's place while pictures are read or made.
+    illustrate: {
+      press: illustration.press,
+      busy: illustration.busy,
+      again: illustration.run?.state === "proposed",
+      state: illustration.run?.state === "proposed" ? `${illustration.proposed.size} to make` : "",
+      ...(illustration.run?.state === "reading"
+        ? { running: { line: "illustrating…", stop: illustration.stop } }
+        : illustration.run?.state === "making" && illustration.run.progress !== undefined
+          ? { running: { line: `making pictures · ${illustration.run.progress.made.length} of ${illustration.run.progress.total}`, stop: illustration.stop } }
+          : {}),
+    },
+    looks: { open: () => setIllustrationLookOpen(true), state: lookState(audiobookRecord.record) },
     // The press waits out the autosave (turn 126's fourth rule, codex on PR 1180): a read of
     // the words on disk while newer ones are on their way would make takes stale on arrival.
     beforeRead: (intent) => {
@@ -1249,7 +1268,24 @@ export function ChapterWorkspace({
   // down from the number, so no Restore is offered that would silently fail.
   const history = useMemo(() => [...(record?.versions ?? [])].sort((a, b) => b - a).slice(0, 12), [record?.versions]);
 
-  const [dock, setDock] = useState(!compact);
+  /*
+   * Arke's dock, by view (design turn 194, rule 13). The Manuscript keeps it open at 1100 and wider;
+   * Audiobook and Timing start with it put away, the list and the panel taking its room. Whatever the
+   * author does with it is remembered on this device for that view, so opening it in Audiobook keeps
+   * it open there next time. It used to be one `useState(!compact)`, forgotten on every visit, which
+   * put the thread over a list that needed the width. Narrow, the dock is a sheet and starts closed.
+   */
+  const [dockByView, setDockByView] = useState(rememberedDocks);
+  const [compactDock, setCompactDock] = useState(false);
+  const dock = compact ? compactDock : dockByView[view];
+  const setDock = useCallback((open: boolean) => {
+    if (compact) {
+      setCompactDock(open);
+      return;
+    }
+    setDockByView((held) => ({ ...held, [view]: open }));
+    rememberDock(view, open);
+  }, [compact, view]);
   const [passageLine, setPassageLine] = useState("");
   /*
    * The plan (turn 127): typed where it reads and saved in place, one write for every field.
@@ -1762,11 +1798,33 @@ export function ChapterWorkspace({
     hear: { worldId, chapterFile: chapter.file },
     blockHost: (key) => audiobookColumn.current?.querySelector<HTMLElement>(`[data-block="${key}"] .fy-ab__text`) ?? null,
   };
+  // The Arke press ends the Audiobook and Timing toolbars (design turn 194, rule 13), where the
+  // folded rail's Ask Arke stood: put away, the dock leaves no strip and the list and the panel run
+  // to the window's edge. Narrow, the dock is a sheet and keeps its own press.
+  const toolbarDock = !compact && view !== "manuscript";
+  const arkePress = toolbarDock ? (
+    <button
+      type="button"
+      className={cx("fy-ab__ico", dock && "fy-ab__ico--on")}
+      aria-label={dock ? "Put Arke away" : "Open Arke"}
+      aria-pressed={dock}
+      title="Arke"
+      onClick={() => setDock(!dock)}
+      data-testid="audiobook-arke"
+    >
+      <Chat size={16} />
+    </button>
+  ) : null;
   return (
     <div className="fy-sw" data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"} data-view={view}>
       <main className="fy-sw__centre" ref={chapterCentre}>
         {phone && <SceneBackRow context={`${production.meta.title} · Chapters`} title={`${String(chapter.order).padStart(2,"0")} · ${chapter.title}`} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)}><Button onClick={() => setNotesOpen(true)}>Notes</Button><Button onClick={() => setDock(true)}>Ask Arke</Button></SceneBackRow>}
         <header className="fy-sw__head">
+          {/* The page head is the Manuscript's (design turn 194, rule 2): the label, the title, the
+              synopsis and the marks are set there. Audiobook and Timing open on their toolbar, and
+              the chapter's title is the app bar's last crumb. */}
+          {view === "manuscript" && (
+          <>
           <p className="fy-sw__breadcrumb">
             CHAPTER {String(chapter.order).padStart(2, "0")} OF {production.chapters.length}
           </p>
@@ -1860,8 +1918,11 @@ export function ChapterWorkspace({
               </span>
             )}
           </div>
-          {/* The view row (turn 146): the Chapters door's seg, Manuscript or Audiobook; in Audiobook
-              the reading and its narrator beside it, then Play and the priced read (turn 165a). */}
+          </>
+          )}
+          {/* The view row (turn 146): the Chapters door's seg, Manuscript or Audiobook. In Audiobook it
+              is the whole head, one line (design turn 194, rule 1): the reading, Notes, the speaker
+              filter, then Direct and illustrate, the priced read, Listen and the Arke press. */}
           <div className="fy-ch__viewline">
             <nav className="fy-seg fy-ch__viewrow" aria-label="Chapter view">
               <button type="button" className={cx("fy-seg__item", view === "manuscript" && "fy-seg__item--active")} onClick={() => chooseView("manuscript")}>
@@ -1899,9 +1960,10 @@ export function ChapterWorkspace({
                   </Button>
                 )}
                 {audiobook.mixPlayer.refused !== null && <span className="fy-mono fy-ch__who-where--warn">{audiobook.mixPlayer.refused}</span>}
+                {arkePress}
               </>
             )}
-            {compact && <div className="fy-ch__compact-actions">{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && !voicedRead.reading && <PageReadControl read={read} label={<><Play size={18} /><span className="fy-sr-only">Read the chapter</span></>} />}{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && voicesRecord !== null && !pageRead.reading && <PageReadControl read={readVoiced} label={phone ? <><Speaker size={18} /><span className="fy-sr-only">Read voiced chapter</span></> : "Voiced"} />}<button type="button" className="ui-btn" aria-label="Notes" onClick={() => setNotesOpen(true)}><FileText size={18} />{!phone && "Notes"}</button></div>}
+            {compact && <div className="fy-ch__compact-actions">{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && !voicedRead.reading && <PageReadControl read={read} label={<><Play size={18} /><span className="fy-sr-only">Read the chapter</span></>} />}{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && voicesRecord !== null && !pageRead.reading && <PageReadControl read={readVoiced} label={phone ? <><Speaker size={18} /><span className="fy-sr-only">Read voiced chapter</span></> : "Voiced"} />}{/* In Audiobook, Notes is the reading's book and chapter note (194, rule 5); the rail's sheet is the Manuscript's. */}{view !== "audiobook" && <button type="button" className="ui-btn" aria-label="Notes" onClick={() => setNotesOpen(true)}><FileText size={18} />{!phone && "Notes"}</button>}</div>}
             {view === "audiobook" && (
               <>
                 <ReadingMenu
@@ -1911,23 +1973,23 @@ export function ChapterWorkspace({
                   onReading={(reading) => setAudiobookReading(worldId, prodId, reading)}
                   onNarrator={() => setNarratorOpen(true)}
                 />
+                {/* The book note and the chapter note behind one press (194, rule 5; turn 184, R-53). */}
+                <NotesPress
+                  worldId={worldId}
+                  productionId={prodId}
+                  chapterFile={chapter.file}
+                  notes={audiobookReadingNotes(production.audiobook, chapter.id)}
+                  disabled={connection !== "open" || audiobook.run?.state === "reading"}
+                />
+                {record !== null && <AudiobookFilterMenu filters={audiobook.filters} filter={audiobook.filter} onFilter={audiobook.setFilter} />}
                 <span className="fy-ch__viewpush" />
-                {/* Listen (design turn 186): the book from this chapter, beside the chapter's own Play. */}
-                {stagedDraft === undefined && <ListenButton worldId={worldId} production={production} chapterId={chapter.id} />}
                 {stagedDraft === undefined && audiobook.head}
+                {/* Listen (design turn 186): the book from this chapter, after the chapter's own read. */}
+                {stagedDraft === undefined && <ListenButton worldId={worldId} production={production} chapterId={chapter.id} solid />}
+                {arkePress}
               </>
             )}
           </div>
-          {/* The book note and the chapter note under the narrator line (design turn 184, R-53). */}
-          {view === "audiobook" && (
-            <ReadingNotes
-              worldId={worldId}
-              productionId={prodId}
-              chapterFile={chapter.file}
-              notes={audiobookReadingNotes(production.audiobook, chapter.id)}
-              disabled={connection !== "open" || audiobook.run?.state === "reading"}
-            />
-          )}
         </header>
 
         <div className={cx("fy-ch__body", view !== "manuscript" && "fy-ch__body--audiobook")}>
@@ -1946,7 +2008,6 @@ export function ChapterWorkspace({
                 <p className="fy-bible__empty">Opening…</p>
               ) : (
                 <>
-                <AudiobookFilterRow filters={audiobook.filters} filter={audiobook.filter} onFilter={audiobook.setFilter} />
                 <AudiobookBlocks
                   brackets={audiobook.brackets}
                   onReRead={audiobook.makeAgain}
@@ -1985,22 +2046,6 @@ export function ChapterWorkspace({
                   onClose={() => setLinesFor(null)}
                 />
               )}
-              <div className="fy-ab__foot" data-testid="audiobook-foot">
-                <span>{`Saved · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`}</span>
-                <span className="fy-ab__foot-push" />
-                {audiobook.note !== null && <span className="fy-ch__who-where--warn">{audiobook.note}</span>}
-                {castingState?.pinRefused !== undefined && <span className="fy-ch__who-where--warn">{castingState.pinRefused}</span>}
-                <span>
-                  {[
-                    `${audiobook.counts.total} block${audiobook.counts.total === 1 ? "" : "s"}`,
-                    `${audiobook.counts.made} made`,
-                    ...(audiobook.counts.stale > 0 ? [`${audiobook.counts.stale} stale`] : []),
-                    ...(audiobook.counts.flagged > 0 ? [`${audiobook.counts.flagged} flagged`] : []),
-                    ...(audiobook.counts.notMade > 0 ? [`${audiobook.counts.notMade} not made`] : []),
-                    ...(audiobook.counts.awaiting > 0 ? [`${audiobook.counts.awaiting} awaiting recording`] : []),
-                  ].join(" · ")}
-                </span>
-              </div>
             </div>
           )}
           {view === "timing" && (
@@ -2250,7 +2295,12 @@ export function ChapterWorkspace({
                   reading={production.audiobook?.reading ?? "narrator"}
                   chapterNote={production.audiobook?.chapterNotes?.[chapter.id] !== undefined}
                   onCancel={audiobook.closeDirect}
-                  onDirect={audiobook.direct}
+                  // The proposal comes back as the dock's card, Accept and Discard on it (turn 184b):
+                  // with the dock put away by default here (194), Direct opens it to show the run.
+                  onDirect={(also) => {
+                    if (!compact) setDock(true);
+                    audiobook.direct(also);
+                  }}
                 />
               </aside>
             </ResponsiveSheet>
@@ -2605,6 +2655,29 @@ export function ChapterWorkspace({
           </ResponsiveSheet>
           </div>
         </div>
+        {/* The foot line under the list and the panel (design turn 194, rule 4): the chapter's Play at
+            its left, the saved state, and the counts that say what is left to do. */}
+        {view === "audiobook" && (
+          <div className="fy-ab__foot" data-testid="audiobook-foot">
+            {stagedDraft === undefined && audiobook.footPlay}
+            {stagedDraft === undefined && <span aria-hidden="true">·</span>}
+            <span>{`Saved · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`}</span>
+            <span className="fy-ab__foot-push" />
+            {audiobook.mixRefused !== null && <span className="fy-ch__who-where--warn">{audiobook.mixRefused}</span>}
+            {audiobook.note !== null && <span className="fy-ch__who-where--warn">{audiobook.note}</span>}
+            {castingState?.pinRefused !== undefined && <span className="fy-ch__who-where--warn">{castingState.pinRefused}</span>}
+            <span>
+              {[
+                `${audiobook.counts.total} block${audiobook.counts.total === 1 ? "" : "s"}`,
+                `${audiobook.counts.made} made`,
+                ...(audiobook.counts.stale > 0 ? [`${audiobook.counts.stale} stale`] : []),
+                ...(audiobook.counts.flagged > 0 ? [`${audiobook.counts.flagged} flagged`] : []),
+                ...(audiobook.counts.notMade > 0 ? [`${audiobook.counts.notMade} not made`] : []),
+                ...(audiobook.counts.awaiting > 0 ? [`${audiobook.counts.awaiting} awaiting recording`] : []),
+              ].join(" · ")}
+            </span>
+          </div>
+        )}
       </main>
 
       {/* Illustrate this chapter (design turn 193h, 193j): the proposal as a sheet over the main area,
@@ -2736,7 +2809,7 @@ export function ChapterWorkspace({
               })}
         />
       </ResponsiveSheet>
-      {(compact || !dock) && (
+      {(compact || (!dock && !toolbarDock)) && (
         <button type="button" className={phone ? "fy-season-arke" : "fy-sw__rail fy-season-arke-rail"} aria-label="Open Arke" title="Pin the assistant back" onClick={() => setDock(true)}>
           {compact ? <Sparkle size={16} /> : <span className="fy-sw__rail-dot" aria-hidden="true" />}
           <span className="fy-sw__rail-label">{phone ? "Arke" : "Ask Arke"}</span>

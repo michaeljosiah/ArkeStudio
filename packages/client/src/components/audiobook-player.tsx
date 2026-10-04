@@ -11,7 +11,7 @@ import { claimRead, releaseRead } from "../lib/reply-reads.js";
 import { mediaUrl } from "../lib/media.js";
 import { openAudiobookListening, subscribeAudiobookListening, useAudiobookRecords, useAudiobookRuns, useStore } from "../lib/store.js";
 import { BodyLayer } from "./body-layer.js";
-import { Play } from "./icons.js";
+import { Play, PlaySolid } from "./icons.js";
 import { Button } from "./ui.js";
 
 /**
@@ -230,13 +230,13 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
  * `Listen` (design turn 186, R-66): on the audiobook door and on a chapter, the book as a listener
  * hears it — the head's one primary, with a play icon, once there is something to hear there.
  */
-export function ListenButton({ worldId, production, chapterId, className }: { worldId: string; production: ProductionBundle; chapterId?: string; className?: string }) {
+export function ListenButton({ worldId, production, chapterId, className, solid = false }: { worldId: string; production: ProductionBundle; chapterId?: string; className?: string; /** The filled transport mark the chapter's Audiobook toolbar draws (design turn 194). */ solid?: boolean }) {
   const [open, setOpen] = useState(false);
   const connection = useStore().connection;
   return (
     <>
       <Button variant={listenLeads(production, chapterId) ? "primary" : "ghost"} className={className} disabled={!bookHasTakes(production) || connection !== "open"} onClick={() => setOpen(true)} data-testid="audiobook-listen">
-        <Play size={14} />
+        {solid ? <PlaySolid size={13} /> : <Play size={14} />}
         Listen
       </Button>
       {open && <AudiobookPlayerView worldId={worldId} production={production} {...(chapterId !== undefined ? { chapterId } : {})} onClose={() => setOpen(false)} />}

@@ -52,9 +52,9 @@ describe("the Audiobook view takes the whole room (turn 193)", () => {
     assert.match(pad!.body, /max\(8px, calc\(\(100% - var\(--ab-list-max\)\) \/ 2\)\)/, "centred in the room the panel leaves");
   });
 
-  it("the head and body have no centred cap and the column leaves its right padding to the panel", () => {
+  it("the head and body have no centred cap and the centre gives its padding to the toolbar, list and foot (194)", () => {
     const audiobook = mentioning(responsive, '[data-view="audiobook"]');
-    assert.ok(audiobook.some((rule) => rule.selector.endsWith(".fy-sw__centre") && rule.body === "padding-right: 0;"));
+    assert.ok(audiobook.some((rule) => rule.selector.endsWith('[data-view="audiobook"] .fy-sw__centre') && rule.body.startsWith("padding: 0;")));
     assert.ok(audiobook.some((rule) => rule.selector.endsWith(".fy-ch__body") && rule.body === "gap: 0;"));
     assert.ok(audiobook.every((rule) => !/margin-inline: auto/.test(rule.body)), "nothing in the Audiobook view centres itself against a cap");
   });

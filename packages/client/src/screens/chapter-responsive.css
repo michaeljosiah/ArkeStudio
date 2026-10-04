@@ -306,11 +306,6 @@
      manuscript's (165k/146b). */
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__panels .fy-ch__notes > .fy-bible__panel:not([data-testid="chapter-voices"]) { display: none; }
 
-  /* The panel sits against the room's right edge, so the column gives up its right padding and the
-     head keeps it for itself. The head's two note fields stop at the list's measure. */
-  [data-screen="chapter"][data-view="audiobook"] .fy-sw__centre { padding-right: 0; }
-  [data-screen="chapter"][data-view="audiobook"] .fy-sw__head { padding-right: 24px; box-sizing: border-box; }
-  [data-screen="chapter"][data-view="audiobook"] .fy-ab__notes { max-width: var(--ab-list-max); }
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__body { gap: 0; }
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__panels {
     width: var(--ab-panel);
@@ -325,7 +320,7 @@
      text, the filter and the foot centre at 920 inside it. */
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__manuscript { --ab-pad: max(8px, calc((100% - var(--ab-list-max)) / 2)); }
   [data-screen="chapter"][data-view="audiobook"] .fy-ab__blocks { max-width: none; padding-inline: var(--ab-pad); }
-  [data-screen="chapter"][data-view="audiobook"] :is(.fy-ab__filter, .fy-ab__foot, .fy-ch__band) { margin-inline: var(--ab-pad); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__band { margin-inline: var(--ab-pad); }
 }
 /* With Arke's dock open the room between 1100 and about 1350 is short of 420 + a list: the panel
    gives up width before the list does, down to 300, and the list keeps about 440. */
@@ -349,9 +344,7 @@
   [data-screen="chapter"] .fy-ch__body:not(.fy-ch__body--audiobook) .fy-ch__foot { position: sticky; bottom: 0; z-index: 2; background: var(--background); }
   [data-screen="chapter"] .fy-ch__body:not(.fy-ch__body--audiobook) > .fy-ch__panels { position: sticky; top: 0; max-height: calc(100dvh - 72px); }
 } }
-/* The Audiobook and Timing view rows (V3). Seg, reading, Listen, Direct and Read need about 810
-   beside the dock at 1180, where the centre holds 800: Direct gives up its tail rather than the
-   presses dropping under the tabs. */
+/* Under 1100 the toolbar wraps by the 173 rules, and a tight row still drops the read's tails. */
 @container (max-width: 829px) {
   .fy-ab__presstail { display: none; }
 }
@@ -367,3 +360,77 @@
 /* A touch window over 1100 folds the production rail into the Pages drawer, and its toggle sits
    at the centre's top-left, where it covered the chapter's "Chapter 01 of 4". */
 .fy-prod:has(> .fy-production-drawer-toggle) > .fy-prodwrap > [data-screen="chapter"] .fy-sw__head { padding-top: 56px; }
+
+/*
+ * A quieter Audiobook view (design turn 194). The master draws these boxes content-box; the app is
+ * border-box, so every height below is the master's plus its border: a 30 press is 32 here, the 52
+ * toolbar 53, the 34 foot 35.
+ *
+ * The toolbar's presses: a 32-high bordered pill in the label type, its count or price muted after
+ * the label; the quiet one (the reading) without a border; the filled one (Listen, or the read
+ * while blocks are unread); the square Arke press at the end.
+ */
+.fy-ab__tool { position: relative; display: inline-flex; flex: none; }
+.fy-ab__pill { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 32px; padding: 0 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: var(--type-label); white-space: nowrap; cursor: pointer; }
+.fy-ab__pill em { font-style: normal; color: var(--muted-foreground); }
+.fy-ab__pill svg { width: 13px; height: 13px; flex: none; }
+.fy-ab__pill:hover:not(:disabled), .fy-ab__pill--on { background: var(--secondary); }
+.fy-ab__pill:disabled { cursor: default; opacity: 0.5; }
+.fy-ab__pill:focus-visible, .fy-ab__ico:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.fy-ab__pill--pri { background: var(--foreground); color: var(--background); border-color: transparent; font-weight: 600; }
+.fy-ab__pill--pri:hover:not(:disabled) { background: var(--foreground); opacity: 0.9; }
+.fy-ab__pill--pri em { color: color-mix(in srgb, var(--background) 70%, transparent); }
+.fy-ab__ico { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 32px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.fy-ab__ico:hover, .fy-ab__ico--on { border-color: var(--border); background: var(--secondary); color: var(--foreground); }
+/* The menus under the presses (194d, 194f): the reading menu's primitive at 12 round, items in the
+   toolbar's type, each item's state or count in mono at its right. */
+.fy-ab__toolmenu { top: 36px; width: auto; min-width: 304px; padding: 6px; border-radius: 12px; }
+.fy-ab__toolmenu--end { left: auto; right: 0; }
+.fy-ab__filtermenu { min-width: 284px; }
+.fy-ab__toolmenu .fy-ab__menu-opt { gap: 10px; height: auto; padding: 8px 10px; border-radius: 8px; font: var(--type-ui); }
+.fy-ab__toolmenu .fy-ab__menu-opt[aria-disabled="true"] { color: var(--muted-foreground); cursor: default; }
+.fy-ab__toolmenu .fy-ab__menu-opt[aria-disabled="true"]:hover { background: transparent; }
+.fy-ab__toolmenu .fy-ab__menu-meta { font: var(--type-mono); font-size: var(--text-2xs); }
+.fy-ab__toolmenu .fy-ab__menu-opt--on { background: var(--secondary); }
+.fy-ab__filtermenu .fy-ab__speaker-dot { width: 8px; height: 8px; }
+.fy-ab__filtermenu .fy-ab__speaker-dot--all { width: 10px; height: 10px; background: transparent; border: 1px solid var(--neutral-400); }
+
+/* The foot line (194, rule 4): the chapter's Play as a round press at its left, then the saved state
+   and the counts, in the 11 mono of the master's foot. */
+.fy-ab__footplay { display: inline-flex; align-items: center; gap: 12px; padding: 0; border: 0; background: transparent; color: var(--foreground); font: inherit; cursor: pointer; }
+.fy-ab__footplay:disabled { cursor: default; color: var(--muted-foreground); }
+.fy-ab__footplay-dot { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex: none; border-radius: 50%; background: var(--foreground); color: var(--background); }
+.fy-ab__footplay:disabled .fy-ab__footplay-dot { opacity: 0.5; }
+.fy-ab__footplay-dot svg { width: 10px; height: 10px; }
+.fy-ab__footplay-dot--stop::after { content: ""; width: 8px; height: 8px; border-radius: 1.5px; background: currentColor; }
+.fy-ab__footplay-at { color: var(--foreground); }
+.fy-ab__footlink { padding: 0; border: 0; background: transparent; color: var(--muted-foreground); font: inherit; cursor: pointer; }
+.fy-ab__footlink:hover:not(:disabled) { color: var(--foreground); }
+.fy-ab__footlink:disabled { opacity: 0.5; cursor: default; }
+
+@media (min-width: 1100px) {
+  /* One toolbar line, 52 high, across the room (rule 1): the page head is the Manuscript's (rule 2). */
+  [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-sw__head { padding: 0; }
+  [data-screen="chapter"][data-view="timing"] .fy-sw__head { margin-inline: -24px; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-sw__centre { padding: 0; overflow: hidden; }
+  [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-ch__viewline { flex-wrap: nowrap; gap: 10px; height: 53px; margin: 0; padding: 0 24px; border-bottom: 1px solid var(--border); font: var(--type-ui); }
+  [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-ch__viewline > .fy-ab__control { gap: 10px; flex: none; }
+  [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-ch__viewrow { align-self: center; padding: 0; border: 1px solid var(--border); border-radius: 9px; background: transparent; overflow: hidden; flex: none; }
+  [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-ch__viewrow .fy-seg__item { height: 30px; padding: 0 13px; border-radius: 0; box-shadow: none; font: var(--type-label); color: var(--muted-foreground); }
+  [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-ch__viewrow .fy-seg__item--active { background: var(--secondary); color: var(--foreground); font-weight: 600; }
+  [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-ch__viewline .fy-ab__reading-press { height: 32px; padding: 0 11px; border: 1px solid transparent; font: var(--type-label); color: var(--muted-foreground); }
+  [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-ch__viewline .fy-ab__reading-press b { font-weight: 600; color: var(--foreground); }
+  [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-ch__viewline .fy-ab__reading-press svg { width: 13px; height: 13px; }
+  [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-ch__viewline .fy-ab__reading-menu { top: 36px; }
+  [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-ch__viewline .ui-btn { height: 32px; min-height: 0; padding: 0 11px; gap: 6px; border-radius: 8px; font: var(--type-label); }
+  [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-ch__viewline .ui-btn--primary { font-weight: 600; box-shadow: none; }
+  [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-ch__viewline .ui-btn--ghost { border-color: var(--border); }
+  [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-ch__viewline .ui-btn svg { width: 13px; height: 13px; }
+  /* Put away, the dock leaves no strip in these views: the Arke press ends the toolbar (rule 13). */
+  [data-screen="chapter"].fy-sw[data-dock="false"]:is([data-view="audiobook"], [data-view="timing"]) { grid-template-columns: minmax(0, 1fr); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__foot { flex: none; gap: 12px; height: 35px; margin: 0; padding: 0 24px; border-top: 1px solid var(--border); font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+}
+/* Short of room — the centre under 1,300, as at 1600 with Arke open — the read says `Read · price`. */
+@container (max-width: 1299px) {
+  [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-ab__presstail { display: none; }
+}

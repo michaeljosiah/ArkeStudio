@@ -360,6 +360,10 @@ export function ProductionLayout() {
   const episodeDeep = phone && !location.pathname.includes("/story/episodes/") && production?.episodes.some(episode => episode.id === episodeId);
   const chapterRoute = /\/story\/chapters\/[^/]+\/?$/.test(location.pathname);
   const chapterDeep = phone && chapterRoute && production?.chapters.some(chapter => chapter.id === chapterId || chapter.file === chapterId);
+  const chapterView = new URLSearchParams(location.search).get("view");
+  const crumbChapter = chapterRoute && !compact && (chapterView === "audiobook" || chapterView === "timing")
+    ? production?.chapters.find((chapter) => chapter.id === chapterId || chapter.file === chapterId)
+    : undefined;
   const sceneDeepPhone = !refusal && (chapterDeep || episodeDeep || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
   const wantsFold = compact && chapterRoute ? false : compact && (sceneRoute || cutRoute) || (railChoice ?? (cutRoute || sceneDetailDefault));
   const drawerMode = !phone && wantsFold && (compact || coarse);
@@ -733,6 +737,9 @@ export function ProductionLayout() {
   return (
     <div className="fy-app fy-production-app" data-scene-route={sceneRoute || undefined} data-cut-route={cutRoute || undefined} data-deep-phone={sceneDeepPhone || undefined}>
       {!sceneDeepPhone && <AppChrome
+        // A chapter's Audiobook and Timing views draw no page head (design turn 194, rule 2): the
+        // chapter's title is the bar's last crumb there, as the frames draw it.
+        {...(crumbChapter !== undefined ? { menu: <><span className="fy-titlebar__sep" aria-hidden="true">›</span><span className="fy-titlebar__crumb">{crumbChapter.title}</span></> } : {})}
         back={compact && chapterRoute ? { label: "Chapters", to: `${base}/story/chapters` } : sceneChrome ? { label: shotChrome ? `Scene ${sceneChrome.number}` : "Scenes", to: `${base}/scenes${shotChrome ? `/${sceneChrome.id}` : ""}` } : { label: "World", to: `/w/${worldId}` }}
         context={{
           label: production && shape ? `${production.meta.title} · ${shotChrome ? `shot ${shotChrome.number}` : sceneChrome ? `scene ${sceneChrome.number}` : shape.displayLabel.toLowerCase()}` : "…",

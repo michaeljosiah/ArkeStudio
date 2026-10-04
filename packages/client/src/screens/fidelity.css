@@ -94,6 +94,9 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* The page's own crumb after the context, where a view draws no page head (design turn 194). */
+.fy-titlebar__sep { flex: none; font: 400 12px var(--font-mono); color: var(--muted-foreground); }
+.fy-titlebar__crumb { min-width: 0; padding: 0 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 500 12px var(--font-mono); color: var(--foreground); }
 button.fy-titlebar__context { cursor: pointer; }
 button.fy-titlebar__context:hover { color: var(--foreground); }
 /*
@@ -6637,16 +6640,17 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-vd__sent { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; background: var(--secondary); font-size: 11px; line-height: 1.5; color: var(--foreground); overflow-wrap: anywhere; }
 .fy-vd__sent-k { color: var(--muted-foreground); }
 .fy-vd__sent-held { color: var(--neutral-400); }
-/* The director reads the book (design turn 184): the book note and the chapter note as 36-high
-   rows under the narrator line, as 181's note; a proposal's markers in a 1.5 dashed outline until
-   it is accepted; the Direct sheet's Reads as a bordered list of one-line rows, label then value;
-   the book's reading as a panel of notes with where each came from. */
-.fy-ab__notes { display: flex; flex-direction: column; margin-top: 4px; }
-.fy-ab__notes .fy-vd__note-k { width: 84px; }
-/* The chapter note wraps to two lines in the same row (turn 188); label and count sit at its top. */
-.fy-ab__notes .fy-vd__note--area { height: auto; align-items: flex-start; padding: 4px 0; }
-.fy-ab__notes .fy-vd__note--area > .fy-vd__note-k, .fy-ab__notes .fy-vd__note--area > .fy-vd__note-count { padding-top: 6px; }
-.fy-ab__notes .fy-vd__note-input--area { height: auto; min-height: 44px; padding: 5px 8px; font: 400 12px/1.5 var(--font-sans); resize: vertical; }
+/* The director reads the book (design turn 184): the book note and the chapter note, behind the
+   toolbar's Notes press in a 520 sheet since 194 (194e) — the label and count over each field;
+   a proposal's markers in a 1.5 dashed outline until it is accepted; the Direct sheet's Reads as a
+   bordered list of one-line rows, label then value; the book's reading as a panel of notes with
+   where each came from. */
+.fy-ab__notes { position: absolute; left: 0; top: 36px; z-index: 6; width: 554px; display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-lg); cursor: default; }
+.fy-vd__note--stacked { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 6px 8px; height: auto; }
+.fy-vd__note--stacked > .fy-vd__note-k { grid-area: 1 / 1; font: var(--type-label); color: var(--muted-foreground); }
+.fy-vd__note--stacked > .fy-vd__note-count { grid-area: 1 / 2; font: var(--type-mono); font-size: var(--text-2xs); }
+.fy-vd__note--stacked > .fy-vd__note-input { grid-area: 2 / 1 / 3 / 3; height: auto; min-height: 38px; padding: 8px 11px; border-radius: 9px; background: transparent; color: var(--muted-foreground); font: var(--type-label); field-sizing: content; resize: none; }
+.fy-vd__note--stacked > .fy-vd__note-input:focus { color: var(--foreground); }
 .fy-ab__text--proposed .fy-ab__mk, .fy-ab__text--proposed .fy-ab__mks, .fy-ab__text--proposed .fy-ab__emph { outline: 1.5px dashed var(--muted-foreground); outline-offset: 1px; border-radius: 4px; }
 .fy-ab__directsheet { display: flex; flex-direction: column; gap: 10px; }
 .fy-ab__reads { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; }
@@ -6693,8 +6697,9 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ab__reading-k { color: var(--muted-foreground); }
 .fy-ab__reading-menu { top: 34px; width: 248px; }
 /* The head fades in with a transform, which makes it a stacking context of its own, so a menu
-   opened in it paints under the blocks that follow unless the head is lifted while it is open. */
-.fy-sw__head:has(.fy-ab__reading-press[aria-expanded="true"]) { position: relative; z-index: 6; }
+   opened in it paints under the blocks that follow unless the head is lifted while it is open —
+   the reading menu, and since turn 194 the Notes, filter and Direct and illustrate menus too. */
+.fy-sw__head:has(:is(.fy-ab__reading-press, .fy-ab__pill)[aria-expanded="true"]) { position: relative; z-index: 6; }
 p.fy-ab__menu-eb { margin: 0; }
 .fy-ab__mgrid { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 6px 6px; }
 .fy-ab__mchip { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--foreground); font: 400 11px/1.4 var(--font-mono); cursor: pointer; }
