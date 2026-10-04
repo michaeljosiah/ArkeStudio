@@ -25,6 +25,11 @@ createInterface({ input: process.stdin }).on('line', line => {
     result(id, { config: { model_provider: 'openai', mcp_servers: { 'unsafe.name': { command: 'sentinel-secret' } }, ...(scenario === 'changed-window-after-recovery' ? { model_context_window: recovered ? 8000 : 100000 } : {}) } });
     if (scenario === 'recovery-exits-after-init' && recovered) setTimeout(() => process.exit(1), 40);
   }
+  else if (method === 'account/read') {
+    const account = scenario.startsWith('image-apikey') ? { type: 'apiKey' } : scenario === 'image-logged-out' ? null : { type: 'chatgpt', email: 'a@example.test', planType: 'plus' };
+    result(id, { account, requiresOpenaiAuth: true });
+  }
+  else if (method === 'modelProvider/capabilities/read') result(id, { imageGeneration: scenario !== 'image-unsupported', namespaceTools: true, webSearch: true });
   else if (method === 'model/list') {
     if (params.cursor) result(id, { data: [{ id: 'spark', model: scenario === 'duplicate-model' ? 'image-model' : 'text-only', displayName: 'Text Only', inputModalities: ['text'], isDefault: false }], nextCursor: null });
     else result(id, { data: [{ id: scenario === 'alias-collision' ? 'text-only' : 'catalog-alias', model: 'image-model', displayName: 'Image Model', inputModalities: scenario === 'empty-input' ? [] : scenario === 'image-input-only' ? ['image'] : ['text', 'image'], isDefault: true }], nextCursor: 'page2' });
@@ -44,6 +49,16 @@ createInterface({ input: process.stdin }).on('line', line => {
       return;
     }
     const base = { threadId: thread.id, turnId: thread.turn };
+    if (scenario.startsWith('image-gen')) {
+      notify('turn/started', { threadId: thread.id, turn: { id: thread.turn } });
+      result(id, { turn: { id: thread.turn } });
+      const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('fixture-image-bytes')]).toString('base64');
+      const item = scenario === 'image-gen-limit' ? { id: 'img', type: 'imageGeneration', status: 'failed', result: '', failure: { type: 'usageLimitExceeded', limitId: 'images', resetsAt: 1900000000 } }
+        : scenario === 'image-gen-junk' ? { id: 'img', type: 'imageGeneration', status: 'completed', result: Buffer.from('not an image at all').toString('base64'), savedPath: '/etc/passwd' }
+        : { id: 'img', type: 'imageGeneration', status: 'completed', result: png, revisedPrompt: 'revised', savedPath: '/etc/passwd' };
+      setTimeout(() => { notify('item/completed', { ...base, item }); finish(thread.id, thread.turn); }, 20);
+      return;
+    }
     if (scenario === 'wrong-callback') write({ id: 'wrong-request', method: 'item/tool/call', params: { threadId: thread.id, turnId: 'unsolicited-turn', callId: 'wrong-call', namespace: 'arke', tool: 'write', arguments: { path: 'should-not-exist.txt', content: 'wrong turn' } } });
     notify('turn/started', { threadId: thread.id, turn: { id: thread.turn } });
     const respond = () => result(id, { turn: { id: thread.turn } });

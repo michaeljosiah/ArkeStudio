@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
 import type { HarnessEvent } from "@arke-studio/contracts";
-import { CodexAdapter, codexCredentialEnv, confinedConfig, type CodexAdapterOptions } from "../src/codex-adapter.js";
+import { CodexAdapter, CodexImageLimitError, codexCredentialEnv, confinedConfig, type CodexAdapterOptions } from "../src/codex-adapter.js";
 
 async function fixture(scenario = "normal", overrides: Partial<CodexAdapterOptions> = {}) {
   const root = await mkdtemp(join(tmpdir(), "arke-codex-adapter-")); const log = join(root, "rpc.jsonl");
@@ -347,4 +347,44 @@ test("duplicate live wire thread identities retire the connection without archiv
   assert.notEqual(fresh.sessionId, old.sessionId);
   await assert.rejects(f.adapter.sendMessage({ sessionId: old.sessionId, parts: [{ type: "text", text: "old context" }] }), /Unknown Codex session/);
   await f.adapter.sendMessage({ sessionId: fresh.sessionId, parts: [{ type: "text", text: "fresh context" }] });
+});
+
+test("the image flag is off for roster agents and only an explicit option turns it on", () => {
+  assert.equal(confinedConfig({}, false)["features.image_generation"], false);
+  assert.equal(confinedConfig({}, true, { imageGeneration: true })["features.image_generation"], true);
+});
+
+test("image status reports the login mode and capability from the app-server", async t => {
+  const f = await fixture("image-gen"); t.after(f.cleanup);
+  assert.deepEqual(await f.adapter.imageStatus(), { authMode: "chatgpt", planType: "plus", imageGeneration: true });
+  const key = await fixture("image-apikey"); t.after(key.cleanup);
+  assert.deepEqual(await key.adapter.imageStatus(), { authMode: "apiKey", imageGeneration: true });
+  const out = await fixture("image-logged-out"); t.after(out.cleanup);
+  assert.equal((await out.adapter.imageStatus()).authMode, "none");
+});
+
+test("a dedicated image thread returns inline bytes, enables only the image flag and ignores a reported path", async t => {
+  const f = await fixture("image-gen"); t.after(f.cleanup);
+  const image = await f.adapter.generateImage({ prompt: "a lighthouse" });
+  assert.equal(image.mimeType, "image/png"); assert.match(image.bytes.toString("latin1"), /fixture-image-bytes/); assert.equal(image.revisedPrompt, "revised");
+  const requests = await f.requests();
+  const start = requests.find(request => request.method === "thread/start")!.params;
+  assert.equal(start.config["features.image_generation"], true); assert.equal(start.config["features.shell_tool"], false);
+  assert.deepEqual(start.dynamicTools, []); assert.equal(start.ephemeral, true); assert.notEqual(start.cwd, f.root);
+  await eventually(async () => (await f.requests()).some(request => request.method === "thread/archive"));
+});
+
+test("image generation refuses logins the app-server does not support it for", async t => {
+  for (const scenario of ["image-apikey", "image-logged-out", "image-unsupported"]) {
+    const f = await fixture(scenario); t.after(f.cleanup);
+    await assert.rejects(f.adapter.generateImage({ prompt: "x" }), /not available for this login/);
+    assert.equal((await f.requests()).some(request => request.method === "thread/start"), false);
+  }
+});
+
+test("a plan limit is a typed error and unrecognised bytes are rejected", async t => {
+  const limit = await fixture("image-gen-limit"); t.after(limit.cleanup);
+  await assert.rejects(limit.adapter.generateImage({ prompt: "x" }), error => error instanceof CodexImageLimitError && error.resetsAt === 1900000000);
+  const junk = await fixture("image-gen-junk"); t.after(junk.cleanup);
+  await assert.rejects(junk.adapter.generateImage({ prompt: "x" }), /not a supported image/);
 });

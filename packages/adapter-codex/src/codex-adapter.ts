@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   agentPromptFor, confinementFor, findHarnessModel, harnessModelMissingInput, ROSTER, sessionSkillForAgent, LLM_ENV_NAMES, LLM_ENV_PROVIDERS,
@@ -34,11 +37,14 @@ export function codexCredentialEnv(
 }
 
 /** Captured once per session. Empty native environments alone did not disable delegation. */
-export function confinedConfig(prior: JsonObject, researchWeb: boolean): JsonObject {
+export function confinedConfig(prior: JsonObject, researchWeb: boolean, opts: { imageGeneration?: boolean } = {}): JsonObject {
   const config: JsonObject = {
     "features.shell_tool": false, "features.apps": false, "features.plugins": false,
     "features.multi_agent": false, "features.multi_agent_v2": false, "agents.enabled": false,
-    "features.hooks": false, "features.codex_hooks": false, "features.image_generation": false,
+    "features.hooks": false, "features.codex_hooks": false,
+    // Off for every roster agent: Codex would write the picture wherever it likes, outside Arke's
+    // rights and budget path. Only the dedicated image thread below turns it on.
+    "features.image_generation": opts.imageGeneration === true,
     "features.computer_use": false, "features.browser_use": false, "features.in_app_browser": false,
     "features.workspace_dependencies": false, "orchestrator.skills.enabled": false,
     "features.skip_host_skill_discovery": true, "features.skill_mcp_dependency_install": false,
@@ -74,6 +80,29 @@ interface Turn {
   abort: AbortController;
   cancelled: boolean;
 }
+/** What the Codex login can do for image generation; read from the app-server, never from auth files. */
+export interface CodexImageStatus {
+  authMode: "chatgpt" | "apiKey" | "other" | "none";
+  planType?: string;
+  /** The app-server's own answer for the current provider and login. */
+  imageGeneration: boolean;
+}
+export interface CodexImageResult { bytes: Buffer; mimeType: "image/png" | "image/jpeg" | "image/webp"; revisedPrompt?: string }
+/** The plan's image allowance ran out; resetsAt is epoch seconds when Codex reports one. */
+export class CodexImageLimitError extends Error {
+  constructor(readonly resetsAt: number | null) { super("The Codex plan's image limit has been reached."); }
+}
+interface ImageJob {
+  turnId: string | null;
+  items: JsonObject[];
+  settle: (error?: Error) => void;
+}
+function imageType(bytes: Buffer): CodexImageResult["mimeType"] | null {
+  if (bytes.length > 12 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length > 12 && bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
+  return null;
+}
 interface Session extends ToolSession {
   id: string;
   threadId: string;
@@ -94,6 +123,7 @@ export class CodexAdapter implements HarnessAdapter {
   private readonly preparations = new Map<string, SessionConfigInput>();
   private readonly sessions = new Map<string, Session>();
   private readonly threads = new Map<string, Session>();
+  private readonly imageJobs = new Map<string, ImageJob>();
   private readonly queues = new Set<EventQueue>();
   private readonly modelLimits = new Map<string, number>();
   private revision = 0;
@@ -136,6 +166,7 @@ export class CodexAdapter implements HarnessAdapter {
         if (this.disposed) throw new Error("Codex adapter is disposed.");
         await this.rpc?.dispose(); this.rpc = null;
         this.sessions.clear(); this.threads.clear(); this.preparations.clear(); this.modelLimits.clear();
+        this.retireImageJobs("Codex credentials changed; reconnecting.");
         this.opts.env = requested;
         this.ready = { ready: false, reason: "Codex credentials changed; reconnecting." };
         if (started) await this.initTransport();
@@ -221,6 +252,81 @@ export class CodexAdapter implements HarnessAdapter {
       if (seen.size > 100) throw new Error("Codex model catalog exceeded its page limit.");
     } while (cursor);
     return result;
+  }
+
+  /**
+   * Asked of the app-server rather than inferred: an API key or a custom provider can leave the
+   * built-in tool out even with the feature on (openai/codex#36832), so the capability probe, not
+   * the login type alone, decides whether Codex is offered as an image provider.
+   */
+  async imageStatus(signal?: AbortSignal): Promise<CodexImageStatus> {
+    const rpc = this.connection();
+    const account = object(object(await rpc.request("account/read", {}, signal)).account);
+    const authMode = account.type === "chatgpt" ? "chatgpt" : account.type === "apiKey" ? "apiKey" : typeof account.type === "string" ? "other" : "none";
+    const capability = object(await rpc.request("modelProvider/capabilities/read", {}, signal)).imageGeneration === true;
+    return { authMode, ...(authMode === "chatgpt" && typeof account.planType === "string" ? { planType: account.planType } : {}), imageGeneration: capability };
+  }
+
+  /**
+   * One image from a dedicated thread: no Arke tools, no shell, an empty temporary directory.
+   * Bytes come from the item's inline result (the Responses API's base64 field); a path the server
+   * reports is never opened, since it names a location this adapter did not choose.
+   */
+  async generateImage(input: { prompt: string; model?: string; signal?: AbortSignal }): Promise<CodexImageResult> {
+    if (!input.prompt.trim()) throw new Error("An image prompt is required.");
+    input.signal?.throwIfAborted();
+    const status = await this.imageStatus(input.signal);
+    if (status.authMode !== "chatgpt" || !status.imageGeneration) throw new Error("Codex image generation is not available for this login.");
+    const rpc = this.connection();
+    const catalog = await this.discoverModels(input.signal);
+    const selected = input.model === undefined ? catalog.find(model => model.isDefault) : findHarnessModel(input.model, catalog);
+    if (!selected) throw new Error("Codex did not report a model to generate with.");
+    const cwd = await mkdtemp(join(tmpdir(), "arke-codex-image-"));
+    let threadId: string | null = null;
+    try {
+      const response = object(await rpc.request("thread/start", {
+        model: selected.id, modelProvider: selected.provider, allowProviderModelFallback: false,
+        cwd, runtimeWorkspaceRoots: [], ephemeral: true, environments: [], selectedCapabilityRoots: [],
+        sandbox: "read-only", approvalPolicy: "untrusted", developerInstructions: "",
+        baseInstructions: "Create exactly one image for the request with the image generation tool. Do not run commands or write files. Reply with one short sentence.",
+        config: confinedConfig(this.priorConfig, false, { imageGeneration: true }), dynamicTools: [],
+      }, input.signal));
+      const id = object(response.thread).id;
+      if (typeof id !== "string" || this.imageJobs.has(id) || this.threads.has(id)) throw new Error("Codex returned an unusable thread for image generation.");
+      threadId = id;
+      let settle!: (error?: Error) => void;
+      const settled = new Promise<void>((resolve, reject) => { settle = error => error ? reject(error) : resolve(); });
+      const job: ImageJob = { turnId: null, items: [], settle };
+      this.imageJobs.set(id, job);
+      const stop = () => { void rpc.request("turn/interrupt", { threadId: id, turnId: job.turnId }, AbortSignal.timeout(5000)).catch(() => rpc.dispose()); settle(new Error("Image generation cancelled.")); };
+      input.signal?.addEventListener("abort", stop, { once: true });
+      try {
+        await rpc.request("turn/start", { threadId: id, input: [{ type: "text", text: input.prompt }], environments: [] }, input.signal);
+        await settled;
+      } finally { input.signal?.removeEventListener("abort", stop); }
+      const failed = job.items.map(item => object(item.failure)).find(failure => failure.type === "usageLimitExceeded");
+      if (failed) throw new CodexImageLimitError(typeof failed.resetsAt === "number" ? failed.resetsAt : null);
+      const item = job.items.find(candidate => typeof candidate.result === "string" && candidate.result.length > 0);
+      if (!item || typeof item.result !== "string") throw new Error("Codex finished without producing an image.");
+      const bytes = Buffer.from(item.result, "base64"); const mimeType = imageType(bytes);
+      if (!mimeType) throw new Error("Codex returned data that is not a supported image.");
+      return { bytes, mimeType, ...(typeof item.revisedPrompt === "string" ? { revisedPrompt: item.revisedPrompt } : {}) };
+    } finally {
+      if (threadId) { this.imageJobs.delete(threadId); void rpc.request("thread/archive", { threadId }).catch(() => {}); }
+      await rm(cwd, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+  private retireImageJobs(reason: string): void { for (const job of this.imageJobs.values()) job.settle(new Error(reason)); }
+  private imageNotification(job: ImageJob, method: string, params: JsonObject): void {
+    const announced = object(params.turn);
+    const id = typeof params.turnId === "string" ? params.turnId : typeof announced.id === "string" ? announced.id : undefined;
+    if (!id || (job.turnId !== null && job.turnId !== id)) return;
+    if (job.turnId === null) { if (method !== "turn/started") return; job.turnId = id; }
+    if (method === "item/completed") { const item = object(params.item); if (item.type === "imageGeneration") job.items.push(item); }
+    else if (method === "turn/completed") {
+      if (Array.isArray(announced.items)) for (const raw of announced.items) { const item = object(raw); if (item.type === "imageGeneration" && !job.items.some(seen => seen.id === item.id)) job.items.push(item); }
+      job.settle(announced.status === "completed" ? undefined : new Error("Codex could not complete the image. Check its login, model access and quota."));
+    } else if (method === "error" && params.willRetry !== true) job.settle(new Error("Codex reported an image generation error."));
   }
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
@@ -313,6 +419,8 @@ export class CodexAdapter implements HarnessAdapter {
   usageTokens(sessionId: string): number { return this.sessions.get(sessionId)?.usage ?? 0; }
 
   private notification(method: string, params: JsonObject): void {
+    const job = typeof params.threadId === "string" ? this.imageJobs.get(params.threadId) : undefined;
+    if (job) { this.imageNotification(job, method, params); return; }
     const session = typeof params.threadId === "string" ? this.threads.get(params.threadId) : undefined;
     if (!session) return;
     const turn = session.turn;
@@ -402,6 +510,7 @@ export class CodexAdapter implements HarnessAdapter {
     this.ready = { ready: false, reason: error.message };
     for (const session of this.sessions.values()) this.finish(session, "error", error.message);
     this.sessions.clear(); this.threads.clear(); this.preparations.clear(); this.modelLimits.clear();
+    this.retireImageJobs(error.message);
     const retired = Promise.resolve().then(() => rpc.dispose());
     this.retirement = retired; void retired.catch(() => {});
     // A replacement that repeatedly initializes and exits must not spin a background
@@ -450,6 +559,7 @@ export class CodexAdapter implements HarnessAdapter {
     await this.recovery;
     await this.initialization?.catch(() => {});
     await this.environmentUpdate.catch(() => {});
+    this.retireImageJobs("Codex adapter disposed.");
     this.sessions.clear(); this.threads.clear(); this.modelLimits.clear(); for (const queue of this.queues) queue.close(); this.queues.clear();
     this.ready = { ready: false, reason: "Codex adapter disposed." };
   }
