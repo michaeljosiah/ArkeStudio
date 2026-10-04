@@ -4,7 +4,7 @@ import { z } from "zod";
 import { BenchEventSchema, BenchReservedTakeSchema, SessionIdSchema, ConversationIdSchema,
   benchTokenFor, characterSheetFor, mainPhotoFor, foldBenchSession,
   type BenchChatReference, type BenchEvent, type BenchReferenceToken, type BenchSession,
-  type BenchTake, type WorldChatBenchGenerationAction } from "@arke-studio/contracts";
+  type BenchTake, type BenchReservedTake, type WorldChatBenchGenerationAction } from "@arke-studio/contracts";
 import { readBenchRecord, readBenchSession } from "./chat-reads.js";
 import { BenchStore, sessionDir } from "./store.js";
 import { resolveArtifactSource, resolveTakeSource, resolveTokenEntry } from "./service.js";
@@ -29,7 +29,11 @@ export function completeBenchChatAction(worldDir: string, action: Action): Actio
   ];
   return { ...action, composer: { ...action.composer, references } };
 }
-export const BenchChatMaterializationSchema = z.object({ reserved: z.array(BenchReservedTakeSchema), initialization: z.object({
+interface BenchChatMaterialization {
+  reserved: BenchReservedTake[];
+  initialization: { sessionId: string; createdAt: string; fresh: boolean; events: BenchEvent[] };
+}
+export const BenchChatMaterializationSchema: z.ZodType<BenchChatMaterialization, z.ZodTypeDef, unknown> = z.object({ reserved: z.array(BenchReservedTakeSchema), initialization: z.object({
   sessionId: SessionIdSchema, createdAt: z.string(), fresh: z.boolean(), events: z.array(BenchEventSchema),
 }).strict() }).strict();
 const initializationPrefix = (id: string) => `chat-composer:${id}:`;
