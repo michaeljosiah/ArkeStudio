@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { formatMicroUsd, type GenesisBlueprint, type GenesisImageCandidate, type GenesisImages, type Job } from "@arke-studio/contracts";
+import { CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan, formatMicroUsd, type GenesisBlueprint, type GenesisImageCandidate, type GenesisImages, type Job } from "@arke-studio/contracts";
 import { Button, Callout } from "./ui.js";
 import { genesisMediaUrl } from "../lib/media.js";
 
@@ -43,13 +43,14 @@ export function GenesisImageCards({ genesisId, blueprint, images, jobs, busy, on
     {images.problems.map(problem => <Callout key={problem} title="Image needs attention">{problem}</Callout>)}
     {images.plans.map(plan => {
       const active = jobs.find(job => job.target.id === plan.intent.target && !["succeeded", "failed", "cancelled"].includes(job.status));
+      const included = usesCodexImagePlan(plan);
       return <article className="fy-actioncard" key={plan.intent.id} aria-label={`Generate ${plan.title}`}>
         <h3>{plan.title} · {plan.role}</h3><p style={{ whiteSpace: "pre-wrap" }}>{plan.prompt}</p>
-        <p>{plan.modelName} · 1 image · estimated {formatMicroUsd(plan.estimatedMicroUsd)}</p>
-        <p>{String(plan.output["width"])} × {String(plan.output["height"])} pixels</p>
+        <p>{plan.modelName} · 1 image · {included ? CODEX_IMAGE_PLAN_LABEL : `estimated ${formatMicroUsd(plan.estimatedMicroUsd)}`}</p>
+        <p>{included ? "Provider-selected dimensions" : `${String(plan.output["width"])} × ${String(plan.output["height"])} pixels`}</p>
         <p>References: {plan.references.map(reference => reference.label).join(", ") || "none"}</p>
         {plan.references.map(reference => <img key={reference.id} src={genesisMediaUrl(genesisId, reference.file)} alt={reference.label} style={{ width: 96, height: 96, objectFit: "contain" }} />)}
-        <Button disabled={busy || !!active} onClick={() => onGenerate(plan.intent.id, plan.digest)}>Generate · ~{formatMicroUsd(plan.estimatedMicroUsd)}</Button>
+        <Button disabled={busy || !!active} onClick={() => onGenerate(plan.intent.id, plan.digest)}>Generate · {included ? "ChatGPT plan" : `~${formatMicroUsd(plan.estimatedMicroUsd)}`}</Button>
         <Button variant="ghost" disabled={busy} onClick={() => onRevise(`Please revise the image prompt for ${plan.title}: `)}>Change prompt</Button>
       </article>;
     })}

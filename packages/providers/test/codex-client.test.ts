@@ -49,22 +49,40 @@ describe("codex image client", () => {
 
   it("refuses a missing prompt, an unprepared reference and any other capability", async () => {
     const client = new CodexClient(runner());
-    await assert.rejects(client.submit("", { model: "m", capability: "image", params: { prompt: " " } }), /prompt is required/);
-    await assert.rejects(client.submit("", { model: "m", capability: "image", params: { prompt: "x", references: [{}] } }), /not every image reference/);
-    await assert.rejects(client.submit("", { model: "m", capability: "video", params: { prompt: "x" } }), /only image/);
+    await assert.rejects(client.submit("", { model: "codex-image", capability: "image", params: { prompt: " " } }), /prompt is required/);
+    await assert.rejects(client.submit("", { model: "codex-image", capability: "image", params: { prompt: "x", references: [{}] } }), /not every image reference/);
+    await assert.rejects(client.submit("", { model: "codex-image", capability: "video", params: { prompt: "x" } }), /only image/);
   });
 
   it("maps a plan limit to a rejected request and a lost sign-in to an auth error", async () => {
     const limit = Object.assign(new Error("limit"), { name: "CodexImageLimitError", resetsAt: 1900000000 });
-    await assert.rejects(new CodexClient(runner({ generate: async () => { throw limit; } })).submit("", { model: "m", capability: "image", params: { prompt: "x" } }),
-      error => error instanceof ProviderRequestRejectedError && /image limit.*2030/.test(error.message));
-    await assert.rejects(new CodexClient(runner({ generate: async () => { throw new Error("Codex image generation is not available for this login."); } })).submit("", { model: "m", capability: "image", params: { prompt: "x" } }),
+    await assert.rejects(new CodexClient(runner({ generate: async () => { throw limit; } })).submit("", { model: "codex-image", capability: "image", params: { prompt: "x" } }),
+      error => error instanceof ProviderRequestRejectedError && /Codex allowance.*2030/.test(error.message));
+    await assert.rejects(new CodexClient(runner({ generate: async () => { throw new Error("Codex image generation is not available for this login."); } })).submit("", { model: "codex-image", capability: "image", params: { prompt: "x" } }),
       error => error instanceof ProviderAuthError && PROVIDER_FAULT.test(error.message));
   });
 
   it("disposing the client stops the runner it was given", async () => {
     let stopped = 0;
-    new CodexClient(runner({ dispose: () => { stopped++; } })).dispose();
+    await new CodexClient(runner({ dispose: () => { stopped++; } })).dispose();
     assert.equal(stopped, 1);
+  });
+
+  it("refuses unsupported routes and reference counts before using any allowance", async () => {
+    let calls = 0;
+    const client = new CodexClient(runner({ generate: async () => { calls++; return { bytes: PNG, mimeType: "image/png" }; } }));
+    await assert.rejects(client.submit("", { model: "unknown", capability: "image", params: { prompt: "x" } }), ProviderRequestRejectedError);
+    const reference = { name: "ref", contentType: "image/png" as const, data: PNG };
+    await assert.rejects(client.submit("", { model: "codex-image", capability: "image", params: { prompt: "x" }, imageReferences: [reference, reference] }), /at most one reference/);
+    assert.equal(calls, 0);
+  });
+
+  it("keeps a quota refusal terminal when the reset timestamp is absent or invalid", async () => {
+    for (const resetsAt of [null, NaN, Infinity, 1e20]) {
+      const limit = Object.assign(new Error("limit"), { name: "CodexImageLimitError", resetsAt });
+      await assert.rejects(new CodexClient(runner({ generate: async () => { throw limit; } })).submit("", {
+        model: "codex-image", capability: "image", params: { prompt: "x" },
+      }), error => error instanceof ProviderRequestRejectedError && /Codex allowance/.test(error.message));
+    }
   });
 });

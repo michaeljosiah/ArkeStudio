@@ -118,7 +118,8 @@ export function imageGenerationSource(store: WorldStore, ports: {
       prompt: prompts.map((prompt, index) => prompts.length === 1 ? prompt : `${index + 1}. ${prompt}`).join("\n\n"),
       references, provider: model.provider, model: model.id, quantity: inputs.length, output: "Pending image candidates; selection requires a separate card", cost: "Pending quote",
       options: [{ label: "Model choice", value: action.modelId ? "Named in this request" : bundle.meta.models?.image ? "World image default" : "Settings image routing default" },
-        ...inputs.flatMap((input, index) => Object.entries(input.params).filter(([key]) => !["prompt", "references", "referenceRoles", "provenance", "characterName", "generationQuotePendingSelection"].includes(key))
+        ...(model.limits.providerSelectedSize ? [{ label: "Dimensions", value: "Provider-selected" }] : []),
+        ...inputs.flatMap((input, index) => Object.entries(input.params).filter(([key]) => !(model.limits.providerSelectedSize && key === "output") && !["prompt", "references", "referenceRoles", "provenance", "characterName", "generationQuotePendingSelection"].includes(key))
           .map(([label, value]) => ({ label: inputs.length === 1 ? label : `${index + 1}: ${label}`, value: typeof value === "string" ? value : JSON.stringify(value) })))],
       privacy: [references.length ? "Attached references and the prompt are sent to the configured provider runtime." : "The prompt is sent to the configured provider runtime."],
       cancellationSupported: true,

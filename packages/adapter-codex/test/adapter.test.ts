@@ -389,6 +389,26 @@ test("a plan limit is a typed error and unrecognised bytes are rejected", async 
   await assert.rejects(junk.adapter.generateImage({ prompt: "x" }), /not a supported image/);
 });
 
+test("turn-level quota and login failures preserve their remedies", async t => {
+  const limit = await fixture("image-gen-turn-limit"); t.after(limit.cleanup);
+  await assert.rejects(limit.adapter.generateImage({ prompt: "x" }), error => error instanceof CodexImageLimitError && error.resetsAt === null);
+  const auth = await fixture("image-gen-turn-auth"); t.after(auth.cleanup);
+  await assert.rejects(auth.adapter.generateImage({ prompt: "x" }), /not available for this login/);
+});
+
+test("an admitted image turn has a deadline even if it never completes", async t => {
+  const f = await fixture("image-gen-turn-hang", { imageTimeoutMs: 300 }); t.after(f.cleanup);
+  await assert.rejects(f.adapter.generateImage({ prompt: "x" }), /timeout|aborted/i);
+  const requests = await f.requests();
+  assert.ok(requests.some(request => request.method === "turn/interrupt"));
+  assert.ok(requests.some(request => request.method === "thread/unsubscribe"));
+});
+
+test("a completed picture survives an internal deadline waiting for the final reply", async t => {
+  const f = await fixture("image-gen-picture-hang", { imageTimeoutMs: 300 }); t.after(f.cleanup);
+  assert.equal((await f.adapter.generateImage({ prompt: "x" })).mimeType, "image/png");
+});
+
 test("reference images travel inline and a mislabelled one is refused", async t => {
   const f = await fixture("image-gen"); t.after(f.cleanup);
   const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("reference-bytes")]);

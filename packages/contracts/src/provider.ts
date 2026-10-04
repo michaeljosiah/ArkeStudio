@@ -125,8 +125,8 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   /**
    * Images made by the user's own Codex sign-in, through the Codex app-server we already drive.
    * Like Higgsfield there is no credential of ours: Codex holds the login and sign-in state is a
-   * probe. Unlike it, nothing here is priced per image — the plan pays — so it carries no
-   * manifest row until the ledger can say so.
+   * probe. Its image route draws on Codex allowance; the manifest and ledger name that plan
+   * separately from local runs and API charges (SPEC-008 R-29..31).
    */
   codex: { displayName: "Codex", capabilities: ["image"], local: false, credential: "external" },
   openai: {

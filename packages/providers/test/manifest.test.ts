@@ -46,6 +46,21 @@ const model = (id: string) => {
 };
 
 describe("the shipped manifest (R-9, §3.2)", () => {
+  it("offers Codex against an included allowance, with one reference and no invented output controls", () => {
+    const codex = model("codex-image");
+    assert.equal(codex.provider, "codex");
+    assert.equal(PROVIDERS.codex.local, false);
+    assert.equal(codex.pricing.kind, "included-plan");
+    assert.equal(estimateMicroUsd(codex, { images: 4, referenceImages: 4 }), 0);
+    assert.equal(characterImageEstimateIsUsable(codex, 0), true);
+    assert.equal(characterImageEstimateIsUsable(codex, 1), false);
+    assert.match(modelPriceCopy(codex), /ChatGPT plan.*Codex allowance/);
+    assert.equal(modelCapabilityCopy(codex), "refs ×1");
+    assert.deepEqual(codex.limits, { providerSelectedSize: true });
+    assert.deepEqual(offeredAspects(codex), []);
+    assert.deepEqual(aspectSupport(codex, "16:9"), { ok: false, supported: [] });
+    assert.equal(aspectOffered(codex, "1:1"), false);
+  });
   it("every model round-trips through the schema", () => {
     const reparsed = ModelManifestSchema.parse(JSON.parse(JSON.stringify(SHIPPED_MANIFEST)));
     assert.deepEqual(reparsed, SHIPPED_MANIFEST);

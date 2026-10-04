@@ -670,6 +670,8 @@ export const BuildReviewSchema = z
     estimateMicroUsd: z.number().int().min(0),
     /** The frozen image route, named — or null with the refusal in `notes` (R-11). */
     imageModel: z.string().nullable(),
+    /** Included allowance is disclosed before authorizing a build, separately from money. */
+    imagePlan: z.literal("included-plan").optional(),
     /**
      * What will be built without what is missing, stated before the press (R-11): a dead
      * route, a reference-less model, a blueprint file that failed to parse (row 9), a

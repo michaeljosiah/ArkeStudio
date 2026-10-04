@@ -20697,7 +20697,7 @@ export class Coordinator {
 
       // Message handlers have now either committed their queue rows or recorded their refusal.
       // Only now may queue disposal cancel execution and suppress further journal transitions.
-      this.jobQueue?.dispose();
+      await this.jobQueue?.dispose();
       this.opts.voice?.dispose?.();
       await this.opts.comfyui?.service.dispose().catch(() => {});
       await Promise.allSettled(this.backgroundWork);

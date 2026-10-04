@@ -275,6 +275,16 @@ function lastPlan(h: Harness): BuildReview {
 const BUILD_MS = 45_000;
 
 describe("the founding build (SPEC-031)", () => {
+  it("carries the included image plan into the founding review before any work starts", async t => {
+    const codex: ManifestModel = { ...MODEL, id: "codex-image", provider: "codex", displayName: "Codex Image", pricing: { kind: "included-plan" } };
+    const h = await makeHarness(t, { manifest: { ...MANIFEST, models: [codex] } });
+    await makeSandbox(h.root, "gen-codex-plan");
+    await h.service.plan("gen-codex-plan", ulid(), undefined, { image: codex.id });
+    const plan = lastPlan(h);
+    assert.equal(plan.imagePlan, "included-plan");
+    assert.equal(plan.estimateMicroUsd, 0);
+    assert.equal(h.queue.jobs.size, 0);
+  });
   it("reuses uploaded and generated selections, preserves alternatives as artifacts, and replays without duplicates", async t => {
     let h!: Harness;
     h = await makeHarness(t, { manifest: MANIFEST,

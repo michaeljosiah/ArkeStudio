@@ -4,6 +4,11 @@ import { setTimeout as delay } from "node:timers/promises";
 import { lazyCodexImageRunner } from "../../src/harness/v2-launch.js";
 
 const FOUND = { command: "codex", args: [], helper: "", source: "path" as const, version: "0.160.0" };
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
 function rig(over: { found?: typeof FOUND | null; initFails?: boolean; path?: { value: string } } = {}) {
   const log: string[] = []; let discoveries = 0;
   const runner = lazyCodexImageRunner({
@@ -76,4 +81,43 @@ test("a Codex path chosen in Settings replaces the running app-server at the nex
   await r.runner.status();
   assert.deepEqual(r.log, ["create 1", "dispose 1", "create 2"], "an unchanged path keeps the one running");
   await r.runner.dispose();
+});
+
+test("disposal while Settings is being read cannot start another process", async () => {
+  const settings = deferred<{}>();
+  let starts = 0;
+  const runner = lazyCodexImageRunner({ discovery: () => settings.promise,
+    discover: async () => { starts++; return { found: FOUND, reason: null }; },
+  });
+  const ask = runner.status();
+  const refused = assert.rejects(ask, /has been stopped/);
+  await runner.dispose();
+  settings.resolve({});
+  await refused;
+  assert.equal(starts, 0);
+});
+
+test("disposal drains a pending start and repeated disposal waits for the same cleanup", async () => {
+  const initialization = deferred<void>();
+  const discovered = deferred<void>();
+  const cleanup = deferred<void>();
+  let stops = 0;
+  const runner = lazyCodexImageRunner({
+    discover: async () => ({ found: FOUND, reason: null }),
+    createAdapter: () => ({ init: async () => { discovered.resolve(); await initialization.promise; }, imageStatus: async () => { throw new Error("must not probe after disposal"); },
+      generateImage: async () => { throw new Error("must not generate"); }, dispose: async () => { stops++; await cleanup.promise; },
+    }),
+  });
+  const ask = assert.rejects(runner.status(), /has been stopped/);
+  await discovered.promise;
+  let drained = false;
+  const first = runner.dispose().then(() => { drained = true; });
+  const second = runner.dispose();
+  initialization.resolve();
+  await ask;
+  await delay(0);
+  assert.equal(stops, 1); assert.equal(drained, false);
+  cleanup.resolve();
+  await Promise.all([first, second]);
+  assert.equal(drained, true);
 });

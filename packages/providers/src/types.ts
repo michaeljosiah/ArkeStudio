@@ -438,7 +438,7 @@ export interface ProviderClient {
   /** The language models a local runtime has pulled, for the writing harness's catalogue (issue 1247). */
   listModels?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").LocalHarnessModel[]>;
   /** Release optional long-lived transports. No provider call may occur after this. */
-  dispose?(): void;
+  dispose?(): void | Promise<void>;
   /**
    * The provider's lane has drained after `model`'s job settled (issue 846): a local engine may
    * put down what it loaded. Never awaited by a terminal row, and nothing the queue can see fails.

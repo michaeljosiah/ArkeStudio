@@ -36,9 +36,9 @@ function withSamples<T extends { id: string }>(models: T[]): T[] {
 }
 
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 29,
+  manifestVersion: 30,
   dialogueGuidance: [],
-  generated: "2026-09-29",
+  generated: "2026-10-04",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
    * the models rather than about any machine: the gate filters this order by what was measured
@@ -74,6 +74,17 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     // and deliberately no graph: the projection in comfyui/recipes.ts is the whole boundary.
     ...COMFYUI_MANIFEST_MODELS,
     // ---- image ------------------------------------------------------------
+    // A stable route to Codex's built-in image tool, not a selectable inference model.
+    // One reference is the verified Arke limit; no size or aspect control is promised.
+    {
+      id: "codex-image",
+      provider: "codex",
+      capability: "image",
+      displayName: "Codex Image",
+      accepts: { referenceImages: 1, referenceRoles: false, startFrame: false, endFrame: false },
+      limits: { providerSelectedSize: true },
+      pricing: { kind: "included-plan" },
+    },
     // Higgsfield rows are keyed on the CLI's `job_type`, because that is the string
     // `generate create` dispatches to. `higgsfield model list --json` is the authority for
     // them, not the CLI repository's MODELS.md: the live catalogue carries 77 job types

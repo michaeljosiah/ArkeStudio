@@ -39,9 +39,10 @@ export type TakeKind = z.infer<typeof TakeKindSchema>;
 
 /**
  * Where an actual cost figure came from (SPEC-008): the provider said so, the manifest priced
- * it, or it ran locally and is recorded at zero as unmetered.
+ * it, it ran locally, or an account allowance covers it. An included-plan zero measures no
+ * additional API charge; it does not measure the allowance consumed.
  */
-export const ActualCostSourceSchema = z.enum(["provider-reported", "usage-derived", "mixed-measured", "manifest-derived", "local-zero", "free-plan", "free-credit"]);
+export const ActualCostSourceSchema = z.enum(["provider-reported", "usage-derived", "mixed-measured", "manifest-derived", "local-zero", "free-plan", "free-credit", "included-plan"]);
 export type ActualCostSource = z.infer<typeof ActualCostSourceSchema>;
 
 /** Money is integer micro-dollars, never floating point (SPEC-008 R-14). */

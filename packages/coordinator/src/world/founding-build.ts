@@ -386,6 +386,7 @@ export class FoundingBuildService {
       generations,
       estimateMicroUsd,
       imageModel: route?.model.displayName ?? null,
+      ...(route?.model.pricing.kind === "included-plan" ? { imagePlan: "included-plan" as const } : {}),
       notes,
       dropped: blueprint.dropped,
     });

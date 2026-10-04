@@ -56,13 +56,21 @@ createInterface({ input: process.stdin }).on('line', line => {
       if (scenario === 'image-gen-hang-first' && ++imageStarts === 1) return;
       if (scenario === 'image-gen-hang-all') return;
       notify('turn/started', { threadId: thread.id, turn: { id: thread.turn } });
-      result(id, { turn: { id: thread.turn } });
+        result(id, { turn: { id: thread.turn } });
+        if (scenario === 'image-gen-turn-hang') return;
+        if (scenario === 'image-gen-turn-limit' || scenario === 'image-gen-turn-auth') {
+          notify('turn/completed', { threadId: thread.id, turn: { id: thread.turn, status: 'failed', items: [], error: {
+            codexErrorInfo: scenario === 'image-gen-turn-limit' ? 'usageLimitExceeded' : 'unauthorized',
+          } } });
+          return;
+        }
       const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('fixture-image-bytes')]).toString('base64');
       const item = scenario === 'image-gen-limit' ? { id: 'img', type: 'imageGeneration', status: 'failed', result: '', failure: { type: 'usageLimitExceeded', limitId: 'images', resetsAt: 1900000000 } }
         : scenario === 'image-gen-junk' ? { id: 'img', type: 'imageGeneration', status: 'completed', result: Buffer.from('not an image at all').toString('base64'), savedPath: '/etc/passwd' }
         : { id: 'img', type: 'imageGeneration', status: 'completed', result: png, revisedPrompt: 'revised', savedPath: '/etc/passwd' };
       setTimeout(() => {
-        notify('item/completed', { ...base, item });
+          notify('item/completed', { ...base, item });
+          if (scenario === 'image-gen-picture-hang') return;
         if (scenario === 'image-gen-late-failure') notify('turn/completed', { threadId: thread.id, turn: { id: thread.turn, status: 'failed', items: [] } });
         else finish(thread.id, thread.turn);
       }, 20);

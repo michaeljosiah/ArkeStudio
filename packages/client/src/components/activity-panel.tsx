@@ -839,13 +839,13 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
               <span>
                 {[
                   (PROVIDERS as Record<string, { displayName: string } | undefined>)[row.provider]?.displayName ?? row.provider,
-                  row.plan === "free-plan" ? "free plan" : "free credit",
-                  `${row.entries} read${row.entries === 1 ? "" : "s"}`,
+                  row.plan === "included-plan" ? "ChatGPT plan" : row.plan === "free-plan" ? "free plan" : "free credit",
+                  `${row.entries} ${row.plan === "included-plan" ? "attempt" : "read"}${row.entries === 1 ? "" : "s"}`,
                   ...(row.tokens > 0 ? [`${compactCount(row.tokens)} tokens`] : []),
                   ...(row.characters > 0 ? [`${compactCount(row.characters)} characters`] : []),
                 ].join(" · ")}
               </span>
-              <span>{row.plan === "free-plan" ? formatMicroUsd(row.microUsd) : `${formatMicroUsd(row.microUsd)} of credit`}</span>
+              <span>{row.plan === "included-plan" ? "Codex allowance used is unknown" : row.plan === "free-plan" ? formatMicroUsd(row.microUsd) : `${formatMicroUsd(row.microUsd)} of credit`}</span>
             </div>
           ))}
         </div>

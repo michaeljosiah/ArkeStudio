@@ -112,6 +112,8 @@ import { ArtStyleGrid, ArtStyleWords } from "../components/art-style-picker.js";
 import { seedFrom } from "../lib/art-styles.js";
 import {
   formatMicroUsd,
+  CODEX_IMAGE_PLAN_LABEL,
+  imagePriceCopy,
   PROVIDERS as PROVIDER_TABLE,
   readerName,
   readerPriceLabel,
@@ -595,7 +597,8 @@ function BuildCard({
         [plan.counts.threads, plan.counts.threads === 1 ? "open thread" : "open threads"],
       ]
     : [];
-  const estimate = plan === null ? null : `${formatMicroUsd(plan.estimateMicroUsd)} generation budget`;
+  const includedImages = plan?.imagePlan === "included-plan";
+  const estimate = plan === null ? null : includedImages ? CODEX_IMAGE_PLAN_LABEL : `${formatMicroUsd(plan.estimateMicroUsd)} generation budget`;
   return (
     <article
       className="fy-actioncard"
@@ -651,7 +654,7 @@ function BuildCard({
               ? "Building…"
               : plan.generations === 0
                 ? `Build ${plan.worldName}`
-                : `Build ${plan.worldName} · ~${formatMicroUsd(plan.estimateMicroUsd)}`}
+                : `Build ${plan.worldName} · ${includedImages ? "ChatGPT plan" : `~${formatMicroUsd(plan.estimateMicroUsd)}`}`}
           </Button>
         )}
         <Button variant="ghost" disabled={pressed} onClick={onDismiss}>
@@ -811,7 +814,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
     if (!manifest) return null;
     const routed = modelForCapability(manifest, { ...state?.app.routing.defaults, ...models }, "image");
     if (!routed || state?.app.models.disabled.includes(routed.id)) return null;
-    return estimateImageMicroUsd(routed, { landscape: true });
+    return imagePriceCopy(routed, estimateImageMicroUsd(routed, { landscape: true }));
   })();
   const sendGenesis = () => {
     if (!harnessReady || chatRunning || myBuild?.status === "running" || g?.worldId || message.trim().length === 0) return;
@@ -1248,7 +1251,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                               disabled={previewEstimate === null || !!g?.founding || buildPressed}
                               onClick={() => generateLookPreview(genesisId, models)}
                             >
-                              See the look{previewEstimate !== null ? ` · ~${formatMicroUsd(previewEstimate)}` : ""}
+                              See the look{previewEstimate !== null ? ` · ${previewEstimate}` : ""}
                             </Button>
                             {previewEstimate === null && (
                               <span className="fy-mono" style={{ fontSize: 9.5 }}>

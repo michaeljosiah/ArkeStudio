@@ -48,6 +48,20 @@ async function setup(beforeOpen?: (dir: string) => Promise<void>) {
 }
 
 describe("durable generation quotes (SPEC-050 R-11..20)", () => {
+  it("discloses Codex allowance in a durable zero-dollar quote without admitting work", async () => {
+    const h = await setup();
+    h.manifest.models[0] = { ...MODEL, id: "codex-image", provider: "codex", limits: { providerSelectedSize: true }, pricing: { kind: "included-plan" } };
+    const action = { ...mainPhoto(), modelId: "codex-image" };
+    const id = newId("act");
+    const quote = await h.quotes().prepare(action, id, AT);
+    assert.equal(quote.estimatedMicroUsd, 0);
+    assert.match(quote.cost!, /ChatGPT plan.*Codex allowance/);
+    assert.ok(quote.options?.some(option => option.label === "Dimensions" && option.value === "Provider-selected"));
+    assert.equal(quote.options?.some(option => option.label === "output"), false);
+    assert.equal(h.queue.listJobs().length, 0);
+    assert.equal(h.fake.submitCount, 0);
+    assert.deepEqual(await h.quotes().prepare(action, id, AT), quote);
+  });
   it("prepares without jobs, survives restart, and makes one unselected main photo exactly once", async () => {
     const h = await setup();
     const action = mainPhoto();

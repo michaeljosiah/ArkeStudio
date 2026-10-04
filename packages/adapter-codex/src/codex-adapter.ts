@@ -21,6 +21,8 @@ export interface CodexAdapterOptions {
   killProcess?: (child: ChildProcessWithoutNullStreams) => Promise<void>;
   onTrace?: (line: Record<string, unknown>) => void;
   requestTimeoutMs?: number;
+  /** Whole image operation, including a turn which never publishes completion. */
+  imageTimeoutMs?: number;
 }
 
 /** The same provider-key policy used by the other harnesses, without copying auth files. */
@@ -277,6 +279,8 @@ export class CodexAdapter implements HarnessAdapter {
    */
   async generateImage(input: { prompt: string; references?: readonly CodexImageReference[]; model?: string; signal?: AbortSignal }): Promise<CodexImageResult> {
     if (!input.prompt.trim()) throw new Error("An image prompt is required.");
+    const callerSignal = input.signal;
+    input = { ...input, signal: AbortSignal.any([AbortSignal.timeout(this.opts.imageTimeoutMs ?? 600_000), ...(input.signal ? [input.signal] : [])]) };
     input.signal?.throwIfAborted();
     const status = await this.imageStatus(input.signal);
     if (status.authMode !== "chatgpt" || !status.imageGeneration) throw new Error("Codex image generation is not available for this login.");
@@ -308,7 +312,7 @@ export class CodexAdapter implements HarnessAdapter {
         settle(new Error("Image generation cancelled."));
         // Before turn/started there is no turn to name, and an interrupt with a null id is only
         // refused. The connection is shared with other images, so a refusal retires it only when
-        // this job is its sole user; otherwise the thread is simply archived below.
+        // this job is its sole user; otherwise the thread is unsubscribed below.
         if (job.turnId === null) return;
         void rpc.request("turn/interrupt", { threadId: id, turnId: job.turnId }, AbortSignal.timeout(5000))
           .catch(() => this.retireIfAlone(rpc));
@@ -332,7 +336,7 @@ export class CodexAdapter implements HarnessAdapter {
         else if (!admitted) this.retireIfAlone(rpc);
         throw error;
       } finally { input.signal?.removeEventListener("abort", stop); }
-      input.signal?.throwIfAborted();
+      callerSignal?.throwIfAborted();
       // A finished picture outranks a turn that failed afterwards: the allowance is already spent,
       // so discarding it would record a failure and invite a retry that spends it again.
       for (const item of job.items) {
@@ -340,6 +344,7 @@ export class CodexAdapter implements HarnessAdapter {
         const bytes = Buffer.from(item.result, "base64"); const mimeType = imageType(bytes);
         if (mimeType) return { bytes, mimeType, ...(typeof item.revisedPrompt === "string" ? { revisedPrompt: item.revisedPrompt } : {}) };
       }
+      input.signal?.throwIfAborted();
       const failed = job.items.map(item => object(item.failure)).find(failure => failure.type === "usageLimitExceeded");
       if (failed) throw new CodexImageLimitError(typeof failed.resetsAt === "number" ? failed.resetsAt : null);
       const lateError = turnError as Error | null;
@@ -367,8 +372,14 @@ export class CodexAdapter implements HarnessAdapter {
     if (method === "item/completed") { const item = object(params.item); if (item.type === "imageGeneration") job.items.push(item); }
     else if (method === "turn/completed") {
       if (Array.isArray(announced.items)) for (const raw of announced.items) { const item = object(raw); if (item.type === "imageGeneration" && !job.items.some(seen => seen.id === item.id)) job.items.push(item); }
-      job.settle(announced.status === "completed" ? undefined : new Error("Codex could not complete the image. Check its login, model access and quota."));
-    } else if (method === "error" && params.willRetry !== true) job.settle(new Error("Codex reported an image generation error."));
+      job.settle(announced.status === "completed" ? undefined : this.imageError(announced.error));
+    } else if (method === "error" && params.willRetry !== true) job.settle(this.imageError(params.error));
+  }
+  private imageError(error: unknown): Error {
+    const code = object(error).codexErrorInfo;
+    if (code === "usageLimitExceeded") return new CodexImageLimitError(null);
+    if (code === "unauthorized") return new Error("Codex image generation is not available for this login.");
+    return new Error("Codex could not complete the image. Check its login, model access and quota.");
   }
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {

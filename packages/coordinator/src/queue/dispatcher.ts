@@ -21,6 +21,7 @@ import {
   credentialKindOf,
   formatMicroUsd,
   PROVIDERS,
+  usesCodexImagePlan,
   REFERENCE_FINALIZATION_TARGETS,
   isReplayableFinalization,
   ulid,
@@ -92,7 +93,7 @@ export interface DispatchClient {
   residency?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]>;
   listModels?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").LocalHarnessModel[]>;
   /** Release optional long-lived transports when the queue shuts down. */
-  dispose?(): void;
+  dispose?(): void | Promise<void>;
   submit(
     key: string,
     request: {
@@ -1920,6 +1921,11 @@ export class JobQueue {
     if (local) {
       actualMicroUsd = 0;
       actualSource = "local-zero"; // unmetered (SPEC-008 R-18)
+    } else if (usesCodexImagePlan(job)) {
+      // No per-request API charge. Zero says nothing about the allowance consumed by a failed
+      // or cancelled turn; its terminal outcome remains visible (SPEC-008 R-29, SPEC-009 R-19).
+      actualMicroUsd = 0;
+      actualSource = "included-plan";
     } else if (job.speechQuote?.unit === "token") {
       const reported = job.providerCostMicroUsd ?? (client?.declarations.reportsCost && costMicroUsd !== undefined ? Math.round(costMicroUsd) : undefined);
       ({ actualMicroUsd, actualSource } = speechSettlement({ ...job, providerCostMicroUsd: reported }));
@@ -2057,7 +2063,8 @@ export class JobQueue {
         job.providerJobId != null ||
         (job.attempt > 0 && job.submissionRejected !== true));
     const reason = outcomeMayBeRemote
-      ? "Cancelled in Arke. The provider may still complete or charge for this request."
+      ? usesCodexImagePlan(job) ? "Cancelled in Arke. Codex may still complete this request and use your allowance."
+        : "Cancelled in Arke. The provider may still complete or charge for this request."
       : null;
     // A cancelled job still writes a ledger entry (R-15, D10).
     const latest = this.jobs.get(job.id);
@@ -2395,6 +2402,7 @@ export class JobQueue {
     // wording that said "charge" here would be a hold nobody can price honestly.
     const duplicateCost = local
       ? "re-runs it on this machine's own GPU time — no charge"
+      : usesCodexImagePlan(job) ? "may use your Codex allowance again"
       : job.estimatedMicroUsd > 0
         ? `may charge about ${formatMicroUsd(job.estimatedMicroUsd)} again`
         : "may create another charge of unknown size";
@@ -2404,6 +2412,8 @@ export class JobQueue {
       ...(failureClass !== undefined ? { failureClass } : {}),
       error: job.providerResultKind === "inline"
         ? `The provider accepted this request, but its inline result was not saved before restart. No automatic retry was made. Resubmitting ${duplicateCost}.`
+        : usesCodexImagePlan(job)
+        ? `Arke did not witness the image result. Codex may have used your allowance; how much is unknown. No automatic retry was made. Resubmitting ${duplicateCost}.`
         : local
         ? `Arke did not witness the submission result — the engine kept running while Arke restarted, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}.`
         : `Arke did not witness the submission result. ${job.provider} may have accepted and charged it, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}; the prior actual cost is unknown.`,
@@ -2592,7 +2602,8 @@ export class JobQueue {
       await this.terminalize(
         job,
         "cancelled",
-        "Abandoned in Arke. The provider may still complete or charge for the unwitnessed request.",
+        usesCodexImagePlan(job) ? "Abandoned in Arke. Codex may still complete the unwitnessed request and use your allowance."
+          : "Abandoned in Arke. The provider may still complete or charge for the unwitnessed request.",
       );
       this.emitQueueStatus(job.provider);
     } finally {
@@ -2676,10 +2687,13 @@ export class JobQueue {
   }
 
   /** Simulated kill for the crash suite, and clean shutdown: no further writes or events. */
-  dispose(): void {
+  private clientDisposal: Promise<void> | null = null;
+  dispose(): Promise<void> {
+    if (this.clientDisposal) return this.clientDisposal;
     this.stopAccepting();
     this.disposed = true;
-    for (const client of new Set(Object.values(this.opts.clients))) client.dispose?.();
+    this.clientDisposal = Promise.allSettled([...new Set(Object.values(this.opts.clients))]
+      .map(client => Promise.resolve().then(() => client.dispose?.()))).then(() => {});
     for (const controller of this.submitAborts.values()) controller.abort();
     this.submitAborts.clear();
     for (const release of this.gpuReservations.values()) release();
@@ -2698,9 +2712,11 @@ export class JobQueue {
     for (const timer of this.retryTimers) clearTimeout(timer);
     this.retryTimers.clear();
     this.busySince.clear();
+    return this.clientDisposal;
   }
 
   async waitForIdle(): Promise<void> {
+    await this.clientDisposal;
     await Promise.allSettled(this.activeRuns);
   }
 

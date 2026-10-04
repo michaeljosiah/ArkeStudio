@@ -2620,6 +2620,60 @@ describe("cancellation (R-14, R-15, D10)", () => {
 });
 
 describe("cost capture (R-15, SPEC-008 R-17)", () => {
+  it("holds an uncertain Codex image without repeating it or claiming another dollar charge", async () => {
+    const fake = new FakeProvider({});
+    fake.submitError = new Error("connection interrupted");
+    const h = await makeHarness({ codex: fake }, { getKey: async () => null });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, provider: "codex", model: "codex-image", capability: "image", estimatedMicroUsd: 0 });
+    await until(() => foldedJob(h, job.id)?.status === "needs-reconciliation", "uncertain image to hold", FOLD_MS);
+    const held = foldedJob(h, job.id)!;
+    assert.match(held.error!, /allowance.*unknown/);
+    assert.doesNotMatch(held.error!, /charge|\$/);
+    assert.equal(fake.submitCount, 1);
+    assert.equal(h.ledger.entries.length, 0);
+    await h.queue.dispose();
+  });
+  for (const outcome of ["succeeded", "failed", "cancelled"] as const) it(`Codex ${outcome} records an included-plan outcome exactly once across restart`, async () => {
+    const fake = new FakeProvider({});
+    if (outcome === "failed") fake.submitError = Object.assign(new Error("codex: the Codex allowance has been reached"), { submissionRejected: true });
+    if (outcome === "cancelled") fake.submitHangs = true;
+    const h = await makeHarness({ codex: fake }, { getKey: async () => null });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, provider: "codex", model: "codex-image", capability: "image", estimatedMicroUsd: 0 });
+    if (outcome === "cancelled") {
+      await until(() => fake.submitCount === 1, "image to start", FOLD_MS);
+      await h.queue.cancel(job.id);
+    }
+    await until(() => h.ledger.entries.length === 1, "included outcome to settle", FOLD_MS);
+    assert.equal(foldedJob(h, job.id)?.status, outcome);
+    assert.equal(h.ledger.entries[0]!.actualMicroUsd, 0);
+    assert.equal(h.ledger.entries[0]!.actualSource, "included-plan");
+    assert.equal(fake.submitCount, 1);
+    await h.queue.dispose();
+    const revived = h.revive();
+    await revived.queue.start();
+    assert.equal(revived.ledger.entries.length, 1);
+    assert.equal(fake.submitCount, 1);
+    await revived.queue.dispose();
+  });
+
+  it("queue disposal waits for a provider process to stop", async () => {
+    let finish!: () => void;
+    const cleanup = new Promise<void>(resolve => { finish = resolve; });
+    let calls = 0;
+    const fake = Object.assign(new FakeProvider({}), { dispose: async () => { calls++; await cleanup; } });
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    let done = false;
+    const stopping = h.queue.dispose().then(() => { done = true; });
+    await Promise.resolve();
+    assert.equal(calls, 1); assert.equal(done, false);
+    finish();
+    await stopping;
+    await h.queue.dispose();
+    assert.equal(calls, 1); assert.equal(done, true);
+  });
   it("a provider that reports cost records it as provider-reported", async () => {
     const fake = new FakeProvider({ reportsCost: true });
     fake.costMicroUsd = 128400;

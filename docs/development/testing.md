@@ -46,6 +46,17 @@ Coordinator `test/harness/stage-model-journey.test.ts` carries a live Stage mode
 
 ## Fixtures and cleanup
 
+Codex image changes run adapter-codex `test/adapter.test.ts`, providers
+`test/codex-client.test.ts` and `test/manifest.test.ts`, contracts `test/provider-plans.test.ts`,
+coordinator `test/harness/codex-image-runner.test.ts`, `test/queue/dispatcher.test.ts` and
+`test/world-chat/generation-quotes.test.ts`, and client `test/dispatch-bar.test.tsx` and
+`test/providers.test.tsx`. The ordinary suites use fixtures and consume no account allowance.
+For a live check, use an installed Codex with ChatGPT sign-in and a synthetic one-image reference;
+verify the returned image visually and stop the adapter in `finally`. Record only the version,
+image-item field names/types, byte count and MIME type, never account details or image payloads
+in test logs. The Windows 0.160.0 check for PR 1554 verified base64 PNG output and reference
+preservation. Quota refusal is fixture/protocol coverage, not a deliberately exhausted account.
+
 Standalone host changes also run coordinator `test/studio-server.test.ts`, existing
 `test/transport.test.ts` and Studio host lifecycle tests. The Node journey uses a copied
 world, disables paid AI, exercises authenticated manuscript download and reopens saved prose.

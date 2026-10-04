@@ -89,6 +89,16 @@ const bar = (props: Partial<Parameters<typeof DispatchBar>[0]> = {}) =>
   );
 
 describe("what the picker may offer", () => {
+  it("discloses Codex allowance before dispatch and offers no size control", () => {
+    const state = stateWith({ providers: [provider("codex")], routedImage: "codex-image" });
+    state.app.manifest!.models = [{ ...FAL_IMAGE, id: "codex-image", provider: "codex", displayName: "Codex Image",
+      accepts: { referenceImages: 1, startFrame: false, endFrame: false }, limits: { providerSelectedSize: true }, pricing: { kind: "included-plan" } }];
+    __setStateForTest(state);
+    const html = bar();
+    assert.match(html, /ChatGPT plan · uses Codex allowance/);
+    assert.doesNotMatch(html, /\$0\.00|unmetered|>free</);
+    assert.doesNotMatch(html, /aria-label="Size"/);
+  });
   it("drops a model whose key was tested and rejected", () => {
     const state = stateWith({ providers: [provider("fal", { validation: "invalid" })] });
     // Stored is not the same as working. Settings already says the capability is unavailable;

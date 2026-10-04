@@ -19,6 +19,7 @@ import {
   durationLimitsFor,
   estimateMicroUsd,
   formatMicroUsd,
+  imagePriceCopy,
   frameTaskModes,
   imageOutputFor,
   durationOptions,
@@ -1022,7 +1023,7 @@ function BenchWorkspace({
         ? speechPriceCopy(model, estimate, freeCreditLeft(state?.app.ledger ?? []))
         : singing
           ? `up to ${formatMicroUsd(estimate)}`
-          : `~${formatMicroUsd(estimate)}`;
+          : model ? imagePriceCopy(model, estimate) : `~${formatMicroUsd(estimate)}`;
 
   /**
    * What each mode was last left in, so glancing at the other one costs nothing.

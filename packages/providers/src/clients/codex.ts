@@ -1,4 +1,4 @@
-import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
+import { usesCodexImagePlan, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
 import {
   ProviderAuthError,
   ProviderRequestRejectedError,
@@ -64,9 +64,11 @@ export class CodexClient implements ProviderClient {
 
   async submit(_key: string, request: SubmitRequest): Promise<SubmitResult> {
     if (request.capability !== "image") throw new Error("codex: only image generation is offered");
+    if (!usesCodexImagePlan({ provider: this.id, model: request.model })) throw new ProviderRequestRejectedError("codex: unknown image model");
     const prompt = request.params["prompt"];
     if (typeof prompt !== "string" || prompt.trim().length === 0) throw new Error("codex: image prompt is required");
     const references = request.imageReferences ?? [];
+    if (references.length > 1) throw new ProviderRequestRejectedError("codex: at most one reference image is supported");
     const durable = request.params["references"];
     if (Array.isArray(durable) && durable.length > 0 && durable.length !== references.length) {
       throw new Error("codex: not every image reference was prepared");
@@ -78,8 +80,9 @@ export class CodexClient implements ProviderClient {
       // Duck-typed: the adapter's typed limit error crosses a package boundary this file may not import.
       if (err instanceof Error && err.name === "CodexImageLimitError") {
         const resetsAt = (err as { resetsAt?: unknown }).resetsAt;
-        const when = typeof resetsAt === "number" ? ` It resets ${new Date(resetsAt * 1000).toISOString()}.` : "";
-        throw new ProviderRequestRejectedError(`codex: the plan's image limit has been reached.${when}`);
+        const reset = typeof resetsAt === "number" ? new Date(resetsAt * 1000) : null;
+        const when = reset && Number.isFinite(reset.getTime()) ? ` It resets ${reset.toISOString()}.` : "";
+        throw new ProviderRequestRejectedError(`codex: the Codex allowance has been reached.${when} Try again after it resets.`);
       }
       // The queue classifies by message, and only a message it recognises pauses the lane for a
       // sign-in instead of failing the job: this phrase is the one its credential path reads.
@@ -101,8 +104,8 @@ export class CodexClient implements ProviderClient {
     throw new Error("codex: results are returned by submit and are not kept");
   }
 
-  dispose(): void {
-    void Promise.resolve(this.runner.dispose?.()).catch(() => {});
+  async dispose(): Promise<void> {
+    await this.runner.dispose?.();
   }
 
   async cancel(): Promise<void> {

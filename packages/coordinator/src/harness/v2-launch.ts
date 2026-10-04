@@ -384,7 +384,7 @@ export interface LazyCodexImageOptions {
  * it is stopped again after a quiet spell. A Codex that is not installed is an ordinary unavailable
  * answer, not an error, and is looked for again on the next ask.
  */
-export function lazyCodexImageRunner(opts: LazyCodexImageOptions = {}): CodexImageRunner & { dispose(): Promise<void> } {
+export function lazyCodexImageRunner(opts: LazyCodexImageOptions = {}): Omit<CodexImageRunner, "dispose"> & { dispose(): Promise<void> } {
   const discover = opts.discover ?? ((options: CodexDiscoveryOptions) => discoverCodex(options));
   const resolveDiscovery = async (): Promise<CodexDiscoveryOptions> => typeof opts.discovery === "function" ? opts.discovery() : (opts.discovery ?? {});
   const create = opts.createAdapter ?? ((found: DiscoveredCodex) => new CodexAdapter({ command: found.command, args: found.args, env: codexCredentialEnv({}),
@@ -396,22 +396,28 @@ export function lazyCodexImageRunner(opts: LazyCodexImageOptions = {}): CodexIma
   let current: Promise<Adapter> | null = null;
   let currentPath = "";
   let disposed = false;
+  let stopping = Promise.resolve();
   let busy = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const stop = async () => {
     const prior = current; current = null;
-    if (prior) await (await prior.catch(() => null))?.dispose();
+    stopping = stopping.catch(() => {}).then(async () => { if (prior) await (await prior.catch(() => null))?.dispose(); });
+    await stopping;
   };
   const acquire = async (): Promise<Adapter> => {
     if (disposed) throw new Error("The Codex image runner has been stopped.");
     const options = await resolveDiscovery();
+    await stopping.catch(() => {});
+    if (disposed) throw new Error("The Codex image runner has been stopped.");
     // A different executable was chosen: the running one answers for the old path. Replace it when
     // nothing else is using it, and otherwise let the work in flight finish on the one it started on.
     if (current && currentPath !== (options.configuredPath ?? "") && busy <= 1) await stop();
+    if (disposed) throw new Error("The Codex image runner has been stopped.");
     if (!current) {
       currentPath = options.configuredPath ?? "";
       const attempt = (async () => {
         const discovered = await discover(options);
+        if (disposed) throw new Error("The Codex image runner has been stopped.");
         if (!discovered.found) throw new Error(discovered.reason ?? "Codex was not found on this machine.");
         const adapter = create(discovered.found);
         try { await adapter.init(); } catch (error) { await adapter.dispose(); throw error; }
@@ -425,10 +431,14 @@ export function lazyCodexImageRunner(opts: LazyCodexImageOptions = {}): CodexIma
   };
   const use = async <T>(run: (adapter: Adapter) => Promise<T>): Promise<T> => {
     clearTimeout(timer); busy++;
-    try { return await run(await acquire()); }
+    try {
+      const adapter = await acquire();
+      if (disposed) throw new Error("The Codex image runner has been stopped.");
+      return await run(adapter);
+    }
     finally {
       busy--;
-      if (busy === 0) { timer = setTimeout(() => { void stop(); }, idleMs); timer.unref?.(); }
+      if (busy === 0 && !disposed) { timer = setTimeout(() => { void stop().catch(() => {}); }, idleMs); timer.unref?.(); }
     }
   };
   return {

@@ -5,7 +5,7 @@ import {
   aspectOffered,
   estimateCharacterImageMicroUsd,
   estimateImageMicroUsd,
-  formatMicroUsd,
+  imagePriceCopy,
   isLandscapeWorkflow,
   MAX_IMAGE_PREVIEWS,
   offeredAspects,
@@ -646,13 +646,13 @@ export function DispatchBar({
         */}
         {!(variant === "full" && onCancel && primaryLabel && onPrimary) && (
           <span className="fy-dispatchbar__group">
-            <span className="fy-dispatchbar__estimate">~{formatMicroUsd(estimate)}</span>
+            <span className="fy-dispatchbar__estimate">{imagePriceCopy(model, estimate)}</span>
           </span>
         )}
 
         {variant === "full" && onCancel && primaryLabel && onPrimary && (
           <span className="fy-dispatchbar__group">
-            <span className="fy-dispatchbar__estimate">~{formatMicroUsd(estimate)}</span>
+            <span className="fy-dispatchbar__estimate">{imagePriceCopy(model, estimate)}</span>
             <Button variant="ghost" onClick={onCancel}>
               Cancel
             </Button>
