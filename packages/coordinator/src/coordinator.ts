@@ -19979,13 +19979,15 @@ export class Coordinator {
           }
           const voiceInputs = await inspectBenchVoiceInputs(store, inputs);
           const admittedInputs = inputs.map(input => ({ ...input }));
+          const confirmed = new Set<string>();
           for (const consent of voiceInputs.consents) {
             // The approved card disclosed the clip and destination. Tokens come from the
             // coordinator, never from the language model, and precede queue reservation.
-            if (await this.requireVoiceUploadConfirmation({ worldId: store.worldId, requestId: id, command: "bench-dispatch",
+            if (!confirmed.has(`${consent.provider}/${consent.voice.id}`) && await this.requireVoiceUploadConfirmation({ worldId: store.worldId, requestId: id, command: "bench-dispatch",
               voiceUploadConfirmedFor: consent.token, reader: { store, provider: consent.provider, voice: consent.voice } })) {
               throw new Error("The cloned voice upload was not confirmed.");
             }
+            confirmed.add(`${consent.provider}/${consent.voice.id}`);
             if (consent.token) admittedInputs[consent.index]!.voiceUploadConfirmedFor = consent.token;
           }
           for (const input of admittedInputs) if (input.params.audioReferences !== undefined) await readCharacterAudioInputs(store, input, true);

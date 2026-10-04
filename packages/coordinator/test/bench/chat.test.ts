@@ -28,6 +28,7 @@ import { wav } from "../audio/helpers.js";
 import { analyzePcmWav, audioHash } from "../../src/audio/qc.js";
 import { openSubjectBenchSession } from "../../src/bench/service.js";
 import { fileBenchSubjectTake } from "../../src/bench/filing.js";
+import { inspectBenchVoiceInputs } from "../../src/bench/chat-voice.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 const AT = "2026-10-04T02:00:00.000Z";
@@ -328,10 +329,12 @@ it("discloses and pins cloned recording uploads, records approval consent, and r
     label: clone.voice.name, attributes: [], local: false, canClone: true, readsClone: clone.voice.id }] };
   const action: Extract<ModelWorldChatAction, { kind: "bench-generation" }> = { kind: "bench-generation", composer: {
     mode: "voice", brief: "The harbour remembers", provider: VOICE.provider, model: VOICE.id,
-    params: { kind: "voice", voiceId: clone.voice.id, voiceProvider: VOICE.provider, voiceModel: VOICE.id, count: 1 }, references: [],
+    params: { kind: "voice", voiceId: clone.voice.id, voiceProvider: VOICE.provider, voiceModel: VOICE.id, count: 2 }, references: [],
   }, checkReceiptIds: [newId("check")] };
   const id = newId("act"), sessionId = benchChatSessionId(action, id);
   const body = await deps().benchGenerationQuotes!.prepare(action, id, AT);
+  assert.equal(body.quantity, 2);
+  assert.equal(body.references.length, 1, "batch speech discloses each source recording once");
   assert.match(body.references[0]!.role, /Cloned voice recording: Harbour glass/);
   assert.match(body.privacy!.join(" "), /upload.*Mistral.*training/);
   assert.equal(store.getBundle().clonedVoices[0]!.remote?.mistral?.confirmedAt, undefined);
@@ -347,6 +350,10 @@ it("discloses and pins cloned recording uploads, records approval consent, and r
   assert.ok(store.getBundle().clonedVoices[0]!.remote?.mistral?.confirmedAt);
   assert.equal(admitted[0]!.voiceReference, true);
   assert.equal(admitted[0]!.voiceUploadConfirmedFor, `vendor:mistral:${clone.voice.id}`);
+  assert.equal(admitted.length, 2);
+  assert.equal(admitted[1]!.voiceUploadConfirmedFor, admitted[0]!.voiceUploadConfirmedFor);
+  const breeze = await inspectBenchVoiceInputs(store, [{ ...admitted[0]!, provider: "breezeblue", model: "breeze-tts-2" }]);
+  assert.match(breeze.privacy.join(" "), /clone charge.*BreezeBlue/);
 });
 
 it("includes automatic On screen voice references in the generation card and privacy disclosure", async t => {

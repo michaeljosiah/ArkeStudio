@@ -2,7 +2,7 @@ import { voiceSourceFor, type ClonedVoice } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import type { WorldStore } from "../world/store.js";
 import { clipFor } from "../voice/library.js";
-import { hostedReaderDestination, hostedUploadToken } from "../voice/hosted.js";
+import { hostedReaderDestination, hostedReaderKeepsSlot, hostedUploadToken } from "../voice/hosted.js";
 
 /** A card names the recording, bytes and destination before approval can consent to upload. */
 export async function inspectBenchVoiceInputs(store: WorldStore, inputs: readonly EnqueueInput[]) {
@@ -21,10 +21,11 @@ export async function inspectBenchVoiceInputs(store: WorldStore, inputs: readonl
     const remote = input.engine?.source === "user-url" && input.engine.locality !== "local";
     const token = vendor ? hostedUploadToken(input.provider, source.voice.id) : remote ? input.engine!.instanceId : undefined;
     pins.push({ index, voiceId: source.voice.id, provider: input.provider, clip: clip.name, destination: token ?? null });
-    references.push({ id: source.voice.id, role: `Cloned voice recording: ${source.voice.name}` });
+    if (!references.some(reference => reference.id === source.voice.id)) references.push({ id: source.voice.id, role: `Cloned voice recording: ${source.voice.name}` });
     privacy.push(vendor ? `${source.voice.name}: upload this recording to ${vendor.label}. ${vendor.notice}`
       : remote ? `${source.voice.name}: upload this recording to the selected remote ComfyUI engine (${input.engine!.instanceId}). Approving this card confirms this destination.`
         : `${source.voice.name}: this recording is read by the local voice runtime.`);
+    if (vendor && hostedReaderKeepsSlot(input.provider)) privacy.push(`${vendor.label} may create a voice copy for this recording. A clone charge may apply, priced by ${vendor.label}.`);
     consents.push({ index, provider: input.provider, voice: source.voice, ...(token ? { token } : {}) });
   }
   return { pins, references, privacy: [...new Set(privacy)], consents };
