@@ -22,7 +22,7 @@ export class BenchChatControls {
     if (action.kind === "bench-discard" && existingBenchSubjectFiling(this.store, record.session, take)) throw new Error("That take is already accepted in its production and cannot be discarded.");
     if (action.kind === "bench-discard" && take.disposition !== "open") throw new Error("Only an open Bench take can be discarded.");
     if (action.kind !== "bench-discard" && take.disposition === "discarded") throw new Error("That Bench take was discarded.");
-    if (action.kind === "bench-keep" && (record.session.subject || take.status !== "succeeded" || !take.media)) {
+    if (action.kind === "bench-keep" && ((record.session.subject && record.session.subject.kind !== "production") || take.status !== "succeeded" || !take.media)) {
       throw new Error(record.session.subject ? "Use the production take filing action for a production subject." : "This take has no completed media to keep.");
     }
     return { record, take };
@@ -71,7 +71,7 @@ export class BenchChatControls {
       && artifact.generation.sessionId === sessionId && artifact.generation.takeId === takeId);
     if (!artifact) return null;
     const take = record.session.takes.find(take => take.id === takeId);
-    if (!take || record.session.subject || take.disposition === "discarded") return null;
+    if (!take || (record.session.subject && record.session.subject.kind !== "production") || take.disposition === "discarded") return null;
     const bench = await this.ports.bench(sessionId);
     if (!bench) return null;
     await this.store.ownedWrite(() => bench.store.append({ type: "take-filed", takeId, artifactId: artifact.id }, { at: this.store.now(), requestId: id }));

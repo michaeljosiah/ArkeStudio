@@ -2742,6 +2742,10 @@ const exampleWorldActions = {
     artifactId: `ar_${EXAMPLE_ULID}`, replace: false, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "image-generation": { kind: "image-generation", request: { operation: "world-image", count: 1 }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "build-item-run": { kind: "build-item-run", itemKey: "main-photo:maren", checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-audio-generation": { kind: "production-audio-generation", productionId: "saltlight", request: { operation: "voice-line", shotId: "sh_12" }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-performance-command": { kind: "production-performance-command", productionId: "saltlight", command: { operation: "clear-selection", lineKey: `sh_${EXAMPLE_ULID}` }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-audio-edit": { kind: "production-audio-edit", productionId: "saltlight", request: { summary: "Mute the music track", commands: [{ kind: "set-track", trackId: "tr_music", muted: true }] }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-audio-cue": { kind: "production-audio-cue", productionId: "saltlight", source: { kind: "generation", actionRef: "music", outputIndex: 0 }, after: ["music"], trackId: "tr_music", startFrame: 0, durationFrames: 240, sourceInFrames: 0, gainDb: -6, role: "music", checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
 } satisfies Record<ModelWorldChatAction["kind"], ModelWorldChatAction>;
 
 /**
@@ -2838,6 +2842,10 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "prop-reference": "Use a filed artifact image as a prop state's reference; say replace only when the person asked to replace one.",
   "image-generation": "Generate pending key art, a master look, or a prop-state image at the coordinator's quote. Selection is a separate card. Omit modelId to use the world's image default.",
   "build-item-run": "Retry one unfinished founding item from list_build_items at the coordinator's quote. The original founding decision installs the result.",
+  "production-audio-generation": "Quote a shot voice line, a generated performance, a scene table read, a speaking character sample, or local sample preparation. Read the exact source, assigned voice and current production first. Audition, rights, performance review and purge remain human controls.",
+  "production-performance-command": "Propose a kept performance's duration, place its selected audio with explicit timing, or clear a line's selection. Versions, review and source hashes are frozen by the coordinator.",
+  "production-audio-edit": "Propose typed timeline audio changes: tracks, gains, mute, roles and mix ducking. The person reviews and applies the ordinary editor request atomically.",
+  "production-audio-cue": "Stage a cue on a named existing audio track at an explicit frame and duration. For a new result, name an earlier generation action ref and include it in after; approval waits for that result. Sound effects are unavailable.",
 } as const satisfies Record<ModelWorldChatAction["kind"], string>;
 
 /** Shaped exactly as the coordinator accepts it; the guide prints this object (issue 684). */

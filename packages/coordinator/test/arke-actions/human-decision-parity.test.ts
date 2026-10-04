@@ -8,6 +8,7 @@ it("gives every pipeline human decision an in-thread control, never a model comm
     "stage-construct-cancel": "stage", "stage-review-discard": "stage", "accept-character-voice-sample": "voice-sample",
     "proposal-accept": "proposal", "proposal-discard": "proposal", "editor-request-decide": "editor-request",
     "resolve-extraction": "extraction", "conversation-action-stage-playblast-complete": "stage",
+    "review-performance": "performance", "purge-performance": "performance",
   } as const;
   const catalogue = modelActionCatalogue();
   for (const [kind, family] of Object.entries(required)) {

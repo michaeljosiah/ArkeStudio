@@ -111,7 +111,8 @@ export async function validatePlacedPerformanceBytes(store: WorldStore, producti
 }
 
 /** Duration suggestions enter the existing scene JSON proposal/rebase path, never direct authorship. */
-export async function proposePerformanceDuration(store: WorldStore, request: Extract<ClientMessage,{kind:"propose-performance-duration"}>) {
+export async function proposePerformanceDuration(store: WorldStore, request: Extract<ClientMessage,{kind:"propose-performance-duration"}>,
+  worldChatOrigins?: import("@arke-studio/contracts").WorldChatProposalOrigin[]) {
   const production=store.getBundle().productions.find(p=>p.meta.id===request.productionId);
   const performance=await readPerformance(store,request.productionId,request.performanceId);
   const scene=production?.scenes.find(s=>s.id===performance.target.sceneId);
@@ -132,5 +133,5 @@ export async function proposePerformanceDuration(store: WorldStore, request: Ext
   const retimed=shot.staging ? stagingRetimed(shot.staging,durationSec,resolvedAuthoredDuration(shot)) : undefined;
   const next=editShot(record,{shotId:shot.id,change:{durationSec,...(retimed ? {staging:{...retimed,version:retimed.version+1}} : {})}});
   return new ProposalManager(store).stage({kind:"scene-edit",summary:`Set ${shot.id} to ${durationSec}s for reviewed dialogue timing`,source:"performance-timing",production:request.productionId,
-    targets:[{path,content:JSON.stringify(next,null,2)+"\n",expectedBaseHash:sha256(raw)}]});
+    targets:[{path,content:JSON.stringify(next,null,2)+"\n",expectedBaseHash:sha256(raw)}], ...(worldChatOrigins ? { worldChatOrigins } : {})});
 }

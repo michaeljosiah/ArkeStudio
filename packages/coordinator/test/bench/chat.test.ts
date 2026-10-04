@@ -14,12 +14,17 @@ import { WorldChatService } from "../../src/world-chat/service.js";
 import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { productionReadFence } from "../../src/world-chat/production-reads.js";
-import { jobsFence, artifactsFence } from "../../src/world-chat/target-reads.js";
+import { jobsFence, artifactsFence, timelineFence } from "../../src/world-chat/target-reads.js";
+import { assembleStory } from "../productions/assemble.js";
+import { applyTimelineCommand } from "../../src/productions/timeline.js";
+import { decideEditorRequest } from "../../src/productions/editor-requests.js";
+import type { MediaProbe } from "../../src/media/probe.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { BenchStore, sessionDir } from "../../src/bench/store.js";
 import { benchReadRows, generationRouteReadRows, readBenchSession } from "../../src/bench/chat-reads.js";
 import { benchChatSessionId, completeBenchChatAction, materializeBenchChatSession, prepareBenchChatSession } from "../../src/bench/chat-session.js";
 import { WorldChatTargetReads } from "../../src/world-chat/target-reads.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
 import { pngBytes } from "../queue/fake-provider.js";
@@ -45,14 +50,14 @@ const music = (): Extract<ModelWorldChatAction, { kind: "bench-generation" }> =>
   mode: "music", brief: "A slow solo piano cue for the title. Instrumental; no vocals.", provider: MUSIC.provider, model: MUSIC.id,
   params: { kind: "music", lyrics: "[instrumental]", count: 1 }, references: [],
 }, checkReceiptIds: [newId("check")] });
-async function setup(t: TestContext) {
+async function setup(t: TestContext, mediaProbe?: MediaProbe) {
   const { root, worldDir } = await makeTempRoot();
   const provider = new FsWorldProvider(root, { clock: () => AT });
   t.after(() => provider.close());
   await provider.loadWorld(WORLD_ID);
   const store = provider.openStore()!;
   const manifest = { manifestVersion: 1 as const, generated: "2026-10-04", models: [IMAGE, MUSIC, VOICE, VIDEO] };
-  const coordinator = new Coordinator({ provider, adapter: null, manifest, changeLogPath: join(root, "changes.jsonl"), appVersion: "test" });
+  const coordinator = new Coordinator({ provider, adapter: null, manifest, changeLogPath: join(root, "changes.jsonl"), appVersion: "test", ...(mediaProbe ? { mediaProbe } : {}) });
   coordinator.emit({ type: "provider.status", at: AT, providers: [
     { id: "fal", configured: true, validation: "valid", fault: null, probes: [{ capability: "image", available: true }, { capability: "video", available: true }, { capability: "music", available: true }] },
     { id: "mistral", configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] },
@@ -67,6 +72,74 @@ async function setup(t: TestContext) {
     id: newId("jb"), status: "queued", createdAt: AT, updatedAt: AT }); jobs.push(job); return job; };
   return { store, worldDir, manifest, coordinator, host, admitted, deps: () => host.conversationActionDependencies(store) };
 }
+
+it("sequences production music into a fenced human editor request, blocks denied dependencies, and recovers placement once", async t => {
+  const { store, worldDir, admitted, deps } = await setup(t, { durationSec: async () => 1,
+    info: async () => ({ durationSec: 1, hasAudio: true, hasVideo: false }) });
+  let timeline = await assembleStory(store, "saltlight");
+  await applyTimelineCommand(store, "saltlight", { kind: "commands", baseRevision: timeline.revision, sourceFingerprint: "", label: "Add music track",
+    commands: [{ kind: "add-track", trackId: "tr_music", trackKind: "audio", name: "Music", defaultRole: "music" }] });
+  const conversationId = newId("cv"), log = new WorldChatStore(conversationDir(worldDir, conversationId));
+  await log.create(conversationId, AT); await log.append({ type: "conversation.created", title: "Production cue", entryContext: { kind: "production", productionId: "saltlight" } }, { at: AT });
+  const dependencies = deps(), lifecycle = new ConversationActionLifecycle({ worldPath: worldDir, worldId: store.worldId,
+    adapters: worldChatActionAdapters(store, null, () => AT, dependencies), now: () => AT });
+  const view = async () => foldConversation(conversationId, AT, (await log.read()).events).view;
+  const bind = async () => {
+    const production = store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
+    const reads = [{ requirement: "jobs" as const, id: store.worldId, fence: jobsFence([], store.worldId) },
+      { requirement: "generation-routes" as const, id: store.worldId, fence: productionReadFence(dependencies.getGenerationRouteRows!()) },
+      { requirement: "timeline" as const, id: "saltlight", fence: timelineFence(production, store.getBundle().artifacts) }];
+    const receipts = reads.map(read => ({ id: newId("check"), runId: newId("run"), tool: "target-read" as const, status: "complete" as const,
+      consulted: [], target: { requirement: read.requirement, id: read.id }, observedRevisionOrDigest: read.fence, complete: true, nextCursor: null, at: AT }));
+    const actions: ModelWorldChatAction[] = [{ ...music(), ref: "cue", checkReceiptIds: receipts.slice(0, 2).map(r => r.id) },
+      { kind: "production-audio-cue", productionId: "saltlight", source: { kind: "generation", actionRef: "cue", outputIndex: 0 }, after: ["cue"],
+        trackId: "tr_music", startFrame: 0, durationFrames: 12, sourceInFrames: 0, gainDb: -6, role: "music", checkReceiptIds: [receipts[2]!.id] }];
+    const turn = { conversationId, turnId: newId("turn"), entryContext: { kind: "production" as const, productionId: "saltlight" },
+      candidates: [], groups: [], existingCandidates: [], existingGroups: [], bibleEdits: [], bibleBaseVersion: 1, sceneEdits: [], sceneBaseVersion: null, editorRequests: [], actions, receipts, at: AT };
+    assert.throws(() => prepareWorldChatActions(store, lifecycle, { ...turn, actions: [actions[0]!, { ...actions[1]!, after: [] }] }, dependencies), /earlier generation action in after/);
+    const prepared = prepareWorldChatActions(store, lifecycle, turn, dependencies);
+    for (const item of prepared) { await log.append({ type: "action.prepare-intent", intent: item.intent }, { at: AT }); await lifecycle.bindIntent(item.intent, item.payload); }
+    return (await view()).actions.slice(-2);
+  };
+  const decide = async (card: ConversationActionCard, decision: "approve" | "deny" = "approve") => lifecycle.decide({ kind: "conversation-action-decide",
+    worldId: store.worldId, conversationId, actionId: card.actionId, expectedConversationSeq: (await view()).seq, expectedStatus: "pending", decision, requestId: ulid() });
+  const denied = await bind();
+  assert.equal(denied[1]!.availableDecisions.includes("approve"), false);
+  await decide(denied[0]!, "deny");
+  assert.equal((await view()).actions.find(c => c.actionId === denied[1]!.actionId)!.availableDecisions.includes("approve"), false);
+  assert.equal(admitted.length, 0);
+  const cards = await bind();
+  const generationOutcome = await decide(cards[0]!);
+  assert.equal(generationOutcome.status, "queued", JSON.stringify((await view()).actions.find(card => card.actionId === cards[0]!.actionId)));
+  assert.equal((await readWorldMeta(worldDir)).schemaVersion, 57);
+  await assert.rejects(readWorldMeta(worldDir, { supports: 56 }), /newer|schema|version/i);
+  const sessionId = cards[0]!.authority.id, bench = new BenchStore(sessionDir(worldDir, sessionId));
+  const session = readBenchSession(worldDir, sessionId)!;
+  assert.deepEqual(session.subject, { kind: "production", productionId: "saltlight", productionTitle: store.getBundle().productions.find(p => p.meta.id === "saltlight")!.meta.title, role: "music" });
+  const take = session.takes[0]!, bytes = wav(Array(48000).fill(1000)), hash = audioHash(bytes);
+  await mkdir(join(sessionDir(worldDir, sessionId), "media", take.id), { recursive: true });
+  await writeFile(join(sessionDir(worldDir, sessionId), "media", take.id, "cue.wav"), bytes);
+  await bench.append({ type: "take-completed", takeId: take.id, media: { file: "cue.wav", hash, info: { durationSec: 1, hasAudio: true, hasVideo: false } }, completedAt: AT }, { at: AT });
+  await lifecycle.reconcileAction(conversationId, cards[0]!.actionId);
+  const child = (await view()).actions.find(card => card.actionId === cards[1]!.actionId)!;
+  assert.equal(child.availableDecisions.includes("approve"), true);
+  assert.equal((await decide(child)).status, "completed");
+  let production = store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
+  const request = production.editorRequests.find(r => r.actionId === child.actionId)!;
+  assert.equal(request.status, "pending");
+  const artifact = store.getBundle().artifacts.find(a => a.generation?.source === "bench" && a.generation.takeId === take.id)!;
+  assert.equal(artifact.production, "saltlight");
+  assert.equal(production.timeline?.status === "ready" && production.timeline.timeline.tracks.find(t => t.id === "tr_music")!.clips.length, 0);
+  await lifecycle.reconcileAction(conversationId, child.actionId);
+  await decideEditorRequest(store, { productionId: "saltlight", requestId: request.id, decision: "accept", now: AT });
+  production = store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
+  assert.ok(production.timeline?.status === "ready");
+  const clip = production.timeline.timeline.tracks.find(t => t.id === "tr_music")!.clips[0]!;
+  assert.equal(clip.gainDb, -6); assert.equal(clip.role, "music"); assert.equal(clip.startFrame, 0); assert.equal(clip.durationFrames, 12);
+  assert.deepEqual(clip.source, { kind: "artifact", artifactId: artifact.id, label: "Music Take 1" });
+  assert.equal(admitted.length, 1);
+  assert.equal(production.editorRequests.filter(r => r.actionId === child.actionId).length, 1);
+});
 
 it("quotes and denies a title cue without creating a session, then approves one session and one job exactly once", async t => {
   const { store, worldDir, admitted, deps } = await setup(t);

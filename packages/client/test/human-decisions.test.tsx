@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import { newId, orderedShots, StageReviewSchema, VoiceSampleReviewSchema, WorldChatWorkspaceSchema, type ClientMessage, type HumanDecisionCard, type HumanDecisionControl } from "@arke-studio/contracts";
+import { newId, orderedShots, ScratchPerformanceSchema, StageReviewSchema, VoiceSampleReviewSchema, WorldChatWorkspaceSchema, type ClientMessage, type HumanDecisionCard, type HumanDecisionControl } from "@arke-studio/contracts";
 import { HumanDecisionCardView } from "../src/components/human-decision-card.js";
 import { ConversationTranscript } from "../src/components/conversation.js";
 import { SceneStage } from "../src/screens/scene-workspace/stage.js";
@@ -12,12 +12,13 @@ import { SelectionProvider } from "../src/screens/scene-workspace/selection.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+import { setAudioFactoryForTest } from "../src/lib/audio.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node,
   IS_REACT_ACT_ENVIRONMENT: true, requestAnimationFrame: () => 1, cancelAnimationFrame() {} });
 let root: Root | undefined;
-afterEach(async () => { await act(async () => root?.unmount()); dom.document.body.replaceChildren(); __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE); });
+afterEach(async () => { await act(async () => root?.unmount()); dom.document.body.replaceChildren(); __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE); setAudioFactoryForTest(null); });
 function card(control: HumanDecisionControl): HumanDecisionCard {
   return { id: "decision", worldId: FIXTURE_STATE.world!.meta.worldId, conversationId: newId("cv"), title: "Your decision", status: "pending",
     body: { family: "human-decision", reason: "Only you can decide this", control } };
@@ -31,6 +32,40 @@ async function mount(element: React.ReactNode) {
   return { host, sent };
 }
 const press = async (button: HTMLElement) => { await act(async () => button.click()); };
+
+it("auditions a performance in the thread, sends native review fences, ignores unrelated replies and confirms purge", async () => {
+  const world = structuredClone(FIXTURE_STATE.world!), production = world.productions.find(p => p.meta.id === "saltlight")!, scene = production.scenes[0]!;
+  const id = newId("pf"), at = "2026-10-04T12:00:00Z", hash = `sha256:${"2".repeat(64)}`;
+  const technical = { container: "wav", codec: "pcm_s16le", sampleFormat: "s16", sampleRateHz: 48000, channels: 1, bitDepth: 16, durationSec: 1, sizeBytes: 100 };
+  const codes = ["decode", "duration", "technicalFormat", "clipping", "silence", "dcOffset", "truePeak", "lufs", "noiseFloor", "snr", "speechPresence", "musicLikelihood", "multipleSpeakers", "transcriptMatch"];
+  const performance = ScratchPerformanceSchema.parse({ id, kind: "scratch", target: { productionId: production.meta.id, sceneId: scene.id, sceneVersion: scene.version,
+    shotId: orderedShots(scene)[0]!.id, speakerSheetId: "maren-kest", authoredTextHash: hash }, file: `sha256-${"2".repeat(64)}.wav`, createdAt: at, recordedAt: at,
+    captureAcknowledgement: { basis: "self", statementVersion: 1, at }, provenance: { schemaVersion: 1,
+      source: { kind: "performance-recording", productionId: production.meta.id, performanceId: id, sourceFile: "capture.wav", sourceMediaHash: hash },
+      sourceTechnical: technical, outputTechnical: technical, outputHash: hash, preparation: [], createdAt: at,
+      qualityReport: { schemaVersion: 1, sourceHash: hash, analyzer: { id: "arke-pcm-qc", version: 1, policyVersion: 1 }, analyzedAt: at, technical,
+        measurements: { samplePeakDbfs: null, rmsDbfs: null, fullScaleSampleCount: null, leadingSilenceSec: null, trailingSilenceSec: null, longestInternalSilenceSec: null, dcOffset: null },
+        checks: Object.fromEntries(codes.map(code => [code, { code, outcome: code === "silence" ? "warning" : "pass" }])) } } });
+  production.performances = [performance];
+  const { host, sent } = await mount(<HumanDecisionCardView card={card({ kind: "performance-review", productionId: production.meta.id, performanceId: id })} />);
+  await act(async () => __setStateForTest({ ...FIXTURE_STATE, world }));
+  const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(value => value.textContent === label)!;
+  assert.equal(button("Accept and choose").disabled, true); assert.match(host.textContent!, /silence: warning/);
+  let blocked = true;
+  setAudioFactoryForTest(() => ({ src: "", currentTime: 0, duration: 1, async play() { if (blocked) throw new Error("Decode failed"); }, pause() {}, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {} }));
+  await press(button("Hear performance")); assert.equal(button("Accept and choose").disabled, true);
+  blocked = false; await press(button("Hear performance")); await press(button("Accept and choose"));
+  const review = sent.find((message): message is Extract<ClientMessage, { kind: "review-performance" }> => message.kind === "review-performance")!;
+  assert.equal(review.performanceId, id); assert.equal(review.decision, "accept"); assert.equal(review.select, true);
+  assert.equal(review.expectedReviewHash, production.performanceReview.reviewHash); assert.equal(review.expectedSelectionHash, production.performanceReview.selectionHash); assert.equal(review.expectedSceneVersion, scene.version);
+  await act(async () => __applyEventForTest({ type: "performance.result", at, requestId: newId("pf").slice(3), worldId: world.meta.worldId, productionId: production.meta.id, status: "reviewed" }));
+  assert.equal(button("Reject").disabled, true, "another request cannot settle this review");
+  await act(async () => __applyEventForTest({ type: "performance.result", at, requestId: review.requestId, worldId: world.meta.worldId, productionId: production.meta.id, status: "refused", reason: "Selection changed" }));
+  assert.match(host.textContent!, /Selection changed/);
+  await press(button("Purge local media")); assert.equal(sent.some(message => message.kind === "purge-performance"), false);
+  await press(button("Confirm purge")); assert.equal(sent.at(-1)!.kind, "purge-performance");
+  assert.equal(sent.some(message => message.kind === "conversation-action-decide"), false);
+});
 
 it("keeps outstanding human decisions reachable beyond the bounded message window and sends the exact plan command", async () => {
   const decision = card({ kind: "plan", productionId: "saltlight", planId: newId("pl"), passIndex: 2, gate: "reconfirm", capMicroUsd: 1_000_000, estimatedMicroUsd: 400_000 });

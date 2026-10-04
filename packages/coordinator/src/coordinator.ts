@@ -39,6 +39,7 @@ import { guardProductionSetupAuthority } from "./productions/setup-authority.js"
 import { StageConstructor } from "./productions/stage-construction.js";
 import { worldImageReferences, stagedWorldImage } from "@arke-studio/contracts";
 import { GenerationQuotes } from "./world-chat/generation-quotes.js";
+import { productionAudioGenerationSource } from "./world-chat/production-audio-generation.js";
 import { productionGenerationSource } from "./world-chat/production-generation.js";
 import { ProductionTakeFiling } from "./world-chat/production-take-filing.js";
 import { BenchReservedTakeSchema } from "@arke-studio/contracts";
@@ -12392,6 +12393,7 @@ export class Coordinator {
             return;
           }
           const subject = bench.session.subject;
+          if (subject.kind === "production") { answer(null, "Production audio uses the music composer; it has no shot prefill to rebuild."); return; }
           const settings = this.appSettings ? await this.appSettings.load() : null;
           const reader = worldFileReader(store.dir);
           const prepared = await prepareBenchSubject(store.getBundle(), {
@@ -12645,7 +12647,7 @@ export class Coordinator {
         // resolved, so a read that could not clear refuses nothing, as the planned-scene arm holds.
         const benchModel = this.opts.manifest?.models.find((candidate) => candidate.id === bench.session.composer.model);
         const benchRoute = benchModel === undefined ? null : characterAudioRoute(benchModel);
-        const castVoices = bench.session.subject && benchParams.kind === "video" && !benchParams.audioReferencesDisabled && fromTake === undefined && benchRoute !== null
+        const castVoices = bench.session.subject && bench.session.subject.kind !== "production" && benchParams.kind === "video" && !benchParams.audioReferencesDisabled && fromTake === undefined && benchRoute !== null
           ? await resolveSubjectCastVoices(store, bench.session.subject, msg.requestId, benchRoute.local === true)
           : { references: [], notSent: [], refused: [] };
         if (castVoices.refused.length > 0) {
@@ -12831,7 +12833,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         const bench = await this.benchFor(msg.worldId, msg.sessionId);
         if (!store || !bench) return;
-        if (bench.session.subject !== undefined) return;
+        if (bench.session.subject !== undefined && bench.session.subject.kind !== "production") return;
         const take = bench.session.takes.find((t) => t.id === msg.takeId);
         if (!take || !take.media) return;
         // Idempotent by take id: a filed take answers with the artifact it already made.
@@ -19087,6 +19089,7 @@ export class Coordinator {
     const artifact = await fileGeneratedArtifact(store, {
       sourcePath,
       generation,
+      ...(bench.session.subject?.kind === "production" ? { production: bench.session.subject.productionId } : {}),
       precondition,
       expectedMediaHash: take.media.hash,
       ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
@@ -19860,7 +19863,7 @@ export class Coordinator {
     const revision = prepared.revision;
     // Resolve the same cast inputs as Bench dispatch, without recording upload rights.
     const benchRoute = model === null ? null : characterAudioRoute(model);
-    const castVoices = session.subject && session.composer.params.kind === "video" && !session.composer.params.audioReferencesDisabled && benchRoute
+    const castVoices = session.subject && session.subject.kind !== "production" && session.composer.params.kind === "video" && !session.composer.params.audioReferencesDisabled && benchRoute
       ? await resolveSubjectCastVoices(store, session.subject, actionId, benchRoute.local === true, { acknowledge: false, at: createdAt })
       : { references: [], notSent: [], refused: [] };
     if (castVoices.refused.length) throw new Error(castVoices.refused.map(entry => `${entry.name}: voice not sent · ${entry.reason}`).join(" · "));
@@ -20089,7 +20092,7 @@ export class Coordinator {
           if (!bench || this.stopping || !this.stillOpen(store)) throw new Error("The owning Bench is unavailable.");
           const model = this.opts.manifest?.models.find(candidate => candidate.id === action.composer.model && candidate.provider === action.composer.provider);
           const route = model ? characterAudioRoute(model) : null;
-          if (bench.session.subject && action.composer.params.kind === "video" && !action.composer.params.audioReferencesDisabled && route) {
+          if (bench.session.subject && bench.session.subject.kind !== "production" && action.composer.params.kind === "video" && !action.composer.params.audioReferencesDisabled && route) {
             const cast = await resolveSubjectCastVoices(store, bench.session.subject, id, route.local === true, { at: quotedAt });
             if (cast.refused.length) throw new Error("The approved cast audio could not be cleared.");
           }
@@ -20163,6 +20166,22 @@ export class Coordinator {
         refresh: async sessionId => { await this.refreshWorldSnapshot(store.worldId); await this.refreshBench(store.worldId, sessionId); },
       }),
       productionBatchQuotes: new GenerationQuotes(store, productionBatchSource(store, this.productionBatchPorts(store)), quotePorts),
+      productionAudioQuotes: new GenerationQuotes(store, productionAudioGenerationSource(store, {
+        manifest: this.opts.manifest ?? null, settings: () => this.appSettings ? this.appSettings.load() : Promise.resolve(null),
+        providers: () => this.readModel.getState().app.providers, jobs: quotePorts.jobs,
+        reader: async (model, voiceId) => {
+          if (model.provider === "kokoro" && !this.voiceService?.localSpeechConfigured) throw new Error("Local narration is unavailable on this host.");
+          await this.requireEnabledSpeechReader(model, voiceId);
+        }, narrator: productionId => this.tableReadNarrator(store, productionId),
+        freeze: input => this.freezeLocalIdentity(input), tools: this.opts.audioMediaTools ?? null,
+        confirmUploads: async (inputs, actionId) => {
+          const voices = await inspectBenchVoiceInputs(store, inputs);
+          for (const consent of voices.consents) {
+            if (await this.requireVoiceUploadConfirmation({ worldId: store.worldId, requestId: actionId, command: "voice-line",
+              ...(consent.token ? { voiceUploadConfirmedFor: consent.token } : {}), reader: { store, provider: consent.provider, voice: consent.voice } })) throw new Error("The cloned voice upload was not confirmed.");
+          }
+        },
+      }), quotePorts),
       productionBatchControls: new ProductionBatchControls(store, this.productionBatchPorts(store)),
       productionGenerationQuotes: new GenerationQuotes(store, productionGenerationSource(store, {
         manifest: this.opts.manifest ?? null,

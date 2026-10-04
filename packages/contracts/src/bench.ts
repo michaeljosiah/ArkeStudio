@@ -519,6 +519,8 @@ export const BenchRequestSnapshotSchema = z
       .optional(),
     /** The production values frozen when this paid request was authorized. */
     productionProvenance: ProvenanceSchema.optional(),
+    /** Audio belongs to the production without claiming shot or board filing. */
+    productionAudio: z.object({ productionId: SlugSchema, role: z.enum(["music", "ambience"]) }).strict().optional(),
     /** Fixed filing identities and segment boundaries for a subject-bound take. */
     filing: z
       .discriminatedUnion("kind", [
@@ -592,7 +594,10 @@ export const BenchRequestSnapshotSchema = z
     if (request.filing?.kind === "board" && request.mode !== "video") {
       ctx.addIssue({ code: "custom", message: "board filing belongs to a video request" });
     }
-    if ((request.filing === undefined) !== (request.productionProvenance === undefined)) {
+    if (request.productionAudio && (request.mode !== "music" || request.filing !== undefined)) {
+      ctx.addIssue({ code: "custom", message: "production audio is a music request without visual filing" });
+    }
+    if ((request.filing === undefined && request.productionAudio === undefined) !== (request.productionProvenance === undefined)) {
       ctx.addIssue({ code: "custom", message: "production filing and provenance travel together" });
     }
     // minimax-music-3 declares `referenceImages: 0`. Refused at the snapshot rather than
@@ -703,6 +708,8 @@ const BenchSubjectContextShape = {
 
 /** Stable production identity and current display/timing snapshots carried by a subject session. */
 export const BenchSubjectSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("production"), productionId: SlugSchema, productionTitle: z.string().min(1),
+    role: z.enum(["music", "ambience"]) }).strict(),
   z
     .object({
       kind: z.literal("shot"),
@@ -744,8 +751,10 @@ export const BenchSubjectSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 export type BenchSubject = z.infer<typeof BenchSubjectSchema>;
+export type VisualBenchSubject = Exclude<BenchSubject, { kind: "production" }>;
 
 function sameBenchSubjectIdentity(left: BenchSubject, right: BenchSubject): boolean {
+  if (left.kind === "production" || right.kind === "production") return left.kind === "production" && right.kind === "production" && left.productionId === right.productionId && left.role === right.role;
   if (
     left.kind !== right.kind ||
     left.productionId !== right.productionId ||
@@ -762,6 +771,7 @@ function sameBenchSubjectIdentity(left: BenchSubject, right: BenchSubject): bool
 }
 
 export function benchSubjectTitle(subject: BenchSubject): string {
+  if (subject.kind === "production") return `${subject.productionTitle} · ${subject.role}`;
   const compact = (value: string): string =>
     value.length <= 32 ? value : `${value.slice(0, 29)}...`;
   const chain = [
@@ -887,6 +897,9 @@ export const BenchSessionSchema = z
     // wants the clip (SPEC-036 R-36) — so only a board is pinned to one mode.
     if (session.subject?.kind === "board" && session.composer.mode !== "video") {
       ctx.addIssue({ code: "custom", message: "a board subject uses video mode" });
+    }
+    if (session.subject?.kind === "production" && session.composer.mode !== "music") {
+      ctx.addIssue({ code: "custom", message: "a production audio subject uses music mode" });
     }
     if (session.subject?.kind === "shot" && session.composer.mode !== "image" && session.composer.mode !== "video") {
       ctx.addIssue({ code: "custom", message: "a shot subject uses image or video mode" });

@@ -25,7 +25,7 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
   const production = store.getBundle().productions.find(p => p.meta.id === productionId), scene = production?.scenes.find(s => s.id === sceneId);
   if (!production || !scene) throw new Error("This rehearsal scene is unavailable.");
   const narration = productionShape(production.meta).playsAsBeats;
-  const items: TableReadPlan["items"] = [], cloud: EnqueueInput[] = [], local: Array<{ file: string; spec: SpeechSpec }> = [], bindings: unknown[] = [];
+  const items: TableReadPlan["items"] = [], cloud: EnqueueInput[] = [], queued: EnqueueInput[] = [], local: Array<{ file: string; spec: SpeechSpec }> = [], bindings: unknown[] = [];
   // A plan may contain many lines for one reader. Revalidate on the next plan/confirmation,
   // not once per line; neither successful nor refused discovery survives this invocation.
   const readerProblems = new Map<string, string | null>();
@@ -92,19 +92,21 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
     const problem = readerProblems.get(readerKey);
     if (problem) { item.reason = problem; continue; }
     if (!speechInputFits(spec.text, model.limits)) { item.reason = "The line exceeds this model's speech input limit."; continue; }
-    if (model.provider === "kokoro") { item.route = "local"; local.push({ file, spec }); continue; }
-    item.route = "cloud"; item.estimatedMicroUsd = estimateSpeechMicroUsd(model, spec.text);
-    cloud.push({ worldId: store.worldId, productionId, target: { kind: "table-read-cache", id: line.id }, capability: "voice-tts", provider: model.provider, model: model.id,
+    if (model.provider === "kokoro") { item.route = "local"; local.push({ file, spec }); }
+    else { item.route = "cloud"; item.estimatedMicroUsd = estimateSpeechMicroUsd(model, spec.text); }
+    const input: EnqueueInput = { worldId: store.worldId, productionId, target: { kind: "table-read-cache", id: line.id }, capability: "voice-tts", provider: model.provider, model: model.id,
       params: { voiceId: voice.voiceId, text: spec.text, tableReadSceneId: sceneId, tableReadInputHash: inputHash, tableReadCacheFile: file, tableReadSpec: spec,
         tableReadVoiceAssignment: voice, ...(line.narration ? { tableReadNarration: true } : { tableReadSpeakerSheetId: line.speakerSheetId }),
         tableReadSceneVersion: scene.version }, estimatedMicroUsd: item.estimatedMicroUsd,
-      landing: { dir: ".cache/voice-previews", name: file.split("/").at(-1)! } });
+      landing: { dir: ".cache/voice-previews", name: file.split("/").at(-1)! } };
+    queued.push(input);
+    if (model.provider !== "kokoro") cloud.push(input);
   }
   const totalEstimatedMicroUsd = items.reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
   const confirmationToken = audioHash(Buffer.from(JSON.stringify({ worldId: store.worldId, productionId, sceneId, version: scene.version,
     manifestVersion: manifest.manifestVersion, generated: manifest.generated, items, bindings })));
   cloud.forEach((job, index) => { job.idempotencyKey = `table-read/${confirmationToken}/${index}`; });
-  return { plan: TableReadPlanSchema.parse({ productionId, sceneId, sceneVersion: scene.version, confirmationToken, totalEstimatedMicroUsd, items }), cloud, local };
+  return { plan: TableReadPlanSchema.parse({ productionId, sceneId, sceneVersion: scene.version, confirmationToken, totalEstimatedMicroUsd, items }), cloud, local, queued };
 }
 export async function prepareLocalTableRead(store: WorldStore, voice: VoiceService, inputs: readonly { file: string; spec: SpeechSpec }[]) {
   const failures: string[] = [];

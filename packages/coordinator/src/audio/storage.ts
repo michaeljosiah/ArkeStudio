@@ -105,13 +105,27 @@ export interface PreparedAudioCandidate {
 /** No consumer writes or paid calls. The caller retains this server-side candidate until the
  * director explicitly accepts it. All staging/cache mutations share the world's ownership. */
 export async function prepareAudio(store: WorldStore, tools: AudioMediaTools, request: AudioSourceRequest,
-  options: { gainDb?: number; signal?: AbortSignal } = {}): Promise<PreparedAudioCandidate> {
+  options: { gainDb?: number; signal?: AbortSignal; operationId?: string } = {}): Promise<PreparedAudioCandidate> {
   return store.gateOp(async () => {
     const signal = options.signal ? AbortSignal.any([options.signal, store.closingSignal]) : store.closingSignal;
     const resolved = await resolveAudioSource(store, request);
-    const operationId = randomUUID();
+    const operationId = options.operationId ?? randomUUID();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(operationId)) throw new Error("audio-candidate-invalid");
     const prefix = `.staging/audio/${operationId}`;
     const stagedFile = `${prefix}/prepared.wav`;
+    // A conversation approval retains its identity. Never erase or re-run a preparation
+    // whose acknowledgement was interrupted; only a complete matching candidate rejoins it.
+    if (options.operationId && await lstat(join(store.dir, prefix)).then(() => true, error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    })) {
+      const retained = JSON.parse(await readFile(await audioWorldPath(store.dir, `${prefix}/candidate.json`), "utf8")) as PreparedAudioCandidate;
+      const provenance = AudioAssetProvenanceSchema.parse(retained.provenance);
+      if (retained.operationId !== operationId || retained.stagedFile !== stagedFile ||
+        JSON.stringify(retained.request) !== JSON.stringify(request) || JSON.stringify(provenance.source) !== JSON.stringify(resolved.source) ||
+        (await hashAudioFile(await audioWorldPath(store.dir, stagedFile), signal)).hash !== provenance.outputHash) throw new Error("audio-candidate-invalid");
+      return { ...retained, provenance };
+    }
     const destinationPath = await audioWorldPath(store.dir, stagedFile, true);
     try {
       // Work on frozen bytes. A later external edit cannot redirect ffmpeg to a different file.
@@ -121,7 +135,8 @@ export async function prepareAudio(store: WorldStore, tools: AudioMediaTools, re
       await writeFile(frozenPath, bytes, { flag: "wx" });
       const measured = await tools.probe({ absolutePath: frozenPath, expectedHash: resolved.source.sourceMediaHash, signal });
       const prepared = await tools.preparePcmWav({ sourcePath: frozenPath, expectedSourceHash: resolved.source.sourceMediaHash,
-        destinationPath, ...(resolved.physicalRange ? { range: resolved.physicalRange } : {}), ...options, signal });
+        destinationPath, ...(resolved.physicalRange ? { range: resolved.physicalRange } : {}),
+        ...(options.gainDb === undefined ? {} : { gainDb: options.gainDb }), signal });
       const cacheFile = await audioWorldPath(store.dir, `.cache/audio-qc/${audioQcCacheKey(prepared.outputHash)}`, true);
       let report = await readFile(cacheFile, "utf8").then(text => AudioQcReportSchema.parse(JSON.parse(text))).catch(() => null);
       if (!report || report.sourceHash !== prepared.outputHash || report.analyzer.version !== 1 || report.analyzer.policyVersion !== 1) {

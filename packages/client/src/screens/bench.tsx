@@ -302,7 +302,8 @@ function BenchWorkspace({
   const connection = useStore().connection;
   const navigate = useNavigate();
   const worldSlug = world?.meta.slug;
-  const subject = session.subject;
+  const productionAudio = session.subject?.kind === "production" ? session.subject : undefined;
+  const subject = session.subject?.kind === "production" ? undefined : session.subject;
   const [chatOpen, setChatOpen] = useState(false);
   const [chatOpened, setChatOpened] = useState(false);
 
@@ -1042,7 +1043,7 @@ function BenchWorkspace({
   });
 
   const switchMode = (mode: BenchMode) => {
-    if (mode === draft.mode || subject !== undefined) return;
+    if (mode === draft.mode || subject !== undefined || productionAudio !== undefined) return;
     modeMemory.current[draft.mode] = { provider: draft.provider, model: draft.model, params: draft.params };
     compose({
       ...draft,
@@ -1277,7 +1278,7 @@ function BenchWorkspace({
     </select>
   );
   const sessionTitle =
-    subject === undefined ? (session.title ?? "Untitled session") : (session.title ?? benchSubjectTitle(subject));
+    productionAudio ? benchSubjectTitle(productionAudio) : subject === undefined ? (session.title ?? "Untitled session") : (session.title ?? benchSubjectTitle(subject));
   /**
    * The chain as the design splits it (R-24; design 2609-2612): a mono crumb, the subject, its
    * own line, and what this screen is. One bold string in a switcher button was the world
@@ -1285,7 +1286,7 @@ function BenchWorkspace({
    * where you are instead.
    */
   const provenance =
-    subject === undefined
+    productionAudio ? { crumb: productionAudio.productionTitle, title: "Production audio", sub: productionAudio.role } : subject === undefined
       ? null
       : {
           crumb: [
@@ -1311,7 +1312,7 @@ function BenchWorkspace({
     0,
   );
   const back =
-    subject === undefined
+    productionAudio ? { label: productionAudio.productionTitle, to: `/w/${worldId}/p/${productionAudio.productionId}` } : subject === undefined
       ? { label: world?.meta.name ?? "Artifacts", to: `/w/${worldId}/artifacts` }
       : {
           label: `Scene ${subject.sceneNumber}`,
@@ -1491,9 +1492,9 @@ function BenchWorkspace({
       <div className="fy-bench">
         {/* ---- the destination rail (design 142a) — the world's places, or the production's
             when the session belongs to a shot or a board; the initial on top says whose. ---- */}
-        <nav className="fy-bench__rail" aria-label={subject === undefined ? "World destinations" : "Production destinations"}>
+        <nav className="fy-bench__rail" aria-label={subject === undefined && !productionAudio ? "World destinations" : "Production destinations"}>
           <span className="fy-bench__railmark" aria-hidden="true">
-            {(subject === undefined ? world?.meta.name : subject.productionTitle)?.trim().charAt(0).toUpperCase() ?? ""}
+            {(productionAudio?.productionTitle ?? (subject === undefined ? world?.meta.name : subject.productionTitle))?.trim().charAt(0).toUpperCase() ?? ""}
           </span>
           {subject === undefined && (
             <button
@@ -1508,7 +1509,7 @@ function BenchWorkspace({
               <Plus size={15} />
             </button>
           )}
-          {(subject === undefined
+          {(subject === undefined && !productionAudio
             ? DESTINATIONS.map(([slug, label, Mark]) => ({
                 key: slug,
                 label,
@@ -1521,7 +1522,7 @@ function BenchWorkspace({
                 label,
                 Mark,
                 current: slug === "bench",
-                to: slug === "bench" ? null : `/w/${worldId}/p/${subject.productionId}${slug ? `/${slug}` : ""}`,
+                to: slug === "bench" ? null : `/w/${worldId}/p/${productionAudio?.productionId ?? subject?.productionId}${slug ? `/${slug}` : ""}`,
               }))
           ).map(({ key, label, Mark, current, to }) => (
             <button
@@ -1562,7 +1563,7 @@ function BenchWorkspace({
               </div>
             ) : (
             <div className="fy-bench__mode" role="group" aria-label="What to make">
-              {(["image", "video", "voice", "music"] as const).map((mode) => (
+              {(productionAudio ? (["music"] as const) : (["image", "video", "voice", "music"] as const)).map((mode) => (
                 <button
                   key={mode}
                   type="button"

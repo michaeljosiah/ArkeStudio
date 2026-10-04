@@ -301,7 +301,7 @@ describe("the fold", () => {
     ]);
 
     assert.deepEqual(session.tokenRegistry.map((entry) => entry.token), ["Image 1", "Image 2", "Image 3"]);
-    assert.equal(session.subject?.durationSec, 6);
+    assert.equal(session.subject?.kind === "production" ? undefined : session.subject?.durationSec, 6);
     assert.equal(session.title, "Current shot title");
     assert.equal(session.composer.brief, "Maren turns toward @Image 3.");
     assert.deepEqual(session.composer.activeTokens, ["Image 1", "Image 3"]);

@@ -1,6 +1,6 @@
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { lstat, readFile, readdir, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 import { AudioAssetProvenanceSchema, CharacterVoiceSampleSchema, ReferenceKitSchema, SlugSchema, VoiceSampleReviewSchema,
   estimateMicroUsd, supportsCharacterSpeakingVideo, type ClientMessage, type ManifestModel, type VoiceSampleReview } from "@arke-studio/contracts";
@@ -10,7 +10,7 @@ import { readKit } from "../references/kit.js";
 import { sha256 } from "../world/text-files.js";
 import { appendAudioRights } from "./rights.js";
 import { acceptPreparedAudio, audioWorldPath, prepareAudio, resolveAudioSource, type PreparedAudioCandidate } from "./storage.js";
-import type { AudioMediaTools } from "./media-tools.js";
+import { hashAudioFile, type AudioMediaTools } from "./media-tools.js";
 import { containedWorldFilePath } from "../world/contained-file.js";
 
 type Prepare = Extract<ClientMessage, { kind: "prepare-character-voice-sample" }>;
@@ -23,11 +23,28 @@ function character(store: WorldStore, id: string) {
   return sheet;
 }
 
-export async function prepareCharacterSample(store: WorldStore, tools: AudioMediaTools, request: Prepare): Promise<VoiceSampleReview> {
+export async function prepareCharacterSample(store: WorldStore, tools: AudioMediaTools, request: Prepare,
+  identity: { operationId?: string } = {}): Promise<VoiceSampleReview> {
   character(store, request.sheetId);
   if (request.source.kind === "legacy-character-sample" && request.source.sheetId !== request.sheetId) throw new Error("audio-candidate-invalid");
   const base = await readKit(store, request.sheetId);
-  const candidate = await prepareAudio(store, tools, request.source);
+  if (identity.operationId) {
+    z.string().uuid().parse(identity.operationId);
+    const exists = await lstat(join(store.dir, ".staging", "audio", identity.operationId)).then(() => true, error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    });
+    const retained = exists ? await readFile(await audioWorldPath(store.dir, contextPath(identity.operationId)), "utf8").catch(error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }) : null;
+    if (retained !== null) {
+      const context = JSON.parse(retained) as { worldId: string; sheetId: string; candidate: PreparedAudioCandidate };
+      if (context.worldId !== store.worldId || context.sheetId !== request.sheetId || JSON.stringify(context.candidate.request) !== JSON.stringify(request.source)) throw new Error("audio-candidate-invalid");
+      return resumeCharacterSample(store, request.sheetId, identity.operationId);
+    }
+  }
+  const candidate = await prepareAudio(store, tools, request.source, identity);
   const resolved = await resolveAudioSource(store, request.source);
   const review = VoiceSampleReviewSchema.parse({ operationId: candidate.operationId, sheetId: request.sheetId,
     sourceFile: resolved.file, preparedFile: candidate.stagedFile, provenance: candidate.provenance });
@@ -47,7 +64,8 @@ export async function resumeCharacterSample(store: WorldStore, sheetId: string, 
   if (context.worldId !== store.worldId || context.sheetId !== sheetId || context.candidate.operationId !== operationId) throw new Error("audio-candidate-invalid");
   const source = await resolveAudioSource(store, context.candidate.request);
   if (JSON.stringify(source.source) !== JSON.stringify(context.candidate.provenance.source)) throw new Error("audio-source-changed");
-  await audioWorldPath(store.dir, context.candidate.stagedFile);
+  const prepared = await audioWorldPath(store.dir, context.candidate.stagedFile);
+  if ((await hashAudioFile(prepared, store.closingSignal)).hash !== context.candidate.provenance.outputHash) throw new Error("audio-candidate-invalid");
   return VoiceSampleReviewSchema.parse({ operationId, sheetId, sourceFile: source.file,
     preparedFile: context.candidate.stagedFile, provenance: context.candidate.provenance });
 }

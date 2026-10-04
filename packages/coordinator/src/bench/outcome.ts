@@ -37,7 +37,7 @@ export async function recordBenchOutcome(
   filing: SubjectFilingOutcome,
 ): Promise<ConversationId> {
   const subject = session.subject;
-  if (subject === undefined) throw new Error("a subject outcome needs a subject session");
+  if (subject === undefined || subject.kind === "production") throw new Error("a scene outcome needs a visual subject session");
   return serialiseSceneConversation(
     store.dir,
     subject.productionId,
@@ -53,6 +53,7 @@ async function recordBenchOutcomeUnserialised(
   filing: SubjectFilingOutcome,
 ): Promise<ConversationId> {
   const subject = session.subject!;
+  if (subject.kind === "production") throw new Error("a scene outcome needs a visual subject session");
   const requestId = `bench-outcome:${session.id}/${take.id}`;
   const matching = (await discoverConversations(store.dir)).summaries
     .filter((summary) => {
