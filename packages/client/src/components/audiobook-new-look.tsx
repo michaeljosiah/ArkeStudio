@@ -78,7 +78,7 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
   const closeRequest = chosenTake === null ? undefined : asked[chosenTake.id];
   const closeJob = closeRequest === undefined ? undefined : lookJobs(jobs, (params) => params["lookBatch"] === closeRequest)[0];
   const closeEnded = lookJobState(closeJob);
-  const closeFailed = closeTake !== null || closeRequest === undefined ? null : (queueRefused[closeRequest] ?? (closeEnded?.state === "failed" ? closeEnded.reason : null));
+  const closeFailed = closeTake !== null || closeRequest === undefined ? null : (queueRefused[closeRequest]?.reason ?? (closeEnded?.state === "failed" ? closeEnded.reason : null));
   const closeWaiting = closeOn && chosenTake !== null && closeTake === null && closeRequest !== undefined && closeFailed === null;
   const looks = chapterLooksOf(kit);
 
@@ -155,10 +155,12 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
             : Array.from({ length: LOOK_CANDIDATES }, (_, index) => {
                 const take = candidates[index];
                 // The slots past the pictures made: those whose job ended without one say why, last.
+                // A picture the coordinator would not queue has no job: counted from its answer, not left making.
                 const left = LOOK_CANDIDATES - candidates.length;
-                const failedSlots = batchRefused !== undefined ? left : Math.min(batchFailures.length, left);
+                const reasons = [...batchFailures.map((failure) => failure.reason), ...Array.from({ length: batchRefused?.count ?? 0 }, () => batchRefused!.reason)];
+                const failedSlots = Math.min(reasons.length, left);
                 if (take === undefined && index >= LOOK_CANDIDATES - failedSlots) {
-                  const reason = batchRefused ?? batchFailures[index - (LOOK_CANDIDATES - failedSlots)]?.reason ?? "not made";
+                  const reason = reasons[index - (LOOK_CANDIDATES - failedSlots)] ?? "not made";
                   return (
                     <div key={`failed-${index}`} className="fy-newlook__cand fy-newlook__cand--wait" data-testid="new-look-candidate" data-state="failed">
                       <span className="fy-mono fy-ch__who-where--warn" data-testid="new-look-candidate-reason">{reason}</span>

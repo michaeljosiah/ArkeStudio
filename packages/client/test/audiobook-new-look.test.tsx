@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import type { ClientMessage, ClientState, ManifestModel, Take } from "@arke-studio/contracts";
 import { NewLookSheet } from "../src/components/audiobook-new-look.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -234,6 +234,17 @@ describe("a picture the provider refuses (2026-10-04)", () => {
     assert.deepEqual(cells.map((cell) => cell.getAttribute("data-state")), ["made", "making", "failed"]);
     assert.equal(text(bodyAll('[data-testid="new-look-candidate-reason"]')[0]), "refused by the image safety check");
     assert.ok(bodyAll('[data-testid="new-look-again"]')[0], "Make again is there to try again");
+  });
+
+  it("says why in the slots the coordinator would not queue, when only part of the request was", async () => {
+    const m = await mount(ready());
+    await press(bodyAll('[data-testid="new-look-make"]')[0]);
+    const batch = sentOf(m, "generate-character-looks")[0]!.requestId;
+    await act(async () =>
+      __applyEventForTest({ at: AT, type: "queue.enqueue-result", requestId: batch, command: "generate-character-looks", disposition: "partial", requestedCount: 3, acceptedJobIds: ["jb_01J8Z3X4Y5Z6A7B8C9D0E1F2G1"], failures: [{ index: 1, reason: "The daily limit is reached. Nothing was queued." }, { index: 2, reason: "The daily limit is reached. Nothing was queued." }] } as never),
+    );
+    assert.deepEqual(bodyAll('[data-testid="new-look-candidate"]').map((cell) => cell.getAttribute("data-state")), ["making", "failed", "failed"]);
+    assert.equal(text(bodyAll('[data-testid="new-look-candidate-reason"]')[0]), "The daily limit is reached");
   });
 
   it("says so on the close view, offers Try again, and lets the look be accepted without it", async () => {

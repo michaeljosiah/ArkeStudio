@@ -142,7 +142,7 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
         return { key: planned.block.key, at: clock.starts[index] ?? 0, text: normalizeSpeechText(planned.block.text), ...(speaker !== undefined ? { speaker } : {}) };
       }),
       ...(room.note !== undefined ? { note: room.note } : {}),
-      lines: briefLines(store, room.look, visible.map((person) => person.key)),
+      lines: briefLines(store, room.look, visible.map((person) => person.key), referenceBudgetFor(model) > 0),
       people: visible,
       places: room.places,
       never: room.people.filter((person) => person.neverDepicted).map((person) => person.name),

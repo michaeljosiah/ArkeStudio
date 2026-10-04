@@ -93,7 +93,7 @@ export function makeAdapterPictureDeriver(adapter: HarnessAdapter, sessionInput:
  * kit look it is the line of where the chapter chose one (`[ife] Ife, look "Cream-gold silk slip
  * dress": …`).
  */
-export function briefLines(store: Pick<WorldStore, "getBundle">, look: AudiobookLook | null, keys: readonly string[]): BriefLine[] {
+export function briefLines(store: Pick<WorldStore, "getBundle">, look: AudiobookLook | null, keys: readonly string[], carries = true): BriefLine[] {
   const kits = store.getBundle().referenceKits;
   return lookLinesFor(look, keys).map((line): BriefLine => {
     const sheet = line.key === null ? undefined : look?.characters[line.key]?.sheet;
@@ -101,8 +101,9 @@ export function briefLines(store: Pick<WorldStore, "getBundle">, look: Audiobook
     // The look's image carries the clothes, so its line is given neutrally (rule 4, 2026-10-04): the
     // garment and its colour, never the skin, the cut or the body a model would copy word for word.
     // Given before the frame is known, so a detail shot (no image rides) reads the neutral line too:
-    // a hand or a cuff loses nothing to it, and the cut words are what the safety check refuses.
-    return { label: line.label, key: line.key, text: chosen !== undefined ? neutralClothing(line.text) : line.text, ...(chosen !== undefined ? { look: lookName(chosen) } : {}) };
+    // a hand or a cuff loses nothing to it, and the cut words are what the safety check refuses. A
+    // model that takes no reference picture carries no look image, so its lines stay whole (`carries`).
+    return { label: line.label, key: line.key, text: chosen !== undefined && carries ? neutralClothing(line.text) : line.text, ...(chosen !== undefined ? { look: lookName(chosen) } : {}) };
   });
 }
 
@@ -113,6 +114,8 @@ export function briefLines(store: Pick<WorldStore, "getBundle">, look: Audiobook
  */
 export function neutralWhereLooksRide(prompt: string, who: readonly PictureWho[]): string {
   // Rides means carried: a look the model's reference budget left out sends no image (codex on PR 1559).
+  // The whole prompt is held once one look rides: its prose cannot be cut person by person, and the
+  // safety check refuses the request as a whole for any of those words.
   return who.some((entry) => entry.kind === "character" && entry.look !== undefined && entry.carried) ? neutralClothing(prompt) : prompt;
 }
 
@@ -258,7 +261,7 @@ export async function suggestPicture(store: WorldStore, room: PictureRoom, block
   const sheets = store.getBundle().sheets;
   const speaker = blockSpeakers(sheets, planned.block);
   const maxChars = promptRoom(options.model);
-  const lines = briefLines(store, room.look, visible.map((person) => person.key));
+  const lines = briefLines(store, room.look, visible.map((person) => person.key), referenceBudgetFor(options.model) > 0);
   const given: PictureDeriverInput = {
     title: room.plan.chapter.title,
     ...(room.mood !== undefined ? { mood: room.mood } : {}),

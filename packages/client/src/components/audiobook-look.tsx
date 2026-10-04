@@ -430,7 +430,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
     const take = pendingClose(sheet, chosen.id);
     if (take !== null) return { kind: "made", take };
     const request = closeAsked[chosen.id];
-    if (request !== undefined && queueRefused[request] !== undefined) return { kind: "failed", reason: queueRefused[request]! };
+    if (request !== undefined && queueRefused[request] !== undefined) return { kind: "failed", reason: queueRefused[request]!.reason };
     // A request asked here is followed by its own job; otherwise the newest close job of this look.
     const job = request !== undefined ? lookJobs(jobs, (params) => params["lookBatch"] === request)[0] : lookJobs(jobs, (params) => params["lookFraming"] === "close" && params["lookOfLook"] === chosen.id)[0];
     const ended = lookJobState(job);
@@ -467,7 +467,8 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
                 closeState={(chosen) => closeStateFor(row.sheet!, chosen)}
                 onMakeClose={makeClose}
                 onAcceptClose={(entry, chosen, take) => {
-                  acceptChapterLook(worldId, entry.sheet!, take.id, { closeFor: chosen.id });
+                  // Shown at once only when the command went: a closed connection sends nothing.
+                  if (!acceptChapterLook(worldId, entry.sheet!, take.id, { closeFor: chosen.id })) return;
                   setCloseAccepted((heldViews) => ({ ...heldViews, [chosen.id]: { path: take.path, under: world } }));
                 }}
                 onDiscardClose={(chosen, takeId, again) => {

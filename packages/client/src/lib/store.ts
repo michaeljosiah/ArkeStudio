@@ -4150,8 +4150,8 @@ export function acceptChapterLook(
   sheetId: string,
   takeId: string,
   options: { closeTakeId?: string; closeFor?: string; choose?: { productionId: string; chapterFile: string; key: string; name?: string; sheet?: string } } = {},
-): void {
-  send({ kind: "accept-character-look", worldId, sheetId, takeId, ...options });
+): boolean {
+  return send({ kind: "accept-character-look", worldId, sheetId, takeId, ...options });
 }
 
 /** Which chapters of the book chose each kit look (R-114), answered under the id returned and held in `audiobookAsks`. */

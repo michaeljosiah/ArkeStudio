@@ -27,19 +27,29 @@ export function lookJobs(jobs: readonly Job[], match: (params: Record<string, un
   return jobs.filter((job) => job.target.kind === "character-look" && match(job.params)).sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
 }
 
+/** Pictures of one request the coordinator would not queue: how many, and why. */
+export interface QueueRefusal {
+  reason: string;
+  /** How many of the request's pictures were not queued; the rest have jobs of their own. */
+  count: number;
+}
+
 /**
- * Requests the coordinator would not queue, by request id, with its reason (`The look to make a
- * close view of is gone`): answered once, as `queue.enqueue-result`, and held here so the row that
- * asked can say it.
+ * Requests the coordinator would not queue in whole or in part, by request id, with the reason
+ * (`The look to make a close view of is gone`): answered once, as `queue.enqueue-result`, and held
+ * here so the row or slot that asked can say it. A partial answer counts the pictures that have no
+ * job, which would otherwise wait as `making` for good (codex on PR 1559).
  */
-export function useQueueRefusals(): Record<string, string> {
-  const [refused, setRefused] = useState<Record<string, string>>({});
+export function useQueueRefusals(): Record<string, QueueRefusal> {
+  const [refused, setRefused] = useState<Record<string, QueueRefusal>>({});
   useEffect(
     () =>
       subscribeQueueResults((result) => {
-        if (result.command !== "generate-character-looks" || result.acceptedJobIds.length > 0) return;
+        if (result.command !== "generate-character-looks") return;
+        const count = Math.max(result.failures.length, result.requestedCount - result.acceptedJobIds.length);
+        if (count <= 0) return;
         const reason = (result.failures[0]?.reason ?? "").replace(/\s*Nothing was queued\.?\s*$/, "").replace(/\.$/, "").trim();
-        setRefused((held) => ({ ...held, [result.requestId]: reason === "" ? "not queued" : reason }));
+        setRefused((held) => ({ ...held, [result.requestId]: { reason: reason === "" ? "not queued" : reason, count } }));
       }),
     [],
   );
