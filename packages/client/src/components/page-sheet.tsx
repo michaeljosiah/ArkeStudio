@@ -2,6 +2,7 @@ import { useLayoutEffect, useId, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom";
 import { IconButton } from "./ui.js";
 import { ChevronLeft, X } from "./icons.js";
+import { focusNewestLayer, useCoveredAfter, useOverlay } from "../lib/overlays.js";
 
 /** Turn 163 uses the character sheet's shape with native focus containment and an inert page. */
 export function PageSheet({ open, onClose, title, children, footer, className, onBack, resetKey, keepMounted = false }: {
@@ -21,17 +22,26 @@ export function PageSheet({ open, onClose, title, children, footer, className, o
   const heading = useId();
   const [mounted, setMounted] = useState(false);
   useLayoutEffect(() => { setMounted(true); }, []);
+  // A sheet opened after this one, drawn on the body, stands in front: the dialog is put away while
+  // it is open, its contents kept as they are, and shown again when it goes (see overlays.ts).
+  const place = useOverlay("modal", open);
+  const covered = useCoveredAfter(place);
+  const coveredNow = useRef(covered);
+  coveredNow.current = covered && open;
+  const showing = open && !covered;
   useLayoutEffect(() => {
     const dialog = ref.current;
-    if (!dialog || !open) return;
+    if (!dialog || !showing) return;
     const opener = document.activeElement;
     dialog.showModal?.();
     dialog.querySelector("h2")?.focus({ preventScroll: true });
     return () => {
       dialog.close?.();
-      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+      // Put away for a sheet in front, the focus goes to that sheet, not back to the page under both.
+      if (coveredNow.current) focusNewestLayer();
+      else if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
-  }, [open, mounted]);
+  }, [showing, mounted]);
   useLayoutEffect(() => {
     if (!open || resetKey === undefined) return;
     const body = ref.current?.querySelector(".fy-page-sheet__body");

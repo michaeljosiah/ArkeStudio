@@ -6,7 +6,7 @@ import { lookViewFor, pictureLookChanged, ridingPicks, type AudiobookLook, type 
 import { BenchStore, sessionDir } from "../../src/bench/store.js";
 import { AUDIOBOOK_LOOK_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readAudiobook } from "../../src/productions/audiobook.js";
-import { buildPicturePrompt, clipPrompt, pictureAspect, pictureQuote, pictureWho, promptRoom } from "../../src/productions/audiobook-picture-suggest.js";
+import { buildPicturePrompt, clipPrompt, pictureAspect, pictureQuote, pictureWho, promptRoom, type PictureDeriverInput } from "../../src/productions/audiobook-picture-suggest.js";
 import { acceptCharacterLook } from "../../src/references/kit.js";
 import { pngBytes } from "../queue/fake-provider.js";
 import { CHAPTER, IMAGE, LEDGER, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
@@ -183,6 +183,43 @@ describe("the brief's answer, held and checked (design turn 193k, R-120, R-121)"
       },
       { prepare: prepareLook, picture: async () => CLOSE },
     ));
+
+  // 0.5.60-local.14: three pictures of Ife at the club table and her close view were refused by the
+  // safety check; their words repeated her look line's "bare shoulders" and "low-backed slip dress"
+  // while her full-body look image, the same dress, rode.
+  it("never puts a look line's bare shoulders or low-backed slip dress into the picture prompt it sends once the look image rides", () => {
+    const asked: PictureDeriverInput[] = [];
+    return withHarness(
+      async (h) => {
+        await acceptCharacterLook(h.store()!, "maren-kest", { id: LOOK_ID, file: `takes/${LOOK_ID}/look.png`, kind: "costume", prompt: "Two braids pinned up, bare shoulders, low-backed slip dress in cream-gold silk.", takeId: LOOK_ID, artDirectionVersion: 1, framing: "full-body", close: { file: `takes/${CLOSE_ID}/close.png`, takeId: CLOSE_ID } });
+        await h.send({ kind: "derive-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, requestId: "01J00000000000000000000007" });
+        await h.send({ kind: "choose-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, key: "maren-kest", sheet: "maren-kest", lookId: LOOK_ID, requestId: "01J00000000000000000000008" });
+        await suggest(h.send);
+        const given = asked.at(-1)!.lines.find((line) => line.key === "maren-kest")!;
+        assert.equal(given.text, "Two braids pinned up, evening dress in cream-gold silk.", "the writing service is given the garment and its colour");
+        assert.match(buildPicturePrompt(asked.at(-1)!), /name each garment once, briefly and neutrally/);
+        const picked = suggestion(h.events).suggestion!;
+        assert.ok(picked.who.some((who) => who.look !== undefined), "the look image rides");
+        for (const words of ["bare shoulders", "low-backed", "slip dress"]) assert.ok(!picked.prompt.includes(words), `suggestion: ${words}`);
+        assert.match(picked.prompt, /tired and unsmiling, eyes on the ledger/, "the expression and the frame are kept");
+        assert.match(picked.prompt, /^Medium close-up on Maren/);
+        await h.send({ kind: "make-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, block: "p0.0", prompt: picked.prompt, who: picked.who.map((who) => who.key), frame: picked.shot!.frame, confirmedMicroUsd: picked.estimatedMicroUsd, requestId: "01J0000000000000000000000B" });
+        const done = madeEvents(h.events).at(-1)!;
+        assert.equal(done.state, "made", done.reason);
+        const sent = String((h.enqueued.at(-1)!.params as { prompt?: string }).prompt ?? "");
+        assert.ok(sent.length > 0, "the job carries the prompt");
+        for (const words of ["bare shoulders", "low-backed", "slip dress"]) assert.ok(!sent.includes(words), `sent: ${words}`);
+      },
+      {
+        prepare: prepareLook,
+        // A model that copies the line word for word, as the one that wrote the refused pictures did.
+        picture: async (input) => {
+          asked.push(input);
+          return { ...CLOSE, frame: "Medium close-up, Maren", prompt: "Medium close-up on Maren over the ledger, tired and unsmiling, eyes on the ledger, in a low-backed slip dress in cream-gold silk, bare shoulders catching the light. Grey dawn light from the rail window." };
+        },
+      },
+    );
+  });
 
   it("carries no reference for a detail shot, and Generate sends none", () =>
     withHarness(

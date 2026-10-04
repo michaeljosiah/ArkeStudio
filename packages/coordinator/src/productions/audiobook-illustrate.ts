@@ -25,7 +25,7 @@ import { listeningBlocks } from "./audiobook-listening.js";
 import { blockSpeakers } from "./audiobook-look.js";
 import { makeAdapterJsonDeriver } from "./continuity.js";
 import { BRIEF_EXAMPLES, briefGiven, briefRiders, briefRules, holdBrief, pictureChecks, type BriefLine } from "./audiobook-picture-brief.js";
-import { briefLines, clipPrompt, depictable, pictureAspect, pictureQuote, pictureWho, promptRoom, type PictureRoom } from "./audiobook-picture-suggest.js";
+import { briefLines, clipPrompt, depictable, neutralWhereLooksRide, pictureAspect, pictureQuote, pictureWho, promptRoom, type PictureRoom } from "./audiobook-picture-suggest.js";
 
 /**
  * Illustrate this chapter (design turn 191b, SPEC-047 R-101): the writing service reads the
@@ -142,7 +142,7 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
         return { key: planned.block.key, at: clock.starts[index] ?? 0, text: normalizeSpeechText(planned.block.text), ...(speaker !== undefined ? { speaker } : {}) };
       }),
       ...(room.note !== undefined ? { note: room.note } : {}),
-      lines: briefLines(store, room.look, visible.map((person) => person.key)),
+      lines: briefLines(store, room.look, visible.map((person) => person.key), referenceBudgetFor(model) > 0),
       people: visible,
       places: room.places,
       never: room.people.filter((person) => person.neverDepicted).map((person) => person.name),
@@ -176,9 +176,10 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
   const rows: IllustrationRow[] = kept.map((position) => {
     const candidate = candidates[position]!;
     const planned = plan.blocks[candidate.index]!;
-    const { held } = candidate;
     // Who rides is who is in frame (rule 12): a detail carries no one, a frame with nobody in it the place.
-    const who = pictureWho(store, model, briefRiders(held), { look: room.look, frame: held.frame });
+    const who = pictureWho(store, model, briefRiders(candidate.held), { look: room.look, frame: candidate.held.frame });
+    // Rule 4 where a look image rides: no skin, cut or body in the words (2026-10-04).
+    const held = { ...candidate.held, prompt: neutralWhereLooksRide(candidate.held.prompt, who) };
     const needs = who.filter((entry) => entry.kind === "character" && entry.sheet !== undefined && entry.reference === null).map((entry) => entry.name);
     const picks = ridingPicks(who);
     const keys = held.inFrame.map((person) => person.key);
@@ -190,7 +191,7 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
       textHash: audiobookTextHash(planned.block.text),
       at: candidate.at,
       title: candidate.title,
-      prompt: candidate.prompt,
+      prompt: held.prompt,
       who,
       estimatedMicroUsd: pictureQuote(model, who.filter((entry) => entry.carried).length),
       ...(stamp !== undefined ? { look: stamp } : {}),

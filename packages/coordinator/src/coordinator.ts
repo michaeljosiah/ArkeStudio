@@ -173,7 +173,9 @@ import {
   type IllustrationProgress,
   type IllustrationProposal,
   type IllustrationRow,
+  illustrationRowGoes,
   illustrationTotal,
+  pictureRefusal,
   type AudiobookReader,
   type ManifestModel,
   CADENCE_NOTE_MAX,
@@ -335,7 +337,7 @@ import { anyNarrator, audiobookListening, setAudiobookPicture } from "./producti
 import { bookLookChoices, lookUsage } from "./productions/audiobook-look-book.js";
 import { chooseChapterLook, deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
 import { makeAdapterIllustrateDeriver, proposeIllustrations, type IllustrateDeriver } from "./productions/audiobook-illustrate.js";
-import { clipPrompt, depictable, makeAdapterPictureDeriver, pictureAspect, pictureRoom, pictureWho, promptRoom, suggestPicture, type PictureDeriver } from "./productions/audiobook-picture-suggest.js";
+import { clipPrompt, depictable, makeAdapterPictureDeriver, neutralWhereLooksRide, pictureAspect, pictureRoom, pictureWho, promptRoom, suggestPicture, type PictureDeriver } from "./productions/audiobook-picture-suggest.js";
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
 import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
@@ -1654,6 +1656,9 @@ export class Coordinator {
       this.emit({ at: new Date().toISOString(), type: "illustration.progress", ...ids, progress: { ...progress, made: [...progress.made], failed: [...progress.failed] } });
     };
     const model = await this.pictureModel(store);
+    // The rows the provider would not make: only these are held as refused, to be tried again. A row
+    // whose words changed or that has a picture now is not one Try again could make (codex on PR 1559).
+    const refusedHere = new Set<string>();
     try {
       if (!model) {
         for (const row of rows) progress.failed.push({ block: row.block, reason: "no picture model is on" });
@@ -1679,8 +1684,10 @@ export class Coordinator {
           const who = pictureWho(store, model, chosen, { look: record?.look ?? null, frame: row.shot?.frame ?? null });
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${row.block === "title" ? "title" : row.title}`,
-            prompt: row.prompt,
-            ...(room.mood !== undefined ? { mood: room.mood } : {}),
+            // Held to rule 4 again: a look chosen since the proposal rides now, and its image carries the clothes (codex on PR 1559).
+            prompt: neutralWhereLooksRide(row.prompt, who),
+            // The Mood line rides after the prompt, so it is held to rule 4 the same way (codex on PR 1559).
+            ...(room.mood !== undefined ? { mood: neutralWhereLooksRide(room.mood, who) } : {}),
             model,
             ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
             who,
@@ -1690,7 +1697,10 @@ export class Coordinator {
           });
           if (!made.ok) {
             if (control.signal.aborted) break;
-            progress.failed.push({ block: row.block, reason: made.reason });
+            // In plain words on the row (`refused by the image safety check`); the provider's own is in the app log.
+            void this.appLog?.append({ kind: "audiobook.illustration-picture-failed", chapter: chapter.file, block: row.block, message: made.reason });
+            progress.failed.push({ block: row.block, reason: pictureRefusal(made.reason) });
+            if (made.provider === true) refusedHere.add(row.block);
             continue;
           }
           progress.spentMicroUsd += made.costMicroUsd ?? made.estimatedMicroUsd;
@@ -1710,7 +1720,21 @@ export class Coordinator {
     delete progress.current;
     progress.state = control.signal.aborted ? "stopped" : "done";
     // What was made belongs to its blocks now; what is left is the proposal still, for another try.
-    const remaining = proposal.rows.filter((row) => !progress.made.includes(row.block));
+    // A row this run could not make keeps why, so a window that opens the proposal later holds it
+    // with its reason instead of offering it as an ordinary picture (2026-10-04); a row the run did
+    // not reach keeps whatever it held before.
+    const reasons = new Map(progress.failed.filter((entry) => refusedHere.has(entry.block)).map((entry) => [entry.block, entry.reason]));
+    // A row that failed this run for any other reason loses an older refusal: that is not why it was
+    // not made now, and Try again is not what it needs (codex on PR 1559).
+    const otherwise = new Set(progress.failed.filter((entry) => !refusedHere.has(entry.block)).map((entry) => entry.block));
+    const remaining = proposal.rows
+      .filter((row) => !progress.made.includes(row.block))
+      .map((row) => {
+        if (reasons.has(row.block)) return { ...row, refused: (reasons.get(row.block) || "not made").slice(0, 200) };
+        if (!otherwise.has(row.block) || row.refused === undefined) return row;
+        const { refused: _old, ...rest } = row;
+        return rest;
+      });
     this.makingIllustrations.delete(key);
     if (remaining.length > 0 && !store.closingSignal.aborted) {
       const event: Extract<DomainEvent, { type: "illustration.finished" }> = { at: new Date().toISOString(), type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...proposal, rows: remaining } };
@@ -15182,7 +15206,8 @@ export class Coordinator {
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${msg.block === "title" ? "title" : `block ${index + 1}`}`,
             prompt: clipPrompt(msg.prompt, promptRoom(model)),
-            ...(room.mood !== undefined ? { mood: room.mood } : {}),
+            // The Mood line rides after the prompt, so it is held to rule 4 the same way (codex on PR 1559).
+            ...(room.mood !== undefined ? { mood: neutralWhereLooksRide(room.mood, who) } : {}),
             model,
             ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
             who,
@@ -15284,9 +15309,10 @@ export class Coordinator {
         const proposal = held.proposal;
         const wanted = new Set(msg.blocks);
         const without = new Set(msg.without ?? []);
-        const rows = proposal.rows.filter((row) => wanted.has(row.block) && ((row.needs?.length ?? 0) === 0 || without.has(row.block)));
+        // A row held for a missing reference, or one a run's picture was refused for, goes only if named in `without`.
+        const rows = proposal.rows.filter((row) => wanted.has(row.block) && illustrationRowGoes(row, new Set(), without));
         if (rows.length === 0) return refuse("nothing to make");
-        const total = illustrationTotal(rows, new Set(), new Set()).microUsd;
+        const total = illustrationTotal(rows, new Set(), without).microUsd;
         // One confirm of the total (R-102): the price Accept showed is the most the run may spend.
         if (total > msg.confirmedMicroUsd) return refuse(`the price moved · ${priceLabel(total)}`);
         const current = await planAudiobook(store, msg.productionId, chapter.id, { narrator: await anyNarrator(store, msg.productionId) }).catch(() => null);
@@ -15315,8 +15341,10 @@ export class Coordinator {
         const at = () => new Date().toISOString();
         try {
           const record = await setChapterLook(store, msg.productionId, chapter.id, msg.target, msg.text);
-          this.refreshIfStillOpen(store);
+          // The answer before the snapshot: the open sheet reads the record, and a whole world's
+          // snapshot serialised ahead of it kept the sheet a press behind (0.5.60-local.14).
           this.emit({ at: at(), type: "audiobook.record", ...ids, record });
+          this.refreshIfStillOpen(store);
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.look-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
@@ -15343,8 +15371,9 @@ export class Coordinator {
         const at = () => new Date().toISOString();
         try {
           const record = await chooseChapterLook(store, msg.productionId, chapter.id, { key: msg.key, ...(msg.name !== undefined ? { name: msg.name } : {}), ...(msg.sheet !== undefined ? { sheet: msg.sheet } : {}) }, msg.lookId);
-          this.refreshIfStillOpen(store);
+          // The answer first, as for a line written above.
           this.emit({ at: at(), type: "audiobook.record", ...ids, record });
+          this.refreshIfStillOpen(store);
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.look-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
@@ -19107,7 +19136,7 @@ export class Coordinator {
   private async makeBenchPicture(
     store: WorldStore,
     input: { title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal },
-  ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null; estimatedMicroUsd: number } | { ok: false; reason: string; sessionId?: SessionId }> {
+  ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null; estimatedMicroUsd: number } | { ok: false; reason: string; sessionId?: SessionId; provider?: true }> {
     const worldId = store.worldId;
     const params = { kind: "image" as const, count: 1, ...(input.aspect !== undefined ? { aspect: input.aspect } : {}) };
     const opened = await openBenchSession(store.dir, () => this.nowIso(), { fresh: true, defaultModel: { provider: input.model.provider, model: input.model.id }, initial: { mode: "image", brief: input.prompt, title: input.title } }).catch(() => null);
@@ -19191,7 +19220,15 @@ export class Coordinator {
           return fail(describeCoordinatorError(err));
         }
       }
-      if (take !== undefined && (take.status === "failed" || take.status === "cancelled" || take.status === "needs-reconciliation")) return fail(take.error ?? (take.status === "cancelled" ? "cancelled" : "the picture could not be made"));
+      // The provider's own answer: the one failure a run holds for Try again (codex on PR 1559). The
+      // queue fails a job the same way before any provider call (no client, a reference it cannot
+      // send); only a job that made a submission call (`attempt`) reached the provider.
+      if (take !== undefined && take.status === "failed") {
+        const ran = jobId === undefined ? undefined : this.jobQueue?.listJobs().find((candidate) => candidate.id === jobId);
+        const failed = await fail(take.error ?? "the picture could not be made");
+        return (ran?.attempt ?? 0) > 0 ? { ...failed, provider: true as const } : failed;
+      }
+      if (take !== undefined && (take.status === "cancelled" || take.status === "needs-reconciliation")) return fail(take.error ?? (take.status === "cancelled" ? "cancelled" : "the picture could not be made"));
       if (Date.now() > deadline) return fail("the picture took too long");
       await new Promise((resolve) => setTimeout(resolve, PICTURE_POLL_MS));
     }

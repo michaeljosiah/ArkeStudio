@@ -3,7 +3,7 @@ import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import type { ChapterAudiobook, ClientMessage, ClientState, DomainEvent, ManifestModel, Take } from "@arke-studio/contracts";
+import { estimateCharacterImageMicroUsd, type ChapterAudiobook, type ClientMessage, type ClientState, type DomainEvent, type ManifestModel, type Take } from "@arke-studio/contracts";
 import { LookSheet } from "../src/components/audiobook-look.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -195,6 +195,154 @@ describe("making a look from the sheet", () => {
     await mount(LOOK(), state(), "closed");
     assert.ok(tiles().every((tile) => (tile as HTMLButtonElement).disabled));
     assert.equal((bodyAll('[data-testid="look-derive"]')[0] as HTMLButtonElement).disabled, true);
+  });
+});
+
+/** A look job as the queue holds it. */
+const job = (id: string, params: Record<string, unknown>, status: "queued" | "running" | "succeeded" | "failed", error: string | null = null) =>
+  ({ id: `jb_${id}`, target: { kind: "character-look", id: "maren-kest/x/1" }, params, status, error, createdAt: AT, updatedAt: AT }) as never;
+const withJobs = (world: ClientState, jobs: unknown[]): ClientState => ({ ...world, app: { ...world.app, jobs: jobs as ClientState["app"]["jobs"] } });
+const SAFETY = "openai: the safety system refused the prompt (moderation blocked) — recompose the prompt away from what it flagged and try again";
+async function rerender(m: Mounted, world: ClientState, look: ChapterAudiobook["look"], updatedAt = AT) {
+  await act(async () => {
+    __setStateForTest(world, { connection: "open" });
+    m.root.render(<LookSheet open onClose={() => {}} worldId={FIXTURE_WORLD_ID} productionId="saltlight" chapterFile="07-the-tenth-key" chapterOrder={7} record={{ ...record(look), updatedAt }} blockKeys={KEYS} />);
+  });
+}
+
+describe("a choice shows at once (2026-10-04, 0.5.60-local.14)", () => {
+  it("rings the look pressed, counts it and says saving before the record comes back, then saved", async () => {
+    const m = await mount(LOOK());
+    await press(tiles()[1]);
+    assert.equal(tiles()[1]!.getAttribute("aria-selected"), "true", "the look pressed is ringed at once");
+    assert.match(text(bodyAll('[data-key="maren-kest"] [data-testid="look-state"]')[0]), /full body, close/);
+    assert.equal((bodyAll('[data-key="maren-kest"] textarea')[0] as HTMLTextAreaElement).value, "Storm coat, hood up; two braids.", "the look's own line");
+    assert.match(text(bodyAll('[data-testid="look-summary"]')[0]), /1 look chosen · derived · saving…/);
+    const chose = sentOf(m, "choose-audiobook-look")[0]!;
+    const written = LOOK({ text: STORM.prompt, lookId: STORM.id, reading: "Oilskin coat, dark and stiff with salt." });
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "saltlight", chapterId: "07-the-tenth-key", requestId: chose.requestId, record: { ...record(written), updatedAt: "2026-10-04T09:00:05.000Z" } }));
+    assert.match(text(bodyAll('[data-testid="look-summary"]')[0]), /1 look chosen · derived · saved/, "its own answer settles it, before the chapter view hands the record down");
+    assert.equal(tiles()[1]!.getAttribute("aria-selected"), "true");
+    await rerender(m, state(), written, "2026-10-04T09:00:05.000Z");
+    assert.match(text(bodyAll('[data-testid="look-summary"]')[0]), /1 look chosen · derived · saved/);
+  });
+
+  it("settles a press the record shows even when its own answer was replaced by a later one", async () => {
+    const m = await mount(LOOK());
+    await press(tiles()[1]);
+    assert.match(text(bodyAll('[data-testid="look-summary"]')[0]), /saving…/);
+    await rerender(m, state(), LOOK({ text: STORM.prompt, lookId: STORM.id }), "2026-10-04T09:00:05.000Z");
+    assert.match(text(bodyAll('[data-testid="look-summary"]')[0]), /1 look chosen · derived · saved/);
+  });
+
+  it("puts a refused choice back, with the reason", async () => {
+    const m = await mount(LOOK());
+    await press(tiles()[1]);
+    const chose = sentOf(m, "choose-audiobook-look")[0]!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "saltlight", chapterId: "07-the-tenth-key", requestId: chose.requestId, refused: "that look is gone" }));
+    assert.equal(tiles()[0]!.getAttribute("aria-selected"), "true", "the main photo rides again");
+    assert.equal(text(bodyAll('[data-testid="look-refused"]')[0]), "that look is gone");
+    assert.match(text(bodyAll('[data-testid="look-summary"]')[0]), /0 looks chosen · derived · saved/);
+  });
+});
+
+describe("the close view, once asked for (2026-10-04)", () => {
+  const chosenHarbour = () => LOOK({ text: HARBOUR.prompt, lookId: HARBOUR.id });
+
+  it("says the provider refused it, in plain words, and offers Try again at the price, never a spinner", async () => {
+    const m = await mount(chosenHarbour());
+    await press(bodyAll('[data-testid="look-make-close"]')[0]);
+    const asked = sentOf(m, "generate-character-looks")[0]!;
+    assert.equal(asked.prompt, "Harbour coat, bare head.", "the look's clothing line");
+    await rerender(m, withJobs(state(), [job("01J8Z3X4Y5Z6A7B8C9D0E1F2J1", { lookFraming: "close", lookOfLook: HARBOUR.id, lookBatch: asked.requestId }, "running")]), chosenHarbour());
+    assert.equal(text(bodyAll('[data-testid="look-make-close"]')[0]), "Making close view…");
+    await rerender(m, withJobs(state(), [job("01J8Z3X4Y5Z6A7B8C9D0E1F2J1", { lookFraming: "close", lookOfLook: HARBOUR.id, lookBatch: asked.requestId }, "failed", SAFETY)]), chosenHarbour());
+    assert.equal(bodyAll('[data-testid="look-make-close"]').length, 0, "no spinner on a job that ended");
+    assert.equal(text(bodyAll('[data-testid="look-close-reason"]')[0]), "Close view refused by the image safety check");
+    assert.equal(text(bodyAll('[data-testid="look-close-retry"]')[0]), "Try again · ~$0.04");
+    await press(bodyAll('[data-testid="look-close-retry"]')[0]);
+    assert.equal(sentOf(m, "generate-character-looks").length, 2, "asked again");
+    assert.equal(text(bodyAll('[data-testid="look-make-close"]')[0]), "Making close view…", "the new request is being made");
+  });
+
+  it("offers no paid Try again for a close view made and paid for whose filing failed", async () => {
+    await mount(chosenHarbour(), withJobs(state(), [{ ...(job("01J8Z3X4Y5Z6A7B8C9D0E1F2J1", { lookFraming: "close", lookOfLook: HARBOUR.id }, "succeeded") as object), finalization: { status: "failed", error: "disk full", updatedAt: AT } }]));
+    assert.equal(text(bodyAll('[data-testid="look-close-reason"]')[0]), "Close view made, not filed · see Activity");
+    assert.equal(bodyAll('[data-testid="look-close-retry"]').length, 0, "Activity retries it at no charge");
+  });
+
+  it("shows a refusal from an earlier opening of the sheet too", async () => {
+    await mount(chosenHarbour(), withJobs(state(), [job("01J8Z3X4Y5Z6A7B8C9D0E1F2J1", { lookFraming: "close", lookOfLook: HARBOUR.id, lookBatch: "an-earlier-request" }, "failed", SAFETY)]));
+    assert.equal(text(bodyAll('[data-testid="look-close-reason"]')[0]), "Close view refused by the image safety check");
+  });
+
+  const arrived = { id: "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2H1", coversShots: [], kind: "look", reference: { sheetId: "maren-kest" }, provider: "openai", model: "gpt-image-2", provenance: { canonRevision: 1, sheets: {} }, references: [], params: { lookFraming: "close", lookOfLook: HARBOUR.id }, cost: { estimatedMicroUsd: 0, actualMicroUsd: null }, dispatchedAt: AT, media: "close.png" } as unknown as Take;
+
+  it("offers Discard and Make again on a close view not yet accepted", async () => {
+    const m = await mount(chosenHarbour(), state([STORM, HARBOUR], [arrived]));
+    assert.ok(bodyAll('[data-testid="look-accept-close"]')[0]);
+    await press(bodyAll('[data-testid="look-close-discard"]')[0]);
+    const rejected = sentOf(m, "reject-reference-take")[0]!;
+    assert.equal(rejected.takeId, arrived.id);
+    assert.equal(bodyAll('[data-testid="look-close-made"]').length, 0, "gone at once");
+    assert.match(text(bodyAll('[data-testid="look-make-close"]')[0]), /^Make close view/);
+    assert.equal(sentOf(m, "generate-character-looks").length, 0, "Discard makes nothing");
+  });
+
+  it("makes the close view again, the one shown discarded first", async () => {
+    const m = await mount(chosenHarbour(), state([STORM, HARBOUR], [arrived]));
+    assert.equal(text(bodyAll('[data-testid="look-close-again"]')[0]), "Make again · ~$0.04");
+    await press(bodyAll('[data-testid="look-close-again"]')[0]);
+    assert.equal(sentOf(m, "reject-reference-take")[0]!.takeId, arrived.id);
+    const asked = sentOf(m, "generate-character-looks")[0]!;
+    assert.deepEqual([asked.framing, asked.closeOf], ["close", { lookId: HARBOUR.id }]);
+    assert.equal(text(bodyAll('[data-testid="look-make-close"]')[0]), "Making close view…");
+  });
+
+  it("shows a close view accepted at once, before the kit says so", async () => {
+    const m = await mount(chosenHarbour(), state([STORM, HARBOUR], [arrived]));
+    await press(bodyAll('[data-testid="look-accept-close"]')[0]);
+    assert.equal(sentOf(m, "accept-character-look")[0]!.closeFor, HARBOUR.id);
+    assert.match(text(bodyAll('[data-key="maren-kest"] [data-testid="look-state"]')[0]), /full body, close/);
+    assert.ok(bodyAll('[data-testid="look-close-accepted"]')[0]);
+    assert.equal(bodyAll('[data-testid="look-accept-close"]').length, 0);
+  });
+
+  it("offers the close view again when the snapshot after Accept has no close view on the look", async () => {
+    const m = await mount(chosenHarbour(), state([STORM, HARBOUR], [arrived]));
+    await press(bodyAll('[data-testid="look-accept-close"]')[0]);
+    assert.ok(bodyAll('[data-testid="look-close-accepted"]')[0]);
+    await rerender(m, state([STORM, HARBOUR], [arrived]), chosenHarbour());
+    assert.equal(bodyAll('[data-testid="look-close-accepted"]').length, 0, "not saving for good");
+    assert.ok(bodyAll('[data-testid="look-accept-close"]')[0], "Accept is there again");
+  });
+
+  it("clears an earlier refusal when a line is written again", async () => {
+    const m = await mount(LOOK());
+    const mood = bodyAll('[data-key="mood"] textarea')[0] as HTMLTextAreaElement;
+    const type = async (words: string) => {
+      const key = Object.keys(mood).find((candidate) => candidate.startsWith("__reactProps$"))!;
+      const props = (mood as unknown as Record<string, { onChange: (e: unknown) => void; onBlur: () => void }>)[key]!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(Object.getPrototypeOf(mood), "value")?.set?.call(mood, words);
+        props.onChange({ target: mood, currentTarget: mood });
+      });
+      await act(async () => (mood as unknown as Record<string, { onBlur: () => void }>)[key]!.onBlur());
+    };
+    await type("Grey dawn light.");
+    const first = sentOf(m, "set-audiobook-look")[0]!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "saltlight", chapterId: "07-the-tenth-key", requestId: first.requestId, refused: "that is not a line the look can hold" }));
+    assert.ok(bodyAll('[data-testid="look-refused"]')[0]);
+    await type("Grey dawn light, fine grain.");
+    assert.equal(bodyAll('[data-testid="look-refused"]').length, 0);
+  });
+
+  it("prices Make close view as the job is priced: one picture from two references", async () => {
+    const REAL: ManifestModel = { ...GPT, pricing: { kind: "perImage", microUsdPerImage: 53_000, microUsdPerReferenceImage: 100_000 } };
+    const world = state();
+    await mount(chosenHarbour(), { ...world, app: { ...world.app, manifest: { ...world.app.manifest!, models: [...world.app.manifest!.models.filter((model) => model.id !== GPT.id), REAL] } } });
+    assert.equal(estimateCharacterImageMicroUsd(REAL, "character-look", 1, 2), 253_000);
+    assert.equal(text(bodyAll('[data-testid="look-make-close"]')[0]), "Make close view · ~$0.26");
   });
 });
 

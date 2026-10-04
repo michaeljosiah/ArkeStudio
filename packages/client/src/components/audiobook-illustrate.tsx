@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { formatRunningTime, frameWord, illustrationTotal, pacePhrase, priceLabel, type IllustrationRow, type PictureWho } from "@arke-studio/contracts";
+import { formatRunningTime, frameWord, illustrationRowGoes, illustrationTotal, pacePhrase, priceLabel, type IllustrationRow, type PictureWho } from "@arke-studio/contracts";
 import { dismissIllustration, illustrateChapter, skipIllustrationRow, sendIllustrationWithout, stopIllustration, acceptIllustration, useIllustrationRuns, type IllustrationRun } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
+import { useOverlay } from "../lib/overlays.js";
 import { Button, cx } from "./ui.js";
 
 /**
@@ -24,8 +25,8 @@ export function useIllustration(worldId: string, productionId: string, chapter: 
     if (run?.proposal === undefined || (run.state !== "proposed" && run.state !== "making")) return marks;
     const made = new Set(run.progress?.made ?? []);
     for (const row of run.proposal.rows) {
-      // While they are made, a row held for a missing reference or skipped is not on its way.
-      const held = run.state === "making" && (row.needs?.length ?? 0) > 0 && !run.without.includes(row.block);
+      // While they are made, a row held — for a missing reference, or refused last time — or skipped is not on its way.
+      const held = run.state === "making" && !illustrationRowGoes(row, new Set(), new Set(run.without));
       if (!made.has(row.block) && !run.skipped.includes(row.block) && !held) marks.set(row.block, { title: row.title });
     }
     return marks;
@@ -138,13 +139,16 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
   onMakeLook: (who: PictureWho) => void;
 }) {
   const held = (row.needs?.length ?? 0) > 0 && !without;
+  // A picture a run could not make (2026-10-04): held with its reason, made again only on Try again.
+  const refused = !held && row.refused !== undefined && !without;
+  const said = row.refused ?? reason;
   const people = row.who.filter((entry) => entry.kind === "character");
   const lacking = people.find((entry) => entry.sheet !== undefined && entry.reference === null);
   const time = clock(row.at, estimated);
   // The frame word in the slot's corner (193h, rule 11): what the brief said the picture is.
   const frame = row.shot === undefined ? null : (frameWord(row.shot.frame) ?? (row.shot.frame === "" ? null : row.shot.frame));
   return (
-    <article className={cx("fy-ills__card", skipped && "fy-ills__card--off", held && !skipped && "fy-ills__card--held")} data-testid="illustration-row" data-block={row.block} data-state={skipped ? "skipped" : held ? "held" : "ready"}>
+    <article className={cx("fy-ills__card", skipped && "fy-ills__card--off", (held || refused) && !skipped && "fy-ills__card--held")} data-testid="illustration-row" data-block={row.block} data-state={skipped ? "skipped" : held ? "held" : refused ? "refused" : "ready"}>
       <div className="fy-ills__th">
         {frame !== null && <span className="fy-mono fy-ills__frame" data-testid="illustration-frame" title={row.shot?.frame}>{frame}</span>}
         <span className="fy-mono fy-ills__tm">{time}</span>
@@ -181,7 +185,16 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
           </Button>
         )}
       </div>
-      {reason !== undefined && <p className="fy-mono fy-ch__who-where--warn" data-testid="illustration-row-reason">{reason}</p>}
+      {said !== undefined && (
+        <div className="fy-ills__wh">
+          <p className="fy-mono fy-ch__who-where--warn" data-testid="illustration-row-reason">{said}</p>
+          {row.refused !== undefined && !skipped && (
+            <Button variant="ghost" disabled={disabled} onClick={onWithout} data-testid="illustration-retry">
+              {without ? "Hold" : "Try again"}
+            </Button>
+          )}
+        </div>
+      )}
     </article>
   );
 }
@@ -209,6 +222,8 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
 }) {
   const proposal = run.proposal;
   const head = useRef<HTMLHeadingElement>(null);
+  // A block drawer open beneath (a modal dialog, drawn above everything) gives way while the sheet is open.
+  useOverlay("layer", true, () => head.current);
   // Escape reads the latest onClose; the listener itself goes up once per opening.
   const closing = useRef(onClose);
   closing.current = onClose;
@@ -236,6 +251,7 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
     `${total.count} to make`,
     ...(skipped.size > 0 ? [`${skipped.size} skipped`] : []),
     ...(total.held > 0 ? [`${total.held} need${total.held === 1 ? "s" : ""} a look`] : []),
+    ...(total.refused > 0 ? [`${total.refused} refused`] : []),
   ].join(" · ");
   const ended = run.progress !== undefined && run.progress.state !== "making" ? run.progress : undefined;
   return (
