@@ -1,5 +1,17 @@
 /* The chat's model chip, in the composer's tool row (design turns 190e and 195). */
-.fy-mchip { position: relative; display: inline-flex; align-items: center; gap: 6px; }
+.fy-mchip { position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+/* The tool row keeps send whole, however narrow: the model's name is ellipsed first, and only once it
+   is down to its mark and a few letters does the effort give way. In the 331 production dock the two
+   chips stood at their full width and the effort ran under send (local.15). The effort's shrink is a
+   token so it yields nothing until the model's chip stops at its floor, then takes the rest. */
+.fy-mchip > .fy-mchip__btn { min-width: 0; flex: 0 1 auto; }
+.fy-mchip > .fy-mchip__btn:not(.fy-mchip__btn--effort):not(.fy-mchip__btn--fixed) { min-width: 76px; }
+.fy-mchip > .fy-mchip__btn--effort { flex-shrink: 0.001; }
+/* Read replies, where it shares that row, gives way before both chips (no frame draws it in the dock's
+   row): its words go, its speaker and its name for a screen reader stay. */
+.fy-cx__left > .fy-cx__tool { flex: 0 100 auto; min-width: 29px; overflow: hidden; }
+.fy-cx__left > .fy-cx__tool > svg { flex: none; }
+.fy-cx__left > .fy-cx__tool > span { min-width: 0; overflow: hidden; text-overflow: clip; white-space: nowrap; }
 .fy-mchip__btn {
   display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 9px 0 6px;
   border: 0; border-radius: 999px; background: var(--secondary); color: var(--foreground);

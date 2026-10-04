@@ -149,7 +149,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Fifty-nine is a character's `shortName` on a strict sheet (design turn 194, rule 12b): a build
 // without the field drops the sheet on scan, and with it the character.
 // Sixty adds non-authorizing plan suggestions and derived-readiness receipts (SPEC-051 T-9).
-export const SUPPORTED_SCHEMA_VERSION = 60;
+// Sixty-one is the shot a made picture keeps on the chapter's audiobook record (design turn 194g).
+export const SUPPORTED_SCHEMA_VERSION = 61;
 
 export class WorldOpenError extends Error {
   constructor(

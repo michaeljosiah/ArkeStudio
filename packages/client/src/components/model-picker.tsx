@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Keyb
 import { ProviderMark } from "../screens/settings-parts.js";
 import { PickerInfo, PickerSearch, PickerSliders, PickerTick } from "./model-chip-icons.js";
 import {
-  filterGroups, matchSpan, modelCard, phoneDetailRows, squash,
+  filterGroups, matchSpan, modelCard, phoneDetailRows, providerMarkLetter, squash,
   type PickerGroup, type PickerModel,
 } from "./model-picker-data.js";
 import { cx } from "./ui.js";
@@ -121,7 +121,7 @@ export function ModelPicker(props: ModelPickerProps) {
     for (const group of filterGroups(groups, query)) {
       out.push({
         key: `group:${group.provider}`,
-        heading: { text: group.name, mark: <ProviderMark id={group.provider} label={group.name} size="xs" /> },
+        heading: { text: group.name, mark: <ProviderMark id={group.provider} label={group.name} letter={providerMarkLetter(group.provider, group.name)} size="xs" /> },
         rows: group.models.map((entry) => modelRow(entry, group.name, "model")),
       });
     }

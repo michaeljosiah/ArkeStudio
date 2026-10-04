@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { LOOK_LINE_MAX, LookViewSchema, PictureLookSchema } from "./audiobook-look.js";
-import { CODEX_IMAGE_PLAN_LABEL } from "./manifest.js";
+import { CODEX_IMAGE_PLAN_LABEL, aspectOffered, estimateMicroUsd, imageOutputFor, type ManifestModel } from "./manifest.js";
 
 /**
  * Pictures proposed by Arke (design turn 191, SPEC-047 R-99..R-102): a suggestion for one block
@@ -131,6 +131,26 @@ export const PictureSuggestionSchema = z
   })
   .strict();
 export type PictureSuggestion = z.infer<typeof PictureSuggestionSchema>;
+
+/** The shape a picture is asked for: widescreen where the model offers it, as the player letterboxes. */
+export function pictureAspect(model: ManifestModel): string | undefined {
+  return model.unverified !== true && aspectOffered(model, "16:9") ? "16:9" : undefined;
+}
+
+/**
+ * What a picture would cost on this model with this many reference pictures riding, from the same
+ * figures the Bench plans with. Here rather than in the coordinator so a picture already made can
+ * say what Make again costs before anything is asked (design turn 194g's foot).
+ */
+export function pictureQuote(model: ManifestModel, referenceImages: number, aspect = pictureAspect(model)): number {
+  const output = imageOutputFor(model, { landscape: true, ...(aspect !== undefined ? { aspect } : {}) });
+  return estimateMicroUsd(model, {
+    images: 1,
+    megapixels: (output.width * output.height) / 1_000_000,
+    referenceImages,
+    ...(output.resolution !== undefined ? { resolution: output.resolution } : {}),
+  });
+}
 
 /** Price as a card says it: `~$0.04`, to the cent and rounded up — an estimate that errs low is not trusted — and `free` for nothing. */
 export function priceLabel(microUsd: number, plan?: "included-plan"): string {

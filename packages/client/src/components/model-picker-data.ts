@@ -29,12 +29,47 @@ export interface PickerGroup {
   models: PickerModel[];
 }
 
-/** The provider's heading: the harness's own name first, since only the harness knows its private providers. */
+/**
+ * The names of the providers a harness serves that Arke's own table (`PROVIDERS`, the services it
+ * holds keys for) does not carry, as their own pages name them. OpenCode's `opencode` provider is
+ * its Zen gateway: 195b heads it `OpenCode Zen`, and the installed app read `opencode` when the
+ * harness stated no name (local.15).
+ */
+const HARNESS_PROVIDER_NAMES: Readonly<Record<string, string>> = {
+  opencode: "OpenCode Zen",
+  "opencode-go": "OpenCode Go",
+  openrouter: "OpenRouter",
+  "github-copilot": "GitHub Copilot",
+  xai: "xAI",
+  deepseek: "DeepSeek",
+  groq: "Groq",
+  "amazon-bedrock": "Amazon Bedrock",
+  azure: "Azure",
+  vercel: "Vercel",
+  moonshotai: "Moonshot AI",
+  zai: "Z.AI",
+  lmstudio: "LM Studio",
+};
+
+/**
+ * The letter a provider with no bundled logo wears on its plate: its name's first letter, except
+ * where that letter would name another — 195b plates OpenCode Zen `Z`, since the OpenAI group
+ * beside it is `O` too.
+ */
+export function providerMarkLetter(provider: string, name: string): string {
+  return provider === "opencode" ? "Z" : name.slice(0, 1).toUpperCase();
+}
+
+/**
+ * The provider's heading: the harness's own name first, since only the harness knows its private
+ * providers — unless that name is only the id again, which is no name — then Arke's for a known
+ * provider, then the id (195's catalogue rule).
+ */
 export function providerHeading(provider: string, models: readonly ModelInfo[]): string {
-  const stated = models.find((model) => model.providerName !== undefined)?.providerName;
+  const stated = models.find((model) => model.providerName !== undefined && model.providerName.toLowerCase() !== provider.toLowerCase())?.providerName;
   if (stated !== undefined) return stated;
   const known = (PROVIDERS as Record<string, { displayName: string } | undefined>)[provider];
-  return known?.displayName ?? provider;
+  return known?.displayName ?? HARNESS_PROVIDER_NAMES[provider] ?? provider;
 }
 
 /** Providers in the order the harness first reports them, each with its models in the harness's order. */

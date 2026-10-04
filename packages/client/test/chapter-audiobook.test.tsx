@@ -1330,6 +1330,23 @@ describe("the director reads the book (design turn 184)", () => {
     assert.equal(q(m, '[data-testid="reading-notes"]'), null, "Escape puts the notes away");
   });
 
+  it("Escape closes the notes, the speaker filter and Direct and illustrate wherever the focus is, and hands it back to the press (local.15)", async () => {
+    const m = await mount(voiced(withBook(inkbound(), { note: BOOK_NOTE })));
+    await answerOpen(m);
+    // Notes opens without taking the focus: its Escape reached the press, not the sheet, and the sheet stayed.
+    for (const [pressId, panel] of [["reading-notes-press", '[data-testid="reading-notes"]'], ["audiobook-filter", ".fy-ab__filtermenu"], ["direct-illustrate", '[role="menu"][aria-label="Direct and illustrate"]']] as const) {
+      const press = q(m, `[data-testid="${pressId}"]`)!;
+      let focused = false;
+      Object.assign(press, { focus: () => { focused = true; } });
+      await act(async () => press.click());
+      assert.ok(q(m, panel), `${pressId} opens`);
+      await act(async () => void dom.document.dispatchEvent(Object.assign(new Event("keydown", { bubbles: true, cancelable: true }), { key: "Escape" })));
+      assert.equal(q(m, panel), null, `Escape puts ${pressId}'s panel away`);
+      assert.equal(focused, true, `the focus goes back to ${pressId}`);
+      assert.equal(press.getAttribute("aria-expanded"), "false");
+    }
+  });
+
   it("the Notes press says Notes alone when no note is set (design turn 194, rule 5)", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m);

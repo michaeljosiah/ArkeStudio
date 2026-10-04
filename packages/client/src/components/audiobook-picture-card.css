@@ -11,6 +11,13 @@
 .fy-pcard__img { display: block; object-fit: cover; border: 1px solid var(--border); }
 .fy-pcard__slot { border: 1px dashed var(--neutral-400); display: flex; align-items: flex-start; justify-content: flex-end; padding: 6px 8px; }
 .fy-pcard__slot .fy-mono { font-size: var(--text-2xs); color: var(--muted-foreground); }
+/* The picture, or the empty slot, is the press that picks another (194 draws no Choose): drawn as
+   the picture alone, with the pointer and the focus ring saying it can be pressed. */
+.fy-pcard__pick { flex: none; display: block; padding: 0; border: 0; border-radius: 9px; background: none; cursor: pointer; }
+.fy-pcard__slot--pick { background: none; color: inherit; font: inherit; cursor: pointer; }
+.fy-pcard__slot--pick:disabled { cursor: default; }
+.fy-pcard__pick:hover .fy-pcard__img { border-color: var(--neutral-400); }
+.fy-pcard__slot--pick:hover:not(:disabled) .fy-mono { color: var(--foreground); }
 .fy-pcard__facts { display: flex; flex-direction: column; gap: 12px; min-width: 0; flex: 1; }
 .fy-pcard__fact { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .fy-pcard__fact .fy-mono { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
@@ -48,4 +55,5 @@
 @media (max-width: 599px) {
   .fy-pcard__top { flex-direction: column; }
   .fy-pcard__img, .fy-pcard__slot { width: 100%; height: auto; aspect-ratio: 3 / 2; }
+  .fy-pcard__pick { width: 100%; }
 }

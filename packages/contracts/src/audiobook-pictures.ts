@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
 import { PictureLookSchema } from "./audiobook-look.js";
+import { PictureShotSchema } from "./audiobook-illustrate.js";
 
 /**
  * A picture set on a block (design turn 186c, SPEC-047 R-66): it shows from that block until the
@@ -31,6 +32,13 @@ export const AudiobookPictureSchema = z
      * never remade without asking. Absent on a picture the author chose rather than Arke made.
      */
     look: PictureLookSchema.optional(),
+    /**
+     * The shot it was made from (design turn 194g, SPEC-047 R-120, R-121): the frame, who was in it
+     * and who was not, and the checks as they stood when Generate was pressed — so the block's card
+     * still says them once the picture is made, and Make again keeps the frame. Absent on a picture
+     * chosen rather than made, and on one made before this was kept: never reconstructed.
+     */
+    shot: PictureShotSchema.optional(),
   })
   .strict();
 export type AudiobookPicture = z.infer<typeof AudiobookPictureSchema>;

@@ -6615,6 +6615,9 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ab__menu-eb { padding: 6px 8px 3px; font: 500 11px/1.2 var(--font-sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted-foreground); }
 .fy-ab__menu-opt { display: flex; align-items: center; gap: 9px; width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--foreground); font: 400 13px/1.4 var(--font-sans); text-align: left; cursor: pointer; box-sizing: border-box; }
 .fy-ab__menu-opt:hover, .fy-ab__menu-opt:focus-visible { background: var(--secondary); outline: none; }
+/* The filled row is the menu's focus mark, as 194's filter draws it: the global ring drew a thick box
+   round the item a menu focuses as it opens (local.15). */
+.fy-ab__menu-opt:focus-visible { box-shadow: none; }
 .fy-ab__menu-opt .fy-ab__speaker-dot { background: var(--fy-voice); }
 .fy-ab__menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-ab__menu-meta { flex: none; font: 400 11px/1 var(--font-mono); color: var(--muted-foreground); }

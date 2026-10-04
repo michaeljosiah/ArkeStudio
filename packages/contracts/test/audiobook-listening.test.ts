@@ -122,6 +122,27 @@ describe("pictures that follow the words (R-69)", () => {
     assert.equal(spans.spans[0]!.at, 16);
     assert.equal(spans.spans[0]!.until, null, "holds to the chapter's end");
   });
+
+  it("says a picture's start is estimated only when a block before it was, not for a block not read after it (194a)", () => {
+    const timed = (unread: string) => BLOCKS.map((block) => ({ key: block.key, text: block.text, seconds: block.key === unread ? null : block.take!.seconds }));
+    const pictures = { "p1.0": picture(BLOCKS[2]!.text, "artifacts/stair.png"), "p3.0": picture(BLOCKS[4]!.text, "artifacts/quarter.png") };
+    const after = pictureSpans(timed("p2.0"), pictures);
+    assert.equal(after.estimated, true, "the chapter still holds an estimate");
+    assert.deepEqual(after.spans.map((span) => [span.key, span.startEstimated]), [["p1.0", false], ["p3.0", true]], "measured up to 0:16; the block after it was not");
+    const before = pictureSpans(timed("p0.0"), pictures);
+    assert.deepEqual(before.spans.map((span) => span.startEstimated), [true, true]);
+    assert.deepEqual(pictureSpans(timed("none"), pictures).spans.map((span) => span.startEstimated), [false, false]);
+  });
+});
+
+describe("a made picture keeps its shot (design turn 194g)", () => {
+  it("reads a picture with the shot it was made from, and one without", () => {
+    const base = { schemaVersion: 1, chapterVersion: 1, hash: "h", updatedAt: AT, takes: {}, flags: {} };
+    const shot = { frame: "Medium two-shot · across the table", inFrame: ["ife"], notInFrame: ["tunde"], expressions: {}, details: [], checks: [{ id: "frame" as const, ok: true, label: "Frame" }] };
+    const read = ChapterAudiobookSchema.parse({ ...base, pictures: { "p0.0": { ...picture("x", "artifacts/a.png"), source: "generated", shot } } });
+    assert.deepEqual(read.pictures?.["p0.0"]?.shot, shot);
+    assert.equal(ChapterAudiobookSchema.parse({ ...base, pictures: { "p0.0": picture("x", "artifacts/a.png") } }).pictures?.["p0.0"]?.shot, undefined);
+  });
 });
 
 describe("the record and the wire (R-73)", () => {

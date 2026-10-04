@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { lookViewFor, pictureLookChanged, ridingPicks, type AudiobookLook, type ClientMessage, type DomainEvent, type ManifestModel, type WorldBundle } from "@arke-studio/contracts";
 import { BenchStore, sessionDir } from "../../src/bench/store.js";
-import { AUDIOBOOK_LOOK_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readAudiobook } from "../../src/productions/audiobook.js";
 import { buildPicturePrompt, clipPrompt, pictureAspect, pictureQuote, pictureWho, promptRoom, type PictureDeriverInput } from "../../src/productions/audiobook-picture-suggest.js";
 import { acceptCharacterLook } from "../../src/references/kit.js";
@@ -397,6 +397,33 @@ describe("Generate (R-99)", () => {
       // The look has since changed: the picture is marked, never remade.
       const look: AudiobookLook = { ...(record.look as AudiobookLook), characters: { ...record.look!.characters, "maren-kest": { ...record.look!.characters["maren-kest"]!, text: "A red coat." } } };
       assert.equal(pictureLookChanged(picture.look, look), true);
+    }));
+
+  it("keeps the shot the press was made from on the picture, raising the world first, and a brief its card can read the prompt back from (194g)", () =>
+    withHarness(async ({ events, send, store, schemaVersion }) => {
+      await suggest(send);
+      const shot = { frame: "Medium · at the rail", inFrame: ["maren-kest"], notInFrame: ["bray-half-hitch"], expressions: { "maren-kest": "unsmiling" }, details: [], checks: [{ id: "frame" as const, ok: true, label: "Frame" }] };
+      await make(send, { frame: shot.frame, shot });
+      const done = madeEvents(events).at(-1)!;
+      assert.equal(done.state, "made", done.reason);
+      const picture = done.record!.pictures!["p0.0"]!;
+      assert.deepEqual(picture.shot, shot);
+      assert.equal(schemaVersion(), AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, "a build that cannot read a picture's shot cannot open the world");
+      const held = await readAudiobook(store()!, LEDGER, CHAPTER);
+      assert.deepEqual(held !== null && held !== "unreadable" ? held.pictures?.["p0.0"]?.shot : null, shot, "and it is on disk");
+      // The card shows the prompt alone: the brief's first paragraph, before the app's own lines.
+      const artifact = store()!.getBundle().artifacts.find((candidate) => `artifacts/${candidate.file}` === picture.file)!;
+      const brief = artifact.generation?.source === "bench" ? artifact.generation.brief : "";
+      assert.equal(brief.split("\n\n")[0], "Maren on the rail at dawn.");
+      assert.match(brief, /No text in the picture\.$/);
+    }));
+
+  it("keeps no shot when the press sends none, and leaves the world where the look put it", () =>
+    withHarness(async ({ events, send, schemaVersion }) => {
+      await suggest(send);
+      await make(send);
+      assert.equal(madeEvents(events).at(-1)!.record!.pictures!["p0.0"]!.shot, undefined);
+      assert.equal(schemaVersion(), AUDIOBOOK_LOOK_SCHEMA_VERSION);
     }));
 
   it("sends the chosen look's image and not the main photo, and the picture keeps which look rode (R-119)", () =>

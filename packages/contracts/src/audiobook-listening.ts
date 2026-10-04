@@ -252,17 +252,24 @@ export function listeningChapter(input: {
 /**
  * Where a picture shows in the chapter's view before the chapter is read (turn 186c): the same
  * placement, with a block that has no take timed at the reading rate, and said to be estimated.
+ *
+ * A picture's start is estimated only when a block before it was (`startEstimated`): one unread
+ * block near the chapter's end once put a `~` on every chip above it, whose times were all measured
+ * (design turn 194 draws `10:22` on a chapter with a block not yet made below it).
  */
 export function pictureSpans(
   blocks: ReadonlyArray<Pick<ListeningInputBlock, "key" | "text"> & { seconds: number | null }>,
   pictures: Readonly<Record<string, AudiobookPicture>> | undefined,
   usable?: (file: string) => boolean,
-): { spans: Array<PlacedPicture & { at: number; seconds: number; short: boolean; until: number | null }>; lost: string[]; estimated: boolean } {
+): { spans: Array<PlacedPicture & { at: number; seconds: number; short: boolean; until: number | null; startEstimated: boolean }>; lost: string[]; estimated: boolean } {
   const starts: number[] = [];
+  /** Whether each block's start leans on an estimate: some block before it had no measured length. */
+  const guessed: boolean[] = [];
   let clock = 0;
   let estimated = false;
   for (const block of blocks) {
     starts.push(round(clock));
+    guessed.push(estimated);
     if (block.seconds !== null && block.seconds > 0) clock += block.seconds;
     else {
       estimated = true;
@@ -272,7 +279,7 @@ export function pictureSpans(
   const { placed, lost } = placePictures(blocks, pictures, usable);
   const held = pictureHolds(placed, starts, round(clock));
   return {
-    spans: held.map((entry, index) => ({ ...entry, until: held[index + 1]?.index ?? null })),
+    spans: held.map((entry, index) => ({ ...entry, until: held[index + 1]?.index ?? null, startEstimated: guessed[entry.index] ?? estimated })),
     lost,
     estimated,
   };

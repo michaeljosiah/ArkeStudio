@@ -9,6 +9,7 @@ import {
   pictureSpans,
   productionStyleFor,
   worldImageReferences,
+  type AudiobookPicture,
   type AudiobookPictureSource,
   type ChapterAudiobook,
   type PictureSuggestion,
@@ -22,16 +23,17 @@ import { mediaUrl } from "../lib/media.js";
 import { sendBenchAddReference, sendBenchCompose, sendBenchNewSession, setAudiobookPicture, useBench, useStore } from "../lib/store.js";
 import type { BlockRow } from "../screens/chapter-audiobook.js";
 import { Button, Textarea, cx } from "./ui.js";
-import { usePictureSuggestion } from "./audiobook-suggest.js";
-import { PictureCard } from "./audiobook-picture-card.js";
+import { usePictureSuggestion, type PictureSuggestionState } from "./audiobook-suggest.js";
+import { PictureCard, PicturePress } from "./audiobook-picture-card.js";
+import { chosenFrom, madePicture } from "./audiobook-made-picture.js";
 
 /**
  * Pictures that follow the words (design turn 186c, SPEC-047 R-69): in a chapter's Audiobook
  * view a block's panel gains Picture — one the world holds, chosen from its art, the cast's and
  * places' pictures or its scenes' frames and takes, or one generated for the book through the
  * Bench, priced and confirmed there as any image is. A chip in the block's margin shows the
- * picture and when it starts; the panel says how long it holds and flags a hold under twenty
- * seconds rather than refusing it.
+ * picture and when it starts, and flags a hold under twenty seconds rather than refusing it; the
+ * chooser says how long it holds.
  */
 
 export type PictureTab = "world" | "cast" | "scenes" | "generated";
@@ -71,6 +73,10 @@ export interface PictureSpan {
   short: boolean;
   /** The block the next picture is on, or null to the chapter's end. */
   until: number | null;
+  /** Its start leans on a block before it timed at the reading rate, not measured: said with a `~`. */
+  estimated: boolean;
+  /** The picture as the record keeps it: its stamp and the shot it was made from. */
+  entry: AudiobookPicture;
 }
 
 /**
@@ -88,25 +94,28 @@ export function useChapterPictures(world: WorldBundle | null, rows: readonly Blo
     });
     const { spans, lost, estimated } = pictureSpans(blocks, record?.pictures, (file) => listed.has(file));
     const byKey = new Map<string, PictureSpan>();
-    for (const span of spans) byKey.set(rows[span.index]!.block.key, { file: span.picture.file, index: span.index, at: span.at, seconds: span.seconds, short: span.short, until: span.until });
+    for (const span of spans) byKey.set(rows[span.index]!.block.key, { file: span.picture.file, index: span.index, at: span.at, seconds: span.seconds, short: span.short, until: span.until, estimated: span.startEstimated, entry: span.picture });
     const first = spans[0];
     return { byKey, lost, estimated, count: spans.length, coverAtStart: first === undefined || first.at > 0 };
   }, [world, rows, record]);
 }
 
 const clock = (seconds: number) => formatRunningTime(seconds);
-const span = (seconds: number) => {
-  const whole = Math.round(seconds);
-  return whole >= 60 ? `${Math.floor(whole / 60)} m ${whole % 60} s` : `${whole} s`;
-};
+
+/**
+ * When a picture starts, as the chip and the Picture tab say it (`10:22`, 194a): with a `~` only
+ * when a block before it was timed at the reading rate rather than measured (186c's estimate).
+ */
+export function pictureStart(picture: Pick<PictureSpan, "at" | "estimated">): string {
+  return `${picture.estimated ? "~" : ""}${clock(picture.at)}`;
+}
 
 /** The margin's chip (186c): the picture, and when it starts. */
-export function PictureChip({ slug, picture, estimated }: { slug: string; picture: PictureSpan; estimated: boolean }) {
+export function PictureChip({ slug, picture }: { slug: string; picture: PictureSpan }) {
   return (
     <span className={cx("fy-ab__picchip", picture.short && "fy-ab__picchip--short")} data-testid="audiobook-picture-chip" title={picture.short ? "under 20 s" : undefined}>
       <img src={mediaUrl(slug, picture.file)} alt="" />
-      {estimated ? "~" : ""}
-      {clock(picture.at)}
+      {pictureStart(picture)}
     </span>
   );
 }
@@ -182,47 +191,59 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
     sendBenchNewSession(worldId);
   };
   // A picture Arke made keeps the look it was made under: marked when that has since changed (R-98).
-  const madeUnder = here === null ? undefined : Object.values(record?.pictures ?? {}).find((entry) => entry.file === here.file)?.look;
-  const lookChanged = pictureLookChanged(madeUnder, record?.look);
+  const lookChanged = pictureLookChanged(here?.entry.look, record?.look);
 
-  const shownCaption = here === null
-    ? null
-    : `${pictures.estimated ? "~" : ""}${clock(here.at)}–${clock(here.at + here.seconds)} · ${span(here.seconds)}${here.short ? " · under 20 s" : ""}`;
   const pad = String(chapterOrder).padStart(2, "0");
   const remove = () => setAudiobookPicture(worldId, production.meta.id, chapterFile, row.block.key, null);
-  // The Picture tab (design turn 194, rule 12; 194g): 193's card, the picture in its slot beside
-  // its facts, when a suggestion is in hand; otherwise the picture set here beside when it shows
-  // and how long it holds — or, with none, the slot and Suggest picture, a press away on every
-  // block. Remove, Edit prompt and Make again stand in the panel's foot.
+  // A picture Arke made reads back as the card it was made from (194a, 194g): the prompt, model and
+  // what rode from the Bench's sidecar, who was in it from its stamp, the shot where it was kept.
+  const manifest = store.state?.app.manifest?.models;
+  const made = useMemo(
+    () => (here === null || world === null ? null : madePicture(world, manifest, here.entry, record?.look, row.block.key)),
+    [here, world, manifest, record?.look, row.block.key],
+  );
+  // The card in hand: a suggestion being drafted or made stands over the picture's own.
+  const card: PictureSuggestionState = suggestion.ask === null && made !== null ? { ...suggestion, ask: { state: "suggested", suggestion: made } } : suggestion;
+  const choosePicture = connection === "open" ? () => setOpen(true) : undefined;
+  // The Picture tab (design turn 194, rule 12; 194a, 194g): 193's card — the picture beside Frame,
+  // Rides and the model, In frame, Not in frame, the prompt, the checks; Remove, Edit prompt and
+  // Make again at the foot. When it shows and how long it holds are the chip's and the tab's, not
+  // the card's: 194 draws neither here. A picture Arke did not make shows what is known of it —
+  // the picture and where it came from — and, with none, the slot and Suggest picture, a press
+  // away on every block. The master draws no Choose: the picture (or the empty slot) is the press
+  // that picks another from the world.
   return (
     <section className="fy-ab__picture" data-testid="audiobook-picture" aria-label={`Picture · ${blockName}`}>
       {lookChanged && <p className="fy-mono fy-ab__card-line fy-ch__who-where--warn" data-testid="picture-look-changed">look changed</p>}
-      {!open && world !== null && suggestion.ask !== null ? (
-        <PictureCard world={world} worldId={worldId} state={suggestion} onEdit={editInBench} offline={connection !== "open"} picture={here === null ? null : mediaUrl(world.meta.slug, here.file)} {...(here !== null ? { onRemove: remove } : {})} />
+      {!open && world !== null && card.ask !== null ? (
+        <PictureCard world={world} worldId={worldId} state={card} onEdit={editInBench} offline={connection !== "open"} picture={here === null ? null : mediaUrl(world.meta.slug, here.file)} {...(here !== null ? { onRemove: remove } : {})} {...(choosePicture !== undefined ? { onChoose: choosePicture } : {})} />
       ) : !open ? (
         <>
           <div className="fy-pcard__top">
-            {here !== null && world !== null ? <img className="fy-pcard__img fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" /> : <div className="fy-pcard__slot" aria-hidden="true" />}
+            {here !== null && world !== null ? (
+              <PicturePress onChoose={choosePicture}>
+                <img className="fy-pcard__img fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" data-testid="picture-card-picture" />
+              </PicturePress>
+            ) : (
+              <button type="button" className="fy-pcard__slot fy-pcard__slot--pick" disabled={choosePicture === undefined} onClick={choosePicture} data-testid="audiobook-picture-open">
+                <span className="fy-mono">Choose</span>
+              </button>
+            )}
             <div className="fy-pcard__facts">
-              {shownCaption !== null && (
+              {here !== null && world !== null ? (
                 <div className="fy-pcard__fact">
-                  <span className="fy-mono">Shows</span>
-                  <b className={cx(here?.short && "fy-ch__who-where--warn")} data-testid="picture-shows">{shownCaption}</b>
+                  <span className="fy-mono">Rides</span>
+                  <b data-testid="picture-card-rides">{chosenFrom(world, here.file)}</b>
+                </div>
+              ) : (
+                <div className="fy-pcard__fact">
+                  <span className="fy-mono">Chapter {pad}</span>
+                  <b>
+                    {pictures.count} picture{pictures.count === 1 ? "" : "s"}
+                    {pictures.lost.length > 0 ? ` · ${pictures.lost.length} lost` : ""}
+                  </b>
                 </div>
               )}
-              {until !== null && (
-                <div className="fy-pcard__fact">
-                  <span className="fy-mono">Holds</span>
-                  <b>{until}</b>
-                </div>
-              )}
-              <div className="fy-pcard__fact">
-                <span className="fy-mono">Chapter {pad}</span>
-                <b>
-                  {pictures.count} picture{pictures.count === 1 ? "" : "s"}
-                  {pictures.lost.length > 0 ? ` · ${pictures.lost.length} lost` : ""}
-                </b>
-              </div>
             </div>
           </div>
           <div className="fy-abp__foot">
@@ -231,12 +252,9 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
                 Remove
               </Button>
             )}
-            <Button variant="outline" disabled={connection !== "open"} onClick={() => setOpen(true)} data-testid="audiobook-picture-open">
-              Choose
-            </Button>
             <span className="fy-ch__panelpush" />
             <Button variant="primary" disabled={connection !== "open"} onClick={suggestion.suggest} data-testid="suggest-picture">
-              {here !== null ? "Make again" : "Suggest picture"}
+              Suggest picture
             </Button>
           </div>
         </>

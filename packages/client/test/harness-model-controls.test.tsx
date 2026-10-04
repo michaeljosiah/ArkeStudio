@@ -674,6 +674,18 @@ describe("the model chip on a conversation page (turn 190e)", () => {
     assert.equal(isSet(), false);
   });
 
+  it("offers Every chat in this production with nothing chosen and nothing kept, keeping the model in force (195b, local.15)", async () => {
+    const state = modelState();
+    state.app.harnessModels = state.app.harnessModels.map((model) => (model.id === "opus[1m]" ? { ...model, isDefault: true } : model));
+    state.world!.productions.find((production) => production.meta.id === "saltlight")!.meta.models = {};
+    await mount(state, pageConversation());
+    assert.equal(isSet(), false, "the harness's default is in force, chosen by nobody");
+    await openChip();
+    assert.deepEqual([...dialogRoot(container).querySelectorAll(".fy-mpick__foot button")].map((button) => button.textContent), ["Manage models", "Every chat in this production"], "Clear is offered only once the production keeps one");
+    await chipPress(/Every chat in this production/);
+    assert.ok(sent.some((message) => message.kind === "set-production-model" && message.capability === "llm" && message.modelId === OPUS), "the default becomes the production's choice");
+  });
+
   describe("the effort (design turn 195)", () => {
     /** Opus offers three efforts, none of them the harness's default. */
     function effortState(production?: { llm: string; kept?: Record<string, string> }): ClientState {

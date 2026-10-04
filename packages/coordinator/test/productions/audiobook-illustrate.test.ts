@@ -6,7 +6,7 @@ import { acceptCharacterLook } from "../../src/references/kit.js";
 import { pngBytes } from "../queue/fake-provider.js";
 import { pictureLookChanged, type AudiobookPicture, type ClientMessage, type DomainEvent, type IllustrationProposal } from "@arke-studio/contracts";
 import { readAudiobook } from "../../src/productions/audiobook.js";
-import { AUDIOBOOK_LOOK_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { buildIllustratePrompt, type IllustrateDeriver, type IllustrateDeriverInput, type RawIllustration } from "../../src/productions/audiobook-illustrate.js";
 import { CHAPTER, IMAGE, LEDGER, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
 
@@ -235,11 +235,13 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
           assert.equal(picture.textHash, row.textHash);
           assert.ok(picture.look !== undefined, "it keeps the look it was made under");
           assert.equal(pictureLookChanged(picture.look, record.look), false);
+          assert.deepEqual(picture.shot, row.shot, "and the shot it was made from, for its card (194g)");
         }
         const records = h.events.filter((event): event is RecordEvent => event.type === "audiobook.record" && event.record?.pictures !== undefined);
         assert.equal(records.length, proposal.rows.length);
         assert.deepEqual(records.map((event) => Object.keys(event.record!.pictures!).length), proposal.rows.map((_, index) => index + 1), "each picture landed on its block before the next was begun");
-        assert.equal(h.schemaVersion(), AUDIOBOOK_LOOK_SCHEMA_VERSION);
+        assert.ok(proposal.rows.every((row) => row.shot !== undefined), "each row was drafted with its shot");
+        assert.equal(h.schemaVersion(), AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, "a picture keeping its shot raises the world first");
         // Nothing is left to make: the proposal is spent, and no second card follows the run.
         assert.equal(h.events.filter((event) => event.type === "illustration.finished").length, 1);
       },
