@@ -1,5 +1,13 @@
 # Running and validating changes
 
+Production Chat end-to-end acceptance (#1427, SPEC-051 R-1..R-3) uses coordinator
+`test/world-chat/production-acceptance.test.ts`. The same thirteen-step scenario runs with
+stub providers and either an injected encoder or real FFmpeg/FFprobe; CI retains the native
+film, subtitles and per-card approval/spend report on Windows and Linux. See the
+[acceptance guide](production-chat-acceptance.md) for commands, coverage boundaries and the
+remaining installed Windows real-provider journey. Queue `test/queue/dispatcher.test.ts`
+also checks retryable Bench score filing without a second purchase.
+
 Production readiness (#1422, SPEC-051 T-9) is covered by contracts
 `test/production-readiness.test.ts` and `test/world-chat-shape.test.ts`; coordinator
 `test/world-chat/production-readiness.test.ts`, `retrieval.test.ts`, `turn-result.test.ts` and
