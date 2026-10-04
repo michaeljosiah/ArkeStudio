@@ -27,7 +27,7 @@ type SpawnLike = typeof nodeSpawn;
 export function createFfmpegProbeRunner(ffmpeg: string, spawn: SpawnLike = nodeSpawn): MediaProbeRunner {
   const runner = createMediaProcessRunner({ ffmpeg, ffprobe: ffmpeg }, spawn);
   return { async run(args, limits) {
-    const result = await runner.run("ffmpeg", args, { signal: new AbortController().signal,
+    const result = await runner.run("ffmpeg", args, { signal: limits.signal ?? new AbortController().signal,
       timeoutMs: limits.timeoutMs, maxStdoutBytes: limits.maxOutputBytes, maxStderrBytes: limits.maxOutputBytes, maxCombinedBytes: limits.maxOutputBytes });
     return { code: result.code, stdout: new TextDecoder().decode(result.stdout), stderr: result.stderr, timedOut: result.timedOut };
   } };

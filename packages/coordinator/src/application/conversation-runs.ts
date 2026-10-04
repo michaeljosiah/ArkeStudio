@@ -275,7 +275,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
         undefined,
         signal,
       );
-      images.start(runId, session.sessionId);
+      images.start(runId, session.sessionId, signal);
       return session;
     },
     prepareImages: async ({ leaseToken, attachments: selected }) => {

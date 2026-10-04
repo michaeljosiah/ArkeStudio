@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { newId, type HarnessAdapter, type WorldChatAttachment } from "@arke-studio/contracts";
 import { ConversationImages } from "../../src/world-chat/images.js";
 import { QueryLeaseRegistry, LeaseDeniedError } from "../../src/world-chat/lease.js";
@@ -15,7 +15,7 @@ import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 import { encodePng, solidImage, decodePng } from "../../src/references/png.js";
-import { createImageRenditionMaker, imageRendition } from "../../src/world-chat/image-rendition.js";
+import { createImageRenditionMaker, imageRendition, IMAGE_MAX_BYTES } from "../../src/world-chat/image-rendition.js";
 import { BenchStore, sessionDir, sessionMediaDir } from "../../src/bench/store.js";
 const digest = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 function metadataChunk() {
@@ -31,7 +31,7 @@ function metadataChunk() {
 }
 
 async function harness(options: { supported?: boolean; local?: boolean; allowed?: boolean; publish?: () => Promise<void>;
-  maker?: import("../../src/world-chat/image-rendition.js").ImageRenditionMaker } = {}) {
+  bytes?: Uint8Array; maker?: import("../../src/world-chat/image-rendition.js").ImageRenditionMaker } = {}) {
   const dir = await makeTempWorld(), store = await WorldStore.open(dir);
   closeOnCleanup(() => store.close());
   const cv = newId("cv"), run = newId("run"), chat = new WorldChatStore(conversationDir(dir, cv));
@@ -41,7 +41,7 @@ async function harness(options: { supported?: boolean; local?: boolean; allowed?
   const leases = new QueryLeaseRegistry(() => active);
   const attachments: WorldChatAttachment[] = [];
   for (const [index, color] of [[255, 0, 0, 255], [0, 0, 255, 255]].entries()) {
-    const bytes = encodePng(solidImage(3, 2, color as [number, number, number, number]));
+    const bytes = options.bytes ?? encodePng(solidImage(3, 2, color as [number, number, number, number]));
     const id = newId("wca"), path = join(conversationDir(dir, cv), "attachments", id);
     await mkdir(path, { recursive: true }); await writeFile(join(path, `look-${index}.png`), bytes);
     const attachment: WorldChatAttachment = { id, conversationId: cv, fileName: `look-${index}.png`, kind: "image",
@@ -53,12 +53,13 @@ async function harness(options: { supported?: boolean; local?: boolean; allowed?
     imageDestinationForSession: () => ({ provider: "test-cloud", local: options.local === true }) } as unknown as HarnessAdapter;
   const images = new ConversationImages(store, leases, { adapter, ...(options.maker ? { maker: options.maker } : {}),
     allowed: async () => permitted, publish: options.publish ?? (async () => {}) });
-  images.start(run, "session");
+  const controller = new AbortController();
+  images.start(run, "session", controller.signal);
   const retrieval = new WorldChatRetrieval({ leases, getBundle: () => store.getBundle(), getIndex: () => null,
     attachments: new WorldChatAttachmentStore(dir), findAttachment: async (_lease, id) => attachments.find(a => a.id === id) ?? null,
     readImage: (lease, args) => images.read(lease, args) });
   return { store, chat, cv, lease, attachments, images, retrieval, setActive: (id: string | null) => { active = id; },
-    forbid: () => { permitted = false; } };
+    forbid: () => { permitted = false; }, abort: () => controller.abort() };
 }
 
 describe("conversation image inspection — SPEC-050 R-31..R-34", () => {
@@ -165,6 +166,60 @@ describe("conversation image inspection — SPEC-050 R-31..R-34", () => {
     assert.equal(read.receipt.status, "unavailable"); assert.equal(read.imageContent, undefined);
     assert.equal((await new WorldChatService(h.store.dir).load(h.cv))!.imageReceipts!.length, 1, "receipt records prepared bytes; it does not claim the model understood them");
   });
+  it("reads an accepted prop-state reference from the current prop catalogue", async () => {
+    const h = await harness(), propId = newId("prop"), stateId = newId("pst"), takeId = newId("tk");
+    const bytes = encodePng(solidImage(2, 2, [17, 18, 19, 255]));
+    const file = `takes/${takeId}/state.png`, path = `references/${propId}/${file}`;
+    await h.store.commit({ kind: "prop-image-test", source: "test", files: [
+      { path, action: "create", baseHash: null, encoding: "base64", content: Buffer.from(bytes).toString("base64") },
+      { path: `references/${propId}/prop.json`, action: "create", baseHash: null, content: JSON.stringify({ id: propId, name: "Lamp", states: [
+        { id: stateId, name: "Lit", reference: { id: "psr-test", file, sourceTakeId: takeId, acceptedAt: "2026-10-04T04:00:00Z" } },
+      ] }) },
+    ] });
+    assert.equal(h.store.getBundle().props.find(prop => prop.id === propId)!.states[0]!.reference!.file, file);
+    const read = await h.retrieval.call(h.lease.token, "view_image", { kind: "reference", file: path });
+    assert.ok(read.imageContent); assert.equal(read.receipt.image!.sourceHash, digest(bytes));
+  });
+  it("delivers GIF and MKV attachments to the rendition codec through the contained read", async () => {
+    const seen: string[] = [], poster = encodePng(solidImage(2, 2, [1, 2, 3, 255]));
+    const h = await harness({ maker: { render: async (_bytes, extension) => { seen.push(extension); return poster; } } });
+    for (const [index, extension] of ["gif", "mkv"].entries()) {
+      const a = h.attachments[index]!, bytes = extension === "gif" ? Buffer.from("GIF89a") : Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
+      a.fileName = `source.${extension}`; a.kind = extension === "gif" ? "image" : "video";
+      a.contentHash = digest(bytes); a.byteLength = bytes.length;
+      await writeFile(join(conversationDir(h.store.dir, h.cv), "attachments", a.id, a.fileName), bytes);
+      await h.chat.append({ type: "attachment.created", attachment: a });
+      const read = await h.retrieval.call(h.lease.token, "view_image", { kind: "attachment", id: a.id });
+      assert.ok(read.imageContent); assert.equal(read.receipt.image!.posterOnly, extension === "mkv");
+    }
+    assert.deepEqual(seen, [".gif", ".mkv"]);
+  });
+  it("aborts a running rendition without persisting a disclosure or handing out pixels", async () => {
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const h = await harness({ maker: { render: async (_bytes, _extension, signal) => {
+      assert.ok(signal); entered();
+      return await new Promise<Uint8Array>((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+    } } });
+    const pending = h.retrieval.call(h.lease.token, "view_image", { kind: "attachment", id: h.attachments[0]!.id });
+    await started; h.abort();
+    const read = await pending;
+    assert.equal(read.imageContent, undefined);
+    assert.equal((await new WorldChatService(h.store.dir).load(h.cv))!.imageDisclosures, undefined);
+  });
+  it("bounds the accumulated base64 image payload before persisting an over-budget handoff", async () => {
+    const bytes = encodePng({ width: 1000, height: 1000, pixels: randomBytes(4_000_000) });
+    const h = await harness({ bytes });
+    let accepted = 0;
+    for (let i = 0; i < 10; i++) {
+      const read = await h.retrieval.call(h.lease.token, "view_image", { kind: "attachment", id: h.attachments[0]!.id });
+      if (!read.imageContent) { assert.match(JSON.stringify(read.result), /20 MB encoded/); break; }
+      assert.ok(read.imageContent[0]!.data.length <= 4_000_000); accepted++;
+    }
+    assert.ok(accepted > 0 && accepted < 10);
+    const persisted = (await h.chat.read()).events.filter(e => e.event.type === "image.receipt");
+    assert.equal(persisted.length, accepted);
+  });
   it("returns MCP image blocks rather than base64 text", async () => {
     const h = await harness(), server = new WorldQueryServer(() => h.store);
     await server.start(); closeOnCleanup(() => server.stop());
@@ -177,6 +232,13 @@ describe("conversation image inspection — SPEC-050 R-31..R-34", () => {
 });
 
 describe("bounded metadata-free renditions", () => {
+  it("downsamples noisy PNG bytes below the encoded provider limit", async () => {
+    const source = encodePng({ width: 1000, height: 1000, pixels: randomBytes(4_000_000) });
+    assert.ok(source.length > IMAGE_MAX_BYTES);
+    const result = await imageRendition(source, ".png");
+    assert.ok(result.data.length <= IMAGE_MAX_BYTES);
+    assert.ok(result.width < 1000 && result.height < 1000);
+  });
   it("shrinks the longest edge, strips ancillary metadata and bounds decompression", async () => {
     const source = encodePng(solidImage(2000, 10, [1, 2, 3, 255]));
     const marked = Buffer.concat([source.slice(0, -12), metadataChunk(), source.slice(-12)]);
@@ -191,11 +253,13 @@ describe("bounded metadata-free renditions", () => {
   });
   it("uses the bounded media runner for image codecs and a single video poster", async () => {
     let args: readonly string[] = [];
-    const maker = createImageRenditionMaker({ run: async command => {
+    const controller = new AbortController();
+    const maker = createImageRenditionMaker({ run: async (command, limits) => {
+      assert.equal(limits.signal, controller.signal);
       args = command; await writeFile(command.at(-1)!, encodePng(solidImage(2, 2, [1, 2, 3, 255])));
       return { code: 0, stdout: "", stderr: "", timedOut: false };
     } });
-    const result = await maker.render(new Uint8Array([1]), ".mp4");
+    const result = await maker.render(new Uint8Array([1]), ".mp4", controller.signal);
     assert.equal(decodePng(result).width, 2); assert.ok(args.includes("-map_metadata"));
     assert.equal(args[args.indexOf("-frames:v") + 1], "1");
     assert.equal(args[args.indexOf("-map") + 1], "0:v:0");

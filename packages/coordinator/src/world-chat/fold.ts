@@ -47,6 +47,7 @@ export interface FoldResult {
 }
 
 const MAX_MESSAGES = 50;
+const MAX_IMAGE_RECEIPTS = 256;
 
 const ACTION_STATUS_TRANSITIONS: Record<ConversationActionStatus, readonly ConversationActionStatus[]> = {
   // Recovery may discover that the bound authority was decided through its original surface.
@@ -221,7 +222,12 @@ export function foldConversation(
         imageDisclosures.set(e.disclosure.provider, e.disclosure);
         break;
       case "image.receipt":
-        imageReceipts.set(e.receipt.id, e.receipt);
+        if (e.receipt.image) {
+          const key = `${e.receipt.image.id}:${e.receipt.image.sourceHash}`;
+          imageReceipts.delete(key);
+          imageReceipts.set(key, e.receipt);
+          if (imageReceipts.size > MAX_IMAGE_RECEIPTS) imageReceipts.delete(imageReceipts.keys().next().value!);
+        }
         break;
       case "input.promoted":
         // Only a promotion replay accepted becomes a turn; a rejected one is a named problem.

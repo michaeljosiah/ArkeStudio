@@ -5,9 +5,9 @@ import { CHAT_IMAGES_SCHEMA_VERSION, ChatAttachmentIdSchema, SessionIdSchema, Ta
   type HarnessAdapter, type ImageObservation, type WorldChatCheckReceipt } from "@arke-studio/contracts";
 import { readBenchSession } from "../bench/chat-reads.js";
 import { resolveTakeSource } from "../bench/service.js";
-import { readContainedImageReferences, readContainedVideoReferences } from "../world/reference-files.js";
+import { readContainedMediaBytes } from "../world/reference-files.js";
 import type { WorldStore } from "../world/store.js";
-import { imageRendition, type ImageRenditionMaker } from "./image-rendition.js";
+import { imageRendition, IMAGE_RUN_ENCODED_BYTES, type ImageRenditionMaker } from "./image-rendition.js";
 import { WorldChatService } from "./service.js";
 import { WorldChatStore, conversationDir } from "./store.js";
 import type { QueryLease, QueryLeaseRegistry } from "./lease.js";
@@ -29,7 +29,7 @@ const imageFiles = (value: unknown): string[] => {
 
 /** One run's actual image destination. Unknown capabilities never become affirmative. */
 export class ConversationImages {
-  private readonly sessions = new Map<string, { supported: boolean; provider: string; local: boolean }>();
+  private readonly sessions = new Map<string, { supported: boolean; provider: string; local: boolean; signal?: AbortSignal }>();
   private readonly counts = new Map<string, number>();
   private readonly bytesByRun = new Map<string, number>();
   private tail: Promise<void> = Promise.resolve();
@@ -38,17 +38,18 @@ export class ConversationImages {
     allowed(provider: string): Promise<boolean>;
     publish(conversationId: QueryLease["conversationId"]): Promise<void>;
   }) {}
-  start(runId: string, sessionId: string): void {
+  start(runId: string, sessionId: string, signal?: AbortSignal): void {
     const adapter = this.deps.adapter;
     const destination = adapter?.imageDestinationForSession?.(sessionId);
     this.sessions.set(runId, { supported: adapter?.imageInput === true && adapter.imageInputForSession?.(sessionId) === true,
-      provider: destination?.provider ?? adapter?.id ?? "unknown", local: destination?.local === true });
+      provider: destination?.provider ?? adapter?.id ?? "unknown", local: destination?.local === true, ...(signal ? { signal } : {}) });
   }
   release(runId: string): void { this.sessions.delete(runId); this.counts.delete(runId); this.bytesByRun.delete(runId); }
   async validate(lease: QueryLease): Promise<void> { await this.access(lease); }
   private async access(lease: QueryLease) {
     this.leases.verify(lease.token, "view_image");
     const session = this.sessions.get(lease.runId);
+    session?.signal?.throwIfAborted();
     if (!session?.supported) throw new RetrievalError("unavailable", "view_image: this adapter or selected model cannot inspect images. The image is unreadable; do not guess its contents.");
     if (!session.local && (this.store.getBundle().meta.cloudImageInspection === false || !await this.deps.allowed(session.provider))) {
       throw new RetrievalError("unavailable", `view_image: cloud image inspection is forbidden for ${session.provider} or this world.`);
@@ -56,7 +57,7 @@ export class ConversationImages {
     this.leases.verify(lease.token, "view_image");
     return session;
   }
-  private async source(lease: QueryLease, raw: Record<string, unknown>) {
+  private async source(lease: QueryLease, raw: Record<string, unknown>, signal?: AbortSignal) {
     const args = ViewImageArgsSchema.parse(raw), bundle = this.store.getBundle();
     let path: string, id: string, label: string, expected: string | undefined, video = false;
     if (args.kind === "attachment") {
@@ -79,15 +80,19 @@ export class ConversationImages {
       const files = [bundle.keyArt, ...bundle.keyArtCandidates, ...bundle.masterLookCandidates,
         ...Object.values(bundle.referenceCandidates).flat(), ...Object.values(bundle.stagedReferences),
         ...bundle.referenceKits.flatMap(kit => imageFiles(kit).map(file => `references/${kit.sheetId}/${file}`)),
-        ...bundle.referenceTakes.flatMap(take => take.reference ? [`references/${take.reference.sheetId}/takes/${take.id}/${take.media}`] : []),
+        ...bundle.props.flatMap(prop => imageFiles(prop).map(file => `references/${prop.id}/${file}`)),
+        ...bundle.referenceTakes.flatMap(take => {
+          const owner = take.reference?.sheetId ?? take.prop?.propId;
+          return owner ? [`references/${owner}/takes/${take.id}/${take.media}`] : [];
+        }),
         ...imageFiles(bundle.artDirection)];
       if (!files.includes(args.file)) throw new RetrievalError("unavailable", "view_image: that reference or candidate is unavailable. Use a file returned by list_references or get_art_direction.");
       path = args.file; id = `reference:${path}`; label = path;
     }
-    const [file] = video ? await readContainedVideoReferences(this.store.dir, [path]) : await readContainedImageReferences(this.store.dir, [path]);
-    const sourceHash = hash(file!.data);
+    const bytes = await readContainedMediaBytes(this.store.dir, path, signal);
+    const sourceHash = hash(bytes);
     if (expected && !sourceHash.startsWith(expected)) throw new RetrievalError("unavailable", "view_image: these image bytes changed. Refresh the source before inspecting it.");
-    return { path, id, label, video, sourceHash, bytes: file!.data };
+    return { path, id, label, video, sourceHash, bytes };
   }
   read(lease: QueryLease, args: Record<string, unknown>): Promise<RetrievalOutcome> {
     const result = this.tail.then(() => this.readOnce(lease, args));
@@ -99,13 +104,13 @@ export class ConversationImages {
     const count = this.counts.get(lease.runId) ?? 0;
     if (count >= 24) throw new RetrievalError("unavailable", "view_image: this run has reached its 24-image inspection limit.");
     this.counts.set(lease.runId, count + 1);
-    const source = await this.source(lease, args);
+    const source = await this.source(lease, args, session.signal);
     let rendition;
-    try { rendition = await imageRendition(source.bytes, extname(source.path), this.deps.maker); }
+    try { rendition = await imageRendition(source.bytes, extname(source.path), this.deps.maker, session.signal); }
     catch { throw new RetrievalError("unavailable", "view_image: a bounded image rendition is unavailable. Configure the local media decoder or use a supported PNG."); }
     await this.access(lease);
-    const total = (this.bytesByRun.get(lease.runId) ?? 0) + rendition.data.length;
-    if (total > 64 * 1024 * 1024) throw new RetrievalError("unavailable", "view_image: this run has reached its 64 MiB image budget.");
+    const total = (this.bytesByRun.get(lease.runId) ?? 0) + 4 * Math.ceil(rendition.data.length / 3);
+    if (total > IMAGE_RUN_ENCODED_BYTES) throw new RetrievalError("unavailable", "view_image: this run has reached its 20 MB encoded image budget.");
     this.bytesByRun.set(lease.runId, total);
     const observation: ImageObservation = { id: source.id, label: source.label.slice(0, 500), sourceHash: source.sourceHash,
       renditionHash: hash(rendition.data), width: rendition.width, height: rendition.height, posterOnly: source.video };

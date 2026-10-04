@@ -200,7 +200,9 @@ export class ArkeAdapter implements HarnessAdapter {
   capabilities(): ReadonlySet<HarnessCapability> { return new Set(["events", "models"]); }
   readonly imageInput = true;
   imageInputForSession(id: string): boolean { return this.sessions.get(id)?.inputModalities?.includes("image") === true; }
-  imageDestinationForSession(_id: string) { return { provider: "ollama", local: true }; }
+  imageDestinationForSession(_id: string) {
+    return { provider: "ollama", local: ["127.0.0.1", "[::1]", "localhost"].includes(new URL(this.baseUrl).hostname) };
+  }
   /**
    * Also how the harness recovers. The coordinator initialises an adapter it does not supervise
    * once, then only polls this; with no process to restart, Ollama starting (or coming back)

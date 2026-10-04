@@ -2,11 +2,21 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { readContainedImageReferences } from "../../src/world/reference-files.js";
+import { readContainedImageReferences, readContainedMediaBytes } from "../../src/world/reference-files.js";
 import { jpegBytes, pngBytes, webpBytes } from "../queue/fake-provider.js";
 import { tempDir } from "../tmp.js";
 
 describe("provider image reference preparation", () => {
+  it("keeps inspection codec inputs contained and abortable without narrowing their format", async () => {
+    const world = await tempDir("arke-inspection-media-");
+    const bytes = Buffer.from("GIF89a");
+    await writeFile(join(world, "source.gif"), bytes);
+    assert.deepEqual(Buffer.from(await readContainedMediaBytes(world, "source.gif")), bytes);
+    await assert.rejects(readContainedMediaBytes(world, "../outside.gif"), /invalid/);
+    await assert.rejects(readContainedMediaBytes(world, "C:/outside.gif"), /invalid/);
+    const controller = new AbortController(); controller.abort();
+    await assert.rejects(readContainedMediaBytes(world, "source.gif", controller.signal), /abort/i);
+  });
   it("reads verified PNG, JPEG, and WebP beneath the world with neutral names", async () => {
     const world = await tempDir("arke-reference-world-");
     await mkdir(join(world, "references"), { recursive: true });

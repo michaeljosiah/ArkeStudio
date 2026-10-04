@@ -46,6 +46,15 @@ test("image parts reach a pinned vision model as Ollama images; text-only sessio
   await assert.rejects(f.adapter.sendMessage({ sessionId: text, parts: [{ type: "image", mimeType: "image/png", data: "cmVk" }] }), /cannot inspect images/);
 });
 
+test("image disclosure locality follows the validated Ollama host, including explicitly remote runtimes", async () => {
+  for (const [baseUrl, local] of [["http://127.0.0.1:11434", true], ["http://localhost:11434", true],
+    ["http://[::1]:11434", true], ["https://gpu-box:11434", false]] as const) {
+    const adapter = new ArkeAdapter({ baseUrl, allowRemoteHost: true });
+    assert.deepEqual(adapter.imageDestinationForSession("session"), { provider: "ollama", local });
+    await adapter.dispose();
+  }
+});
+
 test("lists pulled models in the contract's terms, and names a tool-calling one the default", async (t) => {
   const f = await fixture(t);
   f.ollama.models = [

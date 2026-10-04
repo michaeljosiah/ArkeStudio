@@ -2179,9 +2179,9 @@ export function SettingsHarnessScreen() {
             checked={state.world.meta.cloudImageInspection !== false}
             onChange={event => setWorldImageInspection(state.world!.meta.worldId, event.target.checked)} /> Allow cloud image inspection for this world</label></div>}
           {[...new Set(["anthropic", "openai", ...(state?.app.harnessModels ?? []).map(model => model.provider),
-            ...Object.keys(state?.app.imageInspection?.providers ?? {})])].filter(provider => provider !== "ollama").map(provider => <div className="fy-set__row" key={provider}><label><input type="checkbox"
+            ...Object.keys(state?.app.imageInspection?.providers ?? {})])].map(provider => <div className="fy-set__row" key={provider}><label><input type="checkbox"
             checked={state?.app.imageInspection?.providers[provider] !== false}
-            onChange={event => setImageInspection(event.target.checked, provider)} /> Allow image inspection by {provider === "anthropic" ? "Anthropic" : provider === "openai" ? "OpenAI" : provider}</label></div>)}
+            onChange={event => setImageInspection(event.target.checked, provider)} /> Allow cloud image inspection by {provider === "anthropic" ? "Anthropic" : provider === "openai" ? "OpenAI" : provider === "ollama" ? "Ollama on another device" : provider}</label></div>)}
           {/*
            * Which model runs each writing agent (SPEC-033 R-65).
            *
