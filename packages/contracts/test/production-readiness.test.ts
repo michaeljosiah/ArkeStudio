@@ -92,6 +92,10 @@ it("requires a current accepted performance to be placed on an audible timeline 
     provenance:{schemaVersion:1,source:{kind:"performance-recording",productionId:"film",performanceId:id,sourceFile:"capture.wav",sourceMediaHash:hash},sourceTechnical:technical,outputHash:hash,outputTechnical:technical,preparation:[],qualityReport:report,createdAt:AT}});
   p.performances.push(performance); p.performanceReview.selections[performanceLineKey(target)]={performanceId:id,target,selectedAt:AT,selectedBy:"user"};
   p.performanceReview.reviews.push({requestId:WORLD,ts:AT,performanceId:id,target,decision:"accept",by:"user"});
+  const delivery=doneExport(world(),p), selection=p.performanceReview.selections[performanceLineKey(target)]!;
+  selection.performanceId=newId("pf");
+  assert.equal(deriveProductionReadiness(world(),p,[delivery]).checks.find(check=>check.key === "export")!.status,"missing","Changing a selected beat voice invalidates delivery before it is placed in a video timeline");
+  selection.performanceId=id;
   p.timeline={status:"ready",timeline:seedStoryPictureTimeline(p)}; assert.equal(sceneCheck(p,"dialogue-voiced").status,"missing");
   p.timeline.timeline.tracks.push({id:"tr_dialogue",kind:"dialogue",name:"Dialogue",order:1,muted:false,clips:[{id:"cl_voice",startFrame:0,durationFrames:24,sourceInFrames:0,
     source:{kind:"performance",performanceId:id,shotId:"sh_one",label:"Maren",sourceHash:hash,leadInSec:0,timing:{postHandle:{kind:"tail",durationSec:0},overflow:{mode:"forbid"}}}}]});

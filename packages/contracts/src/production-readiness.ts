@@ -67,7 +67,7 @@ function canonical(value: unknown): unknown {
 export function productionExportFingerprint(world: ReadinessWorld, production: ProductionBundle): string {
   const timeline = production.timeline?.status === "ready" ? production.timeline.timeline : null;
   const content = {meta:production.meta,chapters:production.chapters.filter(c=>!c.retired),scenes:production.scenes,
-    selections:production.selections,spine:production.spine,cut:production.cut,routing:production.routing,
+    selections:production.selections,performanceSelections:production.performanceReview.selections,spine:production.spine,cut:production.cut,routing:production.routing,
     timeline:timeline ? {frameRate:timeline.frameRate,tracks:timeline.tracks,mix:timeline.mix,migratedCut:timeline.migratedCut} : production.timeline};
   const refs = JSON.stringify(content), takeIds = new Set(production.takes.filter(t=>refs.includes(t.id)).map(t=>t.id));
   for (const take of production.takes) if (takeIds.has(take.id) && take.segment) takeIds.add(take.segment.passTakeId);
@@ -76,7 +76,8 @@ export function productionExportFingerprint(world: ReadinessWorld, production: P
   const referenced = `${refs}${JSON.stringify(takes)}`;
   const speakers = new Set(production.scenes.flatMap(scene=>[...Object.keys(scene.cast ?? {}),...(scene.script?.blocks.flatMap(b=>b.speaker ? [b.speaker] : []) ?? []),
     ...orderedShots(scene).flatMap(s=>[...parseMentions(s.description),...(s.audio?.speaker ? [s.audio.speaker] : [])])]));
-  const snapshot = {...content,takes,performances,takeMediaInfo:Object.fromEntries(Object.entries(production.takeMediaInfo).filter(([id])=>takeIds.has(id))),
+  const snapshot = {...content,takes,performances,performanceReviews:production.performanceReview.reviews.filter(r=>performances.some(p=>p.id === r.performanceId)),
+    takeMediaInfo:Object.fromEntries(Object.entries(production.takeMediaInfo).filter(([id])=>takeIds.has(id))),
     artifacts:world.artifacts.filter(a=>referenced.includes(a.id)).sort((a,b)=>a.id.localeCompare(b.id)),
     sheets:world.sheets.filter(s=>speakers.has(s.id)).sort((a,b)=>a.id.localeCompare(b.id))};
   return `production-export-v1:${textDigest(JSON.stringify(canonical(snapshot)))}`;
