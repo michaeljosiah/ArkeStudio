@@ -4,14 +4,19 @@ import { useMediaQuery } from "../../lib/media-query.js";
 import { PageSheet } from "../../components/page-sheet.js";
 import { ChevronLeft, More, Pin, Sparkle } from "../../components/icons.js";
 
-/** Turn 168: a deep page owns the phone's head and the assistant overlays its work. */
-export function SceneBackRow({ context, title, onBack, press, children }: { context: string; title: string; onBack: () => void; /** One press in the place of the ⋯ menu, for a page whose menu would hold only that press (design turn 194, rule 15). */ press?: ReactNode; children?: ReactNode }) {
+/**
+ * Turn 168: a deep page owns the phone's head and the assistant overlays its work. Two lines, the
+ * context over the title, unless `back` names where the chevron goes: then the bar is 194h's one
+ * line, the chevron and the title, and the context is said only to a screen reader, by the press.
+ */
+export function SceneBackRow({ context, back, title, onBack, press, children }: { context?: string; /** The one-line bar (194h): what the back press returns to, as its label says it. */ back?: string; title: string; onBack: () => void; /** One press in the place of the ⋯ menu, for a page whose menu would hold only that press (design turn 194, rule 15). */ press?: ReactNode; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const line = back !== undefined;
   return <>
-    <header className="fy-scene-back">
-      <button type="button" aria-label="Back" onClick={onBack}><ChevronLeft size={20} /></button>
-      <div><span>{context}</span><h1>{title}</h1></div>
-      {press ?? <button type="button" aria-label="Page actions" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><More size={20} /></button>}
+    <header className={line ? "fy-scene-back fy-scene-back--line" : "fy-scene-back"}>
+      <button type="button" aria-label={line ? `Back to ${back}` : "Back"} onClick={onBack}><ChevronLeft size={line ? 16 : 20} /></button>
+      <div>{!line && <span>{context}</span>}<h1>{title}</h1></div>
+      {press ?? <button type="button" aria-label="Page actions" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><More size={line ? 16 : 20} /></button>}
     </header>
     {press === undefined && <PageSheet open={open} onClose={() => setOpen(false)} title={title} className="fy-scene-page-menu">
       <div className="fy-scene-menu" onClick={event => { if ((event.target as Element).closest("button")) setOpen(false); }}>{children}</div>

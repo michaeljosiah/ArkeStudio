@@ -1837,7 +1837,9 @@ export function ChapterWorkspace({
   return (
     <div className="fy-sw" data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"} data-view={view}>
       <main className="fy-sw__centre" ref={chapterCentre}>
-        {phone && <SceneBackRow context={`${production.meta.title} · Chapters`} title={`${String(chapter.order).padStart(2,"0")} · ${chapter.title}`} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)} {...(barArke !== null ? { press: barArke } : {})}><Button onClick={() => setNotesOpen(true)}>Notes</Button><Button onClick={() => setDock(true)}>Ask Arke</Button></SceneBackRow>}
+        {/* 194h: one line, the chevron back to Chapters and the chapter's title, in every view, so
+            the bar stays put when the switch below it changes view (the master draws Audiobook). */}
+        {phone && <SceneBackRow back="Chapters" title={chapter.title} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)} {...(barArke !== null ? { press: barArke } : {})}><Button onClick={() => setNotesOpen(true)}>Notes</Button><Button onClick={() => setDock(true)}>Ask Arke</Button></SceneBackRow>}
         <header className="fy-sw__head">
           {/* The page head is the Manuscript's (design turn 194, rule 2): the label, the title, the
               synopsis and the marks are set there. Audiobook and Timing open on their toolbar, and
