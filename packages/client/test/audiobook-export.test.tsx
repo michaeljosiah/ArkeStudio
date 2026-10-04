@@ -116,9 +116,13 @@ describe("Export audiobook (turn 186e)", () => {
     assert.equal(sheet.closest(".fy-h1row, .fy-prodmain"), null);
     const planAsk = lastAsk(m, "open-audiobook-listening")!;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: planAsk.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: PLAN }));
-    assert.match(text(q(m, '[data-testid="audiobook-export"]')), /Audiobook player\s*player\.html · 1 chapter · 2 pictures · web package/);
+    assert.match(text(q(m, '[data-testid="audiobook-export"]')), /Audiobook player\s*player\.html · web package/);
     assert.match(text(q(m, '[data-testid="audiobook-export"]')), /Chapters\s*1 of 2 · read whole/);
-    assert.doesNotMatch(text(q(m, '[data-testid="audiobook-export"]')), /Chapter files/, "only what it will make");
+    assert.match(text(q(m, '[data-testid="audiobook-export"]')), /Pictures\s*2 · cover where a chapter has none/);
+    // Drawn where 197a draws it, and not offered: SPEC-047's own export is issue 1336.
+    const files = [...dom.document.querySelectorAll("button")].find((button) => text(button).startsWith("Chapter files"))!;
+    assert.equal(files.hasAttribute("disabled"), true);
+    assert.match(files.getAttribute("title") ?? "", /Not built yet/);
     await press(q(m, '[data-testid="audiobook-export-start"]'));
     const exportAsk = lastAsk(m, "export-audiobook-player")!;
     assert.equal(exportAsk.productionId, "inkbound");
@@ -155,5 +159,86 @@ describe("Export audiobook (turn 186e)", () => {
     );
     const rows = [...m.container.querySelectorAll('[data-testid="web-package"]')].map((row) => text(row));
     assert.deepEqual(rows, ["InkboundAudiobook · 2026-10-03Show in folder", "SaltlightVisual novel · 2026-10-02Show in folder"]);
+  });
+});
+
+describe("Export audiobook · Video (turn 197)", () => {
+  const production = () => inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
+  const button = (label: string) => [...dom.document.querySelectorAll("button")].find((candidate) => text(candidate) === label) ?? null;
+  const radio = (group: string, label: string) => [...dom.document.querySelectorAll(`[aria-label="${group}"] button`)].find((candidate) => text(candidate) === label) ?? null;
+  async function videoSheet() {
+    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production()} onClose={() => {}} />);
+    const planAsk = lastAsk(m, "open-audiobook-listening")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: planAsk.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: PLAN }));
+    await press(q(m, '[data-testid="audiobook-export-video"]'));
+    return m;
+  }
+  const answerState = async (m: Mounted, chapters: Array<{ chapterId: string; seconds: number; rendered: boolean }>, rates = {}) => {
+    const ask = lastAsk(m, "read-audiobook-video")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.video-state", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", state: { chapters, rates, readBy: "Read by George’s voice", running: null } }));
+    return ask;
+  };
+
+  it("offers Video beside the player as 197a draws it, priced in size and time before Render", async () => {
+    const m = await videoSheet();
+    const ask = await answerState(m, [{ chapterId: "slack-water", seconds: 1900, rendered: false }]);
+    assert.deepEqual(ask.options, { files: "chapter", shape: "1920x1080", slowPush: true, subtitles: "sidecar", captionPosition: "bottom", captionSize: "m", titleCards: true }, "the owner's defaults");
+    const sheet = text(q(m, '[data-testid="audiobook-export"]'));
+    for (const row of [/Files\s*One a chapterOne for the book\s*1 file/, /Shape\s*1920 × 10801280 × 7201080 × 1920 · vertical/, /Pictures\s*Slow push\s*1 picture · cover before the first/, /Subtitles\s*SidecarBurned inBothNone\s*BottomMiddle\s*SML/, /Openings\s*Chapter title cards\s*chapter markers in the file/, /Chapters\s*1 of 2 · read whole\s*Slack water/, /Audio\s*The chapter mix, as Timing sets it\s*−18 LUFS · AAC 128 kbps · 48 kHz/]) assert.match(sheet, row);
+    assert.match(text(q(m, '[data-testid="audiobook-video-estimate"]')), /^~\d+ MB · ~\d+ min on this machine31:40 of video · 1 to render$/);
+    assert.equal(text(q(m, '[data-testid="audiobook-video-render"]')), "Render 1 chapter");
+    assert.equal(radio("Position", "Bottom")?.hasAttribute("disabled"), true, "position and size wait for burned-in words");
+
+    // Vertical: the subtitles move to Both until the author has chosen them.
+    await press(radio("Shape", "1080 × 1920 · vertical"));
+    assert.deepEqual([lastAsk(m, "read-audiobook-video")!.options.shape, lastAsk(m, "read-audiobook-video")!.options.subtitles], ["1080x1920", "burn-in+sidecar"]);
+    await press(radio("Subtitles", "None"));
+    await press(radio("Shape", "1280 × 720"));
+    assert.equal(lastAsk(m, "read-audiobook-video")!.options.subtitles, "none", "a choice made stays");
+
+    // One for the book: a book past twelve hours in parts, said on the row and on the press.
+    await press(radio("Files", "One for the book"));
+    await answerState(m, [{ chapterId: "a", seconds: 8 * 3600, rendered: true }, { chapterId: "b", seconds: 6 * 3600, rendered: false }], { "1280x720/push": { bytesPerSec: 1000, speed: 10 } });
+    assert.match(text(q(m, '[data-testid="audiobook-export"]')), /2 parts · 8 h 00 m, 6 h 00 m/);
+    assert.equal(text(q(m, '[data-testid="audiobook-video-render"]')), "Render 2 parts");
+    assert.match(text(q(m, '[data-testid="audiobook-video-estimate"]')), /^2 files · 48 MB · 36 min on this machine14:00:10 of video · 1 rendered · 1 to render$/, "measured: no ~");
+  });
+
+  it("renders, follows the render, and lists the files with Open and Show in folder (197e)", async () => {
+    Object.assign(dom.window, { arke: { openDataFolder() {} } });
+    try {
+      const m = await videoSheet();
+      await answerState(m, [{ chapterId: "slack-water", seconds: 1900, rendered: false }]);
+      await press(q(m, '[data-testid="audiobook-video-render"]'));
+      const ask = lastAsk(m, "export-audiobook-video")!;
+      assert.match(ask.exportId, /^vb_[0-9A-HJKMNP-TV-Z]{26}$/);
+      const video = { title: "Inkbound", chapter: 1, of: 1, doneSec: 724, totalSec: 1900, leftSec: 180 };
+      await act(async () => __applyEventForTest({ at: AT, type: "export.progress", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: ask.exportId, deliveryKind: "audiobook-video", status: "running", percent: 41, output: null, video, error: null }));
+      assert.match(text(q(m, '[data-testid="audiobook-video-estimate"]')), /rendering · 41%$/);
+      assert.equal(q(m, '[data-testid="audiobook-video-render"]')?.hasAttribute("disabled"), true, "one render at a time");
+      const files = [{ name: "inkbound-01-slack-water.mp4", seconds: 1900, bytes: 338 * 1024 * 1024, shape: "1920x1080" as const, sidecars: [".srt" as const, ".vtt" as const], picture: "artifacts/stair.png" }];
+      await act(async () => __applyEventForTest({ at: AT, type: "audiobook.video-exported", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: ask.exportId, result: { ok: true, dir: "exports/inkbound-video-20261003", files, made: 1, renderedAt: AT } }));
+      const sheet = text(q(m, '[data-testid="audiobook-export"]'));
+      assert.match(sheet, /^1 video · 338 MBexports\/inkbound-video-20261003\/Show in folderRender again/);
+      assert.equal(text(q(m, '[data-testid="audiobook-video-file"]')), "inkbound-01-slack-water.mp431:40 · 1920×1080 · 338 MB · .srt .vttOpenShow in folder");
+      await press(button("Open"));
+      assert.deepEqual(lastAsk(m, "open-exports-folder"), { kind: "open-exports-folder", worldId: FIXTURE_WORLD_ID, dir: "inkbound-video-20261003", file: "inkbound-01-slack-water.mp4" });
+      await press(q(m, '[data-testid="audiobook-video-again"]'));
+      assert.notEqual(lastAsk(m, "export-audiobook-video")!.exportId, ask.exportId, "Render again is a new render, made only where something changed");
+    } finally {
+      Object.assign(dom.window, { arke: undefined });
+    }
+  });
+
+  it("previews a frame with the vertical crop's focus, and puts the focus back to the centre (197b)", async () => {
+    const m = await videoSheet();
+    await answerState(m, [{ chapterId: "slack-water", seconds: 12, rendered: false }]);
+    await press(q(m, '[data-testid="audiobook-video-preview-open"]'));
+    const preview = q(m, '[data-testid="audiobook-video-preview"]')!;
+    assert.match(text(preview), /^Preview · Slack water16:9 · 1920×1080 · sidecar captionsDone9:16 · focusdrag to set · kept on the pictureCentre/);
+    assert.match(text(preview), /0:00 · cover/);
+    await press(button("Centre"));
+    const ask = lastAsk(m, "set-audiobook-picture-focus")!;
+    assert.deepEqual([ask.chapterFile, ask.block, ask.focus], ["slack-water", "a", null]);
   });
 });

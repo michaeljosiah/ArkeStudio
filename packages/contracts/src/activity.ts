@@ -15,6 +15,7 @@ import type { Take } from "./take.js";
 import { VOICE_PREVIEW_SCOPE } from "./voice.js";
 import { orderedShots } from "./scene-flow.js";
 import { PerformanceTargetSchema } from "./performance.js";
+import { clockTime, roughTime, type AudiobookVideoProgress } from "./audiobook-video.js";
 
 /** The same names for running and completed work, resolved only inside its owning world (#1005). */
 export function activityJobLabels(
@@ -342,6 +343,13 @@ export interface RunningEntry {
   worldId?: string;
   /** Cancellable now? (R-13: only what the state permits.) */
   cancellable: boolean;
+  /** An audiobook video's place (design turn 197d): the row draws its bar and its line from it. */
+  video?: AudiobookVideoProgress;
+}
+
+/** `Chapter 1 of 1 · 12:04 of 31:40 · ~3 min left` (197d). */
+export function videoPlaceLine(video: AudiobookVideoProgress, withLength = true): string {
+  return [`Chapter ${Math.max(1, video.chapter)} of ${video.of}`, ...(withLength ? [`${clockTime(video.doneSec)} of ${clockTime(video.totalSec)}`] : []), ...(video.leftSec !== null ? [`~${roughTime(video.leftSec)} left`] : [])].join(" · ");
 }
 
 const RUNNING_JOB = new Set(["queued", "submitting", "running"]);
@@ -350,7 +358,7 @@ export function computeRunning(
   state: ClientState,
   extras: {
     sidecar?: { state: string; detail: string } | null;
-    exports?: Record<string, { productionId: string; status: string; percent: number }>;
+    exports?: Record<string, { productionId: string; status: string; percent: number; video?: AudiobookVideoProgress }>;
   } = {},
 ): RunningEntry[] {
   const entries: RunningEntry[] = [];
@@ -381,6 +389,10 @@ export function computeRunning(
   }
   for (const [id, e] of Object.entries(extras.exports ?? {})) {
     if (e.status !== "running") continue;
+    if (e.video !== undefined) {
+      entries.push({ kind: "export", title: `Video · ${e.video.title}`, detail: videoPlaceLine(e.video), percent: e.percent, ref: id, cancellable: true, video: e.video });
+      continue;
+    }
     entries.push({
       kind: "export",
       title: `export · ${e.productionId}`,

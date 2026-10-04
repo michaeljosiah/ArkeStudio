@@ -25,6 +25,7 @@ import { OnYourPC } from "./on-your-pc.js";
 import { Badge, Button, Callout, IconButton, Input, cx } from "./ui.js";
 import { ChevronLeft, FileText, Trash } from "./icons.js";
 import { ProviderCallInspector } from "./provider-calls.js";
+import { VideoDoneRow, VideoRunningRow } from "./audiobook-video.js";
 import { historyNote, type NoteTone } from "./queue-note.js";
 import { mediaUrl } from "../lib/media.js";
 import { dayLabel, shortDate, shortDateTime } from "../lib/format.js";
@@ -271,7 +272,7 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
         ) : panel.tab === "new" ? (
           <WhatsNew releases={releases} update={waiting} />
         ) : panel.tab === "inbox" ? (
-          <Inbox state={state} needsYou={needsYou} running={running} scope={scope} activeWorldId={activeWorldId} />
+          <Inbox state={state} needsYou={needsYou} running={running} scope={scope} activeWorldId={activeWorldId} phone={phone} />
         ) : (
           <Spend state={state} scope={scope} activeWorldId={activeWorldId} />
         )}
@@ -295,14 +296,22 @@ function Inbox({
   running,
   scope,
   activeWorldId,
+  phone,
 }: {
   state: ClientState;
   needsYou: NeedsYouEntry[];
   running: RunningEntry[];
   scope: "active" | "all";
   activeWorldId: string | null;
+  phone: boolean;
 }) {
   const navigate = useNavigate();
+  const exportsState = useExports();
+  // The audiobook's videos finished while this window was open (design turn 197f): each file
+  // with its shape and size, to open here or download on a phone.
+  const videos = Object.entries(exportsState).flatMap(([id, entry]) =>
+    entry.status === "done" && entry.made !== undefined && entry.worldId !== undefined && entry.worldId === activeWorldId ? entry.made.files.map((file) => ({ id, dir: entry.made!.dir, file })) : [],
+  );
   const reconcileReport = useReconcileReport();
   const [confirming, setConfirming] = useState<string | null>(null);
   const inScope = (worldId: string | undefined): boolean =>
@@ -379,11 +388,16 @@ function Inbox({
             />
           ))}
           {running.length > 0 && <Eyebrow first={needsYou.length === 0}>Running · {running.length}</Eyebrow>}
-          {running.map((entry) => (
-            <RunningRow key={entry.ref} entry={entry} activeWorldId={activeWorldId} />
-          ))}
+          {running.map((entry) =>
+            entry.video !== undefined ? (
+              <VideoRunningRow key={entry.ref} exportId={entry.ref} worldId={activeWorldId} video={entry.video} percent={entry.percent ?? 0} phone={phone} />
+            ) : (
+              <RunningRow key={entry.ref} entry={entry} activeWorldId={activeWorldId} />
+            ),
+          )}
         </>
       )}
+      {activeWorldId !== null && videos.map((video) => <VideoDoneRow key={`${video.id}/${video.file.name}`} worldId={activeWorldId} dir={video.dir} file={video.file} />)}
       {buildMissing.map(({ build, missing }) => (
         <div key={build.buildId}>
           <Eyebrow>

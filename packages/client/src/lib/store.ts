@@ -735,6 +735,19 @@ export function subscribeAudiobookExported(listener: (answer: AudiobookExported)
   audiobookExportedListeners.add(listener);
   return () => audiobookExportedListeners.delete(listener);
 }
+/** The audiobook's video (design turn 197): what a render would make, and what one made. */
+export type AudiobookVideoExported = Extract<DomainEvent, { type: "audiobook.video-exported" }>;
+const audiobookVideoExportedListeners = new Set<(answer: AudiobookVideoExported) => void>();
+export function subscribeAudiobookVideoExported(listener: (answer: AudiobookVideoExported) => void): () => void {
+  audiobookVideoExportedListeners.add(listener);
+  return () => audiobookVideoExportedListeners.delete(listener);
+}
+export type AudiobookVideoStateAnswer = Extract<DomainEvent, { type: "audiobook.video-state" }>;
+const audiobookVideoStateListeners = new Set<(answer: AudiobookVideoStateAnswer) => void>();
+export function subscribeAudiobookVideoState(listener: (answer: AudiobookVideoStateAnswer) => void): () => void {
+  audiobookVideoStateListeners.add(listener);
+  return () => audiobookVideoStateListeners.delete(listener);
+}
 export type WebPackagesListed = Extract<DomainEvent, { type: "web-packages.listed" }>;
 const webPackagesListeners = new Set<(answer: WebPackagesListed) => void>();
 export function subscribeWebPackages(listener: (answer: WebPackagesListed) => void): () => void {
@@ -1693,6 +1706,12 @@ function handleFrame(json: string): void {
     if (event.type === "audiobook.exported") {
       for (const listener of audiobookExportedListeners) listener(event);
     }
+    if (event.type === "audiobook.video-exported") {
+      for (const listener of audiobookVideoExportedListeners) listener(event);
+    }
+    if (event.type === "audiobook.video-state") {
+      for (const listener of audiobookVideoStateListeners) listener(event);
+    }
     if (event.type === "web-packages.listed") {
       for (const listener of webPackagesListeners) listener(event);
     }
@@ -2534,8 +2553,18 @@ function handleFrame(json: string): void {
           percent: event.percent,
           output: event.output,
           ...(event.sidecar !== undefined ? { sidecar: event.sidecar } : {}),
+          ...(event.deliveryKind !== undefined ? { deliveryKind: event.deliveryKind } : {}),
+          ...(event.video !== undefined ? { video: event.video } : {}),
+          ...(exportsState[event.exportId]?.made !== undefined ? { made: exportsState[event.exportId]!.made! } : {}),
           error: event.error,
         },
+      };
+    } else if (event.type === "audiobook.video-exported" && event.result.ok) {
+      // The files an audiobook video made (design turn 197e), for its finished row in Activity.
+      const held = exportsState[event.exportId];
+      exportsState = {
+        ...exportsState,
+        [event.exportId]: { ...(held ?? { worldId: event.worldId, productionId: event.productionId, status: "done" as const, percent: 100, output: null, error: null }), deliveryKind: "audiobook-video", made: { dir: event.result.dir, files: event.result.files } },
       };
     }
     if (event.type === "canon.answer") {
@@ -5244,6 +5273,11 @@ export interface ExportState {
   output: string | null;
   /** The subtitle sidecar delivered beside the video, when one was (SPEC-038 R-27). */
   sidecar?: string;
+  deliveryKind?: "video" | "manuscript" | "interactive" | "audiobook-video";
+  /** An audiobook video's place while it renders (design turn 197d). */
+  video?: import("@arke-studio/contracts").AudiobookVideoProgress;
+  /** What an audiobook video made, once it has (197e): its folder and files. */
+  made?: { dir: string; files: import("@arke-studio/contracts").AudiobookVideoFile[] };
   error: string | null;
 }
 
@@ -5858,8 +5892,26 @@ export function exportManuscript(worldId: string, productionId: string, format: 
   return send({ kind: "export-manuscript", worldId, productionId, format, ...(language !== undefined && format === "epub" ? { language } : {}) });
 }
 
-export function openExportsFolder(worldId: string, dir?: string): void {
-  send({ kind: "open-exports-folder", worldId, ...(dir !== undefined ? { dir } : {}) });
+export function openExportsFolder(worldId: string, dir?: string, file?: string): void {
+  send({ kind: "open-exports-folder", worldId, ...(dir !== undefined ? { dir } : {}), ...(dir !== undefined && file !== undefined ? { file } : {}) });
+}
+
+/** The audiobook as a video (design turn 197): answered as `audiobook.video-exported` under the id returned, followed in Activity. */
+export function exportAudiobookVideo(worldId: string, productionId: string, exportId: string, options: import("@arke-studio/contracts").AudiobookVideoOptions): string | null {
+  const requestId = ulid();
+  return send({ kind: "export-audiobook-video", worldId, productionId, requestId, exportId, options }) ? requestId : null;
+}
+
+/** What a video render with these options would make (197a): answered as `audiobook.video-state` under the id returned. */
+export function readAudiobookVideo(worldId: string, productionId: string, options: import("@arke-studio/contracts").AudiobookVideoOptions): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-audiobook-video", worldId, productionId, requestId, options }) ? requestId : null;
+}
+
+/** Where a block's picture's subject stands (197b), or null for the centre: answered as `audiobook.record`. */
+export function setAudiobookPictureFocus(worldId: string, productionId: string, chapterFile: string, block: string, focus: { x: number; y: number } | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "set-audiobook-picture-focus", worldId, productionId, chapterFile, block, focus, requestId }) ? requestId : null;
 }
 
 /** The audiobook as the player (design turn 186e): answered as `audiobook.exported` under the id returned. */
