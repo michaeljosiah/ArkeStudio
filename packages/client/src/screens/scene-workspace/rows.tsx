@@ -112,6 +112,8 @@ export function StoryboardRows({
   onPlanVideo,
   onRenderBoard,
   beats,
+  reviewMarks,
+  reviewShots,
 }: {
   layout?: "list" | "grid";
   scene: SceneRecord;
@@ -147,6 +149,8 @@ export function StoryboardRows({
   onRenderBoard: (memberShotIds: string[]) => void;
   /** Present when the production plays as beats (turn 174): each row reads as a beat. */
   beats?: BeatsView;
+  reviewMarks?: ReadonlyMap<string, string>;
+  reviewShots?: ReadonlyMap<string, { framing: string; cast: readonly string[] }>;
 }) {
   const shots = orderedShots(scene);
   const lineFindings = useMemo(() => stageLineCrossings(scene, aspect), [scene, aspect]);
@@ -274,6 +278,8 @@ export function StoryboardRows({
             : finalizationRetryJobId(frameRun, runState.stepIndex, jobs);
           return (
             <li key={shot.id} className="fy-swrow" data-testid={`workspace-row-${shot.id}`}>
+              {reviewMarks?.get(shot.id) && <div className="fy-production-preview__mark">{reviewMarks.get(shot.id)}</div>}
+              {reviewShots && <div className="fy-production-preview__shotmeta"><span>{reviewShots.get(shot.id)?.framing}</span>{reviewShots.get(shot.id)?.cast.map(name => <span className="fy-swchip" key={name}>{name}</span>)}</div>}
               {showBoards && board !== undefined ? (
                 <BoardBand
                   board={board}

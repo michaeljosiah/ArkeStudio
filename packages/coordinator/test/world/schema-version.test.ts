@@ -22,6 +22,14 @@ import { makeTempWorld } from "./helpers.js";
 
 const CLOCK = () => "2026-08-19T12:00:00.000Z";
 
+it("refuses schema-61 readers after frozen production card previews without modifying the world", async () => {
+  const { dir, store } = await open();
+  await store.ensureSchemaVersion(62, "production-card-preview");
+  const before = await readFile(join(dir, "world.json"), "utf8");
+  await assert.rejects(readWorldMeta(dir, { supports: 61 }), /newer|schema|version/i);
+  assert.equal(await readFile(join(dir, "world.json"), "utf8"), before);
+});
+
 async function open() {
   const dir = await makeTempWorld();
   const store = await WorldStore.open(dir, { clock: CLOCK });

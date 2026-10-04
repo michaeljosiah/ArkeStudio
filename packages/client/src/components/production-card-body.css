@@ -1,0 +1,34 @@
+.fy-production-preview { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.fy-production-preview h4 { margin: 10px 0; }
+.fy-production-preview dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.fy-production-preview dt, .fy-production-preview small { color: var(--muted-foreground); font-size: 11px; }
+.fy-production-preview dd { margin: 3px 0; }
+.fy-production-preview__script { border: 1px solid var(--border); padding: 12px; max-height: 480px; overflow: auto; white-space: pre-wrap; }
+.fy-production-preview__script > div { padding: 8px; }
+.fy-production-preview__script [data-kind="dialogue"] { margin-inline: 12%; }
+.fy-production-preview__script strong, .fy-production-preview__script small { display: block; }
+.fy-production-preview__script [data-changed] { border-left: 3px solid var(--accent); }
+.fy-production-preview [data-removed] { opacity: .65; }
+.fy-production-preview__rows { max-height: 520px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border); min-width: 0; }
+.fy-production-preview__rows .fy-swrows { min-width: 0; }
+.fy-production-preview__rows[data-screen="scene-detail"] .fy-swrows[data-layout] .fy-swrow__band { display: flex; flex-direction: column; width: 100%; min-width: 0; }
+.fy-production-preview__rows[data-screen="scene-detail"] .fy-swrows[data-layout] .fy-swrow__body { width: 100%; padding: 10px; }
+.fy-production-preview__rows[data-screen="scene-detail"] .fy-swrows[data-layout] .fy-swrow__framewrap { width: 100%; height: auto; }
+.fy-production-preview__rows .fy-swrow__frame { width: 100%; aspect-ratio: 16/9; min-height: 100px; max-height: 180px; }
+.fy-production-preview__rows .fy-swrow__titleline { padding-right: 0; }
+.fy-production-preview__rows .fy-swrow__pencil { display: none; }
+.fy-production-preview__shotmeta { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; font: var(--type-meta); }
+.fy-production-preview__rows :is(.fy-swrow__actions, .fy-swrow__frameactions, .fy-swaddshot, .fy-swdivider, .fy-swboard__actions) { display: none; }
+.fy-production-preview__rows textarea { pointer-events: none; }
+.fy-production-preview__mark { padding: 6px 10px; color: var(--foreground); border-left: 3px solid var(--accent); font-size: 11px; }
+.fy-production-preview__cast { display: flex; flex-wrap: wrap; gap: 12px; }
+.fy-production-preview__cast figure { width: 72px; margin: 0; }
+.fy-production-preview__cast img { width: 100%; height: 72px; object-fit: cover; }
+.fy-production-preview__cast figcaption { font-size: 11px; }
+.fy-production-preview__stage { height: 340px; overflow: auto; position: relative; }
+.fy-actiongroup { min-width: 0; max-width: 100%; }
+.fy-actiongroup__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; font-size: 12px; }
+.fy-actiongroup__head .ui-btn { min-height: 44px; }
+.fy-actiongroup__sequence { list-style: decimal; padding-left: 20px; margin: 0; }
+.fy-actiongroup__sequence > li { min-width: 0; }
+.fy-actiongroup__sequence .fy-actioncard { margin-bottom: 10px; }

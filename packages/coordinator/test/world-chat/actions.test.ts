@@ -1329,6 +1329,11 @@ describe("World Chat authority adapters", () => {
     const card = (await loaded(w.log)).actions[0]!;
     assert.equal(card.shown.body.family, "command");
     assert.match(JSON.stringify(card.shown), /bell-watch-season-one/);
+    assert.equal(card.shown.productionPreview?.kind, "production");
+    if (card.shown.productionPreview?.kind !== "production") assert.fail("expected typed production preview");
+    assert.equal(card.shown.productionPreview.episodes, 8);
+    assert.equal(card.shown.productionPreview.frameRate, 25);
+    assert.equal(w.store.getBundle().meta.schemaVersion, 62);
 
     const result = await decide(w.lifecycle, w.log, card);
     assert.equal(result.status, "completed");
@@ -1436,6 +1441,17 @@ describe("World Chat authority adapters", () => {
         .scenes.find((candidate) => candidate.id === current.id)!.script!.blocks,
       current.script!.blocks,
     );
+    const corrected = turn(w.conversationId, context, { receipts: [script], actions: [{ ...action, checkReceiptIds: [script.id],
+      change: { ...action.change, blocks: current.script!.blocks.map(block => ({ ...block, text: `${block.text} The bell rings.` })) } }] });
+    const valid = prepareWorldChatActions(w.store, w.lifecycle, corrected);
+    await appendTurn(w.log, corrected, valid); await bindAll(w.lifecycle, valid);
+    const card = (await loaded(w.log)).actions.find(one => one.actionId === valid[0]!.intent.actionId)!;
+    assert.equal(card.shown.productionPreview?.kind, "scene");
+    if (card.shown.productionPreview?.kind !== "scene") assert.fail("expected frozen screenplay preview");
+    assert.deepEqual(card.shown.productionPreview.before!.script!.blocks, current.script!.blocks);
+    assert.match(card.shown.productionPreview.after.script!.blocks[0]!.text, /The bell rings/);
+    assert.equal((await w.adapters.find(adapter => adapter.actionKind === card.actionKind)!.validate(card)).ok, true);
+    assert.equal(card.status, "pending", "preview validation grants no execution permission");
   });
 
   it("refuses a production frame-rate card after a timeline exists", async () => {
@@ -2636,7 +2652,7 @@ describe("turn-local scene action sequencing (#1417)", () => {
     const newShot = orderedShots(first.scenePlan!.after).find(shot => !orderedShots(before).some(old => old.id === shot.id))!;
     assert.equal(second.action.commands![0]!.kind, "set-prompt-override");
     assert.ok(JSON.stringify(second.action).includes(newShot.id));
-    assert.ok(JSON.stringify(cards[1]!.shown.body).includes("Low angle, looking up at the bell."));
+    assert.ok(JSON.stringify(cards[1]!.shown.productionPreview).includes("Low angle, looking up at the bell."));
     assert.deepEqual(scene(w), before, "preparation and binding do not edit the scene");
     assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).reason, "dependency-blocked");
     assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
@@ -2652,7 +2668,7 @@ describe("turn-local scene action sequencing (#1417)", () => {
     if (parentCompleted) assert.equal((await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!)).status, "completed");
     const adapter = w.adapters.find(adapter => adapter.actionKind === prepared[1]!.intent.actionKind)!;
     await adapter.prepare!({ intent: prepared[1]!.intent, payload: prepared[1]!.payload });
-    assert.equal(w.store.getBundle().meta.schemaVersion, 55);
+    assert.equal(w.store.getBundle().meta.schemaVersion, 62);
     await assert.rejects(readWorldMeta(w.store.dir, { supports: 54 }), /newer Arke Studio/);
     await w.store.close();
     const reopened = await WorldStore.open(w.store.dir, { clock: NOW });
@@ -2710,7 +2726,7 @@ describe("turn-local scene action sequencing (#1417)", () => {
     assert.equal(prepared.length, 1);
     await appendTurn(w.log, input, prepared); await bindAll(w.lifecycle, prepared);
     const card = (await loaded(w.log)).actions[0]!;
-    assert.ok(JSON.stringify(card.shown.body).includes("The whole room listens."));
+    assert.ok(JSON.stringify(card.shown.productionPreview).includes("The whole room listens."));
     assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
     assert.equal(orderedShots(scene(w))[1]!.id, shots[0]!.id);
     assert.equal(orderedShots(scene(w))[1]!.promptOverride?.text, "A low angle.");

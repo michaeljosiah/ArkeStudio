@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ZodType } from "zod";
 import type { ClientMessage } from "./frames.js";
+import { ProductionCardPreviewSchema } from "./production-card-preview.js";
 import {
   ConversationActionIdSchema,
   ConversationIdSchema,
@@ -454,6 +455,7 @@ export const ConversationActionShownProjectionSchema = z
     ripples: z.array(z.string().min(1).max(2_000)).default([]),
     permissionReason: ArkePermissionReasonSchema,
     body: ConversationActionBodySchema,
+    productionPreview: ProductionCardPreviewSchema.optional(),
   })
   .strict();
 export type ConversationActionShownProjection = z.infer<typeof ConversationActionShownProjectionSchema>;
@@ -601,6 +603,7 @@ export const DecideConversationActionSchema = z
     requestId: UlidSchema,
     /** The paired gateway always adds this restriction; only stored action facts decide its scope. */
     hostActions: z.literal("refuse").optional(),
+    groupApprovalTurnId: TurnIdSchema.optional(),
   })
   .strict();
 export type DecideConversationAction = z.infer<typeof DecideConversationActionSchema>;

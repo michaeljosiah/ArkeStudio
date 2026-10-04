@@ -1,3 +1,5 @@
+import { productionCardPreview } from "./production-card-preview.js";
+import { PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { WorldChatProductionTimelineActionSchema, WorldChatProductionTimelineTranscribeActionSchema, PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { compileProductionTimelineRequest, historyDigestFromCommitSource, discardProductionTranscriptionQuote, productionHistoryDigest, freezeProductionTimeline, productionTimelineBody, executeProductionTimeline } from "./production-timeline.js";
 import type { TranscriptionPorts } from "../productions/transcription.js";
@@ -1600,11 +1602,14 @@ const clipped = (value: string | null, max = 20_000): string | null =>
   value === null || value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 
 async function proposalProjection(
+  store: WorldStore,
   gate: ProposalManager,
   intent: Pick<ConversationActionPrepareIntent, "targets">,
   proposalId: string,
 ): Promise<PreparedConversationActionAuthority> {
-  const { proposal, review, ripple } = await gate.project(proposalId);
+  const { proposal, review, ripple, scenePreview } = await gate.project(proposalId);
+  const productionPreview = scenePreview ? { kind: "scene" as const, ...scenePreview } : undefined;
+  if (productionPreview) await store.ensureSchemaVersion(PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, "production-card-preview");
   const fields = review.targets.flatMap((target) =>
     target.fields.map((field) => ({
       label: `${target.label}: ${field.field}`.slice(0, 200),
@@ -1620,6 +1625,7 @@ async function proposalProjection(
     authority: { kind: "proposal-manager", id: proposal.id },
     authorityRevision: proposal.draftRevision,
     shown: {
+      ...(productionPreview ? { productionPreview } : {}),
       title: proposal.summary.slice(0, 200),
       consequence: proposal.targets.length === 1
         ? "Writes one reviewed world record."
@@ -2688,16 +2694,16 @@ async function sharedResourceProjection(
         body: {
           family: "command",
           commands: [
-            { label: `Create production ${plan.production.id}`, detail: JSON.stringify(plan.production) },
+            { label: `Create production ${plan.production.id}`, detail: `${plan.production.title} · ${productionShape(plan.production).medium}` },
             {
               label: "Initial season",
-              detail: plan.initialSeason === null ? "None" : JSON.stringify(plan.initialSeason),
+              detail: plan.initialSeason === null ? "None" : "Initial season",
             },
             {
               label: "Series consequence",
               detail: plan.series.operation === "none"
                 ? "None"
-                : `${plan.series.operation}: ${JSON.stringify(plan.series.record)}`,
+                : `${plan.series.operation}: ${plan.series.record.title}`,
             },
           ],
           expectedResult: `Production ${plan.production.id} exists with exactly the shown metadata${plan.initialSeason ? ", initial season" : ""}${plan.series.operation === "none" ? "" : ", and Series consequence"}.`,
@@ -2890,23 +2896,7 @@ async function sharedResourceProjection(
       const commands = sceneActionCommands(payload.action);
       if (payload.scenePlan) {
         const result = payload.scenePlan.after;
-        const rows: Array<{ label: string; detail?: string }> = [];
-        const valueRows = (label: string, value: unknown) => {
-          if (value === undefined) return;
-          const text = typeof value === "string" ? value : JSON.stringify(value);
-          for (let offset = 0; offset < Math.max(text.length, 1); offset += 4_000) {
-            rows.push({ label: `${label}${offset ? " (continued)" : ""}`.slice(0, 200), detail: text.slice(offset, offset + 4_000) });
-          }
-        };
-        for (const [field, value] of Object.entries(result)) {
-          if (!["id", "version", "flow", "shots"].includes(field)) valueRows(`Scene ${field}`, value);
-        }
-        for (const shot of orderedShots(result)) {
-          rows.push({ label: `${shot.number}. ${shot.title} (${shot.id})`.slice(0, 200) });
-          for (const [field, value] of Object.entries(shot)) {
-            if (!["id", "number"].includes(field)) valueRows(`${shot.id} ${field}`, value);
-          }
-        }
+        const rows = commands.map(command => ({ label: command.kind.replaceAll("-", " ") }));
         shown = { title: `Edit ${result.title}`, consequence: `Applies ${commands.length} scene command${commands.length === 1 ? "" : "s"} atomically at one version boundary.`,
           affectedTargets: [...intent.targets], ripples: commands.some(command => command.kind === "delete-shot")
             ? ["The authority rechecks takes, selections and active plans before deleting any shot."] : [],
@@ -2933,7 +2923,7 @@ async function sharedResourceProjection(
         permissionReason: "authored-change",
         body: {
           family: "command",
-          commands: [{ label: command.kind.replaceAll("-", " "), detail: clipped(JSON.stringify(command)) ?? undefined }],
+          commands: [{ label: command.kind.replaceAll("-", " "), detail: "Review the resulting scene below." }],
           expectedResult: `Scene ${scene.id} advances from v${scene.version} only if the semantic operation remains valid.`,
           undoAvailable: true,
         },
@@ -3437,6 +3427,11 @@ async function sharedResourceProjection(
       throw new Error("That shared-resource action cannot be projected.");
   }
 
+  const productionPreview = productionCardPreview(bundle, payload);
+  if (productionPreview) {
+    await store.ensureSchemaVersion(PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, "production-card-preview");
+    shown = { ...shown, productionPreview };
+  }
   await writePreparation(store, "world", intent.actionId, payload);
   return {
     authority,
@@ -4230,7 +4225,7 @@ export function worldChatActionAdapters(
       if (!gate) throw new Error("The proposal authority is unavailable.");
       const action = WorldChatProposalActionSchema.parse(payload);
       const staged = await saveProposalPoint(store, gate, intent, action.candidate, action.members, now);
-      return proposalProjection(gate, intent, staged);
+      return proposalProjection(store, gate, intent, staged);
     },
     recoverPreparation: async (intent) => {
       if (!gate) return null;
@@ -4239,7 +4234,7 @@ export function worldChatActionAdapters(
       );
       if (found.length !== 1) return null;
       await settleSaveAttempt(store, intent, [found[0]!.id], now);
-      return proposalProjection(gate, intent, found[0]!.id);
+      return proposalProjection(store, gate, intent, found[0]!.id);
     },
     abandonPreparation: async (intent) => {
       if (!gate) return;
@@ -4567,14 +4562,14 @@ export function worldChatActionAdapters(
       const current = observationsCurrent(store, intent);
       if (!current.ok) throw new Error(current.detail);
       const staged = await stage(intent, parse(payload), observationPrecondition(store, intent));
-      return proposalProjection(gate, intent, staged.id);
+      return proposalProjection(store, gate, intent, staged.id);
     },
     recoverPreparation: async (intent) => {
       if (!gate) return null;
       const current = observationsCurrent(store, intent);
       if (!current.ok) throw new Error(current.detail);
       const found = (await gate.listOpen()).filter((candidate) => candidate.source === `world-chat-action:${intent.actionId}`);
-      return found.length === 1 ? proposalProjection(gate, intent, found[0]!.id) : null;
+      return found.length === 1 ? proposalProjection(store, gate, intent, found[0]!.id) : null;
     },
     abandonPreparation: async (intent) => {
       if (!gate) return;
@@ -4593,7 +4588,7 @@ export function worldChatActionAdapters(
       if (!checked.ok) {
         return { ok: false, reason: checked.stale ? "stale" : "blocked", detail: checked.detail };
       }
-      const currentProjection = await proposalProjection(gate, action, action.authority.id);
+      const currentProjection = await proposalProjection(store, gate, action, action.authority.id);
       if (conversationActionDigest(currentProjection.shown) !== action.previewDigest) {
         await gate.discard(action.authority.id);
         return { ok: false, reason: "stale", detail: "The proposal preview changed after this card was prepared." };

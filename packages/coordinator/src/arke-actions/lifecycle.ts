@@ -8,6 +8,7 @@ import {
   ConversationActionShownProjectionSchema,
   LOCAL_ACTOR_ID,
   isRemoteHostConversationAction,
+  groupApprovalEligible,
   newId,
   type ArkePermissionReason,
   type ArkeReadObservation,
@@ -472,6 +473,10 @@ export class ConversationActionLifecycle {
     const events = (await store.read()).events;
     const loaded = foldConversation(meta.id, meta.createdAt, events).view;
     const action = loaded.actions.find((one) => one.actionId === input.actionId);
+    if (input.groupApprovalTurnId && (!action || input.decision !== "approve" ||
+        action.turnId !== input.groupApprovalTurnId || !groupApprovalEligible(action))) {
+      return refuse("validation-refused", "This card requires an individual decision.", action?.status);
+    }
     // This must precede the idempotent path too: replaying a desktop approval may resume work.
     if (input.hostActions === "refuse" && input.decision === "approve" && action && isRemoteHostConversationAction(action.actionKind)) {
       return refuse("host-only", "Approve this action on your PC.", action.status);

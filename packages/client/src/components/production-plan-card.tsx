@@ -6,8 +6,8 @@ function Checklist({ checks }: { checks: readonly ReadinessCheck[] }) {
   return <ul className="fy-production-plan__checks">{checks.map(check => <li key={check.key}>
     <span aria-label={check.status === "ready" ? "Complete" : check.status === "not-required" ? "Not required" : check.status === "blocked" ? "Blocked" : "Incomplete"}>
       {check.status === "ready" ? "✓" : check.status === "not-required" ? "—" : "○"}
-    </span>{" "}<span>{check.label}{check.total > 1 ? ` · ${check.completed}/${check.total}` : ""}</span>
-    <small>{check.detail}{check.missingIds.length ? ` Missing: ${check.missingIds.slice(0,4).join(", ")}${check.missingIds.length > 4 ? ", …" : ""}.` : ""}</small>
+    </span>{" "}<span>{check.label}{check.status !== "not-required" && check.total > 1 ? ` · ${check.completed}/${check.total}` : ""}</span>
+    <small>{check.detail}{check.status !== "not-required" && check.missingIds.length ? ` Missing: ${check.missingIds.slice(0,4).join(", ")}${check.missingIds.length > 4 ? ", …" : ""}.` : ""}</small>
   </li>)}</ul>;
 }
 

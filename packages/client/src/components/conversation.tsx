@@ -1,4 +1,6 @@
 import { TimelineCardHistory } from "./timeline-card-history.js";
+import { ProductionCardBody } from "./production-card-body.js";
+import { ConversationActionGroup } from "./conversation-action-group.js";
 import { ProductionPlanCardView } from "./production-plan-card.js";
 import { ProductionSetupOutline } from "./production-setup-outline.js";
 import { HumanDecisionCardView } from "./human-decision-card.js";
@@ -135,9 +137,7 @@ export function ConversationTranscript({
       </div>)}
       {olderActions.length > 0 && (
         <div className="fy-chat__turn fy-chat__turn--studio fy-chat__turn--action" aria-label="Earlier actions">
-          {olderActions.map((action) => (
-            <ConversationPermissionCard key={action.actionId} action={action} conversationSeq={workspace?.seq ?? 0} />
-          ))}
+          {[...new Set(olderActions.map(action => action.turnId))].map(turnId => <ConversationActionGroup key={turnId} actions={olderActions.filter(action => action.turnId === turnId)} conversationSeq={workspace?.seq ?? 0} />)}
         </div>
       )}
       {messages.map((m) => {
@@ -237,13 +237,7 @@ export function ConversationTranscript({
               {...(shotLabel === undefined ? {} : { shotLabel })}
             />
           )}
-          {actions.map((action) => (
-            <ConversationPermissionCard
-              key={action.actionId}
-              action={action}
-              conversationSeq={workspace?.seq ?? 0}
-            />
-          ))}
+          {actions.length > 0 && <ConversationActionGroup actions={actions} conversationSeq={workspace?.seq ?? 0} />}
           {m.role === "studio" && humanDecisions.filter(card => card.turnId === m.turnId).map(card => <HumanDecisionCardView key={card.id} card={card} />)}
         </div>
         );
@@ -315,7 +309,8 @@ export function ConversationPermissionCard({
   const request = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [announcement, setAnnouncement] = useState("");
-  const supported = DECIDABLE_CARD_FAMILIES.has(action.shown.body.family);
+  const needsProductionPreview = ["world-chat-production-create", "world-chat-production-metadata", "world-chat-production-scene-command", "world-chat-production-scene"].includes(action.actionKind);
+  const supported = DECIDABLE_CARD_FAMILIES.has(action.shown.body.family) && (!needsProductionPreview || !!action.shown.productionPreview);
   const onPC = isRemoteSession() && isRemoteHostConversationAction(action.actionKind);
   const terminal = ["completed", "failed", "cancelled", "denied", "stale", "superseded"].includes(action.status);
 
@@ -472,6 +467,9 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
   const { state } = useStore();
   const body = action.shown.body;
   if (!supported) return null;
+  if (action.shown.productionPreview) return <><ProductionCardBody preview={action.shown.productionPreview} action={action} />
+    {action.shown.productionPreview.kind === "production" && body.family === "authored-diff" && <div className="fy-actioncard__body">{body.fields.map(field => <div key={field.label} className="fy-actioncard__change"><strong>{field.label}</strong><span className="fy-actioncard__before">{field.before ?? "Not set"}</span><span aria-hidden="true">→</span><span>{field.after ?? "Removed"}</span></div>)}</div>}
+    {body.family === "authored-diff" && [...body.conflicts, ...body.openChoices].map(line => <p key={line} className="fy-actioncard__notice">{line}</p>)}</>;
   switch (body.family) {
     case "authored-diff":
       return <div className="fy-actioncard__body">

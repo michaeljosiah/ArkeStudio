@@ -4,6 +4,7 @@ import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
 import { isRemoteSession, remoteSocketUrl, remoteSocketProtocols } from "./remote-session.js";
 import { useSyncExternalStore } from "react";
+import type { GroupApprovalPort } from "./conversation-group-approval.js";
 import {
   FrameSchema,
   BROWSER_ATTACHMENT_MAX_BYTES,
@@ -6262,8 +6263,9 @@ export function decideConversationAction(
   expectedConversationSeq: number,
   expectedStatus: "pending" | "stale",
   decision: "approve" | "deny",
+  group?: { turnId: string; requestId: string },
 ): string | null {
-  const requestId = ulid();
+  const requestId = group?.requestId ?? ulid();
   return send({
     kind: "conversation-action-decide",
     worldId,
@@ -6273,7 +6275,39 @@ export function decideConversationAction(
     expectedStatus,
     decision,
     requestId,
+    ...(group ? { groupApprovalTurnId: group.turnId } : {}),
   }) ? requestId : null;
+}
+
+/** A group uses the current conversation sequence after each completed member. */
+export function conversationGroupApprovalPort(conversationId: string): GroupApprovalPort {
+  return {
+    read: () => {
+      const state = current.state;
+      const workspace = state?.worldChat;
+      return state?.world && workspace?.conversationId === conversationId
+        ? { worldId: state.world.meta.worldId, conversationId, seq: workspace.seq, actions: workspace.actions }
+        : null;
+    },
+    decide: (action, seq, requestId) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { unsubscribe(); reject(new Error("The decision acknowledgement is unavailable.")); }, 30_000);
+      const unsubscribe = subscribeConversationActionDecision(answer => {
+        if (answer.requestId !== requestId || answer.actionId !== action.actionId) return;
+        clearTimeout(timer); unsubscribe(); resolve(answer);
+      });
+      if (!decideConversationAction(action.worldId, action.conversationId, action.actionId, seq, "pending", "approve", { turnId: action.turnId, requestId })) {
+        clearTimeout(timer); unsubscribe(); reject(new Error("The decision could not be sent."));
+      }
+    }),
+    changed: signal => new Promise((resolve, reject) => {
+      if (signal.aborted) { reject(new Error("Stopped")); return; }
+      const cleanup = () => { clearTimeout(timer); unsubscribe(); signal.removeEventListener("abort", abort); };
+      const abort = () => { cleanup(); reject(new Error("Stopped")); };
+      const timer = setTimeout(() => { cleanup(); reject(new Error("No current action state.")); }, 30_000);
+      const unsubscribe = subscribe(() => { cleanup(); resolve(); });
+      signal.addEventListener("abort", abort, { once: true });
+    }),
+  };
 }
 
 /** Accept or reject one of Arke's editor requests (SPEC-039 R-29): the only boundary that lands or discards it. */
