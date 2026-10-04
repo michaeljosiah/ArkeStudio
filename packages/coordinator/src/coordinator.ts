@@ -329,7 +329,7 @@ import {
 import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiobookBook } from "./productions/audiobook-book.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
 import { anyNarrator, audiobookListening, setAudiobookPicture } from "./productions/audiobook-listening.js";
-import { deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
+import { chooseChapterLook, deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
 import { makeAdapterIllustrateDeriver, proposeIllustrations, type IllustrateDeriver } from "./productions/audiobook-illustrate.js";
 import { clipPrompt, depictable, makeAdapterPictureDeriver, pictureAspect, pictureRoom, pictureWho, promptRoom, suggestPicture, type PictureDeriver } from "./productions/audiobook-picture-suggest.js";
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
@@ -483,6 +483,7 @@ import {
   acceptCharacterSheet,
   acceptLocationView,
   attachCharacterLook,
+  attachCloseView,
   compileGrid,
   designate,
   landGrid,
@@ -15284,6 +15285,25 @@ export class Coordinator {
         }
         return;
       }
+      case "choose-audiobook-look": {
+        // A kit look chosen for a character in this chapter (turn 193, R-112): by pointer on the
+        // chapter's record, the look left unattached. Answered as the record, or in one clause.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
+        const at = () => new Date().toISOString();
+        try {
+          const record = await chooseChapterLook(store, msg.productionId, chapter.id, { key: msg.key, ...(msg.name !== undefined ? { name: msg.name } : {}), ...(msg.sheet !== undefined ? { sheet: msg.sheet } : {}) }, msg.lookId);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: at(), type: "audiobook.record", ...ids, record });
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.look-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
       case "set-audiobook-timing": {
         // One block's timing (turn 187, SPEC-047 R-81): held to the binding — under Performed a
         // grouped request's inside is the reader's (R-85) — written through the record's lane and
@@ -18188,6 +18208,19 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "An accepted main photo and image model are required.");
           return;
         }
+        // The image a close view is made from (design turn 193, R-109): a candidate take still
+        // pending, or a look already in the kit — world-relative, so it rides as a reference.
+        let closeOf: { file: string; takeId?: string; lookId?: string } | undefined;
+        if (msg.framing === "close") {
+          const fromTake = msg.closeOf?.takeId === undefined ? undefined : pendingReferenceTake(bundle.referenceTakes, bundle.referenceReviews, msg.closeOf.takeId, msg.sheetId, "look");
+          const fromLook = msg.closeOf?.lookId === undefined ? undefined : kit.looks?.find((candidate) => candidate.id === msg.closeOf?.lookId);
+          if (fromTake?.media !== undefined) closeOf = { file: `references/${msg.sheetId}/takes/${fromTake.id}/${fromTake.media}`, takeId: fromTake.id };
+          else if (fromLook !== undefined) closeOf = { file: `references/${msg.sheetId}/${fromLook.file}`, lookId: fromLook.id };
+          if (closeOf === undefined) {
+            this.rejectEnqueue(msg.requestId, msg.kind, "The look to make a close view of is gone. Nothing was queued.");
+            return;
+          }
+        }
         let requests;
         try {
           const stagedLook = stagedWorldImage(bundle, stagedReferenceKey("look", msg.sheetId));
@@ -18199,6 +18232,8 @@ export class Coordinator {
             count: msg.count,
             generationKey: Date.now().toString(36),
             ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
+            ...(msg.framing !== undefined ? { framing: msg.framing, batch: msg.requestId } : {}),
+            ...(closeOf !== undefined ? { closeOf } : {}),
           });
         } catch (error) {
           this.rejectEnqueue(
@@ -18249,6 +18284,17 @@ export class Coordinator {
         )
           return;
         const review = referenceReviewDecision(store.now(), take, "accept");
+        // A close view made for a look (design turn 193, R-109): either the second picture of the
+        // look being accepted, or — with `closeFor` — the close view of a look already in the kit.
+        const closeTake = msg.closeTakeId === undefined ? null : pendingReferenceTake(bundle.referenceTakes, bundle.referenceReviews, msg.closeTakeId, msg.sheetId, "look");
+        const close = closeTake?.media !== undefined && basename(closeTake.media) === closeTake.media && (await stat(toExtendedLength(join(store.dir, `references/${msg.sheetId}/takes/${closeTake.id}/${closeTake.media}`))).catch(() => null)) !== null ? { file: `takes/${closeTake.id}/${closeTake.media}`, takeId: closeTake.id } : undefined;
+        if (msg.closeFor !== undefined) {
+          await attachCloseView(store, msg.sheetId, msg.closeFor, { file: `takes/${take.id}/${take.media}`, takeId: take.id }, review).catch(() => {});
+          await this.refreshWorldSnapshot(msg.worldId);
+          return;
+        }
+        const forChapter = (take.params["lookFraming"] ?? producingJob?.params["lookFraming"]) === "full-body";
+        const mainFile = take.params["lookMain"] ?? producingJob?.params["lookMain"];
         await acceptCharacterLook(store, msg.sheetId, {
           id: take.id,
           file: `takes/${take.id}/${take.media}`,
@@ -18258,7 +18304,26 @@ export class Coordinator {
           takeId: take.id,
           artDirectionVersion: take.provenance.artDirectionVersion ?? store.getBundle().artDirection.version,
           review,
+          ...(forChapter ? { framing: "full-body" as const } : {}),
+          ...(forChapter && typeof mainFile === "string" ? { mainFile } : {}),
+          ...(forChapter && close !== undefined ? { close } : {}),
         }).catch(() => {});
+        if (forChapter && close !== undefined && closeTake !== null) await recordReferenceReview(store, closeTake, "accept").catch(() => {});
+        // The chapter that asked for the look chooses it for the character in the same press
+        // (R-112): by pointer, nothing attached, answered as the record like any choice.
+        if (msg.choose !== undefined) {
+          const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.choose!.productionId)?.chapters.find((c) => c.file === msg.choose!.chapterFile || c.id === msg.choose!.chapterFile);
+          if (chapter !== undefined) {
+            const ids = { worldId: msg.worldId, productionId: msg.choose.productionId, chapterId: chapter.id };
+            try {
+              const record = await chooseChapterLook(store, msg.choose.productionId, chapter.id, { key: msg.choose.key, ...(msg.choose.name !== undefined ? { name: msg.choose.name } : {}), ...(msg.choose.sheet !== undefined ? { sheet: msg.choose.sheet } : { sheet: msg.sheetId }) }, take.id);
+              this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record });
+            } catch (err) {
+              void this.appLog?.append({ kind: "audiobook.look-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+              this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
+            }
+          }
+        }
         // Accepting settles the ask this reference was staged for (design 67). A rejection does
         // not: the usual answer to one is to run it again, and running it again with the
         // picture you had just chosen is the point of having staged it.

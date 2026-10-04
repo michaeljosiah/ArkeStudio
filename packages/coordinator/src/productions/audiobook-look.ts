@@ -3,6 +3,7 @@ import {
   AudiobookLookSchema,
   LOOK_CHARACTERS_MAX,
   LOOK_LINE_MAX,
+  chooseLook,
   editLook,
   lookKey,
   mergeLook,
@@ -18,6 +19,7 @@ import {
 } from "@arke-studio/contracts";
 import type { SessionInput } from "../harness/session-files.js";
 import type { WorldStore } from "../world/store.js";
+import { readKit } from "../references/kit.js";
 import { updateAudiobook, planAudiobook, type AudiobookPlan } from "./audiobook.js";
 import { clip, section } from "./audiobook-direction.js";
 import { anyNarrator } from "./audiobook-listening.js";
@@ -322,6 +324,42 @@ export async function setChapterLook(store: WorldStore, productionId: string, ch
     if (next === null) return null;
     const parsed = AudiobookLookSchema.safeParse(next);
     if (!parsed.success) throw new Error("that is not a line the look can hold");
+    return { ...current, updatedAt: at, look: parsed.data };
+  });
+}
+
+/**
+ * A kit look chosen for a character in this chapter (design turn 193, SPEC-047 R-112), or the
+ * choice taken away with null. By pointer: nothing is attached (SPEC-017 R-18 holds), the look
+ * stays the character's, and the chapter's line for them becomes the look's own clothing line.
+ * Refused, in one clause, for a character with no sheet and for a look that is not there.
+ */
+export async function chooseChapterLook(
+  store: WorldStore,
+  productionId: string,
+  chapterId: string,
+  who: { key: string; name?: string; sheet?: string },
+  lookId: string | null,
+): Promise<ChapterAudiobook> {
+  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId) });
+  const at = store.now();
+  const held = lookOf(plan.record);
+  const sheetId = who.sheet ?? held?.characters[who.key]?.sheet;
+  const sheet = sheetId === undefined ? undefined : store.getBundle().sheets.find((candidate) => candidate.id === sheetId);
+  let pick: { lookId: string; text: string } | null = null;
+  if (lookId !== null) {
+    if (sheetId === undefined || sheet === undefined) throw new Error("that character has no sheet, so no looks");
+    const kit = (await readKit(store, sheetId))?.kit;
+    const look = kit?.looks?.find((candidate) => candidate.id === lookId && candidate.kind === "costume");
+    if (look === undefined) throw new Error("that look is gone");
+    pick = { lookId, text: look.prompt };
+  }
+  const name = who.name ?? sheet?.name;
+  return updateAudiobook(store, productionId, plan.chapter, (current) => {
+    const next = chooseLook(current.look, { key: who.key, ...(name !== undefined ? { name } : {}), ...(sheetId !== undefined ? { sheet: sheetId } : {}) }, pick, { chapterHash: plan.chapter.hash, at });
+    if (next === null) return null;
+    const parsed = AudiobookLookSchema.safeParse(next);
+    if (!parsed.success) throw new Error("that is not a look the chapter can hold");
     return { ...current, updatedAt: at, look: parsed.data };
   });
 }
