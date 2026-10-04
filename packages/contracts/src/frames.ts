@@ -1778,7 +1778,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       sheetId: SlugSchema,
       takeId: TakeIdSchema,
-      /** A close view made for a chapter's look (R-109): filed on the same look as its `closeFile`. */
+      /** A close view made for a chapter's look (R-118): filed on the same look as its `closeFile`. */
       closeTakeId: TakeIdSchema.optional(),
       /** `takeId` is a close view (made by Make close view) for the accepted look with this id, not a look of its own. */
       closeFor: z.string().min(1).optional(),
@@ -3404,6 +3404,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema.optional(),
     })
     .strict(),
+  /**
+   * Which chapters of the book chose each kit look (design turn 193, SPEC-047 R-114): read from the
+   * chapters' records, nothing changed. Answered as `audiobook.looks` under the same id.
+   */
+  z.object({ kind: z.literal("read-audiobook-looks"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   /**
    * A kit look chosen for a character in this chapter (design turn 193, SPEC-047 R-112), or the
    * choice taken away with null. Chosen by pointer; the look stays unattached (SPEC-017 R-18). The

@@ -133,7 +133,7 @@ export const CharacterLookSchema = z
     /** The main photo (file within the kit directory) the look was made from, so a later photo marks it `older face` (R-113). */
     mainFile: z.string().min(1).optional(),
     /**
-     * The look's close view (R-109): a head-and-shoulders image of the same person in the same
+     * The look's close view (R-118): a head-and-shoulders image of the same person in the same
      * clothes, made with it, for the frames that show faces. A file within the kit directory,
      * like `file`; `closeTakeId` the take that made it.
      */
@@ -164,6 +164,47 @@ export function chapterLooksOf(kit: Pick<ReferenceKit, "looks"> | null | undefin
   return [...(kit?.looks ?? [])]
     .filter((look) => look.kind === "costume")
     .sort((a, b) => (a.acceptedAt < b.acceptedAt ? 1 : a.acceptedAt > b.acceptedAt ? -1 : 0));
+}
+
+/** Longest clothing line a look gives a chapter: the chapter look's own bound (`LOOK_LINE_MAX`). */
+const LOOK_CLOTHING_MAX = 400;
+/** A sentence of a Cast page's exploration prompt that tells the image model how to draw, not what is worn. */
+const DIRECTIVE = /\b(references?|backdrop|studio|in frame|full[- ]length|full body|head to (?:toe|shoes)|looking at the camera|soft light|overriding|identity|proportions)\b/i;
+
+/**
+ * The clothing line of a look (design turn 193, SPEC-047 R-112): the words a chapter's pictures take
+ * for the person wearing it. A look made for a chapter (it has a `framing`) was made from exactly
+ * this line, so it is its prompt. A look the Cast page made holds the exploration prompt it was
+ * made from — on Na Love or Juju, `OUTFIT FOR THIS LOOK, overriding any clothing…` then the backdrop,
+ * then the clothes — and the instructions to the image model must not become a person's clothes in
+ * every picture. So the sentences that say what someone wears are kept and the drawing directions
+ * dropped; a prompt with no such sentence keeps every sentence that is not a direction.
+ */
+export function lookClothing(look: Pick<CharacterLook, "prompt" | "framing">): string {
+  const whole = look.prompt.replace(/\s+/g, " ").trim();
+  if (look.framing !== undefined) return clipWords(whole, LOOK_CLOTHING_MAX);
+  const sentences = whole.split(/(?<=[.!?])\s+(?=[A-Z"'(])/).map((sentence) => sentence.trim()).filter((sentence) => sentence !== "");
+  const shouted = (sentence: string): boolean => /^[A-Z][A-Z ,'-]{8,}\b/.test(sentence);
+  const negative = (sentence: string): boolean => /^no\s/i.test(sentence);
+  const plain = sentences.filter((sentence) => !shouted(sentence) && !negative(sentence) && !DIRECTIVE.test(sentence));
+  const worn = plain.filter((sentence) => /\bwears?\b|\bwearing\b|\bdressed\b/i.test(sentence));
+  const kept = worn.length > 0 ? worn : plain;
+  return clipWords(kept.length > 0 ? kept.join(" ") : whole, LOOK_CLOTHING_MAX);
+}
+
+/** A look's name in a picker: the first clause of its clothing line, after who wears it. */
+export function lookName(look: Pick<CharacterLook, "prompt" | "framing">): string {
+  const clothing = lookClothing(look);
+  const verb = /\b(?:wears|is wearing|wearing|dressed in)\s+/i.exec(clothing);
+  const line = (verb !== null && verb.index < 160 ? clothing.slice(verb.index + verb[0].length) : clothing).replace(/^(?:an?|the)\s+/i, "");
+  const clause = line.split(/[,;.(]/)[0]!.trim();
+  const name = clause.length > 28 ? `${clause.slice(0, 28).replace(/\s+\S*$/, "")}…` : clause;
+  return name === "" ? "Look" : `${name[0]!.toUpperCase()}${name.slice(1)}`;
+}
+
+function clipWords(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).replace(/\s+\S*$/, "")}…`;
 }
 
 /**

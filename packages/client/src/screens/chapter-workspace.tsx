@@ -37,6 +37,7 @@ import {
   readerPlace,
   audiobookReadingNotes,
   voiceDisplayLabel,
+  mainPhotoFor,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
@@ -54,6 +55,7 @@ import { ListenButton, listenLeads } from "../components/audiobook-player.js";
 import { BlockPicturePanel, useChapterPictures } from "../components/audiobook-picture.js";
 import { IllustrationSheet, IllustrationStatus, useIllustration, useIllustrationSheet } from "../components/audiobook-illustrate.js";
 import { LookSheet } from "../components/audiobook-look.js";
+import { NewLookSheet } from "../components/audiobook-new-look.js";
 import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectSheet, DirectionCard, ReadSheet, PerformedSpeaker, ReadingMenu, ReadingNotes, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { BlockTimingPanel, TimingProposalCard, TimingSide, TimingView, betweenClocks, chapterTimingOf, proposedView, timingLanes, useTimingProposal } from "./chapter-timing.js";
@@ -1157,6 +1159,8 @@ export function ChapterWorkspace({
   const illustration = useIllustration(worldId, prodId, chapter);
   const illustrationSheet = useIllustrationSheet(illustration.run);
   const [illustrationLookOpen, setIllustrationLookOpen] = useState(false);
+  // Make a look from a held row of the proposal (design turn 193h, rule 17): the same sheet the Looks opens, for that character.
+  const [lookToMake, setLookToMake] = useState<{ key: string; name: string; sheet: string; line: string } | null>(null);
   const audiobook = useChapterAudiobook({
     worldId,
     prodId,
@@ -1175,6 +1179,7 @@ export function ChapterWorkspace({
     locked: locked || record === null,
     listenLeads: listenLeads(production, chapter.id),
     illustrate: { press: illustration.press, busy: illustration.busy, again: illustration.run?.state === "proposed" },
+    looks: { open: () => setIllustrationLookOpen(true) },
     // The press waits out the autosave (turn 126's fourth rule, codex on PR 1180): a read of
     // the words on disk while newer ones are on their way would make takes stale on arrival.
     beforeRead: (intent) => {
@@ -2250,7 +2255,9 @@ export function ChapterWorkspace({
               </aside>
             </ResponsiveSheet>
           )}
-          {view === "audiobook" && <LookSheet open={illustrationLookOpen} onClose={() => setIllustrationLookOpen(false)} worldId={worldId} productionId={prodId} chapterFile={chapter.file} chapterOrder={chapter.order} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} blockKeys={audiobook.rows.map((row) => row.block.key)} />}
+          {/* The chapter's Looks (design turn 193a): from the Audiobook head and from the rail's Voices in any view (rule 18). */}
+          <LookSheet open={illustrationLookOpen} onClose={() => setIllustrationLookOpen(false)} worldId={worldId} productionId={prodId} chapterFile={chapter.file} chapterOrder={chapter.order} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} blockKeys={audiobook.rows.map((row) => row.block.key)} />
+          {view === "audiobook" && lookToMake !== null && <NewLookSheet open onClose={() => setLookToMake(null)} worldId={worldId} productionId={prodId} chapterFile={chapter.file} chapterOrder={chapter.order} who={{ key: lookToMake.key, name: lookToMake.name, sheet: lookToMake.sheet }} line={lookToMake.line} />}
           {view === "audiobook" && <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null} title={`${audiobook.selected === "title" ? "Title" : `Block ${audiobook.rows.findIndex(row => row.block.key === audiobook.selected) + 1}`} · ${audiobook.rows.find(row => row.block.key === audiobook.selected)?.mark ?? "Narrator"}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><AudiobookSide {...blockPanel} />{timingPanel}{soundsPanel}{pictureRow !== null && <BlockPicturePanel worldId={worldId} production={production} chapterFile={chapter.file} chapterOrder={chapter.order} row={pictureRow} rows={audiobook.rows} pictures={chapterPictures} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} />}</aside></ResponsiveSheet>}
           {/* The Timing view's side (turn 187a): the bar selected, the same values as the block panel's. */}
           {view === "timing" && <ResponsiveSheet sheet={blockSheet} open={selectedBar !== null} title={`${selectedTimingRow?.mark ?? "Reaction"} · ${audiobook.selected ?? ""}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><TimingSide bar={selectedBar} row={selectedTimingRow} timing={audiobook.timing} rows={audiobook.rows} onTiming={onTiming} onPlayFrom={(at) => { setPlayhead(at); audiobook.mixPlayer.play(betweenClocks(audiobook.timing, audiobook.mixed, at)); }} refused={audiobook.lastRecord?.refused ?? null} locked={timingLocked} revision={audiobook.lastRecord?.seq} /></aside></ResponsiveSheet>}
@@ -2343,6 +2350,13 @@ export function ChapterWorkspace({
               <h2 className="fy-bible__paneltitle fy-ch__paneltitle--row">
                 Voices
                 <span className="fy-ch__panelpush" />
+                {/* The chapter's Looks from the rail too (design turn 193, rule 18), so Manuscript reaches them;
+                    once the chapter is cast, since an uncast panel is its heading and its press alone (turn 192). */}
+                {voicesRecord !== null && (
+                  <button type="button" className="fy-ch__derive" disabled={connection !== "open"} onClick={() => setIllustrationLookOpen(true)} data-testid="voices-looks">
+                    Looks
+                  </button>
+                )}
                 {castingNow ? (
                   <span className="fy-ch__deriving">
                     <span className="fy-mono">casting…</span>
@@ -2612,7 +2626,17 @@ export function ChapterWorkspace({
           }}
           onSkip={illustration.skip}
           onWithout={illustration.without}
-          onMakeLook={(who) => void navigate(`/w/${worldId}/${who.kind === "place" ? "locations" : "cast"}/${who.sheet}`)}
+          onMakeLook={(who) => {
+            // A character with a main photo has a look made here, over the proposal; a place, or a
+            // character with no main photo to make a look from, is made on its own page.
+            const kit = who.kind === "character" && who.sheet !== undefined ? world.referenceKits.find((candidate) => candidate.sheetId === who.sheet) : undefined;
+            if (kit !== undefined && who.sheet !== undefined && mainPhotoFor(kit) !== null) {
+              const record = audiobookRecord.record === "unreadable" ? null : audiobookRecord.record;
+              setLookToMake({ key: who.key, name: who.name, sheet: who.sheet, line: record?.look?.characters[who.key]?.text ?? "" });
+              return;
+            }
+            void navigate(`/w/${worldId}/${who.kind === "place" ? "locations" : "cast"}/${who.sheet}`);
+          }}
           onAgain={illustration.press}
           onClose={illustrationSheet.hide}
           onLook={() => setIllustrationLookOpen(true)}

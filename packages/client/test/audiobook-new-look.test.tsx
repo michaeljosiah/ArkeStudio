@@ -11,7 +11,7 @@ import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
- * Making a look (design turn 193b, SPEC-047 R-112, R-109): the main photo and a clothing line to
+ * Making a look (design turn 193b, SPEC-047 R-112, R-118): the main photo and a clothing line to
  * three full-body candidates, an optional close view of the chosen one, Accept look filing both and
  * choosing the look for the chapter that asked.
  */
@@ -127,7 +127,7 @@ describe("the sheet before anything is made", () => {
   it("lists the looks the character already has, the Cast page's too", async () => {
     await mount(ready([], [{ id: "council-coat", file: "looks/c.png", kind: "costume", prompt: "Formal council coat", acceptedAt: AT }, { id: "tk_x", file: "takes/x/x.png", kind: "costume", prompt: "Storm coat.", acceptedAt: "2026-10-01T09:00:00.000Z", framing: "full-body", closeFile: "takes/y/y.png" }] as never));
     const rows = bodyAll('[data-testid="new-look-existing"]').map(text);
-    assert.deepEqual(rows, ["Formal council coat · full", "Storm coat. · full, close"]);
+    assert.deepEqual(rows, ["Formal council coat · full", "Storm coat · full, close"]);
   });
 
   it("cannot make without a clothing line, or while the coordinator is away", async () => {

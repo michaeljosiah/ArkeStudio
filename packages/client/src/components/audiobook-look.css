@@ -1,4 +1,4 @@
-/* The look sheet (design turn 191c): 720 wide, centred, drawn on the body. */
+/* The Looks sheet (design turns 191c, 193a): 1,040 wide, centred, drawn on the body. A look tile is 84 wide in the sheet (154 tall, full body) and 78 high in a picker. */
 .fy-look { max-width: calc(100vw - 32px); }
 .fy-look__body { display: flex; flex-direction: column; gap: 0; }
 .fy-look__line { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--border); }
@@ -13,7 +13,29 @@
 .fy-look__meta { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0 4px; border-top: 1px solid var(--border); font-size: var(--text-xs); color: var(--muted-foreground); }
 .fy-look__none { margin: 0; padding: 18px 0; font-size: var(--text-xs); color: var(--muted-foreground); }
 .fy-look__foot { display: flex; align-items: center; gap: 8px; padding-top: 12px; }
+/* A character (193a): the look chosen, its line and facts, then the picker over every look they have. */
+.fy-look__char { display: flex; flex-direction: column; gap: 10px; padding: 12px 0; border-top: 1px solid var(--border); }
+.fy-look__charhead { display: flex; gap: 14px; align-items: flex-start; }
+.fy-look__full { width: 84px; height: 154px; border-radius: 10px; object-fit: cover; flex: none; display: block; }
+.fy-look__main { width: 84px; height: 84px; border-radius: 10px; object-fit: cover; flex: none; display: block; box-sizing: border-box; }
+.fy-look__facts { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; font-size: var(--text-xs); color: var(--muted-foreground); }
+.fy-look__conflict { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; padding: 4px 8px; border-left: 2px solid var(--warning, var(--neutral-400)); font-size: var(--text-xs); }
+.fy-look__conflict b { font-weight: 600; color: var(--foreground); }
+.fy-look__closeimg { width: 46px; height: 46px; border-radius: 8px; object-fit: cover; display: block; }
+.fy-look__picker { display: flex; gap: 8px; flex-wrap: wrap; padding-left: 98px; }
+.fy-look__tile { position: relative; width: 78px; height: 78px; border: 1px solid var(--border); border-radius: 10px; padding: 0; background: var(--secondary); overflow: hidden; cursor: pointer; display: block; box-sizing: border-box; }
+.fy-look__tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fy-look__tile .fy-mono { position: absolute; left: 3px; right: 3px; bottom: 3px; padding: 1px 4px; border-radius: 5px; background: var(--background); font-size: var(--text-2xs); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-look__tile .fy-look__tileuse { bottom: auto; top: 3px; }
+.fy-look__tile--on { outline: 2px solid var(--foreground); outline-offset: 1px; }
+.fy-look__tile--new { border-style: dashed; background: transparent; display: flex; align-items: center; justify-content: center; }
+.fy-look__tile--new i { font-style: normal; font-size: 22px; color: var(--muted-foreground); }
+.fy-look__tile--new i::before { content: "+"; }
+.fy-look__tile--new .fy-mono { background: none; }
+.fy-look__tile:disabled { cursor: default; opacity: 0.6; }
 @media (max-width: 599px) {
+  .fy-look__picker { padding-left: 0; overflow-x: auto; flex-wrap: nowrap; }
+  .fy-look__tile { flex: none; }
   .fy-look__meta { flex-direction: column; gap: 2px; }
   .fy-look__src { display: none; }
 }

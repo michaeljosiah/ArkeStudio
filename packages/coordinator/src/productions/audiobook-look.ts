@@ -5,6 +5,7 @@ import {
   LOOK_LINE_MAX,
   chooseLook,
   editLook,
+  lookClothing,
   lookKey,
   mergeLook,
   normalizeSpeechText,
@@ -13,7 +14,9 @@ import {
   type AudiobookLook,
   type ChapterAudiobook,
   type DerivedLook,
+  type CarriedLook,
   type HarnessAdapter,
+  type LookConflict,
   type LookTarget,
   type Sheet,
 } from "@arke-studio/contracts";
@@ -21,6 +24,7 @@ import type { SessionInput } from "../harness/session-files.js";
 import type { WorldStore } from "../world/store.js";
 import { readKit } from "../references/kit.js";
 import { updateAudiobook, planAudiobook, type AudiobookPlan } from "./audiobook.js";
+import { bookLookChoices, carriedLooks } from "./audiobook-look-book.js";
 import { clip, section } from "./audiobook-direction.js";
 import { anyNarrator } from "./audiobook-listening.js";
 import { makeAdapterJsonDeriver } from "./continuity.js";
@@ -40,7 +44,15 @@ export const LOOK_BOUNDS = { people: 12, section: 240, place: 200, art: 400, cha
 const RawLookSchema = z.object({
   place: z.object({ text: z.string(), blocks: z.array(z.string()).optional() }).nullable().optional(),
   characters: z
-    .array(z.object({ who: z.string(), text: z.string(), blocks: z.array(z.string()).optional() }))
+    .array(
+      z.object({
+        who: z.string(),
+        text: z.string(),
+        blocks: z.array(z.string()).optional(),
+        /** Where the chapter's words and the look this character already has disagree (design turn 193): `{ part, chapter, look }`. */
+        conflicts: z.array(z.object({ part: z.string(), chapter: z.string(), look: z.string() })).optional(),
+      }),
+    )
     .optional(),
 });
 export type RawLook = z.infer<typeof RawLookSchema>;
@@ -164,7 +176,8 @@ export function artDirectionFor(store: WorldStore, productionId: string): string
 export interface LookDeriverInput {
   title: string;
   art?: string;
-  people: ReadonlyArray<Pick<ChapterPerson, "key" | "name" | "essence" | "appearance">>;
+  /** `look` is the clothing line of the look this character already has chosen or carried into the chapter (design turn 193). */
+  people: ReadonlyArray<Pick<ChapterPerson, "key" | "name" | "essence" | "appearance"> & { look?: string }>;
   places: readonly ChapterPlace[];
   blocks: ReadonlyArray<{ key: string; text: string; speaker?: string }>;
 }
@@ -181,8 +194,9 @@ function promptBlocks(blocks: LookDeriverInput["blocks"]): string {
 
 export function buildLookPrompt(input: LookDeriverInput, retryNote?: string): string {
   const people = input.people
-    .map((person) => `[${person.key}] ${person.name}${person.appearance !== undefined ? ` — the sheet says: ${person.appearance}` : ""}${person.essence !== undefined ? ` · who they are: ${person.essence}` : ""}`)
+    .map((person) => `[${person.key}] ${person.name}${person.appearance !== undefined ? ` — the sheet says: ${person.appearance}` : ""}${person.essence !== undefined ? ` · who they are: ${person.essence}` : ""}${person.look !== undefined ? ` · the look chosen for them: ${person.look}` : ""}`)
     .join("\n");
+  const chosen = input.people.some((person) => person.look !== undefined);
   const places = input.places.map((place) => `${place.name}${place.look !== undefined ? ` — ${place.look}` : ""}`).join("\n");
   return `Read the chapter below for how it looks, for an illustrated audiobook: where and when it is and in what light, and what each character wears, carries and looks like IN THIS CHAPTER. Respond with ONLY a JSON object:
 {"place": {"text": "<where, when and the light: one or two phrases>", "blocks": ["<key of a block that says so>"]}, "characters": [{"who": "<the character's key>", "text": "<what they wear and carry and how they appear in this chapter>", "blocks": ["<keys of the blocks it comes from>"]}]}
@@ -194,7 +208,7 @@ Rules — each is enforced mechanically after you answer:
 - At most ${LOOK_LINE_MAX} characters a line, and short is better: a coat, a lamp, a scarf.
 - "blocks" are keys of blocks listed below, the ones the detail comes from.
 - Never rewrite the chapter. Nothing you write goes into the prose.
-${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
+${chosen ? `- A character with "the look chosen for them" is dressed by that look in the pictures. Your "text" for them is still only what the CHAPTER says they wear: never copy the look. Add "conflicts": [{"part": "<hood, hair, coat...>", "chapter": "<what the chapter says, a few words>", "look": "<what the look says, a few words>"}] for each part where the two disagree, and leave "conflicts" out where they do not.\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
 ## The book's look
 
 ${input.art ?? "none stated"}
@@ -252,7 +266,14 @@ export function verifyLook(raw: RawLook, input: Pick<LookDeriverInput, "people">
     seen.add(person.key);
     const blocks = only(entry.blocks);
     const sheet = "sheet" in person && typeof person.sheet === "string" ? person.sheet : undefined;
-    characters.push({ key: person.key, name: person.name, ...(sheet !== undefined ? { sheet } : {}), text, ...(blocks.length > 0 ? { blocks } : {}) });
+    // A conflict is only worth a row when it says a part and both sides; bounded as the sheet draws it.
+    const conflicts = (entry.conflicts ?? []).flatMap((conflict): LookConflict[] => {
+      const part = clip(conflict.part, 40);
+      const a = clip(conflict.chapter, 120);
+      const b = clip(conflict.look, 120);
+      return part === undefined || a === undefined || b === undefined || a.toLowerCase() === b.toLowerCase() ? [] : [{ kind: "chapter", part, a, b }];
+    }).slice(0, 8);
+    characters.push({ key: person.key, name: person.name, ...(sheet !== undefined ? { sheet } : {}), text, ...(blocks.length > 0 ? { blocks } : {}), ...(conflicts.length > 0 ? { conflicts } : {}) });
     if (characters.length >= LOOK_CHARACTERS_MAX) break;
   }
   const placeText = raw.place === null || raw.place === undefined ? undefined : clip(raw.place.text, LOOK_LINE_MAX);
@@ -265,6 +286,8 @@ export interface DerivedChapterLook {
   dropped: number;
   /** The prose the look was read from: written only while the chapter still says it. */
   hash: string;
+  /** The looks earlier chapters chose, by character, that start this chapter's people with one (R-116). */
+  carried: Record<string, CarriedLook>;
 }
 
 /**
@@ -281,11 +304,21 @@ export async function deriveChapterLook(store: WorldStore, productionId: string,
   });
   const visible = people.filter((person) => !person.neverDepicted);
   const art = artDirectionFor(store, productionId);
+  // The look each person starts the chapter with (R-116): chosen here already, else carried from the
+  // latest earlier chapter that chose one — told to the writing service so it can say where the
+  // chapter's own words disagree with it.
+  const held = lookOf(plan.record);
+  const bundle = store.getBundle();
+  const carried = carriedLooks(await bookLookChoices(store, productionId), plan.chapter.order, visible, (sheetId) => bundle.referenceKits.find((kit) => kit.sheetId === sheetId));
+  const told = visible.map((person) => {
+    const look = held?.characters[person.key] !== undefined ? (held.characters[person.key]!.lookId !== undefined ? held.characters[person.key]!.text : undefined) : carried[person.key]?.text;
+    return { ...person, ...(look !== undefined ? { look } : {}) };
+  });
   if (signal?.aborted) throw new Error("stopped");
-  const raw = await deriver({ title: plan.chapter.title, ...(art !== undefined ? { art } : {}), people: visible, places: chapterPlaces(store, plan), blocks }, signal);
+  const raw = await deriver({ title: plan.chapter.title, ...(art !== undefined ? { art } : {}), people: told, places: chapterPlaces(store, plan), blocks }, signal);
   if (signal?.aborted) throw new Error("stopped");
   const verified = verifyLook(raw, { people: visible, blocks });
-  return { look: verified.look, dropped: verified.dropped, hash: plan.chapter.hash };
+  return { look: verified.look, dropped: verified.dropped, hash: plan.chapter.hash, carried };
 }
 
 /** What a derive wrote: the record, and how many of the author's lines it left alone. */
@@ -305,7 +338,7 @@ export async function writeDerivedLook(store: WorldStore, productionId: string, 
   let kept = 0;
   const at = store.now();
   const record = await updateAudiobook(store, productionId, plan.chapter, (current) => {
-    const merged = mergeLook(current.look, derived.look, { chapterHash: derived.hash, at });
+    const merged = mergeLook(current.look, derived.look, { chapterHash: derived.hash, at }, derived.carried);
     kept = merged.kept;
     return { ...current, updatedAt: at, look: merged.look };
   });
@@ -352,7 +385,8 @@ export async function chooseChapterLook(
     const kit = (await readKit(store, sheetId))?.kit;
     const look = kit?.looks?.find((candidate) => candidate.id === lookId && candidate.kind === "costume");
     if (look === undefined) throw new Error("that look is gone");
-    pick = { lookId, text: look.prompt };
+    // The look's clothing line, not a Cast page's whole exploration prompt with its drawing directions.
+    pick = { lookId, text: lookClothing(look) };
   }
   const name = who.name ?? sheet?.name;
   return updateAudiobook(store, productionId, plan.chapter, (current) => {

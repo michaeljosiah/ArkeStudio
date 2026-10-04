@@ -329,6 +329,7 @@ import {
 import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiobookBook } from "./productions/audiobook-book.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
 import { anyNarrator, audiobookListening, setAudiobookPicture } from "./productions/audiobook-listening.js";
+import { bookLookChoices, lookUsage } from "./productions/audiobook-look-book.js";
 import { chooseChapterLook, deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
 import { makeAdapterIllustrateDeriver, proposeIllustrations, type IllustrateDeriver } from "./productions/audiobook-illustrate.js";
 import { clipPrompt, depictable, makeAdapterPictureDeriver, pictureAspect, pictureRoom, pictureWho, promptRoom, suggestPicture, type PictureDeriver } from "./productions/audiobook-picture-suggest.js";
@@ -15301,6 +15302,15 @@ export class Coordinator {
         }
         return;
       }
+      case "read-audiobook-looks": {
+        // Which chapters chose each kit look (turn 193, R-114): read from the records, answered
+        // to the window that asked, nothing changed.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const usage = lookUsage(await bookLookChoices(store, msg.productionId));
+        this.emit({ at: new Date().toISOString(), type: "audiobook.looks", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, usage });
+        return;
+      }
       case "choose-audiobook-look": {
         // A kit look chosen for a character in this chapter (turn 193, R-112): by pointer on the
         // chapter's record, the look left unattached. Answered as the record, or in one clause.
@@ -18224,7 +18234,7 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "An accepted main photo and image model are required.");
           return;
         }
-        // The image a close view is made from (design turn 193, R-109): a candidate take still
+        // The image a close view is made from (design turn 193, R-118): a candidate take still
         // pending, or a look already in the kit — world-relative, so it rides as a reference.
         let closeOf: { file: string; takeId?: string; lookId?: string } | undefined;
         if (msg.framing === "close") {
@@ -18300,7 +18310,7 @@ export class Coordinator {
         )
           return;
         const review = referenceReviewDecision(store.now(), take, "accept");
-        // A close view made for a look (design turn 193, R-109): either the second picture of the
+        // A close view made for a look (design turn 193, R-118): either the second picture of the
         // look being accepted, or — with `closeFor` — the close view of a look already in the kit.
         const closeTake = msg.closeTakeId === undefined ? null : pendingReferenceTake(bundle.referenceTakes, bundle.referenceReviews, msg.closeTakeId, msg.sheetId, "look");
         const close = closeTake?.media !== undefined && basename(closeTake.media) === closeTake.media && (await stat(toExtendedLength(join(store.dir, `references/${msg.sheetId}/takes/${closeTake.id}/${closeTake.media}`))).catch(() => null)) !== null ? { file: `takes/${closeTake.id}/${closeTake.media}`, takeId: closeTake.id } : undefined;
