@@ -141,6 +141,21 @@ describe("Providers holds the credential (SPEC-042 R-3, R-9, R-18)", () => {
     assert.doesNotMatch(group, /Not unlocked by this key/);
   });
 
+  it("Codex is an external sign-in: the probe's words and the command, never a key box or an installer", () => {
+    const state = stateWith({});
+    const reason = "Codex is signed in with an API key — image generation needs a ChatGPT sign-in";
+    state.app.providers = [{ id: "codex", configured: false, validation: "invalid", probes: [{ capability: "image", available: false, reason }], fault: null }];
+    __setStateForTest(state);
+    const html = providers("/settings/providers?provider=codex");
+    const pane = plain(html.slice(html.indexOf('data-testid="provider-pane"')));
+    assert.match(pane, /sign-in needed/);
+    assert.match(pane, /needs a ChatGPT sign-in/);
+    assert.match(pane, /codex login/);
+    assert.match(pane, /against your plan, not an API key/);
+    assert.doesNotMatch(pane, /Install|Replace key|Save key/);
+    assert.match(plain(html.slice(0, html.indexOf('data-testid="provider-pane"'))), /Codex/);
+  });
+
   it("carries no model, and says one line about them", () => {
     __setStateForTest(stateWith({}));
     const html = providers("/settings/providers?provider=fal");

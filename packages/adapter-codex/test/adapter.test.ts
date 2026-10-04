@@ -388,3 +388,13 @@ test("a plan limit is a typed error and unrecognised bytes are rejected", async 
   const junk = await fixture("image-gen-junk"); t.after(junk.cleanup);
   await assert.rejects(junk.adapter.generateImage({ prompt: "x" }), /not a supported image/);
 });
+
+test("reference images go to the image thread as local files and a mislabelled one is refused", async t => {
+  const f = await fixture("image-gen"); t.after(f.cleanup);
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("reference-bytes")]);
+  await f.adapter.generateImage({ prompt: "like this", references: [{ contentType: "image/png", data: png }] });
+  const turn = (await f.requests()).find(request => request.method === "turn/start")!.params;
+  assert.deepEqual(turn.input.map((part: any) => part.type), ["text", "localImage"]);
+  assert.match(turn.input[1].path, /reference-1\.png$/);
+  await assert.rejects(f.adapter.generateImage({ prompt: "x", references: [{ contentType: "image/jpeg", data: png }] }), /not the format it claims/);
+});

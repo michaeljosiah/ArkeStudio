@@ -51,6 +51,7 @@ export { KokoroClient, type KokoroSynthesize, type SidecarBaseUrl } from "./clie
 export { MistralClient, VOXTRAL_MODEL, VOXTRAL_PRESETS } from "./clients/mistral.js";
 export { OllamaClient } from "./clients/ollama.js";
 export { OpenAiClient } from "./clients/openai.js";
+export { CodexClient, type CodexImageRunner } from "./clients/codex.js";
 export { WhisperCppClient, type WhisperTranscribe } from "./clients/whispercpp.js";
 export { jsonRequest, tryProbe } from "./clients/http.js";
 export { requireModel, SHIPPED_MANIFEST } from "./manifest-data.js";

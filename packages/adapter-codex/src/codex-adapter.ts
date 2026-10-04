@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
@@ -87,10 +87,12 @@ export interface CodexImageStatus {
   /** The app-server's own answer for the current provider and login. */
   imageGeneration: boolean;
 }
+/** A picture the new image should follow, as bytes the host already verified. */
+export interface CodexImageReference { contentType: "image/png" | "image/jpeg" | "image/webp"; data: Uint8Array }
 export interface CodexImageResult { bytes: Buffer; mimeType: "image/png" | "image/jpeg" | "image/webp"; revisedPrompt?: string }
 /** The plan's image allowance ran out; resetsAt is epoch seconds when Codex reports one. */
 export class CodexImageLimitError extends Error {
-  constructor(readonly resetsAt: number | null) { super("The Codex plan's image limit has been reached."); }
+  constructor(readonly resetsAt: number | null) { super("The Codex plan's image limit has been reached."); this.name = "CodexImageLimitError"; }
 }
 interface ImageJob {
   turnId: string | null;
@@ -269,10 +271,12 @@ export class CodexAdapter implements HarnessAdapter {
 
   /**
    * One image from a dedicated thread: no Arke tools, no shell, an empty temporary directory.
+   * References are written into that directory and handed over as local images, which keeps
+   * them out of the prompt and out of anything Codex persists beyond the thread.
    * Bytes come from the item's inline result (the Responses API's base64 field); a path the server
    * reports is never opened, since it names a location this adapter did not choose.
    */
-  async generateImage(input: { prompt: string; model?: string; signal?: AbortSignal }): Promise<CodexImageResult> {
+  async generateImage(input: { prompt: string; references?: readonly CodexImageReference[]; model?: string; signal?: AbortSignal }): Promise<CodexImageResult> {
     if (!input.prompt.trim()) throw new Error("An image prompt is required.");
     input.signal?.throwIfAborted();
     const status = await this.imageStatus(input.signal);
@@ -301,7 +305,13 @@ export class CodexAdapter implements HarnessAdapter {
       const stop = () => { void rpc.request("turn/interrupt", { threadId: id, turnId: job.turnId }, AbortSignal.timeout(5000)).catch(() => rpc.dispose()); settle(new Error("Image generation cancelled.")); };
       input.signal?.addEventListener("abort", stop, { once: true });
       try {
-        await rpc.request("turn/start", { threadId: id, input: [{ type: "text", text: input.prompt }], environments: [] }, input.signal);
+        const files: JsonObject[] = [];
+        for (const [index, reference] of (input.references ?? []).entries()) {
+          if (imageType(Buffer.from(reference.data.subarray(0, 16))) !== reference.contentType) throw new Error("A reference image is not the format it claims.");
+          const path = join(cwd, `reference-${index + 1}.${reference.contentType === "image/jpeg" ? "jpg" : reference.contentType.slice(6)}`);
+          await writeFile(path, reference.data); files.push({ type: "localImage", path });
+        }
+        await rpc.request("turn/start", { threadId: id, input: [{ type: "text", text: input.prompt }, ...files], environments: [] }, input.signal);
         await settled;
       } finally { input.signal?.removeEventListener("abort", stop); }
       const failed = job.items.map(item => object(item.failure)).find(failure => failure.type === "usageLimitExceeded");

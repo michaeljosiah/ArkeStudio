@@ -1767,6 +1767,7 @@ describe("the provider table and the registry cannot drift apart (issue 462)", (
     createProviderClients({
       fetch: unreachable as unknown as FetchLike,
       higgsfield: unreachable as unknown as CommandRunner,
+      codexImage: { status: unreachable, generate: unreachable },
       voxa: () => null,
       comfyui: { baseUrl: () => null, preflight: unreachable as unknown as () => Promise<never> },
     });
