@@ -1809,7 +1809,7 @@ export class ProposalManager {
   }
 
   /** The authority-owned preview used by conversation cards; no staged payload crosses with it. */
-  async project(proposalId: string): Promise<{ proposal: Proposal; review: ReviewProjection; ripple: RipplePreview | null }> {
+  async project(proposalId: string): Promise<{ proposal: Proposal; review: ReviewProjection; ripple: RipplePreview | null; scenePreview?: { before: SceneRecord | null; after: SceneRecord } }> {
     const proposal = await this.readManifest(proposalId);
     const proposed = new Map<string, string | null>();
     const base = new Map<string, string | null>();
@@ -1817,8 +1817,12 @@ export class ProposalManager {
       proposed.set(target.path, await this.readProposalFile(proposalId, target.path));
       base.set(target.path, await this.readProposalFile(proposalId, `_base/${target.path}`));
     }
+    const sceneTarget = proposal.targets.find(target => classify(target.path).track === "scene");
+    const sceneContent = sceneTarget ? proposed.get(sceneTarget.path) : null;
+    const sceneBase = sceneTarget ? base.get(sceneTarget.path) : null;
     return {
       proposal,
+      ...(sceneContent ? { scenePreview: { before: sceneBase ? parseSceneRecord(sceneBase) : null, after: parseSceneRecord(sceneContent) } } : {}),
       review: projectReview({
         proposal,
         proposed: (path) => proposed.get(path) ?? null,

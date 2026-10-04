@@ -150,7 +150,7 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // without the field drops the sheet on scan, and with it the character.
 // Sixty adds non-authorizing plan suggestions and derived-readiness receipts (SPEC-051 T-9).
 // Sixty-one is the shot a made picture keeps on the chapter's audiobook record (design turn 194g).
-export const SUPPORTED_SCHEMA_VERSION = 61;
+export const SUPPORTED_SCHEMA_VERSION = 62;
 
 export class WorldOpenError extends Error {
   constructor(
