@@ -39,6 +39,7 @@ import {
   SecretRegistry,
   nodeSetupDeps,
   harnessTrace,
+  lazyCodexImageRunner,
   spoolBytes,
   sweepSpool,
   registerExitBackstop,
@@ -857,6 +858,12 @@ async function initialize(): Promise<{ port: number }> {
     fetch: (url, init) => fetch(url, init),
     transport: providerTransport,
     higgsfield: lazyHiggsfieldRunner(findHiggsfield),
+    // The user's own Codex login, found and started only when Settings or a dispatch asks.
+    codexImage: lazyCodexImageRunner({
+      deps: { ledger: childLedger }, onTrace: harnessTrace(appRoot),
+      discovery: process.env["ARKE_CODEX_CMD"] ?? storedHarness?.codexPath
+        ? { configuredPath: process.env["ARKE_CODEX_CMD"] ?? storedHarness!.codexPath! } : {},
+    }),
     voxa: voxaBaseUrl,
     voxaSynthesize: (input, options) => voxaClient.synthesize(input, options),
     voxaTranscribe: (input, options) => voxaClient.transcribe(input.audio, input.contentType, options),

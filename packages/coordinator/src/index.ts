@@ -49,10 +49,12 @@ export {
   HarnessPasswordHolder,
   harnessInfoFrom,
   harnessProfileDir,
+  lazyCodexImageRunner,
   passwordFromLine,
   v2ProfileEnv,
   type AssembledHarness,
   type AssembleHarnessOptions,
+  type LazyCodexImageOptions,
 } from "./harness/v2-launch.js";
 export { buildDiagnosticsBundle } from "./diagnostics.js";
 export { ProviderService, type KeyValidator } from "./providers/service.js";

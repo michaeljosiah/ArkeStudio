@@ -16,7 +16,7 @@ import { registerExitBackstop } from "./supervisor.js";
 import { nodeSetupDeps } from "./setup/node-deps.js";
 import { FsWorldProvider } from "./world/provider.js";
 import { harnessTrace } from "./harness/trace.js";
-import { assembleHarness, describeClaudeAvailability, describeCodexAvailability } from "./harness/v2-launch.js";
+import { assembleHarness, describeClaudeAvailability, describeCodexAvailability, lazyCodexImageRunner } from "./harness/v2-launch.js";
 
 /**
  * Dev entry: run the coordinator standalone over a real on-disk app root (SPEC-002) so the
@@ -125,7 +125,13 @@ const providerSecrets = new SecretRegistry();
 const providerCalls = new ProviderCallStore(join(devRoot, "provider-calls", "calls.jsonl"), providerSecrets);
 // No Higgsfield runner: its credential lives in a CLI, and discovering one here would make dev
 // depend on what happens to be installed. Every Higgsfield call then fails with the remedy.
-const providerClients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: providerCalls });
+// Codex images use the user's own Codex login and are looked for only when asked: nothing starts
+// here, and an absent Codex answers "unavailable" rather than failing the stack.
+const codexImage = lazyCodexImageRunner({
+  deps: { ledger }, onTrace: harnessTrace(devRoot),
+  discovery: process.env["ARKE_CODEX_CMD"] ?? storedHarness?.codexPath ? { configuredPath: process.env["ARKE_CODEX_CMD"] ?? storedHarness!.codexPath! } : {},
+});
+const providerClients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: providerCalls, codexImage });
 
 const transportToken = randomBytes(32).toString("hex");
 const devOrigins = process.env["ARKE_DEV_ORIGIN"]

@@ -23,7 +23,8 @@ import {
   type ClaudeDiscoveryOptions,
   type RunProbeTurn,
 } from "@arke-studio/adapter-claude";
-import { CodexAdapter, codexCredentialEnv, discoverCodex, type CodexDiscoveryOptions } from "@arke-studio/adapter-codex";
+import { CodexAdapter, codexCredentialEnv, discoverCodex, type CodexDiscoveryOptions, type DiscoveredCodex } from "@arke-studio/adapter-codex";
+import type { CodexImageRunner } from "@arke-studio/providers";
 import { ArkeAdapter } from "@arke-studio/adapter-arke";
 import { ChildSupervisor, type SupervisorDeps } from "../supervisor.js";
 import { atomicWriteFile } from "../world/atomic.js";
@@ -358,5 +359,71 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
         atomicWriteFile(harnessProfileConfigPath(opts.appRoot), `${JSON.stringify(buildProfileConfigV2(models), null, 2)}\n`),
     } : {}),
     logLines,
+  };
+}
+
+export interface LazyCodexImageOptions {
+  discovery?: CodexDiscoveryOptions;
+  deps?: SupervisorDeps;
+  onTrace?: (line: Record<string, unknown>) => void;
+  /** How long an idle app-server lingers before it is stopped; a probe alone should not keep one. */
+  idleMs?: number;
+  /** Test seams: the real ones find a Codex on this machine and start its app-server. */
+  discover?: () => Promise<{ found: DiscoveredCodex | null; reason: string | null }>;
+  createAdapter?: (found: DiscoveredCodex) => Pick<CodexAdapter, "init" | "imageStatus" | "generateImage" | "dispose">;
+}
+
+/**
+ * Codex as an image provider (the `codex` client's runner), independent of which harness the user
+ * chose: someone running Claude Code can still make pictures with their ChatGPT sign-in.
+ *
+ * Nothing starts until the first status check or image. The app-server is then the same private,
+ * leashed, key-free process the Codex lane uses (`codexCredentialEnv({})` removes inherited keys,
+ * so the user's own login is what answers and an Arke media key cannot change who is billed), and
+ * it is stopped again after a quiet spell. A Codex that is not installed is an ordinary unavailable
+ * answer, not an error, and is looked for again on the next ask.
+ */
+export function lazyCodexImageRunner(opts: LazyCodexImageOptions = {}): CodexImageRunner & { dispose(): Promise<void> } {
+  const discover = opts.discover ?? (() => discoverCodex(opts.discovery ?? {}));
+  const create = opts.createAdapter ?? ((found: DiscoveredCodex) => new CodexAdapter({ command: found.command, args: found.args, env: codexCredentialEnv({}),
+    ...ownedChildHooks("codex-image", found.command, opts.deps, opts.onTrace),
+    ...(opts.onTrace ? { onTrace: opts.onTrace } : {}),
+  }));
+  const idleMs = opts.idleMs ?? 60_000;
+  type Adapter = ReturnType<typeof create>;
+  let current: Promise<Adapter> | null = null;
+  let busy = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stop = async () => {
+    const prior = current; current = null;
+    if (prior) await (await prior.catch(() => null))?.dispose();
+  };
+  const acquire = async (): Promise<Adapter> => {
+    if (!current) {
+      const attempt = (async () => {
+        const discovered = await discover();
+        if (!discovered.found) throw new Error(discovered.reason ?? "Codex was not found on this machine.");
+        const adapter = create(discovered.found);
+        try { await adapter.init(); } catch (error) { await adapter.dispose(); throw error; }
+        return adapter;
+      })();
+      current = attempt;
+      // A failed start must not be remembered: the next ask looks again.
+      attempt.catch(() => { if (current === attempt) current = null; });
+    }
+    return current;
+  };
+  const use = async <T>(run: (adapter: Adapter) => Promise<T>): Promise<T> => {
+    clearTimeout(timer); busy++;
+    try { return await run(await acquire()); }
+    finally {
+      busy--;
+      if (busy === 0) { timer = setTimeout(() => { void stop(); }, idleMs); timer.unref?.(); }
+    }
+  };
+  return {
+    status: signal => use(adapter => adapter.imageStatus(signal)),
+    generate: input => use(adapter => adapter.generateImage(input)),
+    dispose: async () => { clearTimeout(timer); await stop(); },
   };
 }
