@@ -81,6 +81,8 @@ export class SceneVersionMoved extends Error {
  */
 export interface SceneCommandDeps {
   activePlans?: (productionId: string) => Promise<Array<{ planId: string; sceneId: string; status: string }>>;
+  /** Revalidate a human review binding inside the same write gate as its scene change. */
+  validateInGate?: () => Promise<void>;
 }
 
 export interface SceneCommandInput {
@@ -173,6 +175,7 @@ export async function applySceneCommand(
    * bare id then alias the wrong one. The gate is what makes the read and the write one act.
    */
   await store.gateOp(async () => {
+    await deps.validateInGate?.();
     const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
     const record = parseSceneRecord(raw);
     fenceOrThrow(input, record, stem);

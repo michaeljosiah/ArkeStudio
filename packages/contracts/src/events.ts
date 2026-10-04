@@ -688,6 +688,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("performance.result"), audioReference: PreparedPerformanceAudioReviewSchema.optional(), masterAudioReference: MasterAudioReviewSchema.optional(), quote: PerformanceGenerationQuoteSchema.optional(), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, status: z.enum(["kept", "purged", "reviewed", "prepared", "queued", "refused"]), performance: PerformanceRecordSchema.optional(), reason: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("voice.sample-result"), requestId: UlidSchema, worldId: UlidSchema,
+    operationId: z.string().uuid().optional(),
     sheetId: SlugSchema, status: z.enum(["prepared", "assigned", "cleared", "withdrawn", "refused"]),
     review: VoiceSampleReviewSchema.optional(), reason: z.string().optional() }).strict(),
   /** A direct voice assignment committed or refused. Every request receives exactly one result. */

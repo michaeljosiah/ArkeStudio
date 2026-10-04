@@ -37,7 +37,7 @@ export const REMOTE_COMMAND_ACCESS = {
   // studio
   "catalogue-voice-preview": "studio", "stop-catalogue-voice-preview": "studio",
   "production-setup": "studio", "save-production-narrative": "studio", "stage-construct": "studio",
-  "stage-inspection": "studio", "stage-construct-cancel": "studio", "hello": "studio",
+  "stage-inspection": "studio", "stage-construct-cancel": "studio", "stage-review-discard": "studio", "hello": "studio",
   "open-world": "studio", "create-world": "studio", "read-sheet-section": "studio",
   "read-sheet-page": "studio", "read-prose": "studio", "read-prose-page": "studio",
   "stop-prose-page": "studio", "read-bible-section": "studio", "generate-world-image": "studio",

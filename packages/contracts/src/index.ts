@@ -152,3 +152,4 @@ export * from "./audiobook-player-source.js";
 export * from "./world-chat-images.js";
 export * from "./scene-command-candidate.js";
 export * from "./turn-action-sequencing.js";
+export * from "./human-decision.js";

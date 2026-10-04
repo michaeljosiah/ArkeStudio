@@ -1,5 +1,6 @@
 import { valueSchema } from "./value-schema.js";
 import { DesignedVoiceSchema } from "./designed-voice.js";
+import { StageReviewSchema } from "./human-decision.js";
 import { AdapterLibraryStateSchema } from "./adapters.js";
 import { BorrowedImageOriginSchema } from "./take.js";
 import { TakeDialogueFeedbackSchema } from "./take-feedback.js";
@@ -601,6 +602,8 @@ export const ClientStateSchema = valueSchema(z
      * it — the same reason the world snapshot carries conversation rows and not their contents.
      */
     worldChat: WorldChatWorkspaceSchema.nullable().default(null),
+    /** Retained, unkept Stage drafts shared by the thread and Stage screen. */
+    stageReviews: z.array(StageReviewSchema).optional(),
     /** Approved Stage handoffs survive closing their source conversation during navigation. */
     stagePlayblastRequests: z.array(z.object({
       worldId: z.string().min(1),

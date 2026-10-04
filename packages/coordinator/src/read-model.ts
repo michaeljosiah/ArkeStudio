@@ -167,6 +167,7 @@ export class ReadModel {
       frameRuns: sameWorld ? this.state.frameRuns : [],
       stageConstructionRequests: sameWorld ? this.state.stageConstructionRequests : [],
       stagePlayblastRequests: sameWorld ? this.state.stagePlayblastRequests : [],
+      stageReviews: sameWorld ? this.state.stageReviews : [],
     };
   }
 
@@ -204,6 +205,9 @@ export class ReadModel {
   }
   setStagePlayblastRequests(requests: NonNullable<ClientState["stagePlayblastRequests"]>): void {
     this.state = { ...this.state, stagePlayblastRequests: requests.filter((request) => request.worldId === this.state.world?.meta.worldId) };
+  }
+  setStageReviews(reviews: NonNullable<ClientState["stageReviews"]>): void {
+    this.state = { ...this.state, stageReviews: reviews.filter(review => review.worldId === this.state.world?.meta.worldId) };
   }
 
   setBench(bench: ClientState["bench"]): void {

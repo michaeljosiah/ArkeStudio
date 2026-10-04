@@ -1,6 +1,8 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { CharacterVoiceSampleSchema, ReferenceKitSchema, SlugSchema, VoiceSampleReviewSchema,
+import { dirname } from "node:path";
+import { z } from "zod";
+import { AudioAssetProvenanceSchema, CharacterVoiceSampleSchema, ReferenceKitSchema, SlugSchema, VoiceSampleReviewSchema,
   estimateMicroUsd, supportsCharacterSpeakingVideo, type ClientMessage, type ManifestModel, type VoiceSampleReview } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
@@ -9,6 +11,7 @@ import { sha256 } from "../world/text-files.js";
 import { appendAudioRights } from "./rights.js";
 import { acceptPreparedAudio, audioWorldPath, prepareAudio, resolveAudioSource, type PreparedAudioCandidate } from "./storage.js";
 import type { AudioMediaTools } from "./media-tools.js";
+import { containedWorldFilePath } from "../world/contained-file.js";
 
 type Prepare = Extract<ClientMessage, { kind: "prepare-character-voice-sample" }>;
 type Accept = Extract<ClientMessage, { kind: "accept-character-voice-sample" }>;
@@ -30,7 +33,7 @@ export async function prepareCharacterSample(store: WorldStore, tools: AudioMedi
     sourceFile: resolved.file, preparedFile: candidate.stagedFile, provenance: candidate.provenance });
   await store.ownedWrite(async () => {
     await writeFile(await audioWorldPath(store.dir, contextPath(candidate.operationId), true), JSON.stringify({
-      worldId: store.worldId, sheetId: request.sheetId, baseHash: base ? sha256(base.raw) : null, candidate,
+      worldId: store.worldId, sheetId: request.sheetId, baseHash: base ? sha256(base.raw) : null, candidate, sourceFile: review.sourceFile,
     }), { flag: "wx" });
   });
   return review;
@@ -47,6 +50,60 @@ export async function resumeCharacterSample(store: WorldStore, sheetId: string, 
   await audioWorldPath(store.dir, context.candidate.stagedFile);
   return VoiceSampleReviewSchema.parse({ operationId, sheetId, sourceFile: source.file,
     preparedFile: context.candidate.stagedFile, provenance: context.candidate.provenance });
+}
+
+const DiscoveryContext = z.object({ worldId: z.string(), sheetId: SlugSchema, sourceFile: z.string().optional(),
+  candidate: z.object({ operationId: z.string().uuid(), stagedFile: z.string(), provenance: AudioAssetProvenanceSchema }) });
+
+/** Older preparations retained provenance but not the resolved source path. Resolve their metadata only. */
+function retainedSourceFile(store: WorldStore, source: VoiceSampleReview["provenance"]["source"]): string {
+  if (source.kind === "legacy-character-sample") return `references/${source.sheetId}/${source.sourceFile}`;
+  if (source.kind === "artifact") {
+    const artifact = store.getBundle().artifacts.find(value => value.id === source.artifactId);
+    if (artifact) return `artifacts/${artifact.file}`;
+  }
+  if (source.kind === "production-take") {
+    const take = store.getBundle().productions.find(value => value.meta.id === source.productionId)?.takes.find(value => value.id === source.mediaTakeId);
+    if (take?.media) return `productions/${source.productionId}/takes/${take.id}/${take.media}`;
+  }
+  throw new Error("audio-source-unavailable");
+}
+
+/** Snapshot projection reads frozen review metadata; Resume and Accept revalidate the media bytes. */
+export async function pendingCharacterSampleReviews(store: WorldStore): Promise<{ reviews: VoiceSampleReview[]; problems: string[] }> {
+  let names: string[];
+  try {
+    const check = await containedWorldFilePath(store.dir, ".staging/audio/.containment-check", false, "audio", true);
+    names = await readdir(dirname(check));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { reviews: [], problems: [] };
+    return { reviews: [], problems: ["Prepared voice reviews could not be read. Reopen the world before deciding."] };
+  }
+  const reviews: VoiceSampleReview[] = [], problems: string[] = [];
+  for (const id of names.filter(name => z.string().uuid().safeParse(name).success)) {
+    let context: unknown;
+    try {
+      context = JSON.parse(await readFile(await containedWorldFilePath(store.dir, contextPath(id)), "utf8"));
+    } catch (error) {
+      // Other audio consumers share this directory and have no character.json.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      problems.push("A prepared character sample could not be read. Review its source on the Voice screen.");
+      continue;
+    }
+    try {
+      const retained = DiscoveryContext.parse(context);
+      character(store, retained.sheetId);
+      if (retained.worldId !== store.worldId || retained.candidate.operationId !== id ||
+        retained.candidate.stagedFile !== `.staging/audio/${id}/prepared.wav`) throw new Error("audio-candidate-invalid");
+      const sourceFile = retained.sourceFile ?? retainedSourceFile(store, retained.candidate.provenance.source);
+      await audioWorldPath(store.dir, sourceFile);
+      await audioWorldPath(store.dir, retained.candidate.stagedFile);
+      reviews.push(VoiceSampleReviewSchema.parse({ operationId: id, sheetId: retained.sheetId, sourceFile,
+        preparedFile: retained.candidate.stagedFile, provenance: retained.candidate.provenance }));
+    }
+    catch { problems.push("A prepared character sample is unavailable or its source changed. Prepare it again before assigning."); }
+  }
+  return { reviews, problems: [...new Set(problems)] };
 }
 
 export async function acceptCharacterSample(store: WorldStore, request: Accept): Promise<void> {
