@@ -1,5 +1,5 @@
 import { WorldChatProductionTimelineActionSchema, WorldChatProductionTimelineTranscribeActionSchema, PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
-import { compileProductionTimelineRequest, productionHistoryDigest, freezeProductionTimeline, productionTimelineBody, executeProductionTimeline } from "./production-timeline.js";
+import { compileProductionTimelineRequest, historyDigestFromCommitSource, discardProductionTranscriptionQuote, productionHistoryDigest, freezeProductionTimeline, productionTimelineBody, executeProductionTimeline } from "./production-timeline.js";
 import type { TranscriptionPorts } from "../productions/transcription.js";
 import { WorldChatBenchKeepActionSchema, WorldChatBenchSelectActionSchema, WorldChatBenchDiscardActionSchema } from "@arke-studio/contracts";
 import { WorldChatProductionAudioGenerationActionSchema, WorldChatProductionPerformanceActionSchema, WorldChatProductionAudioCueActionSchema, PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
@@ -533,7 +533,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-audio-generation": ["scenes", "sheets", "voices"],
   "production-performance-command": ["performances", "scenes", "timeline"],
   "production-audio-edit": ["timeline"],
-  "production-timeline-operation": ["timeline"],
+  "production-timeline-operation": ["timeline", "scenes", "takes", "artifacts"],
   "production-audio-cue": ["timeline"],
 };
 
@@ -1663,9 +1663,10 @@ async function readPreparation(store: WorldStore, authority: "bible" | "scene" |
 
 async function removePreparation(store: WorldStore, authority: "bible" | "scene" | "world", actionId: string): Promise<void> {
   await rm(preparationPath(store, authority, actionId), { force: true });
+  if (authority === "world") await discardProductionTranscriptionQuote(store, actionId);
 }
 
-async function committedAction(store: WorldStore, actionId: string): Promise<{ commitId: string; toVersion?: number } | null> {
+async function committedAction(store: WorldStore, actionId: string): Promise<{ commitId: string; toVersion?: number; source?: string } | null> {
   const record = (await readChanges(join(store.dir, "changes.jsonl"))).find(
     (line) => {
       const value = line as Record<string, unknown>;
@@ -1674,7 +1675,7 @@ async function committedAction(store: WorldStore, actionId: string): Promise<{ c
     },
   ) as (Record<string, unknown> & { toVersion?: number }) | undefined;
   return record && typeof record["commitId"] === "string"
-    ? { commitId: record["commitId"], ...(record.toVersion !== undefined ? { toVersion: record.toVersion } : {}) }
+    ? { commitId: record["commitId"], ...(typeof record["source"] === "string" ? { source: record["source"] } : {}), ...(record.toVersion !== undefined ? { toVersion: record.toVersion } : {}) }
     : null;
 }
 
@@ -4810,7 +4811,7 @@ export function worldChatActionAdapters(
           const committed = await committedAction(store, action.actionId);
           if (committed) {
             const payload = await readPreparation(store, "world", action);
-            const digest = payload && "historyEntryDigest" in payload ? payload.historyEntryDigest : undefined;
+            const digest = historyDigestFromCommitSource(committed.source) ?? (payload && "historyEntryDigest" in payload ? payload.historyEntryDigest : undefined);
             return { status: "completed", receipt: { kind: digest ? "timeline-history" : "timeline-command", id: action.actionId, ...(digest ? { digest } : {}), summary: "The approved timeline operation is durable." } };
           }
         }

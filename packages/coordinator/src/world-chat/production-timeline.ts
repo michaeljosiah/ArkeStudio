@@ -2,7 +2,7 @@ import { applyTimelineCommands, assembleSceneCommands, detachAudioCommands, Mode
   ulid, AUDIO_TRACK_KINDS, type ModelWorldChatAction, type ModelEditorRequest, type WorldChatPreparedAction,
   type ConversationActionCard, type ArkeGenerationBody, type ArkeCommandBodySchema } from "@arke-studio/contracts";
 import { z } from "zod";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { atomicWriteFile } from "../world/atomic.js";
 import { ConversationActionIdSchema } from "@arke-studio/contracts";
@@ -19,6 +19,10 @@ type Action = Extract<ModelWorldChatAction, { kind: "production-timeline-operati
 type Prepared = Extract<WorldChatPreparedAction, { kind: "world-chat-production-timeline-operation" | "world-chat-production-timeline-transcribe" }>;
 const SourceQuoteSchema = z.object({ frozenHash: z.string().min(1), sources: z.array(z.object({ path: z.string().min(1), hash: z.string().min(1) }).strict()).max(500) }).strict();
 const sourceQuotePath = (store: WorldStore, actionId: string) => join(store.dir, ".history", "timeline-transcription", "prepared", `${ConversationActionIdSchema.parse(actionId)}.json`);
+export async function discardProductionTranscriptionQuote(store: WorldStore, actionId: string): Promise<void> {
+  await rm(sourceQuotePath(store, actionId), { force: true });
+}
+export const historyDigestFromCommitSource = (source: string | undefined): string | undefined => source?.match(/^(?:undo|redo):(sha256:[0-9a-f]{64})$/)?.[1];
 function productionFor(store: WorldStore, id: string) {
   const production = store.getBundle().productions.find(p => p.meta.id === id);
   if (!production) throw new Error("This production is unavailable.");
@@ -140,7 +144,8 @@ export async function executeProductionTimeline(store: WorldStore, prepared: Pre
     await applyTimelineCommand(store, production.meta.id, { kind: "commands", commands, baseRevision: production.timeline.timeline.revision,
       sourceFingerprint: requestBase(store, production).sourceFingerprint, requestId: card.actionId, label: "Draft subtitles from dialogue" }, validate);
   } else if (request.operation === "undo" || request.operation === "redo") {
-    await applyTimelineCommand(store, production.meta.id, { kind: request.operation, baseRevision: production.timeline.timeline.revision, requestId: card.actionId }, validate);
+    await applyTimelineCommand(store, production.meta.id, { kind: request.operation, baseRevision: production.timeline.timeline.revision, requestId: card.actionId,
+      expectedEntryDigest: prepared.historyEntryDigest }, validate);
   } else throw new Error("This operation needs the editor request authority.");
   return { status: "completed", receipt: { kind: request.operation === "transcribe" ? "timeline-command" : "timeline-history", id: card.actionId,
     ...(prepared.historyEntryDigest ? { digest: prepared.historyEntryDigest } : {}),

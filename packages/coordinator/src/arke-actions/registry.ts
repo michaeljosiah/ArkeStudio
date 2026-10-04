@@ -1218,9 +1218,9 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     ...action("production", "command", "audio-spine", "authored-change", ["spine"]),
   },
   "world-chat-production-timeline-transcribe": { kind: "world-chat-production-timeline-transcribe", schema: WorldChatProductionTimelineTranscribeActionSchema,
-    ...action("production", "generation", "timeline", "privacy-sensitive", ["timeline"]) },
+    ...action("production", "generation", "timeline", "privacy-sensitive", ["timeline", "scenes", "takes", "artifacts"]) },
   "world-chat-production-timeline-operation": { kind: "world-chat-production-timeline-operation", schema: WorldChatProductionTimelineActionSchema,
-    ...action("production", "command", "timeline", "authored-change", ["timeline"]) },
+    ...action("production", "command", "timeline", "authored-change", ["timeline", "scenes", "takes", "artifacts"]) },
   "world-chat-production-audio-generation": { kind: "world-chat-production-audio-generation", schema: WorldChatProductionAudioGenerationActionSchema,
     ...action("production", "generation", "job-queue", "spend-and-compute", ["scenes", "sheets", "voices"]) },
   "world-chat-production-performance-command": { kind: "world-chat-production-performance-command", schema: WorldChatProductionPerformanceActionSchema,
@@ -1291,7 +1291,7 @@ export interface ArkeBlockedAuthoritySeam {
 /** Typed authorities that do not have a ClientMessage command to classify (SPEC-041 R-52). */
 export const ARKE_AUTHORITY_ACTION_REGISTRY = {
   "production-timeline-operation": { kind: "production-timeline-operation", schema: ProductionTimelineModelActionSchema,
-    ...action("production", "command", "timeline", "authored-change", ["timeline"]) },
+    ...action("production", "command", "timeline", "authored-change", ["timeline", "scenes", "takes", "artifacts"]) },
   "production-audio-generation": { kind: "production-audio-generation", schema: ProductionAudioGenerationModelActionSchema,
     ...action("production", "generation", "job-queue", "spend-and-compute", ["scenes", "sheets", "voices"]) },
   "production-performance-command": { kind: "production-performance-command", schema: ProductionPerformanceModelActionSchema,

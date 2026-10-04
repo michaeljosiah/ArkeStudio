@@ -66,7 +66,7 @@ export type TimelineWrite =
       baseRevision: number | null;
       sourceFingerprint: string;
     }
-  | { kind: "undo" | "redo"; baseRevision: number; requestId?: string };
+  | { kind: "undo" | "redo"; baseRevision: number; requestId?: string; expectedEntryDigest?: string };
 
 export class TimelineCommandRefused extends Error {
   constructor(readonly reason: string) {
@@ -378,9 +378,16 @@ export async function applyTimelineCommand(
     }
     ProductionTimelineSchema.parse(next);
 
+    const historyEntry = command.kind === "undo" || command.kind === "redo" ? current.history[command.kind].at(-1) : null;
+    const historyDigest = historyEntry ? sha256(canonical(historyEntry)) : undefined;
+    if ((command.kind === "undo" || command.kind === "redo") && command.expectedEntryDigest && command.expectedEntryDigest !== historyDigest) {
+      throw new TimelineCommandRefused("the approved history entry changed; prepare a fresh inverse");
+    }
+
     await store.commitUnserialised({
       kind: "timeline-command",
-      source: command.kind,
+      // Keep the exact inverse identity in the durable change journal, after preparation cleanup.
+      source: command.requestId && historyDigest ? `${command.kind}:${historyDigest}` : command.kind,
       ...(command.requestId ? { requestId: command.requestId } : {}),
       // A build that does not understand timeline authority must refuse this world rather than
       // export the old derived order. The boundary lands atomically with first materialisation.

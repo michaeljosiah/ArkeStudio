@@ -40,7 +40,7 @@ import {
 import { BIBLE_EDIT_BOUNDS, BibleEditRecordSchema, BibleEditSchema, type BibleEdit } from "./bible.js";
 import {
   EDITOR_REQUEST_BOUNDS,
-  TIMELINE_EDITOR_COMMAND_GUIDE,
+  TIMELINE_EDITOR_COMMAND_NAMES,
   ModelEditorRequestSchema,
   ModelSceneEditSchema,
   SCENE_EDIT_BOUNDS,
@@ -3182,11 +3182,11 @@ actions holds operations on the world or a production that the person decides on
 
 ### Editor requests
 
-Only in a production, episode or scene thread, and only when the person asks for a change to the cut: an editor request prepares exact timeline commands for a permission card. Nothing you write in reply changes or stages anything on the timeline. Only the person's Approve applies every command or none, as one undoable step. The timeline you may address is described in the thread's context — its clip ids, tracks and frames. A request naming a clip that is not there, or one that cannot apply, is refused, and a refusal rejects the whole turn, so name only what you were shown.
+Only a thread held to a production: an editor request prepares exact timeline commands for a permission card. Read get_timeline through complete=true first; use its clip ids, tracks and frames. Approve applies all commands as one undoable step. Invalid commands refuse the whole turn; reply prose changes nothing.
 
 ${JSON.stringify(exampleEditorRequest)}
 
-summary says what moves, what goes and what comes, in their terms — never "improve the cut". Timeline commands: ${TIMELINE_EDITOR_COMMAND_GUIDE}. direction is earlier|later; indices count from 0; trim edge is start|end and negative deltaFrames shortens; audio is keep|mute. Track kinds are picture, dialogue, ambience, music, audio or subtitle; audio roles are unspecified, dialogue, music or ambience. set-mix changes ducking; set-performance-source chooses the performance audio clip a picture shot plays, or null to clear it. place supplies a complete clip with an explicit shot, take, artifact or performance source. Subtitle commands carry editable timed text, language and style; library commands change memberships. Frames count from zero at the production's frame rate. A newClipId is one you invent, cl_ followed by letters, digits and dashes. Do not repeat a request that is already pending; say that it is waiting for their decision.
+summary names concrete changes, never "improve the cut". Commands: ${TIMELINE_EDITOR_COMMAND_NAMES}. detach-audio is excluded from editorRequests; the direct editor resolves live media. Command fields are in the action guide. direction is earlier|later; indices count from 0; trim edge is start|end and negative deltaFrames shortens; audio is keep|mute. Track kinds: picture, dialogue, ambience, music, audio, subtitle. Audio roles: unspecified, dialogue, music, ambience. set-mix changes ducking; set-performance-source links a picture shot to sourceClipId audio, or null. place needs a complete clip with a shot, take, artifact or performance source. Frames count from zero at the production frame rate. New clip ids use cl_ plus letters, digits and dashes. Do not duplicate pending requests.
 
 ### Scene edits
 

@@ -35,7 +35,7 @@ import { ScriptBlockSchema, ShotFramingSchema } from "./scene.js";
 import { SceneCommandSchema } from "./scene-operations.js";
 import { SceneRecordSchema, type SceneRecord } from "./scene-flow.js";
 import { AudioSpineCommandSchema } from "./spine.js";
-import { SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
+import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { TimelineClipIdSchema, TimelineTrackIdSchema } from "./timeline.js";
 import {
   CHARACTER_ROLE_MAX,
@@ -63,7 +63,7 @@ export const ProductionTimelineOperationSchema = z.discriminatedUnion("operation
   z.object({ operation: z.literal("overlay-split-audio"), clipId: TimelineClipIdSchema }).strict(),
   z.object({ operation: z.literal("overlay-rejoin-audio"), clipId: TimelineClipIdSchema, audioClipId: TimelineClipIdSchema }).strict(),
   z.object({ operation: z.literal("overlay-remove"), clipId: TimelineClipIdSchema }).strict(),
-  z.object({ operation: z.literal("transcribe"), trackId: TimelineTrackIdSchema, language: z.string().min(1).max(80) }).strict(),
+  z.object({ operation: z.literal("transcribe"), trackId: TimelineTrackIdSchema, language: LanguageTagSchema }).strict(),
   z.object({ operation: z.literal("undo") }).strict(),
   z.object({ operation: z.literal("redo") }).strict(),
 ]);
