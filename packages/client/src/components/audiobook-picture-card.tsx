@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { useNavigate } from "react-router";
+import { Check } from "./icons.js";
 import { CLOSE_FRAMES, frameWord, lookName, priceLabel, type PictureShot, type PictureSuggestion, type PictureWho, type ReferenceKit, type WorldBundle } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
 import type { PictureSuggestionState } from "./audiobook-suggest.js";
@@ -43,25 +45,20 @@ function Thumb({ slug, file, on, view }: { slug: string; file: string; on: boole
   return <img className={cx("fy-pcard__thumb", on ? "fy-pcard__thumb--on" : "fy-pcard__thumb--dim")} src={mediaUrl(slug, file)} alt="" data-testid="picture-card-thumb" data-view={view} data-on={on ? "true" : "false"} />;
 }
 
-/** One person in frame, or the place: both look images (the riding one ringed), the name, the look, the reason and the expression. */
+/**
+ * One person in frame, or the place (194g): a bordered row — the image that rides, ringed, the
+ * name over the look and its view, and why that image rides at the row's end. The expression the
+ * prompt names is the expression check's, and the image that does not ride is the Looks sheet's.
+ */
 function InFrameRow({ who, kits, slug, shot, onMake }: { who: PictureWho; kits: readonly ReferenceKit[]; slug: string; shot: PictureShot | undefined; onMake: (who: PictureWho) => void }) {
   const look = who.look === undefined || who.sheet === undefined ? undefined : kits.find((kit) => kit.sheetId === who.sheet)?.looks?.find((candidate) => candidate.id === who.look!.lookId);
-  const expression = who.kind === "character" ? shot?.expressions[who.key] : undefined;
   const state = who.reference === null ? "none" : who.carried ? "carried" : "over";
+  const riding = look !== undefined && who.sheet !== undefined
+    ? { file: `references/${who.sheet}/${who.look?.view === "close" && look.closeFile !== undefined ? look.closeFile : look.file}`, view: who.look?.view === "close" && look.closeFile !== undefined ? "close" : "full" }
+    : who.reference !== null ? { file: who.reference, view: who.kind === "place" ? "place" : "main" } : null;
   return (
     <div className={cx("fy-pcard__who", state === "none" && "fy-pcard__who--miss", state === "over" && "fy-pcard__who--over")} data-testid="suggest-who" data-key={who.key} data-state={state}>
-      <span className="fy-pcard__thumbs">
-        {look !== undefined && who.sheet !== undefined ? (
-          <>
-            <Thumb slug={slug} file={`references/${who.sheet}/${look.file}`} on={who.look?.view === "full"} view="full" />
-            {look.closeFile !== undefined ? <Thumb slug={slug} file={`references/${who.sheet}/${look.closeFile}`} on={who.look?.view === "close"} view="close" /> : <i className="fy-pcard__thumb fy-pcard__thumb--none" aria-hidden="true" />}
-          </>
-        ) : who.reference !== null ? (
-          <Thumb slug={slug} file={who.reference} on={who.carried} view={who.kind === "place" ? "place" : "main"} />
-        ) : (
-          <i className="fy-pcard__thumb fy-pcard__thumb--none" aria-hidden="true" />
-        )}
-      </span>
+      {riding !== null ? <Thumb slug={slug} file={riding.file} on={who.carried} view={riding.view} /> : <i className="fy-pcard__thumb fy-pcard__thumb--none" aria-hidden="true" />}
       <span className="fy-pcard__whotx">
         <b>{who.name}</b>
         {who.reference === null ? (
@@ -71,14 +68,9 @@ function InFrameRow({ who, kits, slug, shot, onMake }: { who: PictureWho; kits: 
             </button>
           )
         ) : (
-          <span className="fy-mono">
+          <span>
             {who.kind === "place" ? "place" : look !== undefined ? `${lookName(look)} · ${who.look?.view === "close" ? "close view" : "full body"}` : "main photo"}
             {who.carried ? "" : " · over the limit"}
-          </span>
-        )}
-        {expression !== undefined && (
-          <span className="fy-pcard__expr" data-testid="picture-card-expression">
-            <span className="fy-mono">Expression</span> {expression}
           </span>
         )}
       </span>
@@ -91,15 +83,24 @@ function InFrameRow({ who, kits, slug, shot, onMake }: { who: PictureWho; kits: 
   );
 }
 
-/** The card (193c): what the picture will be, who is in it and who is not, the prompt and its checks, then Edit prompt and Generate. */
-export function PictureCard({ world, worldId, state, onEdit, offline }: {
+/**
+ * The card (193c; 194g): the picture's slot — the picture itself once one is set — beside Frame,
+ * Rides and the model, then In frame, Not in frame, the prompt folded to three lines until it is
+ * pressed, and the checks; Remove (or Discard), Edit prompt and Generate — Make again once a
+ * picture is set — in the panel's foot.
+ */
+export function PictureCard({ world, worldId, state, onEdit, offline, picture = null, onRemove }: {
   world: Pick<WorldBundle, "meta" | "referenceKits" | "sheets">;
   worldId: string;
   state: PictureSuggestionState;
   onEdit: (suggestion: PictureSuggestion, prompt: string) => void;
   offline: boolean;
+  /** The picture set on the block, drawn in the slot. */
+  picture?: string | null;
+  onRemove?: () => void;
 }) {
   const navigate = useNavigate();
+  const [editing, setEditing] = useState(false);
   const { ask, making } = state;
   if (ask === null) return null;
   if (ask.state === "working") return <p className="fy-mono fy-ab__card-line" data-testid="suggest-reading">reading…</p>;
@@ -107,12 +108,12 @@ export function PictureCard({ world, worldId, state, onEdit, offline }: {
     return (
       <div className="fy-sugg" data-testid="suggest-refused">
         <p className="fy-mono fy-ch__who-where--warn">{ask.refused}</p>
-        <div className="fy-ab__control">
-          <span className="fy-ch__panelpush" />
-          <Button variant="ghost" onClick={state.dismiss}>
+        <div className="fy-abp__foot">
+          <Button variant="outline" onClick={state.dismiss}>
             Discard
           </Button>
-          <Button variant="secondary" disabled={offline} onClick={state.suggest}>
+          <span className="fy-ch__panelpush" />
+          <Button variant="primary" disabled={offline} onClick={state.suggest}>
             Suggest picture
           </Button>
         </div>
@@ -132,9 +133,13 @@ export function PictureCard({ world, worldId, state, onEdit, offline }: {
   return (
     <div className="fy-sugg fy-pcard" data-testid="suggest-card">
       <div className="fy-pcard__top">
-        <div className="fy-pcard__slot" aria-hidden="true">
-          <span className="fy-mono">{suggestion.aspect ?? ""}</span>
-        </div>
+        {picture !== null ? (
+          <img className="fy-pcard__img" src={picture} alt="" data-testid="picture-card-picture" />
+        ) : (
+          <div className="fy-pcard__slot" aria-hidden="true">
+            <span className="fy-mono">{suggestion.aspect ?? ""}</span>
+          </div>
+        )}
         <div className="fy-pcard__facts" data-testid="picture-card-facts">
           {shot !== undefined && shot.frame !== "" && (
             <div className="fy-pcard__fact">
@@ -146,19 +151,19 @@ export function PictureCard({ world, worldId, state, onEdit, offline }: {
             <span className="fy-mono">Rides</span>
             <b data-testid="picture-card-rides">{ridesLabel(suggestion.who, shot)}</b>
           </div>
-          <div className="fy-sugg__meta fy-mono">
-            <span>
+          <div className="fy-pcard__fact">
+            <span className="fy-mono">Model</span>
+            <b data-testid="picture-card-model">
               {suggestion.model.name}
-              {suggestion.aspect !== undefined ? ` · ${suggestion.aspect}` : ""}
-            </span>
-            <span>{priceLabel(suggestion.estimatedMicroUsd)}</span>
+              {suggestion.aspect !== undefined ? ` · ${suggestion.aspect}` : ""} · {priceLabel(suggestion.estimatedMicroUsd)}
+            </b>
           </div>
         </div>
       </div>
       <div className="fy-pcard__sec" data-testid="picture-card-in-frame">
-        <span className="fy-mono fy-pcard__h">In frame</span>
+        <span className="fy-pcard__h">In frame</span>
         {suggestion.who.length === 0 ? (
-          <span className="fy-mono fy-pcard__none">{detail ? "no one · a detail" : "no one"}</span>
+          <span className="fy-pcard__none">{detail ? "no one · a detail" : "no one"}</span>
         ) : (
           suggestion.who.map((who) => <InFrameRow key={who.key} who={who} kits={world.referenceKits} slug={slug} shot={shot} onMake={make} />)
         )}
@@ -171,21 +176,26 @@ export function PictureCard({ world, worldId, state, onEdit, offline }: {
           ))}
       </div>
       {shot !== undefined && shot.notInFrame.length > 0 && (
-        <div className="fy-pcard__sec fy-pcard__out" data-testid="picture-card-not-in-frame">
-          <span className="fy-mono fy-pcard__h">Not in frame</span>
-          {shot.notInFrame.map((key) => (
-            <span key={key} className="fy-pcard__outname">
-              {nameOf(key)}
-            </span>
-          ))}
+        <div className="fy-abp__kv fy-pcard__out" data-testid="picture-card-not-in-frame">
+          <span className="fy-abp__k">Not in frame</span>
+          <span className="fy-abp__v fy-abp__v--off">{shot.notInFrame.map(nameOf).join(" · ")}</span>
         </div>
       )}
-      <Textarea className="fy-sugg__prompt" aria-label="Prompt" rows={5} value={prompt} disabled={busy} onChange={(event) => state.setPrompt(event.target.value)} />
+      <div className="fy-pcard__sec">
+        <span className="fy-pcard__h">Prompt</span>
+        {editing || busy ? (
+          <Textarea className="fy-sugg__prompt" aria-label="Prompt" rows={5} value={prompt} disabled={busy} autoFocus={editing} onChange={(event) => state.setPrompt(event.target.value)} />
+        ) : (
+          <button type="button" className="fy-pcard__prompt" aria-label="Prompt" onClick={() => setEditing(true)} data-testid="picture-card-prompt">
+            {prompt}
+          </button>
+        )}
+      </div>
       {shot !== undefined && shot.checks.length > 0 && (
         <ul className="fy-pcard__checks" data-testid="picture-card-checks">
           {shot.checks.map((check) => (
             <li key={check.id} className={cx("fy-pcard__check", !check.ok && "fy-pcard__check--mark")} data-testid="picture-card-check" data-check={check.id} data-ok={check.ok ? "true" : "false"}>
-              <i aria-hidden="true">{check.ok ? "✓" : "!"}</i>
+              <i aria-hidden="true">{check.ok ? <Check size={12} /> : "!"}</i>
               <span>{check.label}</span>
               {check.note !== undefined && <span className="fy-mono">{check.note}</span>}
             </li>
@@ -197,16 +207,22 @@ export function PictureCard({ world, worldId, state, onEdit, offline }: {
           {failed.reason}
         </p>
       )}
-      <div className="fy-ab__control">
-        <Button variant="ghost" onClick={state.dismiss} disabled={busy}>
-          Discard
-        </Button>
+      <div className="fy-abp__foot">
+        {onRemove !== undefined ? (
+          <Button variant="outline" disabled={offline || busy} onClick={onRemove} data-testid="audiobook-picture-remove">
+            Remove
+          </Button>
+        ) : (
+          <Button variant="outline" onClick={state.dismiss} disabled={busy}>
+            Discard
+          </Button>
+        )}
         <span className="fy-ch__panelpush" />
-        <Button variant="secondary" disabled={offline || busy} onClick={() => onEdit(suggestion, prompt)} data-testid="suggest-edit">
+        <Button variant="outline" disabled={offline || busy} onClick={() => onEdit(suggestion, prompt)} data-testid="suggest-edit">
           Edit prompt
         </Button>
         <Button variant="primary" disabled={offline || busy || prompt.trim() === ""} onClick={() => state.generate(suggestion, prompt)} data-testid="suggest-generate">
-          {busy ? "Generating…" : `Generate · ${priceLabel(suggestion.estimatedMicroUsd)}`}
+          {busy ? "Generating…" : `${picture !== null ? "Make again" : "Generate"} · ${priceLabel(suggestion.estimatedMicroUsd)}`}
         </Button>
       </div>
     </div>
