@@ -187,7 +187,7 @@ describe("what the chapter is asked", () => {
       cap: 3,
       maxChars: 900,
     });
-    for (const part of ["[p1.0] 1:15 Bray: Bray tells a story.", "At most 3 pictures", "about one every 90 seconds", "at least 20 seconds apart", "(at 2:30)", "Maren: Oilskin.", "[maren-kest] Maren — Wiry.", "Never show, name or hint at: Odile", "at most 900 characters", "## The book's mood (light, colour and grain only)\n\nGrey dawn light, fine grain."]) assert.ok(prompt.includes(part), part);
+    for (const part of ["[p1.0] 1:15 Bray: Bray tells a story.", "At most 3 pictures", "about one every 90 seconds", "at least 20 seconds apart", "(at 2:30)", "Maren: Oilskin.", "[maren-kest] Maren — Wiry.", "Never show, name or hint at: Odile", "at most 900 characters", "## The book's mood (light, colour and grain only)\nGrey dawn light, fine grain.", "1. THE BLOCK IS THE PICTURE.", "\"expressions\": {\"<key>\""]) assert.ok(prompt.includes(part), part);
   });
 });
 

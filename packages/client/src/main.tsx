@@ -61,6 +61,7 @@ import "./components/free-plan.css";
 import "./components/audiobook-look.css";
 import "./components/audiobook-new-look.css";
 import "./components/audiobook-suggest.css";
+import "./components/audiobook-picture-card.css";
 import "./components/audiobook-illustrate.css";
 import { App } from "./App.js";
 import { initStore } from "./lib/store.js";

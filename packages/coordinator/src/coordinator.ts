@@ -1674,7 +1674,7 @@ export class Coordinator {
           }
           const chosen = row.who.map((entry) => ({ key: entry.key, name: entry.name, ...(entry.sheet !== undefined ? { sheet: entry.sheet } : {}), kind: entry.kind, ...(room.people.find((person) => person.key === entry.key)?.billing !== undefined ? { billing: room.people.find((person) => person.key === entry.key)!.billing! } : {}) }));
           // The chapter's look as it stands now: a look chosen since the proposal rides (R-119).
-          const who = pictureWho(store, model, chosen, { look: record?.look ?? null });
+          const who = pictureWho(store, model, chosen, { look: record?.look ?? null, frame: row.shot?.frame ?? null });
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${row.block === "title" ? "title" : row.title}`,
             prompt: row.prompt,
@@ -15159,7 +15159,7 @@ export class Coordinator {
           const who = pictureWho(store, model, [
             ...characters.map((person) => ({ key: person.key, name: person.name, ...(person.sheet !== undefined ? { sheet: person.sheet } : {}), kind: "character" as const, ...(person.billing !== undefined ? { billing: person.billing } : {}) })),
             ...(place === undefined ? [] : [{ key: place.key, name: place.name, sheet: place.key, kind: "place" as const }]),
-          ], { look });
+          ], { look, frame: msg.frame ?? null });
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${msg.block === "title" ? "title" : `block ${index + 1}`}`,
             prompt: clipPrompt(msg.prompt, promptRoom(model)),

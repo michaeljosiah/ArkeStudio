@@ -79,9 +79,12 @@ function state(): ClientState {
         artifact("ar_01J8G0000000000000000PICGN", "bench-stair.png", { generation: { source: "bench" } } as unknown as Partial<ArtifactSidecar>),
         ...rows.map((row) => row.artifact!),
       ],
+      // Maren's storm coat, with its close view (design turn 193c).
+      referenceKits: world.referenceKits.map((kit) => (kit.sheetId === "maren-kest" ? ({ ...kit, looks: [STORM_LOOK] } as never) : kit)),
     },
   };
 }
+const STORM_LOOK = { id: "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2S1", file: "takes/tk_storm/storm.png", kind: "costume", prompt: "Storm coat, hood up; two braids.", acceptedAt: "2026-10-03T09:00:00.000Z", framing: "full-body", closeFile: "takes/tk_close/close.png" };
 
 type Mounted = { container: HTMLElement; root: Root; sent: ClientMessage[]; where: () => string };
 const open: Mounted[] = [];
@@ -250,14 +253,53 @@ describe("Suggest picture (turn 191a)", () => {
     assert.equal(held?.value, SUGGESTION.prompt);
     assert.deepEqual(all(m, '[data-testid="suggest-who"]').map((el) => [el.dataset.key, el.dataset.state]), [["maren-kest", "carried"], ["sereth", "none"], ["the-vigil", "over"]]);
     assert.ok(q(m, '[data-key="maren-kest"] img'), "Maren rides by her picture");
-    assert.equal(text(q(m, '[data-key="sereth"]')), "SerethMake a reference", "no picture: dashed, named, held");
+    assert.equal(text(q(m, '[data-key="sereth"]')), "SerethMake a look", "no picture: dashed, named, held");
     assert.equal(q(m, '[data-key="sereth"] img'), null);
-    assert.deepEqual(all(m, '[data-testid="suggest-look"] div').map(text), ["PlaceThe flooded quarter, dusk.", "MarenOilskin coat."]);
+    assert.equal(text(q(m, '[data-testid="picture-card-rides"]')), "Main photo", "no look chosen: her main photo rides");
+    assert.equal(text(q(m, '[data-key="maren-kest"] [data-testid="picture-card-why"]')), "head and shoulders");
     assert.equal(text(q(m, ".fy-sugg__meta")), "GPT Image 2 · 16:9~$0.04");
     assert.equal(text(q(m, '[data-testid="suggest-generate"]')), "Generate · ~$0.04");
     assert.equal(asked(m, "make-audiobook-picture").length, 0, "nothing is made until Generate");
   });
 
+  it("shows the shot as 193c draws it: the frame, what rides, both look images with the riding one ringed, the expression, who is not in frame, and the seven checks", async () => {
+    const m = await mount(2);
+    await press(q(m, '[data-testid="suggest-picture"]'));
+    const shot: PictureSuggestion = {
+      ...SUGGESTION,
+      who: [{ key: "maren-kest", name: "Maren", sheet: "maren-kest", kind: "character", reference: "references/maren-kest/takes/tk_close/close.png", carried: true, look: { lookId: STORM_LOOK.id, view: "close" } }],
+      shot: {
+        frame: "Close-up, Maren's face",
+        inFrame: ["maren-kest"],
+        notInFrame: ["odile"],
+        expressions: { "maren-kest": "tired, unsmiling, eyes on the key" },
+        details: [],
+        checks: [
+          { id: "reference", ok: true, label: "1 of 1 in frame has a reference" },
+          { id: "not-in-frame", ok: true, label: "Nobody else named", note: "Odile" },
+          { id: "frame", ok: true, label: "Frame named first", note: "Close-up" },
+          { id: "garments", ok: false, label: "Look lines", note: "invented: scarf" },
+          { id: "mood", ok: true, label: "Mood", note: "light and colour only" },
+          { id: "closing", ok: true, label: "Closing lines", note: "added by the app" },
+          { id: "expression", ok: true, label: "Expression named", note: "tired, unsmiling, eyes on the key" },
+        ],
+      },
+    };
+    await answerSuggestion(m, { suggestion: shot });
+    assert.equal(text(q(m, '[data-testid="picture-card-frame"]')), "Close-up, Maren's face");
+    assert.equal(text(q(m, '[data-testid="picture-card-rides"]')), "Close view");
+    const thumbs = all(m, '[data-key="maren-kest"] [data-testid="picture-card-thumb"]').map((img) => [img.dataset.view, img.dataset.on]);
+    assert.deepEqual(thumbs, [["full", "false"], ["close", "true"]], "both images, the close view ringed");
+    assert.equal(text(q(m, '[data-key="maren-kest"] [data-testid="picture-card-why"]')), "close frame");
+    assert.match(text(q(m, '[data-key="maren-kest"]')), /Storm coat · close view/);
+    assert.equal(text(q(m, '[data-testid="picture-card-expression"]')), "Expression tired, unsmiling, eyes on the key");
+    assert.match(text(q(m, '[data-testid="picture-card-not-in-frame"]')), /Not in frame/);
+    assert.equal(all(m, '[data-testid="picture-card-check"]').length, 7);
+    assert.deepEqual(all(m, '[data-testid="picture-card-check"][data-ok="false"]').map((li) => li.dataset.check), ["garments"], "a mark is shown");
+    assert.equal((q(m, '[data-testid="suggest-generate"]') as HTMLButtonElement).disabled, false, "and never blocks Generate");
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    assert.equal(asked(m, "make-audiobook-picture")[0]!.frame, "Close-up, Maren's face", "the frame goes with it, so the close view rides at the Bench");
+  });
   it("opens the sheet of a person with no reference", async () => {
     const m = await mount(2);
     await press(q(m, '[data-testid="suggest-picture"]'));

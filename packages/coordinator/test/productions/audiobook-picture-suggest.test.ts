@@ -144,6 +144,82 @@ describe("the art direction gives light and mood only (design turn 193, rule 9, 
     ));
 });
 
+describe("the brief's answer, held and checked (design turn 193k, R-120, R-121)", () => {
+  const prepareLook = async (worldDir: string) => {
+    for (const [id, name] of [[LOOK_ID, "look.png"], [CLOSE_ID, "close.png"]] as const) {
+      await mkdir(join(worldDir, "references", "maren-kest", "takes", id), { recursive: true });
+      await writeFile(join(worldDir, "references", "maren-kest", "takes", id, name), pngBytes());
+    }
+  };
+  const chooseMarensLook = async (h: Pick<Harness, "send" | "store">) => {
+    await acceptCharacterLook(h.store()!, "maren-kest", { id: LOOK_ID, file: `takes/${LOOK_ID}/look.png`, kind: "costume", prompt: "Oilskin coat, dark with salt; two braids.", takeId: LOOK_ID, artDirectionVersion: 1, framing: "full-body", close: { file: `takes/${CLOSE_ID}/close.png`, takeId: CLOSE_ID } });
+    await h.send({ kind: "derive-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, requestId: "01J00000000000000000000007" });
+    await h.send({ kind: "choose-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, key: "maren-kest", sheet: "maren-kest", lookId: LOOK_ID, requestId: "01J00000000000000000000008" });
+  };
+  const CLOSE = { frame: "Close-up, Maren's face", inFrame: ["maren-kest"], notInFrame: ["bray-half-hitch"], expressions: { "maren-kest": "tired, unsmiling, eyes on the ledger" }, details: [], place: null, prompt: "Close-up on Maren's face over the ledger, tired and unsmiling, eyes on the ledger. Oilskin coat, dark with salt, two braids. Grey dawn light from the rail window." };
+
+  it("rides only who is in frame, by their close view for a close frame, and shows the frame, expressions and checks", () =>
+    withHarness(
+      async (h) => {
+        await chooseMarensLook(h);
+        await suggest(h.send);
+        const picked = suggestion(h.events).suggestion!;
+        assert.deepEqual(picked.who.map((who) => [who.key, who.reference, who.look?.view]), [["maren-kest", `references/maren-kest/takes/${CLOSE_ID}/close.png`, "close"]], "Bray is in the scene, not in frame: never carried");
+        assert.equal(picked.shot?.frame, "Close-up, Maren's face");
+        assert.deepEqual(picked.shot?.notInFrame, ["bray-half-hitch"]);
+        assert.equal(picked.shot?.expressions["maren-kest"], "tired, unsmiling, eyes on the ledger");
+        assert.ok(picked.shot!.checks.every((check) => check.ok), JSON.stringify(picked.shot!.checks.filter((check) => !check.ok)));
+        assert.deepEqual(picked.look?.looks, { "maren-kest": { lookId: LOOK_ID, view: "close" } });
+        // Generate carries the frame, so the close view rides at the Bench too, with the app's closing lines.
+        await h.send({ kind: "make-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, block: "p0.0", prompt: picked.prompt, who: picked.who.map((who) => who.key), frame: picked.shot!.frame, confirmedMicroUsd: picked.estimatedMicroUsd, requestId: "01J00000000000000000000009" });
+        const done = madeEvents(h.events).at(-1)!;
+        assert.equal(done.state, "made", done.reason);
+        assert.deepEqual((h.enqueued[0]!.params as { references?: string[] }).references, [`references/maren-kest/takes/${CLOSE_ID}/close.png`]);
+        const session = await new BenchStore(sessionDir(h.worldDir, done.sessionId as never)).fold();
+        const brief = session!.takes[0]!.request.brief;
+        assert.match(brief, /Maren Kest is shown in @Image 1\. Keep each person's identity, hair and clothes as in the references; the expression is as written above, not the reference's\./);
+        assert.match(brief, /No text in the picture\.$/);
+        assert.deepEqual(done.record!.pictures!["p0.0"]!.look?.looks, { "maren-kest": { lookId: LOOK_ID, view: "close" } });
+      },
+      { prepare: prepareLook, picture: async () => CLOSE },
+    ));
+
+  it("carries no reference for a detail shot, and Generate sends none", () =>
+    withHarness(
+      async (h) => {
+        await chooseMarensLook(h);
+        await suggest(h.send);
+        const picked = suggestion(h.events).suggestion!;
+        assert.deepEqual(picked.who, [], "a detail shot carries no reference");
+        assert.equal(picked.estimatedMicroUsd, 40_000, "one picture and no reference");
+        assert.equal(picked.shot?.checks.find((check) => check.id === "reference")?.label, "Detail");
+        await h.send({ kind: "make-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, block: "p0.0", prompt: picked.prompt, who: [], frame: picked.shot!.frame, confirmedMicroUsd: picked.estimatedMicroUsd, requestId: "01J0000000000000000000000A" });
+        assert.equal(madeEvents(h.events).at(-1)!.state, "made");
+        assert.deepEqual((h.enqueued[0]!.params as { references?: string[] }).references ?? [], []);
+      },
+      { prepare: prepareLook, picture: async () => ({ frame: "Detail, her hand on the ledger", inFrame: [], expressions: {}, details: [{ of: "maren-kest", part: "hand", state: "still" }], notInFrame: [], place: null, prompt: "Detail shot, tight on a hand flat on the open ledger, the oilskin cuff dark with salt. Her face is out of frame. Grey dawn light." }) },
+    ));
+
+  it("asks again once, with the reason, when the draft names someone out of frame", () => {
+    const asked: string[] = [];
+    return withHarness(
+      async ({ events, send }) => {
+        await suggest(send);
+        const picked = suggestion(events).suggestion!;
+        assert.equal(asked.length, 2, "asked twice");
+        assert.match(asked[1]!, /names Bray Half-Hitch/);
+        assert.ok(picked.shot!.checks.find((check) => check.id === "not-in-frame")!.ok, "the second draft is clean");
+      },
+      {
+        picture: async (input) => {
+          asked.push(input.retry ?? "");
+          return { ...CLOSE, prompt: input.retry === undefined ? `${CLOSE.prompt} Bray Half-Hitch watches from the door.` : CLOSE.prompt };
+        },
+      },
+    );
+  });
+});
+
 describe("who rides as a reference (R-100)", () => {
   const world = (kits: string[], places: string[] = []): Pick<WorldBundle, "referenceKits" | "sheets"> =>
     ({

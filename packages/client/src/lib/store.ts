@@ -5607,9 +5607,9 @@ export function suggestAudiobookPicture(worldId: string, productionId: string, c
 }
 
 /** A suggestion made (R-99): the prompt as the author left it and the price the press showed; made through the Bench and filed on the block. */
-export function makeAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, input: { prompt: string; who: readonly string[]; confirmedMicroUsd: number }): string | null {
+export function makeAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, input: { prompt: string; who: readonly string[]; frame?: string; confirmedMicroUsd: number }): string | null {
   const requestId = ulid();
-  if (!send({ kind: "make-audiobook-picture", worldId, productionId, chapterFile, block, prompt: input.prompt, who: [...input.who], confirmedMicroUsd: input.confirmedMicroUsd, requestId })) return null;
+  if (!send({ kind: "make-audiobook-picture", worldId, productionId, chapterFile, block, prompt: input.prompt, who: [...input.who], ...(input.frame !== undefined ? { frame: input.frame } : {}), confirmedMicroUsd: input.confirmedMicroUsd, requestId })) return null;
   emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
   return requestId;
 }

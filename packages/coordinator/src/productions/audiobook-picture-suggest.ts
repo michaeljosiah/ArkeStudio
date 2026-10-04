@@ -1,10 +1,10 @@
-import { z } from "zod";
 import {
   PICTURE_PROMPT_MAX,
   aspectOffered,
   estimateMicroUsd,
   imageOutputFor,
   lookLinesFor,
+  lookName,
   lookViewFor,
   normalizeSpeechText,
   pictureLookFor,
@@ -24,92 +24,81 @@ import {
 import type { SessionInput } from "../harness/session-files.js";
 import { referenceBudgetFor } from "../references/generate.js";
 import type { WorldStore } from "../world/store.js";
-import { planAudiobook, type AudiobookPlan } from "./audiobook.js";
+import { planAudiobook, readAudiobookBook, type AudiobookPlan } from "./audiobook.js";
 import { clip } from "./audiobook-direction.js";
 import { anyNarrator } from "./audiobook-listening.js";
 import { artDirectionFor, blockSpeakers, chapterPeople, chapterPlaces, nameAt, type ChapterPerson, type ChapterPlace } from "./audiobook-look.js";
+import { BRIEF_EXAMPLES, BRIEF_SHAPE, RawBriefSchema, briefGiven, briefRiders, briefRules, holdBrief, pictureChecks, type BriefLine, type RawBrief } from "./audiobook-picture-brief.js";
 import { makeAdapterJsonDeriver } from "./continuity.js";
 
 /**
- * Suggest picture (design turn 191a, SPEC-047 R-99, R-100): the writing service reads the block's
- * words, the chapter around it, who is in it and their look, the places and the book's art
- * direction, and drafts ONE picture prompt the author can edit. Around it, deterministically: who
- * rides as a reference — each character by their sheet's main picture, a place by its establishing
- * view, up to the number the model takes — the look lines the prompt was written from, the model,
- * the ratio and the price. Nothing is made and nothing is spent by drafting.
+ * Suggest picture (design turn 191a, 193k; SPEC-047 R-99, R-100, R-119..R-121): the writing service
+ * is given 193k's brief — the block's words, the chapter around it, who is in it and their look, the
+ * places and the chapter's Mood line — and drafts ONE picture the author can edit: its frame, who
+ * is in it and who is not, each face's expression, and the prompt. Around it, deterministically:
+ * who rides as a reference (who is in frame, each by their chosen look's image, else their main
+ * photo; a place by its establishing view), the look lines, the seven checks, the model, the ratio
+ * and the price. Nothing is made and nothing is spent by drafting.
  */
 
-export const PICTURE_BOUNDS = { neighbour: 240, synopsis: 600, art: 400, reserve: 700 } as const;
+export const PICTURE_BOUNDS = { neighbour: 240, synopsis: 600, art: 400, note: 400, reserve: 700 } as const;
 
-const RawPictureSchema = z.object({
-  prompt: z.string(),
-  who: z.array(z.string()).nullable().optional(),
-  place: z.string().nullable().optional(),
-});
-export type RawPicture = z.infer<typeof RawPictureSchema>;
+export type RawPicture = RawBrief;
 
 export interface PictureDeriverInput {
   title: string;
   /** The chapter's Mood line: light, colour and grain only (design turn 193, rule 9). Never the art direction's free text. */
   mood?: string;
   synopsis?: string;
+  /** The chapter's note, from the book's reading notes: what a block that states no feeling is inferred from (193k, rule 5). */
+  note?: string;
   block: { key: string; text: string; speaker?: string };
   before?: string;
   after?: string;
-  /** The look the prompt takes its lines from: the place, then each person's. */
-  lines: ReadonlyArray<{ label: string; text: string }>;
-  people: ReadonlyArray<Pick<ChapterPerson, "key" | "name" | "appearance">>;
+  /** The look the prompt takes its lines from: the place, then each person's, with their chosen look's name. */
+  lines: readonly BriefLine[];
+  people: ReadonlyArray<Pick<ChapterPerson, "key" | "name" | "appearance" | "essence">>;
   places: readonly ChapterPlace[];
   /** Sheets that are never to be pictured: named so the model leaves them out of frame. */
   never: readonly string[];
   maxChars: number;
+  /** Why the draft before this one was asked again (check 2): said to the model once. */
+  retry?: string;
 }
 export type PictureDeriver = (input: PictureDeriverInput, signal?: AbortSignal) => Promise<RawPicture>;
 
+/** The brief for one picture (193k), as the writing service is given it. */
 export function buildPicturePrompt(input: PictureDeriverInput, retryNote?: string): string {
-  const people = input.people.map((person) => `[${person.key}] ${person.name}${person.appearance !== undefined ? ` — ${person.appearance}` : ""}`).join("\n");
-  const places = input.places.map((place) => `[${place.key}] ${place.name}${place.look !== undefined ? ` — ${place.look}` : ""}`).join("\n");
-  const lines = input.lines.map((line) => `${line.label}: ${line.text}`).join("\n");
-  return `Write the prompt for ONE picture to be shown while the block below is heard, in an illustrated audiobook. Respond with ONLY a JSON object:
-{"prompt": "<the picture>", "who": ["<key of each character in frame>"], "place": "<key of the place shown, or null>"}
+  const note = retryNote ?? input.retry;
+  return `You write the prompt for ONE picture, shown while the block below is heard in an illustrated audiobook. The picture is a still taken from the block: what its words describe, seen by one camera. Answer with ONLY this JSON object:
+${BRIEF_SHAPE}
+${briefRules(input.maxChars, input.never)}${note ? `\nYour previous response was rejected: ${note}\n` : ""}
+${BRIEF_EXAMPLES}
 
-Rules — what the prompt says is held to these after you answer:
-- One moment, drawn from the block: where the camera is, who is in frame and what they are doing, the light. Concrete and visual, in one to three sentences, at most ${input.maxChars} characters.
-- What people wear and carry, the place and the light come from the look below. Use them; never contradict them, and never invent a coat the look does not give.
-- Name each character as the characters list does. "who" holds the keys of the characters the picture shows, from that list, and only those; "place" is a key from the places list or null.
-- Never write the book's style (it is added separately), and never ask for text, captions, titles, speech bubbles or logos in the picture.
-${input.never.length > 0 ? `- Never show, name or hint at: ${input.never.join(", ")}.\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
-## The book's mood (light, colour and grain only)
-
-${input.mood ?? "none stated"}
-
-## The chapter (${input.title})
-
-${input.synopsis ?? "no synopsis"}
-
-## The look of this chapter
-
-${lines === "" ? "not read" : lines}
-
-## Characters
-
-${people === "" ? "none" : people}
-
-## Places
-
-${places === "" ? "none named" : places}
-
+${briefGiven(input)}
 ## Around the block
-
 ${input.before !== undefined ? `Before: ${input.before}\n` : ""}${input.after !== undefined ? `After: ${input.after}\n` : ""}
 ## The block [${input.block.key}]${input.block.speaker !== undefined ? ` spoken by ${input.block.speaker}` : ""}
-
 ${input.block.text}`;
 }
 
 export function makeAdapterPictureDeriver(adapter: HarnessAdapter, sessionInput: SessionInput, scratchRoot: string): PictureDeriver {
-  const ask = makeAdapterJsonDeriver(adapter, sessionInput, scratchRoot, RawPictureSchema, "picture");
+  const ask = makeAdapterJsonDeriver(adapter, sessionInput, scratchRoot, RawBriefSchema, "picture");
   return (input, signal) => ask((note) => buildPicturePrompt(input, note), signal);
+}
+
+/**
+ * The look lines as the brief gives them (193k): the place, then each person's line, named by the
+ * kit look it is the line of where the chapter chose one (`[ife] Ife, look "Cream-gold silk slip
+ * dress": …`).
+ */
+export function briefLines(store: Pick<WorldStore, "getBundle">, look: AudiobookLook | null, keys: readonly string[]): BriefLine[] {
+  const kits = store.getBundle().referenceKits;
+  return lookLinesFor(look, keys).map((line): BriefLine => {
+    const sheet = line.key === null ? undefined : look?.characters[line.key]?.sheet;
+    const chosen = line.lookId === undefined || sheet === undefined ? undefined : kits.find((kit) => kit.sheetId === sheet)?.looks?.find((candidate) => candidate.id === line.lookId);
+    return { label: line.label, key: line.key, text: line.text, ...(chosen !== undefined ? { look: lookName(chosen) } : {}) };
+  });
 }
 
 /** A prompt held to its cap: cut after the last whole sentence that fits, else at a word. */
@@ -204,11 +193,15 @@ export interface PictureRoom {
   /** The chapter's Mood line, or the art direction with its clothing cut where the look has none (R-117). */
   mood: string | undefined;
   synopsis: string | undefined;
+  /** The chapter's reading note (the book record's), which a face is read from where the block states no feeling (193k, rule 5). */
+  note: string | undefined;
 }
 
 export async function pictureRoom(store: WorldStore, productionId: string, chapterId: string, look: AudiobookLook | null): Promise<PictureRoom> {
   const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId) });
   const summary = store.getBundle().productions.find((p) => p.meta.id === productionId)?.chapters.find((c) => c.id === plan.chapter.id);
+  const book = await readAudiobookBook(store, productionId).catch(() => null);
+  const note = book === null || book === "unreadable" ? undefined : clip(book.chapterNotes?.[plan.chapter.id], PICTURE_BOUNDS.note);
   return {
     plan,
     people: chapterPeople(store, plan),
@@ -216,6 +209,7 @@ export async function pictureRoom(store: WorldStore, productionId: string, chapt
     look,
     mood: pictureMood(look, artDirectionFor(store, productionId)),
     synopsis: clip(summary?.synopsis, PICTURE_BOUNDS.synopsis),
+    note,
   };
 }
 
@@ -223,7 +217,7 @@ export async function pictureRoom(store: WorldStore, productionId: string, chapt
 export const depictable = (people: readonly ChapterPerson[]): ChapterPerson[] => people.filter((person) => !person.neverDepicted);
 
 /** Who a block shows when the model named no one: those who speak in it, and the characters whose names its words hold. */
-function namedIn(block: Pick<AudiobookBlock, "text" | "sheet" | "speaker" | "rows">, people: readonly ChapterPerson[]): ChapterPerson[] {
+export function namedIn(block: Pick<AudiobookBlock, "text" | "sheet" | "speaker" | "rows">, people: readonly ChapterPerson[]): ChapterPerson[] {
   const speaking = new Set((block.rows ?? [block]).flatMap((turn) => (turn.sheet === undefined ? [] : [turn.sheet])));
   return people.filter((person) => (person.sheet !== undefined && speaking.has(person.sheet)) || nameAt(block.text, person.name) >= 0);
 }
@@ -235,9 +229,11 @@ export interface SuggestOptions {
 }
 
 /**
- * One block's suggestion (R-99): drafted by the deriver, then held — who it names must be someone
- * in the chapter the sheet lets be pictured, a prompt over the model's room is cut at a sentence,
- * and the references, the look lines used, the ratio and the price are the coordinator's own.
+ * One block's suggestion (R-99, R-120, R-121): drafted by the deriver under 193k's brief, then held
+ * — the keys held to the chapter, who rides is who is in frame (a detail carries no reference, a
+ * frame with nobody in it carries the place), a prompt over the model's room cut at a sentence, and
+ * the seven checks run. A draft that names someone out of frame is asked again once with the reason;
+ * what comes back is shown with its checks, marked where it still fails.
  */
 export async function suggestPicture(store: WorldStore, room: PictureRoom, blockKey: string, options: SuggestOptions): Promise<PictureSuggestion> {
   const index = room.plan.blocks.findIndex((planned) => planned.block.key === blockKey);
@@ -247,49 +243,50 @@ export async function suggestPicture(store: WorldStore, room: PictureRoom, block
   const sheets = store.getBundle().sheets;
   const speaker = blockSpeakers(sheets, planned.block);
   const maxChars = promptRoom(options.model);
-  const lines = lookLinesFor(room.look, visible.map((person) => person.key));
-  if (options.signal?.aborted) throw new Error("stopped");
-  const raw = await options.deriver(
-    {
-      title: room.plan.chapter.title,
-      ...(room.mood !== undefined ? { mood: room.mood } : {}),
-      ...(room.synopsis !== undefined ? { synopsis: room.synopsis } : {}),
-      block: { key: planned.block.key, text: normalizeSpeechText(planned.block.text), ...(speaker !== undefined ? { speaker } : {}) },
-      ...(index > 0 ? { before: clip(room.plan.blocks[index - 1]!.block.text, PICTURE_BOUNDS.neighbour)! } : {}),
-      ...(index < room.plan.blocks.length - 1 ? { after: clip(room.plan.blocks[index + 1]!.block.text, PICTURE_BOUNDS.neighbour)! } : {}),
-      lines: lines.map((line) => ({ label: line.label, text: line.text })),
-      people: visible,
-      places: room.places,
-      never: room.people.filter((person) => person.neverDepicted).map((person) => person.name),
-      maxChars,
-    },
-    options.signal,
-  );
-  if (options.signal?.aborted) throw new Error("stopped");
-  const prompt = clipPrompt(raw.prompt, maxChars);
-  if (prompt === "") throw new Error("the writing service gave no picture");
-  const named = (raw.who ?? []).flatMap((key) => {
-    const person = visible.find((candidate) => candidate.key === key || candidate.name.toLowerCase() === key.trim().toLowerCase());
-    return person === undefined ? [] : [person];
-  });
-  const inFrame = [...new Map((named.length > 0 ? named : namedIn(planned.block, visible)).map((person) => [person.key, person])).values()].slice(0, 12);
-  const place = raw.place === null || raw.place === undefined ? undefined : room.places.find((candidate) => candidate.key === raw.place);
-  const who = pictureWho(store, options.model, [
-    ...inFrame.map((person) => ({ key: person.key, name: person.name, ...(person.sheet !== undefined ? { sheet: person.sheet } : {}), kind: "character" as const, ...(person.billing !== undefined ? { billing: person.billing } : {}) })),
-    ...(place === undefined ? [] : [{ key: place.key, name: place.name, sheet: place.key, kind: "place" as const }]),
-  ], { look: room.look });
+  const lines = briefLines(store, room.look, visible.map((person) => person.key));
+  const given: PictureDeriverInput = {
+    title: room.plan.chapter.title,
+    ...(room.mood !== undefined ? { mood: room.mood } : {}),
+    ...(room.synopsis !== undefined ? { synopsis: room.synopsis } : {}),
+    ...(room.note !== undefined ? { note: room.note } : {}),
+    block: { key: planned.block.key, text: normalizeSpeechText(planned.block.text), ...(speaker !== undefined ? { speaker } : {}) },
+    ...(index > 0 ? { before: clip(room.plan.blocks[index - 1]!.block.text, PICTURE_BOUNDS.neighbour)! } : {}),
+    ...(index < room.plan.blocks.length - 1 ? { after: clip(room.plan.blocks[index + 1]!.block.text, PICTURE_BOUNDS.neighbour)! } : {}),
+    lines,
+    people: visible,
+    places: room.places,
+    never: room.people.filter((person) => person.neverDepicted).map((person) => person.name),
+    maxChars,
+  };
+  const draft = async (retry?: string) => {
+    if (options.signal?.aborted) throw new Error("stopped");
+    const raw = await options.deriver(retry === undefined ? given : { ...given, retry }, options.signal);
+    if (options.signal?.aborted) throw new Error("stopped");
+    const prompt = clipPrompt(raw.prompt, maxChars);
+    if (prompt === "") throw new Error("the writing service gave no picture");
+    const held = holdBrief(raw, { people: visible, places: room.places, prompt, fallback: () => namedIn(planned.block, visible) });
+    const who = pictureWho(store, options.model, briefRiders(held), { look: room.look, frame: held.frame });
+    const used = lookLinesFor(room.look, [...held.inFrame.map((person) => person.key), ...held.details.map((detail) => detail.of)], ridingPicks(who));
+    const checks = pictureChecks({ held, who, people: visible, lines: used, block: planned.block.text, mood: room.mood });
+    return { held, who, used, checks };
+  };
+  let drafted = await draft();
+  const outside = drafted.checks.find((check) => check.id === "not-in-frame" && !check.ok);
+  // Check 2 (rule 14): a draft that names someone out of frame is asked again once, with the reason.
+  if (outside !== undefined) drafted = await draft(`${outside.note ?? "it names someone"} who is not in frame. Name nobody in "notInFrame" in the prompt, not as a shoulder, a reflection or behind the camera.`);
+  const { held, who, used, checks } = drafted;
   const picks = ridingPicks(who);
-  const used = lookLinesFor(room.look, inFrame.map((person) => person.key), picks);
   const aspect = pictureAspect(options.model);
-  const stamp = pictureLookFor(room.look, inFrame.map((person) => person.key), picks);
+  const stamp = pictureLookFor(room.look, held.inFrame.map((person) => person.key), picks);
   return {
     block: blockKey,
-    prompt,
+    prompt: held.prompt,
     who,
     lines: used.map((line) => ({ label: line.label, text: line.text })),
     model: { provider: options.model.provider, id: options.model.id, name: options.model.displayName, references: referenceBudgetFor(options.model) },
     ...(aspect !== undefined ? { aspect } : {}),
     estimatedMicroUsd: pictureQuote(options.model, who.filter((entry) => entry.carried).length, aspect),
     ...(stamp !== undefined ? { look: stamp } : {}),
+    shot: { frame: held.frame, inFrame: held.inFrame.map((person) => person.key), notInFrame: held.notInFrame, expressions: held.expressions, details: held.details, checks },
   };
 }

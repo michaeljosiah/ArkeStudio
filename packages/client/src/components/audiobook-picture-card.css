@@ -1,0 +1,41 @@
+/*
+ * A block's picture card (design turn 193c): the picture's slot beside its facts from 480 up and over
+ * them at 420 (the panel is the size container `ab-panel`), In frame with both look images — the one
+ * that rides ringed, the other dim — Not in frame as dashed names, the prompt, and the seven checks.
+ */
+.fy-pcard__top { display: grid; grid-template-columns: 262px minmax(0, 1fr); gap: 14px; align-items: start; }
+.fy-pcard__slot { aspect-ratio: 16 / 9; box-sizing: border-box; border: 1px dashed var(--neutral-400); border-radius: 10px; display: flex; align-items: flex-start; justify-content: flex-end; padding: 6px 8px; }
+.fy-pcard__slot .fy-mono { font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-pcard__facts { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.fy-pcard__fact { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.fy-pcard__fact .fy-mono { font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-pcard__fact b { font-weight: 500; font-size: var(--text-sm); overflow-wrap: anywhere; }
+.fy-pcard__sec { display: flex; flex-direction: column; gap: 6px; }
+.fy-pcard__h { font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-pcard__none { font-size: var(--text-xs); color: var(--muted-foreground); }
+.fy-pcard__who { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.fy-pcard__who--over { color: var(--muted-foreground); }
+.fy-pcard__thumbs { display: flex; gap: 4px; }
+.fy-pcard__thumb { width: 34px; height: 46px; box-sizing: border-box; border-radius: 7px; object-fit: cover; object-position: top; display: block; border: 1px solid var(--border); }
+.fy-pcard__thumb--on { outline: 2px solid var(--foreground); outline-offset: 1px; }
+.fy-pcard__thumb--dim { opacity: 0.45; }
+.fy-pcard__thumb--none { display: inline-block; border-style: dashed; border-color: var(--neutral-400); }
+.fy-pcard__whotx { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: var(--text-sm); }
+.fy-pcard__whotx b { font-weight: 500; }
+.fy-pcard__whotx > .fy-mono { font-size: var(--text-2xs); color: var(--muted-foreground); overflow-wrap: anywhere; }
+.fy-pcard__expr { font-size: var(--text-xs); color: var(--foreground); overflow-wrap: anywhere; }
+.fy-pcard__expr .fy-mono { font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-pcard__why { font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; }
+.fy-pcard__out { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.fy-pcard__outname { padding: 1px 8px; border: 1px dashed var(--neutral-400); border-radius: 8px; font-size: var(--text-xs); color: var(--muted-foreground); }
+.fy-pcard__checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.fy-pcard__check { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; font-size: var(--text-xs); }
+.fy-pcard__check i { font-style: normal; width: 12px; flex: none; color: var(--muted-foreground); }
+.fy-pcard__check .fy-mono { font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-pcard__check--mark, .fy-pcard__check--mark i, .fy-pcard__check--mark .fy-mono { color: var(--warning); }
+@container ab-panel (max-width: 479px) {
+  .fy-pcard__top { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 599px) {
+  .fy-pcard__top { grid-template-columns: minmax(0, 1fr); }
+}
