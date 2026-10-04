@@ -1,8 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject, type ReactNode, type RefObject } from "react";
 import { ProviderMark } from "../screens/settings-parts.js";
-import { PickerSearch, PickerSliders, PickerTick } from "./model-chip-icons.js";
+import { PickerInfo, PickerSearch, PickerSliders, PickerTick } from "./model-chip-icons.js";
 import {
-  filterGroups, matchSpan, modelCard, squash,
+  filterGroups, matchSpan, modelCard, phoneDetailRows, squash,
   type PickerGroup, type PickerModel,
 } from "./model-picker-data.js";
 import { cx } from "./ui.js";
@@ -63,6 +63,10 @@ export interface ModelPickerProps {
   onRemember?: () => void;
   onClear?: () => void;
   onManage: () => void;
+  /** Drawn as a phone's bottom sheet (design turn 195): rows of 48, an info press for each, no hover card, no focus taken. */
+  sheet?: boolean;
+  /** The sheet's head, beside Model: the effort chip, when the model has one. */
+  effort?: ReactNode;
 }
 
 /**
@@ -72,7 +76,7 @@ export interface ModelPickerProps {
  * list moves that row the same way, so what is highlighted is always what Enter would pick.
  */
 export function ModelPicker(props: ModelPickerProps) {
-  const { groups, recent, total, reference, lost, set, unsetLabel, listboxId, panelRef, escapeRef, onChoose, onRemember, onClear, onManage } = props;
+  const { groups, recent, total, reference, lost, set, unsetLabel, listboxId, panelRef, escapeRef, onChoose, onRemember, onClear, onManage, sheet = false, effort } = props;
   const prefix = useId();
   const search = useRef<HTMLInputElement>(null);
   const card = useRef<HTMLDivElement>(null);
@@ -81,6 +85,8 @@ export function ModelPicker(props: ModelPickerProps) {
   const [hot, setHot] = useState<string | null>(null);
   /** The row whose card shows. */
   const [cardKey, setCardKey] = useState<string | null>(null);
+  /** The row whose card is open in place, on a phone, where there is no hover. */
+  const [info, setInfo] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** The row whose card is shown or on its way, so a pointer resting on a row does not start it again. */
   const wanted = useRef<string | null>(null);
@@ -130,9 +136,11 @@ export function ModelPicker(props: ModelPickerProps) {
   // Opening lands on the model in force, else the first model; typing lands on the first match.
   useLayoutEffect(() => {
     const first = (searching ? undefined : usable.find((row) => row.ticked)) ?? usable.find((row) => row.kind === "model") ?? usable[0];
-    setHot(first?.key ?? null);
+    // A phone's list lights nothing until a row is opened: the sheet does not take the keyboard.
+    setHot(sheet ? null : first?.key ?? null);
     wanted.current = null;
     setCardKey(null);
+    setInfo(null);
   }, [searching, query]);
   // A catalogue arriving while open can take the highlighted row away.
   useEffect(() => {
@@ -140,7 +148,8 @@ export function ModelPicker(props: ModelPickerProps) {
   }, [rows, usable, hot]);
 
   const focusSearch = () => search.current?.focus({ preventScroll: true });
-  useLayoutEffect(() => { focusSearch(); }, []);
+  // The keyboard does not rise on a phone until the field is pressed.
+  useLayoutEffect(() => { if (!sheet) focusSearch(); }, []);
   // The model in force is brought into view on opening, since ninety rows are not all in sight.
   useLayoutEffect(() => {
     if (hot === null) return;
@@ -185,7 +194,7 @@ export function ModelPicker(props: ModelPickerProps) {
   };
 
   // The card sits on the side of the list with room, level with its row, never past the window.
-  const shown = cardKey === null ? undefined : rowOf(cardKey);
+  const shown = cardKey === null || sheet ? undefined : rowOf(cardKey);
   const cardData = shown?.entry !== undefined ? modelCard(shown.entry, shown.groupName ?? shown.entry.model.provider) : null;
   useLayoutEffect(() => {
     const element = card.current;
@@ -209,33 +218,72 @@ export function ModelPicker(props: ModelPickerProps) {
     element.style.top = `${Math.min(ceiling, Math.max(floor, level))}px`;
   });
 
-  const renderRow = (row: Row) => (
-    <div
-      key={row.key}
-      id={domId(row.key)}
-      role="option"
-      aria-selected={row.ticked}
-      aria-disabled={row.disabled || undefined}
-      {...(row.entry?.reason !== undefined ? { "aria-label": `${row.label}, ${row.entry.reason}` } : {})}
-      {...(row.entry !== undefined ? { "data-model": row.entry.ref } : row.value !== undefined ? { "data-model": row.value } : {})}
-      className={cx(
-        "fy-mpick__row",
-        row.kind === "unset" && "fy-mpick__row--quiet",
-        row.entry?.reason !== undefined && "fy-mpick__row--off",
-        row.key === hot && "fy-mpick__row--active",
-        row.ticked && "fy-mpick__row--on",
-      )}
-      onMouseMove={() => { if (row.key !== wanted.current) activate(row.key, false); }}
-      onClick={() => pick(row)}
-    >
-      <span className="fy-mpick__name">{row.entry !== undefined ? <Matched label={row.label} query={searching ? query : ""} /> : row.label}</span>
-      {row.tag !== undefined && <span className="fy-mpick__tag">{row.tag}</span>}
-      {row.ticked && <PickerTick />}
-    </div>
-  );
+  const renderRow = (row: Row) => {
+    const reason = row.entry?.reason;
+    // A phone has no hover: a model with facts to show gets a press that opens them under its row.
+    const details = sheet && row.entry !== undefined && reason === undefined ? phoneDetailRows(row.entry, row.groupName ?? row.entry.model.provider) : [];
+    return (
+      <div key={row.key} role="presentation" className="fy-mpick__item">
+        <div
+          id={domId(row.key)}
+          role="option"
+          aria-selected={row.ticked}
+          aria-disabled={row.disabled || undefined}
+          {...(reason !== undefined ? { "aria-label": `${row.label}, ${reason}` } : {})}
+          {...(row.entry !== undefined ? { "data-model": row.entry.ref } : row.value !== undefined ? { "data-model": row.value } : {})}
+          className={cx(
+            "fy-mpick__row",
+            row.kind === "unset" && "fy-mpick__row--quiet",
+            reason !== undefined && "fy-mpick__row--off",
+            sheet && reason !== undefined && "fy-mpick__row--reason",
+            details.length > 0 && "fy-mpick__row--info",
+            (row.key === hot || (sheet && row.key === info)) && "fy-mpick__row--active",
+            row.ticked && "fy-mpick__row--on",
+          )}
+          onMouseMove={sheet ? undefined : () => { if (row.key !== wanted.current) activate(row.key, false); }}
+          onClick={() => pick(row)}
+        >
+          <span className="fy-mpick__name">{row.entry !== undefined ? <Matched label={row.label} query={searching ? query : ""} /> : row.label}</span>
+          {sheet && reason !== undefined && <span className="fy-mpick__reason">{reason}</span>}
+          {row.tag !== undefined && <span className="fy-mpick__tag">{row.tag}</span>}
+          {row.ticked && <PickerTick />}
+        </div>
+        {details.length > 0 && (
+          <button
+            type="button"
+            className={cx("fy-mpick__info", info === row.key && "fy-mpick__info--on")}
+            aria-label={`Details for ${row.label}`}
+            aria-expanded={info === row.key}
+            onClick={() => setInfo(info === row.key ? null : row.key)}
+          >
+            <PickerInfo />
+          </button>
+        )}
+        {info === row.key && details.length > 0 && (
+          <div className="fy-mpick__det">
+            {details.map((detail) => (
+              <span key={detail.label} className="fy-mpick__det-row">
+                <b>{detail.label}</b>
+                <span>{detail.value}</span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <>
+      {sheet && (
+        <>
+          <div className="fy-mpick__grab" aria-hidden="true" />
+          <div className="fy-msheet__head">
+            <span>Model</span>
+            {effort}
+          </div>
+        </>
+      )}
       <div className="fy-mpick__search">
         <PickerSearch />
         <input

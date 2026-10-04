@@ -139,6 +139,11 @@ export interface CardRows {
   rows: Array<{ label: string; value: string }>;
 }
 
+/** What a phone's row shows when its info press opens it in place: the card, less the provider (the group names it) and the tools (a reason says it). */
+export function phoneDetailRows(entry: PickerModel, groupName: string): CardRows["rows"] {
+  return modelCard(entry, groupName).rows.filter((row) => row.label !== "Provider" && row.label !== "Tools");
+}
+
 /** The hovered model's card. */
 export function modelCard(entry: PickerModel, groupName: string): CardRows {
   const { model } = entry;

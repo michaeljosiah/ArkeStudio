@@ -33,6 +33,11 @@ Object.assign(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: true,
 });
 
+/** Whether the window is a phone's: `(max-width: 599px)` answers this. */
+let phone = false;
+Object.assign(dom.window, {
+  matchMedia: (query: string) => ({ matches: phone && query.includes("599"), addEventListener() {}, removeEventListener() {} }),
+});
 /** Where the popover sits, so the card has a side to choose; set per test. */
 let popover = { top: 150, bottom: 710, left: 918, width: 430, height: 560 };
 dom.HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
@@ -103,12 +108,13 @@ afterEach(async () => {
   container?.remove();
   focusLog.length = 0;
   popover = { top: 150, bottom: 710, left: 918, width: 430, height: 560 };
+  phone = false;
   Reflect.deleteProperty(globalThis, "localStorage");
 });
 
 const chips = () => [...container.querySelectorAll<HTMLButtonElement>(".fy-cx__bar button.fy-mchip__btn")];
 const chip = () => chips()[0]!;
-const menu = () => document.querySelector<HTMLElement>(".fy-mchip__menu");
+const menu = () => document.querySelector<HTMLElement>(".fy-mchip__menu:not(.fy-mchip__menu--effort), .fy-msheet");
 const search = () => menu()!.querySelector<HTMLInputElement>("input")!;
 const options = () => [...menu()!.querySelectorAll<HTMLElement>("[role=option]")];
 const names = () => options().map((option) => option.querySelector(".fy-mpick__name")?.textContent);
@@ -366,12 +372,12 @@ describe("the effort", () => {
     assert.equal(chips().length, 2);
     assert.equal(chips()[1]!.textContent, "Medium", "the harness's default, in plain words");
     await act(async () => chips()[1]!.click());
-    const effort = menu()!;
+    const effort = document.querySelector<HTMLElement>(".fy-mchip__menu--effort")!;
     assert.equal(effort.querySelector(".fy-mpick__grp")!.textContent, "Effort");
     assert.deepEqual([...effort.querySelectorAll("button")].map((button) => button.textContent), ["Low", "Medium", "High", "Highest"]);
     assert.equal(effort.querySelector("button[aria-checked=true]")!.textContent, "Medium");
     await act(async () => [...effort.querySelectorAll("button")].find((button) => button.textContent === "Highest")!.click());
-    assert.equal(menu(), null);
+    assert.equal(document.querySelector(".fy-mchip__menu--effort"), null);
     assert.equal(chips()[1]!.textContent, "Highest");
   });
 
@@ -444,6 +450,102 @@ describe("the chip", () => {
     await act(async () => void foot.at(-1)!.dispatchEvent(tab as unknown as Event));
     assert.equal(menu(), null);
     assert.equal(focusLog.at(-1), chip());
+  });
+});
+
+describe("on a phone, the picker is a bottom sheet", () => {
+  const sheet = () => document.querySelector<HTMLElement>(".fy-msheet");
+  async function openSheet() {
+    phone = true;
+    await mount(<Holder />);
+    await act(async () => chip().click());
+    assert.ok(sheet(), "the sheet opened");
+    return sheet()!;
+  }
+
+  it("opens as a sheet over a scrim, not a popover, with a grab, Model and the effort in its head", async () => {
+    const element = await openSheet();
+    assert.equal(document.querySelector(".fy-mchip__menu"), null, "no popover");
+    assert.equal(element.parentElement, document.body);
+    assert.ok(document.querySelector(".fy-msheet__scrim"));
+    assert.ok(element.querySelector(".fy-mpick__grab"));
+    assert.equal(element.querySelector(".fy-msheet__head span")!.textContent, "Model");
+    assert.equal(element.querySelector(".fy-msheet__head .fy-mchip__btn--effort")!.textContent, "Medium");
+    assert.equal(element.querySelector(".fy-mpick__count")!.textContent, "6");
+    assert.deepEqual(headings(), ["OpenAI", "Anthropic", "OpenCode Zen", "mystery-co"].map((name) => name), "the same groups");
+  });
+
+  it("does not take focus for the search: the keyboard waits for a press", async () => {
+    const element = await openSheet();
+    assert.equal(focusLog.at(-1), element, "the sheet itself holds focus");
+    assert.notEqual(focusLog.at(-1), element.querySelector("input"));
+  });
+
+  it("opens a row's facts in place from its info press, and does not pick", async () => {
+    const element = await openSheet();
+    const info = element.querySelector<HTMLButtonElement>('button[aria-label="Details for GPT-5.4"]');
+    assert.ok(info, "a model with facts has the press");
+    assert.equal(element.querySelector('button[aria-label="Details for GPT-5.4 Fast"]'), null, "a model with nothing known has none");
+    assert.equal(element.querySelector(".fy-mpick__det"), null);
+    await act(async () => info.click());
+    assert.ok(sheet(), "pressing it picks nothing");
+    assert.equal(info.getAttribute("aria-expanded"), "true");
+    const rows = [...element.querySelectorAll(".fy-mpick__det .fy-mpick__det-row")].map((row) => [row.querySelector("b")!.textContent, row.querySelector("span")!.textContent]);
+    assert.deepEqual(rows, [["Inputs", "Text, image"], ["Reasoning", "Allows reasoning"], ["Context", "400,000 tokens"], ["Price", "$1.25 in · $10 out per M"]], "the card, without the provider the group names and the tools");
+    await act(async () => info.click());
+    assert.equal(element.querySelector(".fy-mpick__det"), null, "pressing again closes it");
+  });
+
+  it("says a struck model's reason under its name, since there is no hover", async () => {
+    phone = true;
+    await mount(<Holder start="anthropic/claude-sonnet" chip={{ needsTools: true }} />);
+    await act(async () => chip().click());
+    const haiku = sheet()!.querySelector<HTMLElement>('[data-model="anthropic/claude-haiku"]')!;
+    assert.equal(haiku.querySelector(".fy-mpick__reason")?.textContent, "cannot use tools");
+    assert.ok(haiku.className.includes("fy-mpick__row--reason"));
+    assert.equal(sheet()!.querySelector('button[aria-label="Details for Claude Haiku 4.5"]'), null);
+    await act(async () => void haiku.dispatchEvent(new dom.Event("mousemove", { bubbles: true }) as unknown as Event));
+    await pause(350);
+    assert.equal(card(), null, "there is no hover card on a phone");
+  });
+
+  it("picking closes the sheet, as a press on the scrim and Escape do", async () => {
+    await openSheet();
+    await act(async () => options().find((option) => option.getAttribute("data-model") === "openai/gpt-5.4-fast")!.click());
+    assert.equal(sheet(), null);
+    assert.match(chip().textContent ?? "", /GPT-5\.4 Fast/);
+    await act(async () => chip().click());
+    assert.ok(sheet());
+    await act(async () => void document.querySelector(".fy-msheet__scrim")!.dispatchEvent(new dom.Event("mousedown", { bubbles: true }) as unknown as Event));
+    assert.equal(sheet(), null, "a press on the scrim");
+    await act(async () => chip().click());
+    const escape = new dom.Event("keydown", { bubbles: true, cancelable: true }) as Event & { key: string };
+    escape.key = "Escape";
+    await act(async () => void sheet()!.dispatchEvent(escape as unknown as Event));
+    assert.equal(sheet(), null, "Escape");
+  });
+
+  it("opens the effort menu over the sheet, and Escape closes that first", async () => {
+    const element = await openSheet();
+    const effort = element.querySelector<HTMLButtonElement>(".fy-msheet__head .fy-mchip__btn--effort")!;
+    await act(async () => effort.click());
+    const over = document.querySelector<HTMLElement>(".fy-mchip__menu--effort");
+    assert.ok(over, "the effort menu is drawn over the sheet");
+    assert.ok(sheet(), "the sheet stays");
+    const escape = new dom.Event("keydown", { bubbles: true, cancelable: true }) as Event & { key: string };
+    escape.key = "Escape";
+    await act(async () => void over.dispatchEvent(escape as unknown as Event));
+    assert.equal(document.querySelector(".fy-mchip__menu--effort"), null);
+    assert.ok(sheet(), "the sheet is still there after the menu goes");
+    await act(async () => effort.click());
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>(".fy-mchip__menu--effort button")].find((button) => button.textContent === "High")!.click());
+    assert.equal(document.querySelector(".fy-mchip__menu--effort"), null);
+    assert.equal(effort.textContent, "High", "chosen from the sheet's own chip");
+  });
+
+  it("keeps the same foot", async () => {
+    const element = await openSheet();
+    assert.deepEqual([...element.querySelectorAll(".fy-mpick__foot button")].map((button) => button.textContent), ["Manage models"]);
   });
 });
 
