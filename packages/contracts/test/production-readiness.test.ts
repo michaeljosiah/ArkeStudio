@@ -134,7 +134,7 @@ it("counts only current legacy voice placements and refuses an older scene's lin
   assert.equal(sceneCheck(p,"dialogue-voiced").status,"ready");
   p.timeline={status:"ready",timeline:seedStoryPictureTimeline(p)};
   const other=take("voice"); p.takes.push(other);
-  const track={id:"tr_voice" as const,kind:"dialogue" as const,name:"Voice",order:1,muted:false,clips:[{id:"cl_voice" as const,startFrame:0,durationFrames:24,sourceInFrames:0,source:{kind:"take" as const,takeId:other.id}}]};
+  const track={id:"tr_voice" as const,kind:"dialogue" as const,name:"Voice",order:1,muted:false,clips:[{id:"cl_voice" as const,startFrame:0,durationFrames:24,sourceInFrames:0,source:{kind:"take" as const,takeId:other.id,label:"Voice"}}]};
   p.timeline.timeline.tracks.push(track); assert.equal(sceneCheck(p,"dialogue-voiced").status,"missing","Another voice take cannot stand in for the chosen placement");
   track.clips[0]!.source.takeId=voice.id; assert.equal(sceneCheck(p,"dialogue-voiced").status,"ready");
   p.scenes[0]!.version++; assert.equal(sceneCheck(p,"dialogue-voiced").status,"missing");
