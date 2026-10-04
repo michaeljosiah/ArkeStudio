@@ -120,7 +120,7 @@ export function sentenceEnd(text: string, from: number): number {
  * paragraph of several speakers' turns. The break holds no text, so a selection's offsets still
  * count the words alone; the stylesheet draws the rule and the speaker's name from its data.
  */
-export interface TurnBreak { at: number; label: string; tone: string }
+export interface TurnBreak { at: number; label: string; tone: string; /** The full name, where `label` is a short one (design turn 194, rule 12b). */ full?: string }
 
 /**
  * The words with their markers in place (R-42): each its word in brackets on a plate — drawn by

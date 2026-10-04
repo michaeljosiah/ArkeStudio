@@ -120,6 +120,12 @@ export type SheetSection = z.infer<typeof SheetSectionSchema>;
  */
 export const CHARACTER_ROLE_MAX = 28;
 
+/**
+ * How long a character's short name may be when it is *written* (design turn 194, rule 12b). Read
+ * permissively like the role: the schema below does not enforce it, the authoring paths do.
+ */
+export const SHORT_NAME_MAX = 40;
+
 export const SheetSchema = z
   .object({
     id: SlugSchema,
@@ -130,6 +136,13 @@ export const SheetSchema = z
     role: z.string().optional(),
     /** Characters: e.g. "lead" | "support". Display vocabulary, not an enum the gate owns. */
     billing: z.string().optional(),
+    /**
+     * Characters: the name rows, filters and panels call them by (`Ade` for `Adeyemi "Ade" Akinola`,
+     * design turn 194, rule 12b). Display only: the slug, the cast records and every take's key are
+     * unchanged. Absent means the default (`defaultShortName`). Writing one raises the world to
+     * schema 59, so a build that cannot read it refuses the world instead of dropping the sheet.
+     */
+    shortName: z.string().optional(),
     /** Characters whose identity must never be pictured (#905). Absence permits depiction. */
     neverDepicted: z.boolean().optional(),
     /** Locations only. */
@@ -168,6 +181,44 @@ export const SheetSchema = z
   })
   .strict();
 export type Sheet = z.infer<typeof SheetSchema>;
+
+/**
+ * A character's short name when none is set (design turn 194, rule 12b): the nickname quoted inside
+ * the full name — `Adeyemi "Ade" Akinola` gives `Ade` — else the first word.
+ */
+export function defaultShortName(name: string): string {
+  const quoted = /["\u201C\u201E]([^"\u201C\u201D\u201E]+)["\u201D]/.exec(name);
+  const nickname = quoted?.[1]?.trim();
+  if (nickname !== undefined && nickname !== "") return nickname;
+  return name.trim().split(/\s+/)[0] ?? name.trim();
+}
+
+/** The short name a character goes by: the one written on the sheet, else the default. Never empty. */
+export function shortNameOf(sheet: Pick<Sheet, "name" | "shortName">): string {
+  const written = sheet.shortName?.trim();
+  return written !== undefined && written !== "" ? written : defaultShortName(sheet.name);
+}
+
+/**
+ * What each character is called in a row, a filter and a panel title, with the full name for the
+ * tooltip (rule 12b). Two characters who would share a short name — compared without regard to case,
+ * over every character the world holds, retired ones too, so a label never changes when someone is
+ * retired — both go by their full names. Keyed by the sheet's id.
+ */
+export function characterLabels(sheets: readonly Pick<Sheet, "id" | "type" | "name" | "shortName">[]): Map<string, { label: string; full: string }> {
+  const characters = sheets.filter((sheet) => sheet.type === "character");
+  const counts = new Map<string, number>();
+  for (const sheet of characters) {
+    const key = shortNameOf(sheet).toLowerCase();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return new Map(
+    characters.map((sheet) => {
+      const short = shortNameOf(sheet);
+      return [sheet.id, { label: (counts.get(short.toLowerCase()) ?? 0) > 1 ? sheet.name : short, full: sheet.name }] as const;
+    }),
+  );
+}
 
 /**
  * Scope predicates (SPEC-020). Every surface that has to answer "does this sheet belong here?"

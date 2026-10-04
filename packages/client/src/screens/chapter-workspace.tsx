@@ -1218,7 +1218,7 @@ export function ChapterWorkspace({
     const chapterSpeakers = new Map<string, SpeakerChoices["chapter"][number]>();
     for (const row of audiobook.rows) {
       if (row.speakerKey === null || chapterSpeakers.has(row.speakerKey)) continue;
-      chapterSpeakers.set(row.speakerKey, { key: row.speakerKey, label: row.mark, ...(row.block.sheet !== undefined ? { sheet: row.block.sheet } : {}), colour: row.colour });
+      chapterSpeakers.set(row.speakerKey, { key: row.speakerKey, label: row.full, ...(row.block.sheet !== undefined ? { sheet: row.block.sheet } : {}), colour: row.colour });
     }
     const cast = world.sheets
       .filter((sheet) => sheet.type === "character" && !sheet.retired && (sheet.production === undefined || sheet.production === prodId) && !chapterSpeakers.has(sheet.id))

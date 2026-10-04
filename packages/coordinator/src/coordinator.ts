@@ -8910,7 +8910,7 @@ export class Coordinator {
                 requestId: msg.requestId,
                 operation: msg.operation,
                 path: msg.path,
-                edit: (content) => sheetRenameContent(content, undo.name),
+                edit: (content) => sheetRenameContent(content, undo.name, undo.shortName),
               })
             ) {
               await this.refreshWorldSnapshot(msg.worldId);
@@ -8923,7 +8923,7 @@ export class Coordinator {
               path: () => msg.path,
               stage: async () => {
                 if (!gate) throw new Error("The accept gate is unavailable.");
-                return stageSheetRename(store, gate, { path: msg.path, name: undo.name });
+                return stageSheetRename(store, gate, { path: msg.path, name: undo.name, ...(undo.shortName !== undefined ? { shortName: undo.shortName } : {}) });
               },
               undo: () => undefined,
               successDisposition: "undone",
@@ -9103,7 +9103,7 @@ export class Coordinator {
             requestId: msg.requestId,
             operation: "sheet-rename",
             path: msg.path,
-            edit: (content) => sheetRenameContent(content, msg.name),
+            edit: (content) => sheetRenameContent(content, msg.name, msg.shortName),
           }).catch((err) => {
             this.emitSingleAct({
               worldId: msg.worldId,
@@ -9126,9 +9126,9 @@ export class Coordinator {
           path: () => msg.path,
           stage: async () => {
             if (!gate || !store || !sheet) throw new Error("That sheet is not in the open world.");
-            return stageSheetRename(store, gate, { path: msg.path, name: msg.name });
+            return stageSheetRename(store, gate, { path: msg.path, name: msg.name, ...(msg.shortName !== undefined ? { shortName: msg.shortName } : {}) });
           },
-          undo: () => ({ kind: "rename-sheet", path: msg.path, name: sheet!.name }),
+          undo: () => ({ kind: "rename-sheet", path: msg.path, name: sheet!.name, ...(msg.shortName !== undefined ? { shortName: sheet!.shortName ?? null } : {}) }),
         });
         await this.refreshWorldSnapshot(msg.worldId);
         return;

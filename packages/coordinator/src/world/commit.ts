@@ -388,6 +388,12 @@ export const AUDIOBOOK_LOOK_SCHEMA_VERSION = 49;
  * 51 were taken by world chat while it waited, so it is 52.
  */
 export const AUDIOBOOK_LOOKS_SCHEMA_VERSION = 52;
+/**
+ * A character's `shortName` (design turn 194, rule 12b), a field of a strict sheet: a build
+ * without it drops the sheet on scan, and with it the character, so the world is fenced with the
+ * first sheet that carries one — whoever wrote it, a form, a conversation or an external edit.
+ */
+export const SHEET_SHORT_NAME_SCHEMA_VERSION = 59;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
@@ -845,6 +851,7 @@ export class Committer {
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesBeat(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
       // The kind as much as the beat: a visual novel created or converted, before any beat is set.
       files.some(f => classify(f.path).track === "production-meta" && f.newContent != null && carriesVisualNovel(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
+      files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "shortName" in MarkdownFile.parse(f.newContent).data) ? SHEET_SHORT_NAME_SCHEMA_VERSION : 0,
       // Probe metadata is also written by ordinary artifact filing/backfill.
       sidecarBoundary(files),
       landsProseStyle ? PROSE_STYLE_SCHEMA_VERSION : 0,

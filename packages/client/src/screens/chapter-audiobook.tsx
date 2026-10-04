@@ -1,4 +1,4 @@
-import { chapterParagraphs, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
+import { chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import {
   AUDIOBOOK_DELIVERIES,
@@ -166,8 +166,10 @@ export interface DirectAlso {
 export interface BlockRow {
   block: AudiobookBlock;
   state: AudiobookBlockState;
-  /** What the margin says: `title`, `narrator`, or the speaker's name. */
+  /** What the margin says: `title`, `narrator`, or what the speaker goes by — a character's short name (design turn 194, rule 12b). */
   mark: string;
+  /** The speaker's full name, which pins, menus and tooltips use; the same as `mark` for the narrator, the title and a name no sheet carries. */
+  full: string;
   markWarn: boolean;
   /** The reader the block is meant for — what its state is judged against (R-13). */
   assigned: AudiobookReader;
@@ -183,7 +185,7 @@ export interface BlockRow {
   /** Who speaks the block by the cast (SPEC-047 R-33): the sheet, else the name; null for narration and the title. */
   speakerKey: string | null;
   /** The speakers a block holds when it is one reader's whole paragraph (design turn 190): the lines inside it, by key. */
-  speakers?: ReadonlyArray<{ key: string; label: string; colour: number | null }>;
+  speakers?: ReadonlyArray<{ key: string; label: string; full: string; colour: number | null }>;
   /** The turns of a block of several, in order: where each begins in the block's words and who speaks it (design turn 190), drawn as rows. */
   turnMarks?: ReadonlyArray<TurnBreak>;
   /** The speaker's colour, `--voice-N`, the same in every chapter; null for the narrator and a name no sheet carries. */
@@ -347,6 +349,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const recordedKeys = useMemo(() => new Set(recordedList ?? []), [recordedList]);
   const { state } = useStore();
   const world = state?.world ?? null;
+  // What each character goes by in a row, the filter and the panel title; the full name stays the tooltip (design turn 194, rule 12b).
+  const labels = useMemo(() => characterLabels(world?.sheets ?? []), [world?.sheets]);
   const catalogue = useStore().voiceCatalogue;
   const runs = useAudiobookRuns();
   const run = runs[`${worldId}/${prodId}/${chapter.id}`];
@@ -410,13 +414,17 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       // the narrator's stead must read as made here too, not as stale against a retired voice.
       const sheet = block.sheet === undefined ? undefined : world?.sheets.find((candidate) => candidate.id === block.sheet);
       const active = sheet !== undefined && sheet.type === "character" && !sheet.retired;
+      let full = mark;
+      const called = (named: typeof sheet, fallback: string) => (named === undefined ? fallback : (labels.get(named.id)?.label ?? named.name));
       if (reading === "cast" && block.speaker !== undefined) {
-        mark = sheet?.name ?? block.speaker;
+        mark = called(sheet, block.speaker);
+        full = sheet?.name ?? block.speaker;
         const reader = !active || sheet.voice === undefined ? null : readerOf(sheet.voice, world?.clonedVoices);
         if (reader === null) markWarn = true;
         else assigned = reader;
       } else if (block.speaker !== undefined) {
-        mark = sheet?.name ?? block.speaker;
+        mark = called(sheet, block.speaker);
+        full = sheet?.name ?? block.speaker;
       }
       const take = recordOrNull?.takes[block.key];
       const artifact = take === undefined ? null : (world?.artifacts.find((candidate) => candidate.id === take.artifactId) ?? null);
@@ -438,7 +446,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         const key = audiobookSpeakerKey(turn);
         if (key === null) return [];
         const sheetOf = turn.sheet === undefined ? undefined : world?.sheets.find((candidate) => candidate.id === turn.sheet);
-        return [[key, { key, label: sheetOf?.name ?? turn.speaker ?? key, colour: turn.sheet === undefined ? null : (colours.get(turn.sheet) ?? null) }] as const];
+        return [[key, { key, label: called(sheetOf, turn.speaker ?? key), full: sheetOf?.name ?? turn.speaker ?? key, colour: turn.sheet === undefined ? null : (colours.get(turn.sheet) ?? null) }] as const];
       })).values()];
       // The turns as rows (design turn 190): each found in the block's words in order, so the
       // rows draw at the offsets the words keep. One not found leaves the block a single row.
@@ -452,12 +460,15 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
           const key = audiobookSpeakerKey(turn);
           const sheetOf = turn.sheet === undefined ? undefined : world?.sheets.find((candidate) => candidate.id === turn.sheet);
           const tone = key === null ? "narrator" : turn.sheet === undefined ? "none" : String(colours.get(turn.sheet) ?? "none");
-          marks.push({ at: marks.length === 0 ? 0 : found, label: key === null ? "narrator" : (sheetOf?.name ?? turn.speaker ?? key), tone });
+          marks.push({ at: marks.length === 0 ? 0 : found, label: key === null ? "narrator" : called(sheetOf, turn.speaker ?? key), full: key === null ? "narrator" : (sheetOf?.name ?? turn.speaker ?? key), tone });
           from = found + turn.text.length;
         }
         return marks;
       })();
-      if (turnMarks !== undefined) mark = turnMarks[0]!.label;
+      if (turnMarks !== undefined) {
+        mark = turnMarks[0]!.label;
+        full = turnMarks[0]!.full ?? mark;
+      }
       const recorded = take?.source === "recorded";
       const byPerson = recordedKeys.has(audiobookRecordingKey(block));
       const direction = rowDirection(recordOrNull, block);
@@ -480,6 +491,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         proposed: proposedInput === undefined ? null : { input: proposedInput, held: proposedView?.held ?? [], sentAs: proposedView?.sentAs ?? null, readingHeld: proposedView?.readingHeld ?? [] },
         ...(note !== undefined ? { note } : {}),
         mark,
+        full,
         markWarn,
         assigned,
         speaker,
@@ -497,24 +509,24 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         byNarrator: speaker === narrator,
       };
     });
-  }, [derived.blocks, narrator, reading, world, recordOrNull, hasArtifact, catalogue, modelOf, colours, recordedKeys, notes, readingNotes, proposal]);
+  }, [derived.blocks, narrator, reading, world, labels, recordOrNull, hasArtifact, catalogue, modelOf, colours, recordedKeys, notes, readingNotes, proposal]);
   // The filter is the page's (R-33): not kept, and gone with the chapter.
   const [filter, setFilter] = useState<AudiobookFilter>(null);
   useEffect(() => setFilter(null), [chapter.id]);
   /** The filter row: everyone, the narrator, then each speaker in colour order and the names no sheet carries after. */
   const filters = useMemo(() => {
-    const speakers = new Map<string, { key: string; label: string; colour: number | null; count: number }>();
+    const speakers = new Map<string, { key: string; label: string; full: string; colour: number | null; count: number }>();
     for (const row of rows) {
       // A block of several turns counts each speaker in it once (design turn 190).
       for (const who of row.speakers ?? []) {
         const held = speakers.get(who.key);
         if (held !== undefined) held.count += 1;
-        else speakers.set(who.key, { key: who.key, label: who.label, colour: who.colour, count: 1 });
+        else speakers.set(who.key, { key: who.key, label: who.label, full: who.full, colour: who.colour, count: 1 });
       }
       if (row.speakerKey === null) continue;
       const held = speakers.get(row.speakerKey);
       if (held !== undefined) held.count += 1;
-      else speakers.set(row.speakerKey, { key: row.speakerKey, label: row.mark, colour: row.colour, count: 1 });
+      else speakers.set(row.speakerKey, { key: row.speakerKey, label: row.mark, full: row.full, colour: row.colour, count: 1 });
     }
     return {
       everyone: rows.length,
@@ -1444,7 +1456,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
               <button
                 type="button"
                 className={`fy-ab__speaker fy-ab__speaker--press${menu?.key === row.block.key && menu.selection === undefined ? " fy-ab__speaker--open" : ""}`}
-                title={row.markWarn ? `${row.mark} · narrator` : row.mark}
+                title={row.markWarn ? `${row.full} · narrator` : row.full}
                 aria-haspopup="menu"
                 aria-expanded={menu?.key === row.block.key}
                 onClick={(event) => {
@@ -1456,7 +1468,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
                 <span className={`fy-ab__mark${row.markWarn ? " fy-ab__mark--warn" : ""}`}>{row.mark}</span>
               </button>
             ) : (
-              <span className="fy-ab__speaker" title={row.markWarn ? `${row.mark} · narrator` : row.mark}>
+              <span className="fy-ab__speaker" title={row.markWarn ? `${row.full} · narrator` : row.full}>
                 <i className="fy-ab__speaker-dot" aria-hidden="true" />
                 <span className={`fy-ab__mark${row.markWarn ? " fy-ab__mark--warn" : ""}`}>{row.mark}</span>
               </span>
@@ -2349,9 +2361,11 @@ export function blockTakes(artifacts: readonly ArtifactSidecar[], productionId: 
  * state; a flag's reason under it when there is one. The reader in words, never a provider's id
  * (turn 165).
  */
-export function blockPanelHead(row: BlockRow, rows: readonly BlockRow[], record: ChapterAudiobook | null, chapterTitle: string, names: Parameters<typeof voiceDisplayLabel>[1]): { title: string; sub: string; flag: string | null } {
+export function blockPanelHead(row: BlockRow, rows: readonly BlockRow[], record: ChapterAudiobook | null, chapterTitle: string, names: Parameters<typeof voiceDisplayLabel>[1]): { title: string; /** The title with every name in full, for its tooltip, where it differs. */ full?: string; sub: string; flag: string | null } {
   const who = row.turnMarks !== undefined ? [...new Set(row.turnMarks.map((turn) => turn.label))] : [row.speakerKey === null ? "narrator" : row.mark];
+  const whoFull = row.turnMarks !== undefined ? [...new Set(row.turnMarks.map((turn) => turn.full ?? turn.label))] : [row.speakerKey === null ? "narrator" : row.full];
   const title = row.block.key === AUDIOBOOK_TITLE_KEY ? `Title · ${chapterTitle}` : `Block ${rows.indexOf(row) + 1} · ${who.join(", ")}`;
+  const full = row.block.key === AUDIOBOOK_TITLE_KEY ? title : `Block ${rows.indexOf(row) + 1} · ${whoFull.join(", ")}`;
   const lines = row.turnMarks?.length ?? 1;
   const take = record?.takes[row.block.key];
   const seconds = row.state === "made" ? (row.artifact?.mediaInfo?.durationSec ?? take?.grouped?.durationSec ?? null) : null;
@@ -2364,7 +2378,7 @@ export function blockPanelHead(row: BlockRow, rows: readonly BlockRow[], record:
     STATE_LABEL[row.state],
   ].join(" · ");
   const flag = record?.flags[row.block.key];
-  return { title, sub, flag: row.state === "flagged" && flag !== undefined && flag.split === undefined ? flag.reason : null };
+  return { title, ...(full !== title ? { full } : {}), sub, flag: row.state === "flagged" && flag !== undefined && flag.split === undefined ? flag.reason : null };
 }
 
 /**
@@ -2374,7 +2388,7 @@ export function blockPanelHead(row: BlockRow, rows: readonly BlockRow[], record:
  * the sheet's own head names the block, so the panel's title steps back.
  */
 export function BlockPanel({ head, tab, onTab, facts, onClose, children }: {
-  head: { title: string; sub: string; flag: string | null };
+  head: { title: string; full?: string; sub: string; flag: string | null };
   tab: PanelTab;
   onTab: (tab: PanelTab) => void;
   facts: Partial<Record<PanelTab, string>>;
@@ -2386,7 +2400,7 @@ export function BlockPanel({ head, tab, onTab, facts, onClose, children }: {
     <section className="fy-abp" data-testid="audiobook-block-panel">
       <header className="fy-abp__head" data-testid="audiobook-block">
         <div className="fy-abp__title">
-          <h2 data-testid="audiobook-block-title">{head.title}</h2>
+          <h2 data-testid="audiobook-block-title" {...(head.full !== undefined ? { title: head.full } : {})}>{head.title}</h2>
           <button type="button" className="fy-abp__x" aria-label="Close" onClick={onClose}>
             <X size={14} />
           </button>

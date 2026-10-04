@@ -24,6 +24,8 @@ import {
   unattendedProposalsOf,
   productionShape,
   worldSheets,
+  SHORT_NAME_MAX,
+  defaultShortName,
   type CanonEntry,
   type FrameRate,
   type PendingSheet,
@@ -1830,6 +1832,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   });
   const sheetRefsMap = useSheetRefs();
   const [renaming, setRenaming] = useState<string | null>(null);
+  // A character's short name, edited with the name (design turn 194, rule 12b); empty is the default.
+  const [shortDraft, setShortDraft] = useState("");
   const [duplicating, setDuplicating] = useState<string | null>(null);
   const lifecycle = useSingleAct();
   const { talk: talkAboutSheet, starting: sheetTalkStarting } = useTalkItThrough(worldId);
@@ -2096,7 +2100,10 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         <IconButton
           label="Rename"
           aria-pressed={renaming !== null}
-          onClick={() => setRenaming(renaming === null ? sheet.name : null)}
+          onClick={() => {
+            setShortDraft(sheet.shortName ?? "");
+            setRenaming(renaming === null ? sheet.name : null);
+          }}
         >
           <Pencil />
         </IconButton>
@@ -2134,12 +2141,25 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
             <label className="scr-field__label">New name — the id and every citation stay</label>
             <Input value={renaming} onChange={(e) => setRenaming(e.target.value)} />
           </div>
+          {/* What rows, filters and panel titles call a character; the full name stays here and on the Cast page. */}
+          {isCharacter && (
+            <div className="scr-field">
+              <label className="scr-field__label">Short name</label>
+              <Input
+                value={shortDraft}
+                maxLength={SHORT_NAME_MAX}
+                placeholder={defaultShortName(renaming)}
+                data-testid="sheet-short-name"
+                onChange={(e) => setShortDraft(e.target.value)}
+              />
+            </div>
+          )}
           <div className="fy-sheet-inline-form__actions">
             <Button
               variant="primary"
-              disabled={renaming.trim().length === 0 || renaming.trim() === sheet.name}
+              disabled={renaming.trim().length === 0 || (renaming.trim() === sheet.name && (!isCharacter || shortDraft.trim() === (sheet.shortName ?? "")))}
               onClick={() => {
-                if (worldId) lifecycle.track(renameSheet(worldId, sheetPath, renaming.trim()));
+                if (worldId) lifecycle.track(renameSheet(worldId, sheetPath, renaming.trim(), isCharacter && shortDraft.trim() !== (sheet.shortName ?? "") ? shortDraft.trim() : undefined));
               }}
             >
               Rename
