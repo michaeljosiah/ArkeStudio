@@ -159,8 +159,10 @@ describe("the candidates of a look for a chapter", () => {
   // Ife's close view, and her look's candidates, were refused by the safety check for the look line's own words.
   it("names the clothes neutrally in the requests the app writes, and keeps the look's own words as its prompt", () => {
     const line = "Long knotless braids in a low twist, a low-backed cream-gold silk slip dress, bare shoulders, heavy old-gold hoops and stacked bangles.";
+    // The sheet's own words ride in the same request (codex on PR 1559).
+    const ife = { ...(sheet as object), sections: [{ heading: "Appearance", body: "Tall, braids to the waist, bare shoulders." }] } as never;
     for (const framing of ["close", "full-body"] as const) {
-      const [request] = characterLookRequests(meta, direction as never, sheet, kit, MODEL, { kind: "costume", mode: "stay-close", prompt: line, count: 1, generationKey: "g6", framing, ...(framing === "close" ? { closeOf: { file: "references/maren-kest/takes/tk_I/i.png", lookId: "tk_I" } } : {}) });
+      const [request] = characterLookRequests(meta, direction as never, ife, kit, MODEL, { kind: "costume", mode: "stay-close", prompt: line, count: 1, generationKey: "g6", framing, ...(framing === "close" ? { closeOf: { file: "references/maren-kest/takes/tk_I/i.png", lookId: "tk_I" } } : {}) });
       const prompt = String(request!.input.params["prompt"]);
       for (const words of ["bare shoulders", "low-backed", "slip dress"]) assert.ok(!prompt.includes(words), `${framing}: ${words}`);
       assert.match(prompt, /a cream-gold silk evening dress, heavy old-gold hoops and stacked bangles/);

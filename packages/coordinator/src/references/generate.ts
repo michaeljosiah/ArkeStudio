@@ -396,6 +396,8 @@ export function characterLookRequests(
   // colour, never skin, cut or body — a close view of Ife's look line was refused by the safety
   // check. The look's own words are kept as its `lookPrompt`; only the request is plain.
   const clothing = input.framing === undefined ? input.prompt : neutralClothing(input.prompt);
+  // The sheet's own words ride in the same request, and can say the same things (codex on PR 1559).
+  const described = input.framing === undefined ? sheetDescription(sheet) : neutralClothing(sheetDescription(sheet));
   return Array.from({ length: input.count }, (_, index) => ({
     estimatedMicroUsd,
     input: {
@@ -405,7 +407,7 @@ export function characterLookRequests(
       provider: model.provider,
       model: model.id,
       params: {
-        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${clothing}.${framed} ${input.mode === "stay-close" ? "Stay close to the accepted identity and proportions." : "Push the styling while preserving the accepted identity."} Optional ${input.kind.replace("-", " ")} exploration; do not redefine identity.${imageConstraintSuffix(direction)}`,
+        prompt: `${style}. ${sheet.name} — ${described}. ${clothing}.${framed} ${input.mode === "stay-close" ? "Stay close to the accepted identity and proportions." : "Push the styling while preserving the accepted identity."} Optional ${input.kind.replace("-", " ")} exploration; do not redefine identity.${imageConstraintSuffix(direction)}`,
         references: identityReferences,
         referenceRoles,
         output: characterImageOutput(model, "character-look", tier),

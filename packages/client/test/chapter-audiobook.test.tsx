@@ -1656,6 +1656,20 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.deepEqual([sent.blocks, sent.without, sent.confirmedMicroUsd], [["p0.0", "p3.0"], ["p3.0"], 80_000], "named, so the coordinator makes it");
   });
 
+  it("holds a row refused again after Try again: the consent was for the run that ended", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    const refused = (reason: string) => ({ ...PROPOSAL, rows: [PROPOSAL.rows[0]!, row("p3.0", { at: 150, refused: reason })] });
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: refused("refused by the image safety check") }));
+    await act(async () => (q(m, '[data-block="p3.0"] [data-testid="illustration-retry"]') as HTMLButtonElement).click());
+    assert.equal(q(m, '[data-testid="illustration-row"][data-block="p3.0"]')!.dataset.state, "ready");
+    await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.progress", ...ids, progress: { proposalId: "ill-1", state: "done", total: 2, made: ["p0.0"], failed: [{ block: "p3.0", reason: "refused by the image safety check" }], spentMicroUsd: 40_000, confirmedMicroUsd: 80_000 } }));
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...refused("refused by the image safety check"), rows: [row("p3.0", { at: 150, refused: "refused by the image safety check" })] } }));
+    assert.equal(q(m, '[data-testid="illustration-row"][data-block="p3.0"]')!.dataset.state, "refused", "held again, not sent on the next Accept");
+    assert.equal((q(m, '[data-testid="illustration-accept"]') as HTMLButtonElement).disabled, true, "nothing to make until Try again");
+  });
+
   it("does not send a refused row the author left held", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m);

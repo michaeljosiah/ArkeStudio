@@ -100,6 +100,8 @@ export function briefLines(store: Pick<WorldStore, "getBundle">, look: Audiobook
     const chosen = line.lookId === undefined || sheet === undefined ? undefined : kits.find((kit) => kit.sheetId === sheet)?.looks?.find((candidate) => candidate.id === line.lookId);
     // The look's image carries the clothes, so its line is given neutrally (rule 4, 2026-10-04): the
     // garment and its colour, never the skin, the cut or the body a model would copy word for word.
+    // Given before the frame is known, so a detail shot (no image rides) reads the neutral line too:
+    // a hand or a cuff loses nothing to it, and the cut words are what the safety check refuses.
     return { label: line.label, key: line.key, text: chosen !== undefined ? neutralClothing(line.text) : line.text, ...(chosen !== undefined ? { look: lookName(chosen) } : {}) };
   });
 }
@@ -110,7 +112,8 @@ export function briefLines(store: Pick<WorldStore, "getBundle">, look: Audiobook
  * safety check refuses the picture for those words while the image itself shows the dress.
  */
 export function neutralWhereLooksRide(prompt: string, who: readonly PictureWho[]): string {
-  return who.some((entry) => entry.kind === "character" && entry.look !== undefined && entry.reference !== null) ? neutralClothing(prompt) : prompt;
+  // Rides means carried: a look the model's reference budget left out sends no image (codex on PR 1559).
+  return who.some((entry) => entry.kind === "character" && entry.look !== undefined && entry.carried) ? neutralClothing(prompt) : prompt;
 }
 
 /** A prompt held to its cap: cut after the last whole sentence that fits, else at a word. */

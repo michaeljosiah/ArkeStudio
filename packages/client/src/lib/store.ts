@@ -2107,7 +2107,8 @@ function handleFrame(json: string): void {
             state: "proposed",
             proposal: event.proposal,
             skipped: (before?.skipped ?? []).filter((block) => present.has(block)),
-            without: (before?.without ?? []).filter((block) => present.has(block)),
+            // A row refused again is held again: consent to try it was for the run that just ended (codex on PR 1559).
+            without: (before?.without ?? []).filter((block) => present.has(block) && event.proposal!.rows.find((row) => row.block === block)?.refused === undefined),
             ...((before?.state === "done" || before?.state === "stopped") && before.progress !== undefined ? { progress: before.progress } : {}),
           },
         };

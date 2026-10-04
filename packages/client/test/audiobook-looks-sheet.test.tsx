@@ -302,6 +302,35 @@ describe("the close view, once asked for (2026-10-04)", () => {
     assert.equal(bodyAll('[data-testid="look-accept-close"]').length, 0);
   });
 
+  it("offers the close view again when the snapshot after Accept has no close view on the look", async () => {
+    const m = await mount(chosenHarbour(), state([STORM, HARBOUR], [arrived]));
+    await press(bodyAll('[data-testid="look-accept-close"]')[0]);
+    assert.ok(bodyAll('[data-testid="look-close-accepted"]')[0]);
+    await rerender(m, state([STORM, HARBOUR], [arrived]), chosenHarbour());
+    assert.equal(bodyAll('[data-testid="look-close-accepted"]').length, 0, "not saving for good");
+    assert.ok(bodyAll('[data-testid="look-accept-close"]')[0], "Accept is there again");
+  });
+
+  it("clears an earlier refusal when a line is written again", async () => {
+    const m = await mount(LOOK());
+    const mood = bodyAll('[data-key="mood"] textarea')[0] as HTMLTextAreaElement;
+    const type = async (words: string) => {
+      const key = Object.keys(mood).find((candidate) => candidate.startsWith("__reactProps$"))!;
+      const props = (mood as unknown as Record<string, { onChange: (e: unknown) => void; onBlur: () => void }>)[key]!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(Object.getPrototypeOf(mood), "value")?.set?.call(mood, words);
+        props.onChange({ target: mood, currentTarget: mood });
+      });
+      await act(async () => (mood as unknown as Record<string, { onBlur: () => void }>)[key]!.onBlur());
+    };
+    await type("Grey dawn light.");
+    const first = sentOf(m, "set-audiobook-look")[0]!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "saltlight", chapterId: "07-the-tenth-key", requestId: first.requestId, refused: "that is not a line the look can hold" }));
+    assert.ok(bodyAll('[data-testid="look-refused"]')[0]);
+    await type("Grey dawn light, fine grain.");
+    assert.equal(bodyAll('[data-testid="look-refused"]').length, 0);
+  });
+
   it("prices Make close view as the job is priced: one picture from two references", async () => {
     const REAL: ManifestModel = { ...GPT, pricing: { kind: "perImage", microUsdPerImage: 53_000, microUsdPerReferenceImage: 100_000 } };
     const world = state();

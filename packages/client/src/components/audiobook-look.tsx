@@ -323,7 +323,10 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
   /** Close views asked for here, by look: the request whose job is that row's. */
   const [closeAsked, setCloseAsked] = useState<Record<string, string>>({});
   /** Close views accepted or discarded here, shown so at once: the kit's snapshot follows. */
-  const [closeAccepted, setCloseAccepted] = useState<Record<string, string>>({});
+  // Held only until the world's next snapshot, which the coordinator sends after every accept: if
+  // that snapshot's kit has no close view the accept did not land, and the row offers it again
+  // rather than saying `saving…` for good (codex on PR 1559).
+  const [closeAccepted, setCloseAccepted] = useState<Record<string, { path: string; under: unknown }>>({});
   const [discarded, setDiscarded] = useState<readonly string[]>([]);
   /**
    * Choices and line writes pressed and not yet in the record (2026-10-04, 0.5.60-local.14): the
@@ -383,6 +386,8 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
     setAsked(requestId);
   };
   const write = (target: LookTarget, text: string | null) => {
+    // A new write starts clean: an earlier refusal is not this one's (codex on PR 1559).
+    setRefused(null);
     const requestId = setAudiobookLook(worldId, productionId, chapterFile, target, text);
     if (requestId === null) return;
     asking.current.add(requestId);
@@ -419,7 +424,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
   /** The close view's row (R-118): accepted here, made and waiting, being made, or refused with its reason — never a spinner on a job that ended. */
   const closeStateFor = (sheet: string, chosen: CharacterLook): CloseViewState => {
     const accepted = closeAccepted[chosen.id];
-    if (accepted !== undefined) return { kind: "accepted", path: accepted };
+    if (accepted !== undefined && accepted.under === world) return { kind: "accepted", path: accepted.path };
     // A close view waiting to be accepted is the row's (a discarded one is gone at once, and Make
     // again discards before it asks, so a newer request never stands behind an older picture).
     const take = pendingClose(sheet, chosen.id);
@@ -463,7 +468,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
                 onMakeClose={makeClose}
                 onAcceptClose={(entry, chosen, take) => {
                   acceptChapterLook(worldId, entry.sheet!, take.id, { closeFor: chosen.id });
-                  setCloseAccepted((heldViews) => ({ ...heldViews, [chosen.id]: take.path }));
+                  setCloseAccepted((heldViews) => ({ ...heldViews, [chosen.id]: { path: take.path, under: world } }));
                 }}
                 onDiscardClose={(chosen, takeId, again) => {
                   rejectReferenceTake(worldId, takeId, "close view", again ? "made again" : "discarded");
