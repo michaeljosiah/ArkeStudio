@@ -531,3 +531,62 @@
 @container (max-width: 1299px) {
   [data-screen="chapter"]:is([data-view="audiobook"], [data-view="timing"]) .fy-ab__presstail { display: none; }
 }
+
+/*
+ * The Audiobook toolbar folded (design turn 194, rule 15, 194h). Below 1100 it is the view switch
+ * over one line of quiet presses — the reading, Notes, the filter and a ⋯ holding Direct and
+ * illustrate — and, on a phone, the Arke press stands in the app bar where the ⋯ menu was; Read and
+ * Listen are held at the foot, 44 high. The presses are the wide toolbar's own, 30 (32 with their
+ * border) high; where a finger is the pointer a press keeps its look and grows an invisible hit area
+ * to 44 rather than swelling the line. The page's gutter is 24 on a tablet and the master's 16 on a
+ * phone, `--ab-gutter`, which the block tint and the bars also run out to.
+ */
+.fy-ab__hold { display: none; }
+@media (max-width: 1099px) {
+  [data-screen="chapter"][data-view="audiobook"] { --ab-gutter: 24px; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-sw__centre { padding: 0 var(--ab-gutter); }
+  [data-screen="chapter"][data-view="audiobook"] :is(.fy-sw__head, .fy-ch__body) { max-width: none; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline { position: relative; flex-wrap: wrap; align-items: center; gap: 0 6px; margin: 0 calc(-1 * var(--ab-gutter)); padding: 10px var(--ab-gutter); border-bottom: 1px solid var(--border); font: var(--type-ui); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__compact-actions { display: none; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewrow { align-self: center; margin-bottom: 8px; padding: 0; border: 1px solid var(--border); border-radius: 9px; background: transparent; overflow: hidden; flex: none; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewrow .fy-seg__item { height: 30px; min-height: 0; min-width: 0; padding: 0 13px; border-radius: 0; box-shadow: none; font: var(--type-label); color: var(--muted-foreground); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewrow .fy-seg__item--active { background: var(--secondary); color: var(--foreground); font-weight: 600; }
+  /* The reading is the line's quiet press, its voice's name giving way before the presses do. */
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__reading { flex: 1 1 0; min-width: 0; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__reading-press { height: 32px; min-height: 0; max-width: 100%; padding: 0 2px; border: 1px solid transparent; font: var(--type-label); color: var(--muted-foreground); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__reading-press b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--foreground); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__reading-press svg { width: 13px; height: 13px; flex: none; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__pill { padding: 0 8px; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__ico { width: 24px; }
+  /* Under the line, the menus take the line's own width and edge: the line, not the press, is what they hang from. */
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline :is(.fy-ab__tool, .fy-ab__reading) { position: static; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__reading-menu { top: calc(100% - 6px); left: var(--ab-gutter); max-width: calc(100vw - 2 * var(--ab-gutter)); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__notes { top: calc(100% - 6px); left: var(--ab-gutter); right: var(--ab-gutter); width: auto; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__toolmenu { top: calc(100% - 6px); left: auto; right: var(--ab-gutter); min-width: min(284px, calc(100vw - 2 * var(--ab-gutter))); max-width: calc(100vw - 2 * var(--ab-gutter)); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline > .fy-ab__control { gap: 6px; flex: none; }
+  /* The view switch takes the phone's whole line; a tablet's keeps its own width. */
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__block--selected { margin-inline: calc(-1 * var(--ab-gutter)); padding-inline: calc(var(--ab-gutter) - 3px) var(--ab-gutter); }
+  /* Read and Listen, held at the foot. */
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; margin: 0 calc(-1 * var(--ab-gutter)); padding: 10px var(--ab-gutter) calc(14px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border); background: var(--background); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold > :is(.ui-btn, .fy-ab__pill) { flex: 1; min-width: 0; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold > .fy-ab__control { flex: 1 1 100%; flex-wrap: wrap; align-items: center; gap: 8px; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold :is(.ui-btn, .fy-ab__pill) { justify-content: center; height: auto; min-height: 44px; padding: 0 11px; gap: 6px; border-radius: 8px; font: var(--type-label); text-align: center; box-shadow: none; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold .ui-btn--primary { font-weight: 600; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold .ui-btn--ghost { border-color: var(--border); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold .ui-btn svg { width: 13px; height: 13px; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold .fy-ab__control > :is(.ui-btn, .fy-ab__pill) { flex: 1 1 auto; }
+}
+@media (max-width: 599px) {
+  [data-screen="chapter"][data-view="audiobook"] { --ab-gutter: 16px; }
+  /* 194h's filter is `Everyone ▾`: the count is in its menu, where each speaker has its own. */
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline [data-testid="audiobook-filter"] em { display: none; }
+  /* The master's switch fills its line, each of the three the same share of it. */
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewrow { display: flex; flex: 1 1 100%; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewrow .fy-seg__item { flex: 1; justify-content: center; padding-inline: 0; }
+  /* The bar above it spans the same edge, with no space left between them. */
+  [data-screen="chapter"][data-view="audiobook"] .fy-scene-back { margin: 0 calc(-1 * var(--ab-gutter)); }
+}
+@media (max-width: 1099px) and (pointer: coarse) {
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline :is(.fy-ab__pill, .fy-ab__ico, .fy-ab__reading-press, .fy-seg__item) { position: relative; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline :is(.fy-ab__pill, .fy-ab__ico, .fy-ab__reading-press, .fy-seg__item)::after { content: ""; position: absolute; inset: -6px -3px; }
+}

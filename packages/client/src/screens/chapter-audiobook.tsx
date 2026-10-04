@@ -57,7 +57,7 @@ import { DirectedText, type TurnBreak, MarkerMenu, VIEW_HASH, cueLabel, heldWord
 // for the callers and tests that name them from the audiobook.
 export { cueLabel, markerLabel, type MarkerAt };
 import { useMediaQuery } from "../lib/media-query.js";
-import { ChevronDown, ChevronRight, Mic, PlaySolid, X } from "../components/icons.js";
+import { ChevronDown, ChevronRight, Mic, More, PlaySolid, X } from "../components/icons.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { Button } from "../components/ui.js";
 import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, usePlayback, useQueueAt } from "../lib/audio.js";
@@ -143,6 +143,8 @@ export interface ChapterAudiobookInput {
   beforeRead?: (intent: AudiobookIntent) => boolean;
   /** Listen is the head's primary (`listenLeads`): Direct and Read the chapter stand back beside it. */
   listenLeads?: boolean;
+  /** Below 1100 (design turn 194, rule 15): Direct and illustrate is the toolbar's ⋯ and the read is held at the foot, so the head says each in its own part. */
+  compact?: boolean;
   /**
    * Illustrate this chapter (design turn 191b), in the Direct and illustrate menu (194): its press,
    * whether it is working, whether a proposal is held (`Illustrate again`), the state the menu says
@@ -863,9 +865,14 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   }, [uploadId, staged]);
 
   const directable = rows.length > 0 && proposal === null && directionRun?.state !== "directing";
-  const head = (() => {
+  // The head in its two parts (design turn 194, rule 15): the Direct and illustrate menu and the
+  // read's own control. Wide, they are one control on the toolbar line; below 1100 the menu is the
+  // line's ⋯ and the read is held at the foot beside Listen. A state that takes the whole head — an
+  // upload to confirm, a price to confirm, a read running — is the read's part and leaves no menu.
+  const whole = (node: ReactNode) => ({ node, menu: null as ReactNode, read: node });
+  const headParts = (() => {
     if (upload !== null && run?.state !== "read") {
-      return (
+      return whole(
         <RemoteVoiceUploadConfirmation
           destinationLabel={upload.destination}
           destinationNotice={upload.notice}
@@ -884,7 +891,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     }
     if (run?.state === "priced" && run.price !== undefined && run.price.requests !== undefined) {
       // A grouped read is confirmed in its sheet (design turn 185a): the head says what is asked.
-      return (
+      return whole(
         <span className="fy-ab__control">
           <Button variant="primary" disabled data-testid="read-audiobook">
             Read the chapter · {run.toMake} block{run.toMake === 1 ? "" : "s"} · {run.price.requests} request{run.price.requests === 1 ? "" : "s"} · {speechPricePrefix(models, run.price.voices.map((voice) => voice.provider))}{formatMicroUsd(run.price.estimatedMicroUsd)}
@@ -902,7 +909,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       // what the author decides is how far the day's reads go. A priced speaker keeps the price
       // on the button, the day's line beside it (codex on PR 1475).
       const free = price.freePlan !== undefined ? freePlanAskCopy(price.freePlan) : null;
-      return (
+      return whole(
         <span className="fy-ab__control">
           <Button
             disabled={starting}
@@ -929,7 +936,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       );
     }
     if (reading_) {
-      return (
+      return whole(
         <span className="fy-ab__control">
           <span className="fy-mono" data-testid="audiobook-progress">
             {run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
@@ -961,6 +968,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       <ToolMenu
         label="Direct and illustrate"
         testId="direct-illustrate"
+        icon={input.compact === true}
         items={[
           {
             key: "direct",
@@ -987,30 +995,36 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         ]}
       />
     );
-    return (
-      <span className="fy-ab__control">
-        {menu}
-        {/* The read leads until a block is made and Listen takes the fill (turn 188). Short of room
-            it says `Read · price` (194, rule 1): the tails are their own boxes so the centre's
-            container query can drop them and keep the toolbar on one line. */}
-        {counts.toMake.length > 0 && (
-          <button type="button" className={`fy-ab__pill${input.listenLeads === true ? "" : " fy-ab__pill--pri"}`} disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
-            <span>Read<span className="fy-ab__presstail"> the chapter</span></span>
-            {SPOKEN_GAP}
-            {(() => {
-              const price = chapterEstimate > 0 ? `${tokenPriced ? "~" : ""}${formatMicroUsd(chapterEstimate)}` : plan;
-              return (
-                <em>
-                  <span className="fy-ab__presstail">· {counts.toMake.length} block{counts.toMake.length === 1 ? "" : "s"}{grouping.groups.length > 0 ? ` · ${grouping.requests} request${grouping.requests === 1 ? "" : "s"}` : ""}{price !== null ? " " : ""}</span>
-                  {price !== null ? `· ${price}` : ""}
-                </em>
-              );
-            })()}
-          </button>
-        )}
-      </span>
-    );
+    // The read leads until a block is made and Listen takes the fill (turn 188). Short of room it
+    // says `Read · price` (194, rule 1): the tails are their own boxes so the centre's container
+    // query can drop them and keep the toolbar on one line.
+    const read = counts.toMake.length > 0 ? (
+      <button type="button" className={`fy-ab__pill${input.listenLeads === true ? "" : " fy-ab__pill--pri"}`} disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
+        <span>Read<span className="fy-ab__presstail"> the chapter</span></span>
+        {SPOKEN_GAP}
+        {(() => {
+          const price = chapterEstimate > 0 ? `${tokenPriced ? "~" : ""}${formatMicroUsd(chapterEstimate)}` : plan;
+          return (
+            <em>
+              <span className="fy-ab__presstail">· {counts.toMake.length} block{counts.toMake.length === 1 ? "" : "s"}{grouping.groups.length > 0 ? ` · ${grouping.requests} request${grouping.requests === 1 ? "" : "s"}` : ""}{price !== null ? " " : ""}</span>
+              {price !== null ? `· ${price}` : ""}
+            </em>
+          );
+        })()}
+      </button>
+    ) : null;
+    return {
+      node: (
+        <span className="fy-ab__control">
+          {menu}
+          {read}
+        </span>
+      ),
+      menu,
+      read,
+    };
   })();
+  const head = headParts.node;
 
   // The chapter's Play, the mix as it will be heard (146's check), is the round press at the left of
   // the foot line (design turn 194, rule 4); while it plays the foot says the block and the time,
@@ -1129,6 +1143,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     setFilter,
     filters,
     head,
+    /** The head in two parts for below 1100 (design turn 194, rule 15): the menu as the toolbar's ⋯, the read to be held at the foot. */
+    headMenu: headParts.menu,
+    headRead: headParts.read,
     /** The foot line's Play (design turn 194, rule 4), and why the mix could not play where it could not. */
     footPlay,
     mixRefused: mixPlaying ? null : mixPlayer.refused,
@@ -1682,7 +1699,7 @@ export interface ToolMenuItem { key: string; label: string; state: string; disab
  * Direct and illustrate (design turn 194, rule 3): one press, its menu drawn with the reading
  * menu's primitive, each item saying where it stands. The items keep the head's handlers.
  */
-export function ToolMenu({ label, items, testId }: { label: string; items: readonly ToolMenuItem[]; testId?: string }) {
+export function ToolMenu({ label, items, testId, icon = false }: { label: string; items: readonly ToolMenuItem[]; testId?: string; /** Below 1100 (194, rule 15) the press is a ⋯ and the label is its name. */ icon?: boolean }) {
   const pop = usePopover();
   useEffect(() => {
     if (pop.open) pop.panel.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')?.focus();
@@ -1692,14 +1709,21 @@ export function ToolMenu({ label, items, testId }: { label: string; items: reado
       <button
         ref={pop.press}
         type="button"
-        className={`fy-ab__pill${pop.open ? " fy-ab__pill--on" : ""}`}
+        className={icon ? `fy-ab__ico${pop.open ? " fy-ab__ico--on" : ""}` : `fy-ab__pill${pop.open ? " fy-ab__pill--on" : ""}`}
         aria-haspopup="menu"
         aria-expanded={pop.open}
+        {...(icon ? { "aria-label": label, title: label } : {})}
         onClick={() => pop.setOpen((was) => !was)}
         {...(testId !== undefined ? { "data-testid": testId } : {})}
       >
-        {label}
-        <ChevronDown size={13} stroke={2} aria-hidden="true" />
+        {icon ? (
+          <More size={16} />
+        ) : (
+          <>
+            {label}
+            <ChevronDown size={13} stroke={2} aria-hidden="true" />
+          </>
+        )}
       </button>
       {pop.open && (
         <div ref={pop.panel} className="fy-ab__menu fy-ab__toolmenu fy-ab__toolmenu--end" role="menu" aria-label={label} onKeyDown={pop.onKey}>
