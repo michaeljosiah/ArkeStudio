@@ -1739,9 +1739,11 @@ export const TURN_RESULT_BOUNDS = {
   candidateOperations: 12,
   groupOperations: 6,
   actions: 12,
+  productionActions: 24,
+  productionEditorRequests: 6,
 } as const;
 
-export const WorldChatTurnResultSchema = valueSchema(z
+const WorldChatTurnResultObjectSchema = z
   .object({
     setupUpdate: ProductionSetupUpdateSchema.optional(),
     reply: z.string().max(TURN_RESULT_BOUNDS.reply),
@@ -1773,7 +1775,12 @@ export const WorldChatTurnResultSchema = valueSchema(z
     /** Exact world-authoring operations prepared as permission cards; none writes during the turn. */
     actions: z.array(ModelWorldChatActionSchema).max(TURN_RESULT_BOUNDS.actions).default([]),
   })
-  .strict());
+  .strict();
+export const WorldChatTurnResultSchema = valueSchema(WorldChatTurnResultObjectSchema);
+export const ProductionChatTurnResultSchema = valueSchema(WorldChatTurnResultObjectSchema.extend({
+  actions: z.array(ModelWorldChatActionSchema).max(TURN_RESULT_BOUNDS.productionActions).default([]),
+  editorRequests: z.array(ModelEditorRequestSchema).max(TURN_RESULT_BOUNDS.productionEditorRequests).default([]),
+}));
 export type WorldChatTurnResult = z.infer<typeof WorldChatTurnResultSchema>;
 
 // ---------------------------------------------------------------------------
@@ -2793,7 +2800,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-scene-restore": "Restore a scene to an earlier version.",
   "production-style": "Set the style this production's images and video are made in.",
   "production-prose-style": "Set the story's point of view, tense, voice and samples.",
-  "production-scene-command": "One change to a scene: edit its cast and place, insert, edit, move, duplicate or delete a shot, set a shot's staging or prompt override, or change its boards. Visual facts require the person's review on the shot panel and cannot be set here.",
+  "production-scene-command": "One command or an ordered commands list on a scene: cast and place, shots, staging, prompt overrides or boards. Independent commands on the same scene share an atomic card showing the resulting shot list. Explicit after dependencies stay separate cards. Use ref:name in a shot target to name the one shot a preceding action with ref=name creates; include that ref in after when it is a separate card. Visual facts require the person's review on the shot panel and cannot be set here.",
   "production-board-compile": "Compile a scene's storyboard from its shots and frames.",
   "production-board-export": "Export a scene's storyboard to a file the person chooses.",
   "production-take-import": "Import a take for a shot from a file the person picks.",
@@ -3039,7 +3046,7 @@ Return one JSON object and nothing else — no prose around it, no markdown fenc
 
 {"reply": "...", "candidateOperations": [...], "groupOperations": [...], "bibleEdits": [...], "editorRequests": [...], "sceneEdits": [...], "actions": [...]}
 
-reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn}, sceneEdits at most ${SCENE_EDIT_BOUNDS.perTurn}, actions at most ${TURN_RESULT_BOUNDS.actions}; all are [] when there is nothing to record.
+reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn} (${TURN_RESULT_BOUNDS.productionEditorRequests} in production threads), sceneEdits at most ${SCENE_EDIT_BOUNDS.perTurn}, actions at most ${TURN_RESULT_BOUNDS.actions} (${TURN_RESULT_BOUNDS.productionActions} in production threads); all are [] when there is nothing to record.
 
 A complete result:
 ${JSON.stringify(exampleTurnResult, null, 1)}

@@ -1,5 +1,15 @@
 # Running and validating changes
 
+Production sequencing (#1417, SPEC-051 R-14..R-17) is covered by contracts
+`test/turn-action-sequencing.test.ts` and coordinator `test/world-chat/actions.test.ts`,
+`turn-result.test.ts`, `generation-quotes.test.ts`, `production-generation.test.ts` and
+`test/productions/scene-commands.test.ts`. The cases cover fixed new-shot identities, blocked
+and denied parents, interrupted binding recovery before/after parent approval, schema-54
+reader refusal, prospective generation without dispatch, stale parent results, single-version
+atomic batches and combined selection cleanup. These tests use scripted actions and fake
+admission ports; the installed-app journey remains a separate acceptance check.
+
+
 Conversation image inspection (#1409) is covered by coordinator `test/world-chat/images.test.ts`
 (leased scope, cloud privacy, durable disclosures and byte receipts, key art/candidates/kits,
 prop states, artifacts, Bench takes, GIF/MKV codec delivery, cancellation, encoded payload

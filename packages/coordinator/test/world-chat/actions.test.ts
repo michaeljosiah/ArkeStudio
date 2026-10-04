@@ -2,6 +2,8 @@ import { benchReadRows } from "../../src/bench/chat-reads.js";
 import { productionReadFence } from "../../src/world-chat/production-reads.js";
 import { stageReferenceFrames } from "@arke-studio/contracts";
 import { GenerationQuotes } from "../../src/world-chat/generation-quotes.js";
+import { productionGenerationSource } from "../../src/world-chat/production-generation.js";
+import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { imageGenerationSource } from "../../src/world-chat/image-generation.js";
 import { ProductionTakeFiling } from "../../src/world-chat/production-take-filing.js";
 import { BenchStore, sessionDir, sessionMediaDir } from "../../src/bench/store.js";
@@ -18,6 +20,7 @@ import {
   ModelWorldChatActionSchema,
   WorldChatProductionSceneCommandActionSchema,
   orderedShots,
+  sceneCommandCandidate,
   orderedTrackClips,
   stageShot,
   ulid,
@@ -46,6 +49,7 @@ import { encodePng, solidImage } from "../../src/references/png.js";
 import { readKeyArtBrief } from "../../src/references/key-art-references.js";
 import { applyTurnBibleEdits, readBible } from "../../src/world/bible.js";
 import { WorldStore } from "../../src/world/store.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import {
   prepareWorldChatActions,
   worldChatActionAdapters,
@@ -53,6 +57,7 @@ import {
   type WorldChatActionTurn,
 } from "../../src/world-chat/actions.js";
 import { chapterDraftingBrief } from "../../src/world-chat/chapter-brief.js";
+import { sequenceTurnActions } from "../../src/world-chat/action-sequencing.js";
 import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
 import { ConversationImages } from "../../src/world-chat/images.js";
 import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
@@ -2595,4 +2600,246 @@ it("shows every omitted viewpoint beyond the card title limit (#967)", async () 
   const notice = card.shown.body.fields.find((field) => field.label === "Viewpoint characters")!.after!;
   assert.ok(notice.length > 200);
   for (let index = 1; index <= 20; index++) assert.ok(notice.includes(`chapter ${index}`));
+});
+
+describe("turn-local scene action sequencing (#1417)", () => {
+  const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
+  const scene = (w: Awaited<ReturnType<typeof setup>>) => w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.scenes.find(s => s.id === context.sceneId)!;
+  async function insertThenPrompt(bind = true) {
+    const w = await setup(context), before = structuredClone(scene(w));
+    const { id: _id, number: _number, visualFacts: _facts, ...shot } = orderedShots(before)[0]!;
+    const receipt = currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`);
+    const input = turn(w.conversationId, context, { receipts: [receipt], actions: [
+      ModelWorldChatActionSchema.parse({ kind: "production-scene-command", productionId: PRODUCTION, sceneId: context.sceneId,
+        ref: "insert", command: { kind: "insert-shot", at: { after: orderedShots(before)[2]!.id }, shot: { ...shot, title: "New low angle" } }, checkReceiptIds: [receipt.id] }),
+      ModelWorldChatActionSchema.parse({ kind: "production-scene-command", productionId: PRODUCTION, sceneId: context.sceneId,
+        ref: "prompt", after: ["insert"], command: { kind: "set-prompt-override", shotId: "ref:insert", text: "Low angle, looking up at the bell." }, checkReceiptIds: [receipt.id] }),
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, input);
+    await appendTurn(w.log, input, prepared);
+    if (bind) await bindAll(w.lifecycle, prepared);
+    return { w, before, prepared, cards: (await loaded(w.log)).actions };
+  }
+  it("previews two ordered cards with one fixed new shot and requires both approvals", async () => {
+    const { w, before, prepared, cards } = await insertThenPrompt();
+    assert.equal(cards.length, 2);
+    assert.deepEqual(cards[1]!.dependencies, [cards[0]!.actionId]);
+    assert.deepEqual(cards[1]!.availableDecisions, ["deny"]);
+    assert.match(cards[1]!.blockedReason ?? "", /required action|waiting/i);
+    const first = prepared[0]!.payload, second = prepared[1]!.payload;
+    assert.equal(first.kind, "world-chat-production-scene-command"); assert.equal(second.kind, first.kind);
+    if (first.kind !== "world-chat-production-scene-command" || second.kind !== first.kind) throw new Error("wrong action kind");
+    const newShot = orderedShots(first.scenePlan!.after).find(shot => !orderedShots(before).some(old => old.id === shot.id))!;
+    assert.equal(second.action.commands![0]!.kind, "set-prompt-override");
+    assert.ok(JSON.stringify(second.action).includes(newShot.id));
+    assert.ok(JSON.stringify(cards[1]!.shown.body).includes("Low angle, looking up at the bell."));
+    assert.deepEqual(scene(w), before, "preparation and binding do not edit the scene");
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).reason, "dependency-blocked");
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
+    assert.equal(orderedShots(scene(w)).find(shot => shot.id === newShot.id)!.promptOverride?.text, shotPrompt(before), "the first approval does not apply its dependent's prompt");
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).status, "completed");
+    assert.equal(orderedShots(scene(w)).find(shot => shot.id === newShot.id)!.promptOverride?.text, "Low angle, looking up at the bell.");
+    assert.equal(scene(w).version, before.version + 2);
+  });
+  function shotPrompt(before: ReturnType<typeof scene>) { return orderedShots(before)[0]!.promptOverride?.text; }
+  for (const parentCompleted of [false, true]) it(`recovers an interrupted dependent binding with its parent ${parentCompleted ? "completed" : "pending"}`, async () => {
+    const { w, before, prepared } = await insertThenPrompt(false);
+    await w.lifecycle.bindIntent(prepared[0]!.intent, prepared[0]!.payload);
+    if (parentCompleted) assert.equal((await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!)).status, "completed");
+    const adapter = w.adapters.find(adapter => adapter.actionKind === prepared[1]!.intent.actionKind)!;
+    await adapter.prepare!({ intent: prepared[1]!.intent, payload: prepared[1]!.payload });
+    assert.equal(w.store.getBundle().meta.schemaVersion, 55);
+    await assert.rejects(readWorldMeta(w.store.dir, { supports: 54 }), /newer Arke Studio/);
+    await w.store.close();
+    const reopened = await WorldStore.open(w.store.dir, { clock: NOW });
+    closeOnCleanup(() => reopened.close());
+    const lifecycle = new ConversationActionLifecycle({ worldPath: reopened.dir, worldId: reopened.worldId, now: NOW,
+      adapters: worldChatActionAdapters(reopened, new ProposalManager(reopened), NOW) });
+    assert.deepEqual(await lifecycle.recoverConversation(w.conversationId), { prepared: 1, reconciled: 0, failed: 0 });
+    const cards = (await loaded(w.log)).actions;
+    assert.deepEqual(cards[1]!.dependencies, [cards[0]!.actionId]);
+    if (!parentCompleted) {
+      assert.equal((await decide(lifecycle, w.log, cards[1]!)).reason, "dependency-blocked");
+      assert.equal((await decide(lifecycle, w.log, cards[0]!)).status, "completed");
+    }
+    assert.equal((await decide(lifecycle, w.log, cards[1]!)).status, "completed");
+    const actual = reopened.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.scenes.find(s => s.id === context.sceneId)!;
+    assert.equal(actual.version, before.version + 2);
+    assert.equal(orderedShots(actual).find(s => !orderedShots(before).some(old => old.id === s.id))!.promptOverride?.text, "Low angle, looking up at the bell.");
+  });
+  it("keeps a denied dependency blocked and leaves all scene bytes unchanged", async () => {
+    const { w, before, cards } = await insertThenPrompt();
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!, "deny")).status, "denied");
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).reason, "dependency-blocked");
+    assert.deepEqual(scene(w), before);
+  });
+  it("refuses a fixed insert identity when another scene claimed it after preview", async () => {
+    const { w, before, cards } = await insertThenPrompt();
+    const production = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
+    const other = production.scenes.find(s => s.id !== context.sceneId)!;
+    const { id: _id, number: _number, visualFacts: _facts, ...shot } = orderedShots(before)[0]!;
+    await applySceneCommand(w.store, { productionId: PRODUCTION, sceneId: other.id, sceneFile: production.sceneFiles[other.id]!,
+      baseVersion: other.version, command: { kind: "insert-shot", at: { atStart: true }, shot } });
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).reason, "stale");
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).reason, "dependency-blocked");
+    assert.deepEqual(scene(w), before);
+  });
+  it("refuses a dependent whose parent's actual scene result changed", async () => {
+    const { w, cards } = await insertThenPrompt();
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
+    const production = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
+    await applySceneCommand(w.store, { productionId: PRODUCTION, sceneId: context.sceneId, sceneFile: production.sceneFiles[context.sceneId]!,
+      baseVersion: scene(w).version, command: { kind: "edit-scene", synopsis: "A later human edit." } });
+    const actual = structuredClone(scene(w));
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).reason, "stale");
+    assert.deepEqual(scene(w), actual);
+  });
+  it("groups three independent commands into one result preview and one version", async () => {
+    const w = await setup(context), before = structuredClone(scene(w));
+    const receipt = currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`), shots = orderedShots(before);
+    const commands = [{ kind: "edit-shot" as const, shotId: shots[0]!.id, change: { description: "The whole room listens." } },
+      { kind: "move-shot" as const, shotId: shots[0]!.id, to: { after: shots[1]!.id } },
+      { kind: "set-prompt-override" as const, shotId: shots[0]!.id, text: "A low angle." }];
+    const input = turn(w.conversationId, context, { receipts: [receipt], actions: commands.map(command => ({ kind: "production-scene-command", productionId: PRODUCTION,
+      sceneId: context.sceneId, command, checkReceiptIds: [receipt.id] })) });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, input);
+    assert.equal(prepared.length, 1);
+    await appendTurn(w.log, input, prepared); await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.ok(JSON.stringify(card.shown.body).includes("The whole room listens."));
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    assert.equal(orderedShots(scene(w))[1]!.id, shots[0]!.id);
+    assert.equal(orderedShots(scene(w))[1]!.promptOverride?.text, "A low angle.");
+    assert.equal(scene(w).version, before.version + 1);
+  });
+  it("writes nothing when the last command fails an authoritative world check", async () => {
+    const w = await setup(context), before = structuredClone(scene(w));
+    const receipt = currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`);
+    const input = turn(w.conversationId, context, { receipts: [receipt], actions: [{ kind: "production-scene-command", productionId: PRODUCTION, sceneId: context.sceneId,
+      commands: [{ kind: "edit-shot", shotId: orderedShots(before)[0]!.id, change: { description: "Must not land." } },
+        { kind: "edit-scene", inherits: { location: "never-there" } }], checkReceiptIds: [receipt.id] }] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, input);
+    await appendTurn(w.log, input, prepared); await bindAll(w.lifecycle, prepared);
+    assert.equal((await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!)).status, "failed");
+    assert.deepEqual(scene(w), before);
+  });
+  it("rejects unknown turn refs before appending a preparation intent", async () => {
+    const w = await setup(context), before = structuredClone(scene(w)), seq = (await loaded(w.log)).seq;
+    const receipt = currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`);
+    const input = turn(w.conversationId, context, { receipts: [receipt], actions: [{ kind: "production-scene-command", productionId: PRODUCTION, sceneId: context.sceneId,
+      after: ["another_turn"], command: { kind: "set-prompt-override", shotId: orderedShots(before)[0]!.id, text: "Must not land." }, checkReceiptIds: [receipt.id] }] });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, input), /not in this turn/);
+    assert.equal((await loaded(w.log)).seq, seq);
+    assert.deepEqual(scene(w), before);
+  });
+  it("refuses a created-shot ref that would alias a shot in another production", async () => {
+    const w = await setup(), bundle = w.store.getBundle();
+    const original = bundle.productions.find(p => p.meta.id === PRODUCTION)!, other = structuredClone(original);
+    other.meta.id = "other-production";
+    let projected = { ...bundle, productions: [...bundle.productions, other] };
+    const before = other.scenes.find(s => s.id === context.sceneId)!;
+    const command = { kind: "insert-shot" as const, at: { atStart: true as const }, shot: { title: "Fixed shot", description: "The bell", durationSec: 3 } };
+    const otherAfter = sceneCommandCandidate(projected, other.meta.id, before, command);
+    projected = { ...projected, productions: projected.productions.map(p => p.meta.id !== other.meta.id ? p : { ...p, scenes: p.scenes.map(s => s.id === before.id ? otherAfter : s) }) };
+    const receipt = currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`);
+    assert.throws(() => sequenceTurnActions(projected, [
+      { kind: "production-scene-command", productionId: PRODUCTION, sceneId: context.sceneId, ref: "insert", command, checkReceiptIds: [receipt.id] },
+      { kind: "production-take-generation", productionId: other.meta.id, sceneId: context.sceneId, after: ["insert"], target: { kind: "shot", shotId: "ref:insert" }, mode: "image", checkReceiptIds: [receipt.id] },
+    ]), /another production or scene/);
+  });
+  it("checks a different parent scene again inside the dependent batch's write gate", async () => {
+    const w = await setup(), production = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
+    const parent = production.scenes.find(s => s.id !== context.sceneId)!, before = structuredClone(scene(w));
+    const receipts = [currentReceipt(w.store, "scenes", `${PRODUCTION}:${parent.id}`), currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`)];
+    const input = turn(w.conversationId, w.entryContext, { receipts, actions: [
+      { kind: "production-scene-command", productionId: PRODUCTION, sceneId: parent.id, ref: "parent", command: { kind: "edit-scene", synopsis: "Reviewed parent" }, checkReceiptIds: [receipts[0]!.id] },
+      { kind: "production-scene-command", productionId: PRODUCTION, sceneId: context.sceneId, after: ["parent"], command: { kind: "edit-scene", synopsis: "Must not land" }, checkReceiptIds: [receipts[1]!.id] },
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, input);
+    await appendTurn(w.log, input, prepared); await bindAll(w.lifecycle, prepared);
+    const cards = (await loaded(w.log)).actions;
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
+    const adapter = w.adapters.find(a => a.actionKind === cards[1]!.actionKind)!;
+    assert.deepEqual(await adapter.validate(cards[1]!), { ok: true });
+    const gateOp = w.store.gateOp.bind(w.store);
+    let armed = true;
+    w.store.gateOp = async operation => {
+      if (armed) {
+        armed = false;
+        const current = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.scenes.find(s => s.id === parent.id)!;
+        await applySceneCommand(w.store, { productionId: PRODUCTION, sceneFile: production.sceneFiles[parent.id]!, sceneId: parent.id,
+          baseVersion: current.version, command: { kind: "edit-scene", synopsis: "Moved before the child acquired the gate" } });
+      }
+      return gateOp(operation);
+    };
+    try { assert.equal((await adapter.execute(cards[1]!)).status, "stale"); }
+    finally { w.store.gateOp = gateOp; }
+    assert.deepEqual(scene(w), before);
+  });
+  for (const changedParent of [false, true]) it(`prepares production creation after a scene edit and ${changedParent ? "refuses a moved parent" : "creates only after its approval"}`, async () => {
+    const w = await setup(), receipts = [currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`),
+      currentReceipt(w.store, "production-metadata"), currentReceipt(w.store, "series")];
+    const input = turn(w.conversationId, w.entryContext, { receipts, actions: [
+      { kind: "production-scene-command", productionId: PRODUCTION, sceneId: context.sceneId, ref: "parent", command: { kind: "edit-scene", synopsis: "Reviewed parent" }, checkReceiptIds: [receipts[0]!.id] },
+      { kind: "production-create", after: ["parent"], production: { title: "After the bell", medium: "video", productionKind: "microdrama" }, checkReceiptIds: [receipts[1]!.id, receipts[2]!.id] },
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, input);
+    await appendTurn(w.log, input, prepared); await bindAll(w.lifecycle, prepared);
+    const cards = (await loaded(w.log)).actions;
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).reason, "dependency-blocked");
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
+    if (changedParent) {
+      const production = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
+      await applySceneCommand(w.store, { productionId: PRODUCTION, sceneFile: production.sceneFiles[context.sceneId]!, sceneId: context.sceneId,
+        baseVersion: scene(w).version, command: { kind: "edit-scene", synopsis: "Moved after review" } });
+    }
+    const result = await decide(w.lifecycle, w.log, cards[1]!);
+    assert.equal(result.status, changedParent ? "stale" : "completed");
+    assert.equal(w.store.getBundle().productions.some(p => p.meta.id === "after-the-bell"), !changedParent);
+  });
+  for (const changedParent of [false, true]) it(`quotes a future shot without dispatch and ${changedParent ? "refuses a changed dependency" : "dispatches only after every parent approval"}`, async () => {
+    const calls: EnqueueInput[] = [];
+    const w = await setup(context, store => ({ getJobs: () => [], getGenerationRouteRows: () => [],
+      productionGenerationQuotes: new GenerationQuotes(store, productionGenerationSource(store, {
+        manifest: { manifestVersion: 1, generated: "2026-10-04", models: [{ id: "future-image", provider: "fal", capability: "image", displayName: "Future image",
+          accepts: { referenceImages: 16, startFrame: false, endFrame: false }, limits: { aspects: ["16:9"] }, pricing: { kind: "perImage", microUsdPerImage: 40_000 } }] },
+        settings: async () => null, freeze: input => input,
+        sources: { read: async path => ({ hash: `sha256:${createHash("sha256").update(await readFile(join(store.dir, path))).digest("hex").slice(0, 16)}` }), durationSec: async () => 4 },
+      }), { enqueue: async input => { calls.push(input); }, jobs: () => [] }),
+    }));
+    const before = structuredClone(scene(w));
+    const { id: _id, number: _number, visualFacts: _facts, ...shot } = orderedShots(before)[0]!;
+    const receipts = [currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`), currentReceipt(w.store, "takes", PRODUCTION),
+      currentReceipt(w.store, "jobs"), currentReceipt(w.store, "generation-routes")];
+    const common = { productionId: PRODUCTION, sceneId: context.sceneId, checkReceiptIds: receipts.map(r => r.id) };
+    const input = turn(w.conversationId, context, { receipts, actions: [
+      ModelWorldChatActionSchema.parse({ ...common, kind: "production-scene-command", ref: "insert", command: { kind: "insert-shot", at: { atStart: true }, shot: { ...shot, title: "Future shot" } } }),
+      ModelWorldChatActionSchema.parse({ ...common, kind: "production-scene-command", ref: "prompt", after: ["insert"], command: { kind: "set-prompt-override", shotId: "ref:insert", text: "A low angle from the floor." } }),
+      ModelWorldChatActionSchema.parse({ ...common, kind: "production-take-generation", after: ["prompt"], target: { kind: "shot", shotId: "ref:insert" }, mode: "image", modelId: "future-image" }),
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, input, w.actionDeps);
+    await appendTurn(w.log, input, prepared); await bindAll(w.lifecycle, prepared);
+    const cards = (await loaded(w.log)).actions;
+    assert.equal(cards.length, 3); assert.equal(cards[2]!.shown.body.family, "generation");
+    assert.match(JSON.stringify(cards[2]!.shown.body), /A low angle from the floor/);
+    assert.equal(calls.length, 0);
+    assert.equal((await decide(w.lifecycle, w.log, cards[2]!)).reason, "dependency-blocked");
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
+    assert.equal(calls.length, 0);
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).status, "completed");
+    assert.equal(calls.length, 0);
+    if (changedParent) {
+      const production = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
+      await applySceneCommand(w.store, { productionId: PRODUCTION, sceneId: context.sceneId, sceneFile: production.sceneFiles[context.sceneId]!,
+        baseVersion: scene(w).version, command: { kind: "edit-scene", synopsis: "Changed after the dependency completed." } });
+      assert.equal((await decide(w.lifecycle, w.log, cards[2]!)).reason, "stale");
+      assert.equal(calls.length, 0);
+    } else {
+      assert.equal((await decide(w.lifecycle, w.log, cards[2]!)).status, "queued");
+      const inserted = orderedShots(scene(w)).find(s => !orderedShots(before).some(old => old.id === s.id))!;
+      assert.equal(calls.length, 1);
+      assert.deepEqual(calls[0]!.target, { kind: "shot", id: inserted.id, coversShots: [inserted.id] });
+      assert.deepEqual(scene(w).version, before.version + 2);
+    }
+  });
 });

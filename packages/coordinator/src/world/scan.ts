@@ -142,7 +142,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Fifty-two is a look chosen per character, the mood line and a look's close view (turn 193).
 // Fifty-three protects durable conversation image receipts/disclosures and world image privacy.
 // Fifty-four retains original landed-media hashes on immutable production takes.
-export const SUPPORTED_SCHEMA_VERSION = 54;
+// Fifty-five protects turn-local dependencies, frozen scene batches and prospective generation quotes.
+export const SUPPORTED_SCHEMA_VERSION = 55;
 
 export class WorldOpenError extends Error {
   constructor(

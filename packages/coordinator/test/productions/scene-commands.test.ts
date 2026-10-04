@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { linearizeSceneFlow, orderedShots, SceneRecordSchema, type SceneRecord, type ShotStaging } from "@arke-studio/contracts";
+import { linearizeSceneFlow, orderedShots, sceneCommandBatchCandidate, SceneRecordSchema, type SceneRecord, type ShotStaging } from "@arke-studio/contracts";
 import {
   applySceneCommand,
+  applySceneCommands,
   sceneCommandFrom,
   SceneCommandRefused,
   SceneVersionMoved,
@@ -71,6 +72,25 @@ const nodeIdOf = (record: SceneRecord, shotId: string): string => {
   assert.ok(sequence.kind === "linear");
   return sequence.shots.find((pair) => pair.shot.id === shotId)!.nodeId;
 };
+
+describe("atomic scene command batches (SPEC-051 R-16)", () => {
+  it("removes both deleted shots' selections in the same single-version commit", async () => {
+    const { dir, store } = await open(), before = await sceneOnDisk(store);
+    const targets = shotIds(before).slice(-2), path = `productions/${PRODUCTION}/selections.json`;
+    const raw = await readFile(join(dir, path), "utf8"), selections = JSON.parse(raw);
+    for (const target of targets) selections[target] = { acceptedTakeId: null, trimInSec: 1 };
+    await store.commit({ kind: "fixture-selections", source: "test", files: [{ path, action: "replace", content: JSON.stringify(selections), baseHash: sha256(raw) }] });
+    const commands = targets.map(shotId => ({ kind: "delete-shot" as const, shotId }));
+    const after = sceneCommandBatchCandidate(store.getBundle(), PRODUCTION, before, commands);
+    await applySceneCommands(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
+      commands, expectedBefore: before, expectedAfter: after });
+    assert.deepEqual(await sceneOnDisk(store), after);
+    assert.equal(after.version, before.version + 1);
+    const current = JSON.parse(await readFile(join(dir, path), "utf8"));
+    for (const target of targets) assert.equal(target in current, false);
+    for (const target of Object.keys(selections).filter(id => !targets.includes(id))) assert.deepEqual(current[target], selections[target]);
+  });
+});
 
 describe("insert, move and duplicate keep identity and refuse a stale version (T-9)", () => {
   it("inserts on the edge the anchor names, minting an id past the whole production", async () => {

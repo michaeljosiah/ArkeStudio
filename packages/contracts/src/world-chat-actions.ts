@@ -2,7 +2,7 @@ import { z } from "zod";
 import { PropAuthoringChangeSchema, PropIdSchema, PropStateIdSchema } from "./prop.js";
 export { ProductionCreationPlanSchema, type ProductionCreationPlan } from "./production-creation.js";
 import { ProductionCreationPlanSchema } from "./production-creation.js";
-import { ConversationActionSemanticIdSchema } from "./arke-actions.js";
+import { ArkeReadObservationSchema, ConversationActionSemanticIdSchema, type ArkeReadObservation } from "./arke-actions.js";
 import { AudioPolicySchema, FailureModesSchema, KeyArtIntentSchema } from "./art-direction.js";
 import { BenchModeSchema, BenchParamsSchema } from "./bench.js";
 import { BibleEditSchema } from "./bible.js";
@@ -28,6 +28,7 @@ import { CompilationFormatSchema, ReferenceAngleSchema } from "./reference.js";
 import { CapabilitySchema } from "./provider.js";
 import { ScriptBlockSchema, ShotFramingSchema } from "./scene.js";
 import { SceneCommandSchema } from "./scene-operations.js";
+import { SceneRecordSchema, type SceneRecord } from "./scene-flow.js";
 import { AudioSpineCommandSchema } from "./spine.js";
 import { SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { TimelineTrackIdSchema } from "./timeline.js";
@@ -46,6 +47,9 @@ const CandidateRevisionSchema = z
   .strict();
 
 const CompleteReadIdsSchema = z.array(CheckReceiptIdSchema).min(1).max(8);
+export const TurnActionRefSchema = z.string().regex(/^[a-z][a-z0-9-]{0,31}$/);
+const ActionSequencingShape = { ref: TurnActionRefSchema.optional(), after: z.array(TurnActionRefSchema).max(24).optional() };
+export const CHAT_SEQUENCING_SCHEMA_VERSION = 55;
 const SemanticIdsSchema = z.array(ConversationActionSemanticIdSchema).max(40);
 const StagedReferenceKeySchema = z.string().min(1).max(120).regex(STAGED_REFERENCE_KEY);
 const SheetSectionChangeSchema = z
@@ -854,10 +858,18 @@ const editShotCommand = SceneCommandSchema.options.find((option): option is Extr
 const ChatInsertShotCommandSchema = insertShotCommand.extend({ shot: insertShotCommand.shape.shot.omit({ visualFacts: true }) });
 const ChatEditShotCommandSchema = editShotCommand.extend({ change: editShotCommand.shape.change.omit({ visualFacts: true }) });
 type ChatSceneCommandOption = Exclude<SceneCommandOption, typeof insertShotCommand | typeof editShotCommand> | typeof ChatInsertShotCommandSchema | typeof ChatEditShotCommandSchema;
+const ChatShotTargetSchema = z.union([ShotIdSchema, z.string().regex(/^ref:[a-z][a-z0-9-]{0,31}$/)]);
+const ChatShotAnchorSchema = z.union([z.object({ before: ChatShotTargetSchema }).strict(),
+  z.object({ after: ChatShotTargetSchema }).strict(), z.object({ atStart: z.literal(true) }).strict()]);
 export const ChatSceneCommandSchema = z.discriminatedUnion("kind", SceneCommandSchema.options.map((option): ChatSceneCommandOption => {
-  if (option.shape.kind.value === "insert-shot") return ChatInsertShotCommandSchema;
-  if (option.shape.kind.value === "edit-shot") return ChatEditShotCommandSchema;
-  return option as Exclude<SceneCommandOption, typeof insertShotCommand | typeof editShotCommand>;
+  const authored = option.shape.kind.value === "insert-shot" ? ChatInsertShotCommandSchema :
+    option.shape.kind.value === "edit-shot" ? ChatEditShotCommandSchema : option;
+  const targets: z.ZodRawShape = {};
+  for (const field of ["shotId", "fromShotId", "toShotId"]) if (field in authored.shape) targets[field] = ChatShotTargetSchema;
+  for (const field of ["at", "to"]) if (field in authored.shape) targets[field] = ChatShotAnchorSchema;
+  if ("members" in authored.shape) targets.members = z.array(ChatShotTargetSchema).min(1);
+  // Target refs resolve to strings before the strict persisted SceneCommandSchema is parsed.
+  return authored.extend(targets) as unknown as ChatSceneCommandOption;
 }) as [ChatSceneCommandOption, ...ChatSceneCommandOption[]]);
 
 const ProductionSceneCommandModelActionSchema = z
@@ -865,7 +877,8 @@ const ProductionSceneCommandModelActionSchema = z
     kind: z.literal("production-scene-command"),
     productionId: SlugSchema,
     sceneId: SceneIdSchema,
-    command: ChatSceneCommandSchema,
+    command: ChatSceneCommandSchema.optional(),
+    commands: z.array(ChatSceneCommandSchema).min(1).max(24).optional(),
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
@@ -941,8 +954,8 @@ const ProductionTakeGenerationModelActionSchema = z
     productionId: SlugSchema,
     sceneId: SceneIdSchema,
     target: z.discriminatedUnion("kind", [
-      z.object({ kind: z.literal("shot"), shotId: ShotIdSchema }).strict(),
-      z.object({ kind: z.literal("board"), memberShotIds: z.array(ShotIdSchema).min(1) }).strict(),
+      z.object({ kind: z.literal("shot"), shotId: ChatShotTargetSchema }).strict(),
+      z.object({ kind: z.literal("board"), memberShotIds: z.array(ChatShotTargetSchema).min(1) }).strict(),
     ]),
     mode: z.enum(["image", "video"]),
     modelId: z.string().min(1).max(300).optional(),
@@ -1178,15 +1191,15 @@ export const PropReferenceModelActionSchema = z.object({
   artifactId: ArtifactIdSchema, replace: z.boolean().default(false), checkReceiptIds: CompleteReadIdsSchema,
 }).strict();
 export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
-  WorldMetadataModelActionSchema,
-  CanonModelActionSchema,
-  CanonRetireModelActionSchema,
-  CanonRestoreModelActionSchema,
-  SheetModelActionSchema,
-  SheetRetireModelActionSchema,
-  SheetRestoreModelActionSchema,
-  ArtDirectionModelActionSchema,
-  ArtDirectionRestoreModelActionSchema,
+  WorldMetadataModelActionSchema.extend(ActionSequencingShape),
+  CanonModelActionSchema.extend(ActionSequencingShape),
+  CanonRetireModelActionSchema.extend(ActionSequencingShape),
+  CanonRestoreModelActionSchema.extend(ActionSequencingShape),
+  SheetModelActionSchema.extend(ActionSequencingShape),
+  SheetRetireModelActionSchema.extend(ActionSequencingShape),
+  SheetRestoreModelActionSchema.extend(ActionSequencingShape),
+  ArtDirectionModelActionSchema.extend(ActionSequencingShape),
+  ArtDirectionRestoreModelActionSchema.extend(ActionSequencingShape),
   z
     .object({
       kind: z.literal("artifact-import"),
@@ -1197,10 +1210,10 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
       supersedes: ArtifactIdSchema.optional(),
       checkReceiptIds: CompleteReadIdsSchema,
     })
-    .strict(),
-  z.object({ kind: z.literal("artifact-metadata"), change: ArtifactMetadataChangeSchema, checkReceiptIds: CompleteReadIdsSchema }).strict(),
-  z.object({ kind: z.literal("artifact-extraction"), artifactId: ArtifactIdSchema, checkReceiptIds: CompleteReadIdsSchema }).strict(),
-  z.object({ kind: z.literal("artifact-extraction-stop"), artifactId: ArtifactIdSchema, checkReceiptIds: CompleteReadIdsSchema }).strict(),
+    .strict().extend(ActionSequencingShape),
+  z.object({ kind: z.literal("artifact-metadata"), change: ArtifactMetadataChangeSchema, checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
+  z.object({ kind: z.literal("artifact-extraction"), artifactId: ArtifactIdSchema, checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
+  z.object({ kind: z.literal("artifact-extraction-stop"), artifactId: ArtifactIdSchema, checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
   z
     .object({
       kind: z.literal("artifact-extraction-review"),
@@ -1209,20 +1222,20 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
       decision: z.enum(["accept", "reject"]),
       checkReceiptIds: CompleteReadIdsSchema,
     })
-    .strict(),
-  z.object({ kind: z.literal("artifact-reference"), artifactId: ArtifactIdSchema, key: StagedReferenceKeySchema, checkReceiptIds: CompleteReadIdsSchema }).strict(),
-  ReferenceImportActionSchema,
-  ReferenceResultUseActionSchema,
-  ReferenceReviewActionSchema,
-  ReferenceChangeActionSchema,
-  ReferenceTileLockActionSchema,
-  ReferenceCompileActionSchema,
-  ReferenceStyleActionSchema,
-  ReferenceGenerationActionSchema,
-  ReferenceImageImportActionSchema,
-  ReferenceWorldImageResultUseActionSchema,
-  ReferenceMasterLookResultUseActionSchema,
-  ReferenceImageDiscardActionSchema,
+    .strict().extend(ActionSequencingShape),
+  z.object({ kind: z.literal("artifact-reference"), artifactId: ArtifactIdSchema, key: StagedReferenceKeySchema, checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
+  ReferenceImportActionSchema.extend(ActionSequencingShape),
+  ReferenceResultUseActionSchema.extend(ActionSequencingShape),
+  ReferenceReviewActionSchema.extend(ActionSequencingShape),
+  ReferenceChangeActionSchema.extend(ActionSequencingShape),
+  ReferenceTileLockActionSchema.extend(ActionSequencingShape),
+  ReferenceCompileActionSchema.extend(ActionSequencingShape),
+  ReferenceStyleActionSchema.extend(ActionSequencingShape),
+  ReferenceGenerationActionSchema.extend(ActionSequencingShape),
+  ReferenceImageImportActionSchema.extend(ActionSequencingShape),
+  ReferenceWorldImageResultUseActionSchema.extend(ActionSequencingShape),
+  ReferenceMasterLookResultUseActionSchema.extend(ActionSequencingShape),
+  ReferenceImageDiscardActionSchema.extend(ActionSequencingShape),
   z
     .object({
       kind: z.literal("voice-assignment"),
@@ -1231,7 +1244,7 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
       voice: VoiceSelectionSchema.nullable(),
       checkReceiptIds: CompleteReadIdsSchema,
     })
-    .strict(),
+    .strict().extend(ActionSequencingShape),
   z
     .object({
       kind: z.literal("voice-audition"),
@@ -1240,7 +1253,7 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
       text: z.string().trim().min(1).max(2_000).optional(),
       checkReceiptIds: CompleteReadIdsSchema,
     })
-    .strict(),
+    .strict().extend(ActionSequencingShape),
   z
     .object({
       kind: z.literal("voice-clone"),
@@ -1250,65 +1263,75 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
       recordingGesture: z.literal("required"),
       checkReceiptIds: CompleteReadIdsSchema,
     })
-    .strict(),
-  VoiceClipReviewActionSchema,
-  z.object({ kind: z.literal("world-archive"), checkReceiptIds: CompleteReadIdsSchema }).strict(),
-  z.object({ kind: z.literal("world-export"), checkReceiptIds: CompleteReadIdsSchema }).strict(),
-  ProductionCreateModelActionSchema,
-  ProductionMetadataModelActionSchema,
-  ProductionModelModelActionSchema,
-  ProductionSeriesModelActionSchema,
-  ProductionOverviewModelActionSchema,
-  ProductionSeasonModelActionSchema,
-  ProductionEpisodeModelActionSchema,
-  ProductionChapterModelActionSchema,
-  ProductionSceneModelActionSchema,
-  ProductionEpisodeOrderModelActionSchema,
-  ProductionChapterOrderModelActionSchema,
-  ProductionSceneOrderModelActionSchema,
-  ProductionSceneDeleteModelActionSchema,
-  ProductionSceneRestoreModelActionSchema,
-  ProductionStyleModelActionSchema,
-  ProductionProseStyleModelActionSchema,
-  ProductionSceneCommandModelActionSchema,
-  ProductionBoardCompileModelActionSchema,
-  ProductionBoardExportModelActionSchema,
-  ProductionTakeImportModelActionSchema,
-  ProductionFrameRunStartModelActionSchema,
-  ProductionFrameRunPauseModelActionSchema,
-  ProductionFrameRunResumeModelActionSchema,
-  ProductionFrameRunCancelModelActionSchema,
-  ProductionFrameRunRetryStepModelActionSchema,
-  ProductionFrameRunRetryCellModelActionSchema,
-  ProductionSceneDispatchModelActionSchema,
-  ProductionPlanCancelModelActionSchema,
-  ProductionTakeGenerationModelActionSchema,
-  ProductionTakeFileModelActionSchema,
-  ProductionShotFrameClearModelActionSchema,
-  ProductionTakeReviewModelActionSchema,
-  ProductionTakeTrimModelActionSchema,
-  ProductionStagePlayblastModelActionSchema,
-  ProductionStageConstructModelActionSchema,
-  AudioSpineModelActionSchema,
-  ProductionRoutingModelActionSchema,
-  ProductionTraversalModelActionSchema,
-  ProductionBranchCanonModelActionSchema,
-  ProductionInteractiveExportModelActionSchema,
-  ProductionCutExportModelActionSchema,
-  ProductionExportCancelModelActionSchema,
-  BenchGenerationModelActionSchema,
-  BenchKeepModelActionSchema,
-  BenchSelectModelActionSchema,
-  BenchDiscardModelActionSchema,
-  PropAuthoringModelActionSchema,
-  PropReferenceModelActionSchema,
-  ImageGenerationActionSchema,
-  BuildItemRunActionSchema,
+    .strict().extend(ActionSequencingShape),
+  VoiceClipReviewActionSchema.extend(ActionSequencingShape),
+  z.object({ kind: z.literal("world-archive"), checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
+  z.object({ kind: z.literal("world-export"), checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
+  ProductionCreateModelActionSchema.extend(ActionSequencingShape),
+  ProductionMetadataModelActionSchema.extend(ActionSequencingShape),
+  ProductionModelModelActionSchema.extend(ActionSequencingShape),
+  ProductionSeriesModelActionSchema.extend(ActionSequencingShape),
+  ProductionOverviewModelActionSchema.extend(ActionSequencingShape),
+  ProductionSeasonModelActionSchema.extend(ActionSequencingShape),
+  ProductionEpisodeModelActionSchema.extend(ActionSequencingShape),
+  ProductionChapterModelActionSchema.extend(ActionSequencingShape),
+  ProductionSceneModelActionSchema.extend(ActionSequencingShape),
+  ProductionEpisodeOrderModelActionSchema.extend(ActionSequencingShape),
+  ProductionChapterOrderModelActionSchema.extend(ActionSequencingShape),
+  ProductionSceneOrderModelActionSchema.extend(ActionSequencingShape),
+  ProductionSceneDeleteModelActionSchema.extend(ActionSequencingShape),
+  ProductionSceneRestoreModelActionSchema.extend(ActionSequencingShape),
+  ProductionStyleModelActionSchema.extend(ActionSequencingShape),
+  ProductionProseStyleModelActionSchema.extend(ActionSequencingShape),
+  ProductionSceneCommandModelActionSchema.extend(ActionSequencingShape),
+  ProductionBoardCompileModelActionSchema.extend(ActionSequencingShape),
+  ProductionBoardExportModelActionSchema.extend(ActionSequencingShape),
+  ProductionTakeImportModelActionSchema.extend(ActionSequencingShape),
+  ProductionFrameRunStartModelActionSchema.extend(ActionSequencingShape),
+  ProductionFrameRunPauseModelActionSchema.extend(ActionSequencingShape),
+  ProductionFrameRunResumeModelActionSchema.extend(ActionSequencingShape),
+  ProductionFrameRunCancelModelActionSchema.extend(ActionSequencingShape),
+  ProductionFrameRunRetryStepModelActionSchema.extend(ActionSequencingShape),
+  ProductionFrameRunRetryCellModelActionSchema.extend(ActionSequencingShape),
+  ProductionSceneDispatchModelActionSchema.extend(ActionSequencingShape),
+  ProductionPlanCancelModelActionSchema.extend(ActionSequencingShape),
+  ProductionTakeGenerationModelActionSchema.extend(ActionSequencingShape),
+  ProductionTakeFileModelActionSchema.extend(ActionSequencingShape),
+  ProductionShotFrameClearModelActionSchema.extend(ActionSequencingShape),
+  ProductionTakeReviewModelActionSchema.extend(ActionSequencingShape),
+  ProductionTakeTrimModelActionSchema.extend(ActionSequencingShape),
+  ProductionStagePlayblastModelActionSchema.extend(ActionSequencingShape),
+  ProductionStageConstructModelActionSchema.extend(ActionSequencingShape),
+  AudioSpineModelActionSchema.extend(ActionSequencingShape),
+  ProductionRoutingModelActionSchema.extend(ActionSequencingShape),
+  ProductionTraversalModelActionSchema.extend(ActionSequencingShape),
+  ProductionBranchCanonModelActionSchema.extend(ActionSequencingShape),
+  ProductionInteractiveExportModelActionSchema.extend(ActionSequencingShape),
+  ProductionCutExportModelActionSchema.extend(ActionSequencingShape),
+  ProductionExportCancelModelActionSchema.extend(ActionSequencingShape),
+  BenchGenerationModelActionSchema.extend(ActionSequencingShape),
+  BenchKeepModelActionSchema.extend(ActionSequencingShape),
+  BenchSelectModelActionSchema.extend(ActionSequencingShape),
+  BenchDiscardModelActionSchema.extend(ActionSequencingShape),
+  PropAuthoringModelActionSchema.extend(ActionSequencingShape),
+  PropReferenceModelActionSchema.extend(ActionSequencingShape),
+  ImageGenerationActionSchema.extend(ActionSequencingShape),
+  BuildItemRunActionSchema.extend(ActionSequencingShape),
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
 
+export interface WorldChatDependencyPreview {
+  scenes: Array<{ productionId: string; scene: SceneRecord }>;
+  expectedObservations: ArkeReadObservation[];
+}
+export const WorldChatDependencyPreviewSchema: z.ZodType<WorldChatDependencyPreview, z.ZodTypeDef, unknown> = z.object({
+  scenes: z.array(z.object({ productionId: SlugSchema, scene: SceneRecordSchema }).strict()).min(1).max(24),
+  expectedObservations: z.array(ArkeReadObservationSchema),
+}).strict();
 const preparedAction = <K extends string, T extends z.ZodTypeAny>(kind: K, action: T) => z
-  .object({ kind: z.literal(kind), worldId: UlidSchema, productionId: SlugSchema.optional(), action })
+  .object({ kind: z.literal(kind), worldId: UlidSchema, productionId: SlugSchema.optional(), action,
+    dependencyPreview: WorldChatDependencyPreviewSchema.optional(),
+  })
   .strict();
 
 export const WorldChatWorldMetadataActionSchema = preparedAction(
@@ -1357,6 +1380,7 @@ export const WorldChatProductionCreateActionSchema = z
     worldId: UlidSchema,
     action: ProductionCreateModelActionSchema,
     plan: ProductionCreationPlanSchema,
+    dependencyPreview: WorldChatDependencyPreviewSchema.optional(),
   })
   .strict();
 export const WorldChatProductionMetadataActionSchema = preparedAction("world-chat-production-metadata", ProductionMetadataModelActionSchema);
@@ -1375,7 +1399,11 @@ export const WorldChatProductionSceneDeleteActionSchema = preparedAction("world-
 export const WorldChatProductionSceneRestoreActionSchema = preparedAction("world-chat-production-scene-restore", ProductionSceneRestoreModelActionSchema);
 export const WorldChatProductionStyleActionSchema = preparedAction("world-chat-production-style", ProductionStyleModelActionSchema);
 // Old pending cards remain readable; their executor rechecks the current conversation policy.
-export const WorldChatProductionSceneCommandActionSchema = preparedAction("world-chat-production-scene-command", ProductionSceneCommandModelActionSchema.extend({ command: SceneCommandSchema }));
+export const WorldChatProductionSceneCommandActionSchema = preparedAction("world-chat-production-scene-command", ProductionSceneCommandModelActionSchema.extend({
+  command: SceneCommandSchema.optional(), commands: z.array(SceneCommandSchema).min(1).max(24).optional(),
+})).extend({ scenePlan: z.object({ before: SceneRecordSchema, after: SceneRecordSchema,
+  expectedObservations: z.array(ArkeReadObservationSchema),
+}).strict().optional() });
 export const WorldChatProductionBoardCompileActionSchema = preparedAction("world-chat-production-board-compile", ProductionBoardCompileModelActionSchema);
 export const WorldChatProductionBoardExportActionSchema = preparedAction("world-chat-production-board-export", ProductionBoardExportModelActionSchema);
 export const WorldChatProductionTakeImportActionSchema = preparedAction("world-chat-production-take-import", ProductionTakeImportModelActionSchema);
