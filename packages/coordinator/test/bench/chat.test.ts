@@ -8,6 +8,7 @@ import { Coordinator } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { prepareWorldChatActions, worldChatActionAdapters, type WorldChatActionAdapterDeps } from "../../src/world-chat/actions.js";
+import { executeProductionAudioCue } from "../../src/world-chat/production-audio-cue.js";
 import { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { WorldChatStore, conversationDir } from "../../src/world-chat/store.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
@@ -97,6 +98,7 @@ it("sequences production music into a fenced human editor request, blocks denied
     const turn = { conversationId, turnId: newId("turn"), entryContext: { kind: "production" as const, productionId: "saltlight" },
       candidates: [], groups: [], existingCandidates: [], existingGroups: [], bibleEdits: [], bibleBaseVersion: 1, sceneEdits: [], sceneBaseVersion: null, editorRequests: [], actions, receipts, at: AT };
     assert.throws(() => prepareWorldChatActions(store, lifecycle, { ...turn, actions: [actions[0]!, { ...actions[1]!, after: [] }] }, dependencies), /earlier generation action in after/);
+    assert.throws(() => prepareWorldChatActions(store, lifecycle, { ...turn, actions: [actions[0]!, { ...actions[1]!, role: "ambience" }] }, dependencies), /cue's audio role/);
     const prepared = prepareWorldChatActions(store, lifecycle, turn, dependencies);
     for (const item of prepared) { await log.append({ type: "action.prepare-intent", intent: item.intent }, { at: AT }); await lifecycle.bindIntent(item.intent, item.payload); }
     return (await view()).actions.slice(-2);
@@ -123,6 +125,8 @@ it("sequences production music into a fenced human editor request, blocks denied
   await lifecycle.reconcileAction(conversationId, cards[0]!.actionId);
   const child = (await view()).actions.find(card => card.actionId === cards[1]!.actionId)!;
   assert.equal(child.availableDecisions.includes("approve"), true);
+  const cue = JSON.parse(await readFile(join(worldDir, ".history/world/prepared", `${child.actionId}.json`), "utf8"));
+  await assert.rejects(executeProductionAudioCue(store, { ...cue, action: { ...cue.action, role: "ambience" } }, child, undefined, () => null), /music or ambience role/);
   assert.equal((await decide(child)).status, "completed");
   let production = store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
   const request = production.editorRequests.find(r => r.actionId === child.actionId)!;

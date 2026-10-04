@@ -1432,6 +1432,8 @@ export function prepareWorldChatActions(
       const parent = groups[parentIndex]!.action;
       if ((parent.kind !== "bench-generation" || parent.composer.mode !== "music") && (parent.kind !== "production-audio-generation" || parent.request.operation !== "voice-line")) throw new Error("A cue dependency must generate music or a shot voice line.");
       if (actionProduction(parent, contextProductionId) !== payload.action.productionId) throw new Error("The cue generation belongs to another production.");
+      const role = parent.kind === "bench-generation" ? parent.cueRole ?? "music" : "dialogue";
+      if (payload.action.role !== role) throw new Error("Keep the generated cue's audio role.");
       payload = WorldChatProductionAudioCueActionSchema.parse({ ...payload, sourceActionId: actionIds[parentIndex] });
     }
     if (group.dependencyPreview && "action" in payload) {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { mkdir, readFile, readdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { newId, orderedShots, ulid, storyTimelineFingerprint, performanceLineKey, type ConversationActionCard, type ModelWorldChatAction, type ProviderStatus, type WorldChatPreparedAction } from "@arke-studio/contracts";
+import { JobSchema, newId, orderedShots, ulid, storyTimelineFingerprint, performanceLineKey, type ConversationActionCard, type ModelWorldChatAction, type ProviderStatus, type WorldChatPreparedAction } from "@arke-studio/contracts";
 import { productionAudioGenerationSource, productionAudioOperationId } from "../../src/world-chat/production-audio-generation.js";
 import { GenerationQuotes } from "../../src/world-chat/generation-quotes.js";
 import { worldChatActionAdapters } from "../../src/world-chat/actions.js";
@@ -15,6 +15,8 @@ import { readPerformanceGenerationQuote, finalizeGeneratedPerformance } from "..
 import { reviewPerformance } from "../../src/audio/performance-review.js";
 import { freezeProductionPerformance, productionPerformanceBody, executeProductionPerformance } from "../../src/world-chat/production-performance.js";
 import { applyTimelineCommand } from "../../src/productions/timeline.js";
+import { freezeProductionAudioCue, executeProductionAudioCue } from "../../src/world-chat/production-audio-cue.js";
+import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { SHIPPED_MANIFEST } from "../../../providers/src/manifest-data.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -57,6 +59,33 @@ it("quotes the exact shot line and assigned voice without dispatch, refuses a ch
   assert.equal(h.inputs.length, 1); assert.equal(h.inputs[0]!.params.voiceId, "Puck");
   assert.equal(h.inputs[0]!.target.kind, "voice-line");
   assert.deepEqual(h.store.getBundle().productions.find(p => p.meta.id === h.production.meta.id)!.selections, h.production.selections);
+});
+
+it("places finalized PCM voice without a host probe, bounds its actual length and preserves dialogue", async t => {
+  const h = await setup(); t.after(() => h.store.close());
+  const id = newId("act"), request = action(h.production.meta.id, { operation: "voice-line", shotId: h.shot.id });
+  await h.quotes().prepare(request, id, AT); await h.quotes().dispatch(request, id);
+  const file = ".staging/voice-cue/speech.wav", bytes = wav(Array(48000).fill(1000));
+  await mkdir(join(h.store.dir, ".staging/voice-cue"), { recursive: true }); await writeFile(join(h.store.dir, file), bytes);
+  const { voiceReference: _voiceReference, ...input } = h.inputs[0]!;
+  const job = JobSchema.parse({ ...input, id: newId("jb"), status: "succeeded", createdAt: AT, updatedAt: AT, landedFiles: [file] });
+  const [take] = await recordTakesFromJob(h.store, job, null); await h.store.reload();
+  assert.equal(take!.mediaHash, audioHash(bytes));
+  await applyTimelineCommand(h.store, h.production.meta.id, { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(h.store.getBundle().productions.find(p => p.meta.id === h.production.meta.id)!),
+    commands: [{ kind: "add-track", trackId: "tr_dialogue", trackKind: "audio", name: "Dialogue", defaultRole: "dialogue" }] });
+  const prepared = (role: "dialogue" | "music" = "dialogue", durationFrames = 12): Extract<WorldChatPreparedAction, { kind: "world-chat-production-audio-cue" }> => ({
+    kind: "world-chat-production-audio-cue", worldId: h.store.worldId, ...freezeProductionAudioCue(h.store, h.production.meta.id),
+    action: { kind: "production-audio-cue", productionId: h.production.meta.id, source: { kind: "take", takeId: take!.id }, trackId: "tr_dialogue", startFrame: 0,
+      durationFrames, sourceInFrames: 0, gainDb: 0, role, checkReceiptIds: [] } });
+  const card = () => ({ actionId: newId("act"), conversationId: newId("cv"), dependencies: [] }) as unknown as ConversationActionCard;
+  await assert.rejects(executeProductionAudioCue(h.store, prepared("music"), card(), undefined, () => null), /dialogue role/);
+  await assert.rejects(executeProductionAudioCue(h.store, prepared("dialogue", 240), card(), undefined, () => null), /shorter/);
+  const cueCard = card();
+  const outcome = await executeProductionAudioCue(h.store, prepared(), cueCard, undefined, () => null);
+  assert.equal(outcome.status, "completed"); assert.equal(outcome.receipt?.kind, "editor-request");
+  const retained = h.store.getBundle().productions.find(p => p.meta.id === h.production.meta.id)!.editorRequests.find(r => r.actionId === cueCard.actionId)!;
+  assert.equal(retained.status, "pending"); assert.ok(retained.commands[0]?.kind === "place");
+  assert.equal(retained.commands[0].clip.role, "dialogue");
 });
 
 it("uses the native single-line performance compiler and retains its stable quote only after approval", async t => {

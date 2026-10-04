@@ -778,6 +778,7 @@ describe("reading a WAV's length", () => {
   });
 
   it("says nothing rather than guessing", () => {
+    assert.equal(wavSeconds(wav({ byteRate: 88200, dataBytes: 441000 }).slice(0, -1)), null, "a truncated data chunk cannot attest its declared duration");
     // Not a WAV at all, and a WAV whose chunks never arrive: both are unknown, not zero. A zero
     // would read as "too short" and refuse a clip that was never measured.
     assert.equal(wavSeconds(Uint8Array.from([0x49, 0x44, 0x33, 4, 0, 0])), null);

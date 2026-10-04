@@ -3,7 +3,8 @@ import { AUDIO_TRACK_KINDS, framesToSeconds, type ArkeCommandBodySchema, type Co
 import { readBenchSession } from "../bench/chat-reads.js";
 import type { BenchChatControls } from "../bench/chat-controls.js";
 import { audioWorldPath } from "../audio/storage.js";
-import { hashAudioFile } from "../audio/media-tools.js";
+import { hashAudioFile, readAudioBytes } from "../audio/media-tools.js";
+import { wavSeconds } from "../voice/library.js";
 import { readContainedAudioReferences } from "../world/reference-files.js";
 import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
 import { stageEditorRequests, readEditorRequestByAction } from "../productions/editor-requests.js";
@@ -61,6 +62,7 @@ export async function executeProductionAudioCue(store: WorldStore, prepared: Pre
     const bench = readBenchSession(store.dir, source.sessionId);
     const take = bench?.takes.find(t => t.id === source.takeId);
     if (!bench || bench.subject?.kind !== "production" || bench.subject.productionId !== action.productionId || !take?.media || take.request.mode !== "music" || take.status !== "succeeded" || take.disposition === "discarded") throw new Error("Choose a completed music take from this production's audio Bench.");
+    if (action.role !== bench.subject.role) throw new Error("Keep the generated cue's music or ambience role.");
     file = `${sessionMediaDir(source.sessionId, take.id)}/${take.media.file}`;
     expectedHash = take.media.hash;
     durationSec = take.media.info?.durationSec ?? 0;
@@ -80,10 +82,17 @@ export async function executeProductionAudioCue(store: WorldStore, prepared: Pre
   } else {
     const take = production.takes.find(t => t.id === source.takeId && t.kind === "voice");
     if (!take?.media) throw new Error("The production voice take is unavailable.");
+    if (action.role !== "dialogue") throw new Error("A generated voice line must keep its dialogue role.");
     file = `productions/${action.productionId}/takes/${take.id}/${take.media}`;
     if (!take.mediaHash) throw new Error("This voice take has no immutable media hash; regenerate it before placement.");
     expectedHash = take.mediaHash;
-    durationSec = await probe?.durationSec(await audioWorldPath(store.dir, file), { signal: store.closingSignal }) ?? 0;
+    const absolute = await audioWorldPath(store.dir, file);
+    const measured = await probe?.durationSec(absolute, { signal: store.closingSignal });
+    // Node and development hosts can receive PCM speech without installing a subprocess probe.
+    // Measure the actual WAV bytes; an unknown codec or malformed header never becomes zero.
+    const seconds = measured ?? wavSeconds(await readAudioBytes(absolute, store.closingSignal));
+    if (seconds === null || !Number.isFinite(seconds) || seconds <= 0) throw new Error("This voice cue needs a media probe that can measure its duration.");
+    durationSec = seconds;
     clipSource = { kind: "take", takeId: take.id, label: `Voice ${take.id}` };
   }
   if (source.kind !== "bench-take") {
