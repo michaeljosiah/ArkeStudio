@@ -2,6 +2,7 @@ import type { z } from "zod";
 import type { ArkeCommandBodySchema, ArkeDestructiveBodySchema, BenchTake, ConversationActionCard,
   ModelWorldChatAction } from "@arke-studio/contracts";
 import type { OpenedBench } from "./service.js";
+import { existingBenchSubjectFiling } from "./filing.js";
 import { readBenchRecord } from "./chat-reads.js";
 import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
 
@@ -12,11 +13,13 @@ export class BenchChatControls {
     serialise<T>(key: string, work: () => Promise<T>): Promise<T>;
     keep(bench: OpenedBench, take: BenchTake, id: string, precondition: WorldStatePrecondition): Promise<{ id: string }>;
     refresh(sessionId: string): Promise<void>;
+    recoverSubjectFiling(bench: OpenedBench): Promise<void>;
   }) {}
   private source(action: Action) {
     const record = readBenchRecord(this.store.dir, action.sessionId);
     const take = record?.session.takes.find(take => take.id === action.takeId);
     if (!record || !take) throw new Error("That Bench take is unavailable.");
+    if (action.kind === "bench-discard" && existingBenchSubjectFiling(this.store, record.session, take)) throw new Error("That take is already accepted in its production and cannot be discarded.");
     if (action.kind === "bench-discard" && take.disposition !== "open") throw new Error("Only an open Bench take can be discarded.");
     if (action.kind !== "bench-discard" && take.disposition === "discarded") throw new Error("That Bench take was discarded.");
     if (action.kind === "bench-keep" && (record.session.subject || take.status !== "succeeded" || !take.media)) {
@@ -37,6 +40,8 @@ export class BenchChatControls {
     return this.ports.serialise(`${action.sessionId}/${action.takeId}`, async () => {
       const recovered = await this.reconcileIdentity(action.sessionId, action.takeId, action.kind, id);
       if (recovered) return recovered;
+      const opened = await this.ports.bench(action.sessionId);
+      if (opened) await this.ports.recoverSubjectFiling(opened);
       const { take } = this.source(action);
       const bench = await this.ports.bench(action.sessionId);
       if (!bench) throw new Error("That Bench is unavailable.");

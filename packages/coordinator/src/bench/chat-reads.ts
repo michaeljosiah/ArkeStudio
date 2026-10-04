@@ -1,7 +1,7 @@
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BenchEventEnvelopeSchema, BenchSessionMetaSchema, SessionIdSchema, foldBenchSession,
-  PROVIDERS, TakeIdSchema, type BenchTake, type ModelManifest } from "@arke-studio/contracts";
+  PROVIDERS, TakeIdSchema, type BenchTake, type ManifestModel, type ModelManifest } from "@arke-studio/contracts";
 import type { ProductionReadRow } from "../world-chat/production-reads.js";
 
 /** Retrieval must never repair a journal or quietly attest damaged records as empty. */
@@ -83,8 +83,8 @@ export function benchReadRows(worldDir: string, sessionId?: string): ProductionR
   return rows.sort((a, b) => a.key.localeCompare(b.key));
 }
 /** Only public model capabilities and prices: never credentials or the account's speech plan. */
-export function generationRouteReadRows(manifest: ModelManifest | null, disabled: readonly string[]): ProductionReadRow[] {
-  return (manifest?.models ?? []).filter(model => !disabled.includes(model.id) && !model.upscale)
+export function generationRouteReadRows(manifest: ModelManifest | null, disabled: readonly string[], eligible: (model: ManifestModel) => boolean = () => true): ProductionReadRow[] {
+  return (manifest?.models ?? []).filter(model => !disabled.includes(model.id) && !model.upscale && eligible(model))
     .filter(model => ["image", "video", "voice-tts", "music"].includes(model.capability))
     .sort((a, b) => `${a.provider}:${a.id}`.localeCompare(`${b.provider}:${b.id}`))
     .map(model => ({ key: `${model.provider}:${model.id}`, value: { id: model.id, provider: model.provider,

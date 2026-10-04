@@ -43,6 +43,7 @@ export interface ConversationRunDependencies {
   actions: ConversationActionLifecycle;
   jobs: NonNullable<RetrievalDeps["getJobs"]>;
   generationRoutes?: NonNullable<RetrievalDeps["getGenerationRouteRows"]>;
+  voiceCatalogue?: NonNullable<RetrievalDeps["getVoiceCatalogue"]>;
   buildItems?: NonNullable<RetrievalDeps["getBuildItems"]>;
   exports: NonNullable<RetrievalDeps["getExports"]>;
   actionExports: NonNullable<NonNullable<Parameters<typeof prepareWorldChatActions>[3]>["getExports"]>;
@@ -73,6 +74,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     getIndex: () => deps.activeStore()?.getIndex() ?? null,
     getBenchRows: sessionId => benchReadRows(store.dir, sessionId),
     getGenerationRouteRows: deps.generationRoutes,
+    getVoiceCatalogue: deps.voiceCatalogue,
     getFrameRunRows: (productionId) => frameRunReadRows(store, productionId, deps.jobs()),
     getAudioRights: () => readAudioRights(store),
     getPlans: async (productionId) => readPlanRecords(store, productionId, deps.jobs()),
@@ -163,8 +165,8 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     validateSceneEdits: ({ entryContext, edits, baseVersion }) =>
       applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),
     prepareActions: async (turn) => {
-      if (turn.actions.some(action => action.kind.startsWith("bench-"))) await store.ensureSchemaVersion(BENCH_CHAT_SCHEMA_VERSION, "world-chat");
       const prepared = await prepareWorldChatActions(store, actionLifecycle, turn, { getGenerationRouteRows: deps.generationRoutes, getExports: () => deps.actionExports(), getJobs: () => deps.jobs(), getBuildItems: () => deps.buildItems?.() ?? [] });
+      if (prepared.some(item => item.payload.kind.startsWith("world-chat-bench-"))) await store.ensureSchemaVersion(BENCH_CHAT_SCHEMA_VERSION, "world-chat");
       if (turn.actions.some(action => action.kind === "prop-authoring" || action.kind === "prop-reference")) await store.ensureSchemaVersion(CONVERSATIONAL_PROPS_SCHEMA_VERSION, "world-chat");
       return prepared;
     },

@@ -49,7 +49,7 @@ export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
   tool("get_art_direction", "Read the complete resolved art direction.", {}),
   tool("list_references", "Read complete reference kits, tiles, looks, compilations, props and named states.", {}),
   tool("list_artifacts", "Read complete artifact sidecars including extraction state and provenance.", {}),
-  tool("list_voices", "Read cloned voices and every sheet voice assignment.", {}),
+  tool("list_voices", "Read selectable voice catalogue targets, cloned voices and every sheet voice assignment. Choose the exact provider/model/voiceId from a catalogue row for Bench speech.", {}),
   tool("list_productions", "Read every production identity and metadata record.", {}),
   tool("list_series", "Read complete Series records.", {}),
   tool("get_production_metadata", "Read one production's complete metadata.", PRODUCTION, ["productionId"]),

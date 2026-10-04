@@ -770,6 +770,7 @@ function productionActionTargets(
     case "bench-select":
     case "bench-discard": return [{ requirement: "bench", target: action.sessionId }];
     case "bench-generation": return [{ requirement: "jobs", target: worldId }, { requirement: "generation-routes", target: worldId },
+      ...(action.composer.params.kind === "voice" ? [{ requirement: "voices" as const, target: worldId }] : []),
       ...(action.sessionId ? [{ requirement: "bench" as const, target: action.sessionId }] : []),
       ...(action.composer.references?.some(ref => ref.kind === "artifact") ? [{ requirement: "artifacts" as const, target: worldId }] : []),
       ...(action.composer.references?.some(ref => ref.kind === "kit") ? [{ requirement: "references" as const, target: worldId }] : []),

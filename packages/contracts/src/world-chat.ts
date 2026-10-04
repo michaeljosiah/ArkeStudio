@@ -2805,7 +2805,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-interactive-export": "Export the interactive production as a playable file.",
   "production-cut-export": "Export the cut of the production or one episode with a preset and subtitles.",
   "production-export-cancel": "Cancel an export that is running.",
-  "bench-generation": "Generate image, video, speech or music at the quote shown. Omit sessionId to create a session only on approval; rerunTakeId repeats a read take as a new card. Read enabled generation routes first. Sound effects are unavailable: refuse a sound-effects request by name instead of generating music.",
+  "bench-generation": "Generate image, video, speech or music at the quote shown. Omit sessionId to create a session only on approval; rerunTakeId repeats a read take as a new card. Read eligible generation routes first. For speech, complete list_voices and use the exact provider/model/voiceId of an available catalogue row. Sound effects are unavailable: refuse a sound-effects request by name instead of generating music.",
   "bench-keep": "Keep a completed Bench take on the world's artifact shelf; generation alone files nothing.",
   "bench-select": "Select a read Bench take within its session; this changes neither a production's selection nor provider work.",
   "bench-discard": "Discard an open Bench take from its session as a destructive decision; filed results remain on their shelf.",

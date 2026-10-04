@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { it, type TestContext } from "node:test";
-import { JobSchema, ReferenceKitSchema, newId, ulid, type Job, type ManifestModel, type ModelWorldChatAction } from "@arke-studio/contracts";
+import { JobSchema, ReferenceKitSchema, newId, ulid, type ConversationActionCard, type Job, type ManifestModel, type ModelWorldChatAction, type VoiceCandidate } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { WorldStore } from "../../src/world/store.js";
@@ -23,6 +23,11 @@ import { WorldChatTargetReads } from "../../src/world-chat/target-reads.js";
 import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
 import { pngBytes } from "../queue/fake-provider.js";
+import { cloneVoice } from "../../src/voice/library.js";
+import { wav } from "../audio/helpers.js";
+import { analyzePcmWav, audioHash } from "../../src/audio/qc.js";
+import { openSubjectBenchSession } from "../../src/bench/service.js";
+import { fileBenchSubjectTake } from "../../src/bench/filing.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 const AT = "2026-10-04T02:00:00.000Z";
@@ -30,6 +35,11 @@ const IMAGE: ManifestModel = { id: "chat-image", provider: "fal", capability: "i
   accepts: { referenceImages: 4, startFrame: false, endFrame: false }, limits: {}, pricing: { kind: "perImage", microUsdPerImage: 10_000 } };
 const MUSIC: ManifestModel = { id: "minimax-music-3", provider: "fal", capability: "music", displayName: "Piano route",
   accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: {}, pricing: { kind: "perSecond", microUsdPerSecond: 100 } };
+const VOICE: ManifestModel = { ...MUSIC, provider: "mistral", id: "voxtral-mini-tts", capability: "voice-tts", displayName: "Voice reader",
+  pricing: { kind: "perCharacter", microUsdPerCharacter: 1 } };
+const VIDEO: ManifestModel = { ...IMAGE, id: "seedance-2.0", capability: "video", displayName: "Reference video",
+  accepts: { ...IMAGE.accepts, referenceAudio: 3 },
+  limits: { referenceSyntax: "seedance", durations: { "4": "4" }, soundChoice: true, maxReferenceAudioSec: 15 }, pricing: { kind: "perSecond", microUsdPerSecond: 100 } };
 const music = (): Extract<ModelWorldChatAction, { kind: "bench-generation" }> => ({ kind: "bench-generation", composer: {
   mode: "music", brief: "A slow solo piano cue for the title. Instrumental; no vocals.", provider: MUSIC.provider, model: MUSIC.id,
   params: { kind: "music", lyrics: "[instrumental]", count: 1 }, references: [],
@@ -40,15 +50,21 @@ async function setup(t: TestContext) {
   t.after(() => provider.close());
   await provider.loadWorld(WORLD_ID);
   const store = provider.openStore()!;
-  const manifest = { manifestVersion: 1 as const, generated: "2026-10-04", models: [IMAGE, MUSIC] };
+  const manifest = { manifestVersion: 1 as const, generated: "2026-10-04", models: [IMAGE, MUSIC, VOICE, VIDEO] };
   const coordinator = new Coordinator({ provider, adapter: null, manifest, changeLogPath: join(root, "changes.jsonl"), appVersion: "test" });
+  coordinator.emit({ type: "provider.status", at: AT, providers: [
+    { id: "fal", configured: true, validation: "valid", fault: null, probes: [{ capability: "image", available: true }, { capability: "video", available: true }, { capability: "music", available: true }] },
+    { id: "mistral", configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] },
+  ] });
   const host = coordinator as unknown as { conversationActionDependencies(store: WorldStore): WorldChatActionAdapterDeps;
-    enqueueWithSpeechChecks(input: EnqueueInput): Promise<Job>; jobQueue: { listJobs(): Job[] } };
+    enqueueWithSpeechChecks(input: EnqueueInput): Promise<Job>; jobQueue: { listJobs(): Job[] };
+    voiceService: { catalogue(): Promise<VoiceCandidate[]> }; benchVoiceCatalogue(store: WorldStore): Promise<VoiceCandidate[]> };
   const admitted: EnqueueInput[] = [], jobs: Job[] = [];
   host.jobQueue = { listJobs: () => jobs };
-  host.enqueueWithSpeechChecks = async input => { admitted.push(input); const job = JobSchema.parse({ ...input,
+  host.enqueueWithSpeechChecks = async input => { admitted.push(input); const { voiceReference, ...durable } = input; const job = JobSchema.parse({ ...durable,
+    params: { ...input.params, ...(voiceReference ? { voiceReference: true } : {}) },
     id: newId("jb"), status: "queued", createdAt: AT, updatedAt: AT }); jobs.push(job); return job; };
-  return { store, worldDir, manifest, admitted, deps: () => host.conversationActionDependencies(store) };
+  return { store, worldDir, manifest, coordinator, host, admitted, deps: () => host.conversationActionDependencies(store) };
 }
 
 it("quotes and denies a title cue without creating a session, then approves one session and one job exactly once", async t => {
@@ -226,10 +242,15 @@ it("retains conversation attachment bytes used by Bench, including immutable rer
   const rerun = { kind: "bench-generation" as const, sessionId, rerunTakeId: session.takes[0]!.id, checkReceiptIds: [newId("check")],
     composer: { mode: request.mode, brief: request.brief, params: request.params, provider: request.provider, model: request.model } };
   const rerunId = newId("act");
+  const bench = new BenchStore(sessionDir(worldDir, sessionId));
+  await bench.append({ type: "composer-set", brief: "An unrelated unfinished draft", mode: "music", provider: MUSIC.provider, model: MUSIC.id,
+    params: { kind: "music", lyrics: "[instrumental]", count: 1 }, subjectRouting: { activeTokens: [], keyframeTokens: [] } }, { at: AT });
+  const liveComposer = structuredClone(readBenchSession(worldDir, sessionId)!.composer);
   const quote = await deps().benchGenerationQuotes!.prepare(rerun, rerunId, AT, { conversationId: conversation.id });
   assert.equal(quote.quantity, 1, "rerun repeats one immutable take, regardless of its original batch count");
   assert.match(quote.purpose, /Rerun Take 1/);
   assert.equal((await deps().benchGenerationQuotes!.dispatch(rerun, rerunId)).status, "queued");
+  assert.deepEqual(readBenchSession(worldDir, sessionId)!.composer, liveComposer, "a rerun never replaces the unrelated live draft or token lanes");
   const source = session.tokenRegistry[0]!.source;
   assert.equal(source.source, "world-file");
   if (source.source !== "world-file") return;
@@ -241,4 +262,144 @@ it("retains conversation attachment bytes used by Bench, including immutable rer
   // Readable conversations stay available, while an incomplete scan cannot clear deletion.
   assert.equal((await service.load(conversation.id))!.deletionBlock, "bench-references-unavailable");
   await assert.rejects(service.delete(conversation.id, ulid()), /Bench references could not be checked/);
+});
+
+it("settles a reservation crash before queue admission without opening Bench or resubmitting", async t => {
+  const { store, worldDir, admitted, deps } = await setup(t);
+  const action = music(), id = newId("act"), sessionId = benchChatSessionId(action, id);
+  await deps().benchGenerationQuotes!.prepare(action, id, AT);
+  const path = join(worldDir, ".history/world/prepared", `${id}.generation.json`);
+  const frozen = JSON.parse(await readFile(path, "utf8"));
+  await materializeBenchChatSession(store, id, frozen.materialization);
+  await new BenchStore(sessionDir(worldDir, sessionId)).append({ type: "takes-reserved", takes: frozen.materialization.reserved }, { at: AT, requestId: id });
+  frozen.dispatchStarted = true;
+  await writeFile(path, JSON.stringify(frozen));
+  const result = await deps().benchGenerationQuotes!.reconcile({ actionId: id, authority: { id: sessionId } } as ConversationActionCard);
+  assert.equal(result?.status, "failed");
+  assert.equal(result?.receipt?.generation?.unattempted, 1);
+  assert.equal(result?.receipt?.generation?.actualMicroUsd, 0);
+  assert.equal(readBenchSession(worldDir, sessionId)!.takes[0]!.status, "failed");
+  await deps().benchGenerationQuotes!.dispatch(action, id);
+  assert.equal(admitted.length, 0);
+});
+
+it("removes unavailable provider routes and refuses a quote when provider eligibility changes", async t => {
+  const { store, coordinator, deps } = await setup(t);
+  const action = music(), id = newId("act");
+  await deps().benchGenerationQuotes!.prepare(action, id, AT);
+  assert.ok(deps().getGenerationRouteRows!().some(row => row.key === `fal:${MUSIC.id}`));
+  coordinator.emit({ type: "provider.status", at: AT, providers: [{ id: "fal", configured: false, validation: "untested", fault: null, probes: [] }] });
+  assert.ok(!deps().getGenerationRouteRows!().some(row => row.key.startsWith("fal:")));
+  await assert.rejects(deps().benchGenerationQuotes!.validate(action, id), /eligible/);
+  await assert.rejects(deps().benchGenerationQuotes!.prepare(action, newId("act"), AT), /eligible/);
+  assert.equal(store.getBundle().meta.worldId, WORLD_ID);
+});
+
+it("pages public selectable catalogue voices, fences catalogue changes and validates the selected target", async t => {
+  const { store, host, deps } = await setup(t);
+  let voices: VoiceCandidate[] = ["Preset A", "Preset B"].map(label => ({ provider: VOICE.provider, model: VOICE.id, voiceId: label,
+    label, attributes: ["warm"], local: false, canClone: false, previewUrl: "https://private.example/preview" }));
+  host.voiceService = { catalogue: async () => voices };
+  const reads = new WorldChatTargetReads({ getVoiceCatalogue: () => host.benchVoiceCatalogue(store) });
+  const lease = new QueryLeaseRegistry(() => WORLD_ID).mint({ worldId: WORLD_ID, conversationId: newId("cv"), runId: newId("run") });
+  const page = await reads.call(lease, store.getBundle(), "list_voices", { limit: 1 });
+  assert.equal(page.result.total, 2 + store.getBundle().clonedVoices.length + store.getBundle().sheets.filter(sheet => sheet.voice).length);
+  assert.match(JSON.stringify(page.result.items), /Preset A/);
+  assert.doesNotMatch(JSON.stringify(page.result.items), /previewUrl|private.example/);
+  const action: Extract<ModelWorldChatAction, { kind: "bench-generation" }> = { kind: "bench-generation", composer: {
+    mode: "voice", brief: "The harbour remembers", provider: VOICE.provider, model: VOICE.id,
+    params: { kind: "voice", voiceId: "Preset A", voiceProvider: VOICE.provider, voiceModel: VOICE.id, count: 1 }, references: [],
+  }, checkReceiptIds: [newId("check")] };
+  const id = newId("act");
+  await deps().benchGenerationQuotes!.prepare(action, id, AT);
+  voices = voices.map(voice => ({ ...voice, unavailableReason: "Provider no longer offers this voice" }));
+  await assert.rejects(reads.call(lease, store.getBundle(), "list_voices", { cursor: page.result.nextCursor }), /changed/);
+  await assert.rejects(deps().benchGenerationQuotes!.validate(action, id), /available speech voice/);
+});
+
+it("discloses and pins cloned recording uploads, records approval consent, and refuses changed or missing clips before reservation", async t => {
+  const { store, worldDir, host, admitted, deps } = await setup(t);
+  const source = join(worldDir, "recording.wav");
+  const bytes = wav(Array.from({ length: 144_000 }, (_, index) => index % 100));
+  await writeFile(source, bytes);
+  const clone = await cloneVoice(store, [], { sourcePath: source, name: "Harbour glass", description: "Warm and dry", consent: true });
+  assert.ok(clone.ok);
+  host.voiceService = { catalogue: async () => [{ provider: VOICE.provider, model: VOICE.id, voiceId: clone.voice.id,
+    label: clone.voice.name, attributes: [], local: false, canClone: true, readsClone: clone.voice.id }] };
+  const action: Extract<ModelWorldChatAction, { kind: "bench-generation" }> = { kind: "bench-generation", composer: {
+    mode: "voice", brief: "The harbour remembers", provider: VOICE.provider, model: VOICE.id,
+    params: { kind: "voice", voiceId: clone.voice.id, voiceProvider: VOICE.provider, voiceModel: VOICE.id, count: 1 }, references: [],
+  }, checkReceiptIds: [newId("check")] };
+  const id = newId("act"), sessionId = benchChatSessionId(action, id);
+  const body = await deps().benchGenerationQuotes!.prepare(action, id, AT);
+  assert.match(body.references[0]!.role, /Cloned voice recording: Harbour glass/);
+  assert.match(body.privacy!.join(" "), /upload.*Mistral.*training/);
+  assert.equal(store.getBundle().clonedVoices[0]!.remote?.mistral?.confirmedAt, undefined);
+  const path = join(worldDir, clone.voice.clip);
+  await writeFile(path, wav(Array.from({ length: 144_000 }, () => 200)));
+  await assert.rejects(deps().benchGenerationQuotes!.dispatch(action, id), /changed/);
+  assert.equal(readBenchSession(worldDir, sessionId), null);
+  await writeFile(path, "missing recording");
+  await assert.rejects(deps().benchGenerationQuotes!.prepare(action, newId("act"), AT), /missing or invalid/);
+  assert.equal(admitted.length, 0);
+  await writeFile(path, bytes);
+  assert.equal((await deps().benchGenerationQuotes!.dispatch(action, id)).status, "queued");
+  assert.ok(store.getBundle().clonedVoices[0]!.remote?.mistral?.confirmedAt);
+  assert.equal(admitted[0]!.voiceReference, true);
+  assert.equal(admitted[0]!.voiceUploadConfirmedFor, `vendor:mistral:${clone.voice.id}`);
+});
+
+it("includes automatic On screen voice references in the generation card and privacy disclosure", async t => {
+  const { store, worldDir, deps } = await setup(t);
+  const dir = join(worldDir, "references", "maren-kest");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "main.png"), pngBytes());
+  const pcm = wav(Array.from({ length: 48_000 }, (_, i) => Math.round(Math.sin(i / 10) * 8000)));
+  const report = analyzePcmWav(pcm, AT), outputHash = audioHash(pcm);
+  await store.gateOp(() => writeFile(join(dir, "kit.json"), JSON.stringify(ReferenceKitSchema.parse({
+    sheetId: "maren-kest", tiles: [], compilations: [], mainPhoto: { file: "main.png", source: "upload", acceptedAt: AT },
+    designatedVoiceSample: { schemaVersion: 1, file: `voice/${outputHash.replace(":", "-")}.wav`, operationId: randomUUID(), designatedAt: AT,
+      warningCodes: [], attestations: [], acknowledgementId: "reviewed-cloud-sample",
+      provenance: { schemaVersion: 1, source: { kind: "legacy-character-sample", sheetId: "maren-kest", sourceFile: "voice/clone.wav",
+        legacySource: "cloning-recording", legacyDesignatedAt: AT, sourceMediaHash: outputHash },
+        sourceTechnical: report.technical, outputHash, outputTechnical: report.technical, preparation: [], qualityReport: report, createdAt: AT } },
+  }))));
+  const action: Extract<ModelWorldChatAction, { kind: "bench-generation" }> = { kind: "bench-generation", composer: {
+    mode: "video", brief: "Maren speaks by the quay", provider: VIDEO.provider, model: VIDEO.id,
+    params: { kind: "video", durationSec: 4, sound: true }, references: [{ kind: "kit", sheetId: "maren-kest", image: "main-photo", role: "reference" }],
+  }, checkReceiptIds: [newId("check")] };
+  const body = await deps().benchGenerationQuotes!.prepare(action, newId("act"), AT);
+  assert.equal(body.references.length, 2);
+  assert.equal(body.references[1]!.id, "@Audio1");
+  assert.match(body.references[1]!.role, /Maren.*voice-reference/);
+  assert.match(body.privacy!.join(" "), /2 attached references/);
+});
+
+it("recovers accepted production filing before a pending chat discard can hide its receipt", async t => {
+  const { store, worldDir, deps } = await setup(t);
+  const sessionId = newId("sess"), takeId = newId("tk"), productionTakeId = newId("tk"), frameArtifactId = newId("ar");
+  const bench = await openSubjectBenchSession(worldDir, sessionId, AT, {
+    title: "The quay",
+    subject: { kind: "shot", productionId: "saltlight", productionTitle: "Saltlight", sceneId: "sc_04", sceneNumber: 4,
+      sceneTitle: "The verse rises", shotId: "sh_12", shotNumber: 12, shotTitle: "The quay", durationSec: 4, aspect: "16:9" },
+    composer: { mode: "image", brief: "A quay still", provider: IMAGE.provider, model: IMAGE.id,
+      params: { kind: "image", count: 1 }, activeTokens: [], keyframeTokens: [] }, references: [],
+  });
+  await bench.store.append({ type: "takes-reserved", takes: [{ id: takeId, n: 1, requestId: "original", createdAt: AT,
+    request: { mode: "image", brief: "A quay still", provider: IMAGE.provider, model: IMAGE.id, params: { kind: "image", count: 1 }, references: [], keyframes: [],
+      productionProvenance: { canonRevision: store.getBundle().meta.canonRevision, sheets: {} },
+      filing: { kind: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12", productionTakeId, frameArtifactId } } }] }, { at: AT });
+  await mkdir(join(sessionDir(worldDir, sessionId), "media", takeId), { recursive: true });
+  const bytes = pngBytes();
+  await writeFile(join(sessionDir(worldDir, sessionId), "media", takeId, "take.png"), bytes);
+  await bench.store.append({ type: "take-completed", takeId, media: { file: "take.png", hash: `sha256:${createHash("sha256").update(bytes).digest("hex")}` }, completedAt: AT }, { at: AT });
+  const action = { kind: "bench-discard" as const, sessionId, takeId, checkReceiptIds: [newId("check")] };
+  deps().benchControls!.prepare(action);
+  const session = (await bench.store.fold())!;
+  await fileBenchSubjectTake(store, session, session.takes[0]!);
+  assert.equal((await bench.store.fold())!.takes[0]!.disposition, "open", "crash before the Bench receipt");
+  assert.throws(() => deps().benchControls!.prepare(action), /already accepted/);
+  await assert.rejects(deps().benchControls!.execute(action, newId("act"), () => null), /accepted|open Bench take/);
+  assert.equal((await bench.store.fold())!.takes[0]!.disposition, "filed");
+  assert.equal(store.getBundle().productions.find(production => production.meta.id === "saltlight")!.selections.sh_12!.startFrameArtifactId, frameArtifactId);
 });

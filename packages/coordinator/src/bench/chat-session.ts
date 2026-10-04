@@ -151,7 +151,7 @@ export async function prepareBenchChatSession(store: WorldStore, action: Action,
   const { references: _references, ...composer } = action.composer;
   session.composer = { ...composer, activeTokens: fromTake ? fromTake.request.references.map(ref => ref.token) : session.composer.activeTokens,
     keyframeTokens: fromTake ? fromTake.request.keyframes.map(ref => ref.token) : session.composer.keyframeTokens };
-  events.push({ type: "composer-set", ...composer, subjectRouting: { activeTokens: session.composer.activeTokens, keyframeTokens: session.composer.keyframeTokens } });
+  if (!fromTake) events.push({ type: "composer-set", ...composer, subjectRouting: { activeTokens: session.composer.activeTokens, keyframeTokens: session.composer.keyframeTokens } });
   if (!action.sessionId) events.push({ type: "title-set", title: composer.brief.trim().slice(0, 200) || "Chat generation" });
   for (const own of record?.events.filter(event => event.requestId?.startsWith(initializationPrefix(id))) ?? []) {
     const index = Number(own.requestId!.slice(initializationPrefix(id).length));

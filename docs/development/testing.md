@@ -103,7 +103,7 @@ Bench chat changes also run coordinator `test/bench/chat.test.ts`,
 approval-only session creation, Deny without side effects, crash rejoining without another
 purchase, complete reference composers, immutable reruns, paged route privacy and stale
 cursors, Keep/Select/Discard through the action lifecycle, source hashes and attachment
-retention. The client regression sends a message from world Bench without a production id.
+retention, runtime eligibility, public voice catalogue pagination, cloned-voice consent and byte changes, automatic audio disclosure, accepted-production discard recovery and refused-action schema preservation. The client regression sends a message from world Bench without a production id.
 
 Production Chat generation also runs coordinator `test/world-chat/production-generation.test.ts`,
 `test/world-chat/production-take-filing.test.ts`, `test/world-chat/actions.test.ts`,

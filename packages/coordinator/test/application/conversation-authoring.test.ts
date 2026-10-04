@@ -60,6 +60,17 @@ it("a writing run revokes its lease and removes scratch on release", async () =>
   assert.deepEqual(h.deps.receiptsFor(h.runId), []);
 });
 
+it("refused Bench action preparation leaves the world's schema boundary unchanged", async () => {
+  const h = await fixture();
+  const before = h.store.getBundle().meta.schemaVersion;
+  await assert.rejects(async () => h.deps.prepareActions!({ conversationId: h.conversationId, turnId: newId("turn"), entryContext: { kind: "world" },
+    existingCandidates: [], existingGroups: [], candidates: [], groups: [], bibleEdits: [], bibleBaseVersion: 1,
+    sceneEdits: [], sceneBaseVersion: null, editorRequests: [], receipts: [], at: "2026-10-04T02:00:00.000Z",
+    actions: [{ kind: "bench-generation", composer: { mode: "image", brief: "A tide clock", provider: "fal", model: "test-model", params: { kind: "image", count: 1 } }, checkReceiptIds: [newId("check")] }],
+  }), /complete target read|required/);
+  assert.equal(h.store.getBundle().meta.schemaVersion, before);
+});
+
 it("the extracted assembly grounds a chapter in the previous prose and keeps its read receipts", async () => {
   const h = await fixture();
   await createProduction(h.store, { title: "Inkbound", format: "story" });
