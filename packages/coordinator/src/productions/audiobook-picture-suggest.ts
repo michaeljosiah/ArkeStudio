@@ -5,14 +5,17 @@ import {
   estimateMicroUsd,
   imageOutputFor,
   lookLinesFor,
+  lookViewFor,
   normalizeSpeechText,
   pictureLookFor,
   referenceBudget,
+  ridingPicks,
   sheetReferencePicture,
   type AudiobookBlock,
   type AudiobookLook,
   type BudgetCandidate,
   type HarnessAdapter,
+  type LookView,
   type ManifestModel,
   type PictureSuggestion,
   type PictureWho,
@@ -151,18 +154,33 @@ export function pictureWho(
   store: Pick<WorldStore, "getBundle">,
   model: ManifestModel,
   chosen: ReadonlyArray<{ key: string; name: string; sheet?: string; kind: "character" | "place"; billing?: string }>,
+  /**
+   * The chapter's look and the picture's frame (design turn 193, R-119, R-118): a character the
+   * chapter chose a kit look for rides that look's image instead of the main photo — the close
+   * view for a frame that shows faces where the look has one, the full body otherwise.
+   */
+  options: { look?: AudiobookLook | null; frame?: string | null } = {},
 ): PictureWho[] {
   const world = store.getBundle();
-  const reference = (sheet: string | undefined): string | null => (sheet === undefined ? null : sheetReferencePicture(world, sheet));
+  const riding = (entry: (typeof chosen)[number]): { file: string | null; look?: { lookId: string; view: LookView } } => {
+    if (entry.sheet === undefined) return { file: null };
+    const lookId = entry.kind === "character" ? options.look?.characters[entry.key]?.lookId : undefined;
+    const look = lookId === undefined ? undefined : world.referenceKits.find((kit) => kit.sheetId === entry.sheet)?.looks?.find((candidate) => candidate.id === lookId && candidate.kind === "costume");
+    // A look the kit no longer holds leaves the main photo to ride, and the stamp records none.
+    if (look === undefined) return { file: sheetReferencePicture(world, entry.sheet) };
+    const view = lookViewFor(options.frame) === "close" && look.closeFile !== undefined ? "close" : "full";
+    return { file: `references/${entry.sheet}/${view === "close" ? look.closeFile! : look.file}`, look: { lookId: look.id, view } };
+  };
+  const resolved = chosen.map(riding);
   const candidates: BudgetCandidate[] = chosen.flatMap((entry, index) =>
     entry.sheet === undefined
       ? []
-      : [{ sheetId: entry.sheet, kind: entry.kind === "place" ? "location" as const : "character" as const, ...(entry.billing !== undefined ? { billing: entry.billing } : {}), appearanceOrder: index, hasReference: reference(entry.sheet) !== null }],
+      : [{ sheetId: entry.sheet, kind: entry.kind === "place" ? "location" as const : "character" as const, ...(entry.billing !== undefined ? { billing: entry.billing } : {}), appearanceOrder: index, hasReference: resolved[index]!.file !== null }],
   );
   const budget = referenceBudget(candidates, { ...model, accepts: { ...model.accepts, referenceImages: referenceBudgetFor(model) } });
   const carried = new Set(budget.carried.filter((candidate) => candidate.referenceRole === "primary").map((candidate) => candidate.sheetId));
-  return chosen.map((entry): PictureWho => {
-    const file = reference(entry.sheet);
+  return chosen.map((entry, index): PictureWho => {
+    const { file, look } = resolved[index]!;
     return {
       key: entry.key,
       name: entry.name,
@@ -170,6 +188,7 @@ export function pictureWho(
       kind: entry.kind,
       reference: file,
       carried: file !== null && entry.sheet !== undefined && carried.has(entry.sheet),
+      ...(look !== undefined ? { look } : {}),
     };
   });
 }
@@ -255,10 +274,11 @@ export async function suggestPicture(store: WorldStore, room: PictureRoom, block
   const who = pictureWho(store, options.model, [
     ...inFrame.map((person) => ({ key: person.key, name: person.name, ...(person.sheet !== undefined ? { sheet: person.sheet } : {}), kind: "character" as const, ...(person.billing !== undefined ? { billing: person.billing } : {}) })),
     ...(place === undefined ? [] : [{ key: place.key, name: place.name, sheet: place.key, kind: "place" as const }]),
-  ]);
-  const used = lookLinesFor(room.look, inFrame.map((person) => person.key));
+  ], { look: room.look });
+  const picks = ridingPicks(who);
+  const used = lookLinesFor(room.look, inFrame.map((person) => person.key), picks);
   const aspect = pictureAspect(options.model);
-  const stamp = pictureLookFor(room.look, inFrame.map((person) => person.key));
+  const stamp = pictureLookFor(room.look, inFrame.map((person) => person.key), picks);
   return {
     block: blockKey,
     prompt,

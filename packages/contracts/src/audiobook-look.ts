@@ -105,6 +105,19 @@ export const LookViewSchema = z.enum(["full", "close"]);
 export type LookView = z.infer<typeof LookViewSchema>;
 
 /**
+ * The image of a look a frame asks for (design turn 193, rule 8; SPEC-047 R-118): the close view
+ * for Two-shot, Medium close-up, Close-up and Extreme close-up — frames that show faces, where a
+ * full-length figure leaves the model a face a few pixels wide — and the full body for
+ * Establishing, Wide, Medium wide, Medium and anything else, including no frame named at all.
+ * Read from the frame's opening words, so `Medium two-shot across the table` is a two-shot.
+ */
+export function lookViewFor(frame: string | undefined | null): LookView {
+  if (frame === undefined || frame === null) return "full";
+  const words = frame.toLowerCase().replace(/[-‐–]/g, " ").replace(/\s+/g, " ").trim();
+  return /\b(two shot|close up|closeup)\b/.test(words.split(/[,·:;(]/)[0] ?? "") ? "close" : "full";
+}
+
+/**
  * The look one person rode in one picture (R-112): the kit look and which of its two images.
  * `only` is a look chosen for this picture alone — the chapter's choice is not its choice, so a
  * later change of the chapter's choice never marks the picture `look changed` (R-115).

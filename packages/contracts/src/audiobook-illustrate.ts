@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LOOK_LINE_MAX, PictureLookSchema } from "./audiobook-look.js";
+import { LOOK_LINE_MAX, LookViewSchema, PictureLookSchema } from "./audiobook-look.js";
 
 /**
  * Pictures proposed by Arke (design turn 191, SPEC-047 R-99..R-102): a suggestion for one block
@@ -27,9 +27,22 @@ export const PictureWhoSchema = z
     kind: z.enum(["character", "place"]),
     reference: z.string().min(1).max(1000).nullable(),
     carried: z.boolean(),
+    /**
+     * The look that rides for this person (design turn 193, SPEC-047 R-119): the chapter's chosen
+     * kit look, and which of its images the frame took (R-118). `reference` is then that image,
+     * never the main photo — the two never ride together. Absent where the main photo rides.
+     */
+    look: z.object({ lookId: z.string().min(1).max(120), view: LookViewSchema }).strict().optional(),
   })
   .strict();
 export type PictureWho = z.infer<typeof PictureWhoSchema>;
+
+/** The look stamp's picks from who rode (R-119): each person whose chosen look rode, with the image the frame took. */
+export function ridingPicks(who: readonly PictureWho[]): Record<string, { lookId: string; view: "full" | "close" }> {
+  const picks: Record<string, { lookId: string; view: "full" | "close" }> = {};
+  for (const entry of who) if (entry.kind === "character" && entry.look !== undefined) picks[entry.key] = { lookId: entry.look.lookId, view: entry.look.view };
+  return picks;
+}
 
 /** The model a picture is made on, as the card names it, and what it was priced at (R-99). */
 export const PictureModelSchema = z

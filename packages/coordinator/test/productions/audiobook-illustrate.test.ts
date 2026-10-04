@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { acceptCharacterLook } from "../../src/references/kit.js";
+import { pngBytes } from "../queue/fake-provider.js";
 import { pictureLookChanged, type AudiobookPicture, type ClientMessage, type DomainEvent, type IllustrationProposal } from "@arke-studio/contracts";
 import { readAudiobook } from "../../src/productions/audiobook.js";
 import { AUDIOBOOK_LOOK_SCHEMA_VERSION } from "../../src/world/commit.js";
@@ -14,7 +16,8 @@ import { CHAPTER, LEDGER, WORLD_ID, withHarness, type Harness } from "./picture-
  * seconds a picture holds — held until accepted; accepted, made one at a time through the Bench
  * under ONE confirm of the total, each filed on its block as it lands.
  */
-type FinishedEvent = Extract<DomainEvent, { type: "illustration.finished" }>;
+const LOOK_ID = "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2K3";
+type FinishedEvent =Extract<DomainEvent, { type: "illustration.finished" }>;
 type ProgressEvent = Extract<DomainEvent, { type: "illustration.progress" }>;
 type RecordEvent = Extract<DomainEvent, { type: "audiobook.record" }>;
 
@@ -230,6 +233,31 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
         assert.equal(h.events.filter((event) => event.type === "illustration.finished").length, 1);
       },
       { illustrate: says((input) => MARENS(input)) },
+    ));
+
+  it("rides each person's chosen look in the proposal and in the run, and stamps it on every picture (R-119)", () =>
+    withHarness(
+      async (h) => {
+        await acceptCharacterLook(h.store()!, "maren-kest", { id: LOOK_ID, file: `takes/${LOOK_ID}/look.png`, kind: "costume", prompt: "Storm coat, hood up.", takeId: LOOK_ID, artDirectionVersion: 1, framing: "full-body" });
+        // The look is read first, then chosen, then the chapter illustrated.
+        await h.send({ kind: "derive-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, requestId: "01J00000000000000000000004" });
+        await h.send({ kind: "choose-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, key: "maren-kest", sheet: "maren-kest", lookId: LOOK_ID, requestId: "01J00000000000000000000005" });
+        const proposal = await proposed(h);
+        const look = `references/maren-kest/takes/${LOOK_ID}/look.png`;
+        assert.ok(proposal.rows.every((row) => row.who[0]!.reference === look && row.who[0]!.look?.lookId === LOOK_ID), "the look, not the main photo");
+        await accept(h.send, proposal);
+        assert.ok(h.enqueued.every((job) => JSON.stringify((job.params as { references?: string[] }).references) === JSON.stringify([look])), "each job carries the look alone");
+        const record = await readAudiobook(h.store()!, LEDGER, CHAPTER);
+        assert.ok(record !== null && record !== "unreadable");
+        for (const row of proposal.rows) assert.deepEqual(record.pictures![row.block]!.look?.looks, { "maren-kest": { lookId: LOOK_ID, view: "full" } });
+      },
+      {
+        illustrate: says((input) => MARENS(input)),
+        prepare: async (worldDir) => {
+          await mkdir(join(worldDir, "references", "maren-kest", "takes", LOOK_ID), { recursive: true });
+          await writeFile(join(worldDir, "references", "maren-kest", "takes", LOOK_ID, "look.png"), pngBytes());
+        },
+      },
     ));
 
   it("refuses a confirm below the total, and the run never begins", () =>

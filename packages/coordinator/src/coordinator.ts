@@ -155,6 +155,7 @@ import {
   type ArtifactGeneration,
   type CharacterReferenceWorkflow,
   pictureLookFor,
+  ridingPicks,
   type PictureWho,
   pictureBench,
   priceLabel,
@@ -1672,7 +1673,8 @@ export class Coordinator {
             continue;
           }
           const chosen = row.who.map((entry) => ({ key: entry.key, name: entry.name, ...(entry.sheet !== undefined ? { sheet: entry.sheet } : {}), kind: entry.kind, ...(room.people.find((person) => person.key === entry.key)?.billing !== undefined ? { billing: room.people.find((person) => person.key === entry.key)!.billing! } : {}) }));
-          const who = pictureWho(store, model, chosen);
+          // The chapter's look as it stands now: a look chosen since the proposal rides (R-119).
+          const who = pictureWho(store, model, chosen, { look: record?.look ?? null });
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${row.block === "title" ? "title" : row.title}`,
             prompt: row.prompt,
@@ -1690,7 +1692,7 @@ export class Coordinator {
             continue;
           }
           progress.spentMicroUsd += made.costMicroUsd ?? made.estimatedMicroUsd;
-          const stamp = pictureLookFor(record?.look ?? null, who.filter((entry) => entry.kind === "character").map((entry) => entry.key));
+          const stamp = pictureLookFor(record?.look ?? null, who.filter((entry) => entry.kind === "character").map((entry) => entry.key), ridingPicks(who));
           const next = await setAudiobookPicture(store, productionId, chapter.file, row.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, stamp !== undefined ? { look: stamp } : {});
           progress.made.push(row.block);
           this.refreshIfStillOpen(store);
@@ -15157,7 +15159,7 @@ export class Coordinator {
           const who = pictureWho(store, model, [
             ...characters.map((person) => ({ key: person.key, name: person.name, ...(person.sheet !== undefined ? { sheet: person.sheet } : {}), kind: "character" as const, ...(person.billing !== undefined ? { billing: person.billing } : {}) })),
             ...(place === undefined ? [] : [{ key: place.key, name: place.name, sheet: place.key, kind: "place" as const }]),
-          ]);
+          ], { look });
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${msg.block === "title" ? "title" : `block ${index + 1}`}`,
             prompt: clipPrompt(msg.prompt, promptRoom(model)),
@@ -15170,7 +15172,7 @@ export class Coordinator {
             signal: control.signal,
           });
           if (!made.ok) return fail(made.reason, made.sessionId);
-          const stamp = pictureLookFor(look, characters.map((person) => person.key));
+          const stamp = pictureLookFor(look, characters.map((person) => person.key), ridingPicks(who));
           const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, stamp !== undefined ? { look: stamp } : {});
           this.refreshIfStillOpen(store);
           // The record the picture now stands in goes to every window as any record write does: the margin's chip and the panel read it from there, and the card's own word is only that it is done.

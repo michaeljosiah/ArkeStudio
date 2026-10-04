@@ -10,6 +10,7 @@ import {
   pictureLookFor,
   placePictures,
   pictureStarts,
+  ridingPicks,
   thinPictures,
   type HarnessAdapter,
   type IllustrationProposal,
@@ -199,9 +200,9 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
     const who = pictureWho(store, model, [
       ...candidate.people.map((person) => ({ key: person.key, name: person.name, ...(person.sheet !== undefined ? { sheet: person.sheet } : {}), kind: "character" as const, ...(person.billing !== undefined ? { billing: person.billing } : {}) })),
       ...(candidate.place === undefined ? [] : [{ key: candidate.place.key, name: candidate.place.name, sheet: candidate.place.key, kind: "place" as const }]),
-    ]);
+    ], { look: room.look });
     const needs = who.filter((entry) => entry.kind === "character" && entry.sheet !== undefined && entry.reference === null).map((entry) => entry.name);
-    const stamp = pictureLookFor(room.look, candidate.people.map((person) => person.key));
+    const stamp = pictureLookFor(room.look, candidate.people.map((person) => person.key), ridingPicks(who));
     return {
       block: planned.block.key,
       textHash: audiobookTextHash(planned.block.text),
