@@ -1,5 +1,13 @@
 # Running and validating changes
 
+Production readiness (#1422, SPEC-051 T-9) is covered by contracts
+`test/production-readiness.test.ts` and `test/world-chat-shape.test.ts`; coordinator
+`test/world-chat/production-readiness.test.ts`, `retrieval.test.ts`, `turn-result.test.ts` and
+`run.test.ts`; and client `test/production-plan-card.test.tsx`. These check actual selections,
+current voice placements, saved cut placement, scoped exports, complete fenced reads,
+stale checklist refusal, suggestion-only persistence at schema 59, restart reconstruction,
+and live checklist rendering without Approve. Run client tests from `packages/client`.
+
 Production whole-cut chat (#1420, SPEC-051 T-7) is covered by coordinator
 `test/world-chat/actions.test.ts` (the `production whole cut` suite), contracts
 `test/timeline-commands.test.ts`, and client `test/timeline-card-history.test.ts`.

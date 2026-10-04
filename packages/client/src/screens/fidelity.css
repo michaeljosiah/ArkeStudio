@@ -8911,3 +8911,11 @@ button.fy-abdoor__voice:hover { background: var(--accent); border-color: var(--n
 /* SPEC-047 R-39: speaker colour and book counts above the script controls. */
 .fy-rectake--lines { padding: 18px; }
 .fy-rectake__summary { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); font: 400 12px/1.5 var(--font-sans); }
+.fy-production-plan { padding: 16px; border: 1px solid var(--border); border-radius: 12px; margin: 12px 0; }
+.fy-production-plan h3, .fy-production-plan h4 { margin: 8px 0; }
+.fy-production-plan__checks { list-style: none; padding: 0; margin: 12px 0; }
+.fy-production-plan__checks li { margin: 8px 0; overflow-wrap: anywhere; }
+.fy-production-plan__checks small { display: block; opacity: .7; margin-top: 3px; }
+.fy-production-plan details { margin: 12px 0; }
+.fy-production-plan summary { cursor: pointer; }
+.fy-production-plan__note { font-size: .85em; opacity: .7; }

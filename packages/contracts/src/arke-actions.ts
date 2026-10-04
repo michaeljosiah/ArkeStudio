@@ -112,6 +112,7 @@ export const ArkeReadRequirementSchema = z.enum([
   "founding-build",
   "exports",
   "bench",
+  "readiness",
 ]);
 export type ArkeReadRequirement = z.infer<typeof ArkeReadRequirementSchema>;
 

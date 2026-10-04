@@ -586,6 +586,7 @@ import {
   WorldChatAttachmentStore,
 } from "./world-chat/attachments.js";
 import { projectWorkspace } from "./world-chat/project.js";
+import { projectProductionPlan } from "./world-chat/production-readiness.js";
 import {
   ConversationActionLifecycle,
   conversationActionDigest,
@@ -673,6 +674,7 @@ function exportReadRecord(event: ExportProgressEvent): ArkeExportReadRecord {
     productionId: event.productionId,
     ...(event.episodeId !== undefined ? { episodeId: event.episodeId } : {}),
     status: event.status,
+    createdAt: event.at,
     percent: event.percent,
     output: safeExportOutput(event.output),
     error: event.error === null ? null : "export failed",
@@ -20546,6 +20548,11 @@ export class Coordinator {
     this.readModel.setStageReviews(human.stageReviews);
     this.readModel.setWorldChat(
       projectWorkspace(loaded, new Map(), {
+        productionPlan: (request) => {
+          const exports = [...this.exportReads.values()].filter(e => e.worldId === store.worldId && e.productionId === request.productionId)
+            .map(({ id, worldId, productionId, episodeId, status, output, createdAt }) => ({ id, worldId, productionId, episodeId, status, output, createdAt }));
+          return projectProductionPlan(bundle, exports, request);
+        },
         humanDecisions: human.cards, humanDecisionProblems: human.problems,
         sheetName: (slug) => sheets.get(slug)?.name ?? null,
         sheetVersion: (slug) => sheets.get(slug)?.version ?? null,

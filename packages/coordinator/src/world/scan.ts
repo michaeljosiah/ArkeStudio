@@ -147,7 +147,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Fifty-eight adds durable chat transcription and exact timeline history cards (SPEC-051 T-7).
 // Fifty-nine is a character's `shortName` on a strict sheet (design turn 194, rule 12b): a build
 // without the field drops the sheet on scan, and with it the character.
-export const SUPPORTED_SCHEMA_VERSION = 59;
+// Sixty adds non-authorizing plan suggestions and derived-readiness receipts (SPEC-051 T-9).
+export const SUPPORTED_SCHEMA_VERSION = 60;
 
 export class WorldOpenError extends Error {
   constructor(
