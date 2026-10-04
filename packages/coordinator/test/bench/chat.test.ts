@@ -98,7 +98,8 @@ it("sequences production music into a fenced human editor request, blocks denied
     const turn = { conversationId, turnId: newId("turn"), entryContext: { kind: "production" as const, productionId: "saltlight" },
       candidates: [], groups: [], existingCandidates: [], existingGroups: [], bibleEdits: [], bibleBaseVersion: 1, sceneEdits: [], sceneBaseVersion: null, editorRequests: [], actions, receipts, at: AT };
     assert.throws(() => prepareWorldChatActions(store, lifecycle, { ...turn, actions: [actions[0]!, { ...actions[1]!, after: [] }] }, dependencies), /earlier generation action in after/);
-    assert.throws(() => prepareWorldChatActions(store, lifecycle, { ...turn, actions: [actions[0]!, { ...actions[1]!, role: "ambience" }] }, dependencies), /cue's audio role/);
+    const cueAction = actions[1]!; assert.ok(cueAction.kind === "production-audio-cue");
+    assert.throws(() => prepareWorldChatActions(store, lifecycle, { ...turn, actions: [actions[0]!, { ...cueAction, role: "ambience" }] }, dependencies), /cue's audio role/);
     const prepared = prepareWorldChatActions(store, lifecycle, turn, dependencies);
     for (const item of prepared) { await log.append({ type: "action.prepare-intent", intent: item.intent }, { at: AT }); await lifecycle.bindIntent(item.intent, item.payload); }
     return (await view()).actions.slice(-2);
