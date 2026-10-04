@@ -17,6 +17,7 @@ import {
   type ArkeReadTarget,
   type ArkeTargetReadPage,
   type ArkeTargetReadTool,
+  type AudioRightsEvent,
   type ChapterVoices,
   type Job,
   type ProductionBundle,
@@ -58,6 +59,7 @@ export interface ArkeExportReadRecord {
 }
 
 export interface TargetReadDeps {
+  readonly getAudioRights?: () => Promise<readonly AudioRightsEvent[]>;
   readonly getFrameRunRows?: (productionId: string) => readonly ProductionReadRow[] | Promise<readonly ProductionReadRow[]>;
   readonly getBuildItems?: () => readonly ArkeBuildItemRead[];
   readonly getPlans?: (productionId: string) => Promise<readonly DispatchPlanReadRecord[]>;
@@ -844,7 +846,8 @@ export class WorldChatTargetReads {
       }
       case "list_voice_samples": {
         assertArgs(args, []);
-        rows = voiceSampleReadRows(bundle);
+        if (!this.deps.getAudioRights) throw new TargetReadError("Current voice-sample rights are unavailable.");
+        rows = voiceSampleReadRows(bundle, await this.deps.getAudioRights());
         readTarget = target("voice-samples", lease.worldId);
         revisionOrDigest = productionReadFence(rows);
         break;

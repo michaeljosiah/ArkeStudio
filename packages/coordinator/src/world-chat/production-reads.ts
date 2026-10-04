@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { FrameRunSchema, SlugSchema, foldFrameRun, type Job, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
+import { AudioRightsScopeSchema, FrameRunSchema, SlugSchema, foldFrameRun, type AudioRightsEvent, type Job, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
+import { effectiveAudioRights } from "../audio/rights.js";
 import { conversationActionDigest } from "../arke-actions/digest.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -11,7 +12,7 @@ export const productionReadFence = (rows: readonly ProductionReadRow[]) => conve
 
 /** Read the same durable runs for retrieval and approval, without exposing provider inputs. */
 export function frameRunReadRows(store: Pick<WorldStore, "dir" | "worldId">, productionId: string,
-  jobs: readonly Pick<Job, "id" | "worldId" | "productionId" | "status" | "finalization">[]): ProductionReadRow[] {
+  jobs: readonly Pick<Job, "id" | "worldId" | "productionId" | "status" | "finalization" | "failureClass">[]): ProductionReadRow[] {
   SlugSchema.parse(productionId);
   const dir = toExtendedLength(join(store.dir, "productions", productionId, "runs"));
   let files: string[];
@@ -19,7 +20,7 @@ export function frameRunReadRows(store: Pick<WorldStore, "dir" | "worldId">, pro
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
   const rows: ProductionReadRow[] = [];
   const facts = jobs.filter(job => job.worldId === store.worldId && job.productionId === productionId)
-    .map(job => ({ id: job.id, status: job.status, finalization: job.finalization?.status }));
+    .map(job => ({ id: job.id, status: job.status, failureClass: job.failureClass, finalization: job.finalization?.status }));
   for (const file of files.filter(file => file.endsWith(".json")).sort()) {
     const run = FrameRunSchema.parse(JSON.parse(readFileSync(toExtendedLength(join(dir, file)), "utf8")));
     if (file !== `${run.id}.json` || run.steps.some(step => step.dispatch.worldId !== store.worldId || step.dispatch.productionId !== productionId)) continue;
@@ -33,7 +34,7 @@ export function frameRunReadRows(store: Pick<WorldStore, "dir" | "worldId">, pro
       rows.push({ key: `${run.createdAt}:${run.id}:1:${numbered(index)}`, value: { kind: "frame-run-step", runId: run.id,
         stepIndex: index, sourceStepIndex: step.sourceStepIndex, retryOf: step.retryOf ?? null,
         requestShotIds: step.requestShotIds, updateShotIds: step.updateShotIds, jobId: step.jobId ?? null,
-        status: folded.status, canRetry: folded.canRetry, canRetryCell: folded.canRetryCell,
+        status: folded.status, failureClass: folded.failureClass, canRetry: folded.canRetry, canRetryCell: folded.canRetryCell,
         shots: folded.shots.map(({ shotId, status, canRetryCell, landingOutcome }) => ({ shotId, status, canRetryCell, landingOutcome })) } });
     });
   }
@@ -50,10 +51,22 @@ export function performanceReadRows(production: ProductionBundle | undefined): P
   ].sort((a, b) => a.key.localeCompare(b.key));
 }
 
-export function voiceSampleReadRows(bundle: WorldBundle): ProductionReadRow[] {
+export function voiceSampleReadRows(bundle: WorldBundle, events: readonly AudioRightsEvent[]): ProductionReadRow[] {
   return bundle.referenceKits.filter(kit => kit.designatedVoiceSample !== undefined)
     .sort((a, b) => a.sheetId.localeCompare(b.sheetId))
-    .map(kit => ({ key: kit.sheetId, value: { sheetId: kit.sheetId, sample: kit.designatedVoiceSample } }));
+    .map(kit => {
+      const sample = kit.designatedVoiceSample!;
+      const hash = "schemaVersion" in sample ? sample.provenance.outputHash : undefined;
+      const current = hash === undefined ? [] : [...new Map(AudioRightsScopeSchema.options
+        .flatMap(scope => effectiveAudioRights(events, hash, scope)).map(event => [event.id, event])).values()];
+      const withdrawnAcknowledgementIds = [...new Set(events.filter(event => event.action === "withdraw" && event.audioHash === hash)
+        .map(event => event.action === "withdraw" ? event.acknowledgementId : ""))].sort();
+      return { key: kit.sheetId, value: { sheetId: kit.sheetId, sample, rights: {
+        status: hash === undefined ? "unverified" : current.length ? "acknowledged" : withdrawnAcknowledgementIds.length ? "withdrawn" : "unacknowledged",
+        acknowledgements: current.map(({ id, basis, scopes, statementVersion, at }) => ({ id, basis, scopes, statementVersion, at })),
+        withdrawnAcknowledgementIds,
+      } } };
+    });
 }
 
 export function audioCutReadRows(production: ProductionBundle | undefined): ProductionReadRow[] {

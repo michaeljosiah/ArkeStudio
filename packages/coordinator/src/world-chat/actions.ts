@@ -1,4 +1,5 @@
 import { frameRunReadRows, performanceReadRows, voiceSampleReadRows, audioCutReadRows, editorRequestReadRows, productionReadFence } from "./production-reads.js";
+import { readAudioRightsSync } from "../audio/rights.js";
 import type { ProductionBatchControls } from "./production-batch.js";
 import { readPlanRecords } from "../productions/plans.js";
 import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema, checkPropName, newId } from "@arke-studio/contracts";
@@ -602,7 +603,7 @@ function currentWorldObservation(
       const productionId = target ?? store.worldId;
       return { target: productionId, fence: productionReadFence(frameRunReadRows(store, productionId, deps.getJobs?.() ?? [])) };
     }
-    case "voice-samples": return { target: store.worldId, fence: productionReadFence(voiceSampleReadRows(bundle)) };
+    case "voice-samples": return { target: store.worldId, fence: productionReadFence(voiceSampleReadRows(bundle, readAudioRightsSync(store))) };
     case "performances":
     case "audio-cut":
     case "editor-requests": {
