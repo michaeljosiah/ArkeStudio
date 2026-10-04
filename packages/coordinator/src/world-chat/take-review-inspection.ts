@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ConversationActionPrepareIntent, ProductionBundle, Take } from "@arke-studio/contracts";
-import { readContainedMediaBytes } from "../world/reference-files.js";
+import { readContainedMediaBytes, hashContainedProductionMedia } from "../world/reference-files.js";
 import type { WorldStore } from "../world/store.js";
 import { productionTakeImageSource } from "./production-take-images.js";
 import { conversationDir, WorldChatStore } from "./store.js";
@@ -18,7 +18,8 @@ export async function takeReviewInspectionReason(store: WorldStore, intent: Conv
       const source = productionTakeImageSource(store.getBundle(), { kind: "production-take", productionId: production.meta.id, takeId: take.id, frame });
       const receipt = receipts.find(receipt => receipt.image?.id === source.id && receipt.image.posterOnly === source.video);
       if (!receipt?.image) return false;
-      const hash = `sha256:${createHash("sha256").update(await readContainedMediaBytes(store.dir, source.path)).digest("hex")}`;
+      const hash = source.video ? (await hashContainedProductionMedia(store.dir, source.path, source.expected, store.closingSignal)).sourceHash
+        : `sha256:${createHash("sha256").update(await readContainedMediaBytes(store.dir, source.path, store.closingSignal)).digest("hex")}`;
       return hash === receipt.image.sourceHash && (!source.expected || hash.startsWith(source.expected));
     } catch { return false; }
   };

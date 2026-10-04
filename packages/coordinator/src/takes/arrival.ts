@@ -5,6 +5,7 @@ import {
   ProvenanceSchema,
   TakeIdSchema,
   TakeSchema,
+  TAKE_MEDIA_IDENTITY_SCHEMA_VERSION,
   ulid,
   type Job,
   type Provenance,
@@ -14,6 +15,7 @@ import {
   orderedShots,
 } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
+import { hashMedia } from "../world/scan.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import type { TakeQcAnalyzer, TakeQcUnavailableReason } from "./qc.js";
@@ -229,6 +231,9 @@ export async function recordTakesFromJob(
 
   await store.gateOp(async () => {
     const existingPrimary = rejoins ? await takeForJob(store, job.productionId!, job.id) : null;
+    if (!existingPrimary && (job.capability === "image" || job.capability === "video")) {
+      await store.commitUnserialised({ kind: "take-media-identity", source: "app", files: [], raiseSchemaVersion: TAKE_MEDIA_IDENTITY_SCHEMA_VERSION });
+    }
     // A replayable finalization needs a deterministic id, so a retry can recover the window
     // after media moved into its take directory but before take.json became durable.
     const primaryId = rejoins ? `tk_${job.id.slice(3)}` : `tk_${ulid()}`;
@@ -242,6 +247,10 @@ export async function recordTakesFromJob(
     const { rm } = await import("node:fs/promises");
     await rm(toExtendedLength(join(takeDir, ".keep")), { force: true }).catch(() => {});
     await rm(toExtendedLength(dirname(join(store.dir, media))), { recursive: true, force: true }).catch(() => {});
+
+    // Failed checksum work must not strand paid media after it has moved. Such a take remains
+    // metadata-only; never attest its current bytes on a later read. Capture before diagnostics.
+    const mediaHash = existingPrimary?.mediaHash ?? (existingPrimary || takeKindFor(job) === "voice" ? null : await hashMedia(finalMedia, store.closingSignal).catch(() => null));
 
     // Measured once, against the file that arrived, before any take.json exists — a take is
     // immutable, so the only moment to record this is before it is written (#248). Every
@@ -308,6 +317,7 @@ export async function recordTakesFromJob(
         ...(actualMicroUsd !== null ? { actualSource } : {}),
       },
       media: mediaName,
+      ...(mediaHash ? { mediaHash } : {}),
       ...(qc !== null ? { qc } : {}),
     };
     if (!existingPrimary) await atomicWriteFile(join(takeDir, "take.json"), JSON.stringify(primary, null, 2) + "\n");

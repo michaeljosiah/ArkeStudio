@@ -7,6 +7,7 @@ import { ProductionTakeFiling } from "../../src/world-chat/production-take-filin
 import { BenchStore, sessionDir, sessionMediaDir } from "../../src/bench/store.js";
 import { createProp, addPropState } from "../../src/references/props.js";
 import { fileArtifact } from "../../src/artifacts/filing.js";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -1981,9 +1982,13 @@ describe("World Chat authority adapters", () => {
   it("describes only current production pixels served to the review's own completed turn", async () => {
     const context = { kind: "takes" as const, productionId: PRODUCTION, sceneId: "sc_04", shotId: "sh_12" };
     const w = await setup(context), production = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
-    const take = { ...production.takes.find(t => t.kind === "clip")!, id: newId("tk"), kind: "frame", media: "frame.png", startFrame: "artifacts/review-seed.png" };
     const png = encodePng(solidImage(2, 2, [20, 40, 60, 255]));
-    await w.store.commit({ kind: "review-image-test", source: "test", files: [
+    const mediaHash = `sha256:${createHash("sha256").update(png).digest("hex")}`, seedId = newId("ar");
+    const take = { ...production.takes.find(t => t.kind === "clip")!, id: newId("tk"), kind: "frame", media: "frame.png", mediaHash,
+      startFrame: "artifacts/review-seed.png", params: { frameArtifact: { id: seedId, hash: mediaHash } } };
+    await w.store.commit({ kind: "review-image-test", source: "test", raiseSchemaVersion: 54, files: [
+      { path: "artifacts/review-seed.json", action: "create", baseHash: null, content: JSON.stringify({ id: seedId, kind: "image", file: "review-seed.png", hash: mediaHash,
+        origin: { by: "user" }, links: [], created: AT }) },
       { path: `productions/${PRODUCTION}/takes/${take.id}/take.json`, action: "create", baseHash: null, content: JSON.stringify(take) },
       ...[`productions/${PRODUCTION}/takes/${take.id}/frame.png`, "artifacts/review-seed.png"].map(path =>
         ({ path, action: "create" as const, baseHash: null, encoding: "base64" as const, content: Buffer.from(png).toString("base64") })),

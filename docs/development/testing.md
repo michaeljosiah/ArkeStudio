@@ -22,6 +22,14 @@ selection. Coordinator `images.test.ts` checks discovery, pixels, segment positi
 refusals; `actions.test.ts` checks that the card's reason counts only current bytes served to
 its own completed turn. A receipt from another turn/run or a changed image leaves the reason
 metadata-only. These remain scripted model tests; the codec smoke uses real ffmpeg bytes.
+Original media checksums are recorded on new generated, uploaded and Bench-filed production
+takes at schema 54. Legacy takes without a frozen hash remain metadata-only; current probe
+sidecars are not a substitute for original identity. A start frame must match the artifact ID,
+path and hash frozen in `params.frameArtifact`. Production video inspection streams a verified
+private file snapshot (4 GiB scratch ceiling, eight-second verification budget) into the bounded
+decoder, rather than using the 50 MiB image-input allocation ceiling. The image suite includes
+a 52 MiB source and verifies snapshot cleanup; take arrival tests verify original hashes and
+the schema-53 reader refusal.
 
 Use Node 22.12 or later; CI uses Node 22. Run `npm ci` from the repository root. See [CONTRIBUTING.md](../../CONTRIBUTING.md#getting-set-up) for browser development and its authenticated session link; `npm start` builds and starts desktop, including its native rebuild.
 

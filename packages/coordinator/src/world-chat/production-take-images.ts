@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { extname } from "node:path";
-import { SlugSchema, TakeIdSchema, type ProductionBundle, type Take, type WorldBundle } from "@arke-studio/contracts";
+import { Sha256Schema, SlugSchema, TakeIdSchema, type ProductionBundle, type Take, type WorldBundle } from "@arke-studio/contracts";
 import { RetrievalError } from "./retrieval.js";
 
 export const ProductionTakeImageArgsSchema = z.object({
@@ -9,6 +9,7 @@ export const ProductionTakeImageArgsSchema = z.object({
 }).strict();
 export type ProductionTakeImageArgs = z.infer<typeof ProductionTakeImageArgsSchema>;
 const imageFile = (file: string) => [".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(extname(file).toLowerCase());
+const frozenFrameSchema = z.object({ id: z.string().min(1), hash: Sha256Schema }).strict();
 
 /** Copyable reads name an immutable take, never today's mutable shot selection. */
 export function productionTakeImageSources(production: ProductionBundle, take: Take) {
@@ -28,12 +29,14 @@ export function productionTakeImageSource(bundle: WorldBundle, args: ProductionT
   }
   const identity = `production:${production.meta.id}:${take.id}:${args.frame}`;
   if (args.frame === "start-frame") {
-    if (!take.startFrame || !imageFile(take.startFrame) || /^\.conversations(?:[\\/]|$)/i.test(take.startFrame)) {
+    const frozen = frozenFrameSchema.safeParse(take.params.frameArtifact);
+    const artifact = frozen.success ? bundle.artifacts.find(a => a.id === frozen.data.id && ["image", "board"].includes(a.kind)) : undefined;
+    if (!take.startFrame || !imageFile(take.startFrame) || !artifact || !frozen.success ||
+      artifact.hash !== frozen.data.hash || `artifacts/${artifact.file}` !== take.startFrame) {
       throw new RetrievalError("unavailable", "view_image: this take has no available frozen start frame. Never substitute the shot's current selection.");
     }
-    const artifact = bundle.artifacts.find(a => `artifacts/${a.file}` === take.startFrame && ["image", "board"].includes(a.kind));
     return { path: take.startFrame, id: identity, label: `Start frame for ${take.id}`, video: false,
-      expected: artifact?.hash, atSec: 0 };
+      expected: frozen.data.hash, atSec: 0 };
   }
   const source = take.media ? take : take.segment ? production.takes.find(t => t.id === take.segment!.passTakeId) : undefined;
   // Imported take records are not permission to read another folder through a media filename.
@@ -45,7 +48,9 @@ export function productionTakeImageSource(bundle: WorldBundle, args: ProductionT
   if (take.segment && !take.media && (take.kind !== "clip" || source.kind !== "clip" || take.segment.outSec <= atSec)) {
     throw new RetrievalError("unavailable", "view_image: this take's pass segment is unavailable.");
   }
+  const expected = take.panel?.hash ?? source.mediaHash;
+  if (!expected) throw new RetrievalError("unavailable", "view_image: this legacy take has no original media hash. Its pixels cannot be verified; use a metadata-only review.");
   return { path: `productions/${production.meta.id}/takes/${source.id}/${source.media}`,
     id: `${identity}:${source.id}:${atSec}`, label: take.kind === "clip" ? `Poster for ${take.id} at ${atSec}s` : `Image take ${take.id}`,
-    video: take.kind === "clip", expected: take.panel?.hash ?? production.takeMediaInfo[source.id]?.sourceHash, atSec };
+    video: take.kind === "clip", expected, atSec };
 }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { newId, type HarnessAdapter, type Take, type WorldChatAttachment } from "@arke-studio/contracts";
@@ -135,13 +136,17 @@ describe("conversation image inspection — SPEC-050 R-31..R-34", () => {
     const h = await harness({ maker: { render: async (bytes, extension, _signal, atSec = 0) => {
       if (extension === ".png") return bytes;
       positions.push(atSec); return atSec === 2 ? blue : red;
-    } } });
+    }, renderFile: async (_path, _signal, atSec = 0) => { positions.push(atSec); return atSec === 2 ? blue : red; } } });
     const production = h.store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
     const { media: _media, ...base } = production.takes.find(t => t.kind === "clip")!;
-    const frame: Take = { ...base, id: newId("tk"), kind: "frame", media: "frame.png", startFrame: "artifacts/frozen-seed.png" };
-    const pass: Take = { ...base, id: newId("tk"), media: "pass.mp4" };
+    const seedId = newId("ar"), seedHash = digest(blue);
+    const frame: Take = { ...base, id: newId("tk"), kind: "frame", media: "frame.png", mediaHash: digest(red), startFrame: "artifacts/frozen-seed.png",
+      params: { ...base.params, frameArtifact: { id: seedId, hash: seedHash } } };
+    const pass: Take = { ...base, id: newId("tk"), media: "pass.mp4", mediaHash: digest(red) };
     const segment: Take = { ...base, id: newId("tk"), segment: { passTakeId: pass.id, inSec: 2, outSec: 4 } };
-    await h.store.commit({ kind: "production-images-test", source: "test", files: [
+    await h.store.commit({ kind: "production-images-test", source: "test", raiseSchemaVersion: 54, files: [
+      { path: "artifacts/frozen-seed.json", action: "create", baseHash: null, content: JSON.stringify({ id: seedId, kind: "image", file: "frozen-seed.png", hash: seedHash,
+        origin: { by: "user" }, links: [], created: "2026-10-04T04:00:00Z" }) },
       ...[frame, pass, segment].map(take => ({ path: `productions/saltlight/takes/${take.id}/take.json`, action: "create" as const, baseHash: null, content: JSON.stringify(take) })),
       ...[[`productions/saltlight/takes/${frame.id}/frame.png`, red], [`productions/saltlight/takes/${pass.id}/pass.mp4`, red], ["artifacts/frozen-seed.png", blue]].map(([path, bytes]) =>
         ({ path: path as string, action: "create" as const, baseHash: null, encoding: "base64" as const, content: Buffer.from(bytes as Uint8Array).toString("base64") })),
@@ -167,6 +172,38 @@ describe("conversation image inspection — SPEC-050 R-31..R-34", () => {
     assert.notEqual(part.receipt.image!.renditionHash, whole.receipt.image!.renditionHash);
     assert.equal(part.receipt.image!.posterOnly, true);
     assert.match(JSON.stringify(part.result), /motion and audio were not inspected/);
+    await assert.rejects(readWorldMeta(h.store.dir, { supports: 53 }), /newer|schema|version/i);
+    await writeFile(join(h.store.dir, `productions/saltlight/takes/${frame.id}/frame.png`), blue);
+    const changed = await h.retrieval.call(h.lease.token, "view_image", sources.get(frame.id)!.poster!);
+    assert.equal(changed.receipt.status, "unavailable"); assert.equal(changed.imageContent, undefined);
+    const legacy = await h.retrieval.call(h.lease.token, "view_image", { kind: "production-take", productionId: "saltlight", takeId: base.id, frame: "poster" });
+    assert.match(JSON.stringify(legacy.result), /no original media hash/);
+    const sidecarPath = join(h.store.dir, "artifacts/frozen-seed.json"), previous = await readFile(sidecarPath);
+    await h.store.commit({ kind: "edited-seed-test", source: "test", files: [{ path: "artifacts/frozen-seed.json", action: "replace", baseHash: digest(previous),
+      content: JSON.stringify({ id: seedId, kind: "image", file: "frozen-seed.png", hash: digest(red), origin: { by: "user" }, links: [], created: "2026-10-04T04:00:00Z" }) }] });
+    const replacedSeed = await h.retrieval.call(h.lease.token, "view_image", sources.get(frame.id)!.startFrame!);
+    assert.equal(replacedSeed.receipt.status, "unavailable"); assert.equal(replacedSeed.imageContent, undefined);
+  });
+  it("decodes a verified production video larger than 50 MiB through a private file snapshot", async () => {
+    const png = encodePng(solidImage(2, 2, [1, 2, 3, 255]));
+    let worldPath = "", snapshotPath = "";
+    const h = await harness({ maker: { render: async () => { throw new Error("large video must not enter the byte-array decoder"); },
+      renderFile: async path => { snapshotPath = path; assert.ok(!path.startsWith(worldPath)); assert.equal((await stat(path)).size, 52 * 1024 ** 2); return png; } } });
+    worldPath = h.store.dir;
+    const production = h.store.getBundle().productions.find(p => p.meta.id === "saltlight")!, id = newId("tk");
+    const folder = join(h.store.dir, `productions/saltlight/takes/${id}`), path = join(folder, "large.mp4");
+    await mkdir(folder, { recursive: true });
+    const handle = await open(path, "wx");
+    try { await handle.write(png); await handle.truncate(52 * 1024 ** 2); } finally { await handle.close(); }
+    const sha = createHash("sha256");
+    for await (const chunk of createReadStream(path)) sha.update(chunk);
+    const mediaHash = `sha256:${sha.digest("hex")}`;
+    const take: Take = { ...production.takes.find(t => t.kind === "clip")!, id, media: "large.mp4", mediaHash };
+    await h.store.commit({ kind: "large-take-test", source: "test", raiseSchemaVersion: 54, files: [{ path: `productions/saltlight/takes/${id}/take.json`,
+      action: "create", baseHash: null, content: JSON.stringify(take) }] });
+    const read = await h.retrieval.call(h.lease.token, "view_image", { kind: "production-take", productionId: "saltlight", takeId: id, frame: "poster" });
+    assert.ok(read.imageContent); assert.equal(read.receipt.image!.sourceHash, mediaHash); assert.equal(read.receipt.image!.posterOnly, true);
+    await assert.rejects(stat(snapshotPath), /ENOENT/);
   });
   it("refuses missing, audio, escaping and conversation-attachment production image sources", async () => {
     const h = await harness(), production = h.store.getBundle().productions.find(p => p.meta.id === "saltlight")!;

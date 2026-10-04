@@ -1280,7 +1280,9 @@ export async function recordBoardSheetFromJob(
           : Math.floor(actualMicroUsd / updatePanels.length);
       allocatedEstimated += estimated;
       allocatedActual += actual ?? 0;
-      const { boardSheetParent: _boardSheetParent, ...childBase } = parent;
+      // A crop has its own immutable panel hash; the provider sheet's media hash names
+      // different pixels and must not travel through the copied take fields.
+      const { boardSheetParent: _boardSheetParent, mediaHash: _parentMediaHash, ...childBase } = parent;
       child = {
         ...childBase,
         id: childId,

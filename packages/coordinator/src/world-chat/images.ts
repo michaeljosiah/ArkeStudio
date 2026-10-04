@@ -5,7 +5,7 @@ import { CHAT_IMAGES_SCHEMA_VERSION, ChatAttachmentIdSchema, SessionIdSchema, Ta
   type HarnessAdapter, type ImageObservation, type WorldChatCheckReceipt } from "@arke-studio/contracts";
 import { readBenchSession } from "../bench/chat-reads.js";
 import { resolveTakeSource } from "../bench/service.js";
-import { readContainedMediaBytes } from "../world/reference-files.js";
+import { readContainedMediaBytes, withContainedProductionMedia } from "../world/reference-files.js";
 import type { WorldStore } from "../world/store.js";
 import { imageRendition, IMAGE_RUN_ENCODED_BYTES, type ImageRenditionMaker } from "./image-rendition.js";
 import { WorldChatService } from "./service.js";
@@ -93,6 +93,14 @@ export class ConversationImages {
       if (!files.includes(args.file)) throw new RetrievalError("unavailable", "view_image: that reference or candidate is unavailable. Use a file returned by list_references or get_art_direction.");
       path = args.file; id = `reference:${path}`; label = path;
     }
+    if (args.kind === "production-take" && video && this.deps.maker?.renderFile && expected) {
+      try {
+        return await withContainedProductionMedia(this.store.dir, path, expected, signal, async snapshot => ({
+          path, id, label, video, sourceHash: snapshot.sourceHash, byteLength: snapshot.byteLength,
+          bytes: await this.deps.maker!.renderFile!(snapshot.path, signal, atSec), atSec: 0, preparedPoster: true,
+        }));
+      } catch { throw new RetrievalError("unavailable", "view_image: this production poster is unavailable or its original media changed."); }
+    }
     let bytes: Uint8Array;
     try { bytes = await readContainedMediaBytes(this.store.dir, path, signal); }
     catch (error) {
@@ -101,7 +109,7 @@ export class ConversationImages {
     }
     const sourceHash = hash(bytes);
     if (expected && !sourceHash.startsWith(expected)) throw new RetrievalError("unavailable", "view_image: these image bytes changed. Refresh the source before inspecting it.");
-    return { path, id, label, video, sourceHash, bytes, atSec };
+    return { path, id, label, video, sourceHash, bytes, byteLength: bytes.length, atSec, preparedPoster: false };
   }
   read(lease: QueryLease, args: Record<string, unknown>): Promise<RetrievalOutcome> {
     const result = this.tail.then(() => this.readOnce(lease, args));
@@ -115,7 +123,7 @@ export class ConversationImages {
     this.counts.set(lease.runId, count + 1);
     const source = await this.source(lease, args, session.signal);
     let rendition;
-    try { rendition = await imageRendition(source.bytes, extname(source.path), this.deps.maker, session.signal, source.atSec); }
+    try { rendition = await imageRendition(source.bytes, source.preparedPoster ? ".png" : extname(source.path), source.preparedPoster ? undefined : this.deps.maker, session.signal, source.atSec); }
     catch { throw new RetrievalError("unavailable", "view_image: a bounded image rendition is unavailable. Configure the local media decoder or use a supported PNG."); }
     await this.access(lease);
     const total = (this.bytesByRun.get(lease.runId) ?? 0) + 4 * Math.ceil(rendition.data.length / 3);
@@ -142,7 +150,7 @@ export class ConversationImages {
     await this.deps.publish(lease.conversationId);
     await this.access(lease);
     return { result: { image: observation, ...(source.video ? { understanding: "Poster frame only; video motion and audio were not inspected.",
-      media: { kind: "video", byteLength: source.bytes.length, format: extname(source.path) } } : {}) }, receipt,
+      media: { kind: "video", byteLength: source.byteLength, format: extname(source.path) } } : {}) }, receipt,
       imageContent: [{ type: "image", mimeType: "image/png", data: Buffer.from(rendition.data).toString("base64") }] };
   }
 }

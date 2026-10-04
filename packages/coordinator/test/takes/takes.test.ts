@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -18,6 +19,7 @@ import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { exportWorld, runExport, type FfmpegRunner } from "../../src/takes/export.js";
 import { acceptTake, applyTakeAcceptance, rejectTake, setTrim } from "../../src/takes/review.js";
 import { WorldStore } from "../../src/world/store.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { legacySceneView, orderedShots, routingFindings } from "@arke-studio/contracts";
 
@@ -90,6 +92,9 @@ describe("pass segmentation (R-3..R-5, D2..D4, §3.2)", () => {
     const takes = await recordTakesFromJob(store, passJob(landed), 400000);
     assert.equal(takes.length, 4, "the pass plus three segments");
     const [pass, ...segments] = takes;
+    assert.equal(pass!.mediaHash, `sha256:${createHash("sha256").update("fake-mp4-bytes-fake-mp4-bytes").digest("hex")}`);
+    assert.equal(store.getBundle().meta.schemaVersion, 54);
+    await assert.rejects(readWorldMeta(dir, { supports: 53 }), /newer|schema|version/i);
 
     // One media file is stored (R-3): only the pass's directory holds media.
     const takesRoot = join(dir, "productions", "saltlight", "takes");
