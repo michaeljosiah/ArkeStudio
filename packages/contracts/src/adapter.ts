@@ -112,6 +112,26 @@ export const ModelInfoSchema = z.object({
   inputTokenLimit: z.number().int().positive().optional(),
   /** Whether the model calls tools, when the harness states it. Absent means unknown, and unknown is offered. */
   tools: z.boolean().optional(),
+  /**
+   * The harness's own name for the provider, for the picker's group headings (design turn 195).
+   * Absent means the heading falls back to Arke's name for a known provider, else the id.
+   */
+  providerName: z.string().min(1).optional(),
+  /** Whether the model reasons, when the harness states it. Absent means unknown, and the card says nothing. */
+  reasoning: z.boolean().optional(),
+  /**
+   * The effort the model offers, in the harness's own names and order, with the one it uses when
+   * nobody chose. Absent means the model declares none, and the composer draws no effort control.
+   */
+  variants: z.object({
+    names: z.array(z.string().min(1)).min(1),
+    default: z.string().min(1).optional(),
+  }).strict().optional(),
+  /** What the harness says a million tokens cost, in USD. Stated or absent; zero is a stated price. */
+  cost: z.object({
+    inputPerMTok: z.number().nonnegative(),
+    outputPerMTok: z.number().nonnegative(),
+  }).strict().optional(),
 }).strict();
 export type ModelInfo = z.infer<typeof ModelInfoSchema>;
 

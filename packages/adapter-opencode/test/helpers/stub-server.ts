@@ -22,7 +22,7 @@ export class StubOpenCode {
   private sseClients = new Set<ServerResponse>();
   private sessionCounter = 0;
   /** What /config/providers answers with; null makes the endpoint absent (older servers). */
-  configProviders: { providers: Array<{ id: string; models: Record<string, WireModel> }>; default?: Record<string, string> } | null = null;
+  configProviders: { providers: Array<{ id: string; name?: string; models: Record<string, WireModel> }>; default?: Record<string, string> } | null = null;
   configProvidersStatus = 200;
   /** What /api/model answers with; null makes it absent. */
   apiModels: WireModel[] | null = null;

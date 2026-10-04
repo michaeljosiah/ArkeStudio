@@ -110,6 +110,10 @@ export function buildSessionConfig(input: SessionConfigInput): Record<string, un
       // A dispatch choice is narrower than an agent default and therefore wins for this session.
       // With neither, OpenCode keeps its own default rather than Studio inventing one.
       ...(input.model ?? override?.model ? { model: input.model ?? override?.model } : {}),
+      // The agent's `variant` applies only to the model the agent is configured with (checked in
+      // OpenCode 1.18.34's schema), so it travels with a dispatch choice and never with an
+      // override's own default: that model's effort is the harness's.
+      ...(input.model !== undefined && input.modelVariant !== undefined ? { variant: input.modelVariant } : {}),
     };
   }
   return {

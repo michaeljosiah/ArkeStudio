@@ -19,6 +19,8 @@ export interface ConversationSendInput {
   attachmentIds?: readonly string[];
   subject?: WorldChatSubject;
   modelId?: string;
+  /** This turn's effort for whichever model answers, in the harness's own name (design turn 195). */
+  variant?: string;
   replyOnly?: boolean;
 }
 
@@ -55,7 +57,7 @@ export class ConversationAuthoringService {
     const title = first ? titleFrom(input.text) : null;
     if (title !== null) await service.rename(input.conversationId, title).catch(() => {});
     const completion = this.deps.runner(input.conversationId).send(log, input.conversationId,
-      input.text, input.attachmentIds, input.subject, input.modelId, input.replyOnly === true, onAdmitted);
+      input.text, input.attachmentIds, input.subject, input.modelId, input.replyOnly === true, onAdmitted, input.variant);
     const naming = title === null ? null : this.deps.name(input.conversationId, input.text, title);
     return { completion, naming };
   }

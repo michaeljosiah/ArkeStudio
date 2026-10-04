@@ -369,6 +369,13 @@ export const ProductionSchema = z
      * and a choice that cannot be honoured is stated at dispatch rather than silently swapped.
      */
     models: ModelChoicesSchema.optional(),
+    /**
+     * The effort each language model was last kept at in this production, by the model's reference
+     * (design turn 195). Beside `models.llm` rather than inside it: the choice is per model, so
+     * switching away from a model and back finds its effort where it was left. A variant is the
+     * harness's own name for it; the picker's plain words are drawn from it, never stored.
+     */
+    llmVariants: z.record(z.string().min(1), z.string().min(1)).optional(),
     /** Added to the world's failure modes at dispatch, never instead of them. */
     failureModes: FailureModesSchema,
     created: IsoDateTimeSchema,

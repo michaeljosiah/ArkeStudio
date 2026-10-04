@@ -36,6 +36,12 @@ export interface SessionConfigInput {
   /** Concrete model for authoring, e.g. "anthropic/claude-sonnet-5" or "ollama/llama3.3". */
   model?: string;
   /**
+   * The effort the chosen model runs at, in the harness's own name for it (design turn 195).
+   * Belongs to `model` and means nothing without it: an agent's own default model keeps the
+   * harness's effort. An adapter whose harness has no such control ignores it.
+   */
+  modelVariant?: string;
+  /**
    * Per-agent overrides from Settings. A brief replaces what the agent is for; it can never
    * replace the confinement preamble or the tool denials the adapter applies — those are what
    * the accept gate assumes, and an agent talked out of them fails in ways that look like our

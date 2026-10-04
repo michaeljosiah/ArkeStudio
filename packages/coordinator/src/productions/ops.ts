@@ -1801,7 +1801,11 @@ export async function setProductionModel(
   productionId: string,
   capability: Capability,
   modelId: string | null,
-  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
+  options: {
+    source?: string; requestId?: string; precondition?: WorldStatePrecondition;
+    /** The effort kept with a language model (design turn 195), by the model's reference. */
+    variant?: { model: string; name: string };
+  } = {},
 ): Promise<void> {
   const path = `productions/${productionId}/production.json`;
   const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
@@ -1816,7 +1820,18 @@ export async function setProductionModel(
   // Clearing the last entry removes the key rather than leaving `{}` behind — `JSON.stringify`
   // omits an `undefined` value, and an empty object on disk reads as a choice that was made and
   // then emptied, which is a different thing from never having made one.
-  doc.set({ models: Object.keys(next).length > 0 ? next : undefined, updated: store.now() });
+  // The efforts kept for language models follow the same rule as the choice they belong to: a
+  // cleared choice lets go of them, and a kept effort replaces only its own model's.
+  const keptVariants = doc.value["llmVariants"] as Record<string, string> | undefined;
+  const variants = capability !== "llm" ? keptVariants
+    : modelId === null ? undefined
+    : options.variant !== undefined ? { ...keptVariants, [options.variant.model]: options.variant.name }
+    : keptVariants;
+  doc.set({
+    models: Object.keys(next).length > 0 ? next : undefined,
+    ...(capability === "llm" ? { llmVariants: variants } : {}),
+    updated: store.now(),
+  });
   await store.commit({
     kind: "production-edit",
     source: options.source ?? "form",
