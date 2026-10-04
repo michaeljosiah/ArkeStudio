@@ -17,7 +17,7 @@ import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION } from "../../src/world/commit.js";
-import { exportAudiobookVideo, pendingVideoJobs, videoCacheFolder } from "../../src/productions/audiobook-video.js";
+import { exportAudiobookVideo, forgetVideoJob, pendingVideoJobs, videoCacheFolder } from "../../src/productions/audiobook-video.js";
 import type { WorldStore } from "../../src/world/store.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
@@ -348,6 +348,12 @@ describe("the audiobook as a video (turn 197)", () => {
         assert.deepEqual((await readdir(folder)).filter((name) => name.endsWith(".mp4")), ["the-ledger-of-nights-01-neap.mp4"], "the finished chapter is kept, the partial one is not");
         assert.deepEqual(await pendingVideoJobs(h.store()), [], "a Cancel forgets the render");
         assert.equal(h.events.filter((e): e is Progress => e.type === "export.progress" && e.exportId === id).at(-1)!.status, "cancelled");
+        // A render the same day cancelled before it has placed anything leaves the day's folder as it was.
+        const stopped = new AbortController();
+        stopped.abort();
+        assert.deepEqual(await exportAudiobookVideo(h.store(), LEDGER, { ...DEFAULT_VIDEO_OPTIONS, shape: "1280x720", slowPush: false }, { ffmpeg: realRunner([]), clock: () => CLOCK, exportId: exportId(), signal: stopped.signal }), { ok: false, blockers: ["the render was cancelled"] });
+        assert.deepEqual((await readdir(folder)).filter((name) => name.endsWith(".mp4")), ["the-ledger-of-nights-01-neap.mp4"], "the earlier render's file stays");
+        await forgetVideoJob(h.store(), LEDGER);
 
         // The app closing under a render: the note stays, and the next start resumes it, making
         // only the chapter not yet made.

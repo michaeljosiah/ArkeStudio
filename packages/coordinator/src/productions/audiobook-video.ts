@@ -488,6 +488,9 @@ export async function exportAudiobookVideo(store: WorldStore, productionId: stri
   const sidecarNames = wantsSidecar(options) ? [".srt", ".vtt"] : [];
   const writeManifest = async () =>
     atomicWriteFile(join(dir, "video.json"), `${JSON.stringify({ kind: "audiobook-video", version: 1, productionId, title: book.title, files, provenance: { exportId: context.exportId, exportedAt: context.clock() } }, null, 2)}\n`);
+  // A second render the same day lands in the same folder; only a folder this render made is
+  // taken away when it ends with nothing in it.
+  const fresh = !(await stat(toExtendedLength(dir)).then((info) => info.isDirectory(), () => false));
   try {
     await mkdir(toExtendedLength(dir), { recursive: true });
     for (const planned of book.chapters) if (!(await exists(cachedPiece(store, productionId, planned)))) toRenderSec += planned.chapter.seconds;
@@ -567,7 +570,7 @@ export async function exportAudiobookVideo(store: WorldStore, productionId: stri
   } catch (err) {
     // A cancel ends the chapter in hand and keeps those finished; the job note stays only when
     // the app is closing under the render, so the next start resumes it (the caller decides).
-    if (files.length === 0) await rm(toExtendedLength(dir), { recursive: true, force: true }).catch(() => {});
+    if (files.length === 0 && fresh) await rm(toExtendedLength(dir), { recursive: true, force: true }).catch(() => {});
     if (context.signal.aborted) return { ok: false, blockers: ["the render was cancelled"] };
     await forgetVideoJob(store, productionId);
     throw err;
