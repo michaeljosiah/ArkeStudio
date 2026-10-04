@@ -2430,15 +2430,29 @@ export class Coordinator {
    * cancelled rather than paid for, and nothing they say afterwards — a cancellation, a block
    * that lands anyway — is news over the failure. A block that had landed is in the cache for
    * the next read. A page that fails while its batch is still being journalled has no jobs to
-   * name yet; the batch call cancels what it queued when it finds the request here.
+   * name yet; the batch call cancels what it queued when it finds the request here. `siblings`
+   * are a failed block's other pieces, cancelled in the same breath as the page's jobs.
    */
-  private async failPage(requestId: string): Promise<void> {
+  private async failPage(requestId: string, siblings: readonly string[] = []): Promise<void> {
     const jobs = this.readJobs.get(requestId) ?? [];
     this.readJobs.delete(requestId);
     this.pieceReads.drop(requestId);
     this.failedReads.add(requestId);
     if (this.failedReads.size > 200) this.failedReads.delete(this.failedReads.values().next().value!);
-    for (const jobId of jobs) await this.jobQueue?.cancel(jobId).catch(() => {});
+    await this.cancelTogether([...siblings, ...jobs]);
+  }
+
+  /**
+   * Jobs that stand or fall together, cancelled as one decision. One at a time, a sibling's
+   * abort freed its lane slot and the pump filled it at once with a job the loop had not reached
+   * yet: on a runner whose journal writes were slow, a failed page's Appearance went to the
+   * reader — billable — only to be cancelled behind it (CI runs 37145304929, 37147020660).
+   * Started together, every cancel takes its job out of the FIFO before any of them awaits, so
+   * nothing in the set is dispatched once the decision is made. Deduplicated because two
+   * cancels of one job, in flight together, would both terminalize it.
+   */
+  private async cancelTogether(jobIds: readonly string[]): Promise<void> {
+    await Promise.all([...new Set(jobIds)].map((jobId) => this.jobQueue?.cancel(jobId).catch(() => {})));
   }
 
   /**
@@ -5468,9 +5482,9 @@ export class Coordinator {
         // the block's other pieces are cancelled rather than paid for. A sibling cancelled that
         // way comes back through here with its block already gone, and is not news twice.
         const block = pieceOf(job) === null ? undefined : this.pieceReads.failed(job);
-        for (const jobId of block?.cancel ?? []) await this.jobQueue?.cancel(jobId).catch(() => {});
         const page = block === undefined ? voiceJobPart(job).parts !== undefined : block !== null && block.page;
-        if (page) await this.failPage(requestId);
+        if (page) await this.failPage(requestId, block?.cancel);
+        else await this.cancelTogether(block?.cancel ?? []);
         const readIdentity = voiceJobReadIdentity(job);
         if (block !== null) {
           this.emit({
