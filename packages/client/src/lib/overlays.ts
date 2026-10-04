@@ -61,6 +61,16 @@ export function useCoveredAfter(id: number | null): boolean {
   return id !== null && newest > id;
 }
 
+/**
+ * How many sheets have opened so far, of either kind. A menu drawn on the body (the model chip's)
+ * stands above the page it was opened from and the sheets already open, but a sheet opened after
+ * it belongs in front: the menu notes this count when it opens and closes once it grows. It does
+ * not hold a place itself, which would put away a block drawer the chip sits inside.
+ */
+export function useOverlaysOpened(): number {
+  return useSyncExternalStore(subscribe, () => next, () => 0);
+}
+
 /** Focus the newest open sheet's first control, or the sheet itself. */
 export function focusNewestLayer(): void {
   const panel = open.get(newestLayer)?.element() ?? null;

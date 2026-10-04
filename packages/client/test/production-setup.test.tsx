@@ -93,14 +93,15 @@ describe("production setup interaction (issue #976)", () => {
     assert.ok(m.sent.some(message => message.kind === "list-harness-models"));
     // The model is a chip in the composer's row, with no row, select or scope word of its own
     // (design turn 190e). A setup is not yet a production, so the chip has no press that
-    // remembers a choice: it picks for this conversation and lets go of it.
+    // remembers a choice: it picks for this conversation and lets go of it. Its menu is drawn on
+    // the body, out of the composer's clip.
     assert.equal(m.container.querySelector("select[aria-label='Writing model'], .fy-production-setup__model"), null);
     const chip = () => m.container.querySelector<HTMLButtonElement>(".fy-cx__bar button.fy-mchip__btn")!;
-    const open = async () => { if (!m.container.querySelector(".fy-mchip__menu")) await act(async () => chip().click()); };
+    const open = async () => { if (!dom.document.body.querySelector(".fy-mchip__menu")) await act(async () => chip().click()); };
     await open();
-    const items = [...m.container.querySelectorAll<HTMLButtonElement>(".fy-mchip__menu [data-model]")];
+    const items = [...dom.document.body.querySelectorAll<HTMLButtonElement>(".fy-mchip__menu [data-model]")];
     assert.ok(items.some(item => item.getAttribute("data-model") === "anthropic/opus[1m]"));
-    assert.deepEqual([...m.container.querySelectorAll(".fy-mchip__menu button[role=menuitem]")].map(item => item.textContent), [], "nothing to remember the choice in");
+    assert.deepEqual([...dom.document.body.querySelectorAll(".fy-mchip__menu button[role=menuitem]")].map(item => item.textContent), [], "nothing to remember the choice in");
     await act(async () => items.find(item => item.getAttribute("data-model") === "anthropic/opus[1m]")!.click());
     assert.ok(chip().className.includes("fy-mchip__btn--set"), "the choice is this conversation's");
     await act(async () => __setStateForTest({
@@ -108,13 +109,13 @@ describe("production setup interaction (issue #976)", () => {
     }));
     assert.equal(chip().disabled, false);
     await open();
-    assert.match(m.container.querySelector(".fy-mchip__menu")!.textContent!, /anthropic\/opus\[1m\]\s*unavailable/);
+    assert.match(dom.document.body.querySelector(".fy-mchip__menu")!.textContent!, /anthropic\/opus\[1m\]\s*unavailable/);
     assert.match(m.container.textContent!, /Discovery failed/, "the catalogue's trouble is said while there is trouble");
-    const reset = [...m.container.querySelectorAll<HTMLButtonElement>(".fy-mchip__menu button[role=menuitem]")].find(item => /Use the default/.test(item.textContent!))!;
+    const reset = [...dom.document.body.querySelectorAll<HTMLButtonElement>(".fy-mchip__menu button[role=menuitem]")].find(item => /Use the default/.test(item.textContent!))!;
     await act(async () => reset.click());
     assert.equal(chip().className.includes("fy-mchip__btn--set"), false);
     await open();
-    assert.doesNotMatch(m.container.querySelector(".fy-mchip__menu")!.textContent!, /unavailable/);
+    assert.doesNotMatch(dom.document.body.querySelector(".fy-mchip__menu")!.textContent!, /unavailable/);
   });
 
   it("says nothing of the model catalogue while it is simply fine", async () => {
