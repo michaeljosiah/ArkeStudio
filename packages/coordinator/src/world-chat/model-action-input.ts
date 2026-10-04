@@ -1,4 +1,4 @@
-import { ModelWorldChatActionSchema, WorldChatTurnResultSchema } from "@arke-studio/contracts";
+import { ModelWorldChatActionSchema, WorldChatTurnResultSchema, ProductionChatTurnResultSchema, turnActionDependencyIndexes, type WorldChatTurnResult } from "@arke-studio/contracts";
 import { z } from "zod";
 import { worldChatActionDescriptor } from "../arke-actions/registry.js";
 
@@ -20,16 +20,23 @@ export const ModelWorldChatActionInputSchema = ModelWorldChatActionSchema.superR
       message: refusal,
     });
   }
+  if (action.kind === "production-scene-command" && (action.command === undefined) === (action.commands === undefined)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["commands"], message: "Use command or commands, never both." });
+  }
 });
 
-export const WorldChatModelTurnResultSchema = WorldChatTurnResultSchema.superRefine((result, context) => {
+function validateModelTurn(result: WorldChatTurnResult, context: z.RefinementCtx) {
+  try { turnActionDependencyIndexes(result.actions); }
+  catch (error) { context.addIssue({ code: z.ZodIssueCode.custom, path: ["actions"], message: String((error as Error).message) }); }
   for (const [index, action] of result.actions.entries()) {
     const checked = ModelWorldChatActionInputSchema.safeParse(action);
     if (!checked.success) for (const issue of checked.error.issues) {
       context.addIssue({ ...issue, path: ["actions", index, ...issue.path] });
     }
   }
-});
+}
+export const WorldChatModelTurnResultSchema = WorldChatTurnResultSchema.superRefine(validateModelTurn);
+export const ProductionChatModelTurnResultSchema = ProductionChatTurnResultSchema.superRefine(validateModelTurn);
 
 export function modelActionInputRefusal(value: { kind: string }): string | null {
   // Internal callers and old prepared records have their own structural validation. Recheck

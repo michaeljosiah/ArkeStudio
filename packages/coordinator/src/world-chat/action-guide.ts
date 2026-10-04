@@ -185,9 +185,9 @@ function compactEntry(entry: ActionGuideEntry): string {
 }
 
 const FULL_HEAD =
-  "Each entry is a kind you may put in actions, with the card it becomes, the reads whose final complete receipts its checkReceiptIds cite, its fields besides kind and checkReceiptIds, and one valid example.";
+  "Each entry is a kind you may put in actions, with the card it becomes, the reads whose final complete receipts its checkReceiptIds cite, its fields besides kind and checkReceiptIds, and one valid example. Every action may carry ref (a unique label for this turn) and after (earlier refs in this turn). Dependencies require separate successful approvals; they never approve a descendant. Unknown, repeated, forward and cyclic refs are refused.";
 const COMPACT_HEAD =
-  "Only the kinds are listed here, to leave room for the conversation. Before preparing one, call describe_action through arke-world with its kind for the fields and an example.";
+  "Only the kinds are listed here, to leave room for the conversation. Before preparing one, call describe_action through arke-world with its kind for the fields and an example. Every action may carry a unique turn-local ref and after (earlier refs in this turn). Each dependency needs its own successful approval; never use another turn's ref.";
 
 export interface RenderedActionGuide {
   readonly text: string;

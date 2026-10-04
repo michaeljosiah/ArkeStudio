@@ -144,6 +144,13 @@ function turn(result: Partial<WorldChatTurnResult>): string {
 }
 
 describe("parsing a turn result", () => {
+  it("uses the production bounds while preserving the ordinary transport ceiling", () => {
+    const raw = turn({ actions: Array.from({ length: 24 }, () => WORLD_CHAT_SHAPE_EXAMPLES.worldActions["production-scene-command"]),
+      editorRequests: Array.from({ length: 6 }, () => ({ summary: "Move the close-up", commands: [{ kind: "move-to-order", clipId: "cl_sh-3", index: 0 }] })) });
+    assert.equal(parseTurnResult(raw, true).ok, true);
+    assert.equal(parseTurnResult(raw).ok, false);
+  });
+
   it("rejects execution-blocked generation before it can become a dead card", () => {
     for (const kind of ["voice-audition"] as const) {
       const action = WORLD_CHAT_SHAPE_EXAMPLES.worldActions[kind];
