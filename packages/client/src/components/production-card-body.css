@@ -54,3 +54,13 @@
 .fy-production-timeline [data-version="before"] [data-review-change] { opacity: .6; border-style: dashed; }
 .fy-production-timeline__range-lane { position: absolute; inset: 0 0 0 146px; z-index: 5; pointer-events: none; }
 .fy-production-timeline__range { position: absolute; top: 0; bottom: 0; border-inline: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+
+.fy-chat__runreport-row[data-kind="step"] { flex-wrap: wrap; }
+.fy-chat__runreport-frames { width: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr)); gap: 6px; padding: 0 10px 10px; min-width: 0; }
+.fy-chat__runreport-frames figure { margin: 0; min-width: 0; }
+.fy-chat__runreport-frames img { display: block; width: 100%; aspect-ratio: 16/9; object-fit: contain; background: var(--muted); }
+.fy-chat__runreport-frames figcaption { font: var(--type-meta); overflow-wrap: anywhere; }
+.fy-chat__runsummary { max-width: 100%; overflow-wrap: anywhere; }
+
+.fy-production-preview__stage .fy-swstage__construction { display: none; }
+.fy-chat__runreport-frames .fy-portrait--fallback { aspect-ratio: 16/9; }

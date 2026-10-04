@@ -125,6 +125,7 @@ export function SceneStage({
   playblastRequest,
   constructionRequest,
   review,
+  frozenScene = false,
   fullscreen = null,
   head = true,
 }: {
@@ -142,6 +143,8 @@ export function SceneStage({
   constructionRequest?: { actionId: string; conversationId: string; shotId: string; instruction: string; preserve: "blocking" | "camera" | "none" };
   playblastRequest?: { actionId: string; conversationId: string; shotId: string };
   review?: StageReview;
+  /** Approval previews retain their frozen scene rather than hydrating an unrelated live draft. */
+  frozenScene?: boolean;
   /** In full screen the way out sits on this head row (turn 144); null means the page is not in it. */
   fullscreen?: { leave: () => void } | null;
   /**
@@ -157,7 +160,7 @@ export function SceneStage({
   const index = Math.max(0, shots.findIndex((candidate) => candidate.id === selected));
   const shot: Shot | null = shots[index] ?? null;
   const { state } = useStore();
-  const retained = review ?? state?.stageReviews?.filter(value => value.worldId === world.meta.worldId &&
+  const retained = frozenScene ? undefined : review ?? state?.stageReviews?.filter(value => value.worldId === world.meta.worldId &&
     value.productionId === production.meta.id && value.sceneId === scene.id && value.shotId === shot?.id).at(-1);
   const retainedReviewId = useRef<string | null>(null);
   const hydratedReviewId = useRef<string | null>(null);

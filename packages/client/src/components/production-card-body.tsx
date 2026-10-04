@@ -32,6 +32,18 @@ export function ProductionCardBody({ preview, action }: { preview: ProductionCar
   if (preview.kind === "timeline") return <ProductionTimelineCard preview={preview} action={action} />;
   if (preview.kind === "export") return <ProductionExportCard preview={preview} action={action} />;
   const scene = preview.after;
+  const stageAction = action.actionKind === "world-chat-production-stage-construct" || action.actionKind === "world-chat-production-stage-playblast";
+  const stageShot = stageAction ? orderedShots(scene).find(shot => shot.id === action.targets.find(target => target.kind === "shot")?.id) : null;
+  if (stageAction) return <div className="fy-production-preview" aria-label="Stage review preview">
+    <h4>{scene.title} · {stageShot?.title ?? "Shot unavailable"}</h4>
+    {action.shown.body.family === "host-action" && <p>{action.shown.body.action} · {action.shown.body.effect}</p>}
+    {world && production && stageShot ? <section className="fy-production-preview__stage" aria-label={`Stage preview for shot ${stageShot.number}`}>
+      <SelectionProvider value={{ subject: { kind: "shot", shotId: stageShot.id }, select: nothing }}>
+        <SceneStage world={world} production={production} scene={scene} aspect={production.meta.aspect ?? "16:9"}
+          sceneFile={production.sceneFiles[scene.id]} locked frozenScene generatorPending={false} refusalVersion={0} onCommand={() => false} head={false} />
+      </SelectionProvider>
+    </section> : <p>The frozen Stage target is unavailable.</p>}
+  </div>;
   const beforeBlocks = new Map(preview.before?.script?.blocks.map(block => [block.id, block]) ?? []);
   const blocks = scene.script?.blocks ?? [];
   const removedBlocks = preview.before?.script?.blocks.filter(block => !blocks.some(current => current.id === block.id)) ?? [];
@@ -73,7 +85,7 @@ export function ProductionCardBody({ preview, action }: { preview: ProductionCar
     {world && production && stageChanged.map(shot => <section key={shot.id} className="fy-production-preview__stage" aria-label={`Stage preview for shot ${shot.number}`}>
       <SelectionProvider value={{ subject: { kind: "shot", shotId: shot.id }, select: nothing }}>
         <SceneStage world={world} production={production} scene={scene} aspect={production.meta.aspect ?? "16:9"}
-          sceneFile={production.sceneFiles[scene.id]} locked generatorPending={false} refusalVersion={0} onCommand={() => false} head={false} />
+          sceneFile={production.sceneFiles[scene.id]} locked frozenScene generatorPending={false} refusalVersion={0} onCommand={() => false} head={false} />
       </SelectionProvider>
     </section>)}
   </div>;

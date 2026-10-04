@@ -2197,6 +2197,8 @@ describe("World Chat authority adapters", () => {
     await appendTurn(w.log, oneTurn, prepared);
     await bindAll(w.lifecycle, prepared);
     const card = (await loaded(w.log)).actions[0]!;
+    assert.equal(card.shown.productionPreview?.kind, "scene");
+    assert.deepEqual(card.shown.productionPreview, { kind: "scene", before: stagedScene, after: stagedScene });
     assert.equal((await decide(w.lifecycle, w.log, card)).status, "awaiting-host");
 
     const hostDir = join(w.store.dir, ".staging", "private-stage-spool");
@@ -2245,6 +2247,9 @@ describe("World Chat authority adapters", () => {
     const filedShot = orderedShots(filedProduction.scenes.find((candidate) => candidate.id === context.sceneId)!)
       .find((candidate) => candidate.id === stagedShot.id)!;
     assert.ok(filedShot.staging?.playblast);
+    assert.equal(settled.receipt?.id, filedShot.staging!.playblast!.artifactId, "host replay retains the exact filed video");
+    const reconciled = await adapter.reconcile!(card);
+    assert.equal(reconciled?.receipt?.id, filedShot.staging!.playblast!.artifactId, "restart returns the same video receipt");
     const events = await readFile(join(w.store.dir, ".conversations", w.conversationId, "events.jsonl"), "utf8");
     assert.equal(events.includes("private-playblast.mp4"), false);
     assert.equal(events.includes("private-opening-frame.png"), false);
