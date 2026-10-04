@@ -26,6 +26,7 @@ import {
   type ConversationActionCard,
   type ConversationId,
   type Job,
+  type HarnessAdapter,
   type MessageId,
   type WorldChangeCandidate,
   type WorldChatContext,
@@ -52,6 +53,7 @@ import {
 } from "../../src/world-chat/actions.js";
 import { chapterDraftingBrief } from "../../src/world-chat/chapter-brief.js";
 import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
+import { ConversationImages } from "../../src/world-chat/images.js";
 import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
 import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
@@ -186,6 +188,7 @@ async function appendTurn(
   log: WorldChatStore,
   turn: WorldChatActionTurn,
   prepared: ReturnType<typeof prepareWorldChatActions>,
+  runId?: WorldChatCheckReceipt["runId"],
 ): Promise<void> {
   await log.append(
     {
@@ -199,7 +202,7 @@ async function appendTurn(
         createdAt: AT,
       },
       run: {
-        id: newId("run"),
+        id: runId ?? newId("run"),
         turnId: turn.turnId,
         basedOnConversationSeq: 1,
         status: "completed",
@@ -209,7 +212,7 @@ async function appendTurn(
         startedAt: AT,
         endedAt: AT,
       },
-      receipts: [],
+      receipts: [...(turn.receipts ?? [])],
       candidates: [...turn.candidates],
       groups: [...turn.groups],
       tombstones: [],
@@ -1973,6 +1976,43 @@ describe("World Chat authority adapters", () => {
     assert.equal(after.selections.sh_12!.startFrameArtifactId, null);
     assert.equal(after.selections.sh_12!.acceptedTakeId, video);
     assert.equal(after.takes.length, count);
+  });
+
+  it("describes only current production pixels served to the review's own completed turn", async () => {
+    const context = { kind: "takes" as const, productionId: PRODUCTION, sceneId: "sc_04", shotId: "sh_12" };
+    const w = await setup(context), production = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
+    const take = { ...production.takes.find(t => t.kind === "clip")!, id: newId("tk"), kind: "frame", media: "frame.png", startFrame: "artifacts/review-seed.png" };
+    const png = encodePng(solidImage(2, 2, [20, 40, 60, 255]));
+    await w.store.commit({ kind: "review-image-test", source: "test", files: [
+      { path: `productions/${PRODUCTION}/takes/${take.id}/take.json`, action: "create", baseHash: null, content: JSON.stringify(take) },
+      ...[`productions/${PRODUCTION}/takes/${take.id}/frame.png`, "artifacts/review-seed.png"].map(path =>
+        ({ path, action: "create" as const, baseHash: null, encoding: "base64" as const, content: Buffer.from(png).toString("base64") })),
+    ] });
+    const leases = new QueryLeaseRegistry(() => w.store.worldId), runId = newId("run");
+    const lease = leases.mint({ worldId: w.store.worldId, conversationId: w.conversationId, runId });
+    const images = new ConversationImages(w.store, leases, { adapter: { imageInput: true, imageInputForSession: () => true,
+      imageDestinationForSession: () => ({ provider: "test", local: true }) } as unknown as HarnessAdapter,
+      allowed: async () => true, publish: async () => {} });
+    images.start(runId, "test");
+    const poster = (await images.read(lease, { kind: "production-take", productionId: PRODUCTION, takeId: take.id, frame: "poster" })).receipt;
+    const seed = (await images.read(lease, { kind: "production-take", productionId: PRODUCTION, takeId: take.id, frame: "start-frame" })).receipt;
+    const prepare = async (inspection: WorldChatCheckReceipt[], matchingRun = true) => {
+      const read = currentReceipt(w.store, "takes", PRODUCTION);
+      const one = turn(w.conversationId, context, { receipts: [read, ...inspection], actions: [{ kind: "production-take-review",
+        productionId: PRODUCTION, takeId: take.id, review: { decision: "accept", shotId: "sh_12" }, checkReceiptIds: [read.id] }] });
+      const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+      await appendTurn(w.log, one, prepared, matchingRun ? runId : newId("run"));
+      await bindAll(w.lifecycle, prepared);
+      const body = (await loaded(w.log)).actions.at(-1)!.shown.body;
+      assert.equal(body.family, "take-review");
+      return body.family === "take-review" ? body.reason ?? "" : "";
+    };
+    assert.match(await prepare([poster, seed]), /Take image and frozen start frame supplied/);
+    assert.match(await prepare([seed]), /Frozen start frame only/);
+    assert.match(await prepare([]), /Metadata-only/);
+    assert.match(await prepare([poster], false), /Metadata-only/);
+    await writeFile(join(w.store.dir, `productions/${PRODUCTION}/takes/${take.id}/frame.png`), encodePng(solidImage(2, 2, [80, 90, 100, 255])));
+    assert.match(await prepare([poster]), /Metadata-only/);
   });
 
   it("shows rich take evidence, records cited rejection, and trims only the selected take", async () => {

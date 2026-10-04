@@ -14,6 +14,15 @@ Desktop `test/take-qc.test.ts` verifies that the shared media runner kills an ac
 when its owning turn aborts. Receipt projections deduplicate source identities and retain the
 newest 256 entries; the append-only journal retains the complete byte audit.
 
+Production take inspection (#1414, SPEC-051 R-43) uses `list_takes`'s copyable `imageSources`
+and the `production-take` arm of `view_image`. A frame take supplies its produced image; a
+video take supplies one poster, seeking to the recorded in-point for a pass segment. Its
+optional start-frame source names the take's frozen seeding frame, never the shot's current
+selection. Coordinator `images.test.ts` checks discovery, pixels, segment positions and
+refusals; `actions.test.ts` checks that the card's reason counts only current bytes served to
+its own completed turn. A receipt from another turn/run or a changed image leaves the reason
+metadata-only. These remain scripted model tests; the codec smoke uses real ffmpeg bytes.
+
 Use Node 22.12 or later; CI uses Node 22. Run `npm ci` from the repository root. See [CONTRIBUTING.md](../../CONTRIBUTING.md#getting-set-up) for browser development and its authenticated session link; `npm start` builds and starts desktop, including its native rebuild.
 
 ## Select the checks

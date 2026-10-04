@@ -12,12 +12,14 @@ import { WorldChatService } from "./service.js";
 import { WorldChatStore, conversationDir } from "./store.js";
 import type { QueryLease, QueryLeaseRegistry } from "./lease.js";
 import { RetrievalError, type RetrievalOutcome } from "./retrieval.js";
+import { ProductionTakeImageArgsSchema, productionTakeImageSource } from "./production-take-images.js";
 
 export const ViewImageArgsSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("attachment"), id: ChatAttachmentIdSchema }).strict(),
   z.object({ kind: z.literal("artifact"), id: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("reference"), file: z.string().min(1).max(500) }).strict(),
   z.object({ kind: z.literal("bench-take"), sessionId: SessionIdSchema, takeId: TakeIdSchema }).strict(),
+  ProductionTakeImageArgsSchema,
 ]);
 const hash = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 const imageFiles = (value: unknown): string[] => {
@@ -59,7 +61,7 @@ export class ConversationImages {
   }
   private async source(lease: QueryLease, raw: Record<string, unknown>, signal?: AbortSignal) {
     const args = ViewImageArgsSchema.parse(raw), bundle = this.store.getBundle();
-    let path: string, id: string, label: string, expected: string | undefined, video = false;
+    let path: string, id: string, label: string, expected: string | undefined, video = false, atSec = 0;
     if (args.kind === "attachment") {
       this.leases.assertAttachmentAllowed(lease, args.id);
       const attachment = (await new WorldChatService(this.store.dir).load(lease.conversationId))?.attachments.find(a => a.id === args.id);
@@ -76,6 +78,8 @@ export class ConversationImages {
       if (!resolved || "refused" in resolved || resolved.kind === "audio") throw new RetrievalError("unavailable", "view_image: that Bench image take is unavailable.");
       path = resolved.path; id = `${args.sessionId}:${args.takeId}`; label = `Bench take ${args.takeId}`;
       expected = resolved.source.hash; video = resolved.kind === "video";
+    } else if (args.kind === "production-take") {
+      ({ path, id, label, expected, video, atSec } = productionTakeImageSource(bundle, args));
     } else {
       const files = [bundle.keyArt, ...bundle.keyArtCandidates, ...bundle.masterLookCandidates,
         ...Object.values(bundle.referenceCandidates).flat(), ...Object.values(bundle.stagedReferences),
@@ -89,10 +93,15 @@ export class ConversationImages {
       if (!files.includes(args.file)) throw new RetrievalError("unavailable", "view_image: that reference or candidate is unavailable. Use a file returned by list_references or get_art_direction.");
       path = args.file; id = `reference:${path}`; label = path;
     }
-    const bytes = await readContainedMediaBytes(this.store.dir, path, signal);
+    let bytes: Uint8Array;
+    try { bytes = await readContainedMediaBytes(this.store.dir, path, signal); }
+    catch (error) {
+      if (args.kind === "production-take") throw new RetrievalError("unavailable", "view_image: that production image source is missing, changed or outside its allowed folder.");
+      throw error;
+    }
     const sourceHash = hash(bytes);
     if (expected && !sourceHash.startsWith(expected)) throw new RetrievalError("unavailable", "view_image: these image bytes changed. Refresh the source before inspecting it.");
-    return { path, id, label, video, sourceHash, bytes };
+    return { path, id, label, video, sourceHash, bytes, atSec };
   }
   read(lease: QueryLease, args: Record<string, unknown>): Promise<RetrievalOutcome> {
     const result = this.tail.then(() => this.readOnce(lease, args));
@@ -106,7 +115,7 @@ export class ConversationImages {
     this.counts.set(lease.runId, count + 1);
     const source = await this.source(lease, args, session.signal);
     let rendition;
-    try { rendition = await imageRendition(source.bytes, extname(source.path), this.deps.maker, session.signal); }
+    try { rendition = await imageRendition(source.bytes, extname(source.path), this.deps.maker, session.signal, source.atSec); }
     catch { throw new RetrievalError("unavailable", "view_image: a bounded image rendition is unavailable. Configure the local media decoder or use a supported PNG."); }
     await this.access(lease);
     const total = (this.bytesByRun.get(lease.runId) ?? 0) + 4 * Math.ceil(rendition.data.length / 3);

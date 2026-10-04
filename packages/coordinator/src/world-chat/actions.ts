@@ -260,6 +260,7 @@ import { foldConversation } from "./fold.js";
 import { evaluateReadiness } from "./readiness.js";
 import { sendBack } from "./resolution.js";
 import { conversationDir, WorldChatStore } from "./store.js";
+import { takeReviewInspectionReason } from "./take-review-inspection.js";
 import {
   artDirectionFence,
   artifactsFence,
@@ -2958,7 +2959,7 @@ async function sharedResourceProjection(
           family: "take-review",
           mediaKind,
           mediaId: take.id,
-          reason: "Metadata-only review; Arke has not inspected this take's image or audio.",
+          reason: await takeReviewInspectionReason(store, intent, production, take),
           destination: located ? `${located.scene.title} · ${located.shot.title}` : production.meta.title,
           currentSelection,
           ...(mediaPath ? { mediaPath } : {}),

@@ -9,17 +9,19 @@ export const IMAGE_MAX_EDGE = 1568;
 export const IMAGE_MAX_BYTES = 3_000_000;
 export const IMAGE_RUN_ENCODED_BYTES = 20_000_000;
 const DECODE_MAX_BYTES = 12 * 1024 * 1024;
-export interface ImageRenditionMaker { render(bytes: Uint8Array, extension: string, signal?: AbortSignal): Promise<Uint8Array> }
+export interface ImageRenditionMaker { render(bytes: Uint8Array, extension: string, signal?: AbortSignal, atSec?: number): Promise<Uint8Array> }
 
 /** The existing bounded ffmpeg runner owns codecs; only verified bytes enter its scratch. */
 export function createImageRenditionMaker(runner: MediaProbeRunner): ImageRenditionMaker {
-  return { async render(bytes, extension, signal) {
+  return { async render(bytes, extension, signal, atSec = 0) {
     signal?.throwIfAborted();
+    if (!Number.isFinite(atSec) || atSec < 0) throw new Error("The poster position is invalid.");
     const dir = await mkdtemp(join(tmpdir(), "arke-chat-image-"));
     try {
       const input = join(dir, `source${extension}`), output = join(dir, "rendition.png");
       await writeFile(input, bytes, { flag: "wx" });
       const result = await runner.run(["-hide_banner", "-loglevel", "error", "-threads", "1", "-i", input,
+        ...(atSec > 0 ? ["-ss", String(atSec)] : []),
         "-map", "0:v:0", "-frames:v", "1", "-vf", `scale=${IMAGE_MAX_EDGE}:${IMAGE_MAX_EDGE}:force_original_aspect_ratio=decrease`,
         "-map_metadata", "-1", "-pix_fmt", "rgba", "-threads", "1", "-y", output], { timeoutMs: 20_000, maxOutputBytes: 1_048_576, ...(signal ? { signal } : {}) });
       signal?.throwIfAborted();
@@ -31,9 +33,10 @@ export function createImageRenditionMaker(runner: MediaProbeRunner): ImageRendit
 }
 
 /** Decode and re-encode even a PNG: EXIF, text, profiles and other metadata never leave. */
-export async function imageRendition(bytes: Uint8Array, extension: string, maker?: ImageRenditionMaker, signal?: AbortSignal) {
+export async function imageRendition(bytes: Uint8Array, extension: string, maker?: ImageRenditionMaker, signal?: AbortSignal, atSec = 0) {
   signal?.throwIfAborted();
-  const decoded = decodePng(maker ? await maker.render(bytes, extension, signal) : bytes, maker ? IMAGE_MAX_EDGE ** 2 : 16_000_000);
+  if (!maker && atSec > 0) throw new Error("A media decoder is required for a segment poster.");
+  const decoded = decodePng(maker ? await maker.render(bytes, extension, signal, atSec) : bytes, maker ? IMAGE_MAX_EDGE ** 2 : 16_000_000);
   signal?.throwIfAborted();
   const scale = Math.min(1, IMAGE_MAX_EDGE / Math.max(decoded.width, decoded.height));
   let width = Math.max(1, Math.floor(decoded.width * scale)), height = Math.max(1, Math.floor(decoded.height * scale));
