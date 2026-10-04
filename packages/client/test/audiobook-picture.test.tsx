@@ -162,7 +162,7 @@ describe("what a picture can be (turn 186c)", () => {
 describe("Picture on a block (turn 186c)", () => {
   it("chooses a picture by tab and sets it on the block, from the world", async () => {
     const m = await mount(2);
-    assert.equal(text(q(m, ".fy-ab__picture h2")), "Picture · block 3");
+    assert.equal(q(m, ".fy-ab__picture")?.getAttribute("aria-label"), "Picture · block 3");
     await press(q(m, '[data-testid="audiobook-picture-open"]'));
     assert.deepEqual(all(m, '[aria-label="Picture from"] button').map(text), ["World", "Cast", "Scenes", "Generate"]);
     await press(q(m, '.fy-ab__pickitem[aria-label="Key art"]'));
@@ -177,7 +177,7 @@ describe("Picture on a block (turn 186c)", () => {
     const m = await mount(2, { "p1.0": picture(2, "world-art.png"), "p2.0": picture(3, "world-art.png") });
     const chips = all(m, '[data-testid="audiobook-picture-chip"]').map(text);
     assert.deepEqual(chips, ["0:34", "0:44"], "each chip at its block's start");
-    assert.equal(text(q(m, ".fy-ab__picture .fy-mono")), "shows 0:34–0:44 · 10 s · under 20 s", "a short hold is flagged, not refused");
+    assert.equal(text(q(m, '[data-testid="picture-shows"]')), "0:34–0:44 · 10 s · under 20 s", "a short hold is flagged, not refused");
     await press(q(m, '[data-testid="audiobook-picture-open"]'));
     assert.match(text(q(m, ".fy-ab__reads")), /Chapter 07\s*2 pictures · cover at the start/);
     assert.match(text(q(m, ".fy-ab__reads")), /Holds\s*until block 4/);
@@ -258,6 +258,9 @@ describe("Suggest picture (turn 191a)", () => {
     assert.deepEqual([request.block, request.chapterFile, request.productionId], ["p1.0", "07-the-tenth-key", "saltlight"]);
     assert.equal(text(q(m, '[data-testid="suggest-reading"]')), "reading…");
     await answerSuggestion(m);
+    // The prompt is folded to three lines until it is pressed (194g), then it is the field.
+    assert.equal(text(q(m, '[data-testid="picture-card-prompt"]')), SUGGESTION.prompt);
+    await press(q(m, '[data-testid="picture-card-prompt"]'));
     const field = q(m, '[data-testid="suggest-card"] textarea')!;
     const held = (field as unknown as Record<string, { value?: string }>)[Object.keys(field).find((key) => key.startsWith("__reactProps$"))!];
     assert.equal(held?.value, SUGGESTION.prompt);
@@ -267,7 +270,7 @@ describe("Suggest picture (turn 191a)", () => {
     assert.equal(q(m, '[data-key="sereth"] img'), null);
     assert.equal(text(q(m, '[data-testid="picture-card-rides"]')), "Main photo", "no look chosen: her main photo rides");
     assert.equal(text(q(m, '[data-key="maren-kest"] [data-testid="picture-card-why"]')), "head and shoulders");
-    assert.equal(text(q(m, ".fy-sugg__meta")), "GPT Image 2 · 16:9~$0.04");
+    assert.equal(text(q(m, '[data-testid="picture-card-model"]')), "GPT Image 2 · ~$0.04");
     assert.equal(text(q(m, '[data-testid="suggest-generate"]')), "Generate · ~$0.04");
     assert.equal(asked(m, "make-audiobook-picture").length, 0, "nothing is made until Generate");
   });
@@ -299,10 +302,10 @@ describe("Suggest picture (turn 191a)", () => {
     assert.equal(text(q(m, '[data-testid="picture-card-frame"]')), "Close-up, Maren's face");
     assert.equal(text(q(m, '[data-testid="picture-card-rides"]')), "Close view");
     const thumbs = all(m, '[data-key="maren-kest"] [data-testid="picture-card-thumb"]').map((img) => [img.dataset.view, img.dataset.on]);
-    assert.deepEqual(thumbs, [["full", "false"], ["close", "true"]], "both images, the close view ringed");
+    assert.deepEqual(thumbs, [["close", "true"]], "the image that rides, ringed (194g)");
     assert.equal(text(q(m, '[data-key="maren-kest"] [data-testid="picture-card-why"]')), "close frame");
     assert.match(text(q(m, '[data-key="maren-kest"]')), /Storm coat · close view/);
-    assert.equal(text(q(m, '[data-testid="picture-card-expression"]')), "Expression tired, unsmiling, eyes on the key");
+    assert.equal(text(q(m, '[data-check="expression"]')), "Expression namedtired, unsmiling, eyes on the key", "the expression is the check's, not a line of its own");
     assert.match(text(q(m, '[data-testid="picture-card-not-in-frame"]')), /Not in frame/);
     assert.equal(all(m, '[data-testid="picture-card-check"]').length, 7);
     assert.deepEqual(all(m, '[data-testid="picture-card-check"][data-ok="false"]').map((li) => li.dataset.check), ["garments"], "a mark is shown");
@@ -322,6 +325,7 @@ describe("Suggest picture (turn 191a)", () => {
     const m = await mount(2);
     await press(q(m, '[data-testid="suggest-picture"]'));
     await answerSuggestion(m);
+    await press(q(m, '[data-testid="picture-card-prompt"]'));
     await typeInto(q(m, '[data-testid="suggest-card"] textarea') as HTMLTextAreaElement, "Odile alone on the stair, dusk.");
     await press(q(m, '[data-testid="suggest-generate"]'));
     const make = asked(m, "make-audiobook-picture")[0]!;

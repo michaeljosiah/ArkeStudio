@@ -22,7 +22,6 @@ import { mediaUrl } from "../lib/media.js";
 import { sendBenchAddReference, sendBenchCompose, sendBenchNewSession, setAudiobookPicture, useBench, useStore } from "../lib/store.js";
 import type { BlockRow } from "../screens/chapter-audiobook.js";
 import { Button, Textarea, cx } from "./ui.js";
-import { LookSheet } from "./audiobook-look.js";
 import { usePictureSuggestion } from "./audiobook-suggest.js";
 import { PictureCard } from "./audiobook-picture-card.js";
 
@@ -133,7 +132,6 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   /** The chapter's record, for its look (design turn 191c): the sheet opens from here. */
   record?: ChapterAudiobook | null;
 }) {
-  const [lookOpen, setLookOpen] = useState(false);
   const suggestion = usePictureSuggestion(worldId, production.meta.id, chapterFile, row.block.key);
   const store = useStore();
   const world = store.state?.world ?? null;
@@ -189,35 +187,59 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
 
   const shownCaption = here === null
     ? null
-    : `shows ${pictures.estimated ? "~" : ""}${clock(here.at)}–${clock(here.at + here.seconds)} · ${span(here.seconds)}${here.short ? " · under 20 s" : ""}`;
+    : `${pictures.estimated ? "~" : ""}${clock(here.at)}–${clock(here.at + here.seconds)} · ${span(here.seconds)}${here.short ? " · under 20 s" : ""}`;
   const pad = String(chapterOrder).padStart(2, "0");
+  const remove = () => setAudiobookPicture(worldId, production.meta.id, chapterFile, row.block.key, null);
+  // The Picture tab (design turn 194, rule 12; 194g): 193's card, the picture in its slot beside
+  // its facts, when a suggestion is in hand; otherwise the picture set here beside when it shows
+  // and how long it holds — or, with none, the slot and Suggest picture, a press away on every
+  // block. Remove, Edit prompt and Make again stand in the panel's foot.
   return (
-    <section className="fy-bible__panel fy-ab__picture" data-testid="audiobook-picture">
-      <h2 className="fy-ab__blocktitle">Picture · {blockName}</h2>
-      {shownCaption !== null && <p className={cx("fy-mono fy-ab__card-line", here?.short && "fy-ch__who-where--warn")}>{shownCaption}</p>}
+    <section className="fy-ab__picture" data-testid="audiobook-picture" aria-label={`Picture · ${blockName}`}>
       {lookChanged && <p className="fy-mono fy-ab__card-line fy-ch__who-where--warn" data-testid="picture-look-changed">look changed</p>}
-      {!open && world !== null && <PictureCard world={world} worldId={worldId} state={suggestion} onEdit={editInBench} offline={connection !== "open"} />}
-      {!open ? (
-        <div className="fy-ab__control">
-          {here !== null && world !== null && <img className="fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" />}
-          <span className="fy-ch__panelpush" />
-          {here !== null && (
-            <Button variant="ghost" disabled={connection !== "open"} onClick={() => setAudiobookPicture(worldId, production.meta.id, chapterFile, row.block.key, null)}>
-              Remove
+      {!open && world !== null && suggestion.ask !== null ? (
+        <PictureCard world={world} worldId={worldId} state={suggestion} onEdit={editInBench} offline={connection !== "open"} picture={here === null ? null : mediaUrl(world.meta.slug, here.file)} {...(here !== null ? { onRemove: remove } : {})} />
+      ) : !open ? (
+        <>
+          <div className="fy-pcard__top">
+            {here !== null && world !== null ? <img className="fy-pcard__img fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" /> : <div className="fy-pcard__slot" aria-hidden="true" />}
+            <div className="fy-pcard__facts">
+              {shownCaption !== null && (
+                <div className="fy-pcard__fact">
+                  <span className="fy-mono">Shows</span>
+                  <b className={cx(here?.short && "fy-ch__who-where--warn")} data-testid="picture-shows">{shownCaption}</b>
+                </div>
+              )}
+              {until !== null && (
+                <div className="fy-pcard__fact">
+                  <span className="fy-mono">Holds</span>
+                  <b>{until}</b>
+                </div>
+              )}
+              <div className="fy-pcard__fact">
+                <span className="fy-mono">Chapter {pad}</span>
+                <b>
+                  {pictures.count} picture{pictures.count === 1 ? "" : "s"}
+                  {pictures.lost.length > 0 ? ` · ${pictures.lost.length} lost` : ""}
+                </b>
+              </div>
+            </div>
+          </div>
+          <div className="fy-abp__foot">
+            {here !== null && (
+              <Button variant="outline" disabled={connection !== "open"} onClick={remove} data-testid="audiobook-picture-remove">
+                Remove
+              </Button>
+            )}
+            <Button variant="outline" disabled={connection !== "open"} onClick={() => setOpen(true)} data-testid="audiobook-picture-open">
+              Choose
             </Button>
-          )}
-          <Button variant="ghost" onClick={() => setLookOpen(true)} data-testid="audiobook-look-open">
-            Look
-          </Button>
-          {suggestion.ask === null && (
-            <Button variant="secondary" disabled={connection !== "open"} onClick={suggestion.suggest} data-testid="suggest-picture">
-              Suggest picture
+            <span className="fy-ch__panelpush" />
+            <Button variant="primary" disabled={connection !== "open"} onClick={suggestion.suggest} data-testid="suggest-picture">
+              {here !== null ? "Make again" : "Suggest picture"}
             </Button>
-          )}
-          <Button variant="secondary" disabled={connection !== "open"} onClick={() => setOpen(true)} data-testid="audiobook-picture-open">
-            Picture
-          </Button>
-        </div>
+          </div>
+        </>
       ) : (
         <>
           <nav className="fy-seg fy-ab__seg" aria-label="Picture from">
@@ -269,9 +291,9 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
               </div>
             )}
           </div>
-          <div className="fy-ab__control">
+          <div className="fy-abp__foot">
             {here !== null && (
-              <Button variant="ghost" disabled={connection !== "open"} onClick={() => setAudiobookPicture(worldId, production.meta.id, chapterFile, row.block.key, null)}>
+              <Button variant="outline" disabled={connection !== "open"} onClick={remove}>
                 Remove
               </Button>
             )}
@@ -282,7 +304,6 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
           </div>
         </>
       )}
-      <LookSheet open={lookOpen} onClose={() => setLookOpen(false)} worldId={worldId} productionId={production.meta.id} chapterFile={chapterFile} chapterOrder={chapterOrder} record={record} blockKeys={rows.map((candidate) => candidate.block.key)} />
     </section>
   );
 }

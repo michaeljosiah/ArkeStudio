@@ -36,20 +36,23 @@ describe("the Audiobook view takes the whole room (turn 193)", () => {
     assert.equal(rules(fidelity).filter((rule) => rule.body.includes("var(--content-max-chapter)") && /audiobook|timing/.test(rule.selector)).length, 0);
   });
 
-  it("the panel is a third of the room between 420 and 520, the list's text stops at 920", () => {
+  it("the panel is 30% of the room between 420 and 560; the list starts at the 24 gutter and its words stop at 780 (194, rules 10 and 11)", () => {
     const root = mentioning(fidelity, ":root").map((rule) => rule.body).join(" ");
-    assert.match(root, /--ab-panel: clamp\(420px, 34cqw, 520px\)/);
-    assert.match(root, /--ab-list-max: 920px/);
+    assert.match(root, /--ab-panel: clamp\(420px, 30cqw, 560px\)/);
+    assert.doesNotMatch(root, /--ab-list-max|--ab-pad/, "the centred measure and its padding are gone");
     const panel = rules(responsive).find((rule) => rule.selector === '[data-screen="chapter"][data-view="audiobook"] .fy-ch__panels' && rule.body.includes("var(--ab-panel)"));
     assert.ok(panel, "the panel's width is the token");
     assert.match(panel!.body, /border-left: 1px solid var\(--border\)/, "docked with a rule");
-    assert.match(panel!.body, /container: ab-panel \/ inline-size/, "the picture card can answer the panel's own width (480 beside, 420 over)");
+    assert.match(panel!.body, /container: ab-panel \/ inline-size/, "the picture card can answer the panel's own width (460 beside, 420 over)");
     const list = rules(responsive).find((rule) => rule.selector.endsWith(".fy-ab__blocks") && rule.selector.includes('[data-view="audiobook"]'));
     assert.ok(list);
     assert.match(list!.body, /max-width: none/);
-    assert.match(list!.body, /padding-inline: var\(--ab-pad\)/);
-    const pad = rules(responsive).find((rule) => rule.body.includes("--ab-pad:"));
-    assert.match(pad!.body, /max\(8px, calc\(\(100% - var\(--ab-list-max\)\) \/ 2\)\)/, "centred in the room the panel leaves");
+    assert.doesNotMatch(list!.body, /padding-inline/, "no centring padding: the list's own 24 gutter stands");
+    assert.match(rules(fidelity).find((rule) => rule.selector === ".fy-ab__blocks")!.body, /padding: 10px 24px 0/, "from the 24 gutter, rows running to the panel");
+    const row = rules(fidelity).find((rule) => rule.selector === ".fy-ab__block")!;
+    assert.match(row.body, /--ab-measure: 780px/);
+    assert.match(row.body, /grid-template-columns: 120px minmax\(0, var\(--ab-measure\)\) minmax\(16px, 1fr\) auto/, "120 + 780 + end, the end pinned right");
+    assert.match(rules(fidelity).find((rule) => rule.selector === ".fy-ab__text")!.body, /font: 400 var\(--text-base\)\/1\.6/, "narration 14, weight 400, line height 1.6");
   });
 
   it("the head and body have no centred cap and the centre gives its padding to the toolbar, list and foot (194)", () => {

@@ -165,7 +165,7 @@ export function BedPanel({ worldId, world, record, timing, rows, row, onBed, onS
           <span className="fy-ab__label">Bed</span>
           <span className="fy-mono fy-tm__data">{bedHere === null ? "none" : `${source?.label ?? ""} · ${draft.from} to ${draft.to}${timed !== null ? ` · ${formatRunningTime(timed.seconds)}` : ""}`}</span>
           <span className="fy-ch__panelpush" />
-          <Button variant="secondary" disabled={locked} onClick={() => setOpen("bed")} data-testid="audiobook-bed-open">Bed</Button>
+          <button type="button" className="fy-abp__add" disabled={locked} onClick={() => setOpen("bed")} data-testid="audiobook-bed-open">{bedHere === null ? "Add" : "Edit"}</button>
         </div>
       ) : (
         <div className="fy-tm__side">
@@ -206,7 +206,7 @@ export function BedPanel({ worldId, world, record, timing, rows, row, onBed, onS
           <span className="fy-ab__label">Sound</span>
           <span className="fy-mono fy-tm__data">{soundHere === null ? "none" : `${soundHere[1].source.label} · ${soundHere[1].levelDb} dB`}{soundHere !== null && timing.lost.sounds.includes(soundHere[0]) ? " · block removed" : ""}</span>
           <span className="fy-ch__panelpush" />
-          <Button variant="secondary" disabled={locked} onClick={() => setOpen("sound")} data-testid="audiobook-sound-open">Sound</Button>
+          <button type="button" className="fy-abp__add" disabled={locked} onClick={() => setOpen("sound")} data-testid="audiobook-sound-open">{soundHere === null ? "Add" : "Edit"}</button>
         </div>
       ) : (
         <div className="fy-tm__side">
@@ -256,6 +256,9 @@ export function ReactionsPanel({ record, timing, row, speakers, onReaction, lock
   const [sound, setSound] = useState<Sound>("laughs");
   const [words, setWords] = useState("");
   const [offset, setOffset] = useState(0);
+  // The add form waits behind Add (design turn 194g: `Reactions · none · Add`), a block at a time.
+  const [adding, setAdding] = useState(false);
+  useEffect(() => setAdding(false), [host]);
   const barOf = (key: string): TimedBar | undefined => timing.bars.find((bar) => bar.key === key);
   const nameOf_ = (key: string) => speakers.find((candidate) => candidate.key === key)?.name ?? key;
   const add = () => {
@@ -268,6 +271,12 @@ export function ReactionsPanel({ record, timing, row, speakers, onReaction, lock
       <div className="fy-tm__row">
         <span className="fy-ab__label">Reactions</span>
         <span className="fy-mono fy-tm__data">{here.length === 0 ? "none" : `${here.length}`}</span>
+        <span className="fy-ch__panelpush" />
+        {!adding && (
+          <button type="button" className="fy-abp__add" disabled={locked} onClick={() => setAdding(true)} data-testid="reaction-open">
+            Add
+          </button>
+        )}
       </div>
       {here.map(([key, reaction]) => {
         const bar = barOf(key);
@@ -280,6 +289,7 @@ export function ReactionsPanel({ record, timing, row, speakers, onReaction, lock
           </div>
         );
       })}
+      {adding && <>
       <div className="fy-tm__row">
         <select className="fy-ch__pick" aria-label="Who" value={speaker} disabled={locked} onChange={(event) => setSpeaker(event.target.value)}>
           {speakers.map((candidate) => <option key={candidate.key} value={candidate.key}>{candidate.name}</option>)}
@@ -304,8 +314,10 @@ export function ReactionsPanel({ record, timing, row, speakers, onReaction, lock
         <span className="fy-ab__label">Under</span>
         <SecondsField label="Under" testId="reaction-offset" value={offset} min={0} max={600} disabled={locked} onCommit={setOffset} />
         <span className="fy-ch__panelpush" />
+        <Button variant="ghost" onClick={() => setAdding(false)}>Done</Button>
         <Button variant="secondary" disabled={locked} onClick={add} data-testid="reaction-add">Add</Button>
       </div>
+      </>}
     </section>
   );
 }

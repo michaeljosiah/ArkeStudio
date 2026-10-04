@@ -502,7 +502,8 @@ describe("the Audiobook view (turn 146)", () => {
     await answerOpen(m);
     await act(async () => all(m, ".fy-ab__block")[0]!.click());
     const takes = q(m, '[data-testid="audiobook-takes"]')!;
-    assert.match(takes.textContent ?? "", /Takes1/, "one take of this chapter's title, not the other chapter's");
+    assert.equal(takes.querySelectorAll(".fy-abp__take").length, 1, "one take of this chapter's title, not the other chapter's");
+    assert.equal(q(m, '[data-testid="audiobook-tab-voice"]')?.textContent, "Voicev1", "and the Voice tab counts it (194g)");
 
     // Typing, then the press: the read waits for the save, and goes out once it lands.
     await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
@@ -558,9 +559,11 @@ describe("the Audiobook view (turn 146)", () => {
     await answerOpen(m, { audiobook: record(Object.keys(texts), texts), voices: CAST });
     const rows = all(m, ".fy-ab__block");
     assert.deepEqual(rows.map((row) => row.getAttribute("data-speaker")), ["narrator", "narrator", "maren-kest", "narrator", "narrator"]);
-    assert.ok(rows[2]!.className.includes("fy-voice--1") && rows[2]!.className.includes("fy-ab__block--line"), "Maren's line takes the first colour and the line's tint");
-    assert.ok(rows[1]!.className.includes("fy-voice--narrator") && !rows[1]!.className.includes("fy-ab__block--line"), "narration is grey and untinted");
-    assert.ok(rows[2]!.querySelector(".fy-ab__source"), "a made take shows how it was made");
+    assert.ok(rows[2]!.className.includes("fy-voice--1") && rows[2]!.className.includes("fy-ab__block--line"), "Maren's line takes the first colour, on its dot");
+    assert.ok(rows[1]!.className.includes("fy-voice--narrator") && !rows[1]!.className.includes("fy-ab__block--line"), "narration is grey");
+    assert.ok(rows[1]!.querySelector(".fy-ab__state") === null, "no mark on a made block");
+    assert.ok(rows[1]!.querySelector('.fy-ab__marks button[aria-label="Play"]') !== null, "its play at the row's end");
+    assert.equal(rows[2]!.querySelector(".fy-ab__state")?.textContent, "stale", "a block that needs the author carries a mark, and no play");
     // One filter press, its menu the speakers with their counts (design turn 194, rule 6).
     const mark = rows[2]!.querySelector(".fy-ab__mark")!.textContent;
     const press = () => q(m, '[data-testid="audiobook-filter"]')!;
@@ -582,7 +585,7 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(all(m, ".fy-ab__block").every((row) => !row.className.includes("fy-ab__block--dim")), "Everyone clears it");
   });
 
-  it("the speaker's chip opens a menu; a choice writes a pin, and the answer marks the block as set by hand (SPEC-012 R-62, R-63)", async () => {
+  it("the speaker's chip opens a menu; a choice writes a pin, and the answer moves the block to its speaker (SPEC-012 R-62, R-63)", async () => {
     const m = await mount(inkbound("cast"));
     await answerOpen(m, { voices: CAST });
     const line = all(m, ".fy-ab__block").find((row) => row.getAttribute("data-speaker") === "maren-kest")!;
@@ -604,7 +607,8 @@ describe("the Audiobook view (turn 146)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "voices.record", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", record: pinned }));
     const again = all(m, ".fy-ab__block").find((row) => row.getAttribute("data-speaker") === "Tam Rusk");
     assert.ok(again, "the record as it now stands is read");
-    assert.ok(again!.querySelector(".fy-ab__pin"), "and the block is marked as set by hand");
+    // The row carries no pin glyph since 194 (rule 7): the speaker's menu offers Undo correction instead.
+    assert.equal(again!.querySelector(".fy-ab__mark")?.textContent, "Tam Rusk", "the block names the speaker set by hand");
     await act(async () => __applyEventForTest({ at: AT, type: "voices.record", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", refused: "cast moved · cast again" }));
     assert.match(text(m), /cast moved · cast again/, "a refusal is one clause");
   });
@@ -649,7 +653,9 @@ describe("the Audiobook view (turn 146)", () => {
     recorded.updatedAt = "2026-09-25T10:00:00.000Z";
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", requestId: asked.requestId, record: recorded }));
     assert.equal(dom.document.querySelector('[data-testid="recorded-take-dialog"]'), null, "kept: the dialog goes");
-    assert.ok(all(m, ".fy-ab__block")[1]!.querySelector(".fy-ab__source--recorded"), "the block says it was recorded");
+    // A made block, recorded or not, is quiet in the list (194, rule 7); its take says it was recorded.
+    assert.equal(all(m, ".fy-ab__block")[1]!.getAttribute("data-state"), "made", "the recording is the block's take");
+    assert.match(q(m, '[data-testid="audiobook-takes"]')?.textContent ?? "", /recorded/, "and the take says it was recorded");
   });
 
   it("a speaker a person records waits for a recording: the block says so, the press leaves it out, and the toggle writes the book (SPEC-047 R-37, R-38)", async () => {
@@ -772,7 +778,7 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(whispered.disabled && whispered.className.includes("fy-ab__chip--off"), "Kokoro cannot whisper: struck");
     assert.equal(whispered.getAttribute("title"), "reads measured · urgent", "the reason, one clause, on the control");
     assert.ok(!deliveries.find((b) => b.textContent === "urgent")!.disabled);
-    assert.equal(panel.querySelector(".fy-ab__off")?.textContent, "no note", "no note on this reader");
+    assert.equal(panel.querySelector(".fy-abp__v--off")?.textContent, "no note", "no note on this reader");
     const speeds = [...panel.querySelectorAll('[aria-label="Speed"] button')] as HTMLButtonElement[];
     assert.ok(speeds.find((b) => b.textContent === "0.9")!.disabled && !speeds.find((b) => b.textContent === "1.0")!.disabled, "no speed on Kokoro, but one is always one");
     assert.ok(!/\bis\b.*\bbecause\b/.test(panel.textContent ?? ""), "no sentence explains the controls");
@@ -783,13 +789,15 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(set.block, "p0.0");
     assert.deepEqual(set.direction, { delivery: "urgent", speed: 1, cues: [] });
 
-    // The coordinator answers with the record: the block is stale against its undirected take, and the report says how the reader carries it.
+    // The coordinator answers with the record: the block is stale against its undirected take. The
+    // panel says nothing more of it (194g): the struck controls carry what the reader cannot do.
     const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
     const held = record(NARRATION_KEYS, texts);
     held.direction["p0.0"] = directed(texts["p0.0"], "urgent");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, record: { ...held, updatedAt: "2026-09-14T10:00:00.000Z" } }));
     assert.equal(all(m, ".fy-ab__block")[1]!.getAttribute("data-state"), "stale", "a direction changed since the take");
-    assert.equal(q(m, '[data-testid="audiobook-report"]')?.textContent, "urgent · mapped");
+    assert.ok(q(m, '[data-testid="audiobook-report"]') === null, "only a refusal is said");
+    assert.equal(all(m, ".fy-ab__block")[1]!.querySelector(".fy-ab__state")?.textContent, "stale", "and the row's end marks it");
     const urgent = all(m, '[aria-label="Delivery"] button').find((b) => b.textContent === "urgent")!;
     assert.ok(urgent.className.includes("fy-ab__chip--on") && urgent.getAttribute("aria-checked") === "true", "the chosen chip is filled");
 
@@ -821,8 +829,10 @@ describe("the Audiobook view (turn 146)", () => {
     await act(async () => block.click());
     const side = q(m, '[data-testid="audiobook-direction"]')!;
     assert.match(side.querySelector('[data-testid="audiobook-held"]')?.textContent ?? "", /^1 held · Kokoro 82M$/);
-    const sent = [...side.querySelectorAll('[data-testid="audiobook-sent-as"] > span')].map((part) => part.textContent);
+    const sent = all(m, '[data-testid="audiobook-sent-as"] > span').map((part) => part.textContent);
     assert.deepEqual(sent, ["Maren counted", "the bells."], "a settings-only reader makes the marker a part of its own, and the held pause is not sent");
+    assert.equal(q(m, '[data-testid="audiobook-sent"]')?.hasAttribute("open"), false, "Sent as is folded until it is opened (194g)");
+    assert.match(q(m, '[data-testid="audiobook-sent"] summary')?.textContent ?? "", /Sent as.*2 parts/, "its parts named on the folded line");
 
     await act(async () => plates[1]!.click());
     const menu = q(m, '[role="menu"][aria-label="Marker"]');
@@ -913,7 +923,7 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(confirmed.block, first.block);
   });
 
-  it("the block panel shares the note, the Sound button and Sent as (design turn 181e)", async () => {
+  it("the block panel shares the note, the markers' Add and Sent as (design turn 181e, 194g)", async () => {
     const state = voiced(inkbound());
     const reader = { provider: "elevenlabs", model: "eleven-v3", voiceId: "test", label: "Test" };
     state.world = { ...state.world!, productions: state.world!.productions.map(p => p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "narrator", narrator: reader } } : p) };
@@ -928,13 +938,14 @@ describe("the Audiobook view (turn 146)", () => {
     const note = panel.querySelector('input[aria-label="Note"]') as HTMLInputElement;
     assert.equal(note.value, "flat");
     assert.equal(panel.querySelector('[data-testid="audiobook-note-count"]')?.textContent, "4 / 300");
-    assert.deepEqual([...panel.querySelectorAll('[data-testid="audiobook-sent-as"] > span')].map((part) => part.textContent), ["[coldly] [flat] Maren counted the bells. [sighs]"]);
+    assert.deepEqual(all(m, '[data-testid="audiobook-sent-as"] > span').map((part) => part.textContent), ["[coldly] [flat] Maren counted the bells. [sighs]"]);
     assert.ok(panel.querySelector('[data-testid="audiobook-markers"] .fy-ab__mk--sound'), "a sound's plate is outlined");
-    const sound = panel.querySelector('[aria-label="Add sound"]') as HTMLButtonElement;
-    assert.ok(!sound.disabled, "Eleven v3 makes sounds");
-    await act(async () => sound.click());
+    // One Add on the Markers row (194g) opens the marker menu: the deliveries, the cues and the sounds.
+    const add = panel.querySelector('[aria-label="Add marker"]') as HTMLButtonElement;
+    assert.equal(add.textContent, "Add");
+    await act(async () => add.click());
     const menu = q(m, '[role="menu"][aria-label="Marker"]')!;
-    assert.deepEqual([...menu.querySelectorAll(".fy-ab__menu-eb")].map((eyebrow) => eyebrow.textContent), ["Sound"], "the Sound group alone");
+    assert.deepEqual([...menu.querySelectorAll(".fy-ab__menu-eb")].map((eyebrow) => eyebrow.textContent), ["Delivery", "Cue", "Sound"], "every group, each struck where the reader cannot");
     const chips = [...menu.querySelectorAll(".fy-ab__mchip")] as HTMLButtonElement[];
     assert.ok(chips.find((chip) => chip.textContent === "coughs")!.disabled, "a sound the reader does not make is struck");
     await act(async () => chips.find((chip) => chip.textContent === "laughs")!.click());
@@ -947,9 +958,8 @@ describe("the Audiobook view (turn 146)", () => {
     longer.direction["p0.0"] = directed(texts["p0.0"], "cold", { note: long });
     const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, record: { ...longer, updatedAt: "2026-09-14T10:00:00.000Z" } }));
-    const side = q(m, '[data-testid="audiobook-direction"]')!;
-    assert.deepEqual([...side.querySelectorAll('[data-testid="audiobook-sent-as"] > span')].map((part) => part.textContent), ["[coldly] Maren counted the bells."]);
-    assert.equal(side.querySelector('[data-testid="audiobook-sent-held"]')?.textContent, "Held note — Eleven v3");
+    assert.deepEqual(all(m, '[data-testid="audiobook-sent-as"] > span').map((part) => part.textContent), ["[coldly] Maren counted the bells."]);
+    assert.equal(q(m, '[data-testid="audiobook-sent-held"]')?.textContent, "Held note — Eleven v3");
   });
 
   it("a direction written for earlier words shows carried to the words now, with what could not be carried counted (SPEC-047 R-43)", async () => {
@@ -1039,7 +1049,7 @@ describe("the Audiobook view (turn 146)", () => {
     const whispered = panel.querySelector('[aria-label="Delivery"] button:nth-child(2)') as HTMLButtonElement;
     assert.equal(whispered.textContent, "whispered");
     assert.ok(whispered.disabled, "Kokoro will speak this line, and Kokoro cannot whisper");
-    assert.match(q(m, '[data-testid="audiobook-block"]')?.textContent ?? "", /read by George · narrator · stands in/);
+    assert.match(q(m, '[data-testid="audiobook-block"] .fy-abp__sub')?.textContent ?? "", /read by George · stands in/);
     assert.equal(all(m, ".fy-ab__block")[2]!.getAttribute("data-state"), "stale", "the state is judged against the voice the line is meant for, not the one that stands in");
   });
 
@@ -1162,20 +1172,23 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(dom.document.querySelector('[data-testid="narrator-dialog"]'), "Narrator… opens the book's narrator");
   });
 
-  it("the block panel names the block and its reader in words, and its add buttons are one word each (design turn 165a, issue 1324 §3)", async () => {
+  it("the block panel names the block, who speaks and its reader in words, then Picture, Voice and Timing as tabs (design turns 165a, 194g)", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m, { audiobook: record(NARRATION_KEYS, { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." }) });
     await act(async () => all(m, ".fy-ab__block")[1]!.click());
     const title = q(m, '[data-testid="audiobook-block-title"]')!;
-    assert.equal(title.textContent, "Block 2 · Narration");
+    assert.equal(title.textContent, "Block 2 · narrator");
     assert.ok(!title.className.includes("fy-bible__paneltitle"), "not letter-spaced capitals");
-    assert.equal(q(m, ".fy-ab__readby")?.textContent, "read by George · narrator");
-    const adds = all(m, '[data-testid="audiobook-direction"] .fy-ab__add');
-    assert.deepEqual(adds.map((b) => b.textContent), ["Marker", "Pause", "Breath", "Emphasis", "Sound"]);
-    assert.deepEqual(adds.map((b) => b.getAttribute("aria-label")), ["Add marker", "Add pause", "Add breath", "Add emphasis", "Add sound"]);
-    assert.ok((adds[4] as HTMLButtonElement).disabled, "Kokoro makes no sound: struck, with the reason");
-    assert.equal(adds[4]!.getAttribute("title"), "no sounds");
-    assert.ok(adds.every((b) => b.querySelector("svg") !== null), "the plus is an icon inside the button, never a line of its own");
+    assert.equal(q(m, ".fy-abp__sub")?.textContent, "1 line · read by George · made");
+    const tabs = all(m, '[role="tab"]');
+    assert.deepEqual(tabs.map((tab) => tab.textContent), ["Picture", "Voicev1", "Timing"], "the Picture tab on every block, Voice with its take (194, rule 12)");
+    assert.equal(tabs[1]!.getAttribute("aria-selected"), "true", "a block with no picture opens on Voice");
+    await act(async () => tabs[2]!.click());
+    assert.ok(q(m, '[data-testid="block-timing"]'), "Timing holds the block's timing");
+    await act(async () => all(m, ".fy-ab__block")[2]!.click());
+    assert.equal(all(m, '[role="tab"]')[2]!.getAttribute("aria-selected"), "true", "a tab chosen holds from block to block");
+    await act(async () => all(m, '[role="tab"]')[0]!.click());
+    assert.ok(q(m, '[data-testid="suggest-picture"]'), "Picture holds Suggest picture where there is none");
   });
 
   it("a world's designed narrator is named on the head and the block panel, before the catalogue answers and after, as the door names it", async () => {
@@ -1190,17 +1203,17 @@ describe("the Audiobook view (turn 146)", () => {
     await answerOpen(m, { audiobook: record(NARRATION_KEYS, { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." }) });
     const named = () => ({
       head: (q(m, '[data-testid="audiobook-reading"]')?.textContent ?? "").replace(/\s+$/, ""),
-      readBy: q(m, ".fy-ab__readby")?.textContent,
+      readBy: /read by [^·]+/.exec(q(m, ".fy-abp__sub")?.textContent ?? "")?.[0].trim(),
     });
     await act(async () => all(m, ".fy-ab__block")[1]!.click());
     assert.match(named().head, /^Performed · Ife's voice/, "no catalogue yet: the stored choice, never the shipped George");
-    assert.equal(named().readBy, "read by Ife's voice · narrator");
+    assert.equal(named().readBy, "read by Ife's voice");
     await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [
       { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George", attributes: [], local: true, canClone: false, usedBy: [] },
       { provider: "google", model: "gemini-3.8-flash-tts", voiceId: target, label: "Ife's voice", attributes: [], local: false, canClone: false, readsDesigned: ife.id, usedBy: [] },
     ] }));
     assert.match(named().head, /^Performed · Ife's voice/, "the catalogue holds the voice, so it still narrates");
-    assert.equal(named().readBy, "read by Ife's voice · narrator");
+    assert.equal(named().readBy, "read by Ife's voice");
   });
 });
 
@@ -1321,9 +1334,10 @@ describe("the director reads the book (design turn 184)", () => {
     await answerOpen(m);
     await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...RACHEL, attributes: [], local: false, canClone: false, usedBy: [] }] }));
     await act(async () => all(m, ".fy-ab__block")[1]!.click());
-    const side = q(m, '[data-testid="audiobook-direction"]')!;
-    assert.equal(side.querySelector('[data-testid="audiobook-sent-as"]')?.textContent, "Maren counted the bells.");
-    assert.equal(side.querySelector('[data-testid="audiobook-reading-held"]')?.textContent, `book note · ${BOOK_NOTE.length} characters · Eleven v3 takes 60 as a tag`);
+    // Sent as is its own folded row under the Voice tab's takes (194g).
+    const sent = q(m, '[data-testid="audiobook-sent"]')!;
+    assert.equal(sent.querySelector('[data-testid="audiobook-sent-as"]')?.textContent, "Maren counted the bells.");
+    assert.equal(sent.querySelector('[data-testid="audiobook-reading-held"]')?.textContent, `book note · ${BOOK_NOTE.length} characters · Eleven v3 takes 60 as a tag`);
   });
 
   it("a proposal that cast the lines first is drawn on the blocks its cast makes (codex on PR 1479)", async () => {
