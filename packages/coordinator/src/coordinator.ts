@@ -16,7 +16,7 @@ import { randomLocalSeed, withLocalSeed } from "./queue/local-seed.js";
 import { SamplingClock, UpscaleClock, jobSampling, localTakeFreeze, withLocalSampling } from "./queue/local-sampling.js";
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe } from "@arke-studio/providers";
-import { ConversationActionService } from "./application/conversation-actions.js";
+import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
 import { ConversationAuthoringService } from "./application/conversation-authoring.js";
 import { conversationRunDependencies } from "./application/conversation-runs.js";
@@ -7441,6 +7441,21 @@ export class Coordinator {
           return;
         }
         await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
+      case "conversation-take-review-prepare": {
+        const store = this.opts.provider.openStore?.();
+        let actionId: string | undefined;
+        let detail: string | undefined;
+        try {
+          if (!store || store.worldId !== msg.worldId) throw new ConversationTakeReviewRefusal("No matching world is open.");
+          actionId = (await this.conversationActions(store).prepareTakeReview(msg)).actionId;
+        } catch (error) {
+          detail = error instanceof ConversationTakeReviewRefusal ? error.message : "The take review could not be prepared.";
+        }
+        this.emit({ at: this.nowIso(), type: "conversation-action.take-review-prepared", worldId: msg.worldId,
+          conversationId: msg.conversationId, requestId: msg.requestId, ...(actionId ? { actionId } : {}), ...(detail ? { detail } : {}) });
+        if (store && this.stillOpen(store)) await this.refreshConversationOutcome(store, msg.conversationId);
         return;
       }
       case "conversation-action-decide": {
@@ -20590,6 +20605,7 @@ export class Coordinator {
     const bundle = store.getBundle();
     const sheets = new Map(bundle.sheets.map((s) => [s.id, s]));
     const human = await projectHumanDecisions(store, loaded, bundle, this.jobQueue?.listJobs() ?? this.getState().app.jobs);
+    loaded = { ...loaded, actions: await this.conversationActions(store).project(loaded.actions) };
     if (!this.stillOpen(store) || (onlyIfStillSelected !== undefined && this.getState().worldChat?.conversationId !== onlyIfStillSelected)) return;
     this.readModel.setStageReviews(human.stageReviews);
     this.readModel.setWorldChat(

@@ -103,6 +103,7 @@ export function productionGenerationSource(store: WorldStore, ports: {
           inputs.push(ports.freeze({ ...input, productionId: action.productionId,
             target: target.kind === "shot" ? { kind: "shot", id: target.shotId, coversShots } : { kind: "scene-pass", id: scene.id, coversShots },
             params: { ...input.params, generationQuoteProduction: true, provenance: { ...snapshot.productionProvenance, sceneId: scene.id, sceneVersion: scene.version },
+              referenceRoles: prefill.references.flatMap(ref => ref.source.source === "world-file" ? [{ file: ref.source.path, role: ref.label ?? ref.kind }] : []),
               ...(shotPlan && target.kind === "board" ? { shotPlan } : {}), ...(retake ? { retakeOf: retake.id } : {}),
               ...(input.provider === "comfyui" ? { seed: createHash("sha256").update(`${actionId}/${inputs.length}`).digest().readUInt32BE(0) % 0x7fffffff } : {}) },
             landing: { dir: `incoming/production-generation/${actionId}/${inputs.length}` } }));

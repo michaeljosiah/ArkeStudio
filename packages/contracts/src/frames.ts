@@ -60,7 +60,7 @@ import { WorldChatContextSchema, WorldChatInitiativeSchema } from "./world-chat.
 import { ProductionSetupCommandSchema } from "./production-setup.js";
 import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
-import { DecideConversationActionSchema } from "./arke-actions.js";
+import { DecideConversationActionSchema, PrepareConversationTakeReviewSchema } from "./arke-actions.js";
 
 /**
  * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then `event` frames, sequence
@@ -623,6 +623,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   DecideConversationActionSchema,
+  PrepareConversationTakeReviewSchema,
   /**
    * #70 §10.1.1: say something, and take a turn.
    *

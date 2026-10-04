@@ -567,11 +567,38 @@ export const ConversationActionRecordSchema = z
 export type ConversationActionRecord = z.infer<typeof ConversationActionRecordSchema>;
 
 /** The renderer gets coordinator-derived controls, never authority payload or mutable options. */
+export const ConversationCardMediaSchema = z.object({
+  kind: z.enum(["image", "video", "audio", "document"]),
+  path: ArkeGenerationResultSchema.shape.mediaPath.unwrap(),
+  poster: ArkeGenerationResultSchema.shape.posterPath.unwrap().optional(),
+  alt: z.string().min(1).max(1_000), role: z.string().min(1).max(200),
+}).strict();
+/** Presentation bindings to the sealed quote; these never enter the durable decision envelope. */
+export const ConversationGenerationWorkSchema = z.object({
+  jobKeys: z.array(UlidSchema).min(1).max(100),
+  media: z.array(ConversationCardMediaSchema).max(100),
+}).strict();
+export type ConversationGenerationWork = z.infer<typeof ConversationGenerationWorkSchema>;
+export type ConversationCardMedia = z.infer<typeof ConversationCardMediaSchema>;
 export const ConversationActionCardSchema = ConversationActionRecordSchema.extend({
   availableDecisions: z.array(ConversationActionDecisionKindSchema),
   blockedReason: z.string().min(1).max(1_000).optional(),
+  generationWork: ConversationGenerationWorkSchema.optional(),
 }).strict();
 export type ConversationActionCard = z.infer<typeof ConversationActionCardSchema>;
+
+/** Selecting a landed result prepares a review; this gesture never accepts a take. */
+export const PrepareConversationTakeReviewSchema = z.object({
+  kind: z.literal("conversation-take-review-prepare"), worldId: UlidSchema,
+  conversationId: ConversationIdSchema, sourceActionId: ConversationActionIdSchema,
+  takeId: ConversationActionSemanticIdSchema, shotId: ConversationActionSemanticIdSchema,
+  expectedConversationSeq: z.number().int().nonnegative(), requestId: UlidSchema,
+}).strict();
+export type PrepareConversationTakeReview = z.infer<typeof PrepareConversationTakeReviewSchema>;
+export const ConversationTakeReviewPreparationResultSchema = z.object({
+  worldId: UlidSchema, conversationId: ConversationIdSchema, requestId: UlidSchema,
+  actionId: ConversationActionIdSchema.optional(), detail: z.string().max(1_000).optional(),
+}).strict();
 
 /** The content-minimising world-scoped audit retained after a conversation is deleted. */
 export const ConversationActionTombstoneSchema = z

@@ -80,6 +80,8 @@ Use Node 22.12 or later; CI uses Node 22. Run `npm ci` from the repository root.
 
 Frozen production previews and turn approval (#1425) use client `test/production-card-body.test.tsx` and `test/production-plan-card.test.tsx`, plus coordinator `test/world-chat/actions.test.ts`, `test/arke-actions/lifecycle.test.ts` and `test/world/schema-version.test.ts`. They check all forty native shot rows, screenplay changes and removed blocks, eligibility, dependency completion, stopping at refusal, duplicate gestures and the schema-61 reader refusal. Run `node scripts/smoke-production-card-body.mjs` with Chrome installed (`ARKE_CHROME` overrides its path) to check the full client cascade at 360, 390, 984 and 1200 px, including readable native columns and scrolling to row forty. These are renderer and authority checks; the installed journey remains #1427.
 
+Generation media and Select (#1425) also use client `test/production-card-media.test.tsx`, coordinator `test/world-chat/generation-quotes.test.ts` and the “Select prepares”/board cases in `test/world-chat/actions.test.ts`, plus contracts `test/production-card-media.test.ts`. They check sealed quote projection with zero dispatch, cross-purchase refusal, duplicate preparation, Deny/Approve/stale review fences, live filed results and retained receipts. The Chrome script above now checks native board grids, reference/result cards and take comparison at all four widths. This is layout coverage with fixture media addresses, not installed provider playback. Select sends `conversation-take-review-prepare`; only the resulting card’s separate decision changes a shot selection.
+
 ## Select the checks
 
 For design-only production conversation work, turn 196 in the design master is the reference

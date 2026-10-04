@@ -3103,7 +3103,7 @@ async function sharedResourceProjection(
         : undefined;
       const mediaKind = take.kind === "clip" ? "video" as const : take.kind === "voice" ? "audio" as const : "image" as const;
       const selection = located ? production.selections[located.shot.id] : undefined;
-      const currentSelection = selection?.acceptedTakeId ?? selection?.startFrameTakeId ?? null;
+      const currentSelection = mediaKind === "image" ? selection?.startFrameTakeId ?? selection?.startFrameArtifactId ?? null : selection?.acceptedTakeId ?? null;
       const history = production.reviews
         .filter((review) => review.takeId === take.id)
         .map((review) => `${review.ts} · ${review.decision}${review.shotId ? ` for ${review.shotId}` : ""} · ${review.by}`);

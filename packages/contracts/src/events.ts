@@ -82,7 +82,7 @@ import { UpdateStateSchema } from "./update.js";
 import { MediaOpportunityMediumSchema } from "./world-chat.js";
 import { ProductionSetupStateSchema } from "./production-setup.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
-import { ConversationActionDecisionResultSchema } from "./arke-actions.js";
+import { ConversationActionDecisionResultSchema, ConversationTakeReviewPreparationResultSchema } from "./arke-actions.js";
 
 /**
  * The normalised domain-event union (SPEC-001 R-2, R-3). Everything the coordinator pushes to
@@ -195,6 +195,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       ...ConversationActionDecisionResultSchema.shape,
     })
     .strict(),
+  z.object({ ...base, type: z.literal("conversation-action.take-review-prepared"),
+    ...ConversationTakeReviewPreparationResultSchema.shape }).strict(),
 
   /** Correlated outcome for any SPEC-040 single act, including its exact reachable inverse. */
   z

@@ -48,7 +48,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "stage-art-direction-change": "studio", "set-art-direction": "studio", "proposal-accept": "studio",
   "proposal-discard": "studio", "proposal-rebase": "studio", "proposal-resolve-conflict": "studio",
   "proposal-mark-seen": "studio", "proposal-resolve-choice": "studio", "proposal-update-field": "studio",
-  "proposal-update-passage": "studio", "world-chat-open": "studio", "conversation-action-decide": "resolved",
+  "proposal-update-passage": "studio", "world-chat-open": "studio", "conversation-action-decide": "resolved", "conversation-take-review-prepare": "studio",
   "world-chat-send": "studio", "world-chat-send-status": "studio", "world-chat-wrap-up": "studio",
   "world-chat-save-point": "studio", "world-chat-reject-point": "studio", "world-chat-open-media": "studio",
   "world-chat-retry-turn": "studio", "proposal-send-back": "studio", "world-chat-cancel": "studio",

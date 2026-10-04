@@ -34,7 +34,7 @@ export function ProductionCardBody({ preview, action }: { preview: ProductionCar
   const shots = orderedShots(scene);
   const stageChanged = shots.filter(shot => shot.staging && JSON.stringify(shot.staging) !== JSON.stringify(preview.before ? orderedShots(preview.before).find(old => old.id === shot.id)?.staging : undefined));
   const castChanged = JSON.stringify(scene.cast) !== JSON.stringify(preview.before?.cast) || scene.inherits?.location !== preview.before?.inherits?.location;
-  const boardChanged = JSON.stringify(scene.boards) !== JSON.stringify(preview.before?.boards) || action.authority.kind === "board";
+  const boardChanged = JSON.stringify(scene.boards) !== JSON.stringify(preview.before?.boards) || action.actionKind === "world-chat-production-board-compile" || action.actionKind === "world-chat-production-board-export";
   const pack = world && production ? boardsForScene({ scene, production, sheets: world.sheets, artifacts: world.artifacts, capSec: 60 }) : null;
   return <div className="fy-production-preview" aria-label="Resulting scene">
     <h4>{scene.title}</h4>
