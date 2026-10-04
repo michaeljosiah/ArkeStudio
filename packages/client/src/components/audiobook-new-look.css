@@ -13,7 +13,7 @@
 .fy-newlook__candheader b { font-weight: 600; }
 .fy-newlook__candheader .fy-mono { color: var(--muted-foreground); font-size: var(--text-xs); flex: 1; }
 .fy-newlook__cands { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; min-height: 0; }
-.fy-newlook__cand { width: 154px; height: 270px; border: 1px solid var(--border); border-radius: 10px; padding: 0; background: var(--neutral-100); position: relative; overflow: hidden; cursor: pointer; display: block; box-sizing: border-box; }
+.fy-newlook__cand { width: 154px; height: 270px; border: 1px solid var(--border); border-radius: 10px; padding: 0; background: var(--secondary); position: relative; overflow: hidden; cursor: pointer; display: block; box-sizing: border-box; }
 .fy-newlook__cand img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .fy-newlook__cand .fy-mono { position: absolute; left: 6px; bottom: 6px; padding: 1px 6px; border-radius: 6px; background: var(--background); font-size: var(--text-2xs); }
 .fy-newlook__cand--on { outline: 2px solid var(--foreground); outline-offset: 1px; }
