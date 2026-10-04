@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { deriveProductionReadiness, type ProductionPlanCard } from "@arke-studio/contracts";
 import { ProductionPlanCardView } from "../src/components/production-plan-card.js";
-import { __setStateForTest } from "../src/lib/store.js";
+import { __setStateForTest, __applyEventForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -31,4 +31,17 @@ it("derives the live checklist despite a completed card snapshot and offers no a
   await act(async ()=>root!.render(<ProductionPlanCardView card={{...card,worldId:"another-world"}}/>));
   assert.match(container.textContent!,/production is unavailable/);
   assert.equal(container.textContent!.includes("Selected takes"),false);
+});
+
+it("does not re-derive a plan when unrelated export percentage state changes", async ()=>{
+  const state=structuredClone(FIXTURE_STATE),world=state.world!,production=world.productions[0]!,takes=production.takes;
+  let reads=0; Object.defineProperty(production,"takes",{enumerable:true,get(){reads++;return takes;}});
+  const card: ProductionPlanCard={kind:"production-plan",worldId:world.meta.worldId,productionId:production.meta.id,nextSteps:[],readiness:null,exports:[]};
+  const container=dom.document.createElement("div") as unknown as HTMLElement; dom.document.body.append(container); root=createRoot(container);
+  await act(async()=>{__setStateForTest(state);root!.render(<ProductionPlanCardView card={card}/>);});
+  const initialReads=reads; assert.ok(initialReads>0);
+  for(let percent=1;percent<=3;percent++) await act(async()=>__applyEventForTest({type:"export.progress",at:"2026-10-04T00:00:00Z",worldId:world.meta.worldId,productionId:production.meta.id,exportId:"export",deliveryKind:"video",status:"running",percent,output:null,error:null}));
+  assert.equal(reads,initialReads,"World and card export inputs retained their identity");
+  await act(async()=>root!.render(<ProductionPlanCardView card={{...card,exports:[{id:"new",worldId:world.meta.worldId,productionId:production.meta.id,status:"running",deliveryKind:"video"}]}}/>));
+  assert.ok(reads>initialReads,"A new export lifecycle record refreshes readiness");
 });

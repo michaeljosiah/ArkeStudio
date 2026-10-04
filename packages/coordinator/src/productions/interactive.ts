@@ -692,23 +692,23 @@ export async function exportInteractiveWithProgress(
   production: ProductionBundle,
   clock: () => string,
   options: NonNullable<Parameters<typeof exportInteractive>[3]> & {
-    onProgress?: (event: Extract<DomainEvent, { type: "export.progress" }>) => void;
+    onProgress?: (event: Extract<DomainEvent, { type: "export.progress" }>) => void | Promise<void>;
   } = {},
 ): Promise<InteractiveExportResult> {
   const exportId = options.exportId ?? `iv_${ulid()}`;
   const sourceFingerprint = productionExportFingerprint(store.getBundle(), production);
   const progress = (status: "running" | "done" | "failed", output: string | null) => options.onProgress?.({
     at: clock(), type: "export.progress", worldId: store.worldId, productionId: production.meta.id,
-    exportId, sourceFingerprint, status, percent: status === "done" ? 100 : 0, output,
+    exportId, sourceFingerprint, deliveryKind: "interactive", status, percent: status === "done" ? 100 : 0, output,
     error: status === "failed" ? "interactive export refused" : null,
   });
-  progress("running", null);
+  await progress("running", null);
   try {
     const result = await exportInteractive(store, production, clock, { ...options, exportId });
-    progress(result.ok ? "done" : "failed", result.ok ? result.dir : null);
+    await progress(result.ok ? "done" : "failed", result.ok ? result.dir : null);
     return result;
   } catch (error) {
-    progress("failed", null);
+    await progress("failed", null);
     throw error;
   }
 }

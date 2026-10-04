@@ -279,6 +279,7 @@ import {
   type CompileFrameRunInput,
 } from "./productions/frame-run.js";
 import { recordFrameRunOutcome } from "./productions/frame-run-outcome.js";
+import { recordCompletedExport, readCompletedExports } from "./productions/export-receipts.js";
 import {
   appendTraversal,
   applyRoutingCommandOnDisk,
@@ -668,15 +669,16 @@ function safeExportOutput(output: string | null): string | null {
     : null;
 }
 
-function exportReadRecord(event: ExportProgressEvent): ArkeExportReadRecord {
+function exportReadRecord(event: ExportProgressEvent, previous?: ArkeExportReadRecord): ArkeExportReadRecord {
   return {
     id: event.exportId,
     worldId: event.worldId,
     productionId: event.productionId,
     ...(event.episodeId !== undefined ? { episodeId: event.episodeId } : {}),
     status: event.status,
-    createdAt: event.at,
+    createdAt: previous?.createdAt ?? event.at,
     ...(event.sourceFingerprint ? { sourceFingerprint: event.sourceFingerprint } : {}),
+    ...(event.deliveryKind ? { deliveryKind: event.deliveryKind } : {}),
     percent: event.percent,
     output: safeExportOutput(event.output),
     error: event.error === null ? null : "export failed",
@@ -4081,7 +4083,7 @@ export class Coordinator {
     const parsed = DomainEventSchema.parse(event);
     const exportStatusChanged = parsed.type === "export.progress" && this.exportReads.get(parsed.exportId)?.status !== parsed.status;
     if (parsed.type === "export.progress") {
-      this.exportReads.set(parsed.exportId, exportReadRecord(parsed));
+      this.exportReads.set(parsed.exportId, exportReadRecord(parsed, this.exportReads.get(parsed.exportId)));
     }
     this.readModel.apply(parsed);
     if (parsed.type === "export.progress" && exportStatusChanged) {
@@ -4147,12 +4149,17 @@ export class Coordinator {
     }
   }
 
+  private async publishExportProgress(store: WorldStore, event: ExportProgressEvent): Promise<void> {
+    if (event.status === "done") await recordCompletedExport(store, exportReadRecord(event, this.exportReads.get(event.exportId)));
+    this.emit(event);
+  }
+
   private async durableExportReads(worldId: string): Promise<readonly ArkeExportReadRecord[]> {
     const records = new Map<string, ArkeExportReadRecord>();
     for (const record of await this.changeLog.readAll()) {
       const parsed = DomainEventSchema.safeParse(record["event"]);
       if (!parsed.success || parsed.data.type !== "export.progress" || parsed.data.worldId !== worldId) continue;
-      const projection = exportReadRecord(parsed.data);
+      const projection = exportReadRecord(parsed.data, records.get(parsed.data.exportId));
       records.set(projection.id, projection.status === "running"
         ? { ...projection, status: "failed", error: "export interrupted" }
         : projection);
@@ -4160,6 +4167,13 @@ export class Coordinator {
     for (const projection of this.exportReads.values()) {
       if (projection.worldId === worldId) records.set(projection.id, projection);
     }
+    const store = this.opts.provider.openStore?.();
+    const completed = store?.worldId === worldId ? await readCompletedExports(store) : [];
+    const verified = new Map(completed.map(record => [record.id, record]));
+    for (const [id, projection] of records) {
+      if (projection.status === "done") records.set(id, { ...projection, sourceFingerprint: verified.get(id)?.sourceFingerprint });
+    }
+    for (const projection of completed) records.set(projection.id, { ...projection, percent: 100, error: null });
     for (const projection of records.values()) this.exportReads.set(projection.id, projection);
     return [...records.values()];
   }
@@ -11068,7 +11082,7 @@ export class Coordinator {
         if (!production) return;
         const voices = this.interactiveExportVoices(store, production.meta.id);
         const result = await exportInteractiveWithProgress(store, production, () => this.nowIso(), {
-          onProgress: event => this.emit(event), ...(voices === undefined ? {} : { voices }),
+          onProgress: event => this.publishExportProgress(store, event), ...(voices === undefined ? {} : { voices }),
         }).catch(
           (err): InteractiveExportResult => ({
             ok: false,
@@ -11771,7 +11785,7 @@ export class Coordinator {
           const runner = this.opts.ffmpeg;
           const emitProgress = (
             exportId: string,
-            status: "running" | "done" | "cancelled" | "failed",
+            status: "running" | "cancelled" | "failed",
             percent: number,
             output: string | null,
             error: string | null,
@@ -11784,6 +11798,7 @@ export class Coordinator {
               ...(msg.episodeId !== undefined ? { episodeId: msg.episodeId } : {}),
               exportId,
               sourceFingerprint,
+              deliveryKind: "video",
               status,
               percent,
               output: safeExportOutput(output),
@@ -11878,11 +11893,11 @@ export class Coordinator {
             emitProgress(handle.id, "running", 0, null, null);
             started = true;
             this.trackBackground(
-              handle.done.then((result) => {
+              handle.done.then(async (result) => {
                 this.exports.delete(handle.id);
                 this.exportsInFlight.delete(exportKey);
                 if (result.status === "done") {
-                  this.emit({
+                  await this.publishExportProgress(store, {
                     at: new Date().toISOString(),
                     type: "export.progress",
                     worldId: msg.worldId,
@@ -11890,6 +11905,7 @@ export class Coordinator {
                     ...(msg.episodeId !== undefined ? { episodeId: msg.episodeId } : {}),
                     exportId: handle.id,
                     sourceFingerprint,
+                    deliveryKind: "video",
                     status: "done",
                     percent: 100,
                     output: safeExportOutput(result.output),
@@ -11900,7 +11916,7 @@ export class Coordinator {
                   });
                 } else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
                 else emitProgress(handle.id, "failed", 0, null, result.error);
-              }),
+              }).catch(error => emitProgress(handle.id, "failed", 0, null, describeCoordinatorError(error))),
             );
             return;
           }
@@ -12012,13 +12028,17 @@ export class Coordinator {
             emitProgress(handle.id, "running", 0, null, null);
             started = true;
             this.trackBackground(
-              handle.done.then((result) => {
+              handle.done.then(async (result) => {
                 this.exports.delete(handle.id);
                 this.exportsInFlight.delete(exportKey);
-                if (result.status === "done") emitProgress(handle.id, "done", 100, result.output, null);
+                if (result.status === "done") await this.publishExportProgress(store, {
+                  at: this.nowIso(), type: "export.progress", worldId: msg.worldId, productionId: msg.productionId,
+                  episodeId: msg.episodeId, exportId: handle.id, sourceFingerprint, deliveryKind: "video",
+                  status: "done", percent: 100, output: safeExportOutput(result.output), error: null,
+                });
                 else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
                 else emitProgress(handle.id, "failed", 0, null, result.error);
-              }),
+              }).catch(error => emitProgress(handle.id, "failed", 0, null, describeCoordinatorError(error))),
             );
             return;
           }
@@ -12131,19 +12151,20 @@ export class Coordinator {
           emitProgress(handle.id, "running", 0, null, null);
           started = true;
           this.trackBackground(
-            handle.done.then((result) => {
+            handle.done.then(async (result) => {
               this.exports.delete(handle.id);
               // Released when the encode ends, not when this handler returns: the claim covers the
               // running export too, or a second click during it launches a duplicate.
               this.exportsInFlight.delete(exportKey);
               if (result.status === "done") {
-                this.emit({
+                await this.publishExportProgress(store, {
                   at: new Date().toISOString(),
                   type: "export.progress",
                   worldId: msg.worldId,
                   productionId: msg.productionId,
                   exportId: handle.id,
                   sourceFingerprint,
+                  deliveryKind: "video",
                   status: "done",
                   percent: 100,
                   output: safeExportOutput(result.output),
@@ -12154,7 +12175,7 @@ export class Coordinator {
                 });
               } else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
               else emitProgress(handle.id, "failed", 0, null, result.error);
-            }),
+            }).catch(error => emitProgress(handle.id, "failed", 0, null, describeCoordinatorError(error))),
           );
         } finally {
           if (!started) this.exportsInFlight.delete(exportKey);
@@ -13889,13 +13910,14 @@ export class Coordinator {
         const exportId = `ms_${ulid()}`;
         let sourceFingerprint: string | undefined;
         const progress = (status: "running" | "done" | "cancelled" | "failed", percent: number, output: string | null, error: string | null) =>
-          this.emit({
+          this.publishExportProgress(store, {
             at: this.nowIso(),
             type: "export.progress",
             worldId: msg.worldId,
             productionId: msg.productionId,
             exportId,
             ...(sourceFingerprint ? {sourceFingerprint} : {}),
+            deliveryKind: "manuscript",
             status,
             percent,
             output: safeExportOutput(output),
@@ -13908,7 +13930,7 @@ export class Coordinator {
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         const done = (async () => {
-          progress("running", 0, null, null);
+          await progress("running", 0, null, null);
           try {
             await Promise.allSettled(this.chapterSaves);
             if (control.signal.aborted) throw new Error("cancelled");
@@ -13921,16 +13943,16 @@ export class Coordinator {
               now: () => this.nowIso(),
               signal: control.signal,
             });
-            progress("done", 100, made.output, null);
+            await progress("done", 100, made.output, null);
             return { status: "done" as const, output: made.output };
           } catch (error) {
             const rawMessage = error instanceof Error ? error.message : String(error);
             if (control.signal.aborted || rawMessage === "cancelled") {
-              progress("cancelled", 0, null, null);
+              await progress("cancelled", 0, null, null);
               return { status: "cancelled" as const };
             }
             const message = describeCoordinatorError(error);
-            progress("failed", 0, null, message);
+            await progress("failed", 0, null, message);
             return { status: "failed" as const, error: message };
           } finally {
             this.exports.delete(exportId);
@@ -20259,7 +20281,7 @@ export class Coordinator {
       startProductionExport: (action, card) =>
         this.startProductionExportForConversationAction(store, action, card),
       interactiveExportVoices: (productionId) => this.interactiveExportVoices(store, productionId),
-      onExportProgress: event => this.emit(event),
+      onExportProgress: event => this.publishExportProgress(store, event),
       cancelExport: (exportId) => {
         const handle = this.exports.get(exportId);
         if (!handle) return false;
@@ -20573,7 +20595,7 @@ export class Coordinator {
       projectWorkspace(loaded, new Map(), {
         productionPlan: (request) => {
           const exports = [...this.exportReads.values()].filter(e => e.worldId === store.worldId && e.productionId === request.productionId)
-            .map(({ id, worldId, productionId, episodeId, status, output, createdAt, sourceFingerprint }) => ({ id, worldId, productionId, episodeId, status, output, createdAt, sourceFingerprint }));
+            .map(({ id, worldId, productionId, episodeId, status, output, createdAt, sourceFingerprint, deliveryKind }) => ({ id, worldId, productionId, episodeId, status, output, createdAt, sourceFingerprint, deliveryKind }));
           return projectProductionPlan(bundle, exports, request);
         },
         humanDecisions: human.cards, humanDecisionProblems: human.problems,

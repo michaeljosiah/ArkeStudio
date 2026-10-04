@@ -27,6 +27,7 @@ export const ReadinessExportSchema = z.object({
   id: z.string(), worldId: z.string(), productionId: z.string().optional(), episodeId: z.string().optional(),
   status: z.enum(["running", "done", "cancelled", "failed"]), createdAt: z.string().optional(), output: z.string().nullable().optional(),
   sourceFingerprint: z.string().max(200).optional(),
+  deliveryKind: z.enum(["video", "manuscript", "interactive"]).optional(),
 }).strict();
 export type ReadinessExport = z.infer<typeof ReadinessExportSchema>;
 export const ProductionReadinessSchema = z.object({
@@ -56,7 +57,7 @@ function check(key: ReadinessCheck["key"], label: string, ids: readonly string[]
 const ready = (checks: readonly ReadinessCheck[]) => checks.every(c => c.status === "ready" || c.status === "not-required");
 
 /** SPEC-051 R-38: pure, shared and never persisted as a readiness authority. */
-export type ReadinessWorld = Pick<WorldBundle, "artifacts" | "sheets" | "props" | "referenceKits"> & { meta: Pick<WorldBundle["meta"], "worldId"> };
+export type ReadinessWorld = Pick<WorldBundle, "artifacts" | "sheets" | "props" | "referenceKits"> & { meta: Pick<WorldBundle["meta"], "worldId"> & Partial<Pick<WorldBundle["meta"], "name">> };
 
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
@@ -68,7 +69,11 @@ function canonical(value: unknown): unknown {
  * remain visible history but cannot prove that the current production has been delivered. */
 export function productionExportFingerprint(world: ReadinessWorld, production: ProductionBundle): string {
   const timeline = production.timeline?.status === "ready" ? production.timeline.timeline : null;
-  const content = {meta:production.meta,chapters:production.chapters.filter(c=>!c.retired),scenes:production.scenes,
+  const {id,title,format,medium,kind,aspect,frameRate} = production.meta;
+  const shape = productionShape(production.meta);
+  const content = {meta:{id,title,format,medium,kind,aspect,frameRate},
+    ...(shape.hasChapters || shape.isBranching ? {worldName:world.meta.name} : {}),
+    chapters:production.chapters.filter(c=>!c.retired),scenes:production.scenes,
     selections:production.selections,performanceSelections:production.performanceReview.selections,spine:production.spine,cut:production.cut,routing:production.routing,
     timeline:timeline ? {frameRate:timeline.frameRate,tracks:timeline.tracks,mix:timeline.mix,migratedCut:timeline.migratedCut} : production.timeline};
   const refs = JSON.stringify(content), takeIds = new Set(production.takes.filter(t=>refs.includes(t.id)).map(t=>t.id));
@@ -165,8 +170,9 @@ export function deriveProductionReadiness(world: ReadinessWorld, production: Pro
     if (shape.isBranching && production.routing?.excluded.some(e=>e.sceneId === scene.id)) for (const item of checks) { item.status="not-required"; item.detail="This scene is explicitly excluded from the playable package."; }
     return { sceneId: scene.id, title: scene.title, checks, ready: ready(checks) };
   });
-  const exportsHere = exports.filter(e => e.worldId === world.meta.worldId && e.productionId === production.meta.id && e.episodeId === undefined)
-    .map(({ id, worldId, productionId, episodeId, status, createdAt, output, sourceFingerprint }) => ({ id, worldId, productionId, episodeId, status, createdAt, output, sourceFingerprint }))
+  const deliveryKind = shape.hasChapters ? "manuscript" : shape.isBranching ? "interactive" : "video";
+  const exportsHere = exports.filter(e => e.worldId === world.meta.worldId && e.productionId === production.meta.id && e.episodeId === undefined && e.deliveryKind === deliveryKind)
+    .map(({ id, worldId, productionId, episodeId, status, createdAt, output, sourceFingerprint, deliveryKind }) => ({ id, worldId, productionId, episodeId, status, createdAt, output, sourceFingerprint, deliveryKind }))
     .sort((a,b) => (a.createdAt ?? a.id).localeCompare(b.createdAt ?? b.id) || a.id.localeCompare(b.id));
   const lastExport = exportsHere.at(-1) ?? null;
   const currentFingerprint = productionExportFingerprint(world,production);
@@ -177,6 +183,7 @@ export function deriveProductionReadiness(world: ReadinessWorld, production: Pro
       lastExport ? `Last production export: ${lastExport.status}.${lastExport.status === "done" && lastExport.sourceFingerprint !== currentFingerprint ? " Export again: its source snapshot is older or unavailable." : ""}` : "No production export is recorded."),
   ];
   if (!shape.hasScenes || shape.dispatchCapability === "image") for (const c of checks.filter(c => c.key !== "export")) { c.status = "not-required"; c.detail = "This format delivers directly without a video cut or subtitle track."; }
+  if (shape.kind === "stills") { const c = checks.find(c=>c.key === "export")!; c.status="not-required"; c.detail="Stills deliver accepted images through the contact sheet; no whole-production export is required."; }
   if (shape.hasChapters) {
     const chapters = production.chapters.filter(c=>!c.retired), ids = chapters.map(c=>c.id);
     checks.unshift(check("chapters","Chapters",[production.meta.id],()=>chapters.length > 0,"At least one current chapter is present."),

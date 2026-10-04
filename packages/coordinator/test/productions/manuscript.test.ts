@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { deriveProductionReadiness, productionExportFingerprint, type ReadinessExport, type ClientMessage, type DomainEvent } from "@arke-studio/contracts";
@@ -227,7 +227,11 @@ describe("the manuscript in (R-50)", () => {
       assert.ok(done && done.type === "export.progress" && done.output?.startsWith("exports/") && done.output.endsWith(".epub"));
       const bundle = provider.openStore()!.getBundle(), production = bundle.productions.find(p => p.meta.id === PRODUCTION)!;
       assert.equal(done.sourceFingerprint, productionExportFingerprint(bundle, production));
+      assert.equal(done.deliveryKind,"manuscript");
+      const completed=JSON.parse(await readFile(join(worldDir,"exports/.completed",`${done.exportId}.json`),"utf8")) as ReadinessExport;
+      assert.equal(completed.createdAt,progress[0]!.at,"The durable completion retains the first progress timestamp");
       await (coordinator as unknown as { changeLog: ChangeLog }).changeLog.drain();
+      await rm(join(root,"logs/changes.jsonl"));
       const restarted = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test" });
       const records = await (restarted as unknown as { durableExportReads(worldId: string): Promise<ReadinessExport[]> }).durableExportReads(WORLD_ID);
       assert.equal(deriveProductionReadiness(bundle, production, records).checks.find(check => check.key === "export")!.status, "ready");
@@ -236,6 +240,11 @@ describe("the manuscript in (R-50)", () => {
       await saveChapter(provider.openStore()!, PRODUCTION, chapter.file, opened.body + "\nA new ending.\n", { baseHash: opened.hash });
       const changed = provider.openStore()!.getBundle();
       assert.equal(deriveProductionReadiness(changed, changed.productions.find(p => p.meta.id === PRODUCTION)!, records).checks.find(check => check.key === "export")!.status, "missing", "the durable export does not prove the newly saved manuscript");
+      // A failure to record delivery is reported as failed, never published as durable completion.
+      await rm(join(worldDir,"exports/.completed"),{recursive:true}); await writeFile(join(worldDir,"exports/.completed"),"blocked receipt directory");
+      const before=events.length;
+      await send({kind:"export-manuscript",worldId:WORLD_ID,productionId:PRODUCTION,format:"docx",language:"en"});
+      assert.deepEqual(events.slice(before).filter(e=>e.type === "export.progress").map(e=>e.type === "export.progress" && e.status),["running","failed"]);
     } finally {
       await provider.close();
     }

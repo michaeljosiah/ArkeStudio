@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { deriveProductionReadiness, ProductionBundleSchema, ProductionReadinessSchema, ProductionPlanRequestSchema, SheetSchema,
   TakeSchema, ArtifactSidecarSchema, RoutingSchema, PerformanceRecordSchema, performanceLineKey, productionExportFingerprint,
-  newId, seedStoryPictureTimeline, applyTimelineCommands, type ReadinessWorld, type ProductionBundle } from "../src/index.js";
+  newId, seedStoryPictureTimeline, applyTimelineCommands, productionShape, type ReadinessExport, type ReadinessWorld, type ProductionBundle } from "../src/index.js";
 
 const WORLD = "01J8F3K2QW9VZX4N7M0RTYB6HC", AT = "2026-10-04T00:00:00Z";
 function world(): ReadinessWorld { return { meta: { worldId: WORLD }, sheets: [], props: [], artifacts: [], referenceKits: [] }; }
@@ -22,21 +22,45 @@ function image(w: ReadinessWorld) {
     origin:{by:"system",producedBy:"accepted-still"},links:["film","sh_one"],production:"film",created:AT});
   w.artifacts.push(result); return result;
 }
-function doneExport(w: ReadinessWorld,p: ProductionBundle) { return {id:"done",worldId:w.meta.worldId,productionId:p.meta.id,
-  status:"done" as const,createdAt:AT,output:"exports/film.mp4",sourceFingerprint:productionExportFingerprint(w,p)}; }
+function doneExport(w: ReadinessWorld,p: ProductionBundle): ReadinessExport { const shape=productionShape(p.meta); return {id:"done",worldId:w.meta.worldId,productionId:p.meta.id,
+  deliveryKind:shape.hasChapters ? "manuscript" : shape.isBranching ? "interactive" : "video",
+  status:"done",createdAt:AT,output:"exports/film.mp4",sourceFingerprint:productionExportFingerprint(w,p)}; }
 
 it("uses the accepted artifact slot written by still acceptance and refuses retired or foreign images", () => {
   const p=production(),w=world(),artifact=image(w); p.meta.format="stills";
   p.selections.sh_one={acceptedTakeId:null,trimInSec:0,startFrameArtifactId:artifact.id};
   assert.equal(sceneCheck(p,"selected-takes",w).status,"ready"); assert.equal(sceneCheck(p,"start-frames",w).status,"ready");
-  const stills=deriveProductionReadiness(w,p,[doneExport(w,p)]);
+  const stills=deriveProductionReadiness(w,p);
   assert.equal(stills.ready,true,"Native Stills delivery needs no video timeline or subtitle track");
   assert.equal(stills.scenes[0]!.checks.find(check=>check.key === "in-cut")!.status,"not-required");
+  assert.equal(stills.checks.find(check=>check.key === "export")!.status,"not-required");
   p.timeline={status:"invalid",message:"An unused video timeline"};
-  assert.equal(deriveProductionReadiness(w,p,[doneExport(w,p)]).ready,true);
-  p.meta.format="video"; p.meta.kind="stills"; assert.equal(deriveProductionReadiness(w,p,[doneExport(w,p)]).ready,true);
+  assert.equal(deriveProductionReadiness(w,p).ready,true);
+  p.meta.format="video"; p.meta.kind="stills"; assert.equal(deriveProductionReadiness(w,p).ready,true);
   artifact.retiredAt=AT; assert.equal(sceneCheck(p,"selected-takes",w).status,"missing");
   delete artifact.retiredAt; artifact.production="other"; assert.equal(sceneCheck(p,"selected-takes",w).status,"missing");
+});
+
+it("requires each format's native delivery kind, excluding a linear movie from interactive delivery", () => {
+  const p=production(),w=world(); p.meta.kind="interactive";
+  const native=doneExport(w,p), linear={...native,id:"later-video",deliveryKind:"video" as const,createdAt:"2026-10-04T01:00:00Z"};
+  const check=(exports: ReadinessExport[])=>deriveProductionReadiness(w,p,exports).checks.find(c=>c.key === "export")!;
+  assert.equal(check([linear]).status,"missing");
+  assert.equal(check([native,linear]).status,"ready","An unrelated linear delivery does not replace the latest interactive package");
+  assert.equal(check([{...native,deliveryKind:undefined}]).status,"missing","An older untyped export cannot establish native delivery");
+  p.meta.format="story"; delete p.meta.kind;
+  assert.equal(check([doneExport(w,p)]).status,"ready");
+  assert.equal(check([{...doneExport(w,p),deliveryKind:"video"}]).status,"missing");
+});
+
+it("keeps completed exports current after operational metadata changes but invalidates delivered metadata", () => {
+  const p=production(),w=world(),fingerprint=productionExportFingerprint(w,p),done=doneExport(w,p);
+  p.meta.status="complete"; p.meta.updated="2026-10-04T01:00:00Z"; p.meta.models={}; p.meta.failureModes=["Avoid text."]; p.meta.styleOverride="A future visual language";
+  assert.equal(productionExportFingerprint(w,p),fingerprint);
+  assert.equal(deriveProductionReadiness(w,p,[done]).checks.find(c=>c.key === "export")!.status,"ready");
+  for (const changed of [{title:"New title"},{aspect:"9:16"},{frameRate:30 as const}]) assert.notEqual(productionExportFingerprint(w,{...p,meta:{...p.meta,...changed}}),fingerprint);
+  p.meta.format="story"; w.meta.name="The world"; const manuscript=productionExportFingerprint(w,p); w.meta.name="Renamed world";
+  assert.notEqual(productionExportFingerprint(w,p),manuscript,"The world name appears in the manuscript subtitle");
 });
 
 it("requires valid current routing for ordinary interactive video as well as beat playback", () => {
@@ -184,7 +208,7 @@ it("reports the last full production export by time and excludes foreign and epi
     {id:"a",worldId:WORLD,productionId:"film",status:"running" as const,createdAt:"2026-10-04T01:00:00Z",output:null},
     {id:"other",worldId:WORLD,productionId:"other",status:"done" as const,createdAt:"2026-10-05T00:00:00Z",output:"exports/other.mp4"},
     {id:"episode",worldId:WORLD,productionId:"film",episodeId:"one",status:"done" as const,createdAt:"2026-10-06T00:00:00Z",output:"exports/episode.mp4"}];
-  const result = ProductionReadinessSchema.parse(deriveProductionReadiness(w,p,exports));
+  const result = ProductionReadinessSchema.parse(deriveProductionReadiness(w,p,exports.map(e=>({...e,deliveryKind:"video" as const}))));
   assert.equal(result.lastExport?.id,"a"); assert.equal(result.checks.find(c=>c.key==="export")!.status,"missing");
   assert.equal(JSON.stringify({w,p}),before,"Reading readiness does not mutate any input");
 });

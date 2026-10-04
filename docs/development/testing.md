@@ -10,11 +10,18 @@ audible voice placements, base picture placement and unmuted subtitles. Full pro
 exports carry the captured source fingerprint; changed sources and unstamped old exports
 cannot prove current delivery, including after restart. Coverage also includes complete fenced reads,
 stale checklist refusal, suggestion-only persistence at schema 59, restart reconstruction,
-and live checklist rendering without Approve. `dialogue-timing.test.ts`, `render-plan.test.ts`
+and live checklist rendering without Approve. `test/productions/export-receipts.test.ts` checks
+immutable world-owned completion receipts, malformed/partial delivery refusal and read purity;
+it also checks legacy and saved-timeline native video completion after receipt persistence;
+the manuscript coordinator test recovers delivery after the app diagnostic log is removed and
+refuses to report done when receipt persistence fails. `dialogue-timing.test.ts`, `render-plan.test.ts`
 and `rehearsal.test.ts` cover the shared current placement validation and covered-line walk.
 Readiness regressions also exercise Stills without Cut, routing for every branching format,
 bounded current-choice traversal summaries and status-only plan snapshots while percentage
-events continue normally. Run client tests from `packages/client`.
+events continue normally. Stills require no unsupported full-production export, branching formats
+require an interactive package, display/dispatch metadata does not stale delivery, and first export
+timestamps keep paging fences stable. The client card skips derivation across percentage-only
+store updates. Run client tests from `packages/client`.
 
 Production whole-cut chat (#1420, SPEC-051 T-7) is covered by coordinator
 `test/world-chat/actions.test.ts` (the `production whole cut` suite), contracts

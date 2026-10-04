@@ -148,6 +148,7 @@ Implemented landing directories include:
 | Reject take | Creates or replaces `...\reviews.jsonl` only. The selection and take stay unchanged. |
 | Save audio placement | Creates or replaces `...\cut.json`. It holds audio tracks and placement only; picture order comes from scenes and `selections.json`. |
 | Render production | Encodes to `W\.cache\exports\ex_<id>.mp4`, then renames the complete file to `W\exports\<name>.mp4`. Cancel or failure removes the staged file. |
+| Complete native video, manuscript or interactive export | Writes `W\exports\.completed\<export-id>.json` under world ownership by flushed temporary-file rename before reporting done. The immutable receipt retains native delivery kind, first progress timestamp, output path and captured source fingerprint. Recovery verifies output presence (and native interactive package validity); these operational delivery records do not rewrite authored records or raise the world schema floor. |
 | Export whole world | Recursively copies to `R\exports\<world>-<timestamp>\`. Includes `.history`; excludes `.index`, `.commit`, `.proposals`, `.staging`, `.cache`, `world.lock`, and temporary files. The whole copy is not atomic, so failure can leave a partial export directory. |
 
 ## Publication foundation

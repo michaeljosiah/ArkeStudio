@@ -189,7 +189,7 @@ describe("interactive video through the coordinator (epic 401)", () => {
     const production = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
     // No traversal evidence yet: the untraversed edge blocks publication (brief §4).
     const progress: Extract<DomainEvent, { type: "export.progress" }>[] = [];
-    const refused = await exportInteractiveWithProgress(store, production, CLOCK, { onProgress: event => progress.push(event) });
+    const refused = await exportInteractiveWithProgress(store, production, CLOCK, { onProgress: event => { progress.push(event); } });
     assert.ok(!refused.ok);
     assert.ok(refused.blockers.some((blocker) => /ch_on.*never been traversed/.test(blocker)));
     assert.deepEqual(progress.map(event => event.status), ["running", "failed"]);
@@ -517,7 +517,8 @@ describe("a visual novel's package (turn 174)", () => {
     assert.equal(done.sourceFingerprint, fingerprint);
     assert.equal(await interactiveExportCompleted(store, production.meta.id, done.exportId), true);
     const current = store.getBundle();
-    assert.equal(deriveProductionReadiness(current, current.productions.find(p => p.meta.id === production.meta.id)!, [{ id: done.exportId, worldId: WORLD_ID, productionId: production.meta.id, status: done.status, output: done.output, sourceFingerprint: done.sourceFingerprint }]).checks.find(check => check.key === "export")!.status, "ready");
+    assert.equal(done.deliveryKind,"interactive");
+    assert.equal(deriveProductionReadiness(current, current.productions.find(p => p.meta.id === production.meta.id)!, [{ id: done.exportId, worldId: WORLD_ID, productionId: production.meta.id, status: done.status, output: done.output, sourceFingerprint: done.sourceFingerprint, deliveryKind:done.deliveryKind }]).checks.find(check => check.key === "export")!.status, "ready");
     await (coordinator as unknown as { changeLog: ChangeLog }).changeLog.drain();
   });
 

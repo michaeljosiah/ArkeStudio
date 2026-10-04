@@ -1,5 +1,6 @@
 import { deriveProductionReadiness, type ProductionPlanCard, type ReadinessCheck } from "@arke-studio/contracts";
 import { useStore } from "../lib/store.js";
+import { useMemo } from "react";
 
 function Checklist({ checks }: { checks: readonly ReadinessCheck[] }) {
   return <ul className="fy-production-plan__checks">{checks.map(check => <li key={check.key}>
@@ -14,7 +15,8 @@ function Checklist({ checks }: { checks: readonly ReadinessCheck[] }) {
 export function ProductionPlanCardView({ card }: { card: ProductionPlanCard }) {
   const world = useStore().state?.world;
   const production = world?.meta.worldId === card.worldId ? world.productions.find(p => p.meta.id === card.productionId) : undefined;
-  const readiness = world && production ? deriveProductionReadiness(world, production, card.exports) : null;
+  const readiness = useMemo(() => world && production ? deriveProductionReadiness(world, production, card.exports) : null,
+    [world, production, card.exports, card.worldId]);
   return <article className="fy-production-plan" aria-label="Production plan">
     <p className="fy-chatcard__eyebrow">Production plan · current state</p>
     <h3>{readiness?.title ?? card.productionId}</h3>

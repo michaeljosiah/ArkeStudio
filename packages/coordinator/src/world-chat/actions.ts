@@ -416,7 +416,7 @@ export interface WorldChatActionAdapterDeps {
    * the branch map's export uses, so the two exports cannot ship different packages.
    */
   readonly interactiveExportVoices?: (productionId: string) => BeatVoices | undefined;
-  readonly onExportProgress?: (event: Extract<import("@arke-studio/contracts").DomainEvent, { type: "export.progress" }>) => void;
+  readonly onExportProgress?: (event: Extract<import("@arke-studio/contracts").DomainEvent, { type: "export.progress" }>) => void | Promise<void>;
 }
 
 function completeObservation(
