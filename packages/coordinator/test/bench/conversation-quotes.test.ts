@@ -60,6 +60,17 @@ it("persists Bench take identities and exact inputs before approval without rese
   assert.deepEqual((await opened.store.fold())!.takes.map(take => take.id), frozen.materialization.reserved.map((take: { id: string }) => take.id));
   assert.equal((await quotes().dispatch(action, id)).status, "running");
   assert.equal(admitted.length, 2, "a fresh dependency composition rejoins rather than admitting again");
+  const first = (await opened.store.fold())!.takes[0]!;
+  await opened.store.append({ type: "take-completed", takeId: first.id, media: { file: "take.png", hash: `sha256:${"a".repeat(64)}` }, completedAt: at });
+  const job = jobs.find(job => job.id === first.jobId)!;
+  job.status = "succeeded"; job.finalization = { status: "complete", error: null, updatedAt: at };
+  const card = { actionId: id, worldId: store.worldId, shown: { body } } as ConversationActionCard;
+  const path = join(worldDir, ".history/world/prepared", `${id}.generation.json`), sealed = await readFile(path, "utf8");
+  const live = await quotes().project(card);
+  assert.equal(live?.results?.length, 1); assert.equal(live?.results?.[0]?.id, first.id);
+  assert.equal(jobs[1]!.status, "queued", "one output is visible before the purchase settles");
+  assert.equal(await readFile(path, "utf8"), sealed, "live result projection does not rewrite admission evidence");
+  assert.equal(admitted.length, 2);
 });
 
 for (const known of [false, true, "partial", "reservation"] as const) {

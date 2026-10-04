@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
 import { newId, ulid, type ConversationActionCard, type Job } from "@arke-studio/contracts";
 import { generationCardView } from "../src/lib/generation-card-view.js";
+import { generationResultUses } from "../src/lib/generation-result-use.js";
 import { GenerationReferences, GenerationResults } from "../src/components/generation-card-body.js";
 import { TakeComparisonCard } from "../src/components/take-comparison-card.js";
 import { __setStateForTest } from "../src/lib/store.js";
@@ -65,4 +66,37 @@ it("retains playable receipts after jobs disappear and compares the frozen curre
   const { document } = parseHTML(renderToString(<MemoryRouter><TakeComparisonCard action={action} /></MemoryRouter>));
   assert.equal(document.querySelectorAll("video").length, 2);
   assert.match(document.toString(), /Current selection/); assert.match(document.toString(), /Candidate/);
+});
+
+it("renders finalized live audio and its references while other work runs, and requests voice use through the owning conversation", () => {
+  const action = card(); action.actionKind = "world-chat-production-audio-generation";
+  if (action.shown.body.family !== "generation") assert.fail("Expected generation");
+  action.shown.body.medium = "audio";
+  const copy = structuredClone(state), voice = { ...take, kind: "voice" as const, media: "speech.wav" };
+  copy.world!.productions[0]!.takes = [voice]; copy.app.jobs = jobs(action);
+  action.generationWork!.media = [{ kind: "audio", path: "references/maren-kest/voice/sample.wav", alt: "Maren", role: "Voice reference" }];
+  action.generationWork!.results = [{ id: newId("jb"), medium: "audio", status: "completed", description: "Scene rehearsal", mediaPath: ".cache/table-reads/line.wav" }];
+  __setStateForTest(copy);
+  const view = generationCardView(action, copy.world!, copy.app.jobs);
+  assert.equal(view.results.length, 2); assert.deepEqual(view.results[0]!.shotIds, [], "voice never becomes a picture Select gesture");
+  const { document } = parseHTML(renderToString(<MemoryRouter><GenerationReferences action={action} /><GenerationResults action={action} /></MemoryRouter>));
+  assert.equal(document.querySelectorAll("audio[controls]").length, 3);
+  assert.match(document.toString(), /Dialogue cue/); assert.match(document.toString(), /Dialogue timing plan/);
+  assert.equal([...document.querySelectorAll("button")].some(button => button.textContent === "Select"), false);
+  const use = generationResultUses(action, view.results[0]!, copy.world!)[0]!;
+  assert.match(use.request, new RegExp(voice.id)); assert.match(use.request, new RegExp(action.actionId));
+  assert.match(use.request, /show the placement for review/); assert.equal(use.request.includes("speech.wav"), false, "intent names the authority's source, never a caller's filesystem path");
+  assert.deepEqual(generationResultUses(action, { ...view.results[0]!, status: "failed" }, copy.world!), []);
+  assert.deepEqual(generationCardView({ ...action, worldId: ulid() }, copy.world!, copy.app.jobs).results, []);
+});
+
+it("keeps non-shot Bench use in its existing approval workflow, including retained results", () => {
+  const action = card(); action.actionKind = "world-chat-bench-generation"; action.authority = { kind: "bench", id: newId("sess") };
+  const result = { id: newId("tk"), medium: "audio" as const, status: "completed" as const, description: "Music", mediaPath: ".sessions/bench/media/score.wav" };
+  const use = generationResultUses(action, result, world)[0]!;
+  assert.equal(use.label, "Audio cue"); assert.match(use.request, new RegExp(action.authority.id)); assert.match(use.request, new RegExp(result.id));
+  const image = generationResultUses(action, { ...result, medium: "image" }, world)[0]!;
+  assert.equal(image.label, "File result"); assert.match(image.request, /show the filing destination for review/);
+  assert.deepEqual(generationResultUses({ ...action, status: "pending" }, result, world), []);
+  assert.deepEqual(generationResultUses({ ...action, worldId: ulid() }, result, world), []);
 });

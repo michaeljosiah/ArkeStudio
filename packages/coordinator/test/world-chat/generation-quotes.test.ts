@@ -48,6 +48,20 @@ async function setup(beforeOpen?: (dir: string) => Promise<void>) {
 }
 
 describe("durable generation quotes (SPEC-050 R-11..20)", () => {
+  it("projects frozen standalone audio references without dispatch and omits unsafe media addresses", async () => {
+    const h = await setup();
+    const quotes = new GenerationQuotes(h.store, { ...h.source, compile: async (action, id, at, scope, world) => {
+      const compiled = await h.source.compile(action, id, at, scope, world);
+      return { ...compiled, inputs: compiled.inputs.map(input => ({ ...input, params: { ...input.params, referenceMedia: [
+        { kind: "audio", file: "references/maren-kest/voice/sample.wav", hash: "a".repeat(64), durationSec: 2 },
+        { kind: "audio", file: "C:/private/secret.wav", hash: "b".repeat(64), durationSec: 2 },
+      ] } })) };
+    } }, { enqueue: async () => assert.fail("Projection must not dispatch"), jobs: () => [] });
+    const id = newId("act"), body = await quotes.prepare(mainPhoto(), id, AT);
+    const projected = await quotes.project({ actionId: id, worldId: h.store.worldId, shown: { body } } as ConversationActionCard);
+    assert.deepEqual(projected?.media.filter(m => m.kind === "audio").map(m => m.path), ["references/maren-kest/voice/sample.wav"]);
+    assert.equal(h.fake.submitCount, 0); assert.equal(h.queue.listJobs().length, 0);
+  });
   it("projects only sealed job bindings without compiling or admitting a purchase", async () => {
     const h = await setup();
     const id = newId("act"), body = await h.quotes().prepare(mainPhoto(2), id, AT);

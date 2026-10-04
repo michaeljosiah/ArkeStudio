@@ -40,6 +40,8 @@
 .fy-generation-card__grid figcaption { margin: 6px 0; font: var(--type-meta); overflow-wrap: anywhere; }
 .fy-generation-card__grid :is(.ui-btn, a), .fy-generation-card__job .ui-btn { min-height: 44px; }
 .fy-generation-card__job { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fy-generation-card__use summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font: var(--type-meta); }
+.fy-generation-card__use [role="status"] { display: block; font: var(--type-meta); }
 .fy-production-timeline { min-width: 0; max-width: 100%; }
 .fy-production-timeline h4 { margin: 8px 0; }
 .fy-production-timeline__scroll { max-width: 100%; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border); }

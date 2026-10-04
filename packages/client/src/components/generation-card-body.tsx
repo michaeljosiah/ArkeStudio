@@ -3,6 +3,7 @@ import { isReplayableFinalization, type ConversationActionCard } from "@arke-stu
 import { useNavigate } from "react-router";
 import { cancelJob, prepareConversationTakeReview, retryJobFinalization, sendWorldChat, useStore } from "../lib/store.js";
 import { generationCardView } from "../lib/generation-card-view.js";
+import { generationResultUses } from "../lib/generation-result-use.js";
 import { mediaUrl } from "../lib/media.js";
 import { Button } from "./ui.js";
 import { TakeMediaFigure } from "./take-comparison-card.js";
@@ -30,9 +31,27 @@ export function GenerationReferences({ action }: { action: ConversationActionCar
   const world = useStore().state?.world;
   if (world?.meta.worldId !== action.worldId || !action.generationWork?.media.length) return null;
   return <div className="fy-generation-card__grid" aria-label="Frozen references">{action.generationWork.media.map(media => <figure key={media.path}>
-    {media.kind === "image" ? <img src={mediaUrl(world.meta.slug, media.path)} alt={media.alt} /> : <video controls preload="metadata" src={mediaUrl(world.meta.slug, media.path)} aria-label={media.alt} />}
+    {media.kind === "image" ? <img src={mediaUrl(world.meta.slug, media.path)} alt={media.alt} /> : media.kind === "audio"
+      ? <audio controls preload="metadata" src={mediaUrl(world.meta.slug, media.path)} aria-label={media.alt} />
+      : media.kind === "video" ? <video controls preload="metadata" src={mediaUrl(world.meta.slug, media.path)} aria-label={media.alt} /> : <span>{media.alt}</span>}
     <figcaption>{media.role}</figcaption>
   </figure>)}</div>;
+}
+
+function ResultUse({ action, result }: { action: ConversationActionCard; result: NonNullable<NonNullable<ConversationActionCard["receipt"]>["generation"]>["results"][number] }) {
+  const state = useStore().state, world = state?.world;
+  const sent = useRef(false);
+  const [requested, setRequested] = useState(false);
+  const [notice, setNotice] = useState("");
+  const uses = world ? generationResultUses(action, result, world) : [];
+  if (!uses.length) return null;
+  const disabled = requested || state?.worldChat?.conversationId !== action.conversationId;
+  return <details className="fy-generation-card__use"><summary>Use as…</summary>{uses.map(use => <Button key={use.label} variant="ghost" disabled={disabled} onClick={() => {
+    if (sent.current) return;
+    sent.current = true;
+    if (sendWorldChat(action.worldId, action.conversationId, use.request)) { setRequested(true); setNotice("Review requested"); }
+    else { sent.current = false; setNotice("The request could not be sent."); }
+  }}>{use.label}</Button>)}<span role="status">{notice}</span></details>;
 }
 
 /** Native result players are shared by running cards and retained terminal receipts. */
@@ -68,10 +87,10 @@ export function GenerationResults({ action }: { action: ConversationActionCard }
           : result.medium === "audio" ? <audio controls preload="metadata" src={mediaUrl(world.meta.slug, result.mediaPath)} />
           : result.medium === "image" ? <img src={mediaUrl(world.meta.slug, result.mediaPath)} alt={result.description} /> : null}
         <a href={mediaUrl(world.meta.slug, result.mediaPath)} target="_blank" rel="noreferrer">Open</a>
-        {action.productionId && result.shotIds.length ? result.shotIds.map(shotId => <SelectResult key={shotId} action={action} takeId={result.id} shotId={shotId} />) : action.productionId ? <Button variant="ghost" onClick={() => void navigate(`/w/${world.meta.worldId}/p/${action.productionId}`)}>Open production</Button> : <Button variant="ghost" onClick={() => {
+        {action.productionId && result.shotIds.length ? result.shotIds.map(shotId => <SelectResult key={shotId} action={action} takeId={result.id} shotId={shotId} />) : generationResultUses(action, result, world).length ? <ResultUse action={action} result={result} /> : world.referenceTakes.some(t => t.id === result.id) ? <Button variant="ghost" onClick={() => {
           const take = world.referenceTakes.find(t => t.id === result.id), sheet = world.sheets.find(s => s.id === take?.reference?.sheetId);
           void navigate(`/w/${world.meta.worldId}${sheet ? sheet.type === "location" ? `/locations/${sheet.id}/reference` : `/cast/${sheet.id}/kit` : take?.prop ? "/props" : ""}`);
-        }}>Use as…</Button>}
+        }}>Use as…</Button> : action.productionId ? <Button variant="ghost" onClick={() => void navigate(`/w/${world.meta.worldId}/p/${action.productionId}`)}>Open production</Button> : null}
       </> : null}
       <figcaption>{result.description} · {result.status}{result.detail ? ` · ${result.detail}` : ""}</figcaption>
     </figure>)}</div>
