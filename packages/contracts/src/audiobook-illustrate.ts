@@ -236,8 +236,10 @@ export type IllustrationProgress = z.infer<typeof IllustrationProgressSchema>;
 
 /**
  * The brief a picture is made from at the Bench (R-99): the prompt, then who is shown in which
- * attached picture, then the book's look. The prompt is the author's words as they stand.
+ * attached picture, then the chapter's light and mood. The prompt is the author's words as they
+ * stand. `mood` is the Mood line (design turn 193, rule 9; R-117), never the art direction's free
+ * text, which named clothes and dressed everyone in them.
  */
-export function pictureBench(prompt: string, cited: ReadonlyArray<{ name: string; kind: "character" | "place"; token: string }>, art: string | undefined): string {
-  return [prompt.replace(/\s+/g, " ").trim(), referenceBriefLine(cited), ...(art !== undefined && art !== "" ? [`The look: ${art}`] : [])].filter((part) => part !== "").join("\n\n");
+export function pictureBench(prompt: string, cited: ReadonlyArray<{ name: string; kind: "character" | "place"; token: string }>, mood: string | undefined): string {
+  return [prompt.replace(/\s+/g, " ").trim(), referenceBriefLine(cited), ...(mood !== undefined && mood !== "" ? [`Light and mood: ${mood}`] : [])].filter((part) => part !== "").join("\n\n");
 }
