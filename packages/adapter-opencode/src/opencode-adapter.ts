@@ -255,7 +255,10 @@ export class OpenCodeAdapter implements HarnessAdapter {
   } {
     const agent = this.sessions.get(input.sessionId)?.agent;
     return {
-      parts: input.parts.map((p) => ({ type: "text" as const, text: p.text })),
+      parts: input.parts.map((p) => {
+        if (p.type !== "text") throw new Error("This OpenCode adapter does not accept image input.");
+        return { type: "text" as const, text: p.text };
+      }),
       ...(agent ? { agent } : {}),
     };
   }

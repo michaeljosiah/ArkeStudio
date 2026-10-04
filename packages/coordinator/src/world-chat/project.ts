@@ -421,7 +421,11 @@ export function projectWorkspace(
     seq: loaded.seq,
     points: projectPoints(loaded.candidates, { ...options, mediaHandoffs: loaded.mediaHandoffs }),
     actions: loaded.actions,
+    ...(loaded.imageDisclosures ? { imageDisclosures: loaded.imageDisclosures } : {}),
+    ...(loaded.imageReceipts ? { imageReceipts: loaded.imageReceipts } : {}),
     attachments: loaded.attachments.map((a) => ({
+      ...(loaded.imageReceipts?.some(receipt => receipt.image?.id === a.id && receipt.image.sourceHash.startsWith(a.contentHash))
+        ? { imageInspection: "prepared" as const } : {}),
       id: a.id,
       fileName: a.fileName,
       kind: a.kind,

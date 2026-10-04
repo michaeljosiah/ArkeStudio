@@ -1,5 +1,6 @@
 import { valueSchema } from "./value-schema.js";
 import { z } from "zod";
+import { ImageDisclosureSchema, ImageObservationSchema } from "./world-chat-images.js";
 
 /** A browser upload stays below the authenticated websocket frame budget, including base64. */
 export const BROWSER_ATTACHMENT_MAX_BYTES = 16 * 1024 * 1024;
@@ -379,6 +380,7 @@ export const CheckToolSchema = z.enum([
   "list-entities",
   "related",
   "get-attachment-text",
+  "view-image",
   /** Reading a page from the web, kept as an attachment so its quotes stay checkable. */
   "fetch-url",
   /*
@@ -415,6 +417,7 @@ export const WorldChatCheckReceiptSchema = z
         .strict(),
     ),
     searchedCount: z.number().int().min(0).optional(),
+    image: ImageObservationSchema.optional(),
     /** Present together on target reads; optional so every stored search receipt remains readable. */
     target: ArkeReadTargetSchema.optional(),
     observedRevisionOrDigest: z.string().min(1).max(200).optional(),
@@ -424,6 +427,10 @@ export const WorldChatCheckReceiptSchema = z
   })
   .strict()
   .superRefine((receipt, context) => {
+    if ((receipt.tool !== "view-image" && receipt.image !== undefined) ||
+      (receipt.tool === "view-image" && receipt.status === "complete" && receipt.image === undefined)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "complete image receipts require an image observation; other tools cannot carry one" });
+    }
     const targetFields = [
       receipt.target,
       receipt.observedRevisionOrDigest,
@@ -1120,6 +1127,8 @@ export type FrameRunOutcomeReport = z.infer<typeof FrameRunOutcomeReportSchema>;
  * never landed, and the panel would then describe changes that do not exist.
  */
 export const WorldChatStoredEventSchema = valueSchema(z.discriminatedUnion("type", [
+  z.object({ type: z.literal("image.disclosed"), disclosure: ImageDisclosureSchema }).strict(),
+  z.object({ type: z.literal("image.receipt"), receipt: WorldChatCheckReceiptSchema }).strict(),
   ...WorldChatInputEventSchemas,
   // A queued input becomes a primary turn in one record: message, constraints and run together,
   // so a crash can never pop an input without keeping the turn it became (SPEC-045 §2.4).
@@ -1489,6 +1498,8 @@ export const WorldChatLoadedSchema = z
     /** Set when a sent-back proposal reopened this conversation. Survives checkpointing. */
     reopened: z.boolean().optional(),
     messages: z.array(WorldChatMessageSchema),
+    imageDisclosures: z.array(ImageDisclosureSchema).optional(),
+    imageReceipts: z.array(WorldChatCheckReceiptSchema).optional(),
     /** Absent for conversations that have never used additional input (SPEC-045). */
     inputQueue: WorldChatInputQueueViewSchema.optional(),
     /** True when older messages exist before `messages[0]`. */
@@ -1862,6 +1873,8 @@ export type WorldChatTranscriptMessage = z.infer<typeof WorldChatTranscriptMessa
  */
 export const WorldChatWorkspaceSchema = z
   .object({
+    imageDisclosures: z.array(ImageDisclosureSchema).optional(),
+    imageReceipts: z.array(WorldChatCheckReceiptSchema).optional(),
     productionSetup: ProductionSetupStateSchema.optional(),
     conversationId: ConversationIdSchema,
     status: WorldChatStatusSchema,
@@ -1920,6 +1933,7 @@ export const WorldChatWorkspaceSchema = z
             kind: z.enum(["document", "image", "audio", "video", "other"]),
             readability: z.enum(["text-readable", "not-readable", "extracted-text-available"]),
             promoted: z.boolean(),
+            imageInspection: z.literal("prepared").optional(),
           })
           .strict(),
       )

@@ -323,6 +323,8 @@ const CLIENT_COMMAND_METADATA = {
   "set-routing-default": globalOnly(GLOBAL_OPERATION),
   "set-model-enabled": globalOnly(GLOBAL_OPERATION),
   "set-research-web": globalOnly(GLOBAL_OPERATION),
+  "set-image-inspection": humanOnly("Cloud image disclosure policy belongs to the person."),
+  "set-world-image-inspection": humanOnly("World image disclosure policy belongs to the person."),
   "set-local-sampling": globalOnly(GLOBAL_OPERATION),
   "set-agent-config": globalOnly(GLOBAL_OPERATION),
   "list-harness-models": readOnly(QUERY),

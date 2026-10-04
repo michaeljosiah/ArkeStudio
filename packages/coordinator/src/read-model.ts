@@ -91,6 +91,7 @@ export class ReadModel {
         | "activitySeen"
         | "account"
         | "research"
+        | "imageInspection"
         | "appearance"
         | "narrator"
         | "providerPlans"

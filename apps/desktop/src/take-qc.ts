@@ -2,6 +2,8 @@ import { createMediaProcessRunner } from "./media-tools.js";
 import { spawn as nodeSpawn } from "node:child_process";
 import {
   createBoundaryFrameMaker,
+  createImageRenditionMaker,
+  type ImageRenditionMaker,
   createTakePosterMaker,
   createTakeQcAnalyzer,
   type BoundaryFrameMaker,
@@ -70,7 +72,8 @@ export function takePosterOptions(
 export function boundaryFrameOptions(
   ffmpeg: string | null,
   spawn: SpawnLike = nodeSpawn,
-): { boundaryFrameMaker?: BoundaryFrameMaker } {
+): { boundaryFrameMaker?: BoundaryFrameMaker; imageRenditionMaker?: ImageRenditionMaker } {
   if (ffmpeg === null) return {};
-  return { boundaryFrameMaker: createBoundaryFrameMaker(createFfmpegProbeRunner(ffmpeg, spawn)) };
+  const runner = createFfmpegProbeRunner(ffmpeg, spawn);
+  return { boundaryFrameMaker: createBoundaryFrameMaker(runner), imageRenditionMaker: createImageRenditionMaker(runner) };
 }

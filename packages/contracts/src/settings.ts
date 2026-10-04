@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ImageInspectionSettingsSchema } from "./world-chat-images.js";
 import { BenchPresetSchema } from "./bench.js";
 import { IsoDateTimeSchema } from "./ids.js";
 import { LocalSamplingSettingsSchema } from "./local-sampling.js";
@@ -270,6 +271,7 @@ const AppSettingsObjectSchema = z
      * switching it off reaches the next session rather than the running one.
      */
     research: z.object({ web: z.boolean().default(false) }).strict().default({ web: false }),
+    imageInspection: ImageInspectionSettingsSchema.default({}),
     routing: RoutingDefaultsSchema.default({}),
     /**
      * Local capability defaults SPEC-033 R-66 parked here, read on load and then dropped.

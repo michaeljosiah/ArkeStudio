@@ -7,6 +7,7 @@ import { RehearsalSessionSchema } from "./rehearsal.js";
 import { PerformanceBibleStateSchema } from "./performance-bible.js";
 import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformanceReviewState } from "./performance.js";
 import { z } from "zod";
+import { ImageInspectionSettingsSchema } from "./world-chat-images.js";
 import { ModelResidencySchema } from "./local-ai.js";
 import { ProductionNarrativeSchema } from "./production-narrative.js";
 import { AudiobookBookSchema } from "./audiobook.js";
@@ -500,6 +501,7 @@ export const ClientStateSchema = valueSchema(z
         account: AccountStateSchema.default(SIGNED_OUT),
         /** Whether the Studio may read a page online when a conversation asks it to (SPEC-005 R-10). */
         research: z.object({ web: z.boolean() }).strict().default({ web: false }),
+        imageInspection: ImageInspectionSettingsSchema.optional(),
         appearance: AppearanceSettingsSchema.default({ theme: "system" }),
         /** Who reads the app's prose aloud. Null is the shipped local voice, and free. */
         narrator: NarratorSettingsSchema.default(null),

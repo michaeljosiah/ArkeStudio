@@ -60,6 +60,8 @@ import {
   planFoundingBuild,
   useBuildPlans,
   setResearchWeb,
+  setImageInspection,
+  setWorldImageInspection,
   createSheetFromSentence,
   createWorld,
   genesisAttachFiles,
@@ -2168,6 +2170,18 @@ export function SettingsHarnessScreen() {
                 : researchOn ? "Searches, reads, and cites pages." : "Stays offline."}</p>
             </div>
           </div>
+          <div className="fy-set__row">
+            <label><input type="checkbox" checked={state?.app.imageInspection?.cloud !== false}
+              onChange={event => setImageInspection(event.target.checked)} /> Allow cloud image inspection</label>
+          </div>
+          <p>When Arke inspects an image, the conversation names the images that may be shared with the selected provider. Local inspection stays on this device.</p>
+          {state?.world && <div className="fy-set__row"><label><input type="checkbox"
+            checked={state.world.meta.cloudImageInspection !== false}
+            onChange={event => setWorldImageInspection(state.world!.meta.worldId, event.target.checked)} /> Allow cloud image inspection for this world</label></div>}
+          {[...new Set(["anthropic", "openai", ...(state?.app.harnessModels ?? []).map(model => model.provider),
+            ...Object.keys(state?.app.imageInspection?.providers ?? {})])].filter(provider => provider !== "ollama").map(provider => <div className="fy-set__row" key={provider}><label><input type="checkbox"
+            checked={state?.app.imageInspection?.providers[provider] !== false}
+            onChange={event => setImageInspection(event.target.checked, provider)} /> Allow image inspection by {provider === "anthropic" ? "Anthropic" : provider === "openai" ? "OpenAI" : provider}</label></div>)}
           {/*
            * Which model runs each writing agent (SPEC-033 R-65).
            *

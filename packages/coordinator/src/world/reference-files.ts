@@ -2,6 +2,24 @@ import { lstat, open, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { imageFormatOf, mp4Problem } from "../queue/verify.js";
 import { toExtendedLength } from "./paths.js";
+import type { FileHandle } from "node:fs/promises";
+import type { Stats } from "node:fs";
+
+/** A growing file cannot turn a bounded image/video read into an unbounded allocation. */
+async function readStableBytes(handle: FileHandle, before: Stats): Promise<Uint8Array> {
+  const bytes = new Uint8Array(before.size);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+    if (!bytesRead) throw new WorldReferenceError("reference changed during preparation");
+    offset += bytesRead;
+  }
+  const after = await handle.stat();
+  if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) {
+    throw new WorldReferenceError("reference changed during preparation");
+  }
+  return bytes;
+}
 
 const MAX_REFERENCES = 16;
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024 - 1;
@@ -129,7 +147,7 @@ export async function readContainedImageReferences(
       if (info.size > MAX_IMAGE_BYTES) throw new WorldReferenceError("image reference exceeds OpenAI's 50 MB limit");
       totalBytes += info.size;
       if (totalBytes > MAX_TOTAL_BYTES) throw new WorldReferenceError("image references exceed OpenAI's 512 MB request limit");
-      const data = Uint8Array.from(await handle.readFile());
+      const data = await readStableBytes(handle, info);
       const format = imageFormatOf(data);
       if (!format) throw new WorldReferenceError("image reference must be a valid PNG, JPEG, or WebP file");
       results.push({
@@ -176,7 +194,7 @@ export async function readContainedVideoReferences(
       if (totalBytes > MAX_VIDEO_BYTES) {
         throw new WorldReferenceError(`video references exceed the ${MAX_VIDEO_BYTES / 1024 / 1024} MB inline limit`);
       }
-      const data = Uint8Array.from(await handle.readFile());
+      const data = await readStableBytes(handle, info);
       const problem =
         contentType === "video/webm"
           ? WEBM_MAGIC.every((byte, index) => data[index] === byte)

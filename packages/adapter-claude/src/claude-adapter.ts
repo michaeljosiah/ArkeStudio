@@ -197,6 +197,9 @@ export class ClaudeAdapter implements HarnessAdapter {
   capabilities(): ReadonlySet<HarnessCapability> {
     return new Set<HarnessCapability>(["events", ...(this.opts.discoverModels ? ["models" as const] : [])]);
   }
+  readonly imageInput = true;
+  imageInputForSession(id: string): boolean { return this.sessions.has(id); }
+  imageDestinationForSession(_id: string) { return { provider: "anthropic", local: false }; }
 
   async listModels(): Promise<ModelInfo[]> {
     if (!this.opts.discoverModels) throw new Error("Claude model discovery is not configured");
@@ -337,7 +340,9 @@ export class ClaudeAdapter implements HarnessAdapter {
     if (!session) throw new Error(`unknown session ${input.sessionId}`);
     if (session.refused) throw new Error(session.refused);
     const correlationId = input.correlationId ?? randomUUID();
-    const text = input.parts.map((p) => p.text).join("\n");
+    const content = input.parts.some(p => p.type === "image") ? input.parts.map(p => p.type === "text" ? p : {
+      type: "image", source: { type: "base64", media_type: p.mimeType, data: p.data },
+    }) : input.parts.filter(p => p.type === "text").map(p => p.text).join("\n");
 
     let settle!: (error?: Error) => void;
     const settled = new Promise<void>((resolve, reject) => {
@@ -360,7 +365,7 @@ export class ClaudeAdapter implements HarnessAdapter {
 
     session.inbox.push({
       type: "user",
-      message: { role: "user", content: text },
+      message: { role: "user", content },
       parent_tool_use_id: null,
       session_id: session.id,
     });

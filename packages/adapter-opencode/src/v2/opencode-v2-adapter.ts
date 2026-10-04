@@ -298,7 +298,10 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     // if the host never called streamEvents(), or sendMessage waits on silence forever.
     void this.pump();
     const correlationId = input.correlationId ?? `corr_${Date.now().toString(36)}`;
-    const text = input.parts.map((p) => p.text).join("\n");
+    const text = input.parts.map(p => {
+      if (p.type !== "text") throw new Error("This OpenCode adapter does not accept image input.");
+      return p.text;
+    }).join("\n");
     void (async () => {
       try {
         await this.http.reqData<{ id?: string }>("POST", `/api/session/${input.sessionId}/prompt`, {

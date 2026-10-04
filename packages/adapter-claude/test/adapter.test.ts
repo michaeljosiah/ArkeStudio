@@ -36,6 +36,20 @@ function fakeQuery(script: unknown[]): { run: RunQuery; options: () => Record<st
 const assistant = (blocks: unknown[]) => ({ type: "assistant", message: { content: blocks } });
 const result = (over: Record<string, unknown> = {}) => ({ type: "result", subtype: "success", is_error: false, result: "done", ...over });
 
+it("passes image parts to the Claude SDK as native base64 content blocks", async () => {
+  let handed: unknown;
+  const run: RunQuery = ({ prompt }) => (async function* () {
+    handed = (await prompt[Symbol.asyncIterator]().next()).value;
+    yield result();
+  })();
+  const adapter = new ClaudeAdapter({ command: "claude", runQuery: run });
+  const session = await adapter.createSession({ cwd: await tempDir("arke-claude-image-"), agent: "world-builder", purpose: "world-chat" });
+  await adapter.sendMessage({ sessionId: session.sessionId, parts: [{ type: "text", text: "Compare" }, { type: "image", mimeType: "image/png", data: "cmVk" }] });
+  await adapter.dispose();
+  assert.deepEqual((handed as { message: { content: unknown } }).message.content, [{ type: "text", text: "Compare" },
+    { type: "image", source: { type: "base64", media_type: "image/png", data: "cmVk" } }]);
+});
+
 async function collect(adapter: ClaudeAdapter, run: () => Promise<unknown>): Promise<HarnessEvent[]> {
   const events: HarnessEvent[] = [];
   const stream = adapter.streamEvents();

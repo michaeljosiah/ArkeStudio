@@ -867,6 +867,7 @@ export interface CoordinatorOptions {
    * steering pointer, and the reason is logged rather than silent.
    */
   boundaryFrameMaker?: BoundaryFrameMaker;
+  imageRenditionMaker?: import("./world-chat/image-rendition.js").ImageRenditionMaker;
   /**
    * The credential file's name inside the app root. Only dev overrides it, and only because its
    * cipher is not safeStorage: `ARKE_STUDIO_ROOT` can point the dev coordinator at a real app
@@ -5381,7 +5382,7 @@ export class Coordinator {
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
       ...(settings ? { activitySeen: settings.activity } : {}),
       account: this.account.current(),
-      ...(settings ? { research: settings.research } : {}),
+      ...(settings ? { research: settings.research, imageInspection: settings.imageInspection } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
       // Without this the narrator was correct on disk and absent from every snapshot, so a
       // restart showed the shipped local voice while a cloud one was actually stored.
@@ -9432,6 +9433,21 @@ export class Coordinator {
         this.researchWeb = settings.research.web;
         this.readModel.seedAppConfig({ research: settings.research });
         this.transport.broadcastSnapshot();
+        return;
+      }
+      case "set-image-inspection": {
+        if (!this.appSettings) return;
+        const settings = await this.appSettings.setImageInspection(msg.enabled, msg.provider);
+        this.readModel.seedAppConfig({ imageInspection: settings.imageInspection });
+        this.transport.broadcastSnapshot();
+        return;
+      }
+      case "set-world-image-inspection": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await store.commit({ kind: "world-image-inspection", source: "settings", files: [],
+          worldFields: { cloudImageInspection: msg.enabled }, raiseSchemaVersion: 52 });
+        this.refreshIfStillOpen(store);
         return;
       }
       case "set-local-sampling": {
@@ -20286,6 +20302,15 @@ export class Coordinator {
       researchAllowed: async () => {
         const settings = this.appSettings ? await this.appSettings.load().catch(() => null) : null;
         return settings?.research.web === true;
+      },
+      ...(this.opts.imageRenditionMaker ? { imageRenditionMaker: this.opts.imageRenditionMaker } : {}),
+      imageInspectionAllowed: async provider => {
+        const settings = this.appSettings ? await this.appSettings.load().catch(() => null) : null;
+        return settings?.imageInspection.cloud === true && settings.imageInspection.providers[provider] !== false;
+      },
+      publishImageDisclosure: async id => {
+        if (this.stillOpen(store) && this.getState().worldChat?.conversationId === id) await this.openWorldChat(store, id);
+        if (this.stillOpen(store)) this.transport.broadcastSnapshot();
       },
       resolveLanguageModel: (input) => this.languageModelFor(input.entryContext, input.modelId, "world-builder", input.signal),
       onTurnFailed: ({ conversationId, runId, cause }) => {

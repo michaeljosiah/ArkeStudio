@@ -30,6 +30,22 @@ async function fixture(t: test.TestContext, options: Partial<ConstructorParamete
   return { ollama, adapter, root, base, events, session, ended };
 }
 
+test("image parts reach a pinned vision model as Ollama images; text-only sessions refuse them", async t => {
+  const f = await fixture(t);
+  f.ollama.models[0]!.capabilities = ["completion", "tools", "vision"];
+  const id = await f.session("world-builder");
+  f.ollama.script.push(reply("The first look is red; the second is blue."));
+  assert.equal(f.adapter.imageInputForSession(id), true);
+  await f.adapter.sendMessage({ sessionId: id, parts: [{ type: "text", text: "Compare" },
+    { type: "image", mimeType: "image/png", data: "cmVk" }, { type: "image", mimeType: "image/png", data: "Ymx1ZQ==" }] });
+  const messages = f.ollama.chats[0]!["messages"] as Array<{ role: string; images?: string[] }>;
+  assert.deepEqual(messages.find(message => message.role === "user")!.images, ["cmVk", "Ymx1ZQ=="]);
+  f.ollama.models[0]!.capabilities = ["completion", "tools"];
+  const text = await f.session("world-builder");
+  assert.equal(f.adapter.imageInputForSession(text), false);
+  await assert.rejects(f.adapter.sendMessage({ sessionId: text, parts: [{ type: "image", mimeType: "image/png", data: "cmVk" }] }), /cannot inspect images/);
+});
+
 test("lists pulled models in the contract's terms, and names a tool-calling one the default", async (t) => {
   const f = await fixture(t);
   f.ollama.models = [

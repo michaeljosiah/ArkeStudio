@@ -25,6 +25,21 @@ async function eventually(predicate: () => boolean | Promise<boolean>): Promise<
   while (!await predicate()) { assert.ok(Date.now() < deadline, "expected adapter lifecycle transition"); await delay(10); }
 }
 
+test("image parts use app-server image inputs and the pinned text-only model refuses them", async t => {
+  const f = await fixture(); t.after(f.cleanup);
+  const session = await f.adapter.createSession({ cwd: f.root, purpose: "world-chat", agent: "world-builder" });
+  assert.equal(f.adapter.imageInputForSession(session.sessionId), true);
+  await f.adapter.sendMessage({ sessionId: session.sessionId, parts: [{ type: "text", text: "Compare these looks" },
+    { type: "image", mimeType: "image/png", data: "cmVk" }, { type: "image", mimeType: "image/png", data: "Ymx1ZQ==" }] });
+  const sent = (await f.requests()).find(request => request.method === "turn/start")!.params.input;
+  assert.deepEqual(sent, [{ type: "text", text: "Compare these looks" },
+    { type: "image", url: "data:image/png;base64,cmVk" }, { type: "image", url: "data:image/png;base64,Ymx1ZQ==" }]);
+  f.adapter.prepareSession({ preparationId: "text-only", model: "openai/text-only" });
+  const text = await f.adapter.createSession({ cwd: f.root, purpose: "world-chat", agent: "world-builder", preparationId: "text-only" });
+  assert.equal(f.adapter.imageInputForSession(text.sessionId), false);
+  await assert.rejects(f.adapter.sendMessage({ sessionId: text.sessionId, parts: [{ type: "image", mimeType: "image/png", data: "cmVk" }] }), /cannot inspect images/);
+});
+
 test("live paginated model catalog preserves identity, aliases and modalities", async t => {
   const f = await fixture(); t.after(f.cleanup);
   const models = await f.adapter.listModels();
