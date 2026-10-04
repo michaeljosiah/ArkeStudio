@@ -53,7 +53,8 @@ describe("queue notification", () => {
       assert.doesNotMatch(note!.meta, /local|free|\$0/);
     }
     for (const status of ["failed", "cancelled"] as const) {
-      assert.match(historyNote({ ...image, status }, manifest).meta, /Codex allowance used is unknown/);
+      assert.match(historyNote({ ...image, status, attempt: 1 }, manifest).meta, /Codex allowance used is unknown/);
+      assert.match(historyNote({ ...image, status }, manifest).meta, /not submitted/);
     }
   });
   const batchIds = [

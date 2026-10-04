@@ -1,6 +1,7 @@
 import { usesCodexImagePlan, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
 import {
   ProviderAuthError,
+  ProviderPlanLimitError,
   ProviderRequestRejectedError,
   type FetchedArtifact,
   type PollResult,
@@ -81,8 +82,9 @@ export class CodexClient implements ProviderClient {
       if (err instanceof Error && err.name === "CodexImageLimitError") {
         const resetsAt = (err as { resetsAt?: unknown }).resetsAt;
         const reset = typeof resetsAt === "number" ? new Date(resetsAt * 1000) : null;
-        const when = reset && Number.isFinite(reset.getTime()) ? ` It resets ${reset.toISOString()}.` : "";
-        throw new ProviderRequestRejectedError(`codex: the Codex allowance has been reached.${when} Try again after it resets.`);
+        const validReset = reset && Number.isFinite(reset.getTime()) ? reset.toISOString() : undefined;
+        const when = validReset ? ` It resets ${validReset}. Try again after it resets.` : " Try again after it resets; use Test connection in Providers to check again.";
+        throw new ProviderPlanLimitError(`codex: the Codex allowance has been reached.${when}`, validReset);
       }
       // The queue classifies by message, and only a message it recognises pauses the lane for a
       // sign-in instead of failing the job: this phrase is the one its credential path reads.

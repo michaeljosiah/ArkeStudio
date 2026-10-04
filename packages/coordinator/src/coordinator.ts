@@ -9331,6 +9331,7 @@ export class Coordinator {
           providers: this.providerService.list(),
         });
         await this.providerService.validate(msg.provider);
+        this.jobQueue?.forgetUnknownPlanLimit(msg.provider);
         this.emit({
           at: new Date().toISOString(),
           type: "provider.status",

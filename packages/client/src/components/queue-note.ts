@@ -172,7 +172,7 @@ function modelAndCost(jobs: readonly Job[], manifest: ModelManifest | null, spen
  * refusal, and a false zero over a charged failure (codex P1, PR 1087).
  */
 function failureCost(job: Job): string {
-  if (usesCodexImagePlan(job)) return "Codex allowance used is unknown";
+  if (usesCodexImagePlan(job)) return job.attempt > 0 || job.providerJobId !== null ? "Codex allowance used is unknown" : "not submitted";
   if (job.estimatedMicroUsd === 0) return "not charged";
   const cost = measuredCost(job);
   if (cost !== null) return cost > 0 ? usd(cost) : "not charged";

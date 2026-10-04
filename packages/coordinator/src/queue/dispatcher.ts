@@ -411,7 +411,7 @@ export function foldJobHistory(history: Iterable<Job>): Array<{ job: Job; prior:
 
 function landedName(job: Job, artifact: DispatchArtifact, index: number): string {
   const requested = index === 0 && job.landing?.name !== undefined ? job.landing.name : artifact.name;
-  if (!FORMAT_PRESERVING_IMAGE_TARGETS.has(job.target.kind)) return requested;
+  if (!FORMAT_PRESERVING_IMAGE_TARGETS.has(job.target.kind) && !(usesCodexImagePlan(job) && job.capability === "image")) return requested;
   const format = imageFormatOf(artifact.data);
   if (format === null) return requested;
   const extension = extname(requested);
@@ -473,6 +473,7 @@ export class JobQueue {
    * and puts it back, and the ledger's count still asks before a read the day cannot cover.
    */
   private readonly freeLimits = new Map<string, FreePlanLimit>();
+  private readonly planLimits = new Map<string, { message: string; resetsAt: number | null }>();
 
   constructor(private readonly opts: JobQueueOptions) {
     this.journal = opts.journal ?? new JobJournal(opts.journalPath);
@@ -1214,6 +1215,11 @@ export class JobQueue {
       return;
     }
     if (this.disposed || !this.stillQueued(job)) return;
+    const planLimit = usesCodexImagePlan(job) ? this.planLimits.get(job.provider) : undefined;
+    if (planLimit && (planLimit.resetsAt === null || planLimit.resetsAt > this.now())) {
+      await this.terminalize(job, "failed", `${planLimit.message} · not submitted`, undefined, "terminal");
+      return;
+    }
     // The rest of a batch once a free tier has refused for the day. On 2026-10-02 every block of
     // a chapter and two page reads went to Google to meet the same refusal. Failed rather than
     // held: a held read would sit in the journal for hours, resume unasked after the reset — on
@@ -1352,6 +1358,13 @@ export class JobQueue {
     }
     const message = describeCoordinatorError(err);
     const klass: FailureClass = classifyError(err);
+    if (usesCodexImagePlan(job) && typeof err === "object" && err !== null && (err as { planLimit?: unknown }).planLimit === true) {
+      const said = (err as { resetsAt?: unknown }).resetsAt;
+      const reset = typeof said === "string" ? Date.parse(said) : NaN;
+      this.planLimits.set(job.provider, { message, resetsAt: Number.isFinite(reset) ? reset : null });
+      await this.terminalize(job, "failed", message, undefined, "terminal");
+      return;
+    }
     // A daily limit, free or paid, is the key's, not the lane's pace: it must not slow other reads.
     const freeLimit = typeof err === "object" && err !== null && (err as { freeLimit?: unknown }).freeLimit === true;
     const dailyLimit = freeLimit || (typeof err === "object" && err !== null && (err as { dailyLimit?: unknown }).dailyLimit === true);
@@ -1922,10 +1935,10 @@ export class JobQueue {
       actualMicroUsd = 0;
       actualSource = "local-zero"; // unmetered (SPEC-008 R-18)
     } else if (usesCodexImagePlan(job)) {
-      // No per-request API charge. Zero says nothing about the allowance consumed by a failed
-      // or cancelled turn; its terminal outcome remains visible (SPEC-008 R-29, SPEC-009 R-19).
+      // Zero additional API cost. Only jobs crossing the durable submission boundary may have
+      // consumed allowance; preparation failures and queued cancellations never did (SPEC-008 R-30).
       actualMicroUsd = 0;
-      actualSource = "included-plan";
+      actualSource = job.attempt > 0 || job.providerJobId !== null ? "included-plan" : "manifest-derived";
     } else if (job.speechQuote?.unit === "token") {
       const reported = job.providerCostMicroUsd ?? (client?.declarations.reportsCost && costMicroUsd !== undefined ? Math.round(costMicroUsd) : undefined);
       ({ actualMicroUsd, actualSource } = speechSettlement({ ...job, providerCostMicroUsd: reported }));
@@ -1965,6 +1978,11 @@ export class JobQueue {
   }
 
   // ---- a free tier's day (design turn 182) ----------------------------------
+
+  /** An explicit connection test permits another try when the provider named no reset time. */
+  forgetUnknownPlanLimit(provider: string): void {
+    if (this.planLimits.get(provider)?.resetsAt === null) this.planLimits.delete(provider);
+  }
 
   /** The day a free tier said is used up for this model, or null once the reset it named has come. */
   freeLimitFor(provider: string, model: string): FreePlanLimit | null {

@@ -86,6 +86,7 @@ export {
   ProviderRequestRejectedError,
   ProviderDailyLimitError,
   ProviderFreeLimitError,
+  ProviderPlanLimitError,
   ProviderPaymentRequiredError,
   type CommandResult,
   type CommandRunner,

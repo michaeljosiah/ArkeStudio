@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { appendFile, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, Job, LedgerEntry } from "@arke-studio/contracts";
+import { spendSummary } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import {
   foldJobHistory,
@@ -2356,6 +2357,23 @@ describe("artifact verification (R-12, R-13, D12)", () => {
     });
   }
 
+  for (const kind of ["world-image", "master-look"] as const) for (const sample of [
+    { contentType: "image/jpeg", data: jpegBytes(), extension: "jpg" },
+    { contentType: "image/webp", data: webpBytes(), extension: "webp" },
+  ]) it(`preserves Codex ${sample.extension} output for ${kind} despite a requested PNG name`, async () => {
+    const fake = new FakeProvider({});
+    fake.inlineArtifacts = [{ name: `image-1.${sample.extension}`, contentType: sample.contentType, data: sample.data }];
+    const h = await makeHarness({ codex: fake }, { getKey: async () => null });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, provider: "codex", model: "codex-image", capability: "image", estimatedMicroUsd: 0,
+      target: { kind, id: WORLD }, landing: { dir: `incoming/${kind}`, name: "candidate.png" } });
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "Codex image to land", FOLD_MS);
+    const relative = `incoming/${kind}/candidate.${sample.extension}`;
+    assert.deepEqual(foldedJob(h, job.id)?.landedFiles, [relative]);
+    assert.deepEqual(new Uint8Array(await readFile(join(h.worldDir, relative))), sample.data);
+    await h.queue.dispose();
+  });
+
   it("rejects a declared image type that disagrees with the bytes", async () => {
     const fake = new FakeProvider({});
     fake.artifacts = [{ name: "frame.png", contentType: "image/png", data: jpegBytes() }];
@@ -2620,6 +2638,57 @@ describe("cancellation (R-14, R-15, D10)", () => {
 });
 
 describe("cost capture (R-15, SPEC-008 R-17)", () => {
+  for (const outcome of ["failed", "cancelled"] as const) it(`Codex ${outcome} before submission consumes no plan attempt`, async () => {
+    const fake = new FakeProvider({});
+    let release!: () => void;
+    const preparation = new Promise<void>(resolve => { release = resolve; });
+    const h = await makeHarness({ codex: fake }, { getKey: async () => null,
+      beforeSubmit: async () => { if (outcome === "cancelled") await preparation; },
+      readImageReferences: async () => { throw new Error("image reference path is invalid"); } });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, provider: "codex", model: "codex-image", capability: "image", estimatedMicroUsd: 0,
+      params: outcome === "failed" ? { references: ["../outside.png"] } : {} });
+    if (outcome === "cancelled") await h.queue.cancel(job.id);
+    release();
+    await until(() => h.ledger.entries.length === 1, "pre-submission outcome to settle", FOLD_MS);
+    assert.equal(foldedJob(h, job.id)?.status, outcome);
+    assert.equal(foldedJob(h, job.id)?.attempt, 0);
+    assert.equal(fake.submitCount, 0);
+    assert.equal(h.ledger.entries[0]!.actualMicroUsd, 0);
+    assert.equal(h.ledger.entries[0]!.actualSource, "manifest-derived");
+    assert.deepEqual(spendSummary(h.ledger.entries, 30, new Date(h.ledger.entries[0]!.ts)).plans, []);
+    await h.queue.dispose();
+  });
+
+  for (const knownReset of [true, false]) it(`stops Codex allowance-limit siblings until ${knownReset ? "reset" : "an explicit connection check"}`, async () => {
+    let now = Date.now();
+    const fake = new FakeProvider({});
+    fake.submitError = Object.assign(new Error("codex: the Codex allowance has been reached"), {
+      submissionRejected: true, failureClass: "terminal", planLimit: true,
+      ...(knownReset ? { resetsAt: new Date(now + 60_000).toISOString() } : {}),
+    });
+    const h = await makeHarness({ codex: fake }, { getKey: async () => null, now: () => now });
+    await h.queue.start();
+    const input = { ...INPUT, provider: "codex", model: "codex-image", capability: "image" as const, estimatedMicroUsd: 0 };
+    await h.queue.enqueue(input);
+    await until(() => h.ledger.entries.length === 1, "quota refusal to settle", FOLD_MS);
+    for (let i = 0; i < 3; i++) {
+      const sibling = await h.queue.enqueue(input);
+      await until(() => h.ledger.entries.length === i + 2, "sibling to fail without submitting", FOLD_MS);
+      assert.equal(foldedJob(h, sibling.id)?.attempt, 0);
+      assert.match(foldedJob(h, sibling.id)?.error ?? "", /not submitted/);
+    }
+    assert.equal(fake.submitCount, 1);
+    assert.equal(h.ledger.entries.filter(entry => entry.actualSource === "included-plan").length, 1);
+    fake.submitError = null;
+    if (knownReset) now += 60_001;
+    else h.queue.forgetUnknownPlanLimit("codex");
+    const fresh = await h.queue.enqueue(input);
+    await until(() => foldedJob(h, fresh.id)?.status === "succeeded", "a newly authorized image to run after reset", FOLD_MS);
+    assert.equal(fake.submitCount, 2);
+    await h.queue.dispose();
+  });
+
   it("holds an uncertain Codex image without repeating it or claiming another dollar charge", async () => {
     const fake = new FakeProvider({});
     fake.submitError = new Error("connection interrupted");

@@ -311,6 +311,7 @@ export class CodexAdapter implements HarnessAdapter {
       settled.catch(() => {});
       const job: ImageJob = { turnId: null, items: [], settle };
       this.imageJobs.set(id, job);
+      this.recoveryEligible = true;
       const stop = () => {
         settle(new Error("Image generation cancelled."));
         // Before turn/started there is no turn to name, and an interrupt with a null id is only
@@ -572,7 +573,7 @@ export class CodexAdapter implements HarnessAdapter {
     const retired = Promise.resolve().then(() => rpc.dispose());
     this.retirement = retired; void retired.catch(() => {});
     // A replacement that repeatedly initializes and exits must not spin a background
-    // restart loop. Only a newly admitted session replenishes the recovery allowance.
+    // restart loop. Only a newly admitted session or image replenishes the recovery allowance.
     if (!mayRecover || this.disposed || this.environmentChanging || this.recovery) return;
     this.ready = { ready: false, reason: "Codex connection failed; reconnecting without replaying the interrupted turn." };
     // Start on the next microtask: CodexRpc must first publish its disposal promise. This

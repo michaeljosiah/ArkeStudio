@@ -389,6 +389,19 @@ test("a dedicated image thread returns inline bytes, enables only the image flag
   await eventually(async () => (await f.requests()).some(request => request.method === "thread/unsubscribe"));
 });
 
+test("admitting image work re-arms recovery after each healthy replacement", async t => {
+  let spawns = 0; let stopCurrent = () => {};
+  const f = await fixture("image-gen", { onSpawn: async child => { spawns++; stopCurrent = () => { child.kill(); }; } });
+  t.after(f.cleanup);
+  for (let expected = 2; expected <= 3; expected++) {
+    assert.equal((await f.adapter.generateImage({ prompt: "a lighthouse" })).mimeType, "image/png");
+    stopCurrent();
+    await eventually(() => spawns === expected && f.adapter.readiness().ready);
+  }
+  assert.equal((await f.adapter.generateImage({ prompt: "after two recoveries" })).mimeType, "image/png");
+  assert.equal(spawns, 3);
+});
+
 test("image generation refuses logins the app-server does not support it for", async t => {
   for (const scenario of ["image-apikey", "image-logged-out", "image-unsupported"]) {
     const f = await fixture(scenario); t.after(f.cleanup);

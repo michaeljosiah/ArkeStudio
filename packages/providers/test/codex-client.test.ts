@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { PROVIDERS } from "@arke-studio/contracts";
 import { CodexClient, type CodexImageRunner } from "../src/clients/codex.js";
 import { createProviderClients } from "../src/registry.js";
-import { ProviderAuthError, ProviderRequestRejectedError, type FetchLike } from "../src/types.js";
+import { ProviderAuthError, ProviderPlanLimitError, ProviderRequestRejectedError, type FetchLike } from "../src/types.js";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 const runner = (over: Partial<CodexImageRunner> = {}): CodexImageRunner => ({
@@ -57,7 +57,7 @@ describe("codex image client", () => {
   it("maps a plan limit to a rejected request and a lost sign-in to an auth error", async () => {
     const limit = Object.assign(new Error("limit"), { name: "CodexImageLimitError", resetsAt: 1900000000 });
     await assert.rejects(new CodexClient(runner({ generate: async () => { throw limit; } })).submit("", { model: "codex-image", capability: "image", params: { prompt: "x" } }),
-      error => error instanceof ProviderRequestRejectedError && /Codex allowance.*2030/.test(error.message));
+      error => error instanceof ProviderPlanLimitError && error.planLimit && error.resetsAt === new Date(1900000000 * 1000).toISOString() && /Codex allowance.*2030/.test(error.message));
     await assert.rejects(new CodexClient(runner({ generate: async () => { throw new Error("Codex image generation is not available for this login."); } })).submit("", { model: "codex-image", capability: "image", params: { prompt: "x" } }),
       error => error instanceof ProviderAuthError && PROVIDER_FAULT.test(error.message));
   });
@@ -82,7 +82,7 @@ describe("codex image client", () => {
       const limit = Object.assign(new Error("limit"), { name: "CodexImageLimitError", resetsAt });
       await assert.rejects(new CodexClient(runner({ generate: async () => { throw limit; } })).submit("", {
         model: "codex-image", capability: "image", params: { prompt: "x" },
-      }), error => error instanceof ProviderRequestRejectedError && /Codex allowance/.test(error.message));
+      }), error => error instanceof ProviderPlanLimitError && error.resetsAt === undefined && /Codex allowance/.test(error.message));
     }
   });
 });
