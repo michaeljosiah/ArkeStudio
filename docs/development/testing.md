@@ -78,7 +78,7 @@ the schema-53 reader refusal.
 
 Use Node 22.12 or later; CI uses Node 22. Run `npm ci` from the repository root. See [CONTRIBUTING.md](../../CONTRIBUTING.md#getting-set-up) for browser development and its authenticated session link; `npm start` builds and starts desktop, including its native rebuild.
 
-Frozen production previews and turn approval (#1425) use client `test/production-card-body.test.tsx` and `test/production-plan-card.test.tsx`, plus coordinator `test/world-chat/actions.test.ts`, `test/arke-actions/lifecycle.test.ts` and `test/world/schema-version.test.ts`. They check all forty native shot rows, screenplay changes and removed blocks, eligibility, dependency completion, stopping at refusal, duplicate gestures and the schema-61 reader refusal. These are renderer and authority checks; the installed journey remains #1427.
+Frozen production previews and turn approval (#1425) use client `test/production-card-body.test.tsx` and `test/production-plan-card.test.tsx`, plus coordinator `test/world-chat/actions.test.ts`, `test/arke-actions/lifecycle.test.ts` and `test/world/schema-version.test.ts`. They check all forty native shot rows, screenplay changes and removed blocks, eligibility, dependency completion, stopping at refusal, duplicate gestures and the schema-61 reader refusal. Run `node scripts/smoke-production-card-body.mjs` with Chrome installed (`ARKE_CHROME` overrides its path) to check the full client cascade at 360, 390, 984 and 1200 px, including readable native columns and scrolling to row forty. These are renderer and authority checks; the installed journey remains #1427.
 
 ## Select the checks
 
