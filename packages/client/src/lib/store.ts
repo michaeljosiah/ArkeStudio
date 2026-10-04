@@ -3696,8 +3696,10 @@ export function setProductionModel(
   productionId: string,
   capability: Capability,
   modelId: string | null,
+  /** The effort kept with a language model (design turn 195), in the harness's own name. */
+  variant?: string,
 ): void {
-  send({ kind: "set-production-model", worldId, productionId, capability, modelId });
+  send({ kind: "set-production-model", worldId, productionId, capability, modelId, ...(variant !== undefined ? { variant } : {}) });
 }
 
 /**
@@ -6207,6 +6209,8 @@ export function sendWorldChat(
    * coordinator takes one line per request, so the retry cannot buy a second turn.
    */
   requestId: string = crypto.randomUUID(),
+  /** This turn's effort for whichever model answers, in the harness's own name (design turn 195). */
+  variant?: string,
 ): string | null {
   const sent = send({
     kind: "world-chat-send",
@@ -6216,6 +6220,7 @@ export function sendWorldChat(
     text,
     attachmentIds,
     ...(modelId !== undefined ? { modelId } : {}),
+    ...(variant !== undefined ? { variant } : {}),
     ...(subject !== undefined ? { subject } : {}),
     ...(replyOnly ? { replyOnly: true } : {}),
   });

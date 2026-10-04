@@ -129,10 +129,12 @@ function chip(): HTMLButtonElement {
 async function openChip() {
   if (!dialogRoot(container).querySelector(".fy-mchip__menu")) await act(async () => chip().click());
 }
-function modelItems(): HTMLButtonElement[] {
-  return [...dialogRoot(container).querySelectorAll<HTMLButtonElement>(".fy-mchip__menu [data-model]")];
+function modelItems(): HTMLElement[] {
+  return [...dialogRoot(container).querySelectorAll<HTMLElement>(".fy-mchip__menu [data-model]")];
 }
-function modelItem(id: string): HTMLButtonElement {
+/** A model this chat cannot pick is struck and `aria-disabled`; it stays on the page so its card can say why (design turn 195). */
+const off = (item: Element) => item.getAttribute("aria-disabled") === "true";
+function modelItem(id: string): HTMLElement {
   const item = modelItems().find((candidate) => candidate.getAttribute("data-model") === id);
   assert.ok(item, id);
   return item;
@@ -142,14 +144,14 @@ async function pickModel(id: string) {
   const item = modelItem(id);
   await act(async () => item.click());
 }
-function menuPress(label: RegExp): HTMLButtonElement | undefined {
-  return [...dialogRoot(container).querySelectorAll<HTMLButtonElement>(".fy-mchip__menu button[role=menuitem]")].find((candidate) => label.test(candidate.textContent ?? ""));
+function menuPress(label: RegExp): HTMLElement | undefined {
+  return [...dialogRoot(container).querySelectorAll<HTMLElement>(".fy-mchip__menu button, .fy-mchip__menu [role=option]:not([data-model])")].find((candidate) => label.test(candidate.textContent ?? ""));
 }
 async function chipPress(label: RegExp) {
   await openChip();
   const button = menuPress(label);
   assert.ok(button, String(label));
-  assert.equal(button.disabled, false, `${label} is enabled`);
+  assert.equal(off(button), false, `${label} is enabled`);
   await act(async () => button.click());
 }
 const isSet = () => chip().className.includes("fy-mchip__btn--set");
@@ -308,8 +310,9 @@ describe("live harness model controls (#1123, #1124)", () => {
     await openChip();
     for (const value of ["custom/image-only", "custom/no-inputs"]) {
       const item = modelItem(value);
-      assert.equal(item.disabled, true, `chip: ${value}`);
-      assert.match(item.textContent!, /cannot read text/);
+      assert.equal(off(item), true, `chip: ${value}`);
+      assert.match(item.getAttribute("aria-label")!, /cannot read text/, "the reason is on the card and in the option's name");
+      assert.doesNotMatch(item.textContent!, /cannot read text/, "the row itself no longer prints it");
     }
     const prompt = [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.trim() === "Explain the scene")!;
     assert.equal(prompt.disabled, true, "a previously saved model without text input cannot dispatch");
@@ -428,7 +431,7 @@ describe("live harness model controls (#1123, #1124)", () => {
     } }));
     assert.match(container.textContent!, /The harness exited/);
     await openChip();
-    assert.equal(modelItem(OPUS).disabled, true);
+    assert.equal(off(modelItem(OPUS)), true);
     const prompt = [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.trim() === "Explain the scene")!;
     assert.equal(prompt.disabled, true);
     await chipPress(/Clear the production/);
@@ -447,12 +450,12 @@ describe("live harness model controls (#1123, #1124)", () => {
       assert.equal(options.find(option => option.value === "")!.hasAttribute("disabled"), false, "clearing remains available");
     }
     await openChip();
-    assert.equal(modelItem(OPUS).disabled, true);
-    assert.ok(menuPress(/Use the saved choice/) ?? [...dialogRoot(container).querySelectorAll<HTMLButtonElement>(".fy-mchip__menu button")].find((b) => /Use the saved choice/.test(b.textContent ?? "")), "clearing remains available");
+    assert.equal(off(modelItem(OPUS)), true);
+    assert.ok(menuPress(/Use the saved choice/), "clearing remains available");
     const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.trim() === label)!;
     assert.equal(button("Explain the scene").disabled, true);
     assert.equal(menuPress(/Every chat in this production/), undefined, "a choice that cannot be checked is not offered to the production");
-    assert.equal(menuPress(/Clear the production/)!.disabled, false);
+    assert.equal(off(menuPress(/Clear the production/)!), false);
     const requests = sent.filter(message => message.kind === "list-harness-models").length;
     await press("Retry models");
     assert.equal(sent.filter(message => message.kind === "list-harness-models").length, requests + 1);
@@ -460,7 +463,7 @@ describe("live harness model controls (#1123, #1124)", () => {
       harnessModelStatus: { status: "ready" }, harnessModels: [state.app.harnessModels[1]!],
     } }));
     await openChip();
-    assert.equal(modelItem(OPUS).disabled, false);
+    assert.equal(off(modelItem(OPUS)), false);
     assert.equal(button("Explain the scene").disabled, false);
     await chipPress(/Every chat in this production/);
     assert.ok(sent.some(message => message.kind === "set-production-model" && message.modelId === OPUS));
@@ -671,6 +674,98 @@ describe("the model chip on a conversation page (turn 190e)", () => {
     assert.equal(isSet(), false);
   });
 
+  describe("the effort (design turn 195)", () => {
+    /** Opus offers three efforts, none of them the harness's default. */
+    function effortState(production?: { llm: string; kept?: Record<string, string> }): ClientState {
+      const state = modelState();
+      state.app.harnessModels = state.app.harnessModels.map((model) => model.id === "opus[1m]" ? { ...model, variants: { names: ["low", "high", "max"] } } : model);
+      if (production !== undefined) {
+        state.world!.productions = state.world!.productions.map((entry) => entry.meta.id === "saltlight"
+          ? { ...entry, meta: { ...entry.meta, models: { llm: production.llm }, ...(production.kept ? { llmVariants: production.kept } : {}) } }
+          : entry);
+      }
+      return state;
+    }
+    const effortChip = () => [...container.querySelectorAll<HTMLButtonElement>(".fy-cx__bar button.fy-mchip__btn")].find((candidate) => candidate.getAttribute("aria-label") === "Effort");
+    async function chooseEffort(label: string) {
+      await act(async () => effortChip()!.click());
+      const item = [...dialogRoot(container).querySelectorAll<HTMLButtonElement>(".fy-mchip__menu--effort button")].find((candidate) => candidate.textContent === label);
+      assert.ok(item, label);
+      await act(async () => item.click());
+    }
+
+    it("is drawn only for a model that offers one, and goes with the model it was chosen for", async () => {
+      await mount(effortState(), pageConversation());
+      assert.equal(effortChip(), undefined, "Sonnet declares none");
+      await pickModel(OPUS);
+      assert.equal(effortChip()?.textContent, "Effort", "nothing chosen and no default stated");
+      await chooseEffort("High");
+      assert.equal(effortChip()?.textContent, "High");
+      assert.equal(isSet(), true, "an effort chosen here is this chat's own");
+      await say("Explain the scene");
+      const turn = sent.findLast((message) => message.kind === "world-chat-send");
+      assert.ok(turn?.kind === "world-chat-send");
+      assert.equal(turn.modelId, OPUS);
+      assert.equal(turn.variant, "high", "the harness's own name, not the plain word");
+      // Spent with the turn, as the model's own choice is.
+      assert.equal(effortChip(), undefined);
+      assert.equal(isSet(), false);
+    });
+
+    it("keeps an effort per model and shows it again when the model comes back", async () => {
+      await mount(effortState(), pageConversation());
+      await pickModel(OPUS);
+      await chooseEffort("Highest");
+      await pickModel(CLAUDE);
+      assert.equal(effortChip(), undefined);
+      await pickModel(OPUS);
+      assert.equal(effortChip()?.textContent, "Highest", "max, in plain words");
+    });
+
+    it("is kept for every chat in the production with the model, in the same press", async () => {
+      await mount(effortState(), pageConversation());
+      await pickModel(OPUS);
+      await chooseEffort("High");
+      await chipPress(/Every chat in this production/);
+      const kept = sent.findLast((message) => message.kind === "set-production-model");
+      assert.ok(kept?.kind === "set-production-model");
+      assert.equal(kept.modelId, OPUS);
+      assert.equal(kept.variant, "high");
+    });
+
+    it("shows the production's kept effort, sends none of its own, and can change it alone", async () => {
+      await mount(effortState({ llm: OPUS, kept: { [OPUS]: "max" } }), pageConversation());
+      assert.equal(effortChip()?.textContent, "Highest");
+      assert.equal(isSet(), false);
+      await say("Explain the scene");
+      const turn = sent.findLast((message) => message.kind === "world-chat-send");
+      assert.ok(turn?.kind === "world-chat-send");
+      assert.equal(turn.variant, undefined, "the coordinator resolves what the production kept");
+      assert.equal(turn.modelId, undefined);
+    });
+
+    it("sends a different effort on the production's own model without naming the model", async () => {
+      await mount(effortState({ llm: OPUS, kept: { [OPUS]: "max" } }), pageConversation());
+      await chooseEffort("Low");
+      assert.equal(isSet(), true, "a different effort on the production's own model is this chat's");
+      await say("Explain the scene");
+      const turn = sent.findLast((message) => message.kind === "world-chat-send");
+      assert.ok(turn?.kind === "world-chat-send");
+      assert.equal(turn.variant, "low");
+      assert.equal(turn.modelId, undefined, "the model was not chosen here");
+    });
+
+    it("lets the production keep a different effort for its own model without choosing a model", async () => {
+      await mount(effortState({ llm: OPUS, kept: { [OPUS]: "max" } }), pageConversation());
+      await chooseEffort("Low");
+      await chipPress(/Every chat in this production/);
+      const kept = sent.findLast((message) => message.kind === "set-production-model");
+      assert.ok(kept?.kind === "set-production-model");
+      assert.equal(kept.modelId, OPUS);
+      assert.equal(kept.variant, "low");
+    });
+  });
+
   it("shows a saved choice the harness no longer offers, disabled, and keeps it clearable", async () => {
     const state = modelState();
     state.app.harnessModels = [];
@@ -678,7 +773,7 @@ describe("the model chip on a conversation page (turn 190e)", () => {
     await mount(state, pageConversation());
     await openChip();
     assert.match(dialogRoot(container).querySelector(".fy-mchip__menu")!.textContent ?? "", /anthropic\/sonnet\s*unavailable/);
-    assert.equal(modelItem(CLAUDE).disabled, true);
+    assert.equal(off(modelItem(CLAUDE)), true);
     assert.match(container.textContent!, /The harness did not answer/, "the catalogue's trouble is said, below the title and above the composer");
     await chipPress(/Clear the production/);
     assert.ok(sent.some((message) => message.kind === "set-production-model" && message.modelId === null));

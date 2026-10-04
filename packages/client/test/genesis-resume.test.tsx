@@ -46,10 +46,10 @@ it("offers a writing model without empty review sections on the founding front d
     await act(async () => chip.click());
     // The menu is drawn on the body, out of the composer's clip.
     const body = dom.document.body;
-    assert.equal(body.querySelector('.fy-mchip__menu [data-model="ollama/no-tools"]')?.hasAttribute("disabled"), true);
-    assert.match(body.querySelector('.fy-mchip__menu [data-model="ollama/no-tools"]')?.textContent ?? "", /cannot use tools/);
-    assert.equal(body.querySelector('.fy-mchip__menu [data-model="ollama/writing"]')?.hasAttribute("disabled"), false, "unknown tool support stays selectable");
-    assert.equal(body.querySelectorAll(".fy-mchip__menu button[role=menuitem]").length, 0);
+    assert.equal(body.querySelector('.fy-mchip__menu [data-model="ollama/no-tools"]')?.getAttribute("aria-disabled"), "true");
+    assert.match(body.querySelector('.fy-mchip__menu [data-model="ollama/no-tools"]')?.getAttribute("aria-label") ?? "", /cannot use tools/, "the reason is the card's first line and the option's name");
+    assert.equal(body.querySelector('.fy-mchip__menu [data-model="ollama/writing"]')?.hasAttribute("aria-disabled"), false, "unknown tool support stays selectable");
+    assert.deepEqual([...body.querySelectorAll(".fy-mchip__menu .fy-mpick__foot button")].map(item => item.textContent), ["Manage models"], "nothing to remember the choice in");
     assert.doesNotMatch(container.textContent ?? "", /models? from /, "the catalogue is not counted while it is fine");
     assert.match(container.textContent ?? "", /What is this world/);
     assert.doesNotMatch(container.textContent ?? "", /Review world content|Review the world|Available voices/);

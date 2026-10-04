@@ -151,6 +151,15 @@ export function productionModel(
   return state?.world?.productions.find((p) => p.meta.id === productionId)?.meta.models?.[capability];
 }
 
+/** The effort each language model was last kept at in a production, by the model's reference (design turn 195). */
+export function productionVariants(
+  state: ReturnType<typeof useStore>["state"],
+  productionId: string | undefined,
+): Readonly<Record<string, string>> | undefined {
+  if (productionId === undefined) return undefined;
+  return state?.world?.productions.find((p) => p.meta.id === productionId)?.meta.llmVariants;
+}
+
 /**
  * The model this world's own work reaches for, for a capability (design turn 153). Read only for
  * world work: a production falls back to Settings, never to its world.
