@@ -197,15 +197,45 @@ export function segmentAt(segments: readonly VideoSegment[], at: number): VideoS
   return segments.find((segment) => at >= segment.from && at < segment.to) ?? segments[segments.length - 1] ?? null;
 }
 
+/** Where a picture's crop stands on it, in the picture's own pixels, and where its focus falls inside the crop. */
+export interface PictureCrop {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** The focus inside the crop, as shares of the crop: the point Slow push moves toward. */
+  focusX: number;
+  focusY: number;
+}
+
+const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
+
 /**
- * The vertical crop (rule 3): a full-height column of the picture's 9:16 around its focus, kept
- * inside the picture. Returned as the column's left edge and width, as shares of the picture's
- * width. A picture narrower than 9:16 keeps its whole width.
+ * The picture filling the frame (turn 197's correction of 2026-10-04): scaled to cover the frame
+ * and cropped around its focus, kept inside the picture, at 16:9 and at 9:16 alike. The rendered
+ * pictures are 3:2 and a 16:9 frame letterboxed them behind black bars, which the owner refused;
+ * a crop loses a strip top and bottom at 16:9 and the sides at 9:16, and the focus says which.
+ * Whole pixels, so ffmpeg's crop and the preview's take the same rectangle.
  */
-export function verticalCrop(pictureWidth: number, pictureHeight: number, focusX = 0.5): { left: number; width: number } {
-  const width = Math.min(1, (pictureHeight * 9) / 16 / pictureWidth);
-  const left = Math.min(1 - width, Math.max(0, focusX - width / 2));
-  return { left: Math.round(left * 10000) / 10000, width: Math.round(width * 10000) / 10000 };
+export function coverCrop(pictureWidth: number, pictureHeight: number, frameWidth: number, frameHeight: number, focus: { x: number; y: number } = { x: 0.5, y: 0.5 }): PictureCrop {
+  const width = Math.max(1, Math.min(pictureWidth, Math.round((pictureHeight * frameWidth) / frameHeight)));
+  const height = Math.max(1, Math.min(pictureHeight, Math.round((pictureWidth * frameHeight) / frameWidth)));
+  const x = clamp(Math.round(pictureWidth * focus.x - width / 2), 0, pictureWidth - width);
+  const y = clamp(Math.round(pictureHeight * focus.y - height / 2), 0, pictureHeight - height);
+  const share = (value: number) => Math.round(clamp(value, 0, 1) * 10000) / 10000;
+  return { x, y, width, height, focusX: share((pictureWidth * focus.x - x) / width), focusY: share((pictureHeight * focus.y - y) / height) };
+}
+
+/**
+ * How far Slow push has come at a share of a picture's hold, as the window inside the crop it
+ * shows: 6% closer by the end, about the focus's place in the crop, so the focus stays where it
+ * stands and the window never leaves the crop — no edge of the picture is ever revealed. ffmpeg's
+ * zoompan takes the same window; the preview draws it.
+ */
+export function pushWindow(crop: Pick<PictureCrop, "focusX" | "focusY">, progress: number): { left: number; top: number; size: number } {
+  const zoom = 1 + VIDEO_PUSH * clamp(progress, 0, 1);
+  const size = 1 / zoom;
+  return { left: (1 - size) * crop.focusX, top: (1 - size) * crop.focusY, size };
 }
 
 // ————————————————————————————————————————————————————————————————————————————————————————————
@@ -234,43 +264,208 @@ export function wrapWords(text: string, maxChars: number): string[] {
   return lines;
 }
 
+/** A cue's line, at most: the subtitler's 42 at 16:9 (turn 197's correction of 2026-10-04). */
+export const CUE_LINE_CHARS = 42;
+/** A cue is on screen at least this long where its words allow, so it can be read… */
+export const CUE_MIN_SEC = 1.2;
+/** …and at most this long: a short sentence over a long pause clears rather than hangs. */
+export const CUE_MAX_SEC = 6;
+
 /**
- * The chapter's words as cues, timed exactly as the player's Text times them (rule 5): each
- * sentence from its place in its block until the next sentence, the block's last until the block
- * ends — the takes keep no word times, so a grouped take's sentences share it by length. A
- * sentence longer than `maxLines` lines of `maxChars` is cut at line breaks into cues that share
- * its time by length.
+ * Where a cue or a line may break, from best to worst. Captions read in phrases: a break at a
+ * sentence's end, at a quote or a dialogue tag, at a clause mark, before a conjunction or a
+ * preposition — never inside a word, and never straight after an article, a preposition or a
+ * possessive, which leaves a line hanging on "the" or "of an".
  */
-export function chapterCues(chapter: Pick<ListeningChapter, "blocks">, maxChars = 42, maxLines = 2): VideoCue[] {
-  const cues: VideoCue[] = [];
-  for (const block of chapter.blocks) {
-    const end = block.at + block.seconds;
-    block.sentences.forEach((sentence, index) => {
-      const from = Math.max(block.at, sentence.at);
-      const to = Math.min(end, block.sentences[index + 1]?.at ?? end);
-      if (!(to > from)) return;
-      const lines = wrapWords(sentence.text, maxChars);
-      if (lines.length === 0) return;
-      const pieces: string[][] = [];
-      for (let at = 0; at < lines.length; at += maxLines) pieces.push(lines.slice(at, at + maxLines));
-      const total = pieces.reduce((sum, piece) => sum + piece.join(" ").length, 0);
-      let clock = from;
-      for (const piece of pieces) {
-        const share = ((to - from) * piece.join(" ").length) / total;
-        cues.push({ text: piece.join("\n"), startSec: round(clock), endSec: round(clock + share) });
-        clock += share;
-      }
+const BREAK_COST = { sentence: 0, quote: 0.5, clause: 1, conjunction: 2.5, preposition: 3.5, plain: 8, dangling: 20, never: 60 } as const;
+type BreakKind = keyof typeof BREAK_COST;
+
+const CONJUNCTIONS = new Set(["and", "but", "or", "nor", "so", "yet", "because", "while", "when", "whenever", "where", "which", "who", "whom", "whose", "that", "though", "although", "until", "unless", "if", "as", "since", "than", "then"]);
+const PREPOSITIONS = new Set(["in", "on", "at", "by", "with", "from", "into", "onto", "over", "under", "through", "between", "behind", "beside", "near", "after", "before", "toward", "towards", "without", "within", "across", "along", "around", "past", "against", "among", "about", "above", "below", "beneath", "beyond", "during", "inside", "outside", "like", "for", "to", "upon", "per", "via"]);
+/** Words a line never ends on: what follows them is what they are for. */
+const HOLDS_THE_NEXT = new Set(["a", "an", "the", "my", "your", "his", "its", "our", "their", "of", "to", "for", "with", "from", "into", "onto", "upon", "mr.", "mrs.", "ms.", "dr.", "mr", "mrs", "ms", "dr"]);
+/**
+ * Words a line seldom ends on — but each also ends a phrase (`he came in`, `told her`), so they
+ * cost a great deal rather than being refused, and a conjunction after one can still win.
+ */
+const LEANS_ON_THE_NEXT = new Set(["in", "on", "at", "by", "through", "between", "under", "among", "toward", "towards", "without", "within", "across", "against", "during", "beneath", "beside", "behind", "about", "over", "after", "before", "like", "and", "or", "but", "nor", "every", "each", "her", "this", "that", "these", "those", "such", "another", "some", "any", "one", "two", "three", "few", "several", "many", "very", "too", "most"]);
+const ENDS_SENTENCE = /[.!?…]["”’')\]]*$/;
+const ENDS_CLAUSE = /([,;:]|[—–]|--)["”’')\]]*$/;
+/** A closing quote: `"` or `”` after a word or its mark; `'` and `’` only after a mark, since `boys'` is a word. */
+const CLOSES_QUOTE = /([\p{L}\p{N},.!?…—–]["”]|[,.!?…—–]['’])$/u;
+const OPENS_QUOTE = /^(["“‘—–]|'\p{L})/u;
+const bare = (word: string) => word.toLowerCase().replace(/^["“‘'([—–]+|["”’'),;:\]]+$/g, "");
+
+/** How good a break between two words is. `textEnd`: the left word ends one of Text's sentences. */
+function breakKind(left: string, right: string, textEnd: boolean): BreakKind {
+  // A dash or a quote mark standing alone belongs to the word before it.
+  if (!/[\p{L}\p{N}]/u.test(right)) return "never";
+  const clause = ENDS_CLAUSE.test(left) || ENDS_SENTENCE.test(left);
+  if (HOLDS_THE_NEXT.has(bare(left)) && !clause) return "never";
+  // Text's own sentence ends are breaks whatever their punctuation: a title has none.
+  if (textEnd || ENDS_SENTENCE.test(left)) return "sentence";
+  if (CLOSES_QUOTE.test(left) || OPENS_QUOTE.test(right)) return "quote";
+  if (ENDS_CLAUSE.test(left)) return "clause";
+  if (CONJUNCTIONS.has(bare(right))) return "conjunction";
+  if (LEANS_ON_THE_NEXT.has(bare(left))) return "dangling";
+  if (PREPOSITIONS.has(bare(right))) return "preposition";
+  return "plain";
+}
+
+interface TimedWord {
+  text: string;
+  from: number;
+  to: number;
+  /** How good a break after this word is; the last word of a block needs none. */
+  after: BreakKind;
+  /** A quotation is open after this word: a cue cut here starts its next one mid-quote. */
+  quoted: boolean;
+}
+
+/** A block's words, each timed by its share of its sentence's time, as Text shares a take by length. */
+function timedWords(block: ListeningChapter["blocks"][number]): TimedWord[] {
+  const end = block.at + block.seconds;
+  const words: TimedWord[] = [];
+  const textEnds = new Set<number>();
+  block.sentences.forEach((sentence, index) => {
+    const from = Math.max(block.at, sentence.at);
+    const to = Math.min(end, block.sentences[index + 1]?.at ?? end);
+    const text = sentence.text.replace(/\s+/g, " ").trim();
+    if (!(to > from) || text === "") return;
+    const parts = text.split(" ");
+    let clock = 0;
+    parts.forEach((part, at) => {
+      const weight = part.length + (at < parts.length - 1 ? 1 : 0);
+      words.push({ text: part, from: from + ((to - from) * clock) / text.length, to: from + ((to - from) * (clock + weight)) / text.length, after: "sentence", quoted: false });
+      clock += weight;
     });
+    textEnds.add(words.length - 1);
+  });
+  for (let at = 0; at < words.length - 1; at++) words[at]!.after = breakKind(words[at]!.text, words[at + 1]!.text, textEnds.has(at));
+  // Straight quotes open and close by turns; a block is its own paragraph, so it starts closed.
+  let open = false;
+  for (const word of words) {
+    for (const mark of word.text) {
+      if (mark === "“") open = true;
+      else if (mark === "”") open = false;
+      else if (mark === '"') open = !open;
+    }
+    word.quoted = open;
   }
-  return cues;
+  return words;
+}
+
+const lineLength = (words: readonly TimedWord[], from: number, to: number) => words.slice(from, to).reduce((sum, word, at) => sum + word.text.length + (at > 0 ? 1 : 0), 0);
+
+/** The best place to break words `from..to` into two lines, or none needed; null when they cannot fit two. */
+function bestLines(words: readonly TimedWord[], from: number, to: number, lineChars: number): { at: number | null; cost: number } | null {
+  const whole = lineLength(words, from, to);
+  if (whole <= lineChars || to - from === 1) return { at: null, cost: 0 };
+  let best: { at: number; cost: number } | null = null;
+  for (let at = from + 1; at < to; at++) {
+    const top = lineLength(words, from, at);
+    const foot = lineLength(words, at, to);
+    if ((top > lineChars && at - from > 1) || (foot > lineChars && to - at > 1)) continue;
+    const cost = BREAK_COST[words[at - 1]!.after] / 2 + (6 * Math.abs(top - foot)) / lineChars;
+    if (best === null || cost < best.cost) best = { at, cost };
+  }
+  return best;
 }
 
 /**
- * The burned-in words (rule 5): only the sentence being read, broken to the frame's width at the
- * chosen size, at most three lines a cue; none over a title card, which is the title being read.
+ * A block's words cut into cues (turn 197's correction of 2026-10-04): each at most two lines of
+ * `lineChars`, cut where a phrase ends, timed by the words' share of their sentence's time, so
+ * the player's Text and the video still agree. The cut is the cheapest over the whole block —
+ * each cue costs a little, a poor break more, a cue on screen under 1.2 s or (mid-sentence) over
+ * 6 s a great deal — so a short sentence joins its neighbour rather than flash, and a long one is
+ * cut at its clauses. A cue ends mid-sentence only where the next one starts on the same instant.
+ */
+function blockCues(words: readonly TimedWord[], lineChars: number): VideoCue[] {
+  const n = words.length;
+  if (n === 0) return [];
+  const best: Array<{ cost: number; from: number; lines: number | null } | null> = Array.from({ length: n + 1 }, () => null);
+  best[0] = { cost: 0, from: 0, lines: null };
+  for (let to = 1; to <= n; to++) {
+    for (let from = to - 1; from >= 0; from--) {
+      const length = lineLength(words, from, to);
+      if (length > lineChars * 2 && to - from > 1) break;
+      const before = best[from];
+      if (before === null || before === undefined) continue;
+      const lines = bestLines(words, from, to, lineChars);
+      if (lines === null) continue;
+      const seconds = words[to - 1]!.to - words[from]!.from;
+      const endsSentence = to === n || words[to - 1]!.after === "sentence";
+      // A cue's own break weighs more than a line's: a line break is read in one glance.
+      let cost = before.cost + 3 + lines.cost + (to === n ? 0 : 1.5 * BREAK_COST[words[to - 1]!.after] + (words[to - 1]!.quoted ? 1.5 : 0));
+      // Two sentences share a cue only to save a flash — more readily inside one speaker's quote,
+      // and each on its own line: a sentence that ends mid-line reads as run on.
+      for (let at = from; at < to - 1; at++) if (words[at]!.after === "sentence") cost += (words[at]!.quoted ? 1.5 : 3) + (lines.at === at + 1 ? 0 : 5);
+      if (seconds < CUE_MIN_SEC) cost += 15 + 20 * (CUE_MIN_SEC - seconds);
+      if (seconds > CUE_MAX_SEC) cost += endsSentence ? 1.5 * (seconds - CUE_MAX_SEC) : 10 + 5 * (seconds - CUE_MAX_SEC);
+      if (length < 12 && to - from < n) cost += 2;
+      if (best[to] === null || cost < best[to]!.cost) best[to] = { cost, from, lines: lines.at };
+    }
+  }
+  const cuts: Array<{ from: number; to: number; lines: number | null }> = [];
+  for (let to = n; to > 0; ) {
+    const step = best[to]!;
+    cuts.unshift({ from: step.from, to, lines: step.lines });
+    to = step.from;
+  }
+  const join = (from: number, to: number) => words.slice(from, to).map((word) => word.text).join(" ");
+  return cuts.map((cut, index) => {
+    const start = words[cut.from]!.from;
+    let end = words[cut.to - 1]!.to;
+    // A short sentence over a long pause clears after six seconds rather than hang; only a cue
+    // that ends a sentence, so no cue ends mid-sentence before the next begins.
+    const endsSentence = cut.to === n || words[cut.to - 1]!.after === "sentence";
+    if (endsSentence && end - start > CUE_MAX_SEC) end = start + CUE_MAX_SEC;
+    // A flash too short to read borrows the silence after it, where there is any.
+    const next = cuts[index + 1];
+    const room = next === undefined ? end : words[next.from]!.from;
+    if (end - start < CUE_MIN_SEC && room > end) end = Math.min(room, start + CUE_MIN_SEC);
+    const text = cut.lines === null ? join(cut.from, cut.to) : `${join(cut.from, cut.lines)}\n${join(cut.lines, cut.to)}`;
+    return { text, startSec: round(start), endSec: round(end) };
+  });
+}
+
+/**
+ * The chapter's words as cues, timed exactly as the player's Text times them (rule 5): each
+ * sentence from its place in its block until the next sentence, the block's last until the block
+ * ends — the takes keep no word times, so a grouped take's sentences share it by length — and cut
+ * into cues of at most two lines of `lineChars` at the phrases (`blockCues`). The sidecar and the
+ * burned-in words cut alike; only the line's length differs with the frame.
+ */
+export function chapterCues(chapter: Pick<ListeningChapter, "blocks">, lineChars = CUE_LINE_CHARS): VideoCue[] {
+  const cues = chapter.blocks.flatMap((block) => blockCues(timedWords(block), lineChars));
+  // A block that is one short line ("Nothing.") still flashes: it borrows what it lacks from the
+  // cue beside it, where that one can spare it and still be read, moving their shared edge.
+  // Only a shared edge moves, so no gap opens inside a sentence.
+  cues.forEach((cue, index) => {
+    const lack = CUE_MIN_SEC - (cue.endSec - cue.startSec);
+    if (!(lack > 0.001)) return;
+    const next = cues[index + 1];
+    const before = cues[index - 1];
+    if (next !== undefined && next.startSec === cue.endSec && next.endSec - next.startSec - lack >= CUE_MIN_SEC) {
+      cue.endSec = next.startSec = round(cue.endSec + lack);
+    } else if (before !== undefined && before.endSec === cue.startSec && before.endSec - before.startSec - lack >= CUE_MIN_SEC) {
+      cue.startSec = before.endSec = round(cue.startSec - lack);
+    }
+  });
+  return cues;
+}
+
+/** A burned-in line, at most: 42, or less where the frame at this size holds less (the vertical frame), so a cue stays two lines. */
+export function burnedLineChars(shape: VideoShape, size: CaptionSize): number {
+  return Math.min(CUE_LINE_CHARS, captionLineChars(shape, size));
+}
+
+/**
+ * The burned-in words (rule 5): the words being read, at most two lines a cue at the frame's
+ * width and the chosen size; none over a title card, which is the title being read.
  */
 export function burnedCues(chapter: Pick<ListeningChapter, "blocks">, shape: VideoShape, size: CaptionSize, after = 0): VideoCue[] {
-  return chapterCues(chapter, captionLineChars(shape, size), 3)
+  return chapterCues(chapter, burnedLineChars(shape, size))
     .filter((cue) => cue.endSec > after)
     .map((cue) => ({ ...cue, startSec: Math.max(cue.startSec, after) }))
     .filter((cue) => cue.endSec - cue.startSec > 0.05);

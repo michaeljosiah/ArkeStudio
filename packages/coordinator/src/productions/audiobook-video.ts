@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { copyFile, link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   assertSlateLabelSupported,
@@ -11,6 +11,7 @@ import {
   CARD_TITLE_SHARE,
   captionFontPx,
   chapterCues,
+  coverCrop,
   ffmpegDrawtextText,
   ffmpegFilterPath,
   OPENING_CAPTION_SHARE,
@@ -48,8 +49,9 @@ import { containedWorldFile } from "./interactive.js";
  * The audiobook as a video (design turn 197, SPEC-047): what the player shows rendered to MP4 on
  * this machine, through the ffmpeg the app ships for the Cut.
  *
- * A chapter is one encode. Its pictures are held as the player holds them, each crossfading into
- * the next over a second, moving 6% toward its focus when Slow push is on; the cover, blurred and
+ * A chapter is one encode. Its pictures are held as the player holds them, each filling the frame
+ * around its focus and crossfading into the next over a second, moving 6% toward that focus when
+ * Slow push is on; the cover, blurred and
  * dimmed, shows before the first; a title card holds while the title is read. The sound is the
  * chapter's one mix from the renderer the chapter's Play uses, encoded once; the words are timed
  * by the player's own Text plan, burned in, carried as a text track, or both.
@@ -60,8 +62,11 @@ import { containedWorldFile } from "./interactive.js";
  * so one cut short by the app closing starts again from the next chapter not yet made.
  */
 
-/** Moves when what a render makes from the same inputs changes, so an older render is never reused. */
-export const VIDEO_RENDER_VERSION = 1;
+/**
+ * Moves when what a render makes from the same inputs changes, so an older render is never reused.
+ * 2: pictures fill the frame, and the words are cut into short cues (2026-10-04).
+ */
+export const VIDEO_RENDER_VERSION = 2;
 
 const EXPORT_ID = /^vb_[0-9A-HJKMNP-TV-Z]{26}$/;
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -150,6 +155,79 @@ const cachedPiece = (store: WorldStore, productionId: string, planned: PlannedCh
 
 const exists = (path: string) => stat(toExtendedLength(path)).then((info) => info.isFile() && info.size > 0, () => false);
 
+type PictureSize = { width: number; height: number };
+
+/**
+ * A picture's size from its header (PNG, WebP, JPEG), for the crop that fills the frame. Null when
+ * it cannot be read — or when a JPEG says it is turned, since whether ffmpeg turns it first is the
+ * build's business: the graph then crops in ffmpeg's own terms instead (`chapterGraph`).
+ */
+export async function readPictureSize(path: string): Promise<PictureSize | null> {
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  const sized = (width: number, height: number) => (width > 0 && height > 0 ? { width, height } : null);
+  try {
+    handle = await open(toExtendedLength(path), "r");
+    const file = handle;
+    const read = async (at: number, length: number) => {
+      const bytes = Buffer.alloc(length);
+      const { bytesRead } = await file.read(bytes, 0, length, at);
+      return bytes.subarray(0, bytesRead);
+    };
+    const head = await read(0, 32);
+    if (head.length >= 24 && head.readUInt32BE(0) === 0x89504e47 && head.toString("latin1", 12, 16) === "IHDR") return sized(head.readUInt32BE(16), head.readUInt32BE(20));
+    if (head.length >= 30 && head.toString("latin1", 0, 4) === "RIFF" && head.toString("latin1", 8, 12) === "WEBP") {
+      const chunk = head.toString("latin1", 12, 16);
+      if (chunk === "VP8X") return sized(1 + head.readUIntLE(24, 3), 1 + head.readUIntLE(27, 3));
+      if (chunk === "VP8L") {
+        const bits = head.readUInt32LE(21);
+        return sized(1 + (bits & 0x3fff), 1 + ((bits >> 14) & 0x3fff));
+      }
+      if (chunk === "VP8 ") return sized(head.readUInt16LE(26) & 0x3fff, head.readUInt16LE(28) & 0x3fff);
+      return null;
+    }
+    if (head.length < 4 || head[0] !== 0xff || head[1] !== 0xd8) return null;
+    // A JPEG: walk the markers to the first frame header, which carries height then width.
+    let at = 2;
+    for (let step = 0; step < 1000; step++) {
+      const marker = await read(at, 10);
+      if (marker.length < 4 || marker[0] !== 0xff) return null;
+      const kind = marker[1]!;
+      if (kind === 0xff) {
+        at += 1;
+        continue;
+      }
+      const length = marker.readUInt16BE(2);
+      if (kind === 0xe1 && length >= 16 && marker.toString("latin1", 4, 10) === "Exif\0\0" && exifTurned(await read(at + 10, length - 8))) return null;
+      const frame = kind >= 0xc0 && kind <= 0xcf && kind !== 0xc4 && kind !== 0xc8 && kind !== 0xcc;
+      if (frame) return marker.length >= 9 ? sized(marker.readUInt16BE(7), marker.readUInt16BE(5)) : null;
+      if (kind === 0xda || kind === 0xd9 || length < 2) return null;
+      at += 2 + length;
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+/** Whether an Exif block's orientation turns the picture a quarter (5–8), which swaps its width and height. */
+function exifTurned(tiff: Buffer): boolean {
+  if (tiff.length < 8) return false;
+  const little = tiff.toString("latin1", 0, 2) === "II";
+  const u16 = (at: number) => (little ? tiff.readUInt16LE(at) : tiff.readUInt16BE(at));
+  const u32 = (at: number) => (little ? tiff.readUInt32LE(at) : tiff.readUInt32BE(at));
+  const ifd = u32(4);
+  if (ifd + 2 > tiff.length) return false;
+  const count = u16(ifd);
+  for (let entry = 0; entry < count; entry++) {
+    const at = ifd + 2 + entry * 12;
+    if (at + 12 > tiff.length) return false;
+    if (u16(at) === 0x0112) return u16(at + 8) >= 5;
+  }
+  return false;
+}
+
 // ————————————————————————————————————————————————————————————————————————————————————————————
 // This machine's rates (rule 9): kept per device, beside the app's own settings.
 
@@ -206,10 +284,9 @@ function chapterGraph(
   planned: PlannedChapter,
   options: AudiobookVideoOptions,
   font: string,
-  inputs: { file: (index: number) => number | null },
+  inputs: { file: (index: number) => number | null; size: (index: number) => PictureSize | null },
 ): string {
   const { width: W, height: H } = shapeSize(options.shape);
-  const vertical = options.shape === "1080x1920";
   const fades = segmentFades(planned.segments);
   const filters: string[] = [];
   const short = Math.min(W, H);
@@ -236,24 +313,31 @@ function chapterGraph(
       filters.push(`[${input}:v]${blur},drawbox=x=0:y=0:w=iw:h=ih:color=black@0.45:t=fill${title},setsar=1,format=yuv420p,${hold}${out}`);
       return;
     }
-    // A picture: letterboxed at 16:9 when its shape differs, never cropped to a face (rule 4);
-    // vertical, a full-height column around its focus, kept inside the picture (rule 3).
-    const fx = segment.focus?.x ?? 0.5;
-    const fy = segment.focus?.y ?? 0.5;
+    // A picture fills the frame (turn 197's correction of 2026-10-04): scaled to cover and cropped
+    // around its focus, kept inside the picture, at 16:9 and 9:16 alike — the 3:2 pictures were
+    // letterboxed behind black bars, which the owner refused. The crop is the preview's own
+    // (coverCrop), worked out from the picture's size; a picture whose header cannot be read is
+    // cropped by the same rule in ffmpeg's terms, and its push aims at the focus as given.
+    const focus = segment.focus ?? { x: 0.5, y: 0.5 };
+    const size = inputs.size(index);
+    const crop = size === null ? null : coverCrop(size.width, size.height, W, H, focus);
     const scale = options.slowPush ? 2 : 1;
-    const fit = vertical
-      ? `crop=w='min(iw,ih*9/16)':h='min(ih,iw*16/9)':x='max(0,min(iw-ow,iw*${fx}-ow/2))':y='max(0,min(ih-oh,ih*${fy}-oh/2))',scale=${W * scale}:${H * scale}`
-      : `scale=${W * scale}:${H * scale}:force_original_aspect_ratio=decrease,pad=${W * scale}:${H * scale}:(ow-iw)/2:(oh-ih)/2:black`;
+    const fit =
+      crop !== null
+        ? `crop=w='min(iw,${crop.width})':h='min(ih,${crop.height})':x='min(iw-ow,${crop.x})':y='min(ih-oh,${crop.y})',scale=${W * scale}:${H * scale}`
+        : `crop=w='min(iw,ih*${W}/${H})':h='min(ih,iw*${H}/${W})':x='max(0,min(iw-ow,iw*${focus.x}-ow/2))':y='max(0,min(ih-oh,ih*${focus.y}-oh/2))',scale=${W * scale}:${H * scale}`;
     if (!options.slowPush) {
       filters.push(`[${input}:v]${fit},setsar=1,format=yuv420p,${hold}${out}`);
       return;
     }
-    // Slow push: 6% closer over the hold, toward the focus (vertical: the column is already
-    // centred on it). Rendered from twice the frame so the window's whole-pixel steps are halves.
-    const px = vertical ? 0.5 : fx;
+    // Slow push: 6% closer over the hold about the focus's place in the crop (pushWindow), so the
+    // focus holds still while the frame closes on it, and the window never leaves the crop: no
+    // edge of the picture shows. Rendered from twice the frame so whole-pixel steps are halves.
+    const px = crop?.focusX ?? focus.x;
+    const py = crop?.focusY ?? focus.y;
     const hold2 = Math.max(1, Math.round((segment.to - segment.from) * VIDEO_FPS));
     filters.push(
-      `[${input}:v]${fit},setsar=1,zoompan=z='1+${VIDEO_PUSH}*min(on/${hold2},1)':x='(iw-iw/zoom)*${px}':y='(ih-ih/zoom)*${fy}':d=${frames}:s=${W}x${H}:fps=${VIDEO_FPS},setsar=1,format=yuv420p,settb=1/${VIDEO_FPS},fps=${VIDEO_FPS}${out}`,
+      `[${input}:v]${fit},setsar=1,zoompan=z='1+${VIDEO_PUSH}*min(on/${hold2},1)':x='(iw-iw/zoom)*${px}':y='(ih-ih/zoom)*${py}':d=${frames}:s=${W}x${H}:fps=${VIDEO_FPS},setsar=1,format=yuv420p,settb=1/${VIDEO_FPS},fps=${VIDEO_FPS}${out}`,
     );
   });
   // Each piece gives way to the next over its crossfade, at the next piece's start on the clock.
@@ -272,7 +356,9 @@ function chapterGraph(
     const y = options.captionPosition === "middle" ? "(h-th)/2" : `h-th-${Math.round(H * CAPTION_BOTTOM_SHARE)}`;
     planned.burned.forEach((cue, index) => {
       const next = `c${index}`;
-      filters.push(`[${last}]drawtext=${textOptions(font, size)}:text='${ffmpegDrawtextText(cue.text)}':x=(w-tw)/2:y=${y}:enable='between(t,${cue.startSec},${cue.endSec})'[${next}]`);
+      // Half-open, as the cues are: `between` holds both ends, so a frame landing on the instant
+      // one cue gives way to the next drew both over each other.
+      filters.push(`[${last}]drawtext=${textOptions(font, size)}:text='${ffmpegDrawtextText(cue.text)}':x=(w-tw)/2:y=${y}:enable='gte(t,${cue.startSec})*lt(t,${cue.endSec})'[${next}]`);
       last = next;
     });
   }
@@ -320,6 +406,7 @@ async function renderChapter(
   await mkdir(toExtendedLength(work), { recursive: true });
   const args: string[] = ["-y", ...QUIET];
   const indexOf = new Map<string, number>();
+  const sizes = new Map<string, PictureSize | null>();
   let count = 0;
   for (const segment of planned.segments) {
     if (segment.file === null || indexOf.has(segment.file)) continue;
@@ -327,6 +414,7 @@ async function renderChapter(
     if (real === null) throw new Error(`${segment.file.split("/").pop()} is not a file inside this world`);
     args.push("-i", real);
     indexOf.set(segment.file, count++);
+    sizes.set(segment.file, await readPictureSize(real));
   }
   const mix = await containedWorldFile(store.dir, planned.mix);
   if (mix === null) throw new Error(`${planned.chapter.title}: its mix is not on this machine`);
@@ -344,7 +432,15 @@ async function renderChapter(
   args.push("-i", meta);
   const metaIndex = count++;
   const graph = join(work, `${planned.chapter.chapterId}.graph`);
-  await writeFile(toExtendedLength(graph), chapterGraph(planned, options, ffmpeg.slateFont, { file: (index) => { const file = planned.segments[index]!.file; return file === null ? null : (indexOf.get(file) ?? null); } }), "utf8");
+  const fileAt = (index: number) => planned.segments[index]!.file;
+  await writeFile(
+    toExtendedLength(graph),
+    chapterGraph(planned, options, ffmpeg.slateFont, {
+      file: (index) => { const file = fileAt(index); return file === null ? null : (indexOf.get(file) ?? null); },
+      size: (index) => { const file = fileAt(index); return file === null ? null : (sizes.get(file) ?? null); },
+    }),
+    "utf8",
+  );
   const stage = join(work, `${planned.chapter.chapterId}-${planned.digest}.mp4`);
   args.push("-/filter_complex", graph, "-map", "[vout]", "-map", `${audio}:a`);
   if (subtitles !== null) args.push("-map", `${subtitles}:s`, "-c:s", "mov_text");
