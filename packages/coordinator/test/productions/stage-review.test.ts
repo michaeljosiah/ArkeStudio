@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { randomUUID } from "node:crypto";
-import { readFile, mkdir, symlink } from "node:fs/promises";
+import { readFile, mkdir, rename, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { newId, orderedShots, StageReviewSchema, type StageReview } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
-import { discardStageReview, keepStageReview, listStageReviews, readStageReview, retainStageReview, stageReviewKept } from "../../src/productions/stage-review.js";
+import { compactSettledStageReviews, discardStageReview, keepStageReview, listStageReviews, readStageReview, retainStageReview, stageReviewKept } from "../../src/productions/stage-review.js";
 import { makeTempWorld } from "../world/helpers.js";
 
 function draft(store: WorldStore): StageReview {
@@ -30,6 +30,13 @@ it("reopening preserves a draft; the ordinary Keep commit is its crash-safe, ide
   assert.deepEqual(await listStageReviews(store), [review]);
   await keepStageReview(store, review.id, input(review));
   assert.equal(await stageReviewKept(store, review.id), true);
+  assert.deepEqual(await listStageReviews(store), [], "settled meshes leave the snapshot directory");
+  assert.deepEqual(await readStageReview(store, review.id), review, "history retains the immutable draft for replay and host recovery");
+  await rename(join(dir, `.staging/stage-review-history/${review.id}.json`), join(dir, `.staging/stage-reviews/${review.id}.json`));
+  await compactSettledStageReviews(store);
+  assert.deepEqual(await listStageReviews(store), [], "recovery closes the crash window after Keep and before archival");
+  await writeFile(join(dir, `.staging/stage-review-history/${randomUUID()}.json`), "historical mesh not parsed by refresh");
+  assert.deepEqual(await listStageReviews(store), [], "refresh never opens historical drafts");
   const scene = store.getBundle().productions.find(p => p.meta.id === "saltlight")!.scenes.find(s => s.id === review.sceneId)!;
   assert.equal(scene.version, review.baseVersion + 1);
   const log = await readFile(join(dir, "changes.jsonl"), "utf8");
@@ -45,6 +52,7 @@ it("discard and stale Keep use the same gate as scene edits, and retention never
   const review = draft(store); await retainStageReview(store, review);
   await discardStageReview(store, review.id); await retainStageReview(store, review);
   assert.equal((await readStageReview(store, review.id)).status, "discarded");
+  assert.deepEqual(await listStageReviews(store), [], "discarded drafts cannot accumulate in the refresh path");
   await assert.rejects(keepStageReview(store, review.id, input(review)), /review changed/);
   await assert.rejects(retainStageReview(store, { ...review, shotId: "sh_other" }), /another draft/);
   const next = draft(store); await retainStageReview(store, next);

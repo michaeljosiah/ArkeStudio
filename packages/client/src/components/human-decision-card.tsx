@@ -74,7 +74,7 @@ function ThreadStage({ world, production, scene, control, conversationId }: {
   const selection = useMemo(() => ({ subject: { kind: "shot" as const, shotId: target.shotId }, select: () => {} }), [target.shotId]);
   return <SelectionProvider value={selection}><SceneStage world={world} production={production} scene={writer.workingScene}
     aspect={production.meta.aspect ?? "16:9"} sceneFile={writer.sceneFile} locked={writer.locked} generatorPending={false}
-    refusalVersion={writer.refusalVersion} onCommand={writer.write} onRenderShot={() => {}}
+    refusalVersion={writer.refusalVersion} onCommand={writer.write} head={false}
     {...(control.kind === "stage-review" ? { review: control.review } : control.mode === "construct"
       ? { constructionRequest: { actionId: control.actionId, conversationId, shotId: control.shotId, instruction: control.instruction ?? "", preserve: control.preserve ?? "none" } }
       : { playblastRequest: { actionId: control.actionId, conversationId, shotId: control.shotId } })} />

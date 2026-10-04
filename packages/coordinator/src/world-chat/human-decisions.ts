@@ -68,7 +68,7 @@ export async function projectHumanDecisions(store: WorldStore, loaded: WorldChat
   try { reviews = await listStageReviews(store); }
   catch { problems.push("Stage review drafts could not be read. Reopen the world before Keep."); }
   const stageReviews: StageReview[] = [];
-  const kept = await keptStageReviewIds(store);
+  const kept = reviews.length ? await keptStageReviewIds(store) : new Set<string>();
   for (const review of reviews.filter(value => value.status === "pending")) {
     if (kept.has(review.id)) continue;
     stageReviews.push(review);

@@ -468,7 +468,7 @@ const CLIENT_COMMAND_METADATA = {
   "stage-construct-cancel": humanOnly("The person can stop Stage construction.", "stage"),
   "stage-review-discard": humanOnly("Only the person can discard a constructed Stage draft.", "stage"),
   "stage-playblast": action("production", "host-action", "scene-store", "host-file-access", ["scenes", "shots", "stage"], { preparation: ARTIFACT_SOURCE }),
-  "conversation-action-stage-playblast-complete": humanOnly("Only the renderer may complete an approved Stage recording handoff."),
+  "conversation-action-stage-playblast-complete": humanOnly("Only the renderer may complete an approved Stage recording handoff.", "stage"),
   "reject-take": action("production", "take-review", "take-review", "authored-change", ["takes", "shots", "sheets"]),
   "set-trim": action("production", "command", "take-review", "authored-change", ["takes", "shots"]),
   "timeline-move-picture": action("production", "command", "timeline", "authored-change", ["timeline", "shots"], { reads: COMPLETE_TIMELINE_READ }),

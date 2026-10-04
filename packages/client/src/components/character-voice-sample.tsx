@@ -90,15 +90,15 @@ export function VoiceSampleFlow({ world, sheet, onClose, initialReview, inline =
   useEffect(() => subscribeVoiceSampleResults(result => {
     if (result.worldId !== world.meta.worldId || result.sheetId !== sheet.id) return;
     if (result.requestId !== pending.current) {
-      if (result.status === "assigned" || result.status === "cleared") { setReview(null); retainReview(null); setNotice("The character's voice review was decided on another surface."); }
+      if (result.status === "assigned" && review && result.operationId === review.operationId) { setReview(null); retainReview(null); setNotice("This voice review was decided on another surface."); }
       return;
     }
     pending.current = null; setBusy(false);
     if (result.review) { retainReview(result.review.operationId); setReview(result.review); setSingleSpeaker(false); setNoMusic(false); setAckWarnings(false); }
-    else if (result.status === "assigned" || result.status === "cleared") { setReview(null); retainReview(null); }
+    else if (result.status === "assigned" && (!result.operationId || result.operationId === review?.operationId)) { setReview(null); retainReview(null); }
     setNotice(result.reason ?? ({ prepared: "Prepared locally. Audition and review before assigning.", assigned: "Character voice reference assigned.",
       cleared: "Voice reference cleared. Source media is retained.", withdrawn: "Cloud reuse withdrawn. Future uploads are blocked; submitted work is unchanged.", refused: "Unable to complete this action." }[result.status]));
-  }), [world.meta.worldId, sheet.id]);
+  }), [world.meta.worldId, sheet.id, review?.operationId]);
   useEffect(() => subscribeQueueResults(result => {
     if (result.requestId !== generation.current) return;
     generation.current = null; setBusy(false);

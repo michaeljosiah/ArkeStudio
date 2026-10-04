@@ -31,7 +31,7 @@ import { HarnessModelCatalog, selectHarnessModel, type LanguageModelSelection } 
 import { prepareReferences, validateSeedanceReferences } from "./media/prepare-references.js";
 import { stageConstructionHandoff } from "./world-chat/actions.js";
 import { projectHumanDecisions } from "./world-chat/human-decisions.js";
-import { discardStageReview, keepStageReview, keptStageReviewIds, listStageReviews, recoverRetainedStageReviews, retainStageReview } from "./productions/stage-review.js";
+import { compactSettledStageReviews, discardStageReview, keepStageReview, keptStageReviewIds, listStageReviews, recoverRetainedStageReviews, retainStageReview } from "./productions/stage-review.js";
 import { handleProductionSetupCommand } from "./productions/setup-command.js";
 import { recoverProductionSetups } from "./productions/setup.js";
 import { saveProductionNarrative } from "./productions/narrative.js";
@@ -18119,7 +18119,7 @@ export class Coordinator {
             if (msg.kind === "prepare-character-voice-sample" && !this.opts.audioMediaTools) throw new Error("Audio preparation needs the configured FFmpeg and ffprobe tools.");
             const review = msg.kind === "resume-character-voice-sample" ? await resumeCharacterSample(store, msg.sheetId, msg.operationId) : await prepareCharacterSample(store, this.opts.audioMediaTools!, msg);
             this.emit({ at: new Date().toISOString(), type: "voice.sample-result", requestId: msg.requestId,
-              worldId: msg.worldId, sheetId: msg.sheetId, status: "prepared", review });
+              worldId: msg.worldId, sheetId: msg.sheetId, operationId: review.operationId, status: "prepared", review });
             await this.refreshSelectedHumanDecisions(store);
           } else {
             if (msg.kind === "accept-character-voice-sample") await acceptCharacterSample(store, msg);
@@ -18127,7 +18127,7 @@ export class Coordinator {
             else await withdrawCharacterSample(store, msg.sheetId, msg.expectedHash);
             await this.refreshWorldSnapshot(msg.worldId);
             this.emit({ at: new Date().toISOString(), type: "voice.sample-result", requestId: msg.requestId,
-              worldId: msg.worldId, sheetId: msg.sheetId, status: msg.kind === "accept-character-voice-sample" ? "assigned" :
+              worldId: msg.worldId, sheetId: msg.sheetId, ...(msg.kind === "accept-character-voice-sample" ? { operationId: msg.operationId } : {}), status: msg.kind === "accept-character-voice-sample" ? "assigned" :
                 msg.kind === "clear-character-voice-sample" ? "cleared" : "withdrawn" });
           }
         } catch {
@@ -20434,6 +20434,7 @@ export class Coordinator {
    * none of them would otherwise be noticed.
    */
   private async refreshConversations(store: WorldStore): Promise<void> {
+    await compactSettledStageReviews(store);
     let discovery = await store.ownedWrite(() => discoverConversations(store.dir));
     if (await recoverRetainedStageReviews(store, discovery.activeActions, this.conversationActionLifecycle(store))) {
       discovery = await store.ownedWrite(() => discoverConversations(store.dir));
@@ -20740,7 +20741,7 @@ export class Coordinator {
 
   private async refreshStageReviews(store: WorldStore): Promise<void> {
     try {
-      const reviews = await listStageReviews(store), kept = await keptStageReviewIds(store);
+      const reviews = await listStageReviews(store), kept = reviews.length ? await keptStageReviewIds(store) : new Set<string>();
       const pending = reviews.filter(review => review.status === "pending" && !kept.has(review.id));
       if (this.stillOpen(store)) this.readModel.setStageReviews(pending);
     } catch {

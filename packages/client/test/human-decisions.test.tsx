@@ -57,6 +57,11 @@ it("renders the screen's voice attestations inline, requires each tick, and sett
         measurements: { samplePeakDbfs: null, rmsDbfs: null, fullScaleSampleCount: null, leadingSilenceSec: null, trailingSilenceSec: null, longestInternalSilenceSec: null, dcOffset: null },
         checks: Object.fromEntries(codes.map(code => [code, { code, outcome: code === "silence" ? "warning" : "pass" }])) } } });
   const { host, sent } = await mount(<HumanDecisionCardView card={card({ kind: "voice-sample", review })} />);
+  for (const event of [{ status: "assigned" as const, operationId: "05734c91-c438-4543-acec-a619c95d2e3e" }, { status: "cleared" as const }]) {
+    await act(async () => __applyEventForTest({ type: "voice.sample-result", at, worldId: FIXTURE_STATE.world!.meta.worldId,
+      sheetId: review.sheetId, requestId: newId("ar").slice(3), ...event }));
+    assert.ok(host.querySelector('[data-testid="voice-review"]'), "another candidate's assignment or clearing the assigned clip cannot decide this pending review");
+  }
   const use = host.querySelector<HTMLButtonElement>('[data-testid="sample-use"]')!;
   assert.equal(use.disabled, true); assert.equal(dom.document.querySelector('[role="dialog"]'), null, "the review remains inside the thread");
   const tick = async (id: string) => {
@@ -72,17 +77,22 @@ it("renders the screen's voice attestations inline, requires each tick, and sett
   assert.equal(message.operationId, review.operationId); assert.equal(message.rightsBasis, "authorized");
   assert.deepEqual(message.warningCodes, ["silence"]); assert.equal(message.singleSpeaker, true); assert.equal(message.noMusic, true);
   await act(async () => __applyEventForTest({ type: "voice.sample-result", at, worldId: FIXTURE_STATE.world!.meta.worldId,
-    sheetId: review.sheetId, requestId: newId("ar").slice(3), status: "assigned" }));
+    sheetId: review.sheetId, requestId: newId("ar").slice(3), status: "assigned", operationId: review.operationId }));
   assert.equal(host.querySelector('[data-testid="voice-review"]'), null);
 });
 
-it("hydrates the same retained draft on the Stage screen, binds Keep to its review, and observes settlement elsewhere", async () => {
+function stageFixture() {
   const world = structuredClone(FIXTURE_STATE.world!), production = world.productions.find(p => p.meta.id === "saltlight")!;
   const scene = production.scenes.find(s => s.id === "sc_04")!, shot = orderedShots(scene).find(s => s.id === "sh_12")!;
   const review = StageReviewSchema.parse({ id: "de6ad993-50f6-4f86-88f8-03ed93c5b824", worldId: world.meta.worldId, productionId: production.meta.id,
     sceneId: scene.id, shotId: shot.id, baseVersion: scene.version, actionId: newId("act"), conversationId: newId("cv"), createdAt: "2026-10-04T12:00:00Z", status: "pending",
     draft: { staging: { keys: [{ t: 0, p: [0, 2, 5], l: [0, 1, 0] }, { t: shot.durationSec ?? 4, p: [1, 2, 5], l: [0, 1, 0] }] },
       cast: [], sets: [], assumptions: [], assessment: "Reviewed in chat", inspected: ["camera"] } });
+  return { world, production, scene, shot, review };
+}
+
+it("hydrates the same retained draft on the Stage screen, binds Keep to its review, and observes settlement elsewhere", async () => {
+  const { world, production, scene, shot, review } = stageFixture();
   let keptId: string | undefined;
   const { host } = await mount(<SelectionProvider value={{ subject: { kind: "shot", shotId: shot.id }, select: () => {} }}>
     <SceneStage world={world} production={production} scene={scene} aspect="16:9" sceneFile="04-the-verse-rises" locked={false}
@@ -94,4 +104,34 @@ it("hydrates the same retained draft on the Stage screen, binds Keep to its revi
   await press(keep()!); assert.equal(keptId, review.id, "Keep carries the retained authority without inventing a second edit command");
   await act(async () => __setStateForTest({ ...FIXTURE_STATE, world, stageReviews: [] }));
   assert.equal(keep(), undefined, "a decision on another surface clears the bound screen draft");
+});
+
+it("preserves unsaved Stage edits until the person decides them before hydrating a newly arrived review", async () => {
+  const { world, production, scene, shot, review } = stageFixture();
+  shot.staging = { version: 1, keys: review.draft.staging.keys, rigIntensity: 1 };
+  let keptId: string | undefined;
+  const { host, sent } = await mount(<SelectionProvider value={{ subject: { kind: "shot", shotId: shot.id }, select: () => {} }}>
+    <SceneStage world={world} production={production} scene={scene} aspect="16:9" sceneFile="04-the-verse-rises" locked={false}
+      generatorPending={false} refusalVersion={0} onCommand={(_, id) => { keptId = id; return true; }} />
+  </SelectionProvider>);
+  const input = host.querySelector<HTMLInputElement>('[aria-label="Rig intensity"]')!;
+  const props = (input as unknown as Record<string, { onFocus: () => void; onChange: (event: { target: { value: string } }) => void }>)[Object.keys(input).find(key => key.startsWith("__reactProps$"))!]!;
+  await act(async () => props.onFocus());
+  await act(async () => props.onChange({ target: { value: "1.75" } }));
+  await act(async () => __setStateForTest({ ...FIXTURE_STATE, world, stageReviews: [review] }));
+  assert.equal(input.value, "1.75", "the incoming constructed draft cannot overwrite an unsaved camera edit");
+  assert.match(host.textContent!, /Keep or discard your current Stage edits/);
+  await press(host.querySelector<HTMLElement>('[aria-label="Discard"]')!);
+  assert.equal(sent.some(message => message.kind === "stage-review-discard"), false, "discarding manual edits does not discard the new retained authority");
+  assert.match(host.textContent!, /Reviewed in chat/);
+  await press([...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Keep")!);
+  assert.equal(keptId, review.id);
+});
+
+it("shows a fixed-shot Stage review without a dead shot stepper or render command", async () => {
+  const { review } = stageFixture();
+  const { host } = await mount(<HumanDecisionCardView card={card({ kind: "stage-review", review })} />);
+  assert.ok(host.querySelector('[data-testid="workspace-stage"]'));
+  assert.equal(host.textContent!.includes("Render with this"), false);
+  assert.equal(host.querySelector('.fy-swstage__head'), null);
 });

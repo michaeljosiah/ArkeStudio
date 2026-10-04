@@ -178,8 +178,10 @@ Production human controls also run coordinator `test/world-chat/human-decisions.
 `test/audio/character-sample.test.ts` and `test/audio/preparation.test.ts`, plus client
 `test/human-decisions.test.tsx`, `test/scene-stage.test.tsx` and `test/voice-sample-take.test.tsx`.
 These exercise ordinary screen commands settling the thread, read-only voice review discovery,
-inline rights attestations, retained Stage draft reopening, stale/duplicate Keep, discard,
-path containment and interrupted host completion without another construction. The parity
+inline rights attestations, operation-specific cross-surface voice settlement, metadata-only
+voice discovery with full Resume/Accept revalidation, retained Stage draft reopening without
+overwriting unsaved edits, stale/duplicate Keep, discard, settled-draft archival, path containment
+and interrupted host completion from pending or archived drafts without another construction. The parity
 fixture requires every pipeline human command's in-thread surface and keeps those commands
 out of model preparation. This scripted evidence does not replace installed-renderer acceptance.
 

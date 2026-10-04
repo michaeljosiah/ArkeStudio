@@ -138,7 +138,7 @@ export function SceneStage({
   /** Counts up on every refused scene write, so a wait can end on a refusal as well as a landing. */
   refusalVersion: number;
   onCommand: (command: Command, stageReviewId?: string) => boolean;
-  onRenderShot: (shotId: string) => void;
+  onRenderShot?: (shotId: string) => void;
   constructionRequest?: { actionId: string; conversationId: string; shotId: string; instruction: string; preserve: "blocking" | "camera" | "none" };
   playblastRequest?: { actionId: string; conversationId: string; shotId: string };
   review?: StageReview;
@@ -615,6 +615,10 @@ export function SceneStage({
   }), [world.meta.worldId, shot?.id, scene.id, scene.version, persisted?.version]);
   useEffect(() => {
     if (retained && retained.id !== hydratedReviewId.current) {
+      if (draft !== null && moved && construction.current?.id !== retained.id && retainedReviewId.current !== retained.id) {
+        setNote("Keep or discard your current Stage edits before reviewing the constructed draft.");
+        return;
+      }
       hydratedReviewId.current = retained.id; retainedReviewId.current = retained.id;
       aiDraftVersion.current = retained.baseVersion;
       cameraDirty.current = true; blockingDirty.current = true; scopeDirty.current = true;
@@ -626,7 +630,7 @@ export function SceneStage({
       cameraDirty.current = false; blockingDirty.current = false; scopeDirty.current = false;
       setDraft(null);
     }
-  }, [retained, state?.stageReviews, constructing, persisted?.version]);
+  }, [retained, state?.stageReviews, constructing, persisted?.version, draft, moved]);
   useEffect(() => {
     if (inspectionRound === null || !data || !constructing) return;
     let live = true;
@@ -1560,7 +1564,7 @@ export function SceneStage({
                   >
                     {exporting === null ? "Export playblast" : `exporting… ${Math.round(exporting * 100)}%`}
                   </Button>
-                  <Button
+                  {onRenderShot && <Button
                     variant="primary"
                     size="sm"
                     // The session is prepared from the KEPT staging; a move still in hand would render the old one.
@@ -1569,7 +1573,7 @@ export function SceneStage({
                     onClick={() => onRenderShot(shot.id)}
                   >
                     {generatorPending ? "Opening…" : "Render with this"}
-                  </Button>
+                  </Button>}
                 </div>
               </div>
 
@@ -1584,7 +1588,7 @@ export function SceneStage({
       </div>
       {touch && <div className="fy-stage-gestures"><span>1 finger · orbit</span><span>2 fingers · pan / pinch</span><span>Double-tap · follow figure</span></div>}
 
-      {(touch || inspectorSheet) && working !== null && <div className="fy-stage-touch-ways"><Button variant="outline" disabled={!moved || locked || frozen} onClick={keep}>Keep blocking</Button><Button variant="primary" disabled={generatorPending || frozen || moved || stale || filed === undefined} title={moved ? "Keep the move first" : stale || filed === undefined ? "Export the current blockout from the inspector first" : undefined} onClick={() => onRenderShot(shot.id)}>Render with this</Button></div>}
+      {(touch || inspectorSheet) && working !== null && <div className="fy-stage-touch-ways"><Button variant="outline" disabled={!moved || locked || frozen} onClick={keep}>Keep blocking</Button>{onRenderShot && <Button variant="primary" disabled={generatorPending || frozen || moved || stale || filed === undefined} title={moved ? "Keep the move first" : stale || filed === undefined ? "Export the current blockout from the inspector first" : undefined} onClick={() => onRenderShot(shot.id)}>Render with this</Button>}</div>}
       {working === null ? null : (
         <div className="fy-swstage__timeline">
           <div className="fy-swstage__transport">

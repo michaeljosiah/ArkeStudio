@@ -42,6 +42,16 @@ it("reviewed assignment survives reopen, leaves source and TTS intact, and clear
   const warnings = Object.values(review.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code);
   const accept = { kind: "accept-character-voice-sample" as const, worldId: store.worldId, sheetId: "maren-kest", requestId: ulid(),
     operationId: review.operationId, warningCodes: warnings, singleSpeaker: true, noMusic: true, rightsBasis: "self" as const };
+  await writeFile(join(dir, "artifacts/sample.wav"), wav([1]));
+  assert.deepEqual(await pendingCharacterSampleReviews(store), { reviews: [review], problems: [] }, "snapshot discovery uses retained metadata without rehashing source bytes");
+  await assert.rejects(resumeCharacterSample(store, "maren-kest", review.operationId), /audio-source-changed/);
+  await assert.rejects(acceptCharacterSample(store, { ...accept, rightsBasis: null }), /audio-source-changed/);
+  await writeFile(join(dir, "artifacts/sample.wav"), bytes);
+  const retainedPath = join(dir, `.staging/audio/${review.operationId}/character.json`);
+  const retained = JSON.parse(await readFile(retainedPath, "utf8")) as { sourceFile?: string };
+  delete retained.sourceFile;
+  await writeFile(retainedPath, JSON.stringify(retained));
+  assert.deepEqual(await pendingCharacterSampleReviews(store), { reviews: [review], problems: [] }, "older contexts resolve the audition path from provenance metadata");
   await assert.rejects(acceptCharacterSample(store, { ...accept, noMusic: false }), /one speaker and no music/);
   await acceptCharacterSample(store, accept);
   await acceptCharacterSample(store, accept); // Lost response does not create another acceptance.

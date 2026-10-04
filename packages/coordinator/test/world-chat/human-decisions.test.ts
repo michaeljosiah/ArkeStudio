@@ -9,7 +9,7 @@ import { Coordinator } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
-import { retainStageReview } from "../../src/productions/stage-review.js";
+import { discardStageReview, retainStageReview } from "../../src/productions/stage-review.js";
 import { stageEditorRequests } from "../../src/productions/editor-requests.js";
 import { storeBatch, verifyCandidates } from "../../src/artifacts/extraction.js";
 import { setOwner } from "../../src/artifacts/filing.js";
@@ -61,7 +61,7 @@ it("projects existing authorities and settles screen and thread decisions throug
   assert.deepEqual(cards(), [], "reopening cannot resurrect a settled authority");
 });
 
-it("recovery resumes a retained construction at human review instead of starting the renderer's handoff again", async t => {
+for (const settled of [false, true]) it(`recovery completes a retained construction without repeating the renderer handoff (${settled ? "archived" : "pending"})`, async t => {
   const made = await makeTempRoot(), provider = new FsWorldProvider(made.root); t.after(() => provider.close());
   await provider.loadWorld(WORLD_ID);
   const store = provider.openStore()!, service = new WorldChatService(store.dir);
@@ -80,13 +80,15 @@ it("recovery resumes a retained construction at human review instead of starting
     actionId: action.actionId, expectedConversationSeq: (await service.load(conversation.id))!.seq, expectedStatus: "pending", decision: "approve", requestId: ulid() });
   assert.equal(decision.disposition, "recorded");
   assert.equal((await service.load(conversation.id))!.actions[0]!.status, "awaiting-host");
-  await retainStageReview(store, { id: randomUUID(), worldId: WORLD_ID, productionId: "saltlight", sceneId: scene.id, shotId,
+  const reviewId = randomUUID();
+  await retainStageReview(store, { id: reviewId, worldId: WORLD_ID, productionId: "saltlight", sceneId: scene.id, shotId,
     baseVersion: scene.version, conversationId: conversation.id, actionId: action.actionId, createdAt: AT, status: "pending",
     draft: { staging: { keys: [{ t: 0, p: [0, 2, 5], l: [0, 1, 0] }, { t: 4, p: [1, 2, 5], l: [0, 1, 0] }] },
       cast: [], sets: [], assumptions: [], assessment: "Inspected", inspected: ["camera"] } });
+  if (settled) await discardStageReview(store, reviewId);
   await internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId: conversation.id });
   assert.equal(coordinator.getState().worldChat!.actions[0]!.status, "completed");
-  assert.deepEqual(coordinator.getState().worldChat!.humanDecisions!.map(card => card.body.control.kind), ["stage-review"]);
+  assert.deepEqual(coordinator.getState().worldChat!.humanDecisions!.map(card => card.body.control.kind), settled ? [] : ["stage-review"]);
   assert.equal(coordinator.getState().stageConstructionRequests?.some(request => request.actionId === action.actionId), false);
 });
 
