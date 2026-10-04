@@ -129,7 +129,11 @@ const providerCalls = new ProviderCallStore(join(devRoot, "provider-calls", "cal
 // here, and an absent Codex answers "unavailable" rather than failing the stack.
 const codexImage = lazyCodexImageRunner({
   deps: { ledger }, onTrace: harnessTrace(devRoot),
-  discovery: process.env["ARKE_CODEX_CMD"] ?? storedHarness?.codexPath ? { configuredPath: process.env["ARKE_CODEX_CMD"] ?? storedHarness!.codexPath! } : {},
+  // Read at each start: a path chosen in Settings applies to the next check, not the next launch.
+  discovery: async () => {
+    const path = process.env["ARKE_CODEX_CMD"] ?? (await new AppSettingsFile(join(devRoot, "settings.json")).load().catch(() => null))?.harness.codexPath;
+    return path ? { configuredPath: path } : {};
+  },
 });
 const providerClients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: providerCalls, codexImage });
 

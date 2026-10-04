@@ -371,7 +371,7 @@ test("a dedicated image thread returns inline bytes, enables only the image flag
   const start = requests.find(request => request.method === "thread/start")!.params;
   assert.equal(start.config["features.image_generation"], true); assert.equal(start.config["features.shell_tool"], false);
   assert.deepEqual(start.dynamicTools, []); assert.equal(start.ephemeral, true); assert.notEqual(start.cwd, f.root);
-  await eventually(async () => (await f.requests()).some(request => request.method === "thread/archive"));
+  await eventually(async () => (await f.requests()).some(request => request.method === "thread/unsubscribe"));
 });
 
 test("image generation refuses logins the app-server does not support it for", async t => {
@@ -389,12 +389,53 @@ test("a plan limit is a typed error and unrecognised bytes are rejected", async 
   await assert.rejects(junk.adapter.generateImage({ prompt: "x" }), /not a supported image/);
 });
 
-test("reference images go to the image thread as local files and a mislabelled one is refused", async t => {
+test("reference images travel inline and a mislabelled one is refused", async t => {
   const f = await fixture("image-gen"); t.after(f.cleanup);
   const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("reference-bytes")]);
   await f.adapter.generateImage({ prompt: "like this", references: [{ contentType: "image/png", data: png }] });
   const turn = (await f.requests()).find(request => request.method === "turn/start")!.params;
-  assert.deepEqual(turn.input.map((part: any) => part.type), ["text", "localImage"]);
-  assert.match(turn.input[1].path, /reference-1\.png$/);
+  assert.deepEqual(turn.input.map((part: any) => part.type), ["text", "image"]);
+  assert.equal(turn.input[1].url, `data:image/png;base64,${png.toString("base64")}`);
   await assert.rejects(f.adapter.generateImage({ prompt: "x", references: [{ contentType: "image/jpeg", data: png }] }), /not the format it claims/);
+});
+
+test("an ephemeral image thread is released with thread/unsubscribe, which the server accepts, never archive", async t => {
+  const f = await fixture("image-gen"); t.after(f.cleanup);
+  await f.adapter.generateImage({ prompt: "x" });
+  const methods = (await f.requests()).map(request => request.method);
+  assert.ok(methods.includes("thread/unsubscribe")); assert.equal(methods.includes("thread/archive"), false);
+});
+
+test("a picture that finished is kept when the turn fails afterwards", async t => {
+  const f = await fixture("image-gen-late-failure"); t.after(f.cleanup);
+  const image = await f.adapter.generateImage({ prompt: "x" });
+  assert.equal(image.mimeType, "image/png");
+});
+
+test("cancelling before turn/start is answered leaves no unhandled rejection and retires the uncertain process", async t => {
+  const f = await fixture("image-gen-hang-all"); t.after(f.cleanup);
+  const unhandled: unknown[] = []; const record = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", record); t.after(() => { process.off("unhandledRejection", record); });
+  const abort = new AbortController();
+  const run = f.adapter.generateImage({ prompt: "x", signal: abort.signal });
+  await eventually(async () => (await f.requests()).some(request => request.method === "turn/start"));
+  abort.abort();
+  await assert.rejects(run, /cancelled/i);
+  await delay(50);
+  assert.deepEqual(unhandled, []);
+  // The adapter replaces a retired process by itself, so the proof is a second initialize.
+  await eventually(async () => (await f.requests()).filter(request => request.method === "initialize").length === 2);
+});
+
+test("cancelling one image before its turn starts does not fail another that shares the connection", async t => {
+  const f = await fixture("image-gen-hang-first"); t.after(f.cleanup);
+  const abort = new AbortController();
+  const first = f.adapter.generateImage({ prompt: "first", signal: abort.signal }); first.catch(() => {});
+  await eventually(async () => (await f.requests()).filter(request => request.method === "turn/start").length === 1);
+  const second = f.adapter.generateImage({ prompt: "second" });
+  await eventually(async () => (await f.requests()).filter(request => request.method === "turn/start").length === 2);
+  abort.abort();
+  await assert.rejects(first, /cancelled/i);
+  assert.equal((await second).mimeType, "image/png");
+  assert.equal(f.adapter.readiness().ready, true);
 });

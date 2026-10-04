@@ -11,6 +11,8 @@ const runner = (over: Partial<CodexImageRunner> = {}): CodexImageRunner => ({
   generate: async () => ({ bytes: PNG, mimeType: "image/png" }),
   ...over,
 });
+// The queue's own provider-fault reading (coordinator src/queue/classify.ts), kept in step by hand.
+const PROVIDER_FAULT = /(HTTP 401|HTTP 403|credential was rejected|unauthoriz|unauthent)/i;
 const noFetch = (() => Promise.reject(new Error("no network"))) as FetchLike;
 
 describe("codex image client", () => {
@@ -39,9 +41,9 @@ describe("codex image client", () => {
     const result = await client.submit("", { model: "codex-image", capability: "image", params: { prompt: "a lighthouse", references: [{}] }, imageReferences: [reference] });
     assert.equal(seen!.prompt, "a lighthouse"); assert.deepEqual(seen!.references, [reference]);
     assert.equal(result.artifacts![0]!.name, "image-1.png"); assert.equal(result.costMicroUsd, undefined);
-    assert.deepEqual(await client.poll("", result.remoteId), { state: "succeeded" });
-    assert.deepEqual(await client.fetchArtifacts("", result.remoteId), result.artifacts);
-    assert.equal((await client.poll("", "missing")).state, "failed");
+    // Inline artifacts are the dispatcher's to persist; the client keeps nothing to poll or fetch.
+    assert.equal((await client.poll()).state, "failed");
+    await assert.rejects(client.fetchArtifacts(), /not kept/);
     assert.equal(client.declarations.reportsCost, false);
   });
 
@@ -57,6 +59,12 @@ describe("codex image client", () => {
     await assert.rejects(new CodexClient(runner({ generate: async () => { throw limit; } })).submit("", { model: "m", capability: "image", params: { prompt: "x" } }),
       error => error instanceof ProviderRequestRejectedError && /image limit.*2030/.test(error.message));
     await assert.rejects(new CodexClient(runner({ generate: async () => { throw new Error("Codex image generation is not available for this login."); } })).submit("", { model: "m", capability: "image", params: { prompt: "x" } }),
-      error => error instanceof ProviderAuthError);
+      error => error instanceof ProviderAuthError && PROVIDER_FAULT.test(error.message));
+  });
+
+  it("disposing the client stops the runner it was given", async () => {
+    let stopped = 0;
+    new CodexClient(runner({ dispose: () => { stopped++; } })).dispose();
+    assert.equal(stopped, 1);
   });
 });

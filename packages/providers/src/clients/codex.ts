@@ -23,6 +23,8 @@ export interface CodexImageRunner {
     references: readonly PreparedImageReference[];
     signal?: AbortSignal;
   }): Promise<{ bytes: Uint8Array; mimeType: "image/png" | "image/jpeg" | "image/webp" }>;
+  /** Stops whatever the host started for this runner. No call may follow it. */
+  dispose?(): Promise<void> | void;
 }
 
 const EXTENSION = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" } as const;
@@ -30,8 +32,9 @@ const EXTENSION = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp
 /**
  * Images made by the user's own Codex sign-in. There is no credential of ours — the `key` every
  * method takes is empty and unused — and sign-in state is a probe, as for Higgsfield. The call is
- * synchronous like OpenAI's: the picture comes back from `submit`, nothing survives a restart,
- * and an interrupted submission is the user's to ask about because there is no key to look up.
+ * synchronous like OpenAI's: the picture comes back from `submit` and is not kept here — the
+ * dispatcher persists inline artifacts and never polls — so nothing survives a restart, and an
+ * interrupted submission is the user's to ask about because there is no key to look up.
  * Nothing is reported as a cost: the plan pays, and a figure invented here would be recorded.
  */
 export class CodexClient implements ProviderClient {
@@ -43,7 +46,6 @@ export class CodexClient implements ProviderClient {
     reportsCost: false,
   };
   private counter = 0;
-  private readonly completed = new Map<string, FetchedArtifact[]>();
 
   constructor(private readonly runner: CodexImageRunner) {}
 
@@ -79,25 +81,28 @@ export class CodexClient implements ProviderClient {
         const when = typeof resetsAt === "number" ? ` It resets ${new Date(resetsAt * 1000).toISOString()}.` : "";
         throw new ProviderRequestRejectedError(`codex: the plan's image limit has been reached.${when}`);
       }
-      if (err instanceof Error && /not signed in|not available for this login/i.test(err.message)) throw new ProviderAuthError(this.id, `codex: ${err.message}`);
+      // The queue classifies by message, and only a message it recognises pauses the lane for a
+      // sign-in instead of failing the job: this phrase is the one its credential path reads.
+      if (err instanceof Error && /not signed in|not available for this login/i.test(err.message)) {
+        throw new ProviderAuthError(this.id, "codex: the credential was rejected — Codex is no longer signed in with ChatGPT");
+      }
       throw err;
     }
     const remoteId = `codex-${++this.counter}-${Date.now()}`;
     const artifacts: FetchedArtifact[] = [{ name: `image-1.${EXTENSION[image.mimeType]}`, contentType: image.mimeType, data: image.bytes }];
-    this.completed.set(remoteId, artifacts);
     return { remoteId, acceptedAt: new Date().toISOString(), artifacts };
   }
 
-  async poll(_key: string, remoteId: string): Promise<PollResult> {
-    return this.completed.has(remoteId)
-      ? { state: "succeeded" }
-      : { state: "failed", error: "codex: unknown request id (synchronous; results do not survive a restart)" };
+  async poll(): Promise<PollResult> {
+    return { state: "failed", error: "codex: unknown request id (synchronous; results are returned by submit and do not survive a restart)" };
   }
 
-  async fetchArtifacts(_key: string, remoteId: string): Promise<FetchedArtifact[]> {
-    const hit = this.completed.get(remoteId);
-    if (!hit) throw new Error("codex: no cached result for this id");
-    return hit;
+  async fetchArtifacts(): Promise<FetchedArtifact[]> {
+    throw new Error("codex: results are returned by submit and are not kept");
+  }
+
+  dispose(): void {
+    void Promise.resolve(this.runner.dispose?.()).catch(() => {});
   }
 
   async cancel(): Promise<void> {

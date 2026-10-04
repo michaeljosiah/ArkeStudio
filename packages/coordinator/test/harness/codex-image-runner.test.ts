@@ -4,10 +4,11 @@ import { setTimeout as delay } from "node:timers/promises";
 import { lazyCodexImageRunner } from "../../src/harness/v2-launch.js";
 
 const FOUND = { command: "codex", args: [], helper: "", source: "path" as const, version: "0.160.0" };
-function rig(over: { found?: typeof FOUND | null; initFails?: boolean } = {}) {
+function rig(over: { found?: typeof FOUND | null; initFails?: boolean; path?: { value: string } } = {}) {
   const log: string[] = []; let discoveries = 0;
   const runner = lazyCodexImageRunner({
     idleMs: 40,
+    ...(over.path ? { discovery: () => (over.path!.value ? { configuredPath: over.path!.value } : {}) } : {}),
     discover: async () => { discoveries++; return { found: over.found === undefined ? FOUND : over.found, reason: over.found === null ? "Codex was not found on this machine." : null }; },
     createAdapter: () => {
       const id = log.filter(line => line.startsWith("create")).length + 1; log.push(`create ${id}`);
@@ -54,5 +55,25 @@ test("a failed start is disposed and not remembered", async () => {
   await assert.rejects(r.runner.status(), /init failed/);
   await assert.rejects(r.runner.status(), /init failed/);
   assert.deepEqual(r.log, ["create 1", "dispose 1", "create 2", "dispose 2"]);
+  await r.runner.dispose();
+});
+
+test("dispose is terminal: a later ask is refused rather than starting a new app-server", async () => {
+  const r = rig();
+  await r.runner.status(); await r.runner.dispose();
+  await assert.rejects(r.runner.status(), /has been stopped/);
+  await assert.rejects(r.runner.generate({ prompt: "x", references: [] }), /has been stopped/);
+  assert.deepEqual(r.log, ["create 1", "dispose 1"]);
+});
+
+test("a Codex path chosen in Settings replaces the running app-server at the next ask", async () => {
+  const path = { value: "" };
+  const r = rig({ path });
+  await r.runner.status();
+  path.value = "/opt/codex";
+  await r.runner.status();
+  assert.deepEqual(r.log, ["create 1", "dispose 1", "create 2"]);
+  await r.runner.status();
+  assert.deepEqual(r.log, ["create 1", "dispose 1", "create 2"], "an unchanged path keeps the one running");
   await r.runner.dispose();
 });

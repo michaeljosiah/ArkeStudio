@@ -53,7 +53,10 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
     const secrets = new SecretRegistry();
     const calls = new ProviderCallStore(join(options.appRoot, "provider-calls", "calls.jsonl"), secrets);
     codexImage = lazyCodexImageRunner({ deps: { ledger }, onTrace: harnessTrace(options.appRoot),
-      discovery: settings.harness.codexPath ? { configuredPath: settings.harness.codexPath } : {} });
+      discovery: async () => {
+        const path = (await new AppSettingsFile(join(options.appRoot, "settings.json")).load().catch(() => null))?.harness.codexPath;
+        return path ? { configuredPath: path } : {};
+      } });
     const clients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: calls, codexImage });
     const host = createStudioHost({
       provider, appRoot: options.appRoot, appVersion: options.appVersion,

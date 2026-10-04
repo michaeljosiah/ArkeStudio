@@ -363,13 +363,14 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
 }
 
 export interface LazyCodexImageOptions {
-  discovery?: CodexDiscoveryOptions;
+  /** A function is read at each start, so a path chosen in Settings applies without a restart. */
+  discovery?: CodexDiscoveryOptions | (() => CodexDiscoveryOptions | Promise<CodexDiscoveryOptions>);
   deps?: SupervisorDeps;
   onTrace?: (line: Record<string, unknown>) => void;
   /** How long an idle app-server lingers before it is stopped; a probe alone should not keep one. */
   idleMs?: number;
   /** Test seams: the real ones find a Codex on this machine and start its app-server. */
-  discover?: () => Promise<{ found: DiscoveredCodex | null; reason: string | null }>;
+  discover?: (options: CodexDiscoveryOptions) => Promise<{ found: DiscoveredCodex | null; reason: string | null }>;
   createAdapter?: (found: DiscoveredCodex) => Pick<CodexAdapter, "init" | "imageStatus" | "generateImage" | "dispose">;
 }
 
@@ -384,7 +385,8 @@ export interface LazyCodexImageOptions {
  * answer, not an error, and is looked for again on the next ask.
  */
 export function lazyCodexImageRunner(opts: LazyCodexImageOptions = {}): CodexImageRunner & { dispose(): Promise<void> } {
-  const discover = opts.discover ?? (() => discoverCodex(opts.discovery ?? {}));
+  const discover = opts.discover ?? ((options: CodexDiscoveryOptions) => discoverCodex(options));
+  const resolveDiscovery = async (): Promise<CodexDiscoveryOptions> => typeof opts.discovery === "function" ? opts.discovery() : (opts.discovery ?? {});
   const create = opts.createAdapter ?? ((found: DiscoveredCodex) => new CodexAdapter({ command: found.command, args: found.args, env: codexCredentialEnv({}),
     ...ownedChildHooks("codex-image", found.command, opts.deps, opts.onTrace),
     ...(opts.onTrace ? { onTrace: opts.onTrace } : {}),
@@ -392,6 +394,8 @@ export function lazyCodexImageRunner(opts: LazyCodexImageOptions = {}): CodexIma
   const idleMs = opts.idleMs ?? 60_000;
   type Adapter = ReturnType<typeof create>;
   let current: Promise<Adapter> | null = null;
+  let currentPath = "";
+  let disposed = false;
   let busy = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const stop = async () => {
@@ -399,9 +403,15 @@ export function lazyCodexImageRunner(opts: LazyCodexImageOptions = {}): CodexIma
     if (prior) await (await prior.catch(() => null))?.dispose();
   };
   const acquire = async (): Promise<Adapter> => {
+    if (disposed) throw new Error("The Codex image runner has been stopped.");
+    const options = await resolveDiscovery();
+    // A different executable was chosen: the running one answers for the old path. Replace it when
+    // nothing else is using it, and otherwise let the work in flight finish on the one it started on.
+    if (current && currentPath !== (options.configuredPath ?? "") && busy <= 1) await stop();
     if (!current) {
+      currentPath = options.configuredPath ?? "";
       const attempt = (async () => {
-        const discovered = await discover();
+        const discovered = await discover(options);
         if (!discovered.found) throw new Error(discovered.reason ?? "Codex was not found on this machine.");
         const adapter = create(discovered.found);
         try { await adapter.init(); } catch (error) { await adapter.dispose(); throw error; }
@@ -424,6 +434,6 @@ export function lazyCodexImageRunner(opts: LazyCodexImageOptions = {}): CodexIma
   return {
     status: signal => use(adapter => adapter.imageStatus(signal)),
     generate: input => use(adapter => adapter.generateImage(input)),
-    dispose: async () => { clearTimeout(timer); await stop(); },
+    dispose: async () => { disposed = true; clearTimeout(timer); await stop(); },
   };
 }

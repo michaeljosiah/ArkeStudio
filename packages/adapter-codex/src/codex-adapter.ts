@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
@@ -271,8 +271,7 @@ export class CodexAdapter implements HarnessAdapter {
 
   /**
    * One image from a dedicated thread: no Arke tools, no shell, an empty temporary directory.
-   * References are written into that directory and handed over as local images, which keeps
-   * them out of the prompt and out of anything Codex persists beyond the thread.
+   * References travel inline as data-URL images, so nothing of theirs is written to disk here.
    * Bytes come from the item's inline result (the Responses API's base64 field); a path the server
    * reports is never opened, since it names a location this adapter did not choose.
    */
@@ -287,6 +286,7 @@ export class CodexAdapter implements HarnessAdapter {
     if (!selected) throw new Error("Codex did not report a model to generate with.");
     const cwd = await mkdtemp(join(tmpdir(), "arke-codex-image-"));
     let threadId: string | null = null;
+    let turnError: Error | null = null;
     try {
       const response = object(await rpc.request("thread/start", {
         model: selected.id, modelProvider: selected.provider, allowProviderModelFallback: false,
@@ -294,37 +294,69 @@ export class CodexAdapter implements HarnessAdapter {
         sandbox: "read-only", approvalPolicy: "untrusted", developerInstructions: "",
         baseInstructions: "Create exactly one image for the request with the image generation tool. Do not run commands or write files. Reply with one short sentence.",
         config: confinedConfig(this.priorConfig, false, { imageGeneration: true }), dynamicTools: [],
-      }, input.signal));
+      }, input.signal, late => { const lateId = object(object(late).thread).id; if (typeof lateId === "string") void this.releaseImageThread(rpc, lateId); }));
       const id = object(response.thread).id;
       if (typeof id !== "string" || this.imageJobs.has(id) || this.threads.has(id)) throw new Error("Codex returned an unusable thread for image generation.");
       threadId = id;
       let settle!: (error?: Error) => void;
       const settled = new Promise<void>((resolve, reject) => { settle = error => error ? reject(error) : resolve(); });
+      // Cancelling while turn/start is pending rejects this before anything awaits it.
+      settled.catch(() => {});
       const job: ImageJob = { turnId: null, items: [], settle };
       this.imageJobs.set(id, job);
-      const stop = () => { void rpc.request("turn/interrupt", { threadId: id, turnId: job.turnId }, AbortSignal.timeout(5000)).catch(() => rpc.dispose()); settle(new Error("Image generation cancelled.")); };
+      const stop = () => {
+        settle(new Error("Image generation cancelled."));
+        // Before turn/started there is no turn to name, and an interrupt with a null id is only
+        // refused. The connection is shared with other images, so a refusal retires it only when
+        // this job is its sole user; otherwise the thread is simply archived below.
+        if (job.turnId === null) return;
+        void rpc.request("turn/interrupt", { threadId: id, turnId: job.turnId }, AbortSignal.timeout(5000))
+          .catch(() => this.retireIfAlone(rpc));
+      };
       input.signal?.addEventListener("abort", stop, { once: true });
+      let admitted = false;
       try {
-        const files: JsonObject[] = [];
-        for (const [index, reference] of (input.references ?? []).entries()) {
+        for (const reference of input.references ?? []) {
           if (imageType(Buffer.from(reference.data.subarray(0, 16))) !== reference.contentType) throw new Error("A reference image is not the format it claims.");
-          const path = join(cwd, `reference-${index + 1}.${reference.contentType === "image/jpeg" ? "jpg" : reference.contentType.slice(6)}`);
-          await writeFile(path, reference.data); files.push({ type: "localImage", path });
         }
-        await rpc.request("turn/start", { threadId: id, input: [{ type: "text", text: input.prompt }, ...files], environments: [] }, input.signal);
-        await settled;
+        const images = (input.references ?? []).map(reference => ({ type: "image", url: `data:${reference.contentType};base64,${Buffer.from(reference.data).toString("base64")}` }));
+        await rpc.request("turn/start", { threadId: id, input: [{ type: "text", text: input.prompt }, ...images], environments: [] }, input.signal);
+        admitted = true;
+        await settled.catch(error => { turnError = error instanceof Error ? error : new Error(String(error)); });
+      } catch (error) {
+        // An unanswered or cancelled turn/start may already be generating, and the allowance is
+        // spent by generating. Name the turn when it announced itself; otherwise stop the process
+        // that holds it, which is the only bounded cancellation left — unless other images share
+        // it, in which case the thread is released below and they are left running.
+        if (!admitted && job.turnId !== null) await rpc.request("turn/interrupt", { threadId: id, turnId: job.turnId }, AbortSignal.timeout(5000)).catch(() => this.retireIfAlone(rpc));
+        else if (!admitted) this.retireIfAlone(rpc);
+        throw error;
       } finally { input.signal?.removeEventListener("abort", stop); }
+      input.signal?.throwIfAborted();
+      // A finished picture outranks a turn that failed afterwards: the allowance is already spent,
+      // so discarding it would record a failure and invite a retry that spends it again.
+      for (const item of job.items) {
+        if (typeof item.result !== "string" || item.result.length === 0) continue;
+        const bytes = Buffer.from(item.result, "base64"); const mimeType = imageType(bytes);
+        if (mimeType) return { bytes, mimeType, ...(typeof item.revisedPrompt === "string" ? { revisedPrompt: item.revisedPrompt } : {}) };
+      }
       const failed = job.items.map(item => object(item.failure)).find(failure => failure.type === "usageLimitExceeded");
       if (failed) throw new CodexImageLimitError(typeof failed.resetsAt === "number" ? failed.resetsAt : null);
-      const item = job.items.find(candidate => typeof candidate.result === "string" && candidate.result.length > 0);
-      if (!item || typeof item.result !== "string") throw new Error("Codex finished without producing an image.");
-      const bytes = Buffer.from(item.result, "base64"); const mimeType = imageType(bytes);
-      if (!mimeType) throw new Error("Codex returned data that is not a supported image.");
-      return { bytes, mimeType, ...(typeof item.revisedPrompt === "string" ? { revisedPrompt: item.revisedPrompt } : {}) };
+      const lateError = turnError as Error | null;
+      if (lateError) throw lateError;
+      throw new Error(job.items.some(item => typeof item.result === "string" && item.result.length > 0) ? "Codex returned data that is not a supported image." : "Codex finished without producing an image.");
     } finally {
-      if (threadId) { this.imageJobs.delete(threadId); void rpc.request("thread/archive", { threadId }).catch(() => {}); }
+      if (threadId) { this.imageJobs.delete(threadId); await this.releaseImageThread(rpc, threadId); }
       await rm(cwd, { recursive: true, force: true }).catch(() => {});
     }
+  }
+  /** Ephemeral threads are not archivable (the server refuses and leaves them loaded); unsubscribing is what releases one. */
+  private async releaseImageThread(rpc: CodexRpc, threadId: string): Promise<void> {
+    await rpc.request("thread/unsubscribe", { threadId }, AbortSignal.timeout(5000)).catch(() => {});
+  }
+  /** A shared connection is retired only when no other image or session is using it. */
+  private retireIfAlone(rpc: CodexRpc): void {
+    if (this.rpc === rpc && this.imageJobs.size <= 1 && this.sessions.size === 0) void rpc.dispose();
   }
   private retireImageJobs(reason: string): void { for (const job of this.imageJobs.values()) job.settle(new Error(reason)); }
   private imageNotification(job: ImageJob, method: string, params: JsonObject): void {
