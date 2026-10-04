@@ -124,9 +124,47 @@ export const CharacterLookSchema = z
         z.object({ kind: z.literal("scene"), productionId: SlugSchema, sceneId: z.string().min(1) }).strict(),
       ])
       .optional(),
+    /**
+     * A look made for a chapter's pictures (design turn 193, SPEC-047 R-112): `full-body` is a
+     * full-length image in the clothing its `prompt` says, `portrait` the head and shoulders. Absent
+     * on every look made before it, which are read as they were.
+     */
+    framing: z.enum(["full-body", "portrait"]).optional(),
+    /** The main photo (file within the kit directory) the look was made from, so a later photo marks it `older face` (R-113). */
+    mainFile: z.string().min(1).optional(),
+    /**
+     * The look's close view (R-109): a head-and-shoulders image of the same person in the same
+     * clothes, made with it, for the frames that show faces. A file within the kit directory,
+     * like `file`; `closeTakeId` the take that made it.
+     */
+    closeFile: z.string().min(1).optional(),
+    closeTakeId: TakeIdSchema.optional(),
   })
   .strict();
 export type CharacterLook = z.infer<typeof CharacterLookSchema>;
+
+/**
+ * Whether a look was made from a face the character no longer has (R-113): replacing the main
+ * photo marks the looks made from the old one `older face`. A look made before looks recorded
+ * their photo is never marked; it still rides until the author makes it again.
+ */
+export function lookOlderFace(kit: Pick<ReferenceKit, "mainPhoto" | "anchor" | "tiles" | "sheetId">, look: Pick<CharacterLook, "mainFile">): boolean {
+  if (look.mainFile === undefined) return false;
+  const photo = mainPhotoFor({ ...kit, compilations: [] });
+  return photo !== null && photo.file !== look.mainFile;
+}
+
+/**
+ * The looks a chapter may choose for a character (R-112): every kit look of kind costume, newest
+ * first — those made for chapters and those a Cast page made before them, which have no framing
+ * and are taken as the image they are. Whether a look is attached to a production or a scene
+ * is no matter here: a chapter chooses by pointer and attaches nothing (R-18 holds).
+ */
+export function chapterLooksOf(kit: Pick<ReferenceKit, "looks"> | null | undefined): CharacterLook[] {
+  return [...(kit?.looks ?? [])]
+    .filter((look) => look.kind === "costume")
+    .sort((a, b) => (a.acceptedAt < b.acceptedAt ? 1 : a.acceptedAt > b.acceptedAt ? -1 : 0));
+}
 
 /**
  * One accepted angle on a place (#243, design turn 57).
