@@ -32,6 +32,11 @@ export interface QueueRefusal {
   reason: string;
   /** How many of the request's pictures were not queued; the rest have jobs of their own. */
   count: number;
+  /**
+   * Nothing of it was queued. A request refused before its pictures were assembled is answered
+   * as one failure whatever it asked for, so the asker counts every picture it asked for.
+   */
+  whole: boolean;
 }
 
 /**
@@ -49,7 +54,7 @@ export function useQueueRefusals(): Record<string, QueueRefusal> {
         const count = Math.max(result.failures.length, result.requestedCount - result.acceptedJobIds.length);
         if (count <= 0) return;
         const reason = (result.failures[0]?.reason ?? "").replace(/\s*Nothing was queued\.?\s*$/, "").replace(/\.$/, "").trim();
-        setRefused((held) => ({ ...held, [result.requestId]: { reason: reason === "" ? "not queued" : reason, count } }));
+        setRefused((held) => ({ ...held, [result.requestId]: { reason: reason === "" ? "not queued" : reason, count, whole: result.acceptedJobIds.length === 0 } }));
       }),
     [],
   );

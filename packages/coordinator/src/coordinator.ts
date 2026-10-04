@@ -1696,7 +1696,7 @@ export class Coordinator {
             // In plain words on the row (`refused by the image safety check`); the provider's own is in the app log.
             void this.appLog?.append({ kind: "audiobook.illustration-picture-failed", chapter: chapter.file, block: row.block, message: made.reason });
             progress.failed.push({ block: row.block, reason: pictureRefusal(made.reason) });
-            refusedHere.add(row.block);
+            if (made.provider === true) refusedHere.add(row.block);
             continue;
           }
           progress.spentMicroUsd += made.costMicroUsd ?? made.estimatedMicroUsd;
@@ -19102,7 +19102,7 @@ export class Coordinator {
   private async makeBenchPicture(
     store: WorldStore,
     input: { title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal },
-  ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null; estimatedMicroUsd: number } | { ok: false; reason: string; sessionId?: SessionId }> {
+  ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null; estimatedMicroUsd: number } | { ok: false; reason: string; sessionId?: SessionId; provider?: true }> {
     const worldId = store.worldId;
     const params = { kind: "image" as const, count: 1, ...(input.aspect !== undefined ? { aspect: input.aspect } : {}) };
     const opened = await openBenchSession(store.dir, () => this.nowIso(), { fresh: true, defaultModel: { provider: input.model.provider, model: input.model.id }, initial: { mode: "image", brief: input.prompt, title: input.title } }).catch(() => null);
@@ -19186,7 +19186,9 @@ export class Coordinator {
           return fail(describeCoordinatorError(err));
         }
       }
-      if (take !== undefined && (take.status === "failed" || take.status === "cancelled" || take.status === "needs-reconciliation")) return fail(take.error ?? (take.status === "cancelled" ? "cancelled" : "the picture could not be made"));
+      // The provider's own answer: the one failure a run holds for Try again (codex on PR 1559).
+      if (take !== undefined && take.status === "failed") return { ...(await fail(take.error ?? "the picture could not be made")), provider: true as const };
+      if (take !== undefined && (take.status === "cancelled" || take.status === "needs-reconciliation")) return fail(take.error ?? (take.status === "cancelled" ? "cancelled" : "the picture could not be made"));
       if (Date.now() > deadline) return fail("the picture took too long");
       await new Promise((resolve) => setTimeout(resolve, PICTURE_POLL_MS));
     }

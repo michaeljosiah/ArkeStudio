@@ -157,7 +157,8 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
                 // The slots past the pictures made: those whose job ended without one say why, last.
                 // A picture the coordinator would not queue has no job: counted from its answer, not left making.
                 const left = LOOK_CANDIDATES - candidates.length;
-                const reasons = [...batchFailures.map((failure) => failure.reason), ...Array.from({ length: batchRefused?.count ?? 0 }, () => batchRefused!.reason)];
+                const unqueued = batchRefused === undefined ? 0 : batchRefused.whole ? LOOK_CANDIDATES : batchRefused.count;
+                const reasons = [...batchFailures.map((failure) => failure.reason), ...Array.from({ length: unqueued }, () => batchRefused!.reason)];
                 const failedSlots = Math.min(reasons.length, left);
                 if (take === undefined && index >= LOOK_CANDIDATES - failedSlots) {
                   const reason = reasons[index - (LOOK_CANDIDATES - failedSlots)] ?? "not made";

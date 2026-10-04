@@ -229,12 +229,18 @@ const EXPOSURE_PHRASES = [
 const CUT = new RegExp(`\\b(?:${CUT_WORDS.join("|")})\\b[ ,]*`, "gi");
 const EXPOSURE = new RegExp(`(?:^|\\s|,)(?:${EXPOSURE_PHRASES.join("|")})(?=$|[\\s,;.)])`, "gi");
 const SHOWS = new RegExp(`\\b(?:${[...CUT_WORDS, ...EXPOSURE_PHRASES].join("|")})(?=$|[\\s,;.)])`, "i");
+/** Words that say nothing on their own once the skin and the cut are out of a clause. */
+const EMPTY_WORDS = new Set(["her", "his", "their", "its", "a", "an", "the", "and", "with", "in", "on", "of", "to", "at", "by", "is", "are", "was", "left", "showing", "bare", "beneath", "under", "below", "she", "he", "they"]);
+
 /**
- * Something worn or carried named in a clause — a garment, jewellery, shoes, hair, a bag: what
- * keeps the clause when the skin and the cut are taken out (`bare arms stacked with old-gold
- * bangles` keeps the bangles, codex on PR 1559).
+ * Whether a clause still says something once the skin and the cut are taken out: anything worn,
+ * carried, done or seen (`bare arms in elbow-length white gloves` keeps the gloves, `bare
+ * shoulders catching the light` keeps the light), and not only a pronoun left over (`her back bare
+ * beneath her braids` goes whole). Codex on PR 1559: a list of garments dropped what it did not name.
  */
-const GARMENT = /\b(dress|gown|slip|shirt|blouse|top|skirt|trousers|jeans|suit|jacket|coat|robe|wrapper|agbada|kaftan|tunic|sweater|jumper|vest|camisole|bodysuit|jumpsuit|outfit|scarf|shawl|stole|wrap|gele|headwrap|hat|cap|bangles?|bracelets?|earrings?|hoops?|necklaces?|pendants?|chains?|rings?|beads|watch|anklets?|shoes|heels|sandals|boots|trainers|sneakers|clutch|bag|purse|braids?|locs|twist|bun|wig)\b/i;
+function saysSomething(clause: string): boolean {
+  return (clause.toLowerCase().match(/[\p{L}][\p{L}'-]*/gu) ?? []).filter((word) => !EMPTY_WORDS.has(word)).length > 0;
+}
 
 /** The clauses of a line: split on commas and semicolons outside brackets, each with the separator after it. */
 function clauses(text: string): Array<{ words: string; after: string }> {
@@ -270,8 +276,8 @@ export function neutralClothing(text: string): string {
     const parts = clauses(sentence).flatMap(({ words, after }) => {
       if (!SHOWS.test(words)) return [{ words, after }];
       const cleaned = words.replace(EXPOSURE, " ").replace(CUT, "").replace(/\s+(?:with|and)\s*$/i, "").replace(/\s{2,}/g, " ");
-      // A clause left naming nothing worn or carried was only about the body: it goes, its separator with it.
-      return GARMENT.test(cleaned) ? [{ words: cleaned, after }] : [];
+      // A clause with nothing left once the skin is out was only about the body: it goes, its separator with it.
+      return saysSomething(cleaned) ? [{ words: cleaned, after }] : [];
     });
     let joined = parts.map((part, index) => `${part.words}${index < parts.length - 1 ? part.after : ""}`).join("");
     // A sentence whose last clause went keeps its full stop.

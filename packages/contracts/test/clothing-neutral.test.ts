@@ -42,6 +42,7 @@ describe("neutralClothing", () => {
   it("keeps the jewellery, shoes or hair a clause about skin also names (codex on PR 1559)", () => {
     assert.equal(neutralClothing("A green wrapper, bare arms stacked with old-gold bangles, gold sandals."), "A green wrapper, stacked with old-gold bangles, gold sandals.");
     assert.equal(neutralClothing("Ife turns, her back bare beneath her braids, and smiles."), "Ife turns, and smiles.");
+    assert.equal(neutralClothing("A black gown, bare arms in elbow-length white gloves."), "A black gown, in elbow-length white gloves.", "a thing worn that no list names is kept");
   });
 });
 

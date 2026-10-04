@@ -247,6 +247,15 @@ describe("a picture the provider refuses (2026-10-04)", () => {
     assert.equal(text(bodyAll('[data-testid="new-look-candidate-reason"]')[0]), "The daily limit is reached");
   });
 
+  it("fills every slot when the whole request was refused before its pictures were assembled", async () => {
+    const m = await mount(ready());
+    await press(bodyAll('[data-testid="new-look-make"]')[0]);
+    const batch = sentOf(m, "generate-character-looks")[0]!.requestId;
+    // The coordinator's refusal before assembly answers as one failure of one, whatever was asked.
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.enqueue-result", requestId: batch, command: "generate-character-looks", disposition: "rejected", requestedCount: 1, acceptedJobIds: [], failures: [{ index: 0, reason: "An accepted main photo and image model are required." }] } as never));
+    assert.deepEqual(bodyAll('[data-testid="new-look-candidate"]').map((cell) => cell.getAttribute("data-state")), ["failed", "failed", "failed"]);
+  });
+
   it("says so on the close view, offers Try again, and lets the look be accepted without it", async () => {
     const m = await mount(ready());
     await press(bodyAll('[data-testid="new-look-make"]')[0]);
