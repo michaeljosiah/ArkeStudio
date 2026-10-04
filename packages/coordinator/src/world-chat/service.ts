@@ -15,6 +15,7 @@ import { readCheckpoint, shouldCheckpoint, writeCheckpoint } from "./checkpoint.
 import { foldConversation, summarise } from "./fold.js";
 import { ConversationSequenceError, conversationDir, conversationsDir, WorldChatStore } from "./store.js";
 import { preserveConversationActionTombstones } from "../arke-actions/tombstones.js";
+import { benchUsesConversationAttachments } from "../bench/chat-reads.js";
 
 /**
  * Creating, reading and disposing of conversations (#70 phase 1, §15.1).
@@ -44,6 +45,8 @@ const REASONS: Record<WorldChatDeletionBlock, string> = {
     "Proposals from this conversation are still waiting on a decision. Accept or discard them first.",
   "pending-actions": "Actions from this conversation are still waiting. Deny or cancel them before deleting.",
   "pending-inputs": "Messages are still waiting for delivery. Resolve them before deleting this conversation.",
+  "bench-references": "Bench takes or references still use attachments from this conversation. Archive it to keep those source files available.",
+  "bench-references-unavailable": "Bench references could not be checked. Recover the Bench records before deleting this conversation, or archive it to keep its source files available.",
 } as const;
 
 export interface CreateOptions {
@@ -61,6 +64,17 @@ export class WorldChatService {
 
   private store(id: ConversationId): WorldChatStore {
     return new WorldChatStore(conversationDir(this.worldPath, id));
+  }
+
+  private withBenchReferences(view: WorldChatLoaded): WorldChatLoaded {
+    if (view.deletionBlock || view.attachments.length === 0) return view;
+    try {
+      return { ...view, deletionBlock: benchUsesConversationAttachments(this.worldPath, view.id) ? "bench-references" : null };
+    } catch {
+      // An unrelated damaged session must not prevent opening the conversation. It does
+      // prevent proving that deletion is safe while those references cannot be inspected.
+      return { ...view, deletionBlock: "bench-references-unavailable" };
+    }
   }
 
   async create(options: CreateOptions): Promise<WorldChatSummary> {
@@ -102,18 +116,18 @@ export class WorldChatService {
     if (options.before === undefined && options.messageLimit === undefined) {
       const { checkpoint, problems: checkpointProblems } = await readCheckpoint(store.dir, tailSeq);
       if (checkpoint && checkpoint.throughSeq === tailSeq) {
-        return { ...checkpoint.view, problems: [...problems, ...checkpointProblems] };
+        return this.withBenchReferences({ ...checkpoint.view, problems: [...problems, ...checkpointProblems] });
       }
       const folded = foldConversation(meta.id, meta.createdAt, events, options);
       const view = { ...folded.view, problems: [...problems, ...checkpointProblems, ...folded.problems] };
       if (shouldCheckpoint(tailSeq - (checkpoint?.throughSeq ?? 0), 0)) {
         await writeCheckpoint(store.dir, view);
       }
-      return view;
+      return this.withBenchReferences(view);
     }
 
     const folded = foldConversation(meta.id, meta.createdAt, events, options);
-    return { ...folded.view, problems: [...problems, ...folded.problems] };
+    return this.withBenchReferences({ ...folded.view, problems: [...problems, ...folded.problems] });
   }
 
   async rename(id: ConversationId, title: string, requestId?: string): Promise<void> {
@@ -162,7 +176,7 @@ export class WorldChatService {
     const meta = await store.readMeta();
     if (!meta) return null;
     const { events } = await store.read();
-    return foldConversation(meta.id, meta.createdAt, events).view.deletionBlock;
+    return this.withBenchReferences(foldConversation(meta.id, meta.createdAt, events).view).deletionBlock;
   }
 
   /**
@@ -178,7 +192,7 @@ export class WorldChatService {
       const meta = await store.readMeta();
       if (!meta) return; // already gone: a repeated Delete is not an error
       const events = (await store.read()).events;
-      const blocked = foldConversation(meta.id, meta.createdAt, events).view.deletionBlock;
+      const blocked = this.withBenchReferences(foldConversation(meta.id, meta.createdAt, events).view).deletionBlock;
       if (blocked) throw new ConversationInUseError(blocked);
       try {
         const appended = await store.append(

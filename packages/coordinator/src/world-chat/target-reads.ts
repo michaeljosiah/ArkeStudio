@@ -22,6 +22,7 @@ import {
   type Job,
   type ProductionBundle,
   type WorldBundle,
+  type VoiceCandidate,
 } from "@arke-studio/contracts";
 import { conversationActionDigest } from "../arke-actions/digest.js";
 import type { QueryLease } from "./lease.js";
@@ -59,6 +60,9 @@ export interface ArkeExportReadRecord {
 }
 
 export interface TargetReadDeps {
+  readonly getBenchRows?: (sessionId?: string) => readonly ProductionReadRow[];
+  readonly getGenerationRouteRows?: () => readonly ProductionReadRow[];
+  readonly getVoiceCatalogue?: () => Promise<readonly VoiceCandidate[]>;
   readonly getAudioRights?: () => Promise<readonly AudioRightsEvent[]>;
   readonly getFrameRunRows?: (productionId: string) => readonly ProductionReadRow[] | Promise<readonly ProductionReadRow[]>;
   readonly getBuildItems?: () => readonly ArkeBuildItemRead[];
@@ -526,6 +530,7 @@ export class WorldChatTargetReads {
   ): Promise<TargetReadOutcome> {
     let readTarget: ArkeReadTarget;
     let revisionOrDigest: string;
+    let cursorFence: string | undefined;
     let rows: Row[];
 
     switch (tool) {
@@ -616,10 +621,19 @@ export class WorldChatTargetReads {
         assertArgs(args, []);
         readTarget = target("voices", bundle.meta.worldId);
         rows = [
+          ...(await this.deps.getVoiceCatalogue?.() ?? []).filter(voice => !voice.unavailableReason && !voice.narratorCopy).map(voice => ({
+            key: `catalogue:${JSON.stringify([voice.provider, voice.model, voice.voiceId])}`,
+            value: { kind: "catalogue", voice: { provider: voice.provider, model: voice.model, voiceId: voice.voiceId,
+              label: voice.label, attributes: voice.attributes, facets: voice.facets, local: voice.local,
+              readsClone: voice.readsClone, readsDesigned: voice.readsDesigned } },
+          })),
           ...bundle.clonedVoices.map((voice) => ({ key: `cloned:${voice.id}`, value: { kind: "cloned", voice } })),
           ...bundle.sheets.filter((sheet) => sheet.voice !== undefined).map((sheet) => ({ key: `sheet:${sheet.id}`, value: { kind: "assignment", sheetId: sheet.id, version: sheet.version, voice: sheet.voice } })),
         ].sort((a, b) => a.key.localeCompare(b.key));
         revisionOrDigest = voicesFence(bundle);
+        // The receipt fences world assignments; the selected catalogue target is checked at
+        // quote and approval. Pagination also fences the advisory runtime catalogue itself.
+        cursorFence = conversationActionDigest({ world: revisionOrDigest, rows });
         break;
       }
       case "list_productions":
@@ -833,6 +847,24 @@ export class WorldChatTargetReads {
         revisionOrDigest = takesFence(production);
         break;
       }
+      case "list_generation_routes": {
+        assertArgs(args, []);
+        if (!this.deps.getGenerationRouteRows) throw new TargetReadError("Generation routes are unavailable.");
+        rows = [...this.deps.getGenerationRouteRows()];
+        readTarget = target("generation-routes", lease.worldId);
+        revisionOrDigest = productionReadFence(rows);
+        break;
+      }
+      case "list_bench_sessions":
+      case "get_bench_session": {
+        assertArgs(args, tool === "get_bench_session" ? ["sessionId"] : []);
+        const sessionId = tool === "get_bench_session" ? requireString(args, "sessionId") : undefined;
+        if (!this.deps.getBenchRows) throw new TargetReadError("Bench records are unavailable.");
+        rows = [...this.deps.getBenchRows(sessionId)];
+        readTarget = target("bench", sessionId ?? lease.worldId);
+        revisionOrDigest = productionReadFence(rows);
+        break;
+      }
       case "list_frame_runs": {
         assertArgs(args, ["productionId"]);
         const productionId = requireString(args, "productionId");
@@ -941,7 +973,7 @@ export class WorldChatTargetReads {
       }
     }
 
-    return this.page(lease, args, readTarget, revisionOrDigest, rows);
+    return this.page(lease, args, readTarget, revisionOrDigest, rows, cursorFence);
   }
 
   private page(
@@ -950,6 +982,7 @@ export class WorldChatTargetReads {
     readTarget: ArkeReadTarget,
     revisionOrDigest: string,
     rows: readonly Row[],
+    cursorFence = revisionOrDigest,
   ): TargetReadOutcome {
     const cursor = args["cursor"] as string | undefined;
     let start = 0;
@@ -962,7 +995,7 @@ export class WorldChatTargetReads {
       ) {
         throw new TargetReadError("that cursor belongs to a different target");
       }
-      if (decoded.fence !== revisionOrDigest) {
+      if (decoded.fence !== cursorFence) {
         throw new TargetReadError("that target changed while it was being read; start again without a cursor");
       }
       const found = rows.findIndex((row) => row.key === decoded.after);
@@ -979,7 +1012,7 @@ export class WorldChatTargetReads {
           runId: lease.runId,
           requirement: readTarget.requirement,
           targetId: readTarget.id,
-          fence: revisionOrDigest,
+          fence: cursorFence,
           after: selected.at(-1)!.key,
         })
       : null;

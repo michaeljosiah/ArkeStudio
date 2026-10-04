@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import type { ClientMessage, DomainEvent, ManifestModel } from "@arke-studio/contracts";
 import { BenchStore, sessionDir } from "../../src/bench/store.js";
 import { Coordinator } from "../../src/coordinator.js";
@@ -111,9 +112,10 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
           return { id };
         }
         await mkdir(join(worldDir, input.landing.dir), { recursive: true });
-        await writeFile(join(worldDir, input.landing.dir, "made.png"), pngBytes());
+        const bytes = pngBytes();
+        await writeFile(join(worldDir, input.landing.dir, "made.png"), bytes);
         await bench.append(
-          { type: "take-completed", takeId: takeId as never, media: { file: "made.png", hash: "sha256:0123456789abcdef" as never }, cost: { estimatedMicroUsd: input.estimatedMicroUsd, actualMicroUsd: input.estimatedMicroUsd }, completedAt: CLOCK },
+          { type: "take-completed", takeId: takeId as never, media: { file: "made.png", hash: `sha256:${createHash("sha256").update(bytes).digest("hex")}` }, cost: { estimatedMicroUsd: input.estimatedMicroUsd, actualMicroUsd: input.estimatedMicroUsd }, completedAt: CLOCK },
           { at: CLOCK },
         );
         return { id };

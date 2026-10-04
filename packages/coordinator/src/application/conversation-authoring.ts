@@ -3,6 +3,7 @@ import type { WorldStore } from "../world/store.js";
 import type { WorldChatRunner, TurnOutcome } from "../world-chat/run.js";
 import { WorldChatService } from "../world-chat/service.js";
 import { WorldChatStore, conversationDir } from "../world-chat/store.js";
+import { readBenchSession } from "../bench/chat-reads.js";
 import { worldChatContextExists, worldChatSubjectExists } from "../world-chat/context-validation.js";
 import { titleFrom } from "../world-chat/title.js";
 import { productionSetups } from "../productions/setup.js";
@@ -40,9 +41,12 @@ export class ConversationAuthoringService {
     const entry = conversation?.entryContext ?? { kind: "world" as const };
     const exists = entry.kind === "attachment"
       ? conversation?.attachments.some(attachment => attachment.id === entry.attachmentId) === true
-      : worldChatContextExists(this.store.getBundle(), entry);
-    if (!conversation || !exists || input.subject !== undefined &&
-      !worldChatSubjectExists(this.store.getBundle(), entry, input.subject)) return null;
+      : entry.kind === "bench" ? readBenchSession(this.store.dir, entry.sessionId) !== null : worldChatContextExists(this.store.getBundle(), entry);
+    const selected = input.subject;
+    const subjectExists = selected === undefined || (entry.kind === "bench"
+      ? selected.kind === "take" && readBenchSession(this.store.dir, entry.sessionId)?.takes.some(take => take.id === selected.takeId)
+      : worldChatSubjectExists(this.store.getBundle(), entry, selected));
+    if (!conversation || !exists || !subjectExists) return null;
 
     // Give the row a usable title before starting the model. Naming is an optional promotion
     // after the author's turn has first claim on the harness, never a prerequisite for a reply.

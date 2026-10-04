@@ -263,7 +263,7 @@ export function resolveTakeSource(session: BenchSession, takeId: string): Resolv
   // What the take actually IS, by the mode that made it. Read as "video or else image" this
   // sent a spoken take to a picture model as though it were a still.
   const kind: ReferenceKind =
-    take.request.mode === "video" ? "video" : take.request.mode === "voice" ? "audio" : "image";
+    take.request.mode === "video" ? "video" : take.request.mode === "voice" || take.request.mode === "music" ? "audio" : "image";
   return {
     source: { source: "take", takeId: take.id, hash: take.media.hash },
     kind,
@@ -334,7 +334,13 @@ export function resolveTokenEntry(
     if(problem) return {refused:problem};
     return artifact ? resolveArtifactSource(artifact) : { refused: "that artifact is no longer in the world" };
   }
-  if (source.source === "world-file") return resolveWorldFileSource(source);
+  if (source.source === "world-file") {
+    // Cross-session takes carry their measured kind and duration; loose picked files remain images.
+    if (entry.kind !== "image" && entry.durationSec && (entry.kind === "video" ? /\.(mp4|m4v|mov|webm)$/i : /\.(wav|mp3)$/i).test(source.path)) {
+      return { source, kind: entry.kind, durationSec: entry.durationSec, path: source.path };
+    }
+    return resolveWorldFileSource(source);
+  }
   return resolveTakeSource(session, source.takeId);
 }
 

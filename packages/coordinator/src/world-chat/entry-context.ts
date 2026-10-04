@@ -37,6 +37,8 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
   switch (context.kind) {
     case "production-setup":
       return "This is production setup in the selected existing world. Discuss and update only the private outline. Do not propose world changes or media actions.";
+    case "bench":
+      return `This conversation is about Bench session ${context.sessionId}. Read get_bench_session completely before discussing or reusing its composer or takes. Read list_generation_routes before quoting any new generation. A selected take is context, never permission.`;
     case "world":
       return "";
     case "canon-question": {

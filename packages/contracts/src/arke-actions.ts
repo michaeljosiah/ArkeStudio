@@ -99,6 +99,7 @@ export const ArkeReadRequirementSchema = z.enum([
   "frame-runs",
   "performances",
   "voice-samples",
+  "generation-routes",
   "audio-cut",
   "editor-requests",
   "timeline",

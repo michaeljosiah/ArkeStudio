@@ -2,7 +2,8 @@ import { productionSetupBrief } from "../productions/setup-brief.js";
 import { createPreparedSession } from "../harness/session-files.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type WorldChatCheckReceipt, applyBibleEdits, CONVERSATIONAL_PROPS_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { type WorldChatCheckReceipt, applyBibleEdits, BENCH_CHAT_SCHEMA_VERSION, CONVERSATIONAL_PROPS_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { benchReadRows } from "../bench/chat-reads.js";
 import { frameRunReadRows } from "../world-chat/production-reads.js";
 import { readAudioRights } from "../audio/rights.js";
 import { readPlanRecords } from "../productions/plans.js";
@@ -41,6 +42,8 @@ export interface ConversationRunDependencies {
   query: Pick<WorldQueryServer, "start" | "attachLease" | "detachLease" | "leasedUrl">;
   actions: ConversationActionLifecycle;
   jobs: NonNullable<RetrievalDeps["getJobs"]>;
+  generationRoutes?: NonNullable<RetrievalDeps["getGenerationRouteRows"]>;
+  voiceCatalogue?: NonNullable<RetrievalDeps["getVoiceCatalogue"]>;
   buildItems?: NonNullable<RetrievalDeps["getBuildItems"]>;
   exports: NonNullable<RetrievalDeps["getExports"]>;
   actionExports: NonNullable<NonNullable<Parameters<typeof prepareWorldChatActions>[3]>["getExports"]>;
@@ -69,8 +72,11 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       Math.max(MAX_TEXT_PER_RUN_CHARS, budgetFor(deps.adapter?.knownInputTokenLimit?.() ?? undefined)),
     getBundle: () => deps.activeStore()?.getBundle() ?? null,
     getIndex: () => deps.activeStore()?.getIndex() ?? null,
-      getFrameRunRows: (productionId) => frameRunReadRows(store, productionId, deps.jobs()),
-      getAudioRights: () => readAudioRights(store),
+    getBenchRows: sessionId => benchReadRows(store.dir, sessionId),
+    getGenerationRouteRows: deps.generationRoutes,
+    getVoiceCatalogue: deps.voiceCatalogue,
+    getFrameRunRows: (productionId) => frameRunReadRows(store, productionId, deps.jobs()),
+    getAudioRights: () => readAudioRights(store),
     getPlans: async (productionId) => readPlanRecords(store, productionId, deps.jobs()),
     getJobs: () => deps.jobs(),
     getBuildItems: () => deps.buildItems?.() ?? [],
@@ -159,7 +165,8 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     validateSceneEdits: ({ entryContext, edits, baseVersion }) =>
       applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),
     prepareActions: async (turn) => {
-      const prepared = await prepareWorldChatActions(store, actionLifecycle, turn, { getExports: () => deps.actionExports(), getJobs: () => deps.jobs(), getBuildItems: () => deps.buildItems?.() ?? [] });
+      const prepared = await prepareWorldChatActions(store, actionLifecycle, turn, { getGenerationRouteRows: deps.generationRoutes, getExports: () => deps.actionExports(), getJobs: () => deps.jobs(), getBuildItems: () => deps.buildItems?.() ?? [] });
+      if (prepared.some(item => item.payload.kind.startsWith("world-chat-bench-"))) await store.ensureSchemaVersion(BENCH_CHAT_SCHEMA_VERSION, "world-chat");
       if (turn.actions.some(action => action.kind === "prop-authoring" || action.kind === "prop-reference")) await store.ensureSchemaVersion(CONVERSATIONAL_PROPS_SCHEMA_VERSION, "world-chat");
       return prepared;
     },

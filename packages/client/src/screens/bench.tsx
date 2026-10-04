@@ -1,6 +1,8 @@
 import { estimateSpeechMicroUsd, freeCreditLeft, SAMPLING_CHOICE_NAMES, samplingSummary, speechPriceCopy } from "@arke-studio/contracts";
 import { castVoiceSummary, planCastCharacterAudio, planSubjectCharacterAudio } from "@arke-studio/contracts";
 import { benchLineLanguage, castNameFor, DEFAULT_REFERENCE_WHO, referenceRouteModel, referenceRouteRefusal, referenceSheetId } from "@arke-studio/contracts";
+import { PageSheet } from "../components/page-sheet.js";
+import { ProductionConversation } from "../components/conversation.js";
 import { BodyLayer } from "../components/body-layer.js";
 import { AdapterPicker } from "../components/adapter-picker.js";
 import { SamplingChip, hasSampling } from "../components/local-sampling.js";
@@ -301,6 +303,8 @@ function BenchWorkspace({
   const navigate = useNavigate();
   const worldSlug = world?.meta.slug;
   const subject = session.subject;
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatOpened, setChatOpened] = useState(false);
 
   // ---- the composer draft: local while typing, pushed debounced, restored by selection ----
   const [draft, setDraft] = useState(() => ({
@@ -1384,6 +1388,7 @@ function BenchWorkspace({
         back={back}
         aside={
           <>
+            <button type="button" className="fy-bench__chip" onClick={() => { setChatOpened(true); setChatOpen(true); }}>Ask Arke</button>
             {/* The subject on a pill at the right (design 142a): the crumb on the left says
                 "Bench" and stops, so it can never run under the wordmark the way a chain of
                 five parts did. */}
@@ -3053,6 +3058,12 @@ function BenchWorkspace({
             </div>
           </BodyLayer>
         )}
+        {chatOpened && <PageSheet open={chatOpen} onClose={() => setChatOpen(false)} title="Bench conversation" keepMounted>
+          <ProductionConversation worldId={worldId} productionId={subject?.productionId}
+            entry={{ kind: "bench", sessionId: session.id }}
+            subject={session.selectedTakeId ? { kind: "take", takeId: session.selectedTakeId } : undefined}
+            placeholder="Ask about this take or make something new…" emptyLine="Talk about this Bench session." />
+        </PageSheet>}
         {uploadConfirmation && (
           <RemoteVoiceUploadConfirmation
             destinationLabel={uploadConfirmation.destinationLabel}

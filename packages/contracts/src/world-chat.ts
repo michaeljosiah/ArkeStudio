@@ -115,6 +115,9 @@ export const WorldChatDeletionBlockSchema = z.enum([
   "pending-actions",
   /** Additional input still waiting or with an unsettled delivery (SPEC-045 R-19). */
   "pending-inputs",
+  /** Private attachments still cited by a durable Bench composer or immutable take. */
+  "bench-references",
+  "bench-references-unavailable",
 ]);
 export type WorldChatDeletionBlock = z.infer<typeof WorldChatDeletionBlockSchema>;
 
@@ -122,6 +125,7 @@ export type WorldChatDeletionBlock = z.infer<typeof WorldChatDeletionBlockSchema
 export const WorldChatContextSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("production-setup"), setupId: ConversationIdSchema }).strict(),
   z.object({ kind: z.literal("world") }).strict(),
+  z.object({ kind: z.literal("bench"), sessionId: SessionIdSchema }).strict(),
   z
     .object({
       kind: z.literal("canon-question"),
@@ -159,7 +163,9 @@ export type WorldChatContext = z.infer<typeof WorldChatContextSchema>;
 
 /** Older readers cannot parse these persisted conversation entry kinds. */
 export const PRODUCTION_CHAT_CONTEXT_SCHEMA_VERSION = 50;
+export const BENCH_CHAT_SCHEMA_VERSION = 51;
 export function worldChatContextSchemaVersion(context: WorldChatContext | undefined): number {
+  if (context?.kind === "bench") return BENCH_CHAT_SCHEMA_VERSION;
   return context && ["shot", "stage", "takes", "generate", "cut"].includes(context.kind)
     ? PRODUCTION_CHAT_CONTEXT_SCHEMA_VERSION : 2;
 }
@@ -2692,16 +2698,19 @@ const exampleWorldActions = {
   },
   "bench-generation": {
     kind: "bench-generation",
-    sessionId: `sess_${EXAMPLE_ULID}`,
     composer: {
       mode: "image",
       provider: "fal",
       model: "fal-ai/flux/dev",
       params: { kind: "image", aspect: "16:9", count: 2 },
       brief: "Two salt-stained ledger studies on a black quay.",
+      references: [],
     },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "bench-keep": { kind: "bench-keep", sessionId: `sess_${EXAMPLE_ULID}`, takeId: `tk_${EXAMPLE_ULID}`, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "bench-select": { kind: "bench-select", sessionId: `sess_${EXAMPLE_ULID}`, takeId: `tk_${EXAMPLE_ULID}`, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "bench-discard": { kind: "bench-discard", sessionId: `sess_${EXAMPLE_ULID}`, takeId: `tk_${EXAMPLE_ULID}`, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "prop-authoring": { kind: "prop-authoring", change: { operation: "create", name: "Tide sword", states: ["Intact", "Broken"] },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "prop-reference": { kind: "prop-reference", propId: `prop_${EXAMPLE_ULID}`, stateId: `pst_${EXAMPLE_ULID}`,
@@ -2796,7 +2805,10 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-interactive-export": "Export the interactive production as a playable file.",
   "production-cut-export": "Export the cut of the production or one episode with a preset and subtitles.",
   "production-export-cancel": "Cancel an export that is running.",
-  "bench-generation": "Generate image, video, speech or music in an existing Bench session, at the quote shown on the card. Needs the session's id and a provider and model the person has enabled.",
+  "bench-generation": "Generate image, video, speech or music at the quote shown. Omit sessionId to create a session only on approval; rerunTakeId repeats a read take as a new card. Read eligible generation routes first. For speech, complete list_voices and use the exact provider/model/voiceId of an available catalogue row. Sound effects are unavailable: refuse a sound-effects request by name instead of generating music.",
+  "bench-keep": "Keep a completed Bench take on the world's artifact shelf; generation alone files nothing.",
+  "bench-select": "Select a read Bench take within its session; this changes neither a production's selection nor provider work.",
+  "bench-discard": "Discard an open Bench take from its session as a destructive decision; filed results remain on their shelf.",
   "prop-authoring": "Create a prop, add a state to it, or rename a prop or state.",
   "prop-reference": "Use a filed artifact image as a prop state's reference; say replace only when the person asked to replace one.",
   "image-generation": "Generate pending key art, a master look, or a prop-state image at the coordinator's quote. Selection is a separate card. Omit modelId to use the world's image default.",

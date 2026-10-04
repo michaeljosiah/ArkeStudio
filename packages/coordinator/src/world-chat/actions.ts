@@ -1,3 +1,4 @@
+import { WorldChatBenchKeepActionSchema, WorldChatBenchSelectActionSchema, WorldChatBenchDiscardActionSchema } from "@arke-studio/contracts";
 import { frameRunReadRows, performanceReadRows, voiceSampleReadRows, audioCutReadRows, editorRequestReadRows, productionReadFence } from "./production-reads.js";
 import { readAudioRightsSync } from "../audio/rights.js";
 import type { ProductionBatchControls } from "./production-batch.js";
@@ -288,6 +289,9 @@ import {
   plansFence,
   type ArkeExportReadRecord,
 } from "./target-reads.js";
+import { benchChatSessionId, completeBenchChatAction } from "../bench/chat-session.js";
+import type { BenchChatControls } from "../bench/chat-controls.js";
+import { benchReadRows } from "../bench/chat-reads.js";
 import { foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
   stageWorldChatArtDirectionAction,
@@ -327,6 +331,7 @@ export interface WorldChatActionTurn {
 }
 
 export interface WorldChatActionAdapterDeps {
+  readonly getGenerationRouteRows?: () => readonly import("./production-reads.js").ProductionReadRow[];
   readonly activePlans?: import("../productions/scene-commands.js").SceneCommandDeps["activePlans"];
   readonly pickFiles?: (input: { accept: readonly string[] }) => Promise<readonly string[]>;
   readonly pickFolder?: () => Promise<string | null>;
@@ -378,6 +383,7 @@ export interface WorldChatActionAdapterDeps {
   readonly productionBatchControls?: ProductionBatchControls;
   readonly productionTakeFiling?: ProductionTakeFiling;
   readonly buildGenerationQuotes?: GenerationQuotes;
+  readonly benchControls?: BenchChatControls;
   readonly benchGenerationQuotes?: GenerationQuotes;
   readonly quoteBenchGeneration?: (
     action: WorldChatBenchGenerationAction["action"],
@@ -508,7 +514,10 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-interactive-export": ["routing", "scenes", "takes", "exports"],
   "production-cut-export": ["timeline", "episodes", "exports"],
   "production-export-cancel": ["exports"],
-  "bench-generation": ["jobs"],
+  "bench-keep": ["bench", "artifacts"],
+  "bench-select": ["bench"],
+  "bench-discard": ["bench"],
+  "bench-generation": ["jobs", "generation-routes"],
 };
 
 function currentWorldObservation(
@@ -519,6 +528,11 @@ function currentWorldObservation(
 ): { target: string; fence: string } | null {
   const bundle = store.getBundle();
   switch (requirement) {
+    case "bench": {
+      const id = target ?? store.worldId;
+      return { target: id, fence: productionReadFence(benchReadRows(store.dir, id === store.worldId ? undefined : id)) };
+    }
+    case "generation-routes": return deps.getGenerationRouteRows ? { target: store.worldId, fence: productionReadFence(deps.getGenerationRouteRows()) } : null;
     case "world-metadata": return { target: store.worldId, fence: worldMetadataFence(bundle) };
     case "canon": return { target: store.worldId, fence: canonFence(bundle) };
     case "sheets": return { target: store.worldId, fence: sheetsFence(bundle) };
@@ -752,7 +766,15 @@ function productionActionTargets(
       { requirement: "exports", target: action.productionId },
     ];
     case "production-export-cancel": return [{ requirement: "exports", target: action.productionId }];
-    case "bench-generation": return [{ requirement: "jobs", target: worldId }];
+    case "bench-keep": return [{ requirement: "bench", target: action.sessionId }, { requirement: "artifacts", target: worldId }];
+    case "bench-select":
+    case "bench-discard": return [{ requirement: "bench", target: action.sessionId }];
+    case "bench-generation": return [{ requirement: "jobs", target: worldId }, { requirement: "generation-routes", target: worldId },
+      ...(action.composer.params.kind === "voice" ? [{ requirement: "voices" as const, target: worldId }] : []),
+      ...(action.sessionId ? [{ requirement: "bench" as const, target: action.sessionId }] : []),
+      ...(action.composer.references?.some(ref => ref.kind === "artifact") ? [{ requirement: "artifacts" as const, target: worldId }] : []),
+      ...(action.composer.references?.some(ref => ref.kind === "kit") ? [{ requirement: "references" as const, target: worldId }] : []),
+      ...[...new Set(action.composer.references?.flatMap(ref => ref.kind === "take" && ref.sessionId !== action.sessionId ? [ref.sessionId] : []) ?? [])].map(target => ({ requirement: "bench" as const, target }))];
     default: return [];
   }
 }
@@ -895,6 +917,9 @@ function preparedWorldPayload(
     case "production-interactive-export": return WorldChatProductionInteractiveExportActionSchema.parse({ kind: "world-chat-production-interactive-export", ...common });
     case "production-cut-export": return WorldChatProductionCutExportActionSchema.parse({ kind: "world-chat-production-cut-export", ...common });
     case "production-export-cancel": return WorldChatProductionExportCancelActionSchema.parse({ kind: "world-chat-production-export-cancel", ...common });
+    case "bench-keep": return WorldChatBenchKeepActionSchema.parse({ kind: "world-chat-bench-keep", ...common });
+    case "bench-select": return WorldChatBenchSelectActionSchema.parse({ kind: "world-chat-bench-select", ...common });
+    case "bench-discard": return WorldChatBenchDiscardActionSchema.parse({ kind: "world-chat-bench-discard", ...common });
     case "bench-generation": return WorldChatBenchGenerationActionSchema.parse({ kind: "world-chat-bench-generation", ...common });
   }
 }
@@ -1253,7 +1278,10 @@ function worldActionTargets(
     case "production-interactive-export":
     case "production-cut-export": return [{ kind: "production", id: action.productionId, label: action.productionId }];
     case "production-export-cancel": return [{ kind: "export", id: action.exportId, label: action.exportId }];
-    case "bench-generation": return [{ kind: "bench-session", id: action.sessionId, label: "Bench session" }];
+    case "bench-keep":
+    case "bench-select":
+    case "bench-discard": return [{ kind: "bench-session", id: action.sessionId, label: "Bench session" }, { kind: "bench-take", id: action.takeId, label: "Bench take" }];
+    case "bench-generation": return [{ kind: "bench-session", id: benchChatSessionId(action, fallbackId), label: "Bench session" }];
   }
 }
 
@@ -1347,12 +1375,14 @@ export function prepareWorldChatActions(
   const plannedProductionIds = new Set<string>();
   const plannedSeriesIds = new Set<string>();
   for (const [index, rawAction] of turn.actions.entries()) {
-    const action = scopedWorldAction(store, rawAction, contextProductionId);
+    const scoped = scopedWorldAction(store, rawAction, contextProductionId);
+    const action = scoped.kind === "bench-generation" ? completeBenchChatAction(store.dir, scoped) : scoped;
     heldToPassage(store, action, turn.subject);
     const productionId = actionProduction(action, contextProductionId);
     if (action.kind === "production-chapter" && action.change.operation === "edit") {
       resolveChapterViewpointEdit(store, action.productionId, action.change.changes.viewpointCharacter);
     }
+    const actionId = newId("act");
     const payload = preparedWorldPayload(store, action, productionId, turn.at);
     if (payload.kind === "world-chat-production-create") {
       if (plannedProductionIds.has(payload.plan.production.id)) {
@@ -1373,12 +1403,13 @@ export function prepareWorldChatActions(
         turnId: turn.turnId,
         worldId: store.worldId,
         ...(productionId !== undefined ? { productionId } : {}),
+        actionId,
         actionKind: payload.kind,
         targets: [
           ...worldActionTargets(
             store,
             action,
-            payload.kind === "world-chat-production-create" ? payload.plan.production.id : `${turn.turnId}:${index + 1}`,
+            payload.kind === "world-chat-production-create" ? payload.plan.production.id : action.kind === "bench-generation" ? actionId : `${turn.turnId}:${index + 1}`,
           ),
           ...(payload.kind === "world-chat-production-create" && payload.plan.series.operation !== "none"
             ? [{ kind: "series", id: payload.plan.series.record.id, label: payload.plan.series.record.title }]
@@ -3151,9 +3182,20 @@ async function sharedResourceProjection(
       };
       break;
     }
-    case "world-chat-bench-generation": {
+    case "world-chat-bench-keep":
+    case "world-chat-bench-select":
+    case "world-chat-bench-discard": {
+      if (!deps.benchControls) throw new Error("Bench take controls are unavailable.");
       authority = { kind: "bench", id: payload.action.sessionId };
-      if (!deps.quoteBenchGeneration) {
+      const body = deps.benchControls.prepare(payload.action);
+      shown = { title: payload.action.kind === "bench-keep" ? "Keep a Bench take" : payload.action.kind === "bench-select" ? "Select a Bench take" : "Discard a Bench take",
+        consequence: body.family === "command" ? body.expectedResult : "Marks this candidate discarded; its immutable media remains.", affectedTargets: [...intent.targets], ripples: [],
+        permissionReason: payload.action.kind === "bench-discard" ? "destructive-change" : "authored-change", body };
+      break;
+    }
+    case "world-chat-bench-generation": {
+      authority = { kind: "bench", id: benchChatSessionId(payload.action, intent.actionId) };
+      if (!deps.quoteBenchGeneration && !deps.benchGenerationQuotes) {
         approvalBlockedReason = "The coordinator cannot quote this Bench generation.";
         shown = {
           title: "Generate in Bench",
@@ -3177,10 +3219,10 @@ async function sharedResourceProjection(
         break;
       }
       const quote = deps.benchGenerationQuotes
-        ? { body: await deps.benchGenerationQuotes.prepare(payload.action, intent.actionId, intent.createdAt), authorityRevision: 0 }
-        : await deps.quoteBenchGeneration(payload.action, intent.createdAt);
+        ? { body: await deps.benchGenerationQuotes.prepare(payload.action, intent.actionId, intent.createdAt, { conversationId: intent.conversationId }), authorityRevision: 0 }
+        : await deps.quoteBenchGeneration!(payload.action, intent.createdAt);
       authorityRevision = quote.authorityRevision;
-      if (!deps.dispatchBenchGeneration) approvalBlockedReason = "Bench dispatch is unavailable.";
+      if (!deps.dispatchBenchGeneration && !deps.benchGenerationQuotes) approvalBlockedReason = "Bench dispatch is unavailable.";
       if (quote.body.quoteExpiresAt && Date.parse(quote.body.quoteExpiresAt) <= Date.parse(store.now())) {
         approvalBlockedReason = "This generation quote expired. Prepare a fresh card.";
       }
@@ -3601,6 +3643,10 @@ async function executeSharedResource(
       return deps.buildGenerationQuotes?.dispatch(payload.action, action.actionId) ?? { status: "failed", detail: "The founding quote source is unavailable." };
     case "world-chat-voice-audition":
       return { status: "failed", detail: "A durable coordinator-owned generation quote is required." };
+    case "world-chat-bench-keep":
+    case "world-chat-bench-select":
+    case "world-chat-bench-discard":
+      return deps.benchControls?.execute(payload.action, action.actionId, precondition) ?? { status: "failed", detail: "Bench controls are unavailable." };
     case "world-chat-bench-generation":
       if (deps.benchGenerationQuotes) return deps.benchGenerationQuotes.dispatch(payload.action, action.actionId);
       return deps.dispatchBenchGeneration?.(payload.action, action.actionId) ?? {
@@ -4611,6 +4657,7 @@ export function worldChatActionAdapters(
             return { status: "stale", detail: "The export finished before cancellation could be reconciled." };
           }
         }
+        if (["world-chat-bench-keep", "world-chat-bench-select", "world-chat-bench-discard"].includes(action.actionKind)) return deps.benchControls?.reconcile(action) ?? null;
         if (action.actionKind === "world-chat-bench-generation") {
           if (deps.benchGenerationQuotes) {
             const reconciled = await deps.benchGenerationQuotes.reconcile(action);
@@ -4814,6 +4861,7 @@ export function worldChatActionAdapters(
     "world-chat-production-cut-export",
     "world-chat-production-export-cancel",
     "world-chat-bench-generation",
+    "world-chat-bench-keep", "world-chat-bench-select", "world-chat-bench-discard",
   ] satisfies readonly WorldChatPreparedAction["kind"][];
 
   const canonAction = proposalBacked(

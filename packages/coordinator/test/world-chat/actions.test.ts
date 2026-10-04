@@ -1,3 +1,5 @@
+import { benchReadRows } from "../../src/bench/chat-reads.js";
+import { productionReadFence } from "../../src/world-chat/production-reads.js";
 import { stageReferenceFrames } from "@arke-studio/contracts";
 import { GenerationQuotes } from "../../src/world-chat/generation-quotes.js";
 import { imageGenerationSource } from "../../src/world-chat/image-generation.js";
@@ -273,7 +275,7 @@ function currentReceipt(
   exportRecords: readonly ArkeExportReadRecord[] = [],
 ): WorldChatCheckReceipt {
   const bundle = store.getBundle();
-  const fence = requirement === "founding-build" ? buildItemsFence([]) : requirement === "world-metadata"
+  const fence = requirement === "generation-routes" ? productionReadFence([]) : requirement === "bench" ? productionReadFence(benchReadRows(store.dir, target)) : requirement === "founding-build" ? buildItemsFence([]) : requirement === "world-metadata"
     ? worldMetadataFence(bundle)
     : requirement === "canon"
       ? canonFence(bundle)
@@ -2309,6 +2311,7 @@ describe("World Chat authority adapters", () => {
   it("binds a durable Bench quote before dispatch", async () => {
     let dispatched = 0;
     const w = await setup({ kind: "world" }, {
+      getGenerationRouteRows: () => [],
       getJobs: () => [],
       quoteBenchGeneration: async () => ({
         authorityRevision: 7,
@@ -2341,9 +2344,13 @@ describe("World Chat authority adapters", () => {
         return { status: "queued", detail: "2 Bench items reserved and queued." };
       },
     });
+    const sessionId = `sess_${"0".repeat(26)}`;
+    await new BenchStore(sessionDir(w.store.dir, sessionId)).create(sessionId, AT);
     const receipt = currentReceipt(w.store, "jobs");
+    const routeReceipt = currentReceipt(w.store, "generation-routes");
+    const benchReceipt = currentReceipt(w.store, "bench", sessionId);
     const oneTurn = turn(w.conversationId, { kind: "world" }, {
-      receipts: [receipt],
+      receipts: [receipt, routeReceipt, benchReceipt],
       actions: [{
         kind: "bench-generation",
         sessionId: `sess_${"0".repeat(26)}`,
@@ -2354,7 +2361,7 @@ describe("World Chat authority adapters", () => {
           params: { kind: "image", aspect: "16:9", count: 2 },
           brief: "Salt-stained ledger studies",
         },
-        checkReceiptIds: [receipt.id],
+        checkReceiptIds: [receipt.id, routeReceipt.id, benchReceipt.id],
       }],
     });
     const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn, w.actionDeps);

@@ -206,6 +206,7 @@ export const REMOTE_PREPARED_ACTION_ACCESS = {
   "world-chat-production-routing-traversal": "studio", "world-chat-production-branch-canon": "studio",
   "world-chat-production-interactive-export": "studio", "world-chat-production-cut-export": "studio",
   "world-chat-production-export-cancel": "studio", "world-chat-bench-generation": "studio",
+  "world-chat-bench-keep": "studio", "world-chat-bench-select": "studio", "world-chat-bench-discard": "studio",
   "world-chat-image-generation": "studio", "world-chat-build-item-run": "studio",
 } as const satisfies Record<WorldChatPreparedAction["kind"], "host" | "studio">;
 

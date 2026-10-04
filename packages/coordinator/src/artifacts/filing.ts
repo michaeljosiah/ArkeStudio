@@ -578,6 +578,8 @@ export async function fileGeneratedArtifact(
     /** Absolute path to the durable copy of the media — a bench take, or a reference take. */
     sourcePath: string;
     generation: ArtifactGeneration;
+    precondition?: WorldStatePrecondition;
+    expectedMediaHash?: string;
     mediaProbe?: MediaProbe | null;
     abandoned?: () => boolean;
     /**
@@ -591,6 +593,7 @@ export async function fileGeneratedArtifact(
   const bytes = await readFile(toExtendedLength(input.sourcePath));
   const hash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
 
+  if (input.expectedMediaHash && `sha256:${createHash("sha256").update(bytes).digest("hex")}`.slice(0, input.expectedMediaHash.length) !== input.expectedMediaHash) throw new Error("The generated media changed before filing.");
   const original = basename(input.sourcePath);
   const ext = extname(original).toLowerCase();
   const identity = generatedIdentity(input.generation, basename(original, extname(original)));
@@ -646,7 +649,7 @@ export async function fileGeneratedArtifact(
     await atomicWriteFile(join(store.dir, "artifacts", file), bytes);
     await writeSidecar(store, created, null);
     return { artifact: created, created: true };
-  });
+  }, input.precondition);
   if (filed.created && (kind === "audio" || kind === "video")) {
     await measureInto(store, filed.artifact.file, input.mediaProbe ?? null, input.abandoned);
     return store.getBundle().artifacts.find((artifact) => artifact.id === filed.artifact.id) ?? filed.artifact;
