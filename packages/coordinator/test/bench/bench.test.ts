@@ -37,6 +37,20 @@ import { comfyUiRecipeById, SHIPPED_MANIFEST } from "@arke-studio/providers";
 
 const CLOCK = () => "2026-08-16T12:00:00.000Z";
 
+it("refuses stale Codex size requests before freezing a misleading take", async () => {
+  const { dir, store } = await open();
+  const opened = await freshBench(dir);
+  const at = CLOCK();
+  for (const choice of [{ aspect: "16:9" }, { tier: "2K" as const }, {}]) {
+    await opened.store.append({ type: "composer-set", mode: "image", provider: "codex", model: "codex-image",
+      params: { kind: "image", count: 1, ...choice }, brief: "A circle in a field." }, { at });
+    const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST,
+      { worldId: store.worldId, requestId: "codex-size", at });
+    assert.equal(plan.ok, Object.keys(choice).length === 0);
+    if (!plan.ok) assert.match(plan.reason, /chooses the image dimensions/);
+  }
+});
+
 it("refuses oversized Gemini Bench lines before reserving takes, counting delivery beside Unicode words", async () => {
   const { dir, store } = await open();
   const opened = await freshBench(dir);
