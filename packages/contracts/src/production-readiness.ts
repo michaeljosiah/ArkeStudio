@@ -13,6 +13,8 @@ import { audibleTracks } from "./render-plan.js";
 import { hasOwnFrame } from "./scene.js";
 import { beatPictureShotId, sceneBeats } from "./beats.js";
 import { routingFindings, publicationBlockers } from "./routing.js";
+import { deriveRehearsalLines } from "./rehearsal.js";
+import { performanceClipTiming, dialogueSlots, dialogueTimingProblems } from "./dialogue-timing.js";
 
 export const PRODUCTION_READINESS_SCHEMA_VERSION = 59;
 export const ReadinessCheckSchema = z.object({
@@ -90,6 +92,9 @@ export function deriveProductionReadiness(world: ReadinessWorld, production: Pro
   const base = timeline ? basePictureTrack(timeline) : null;
   const picture = base && !base.muted ? base.clips : [];
   const audio = timeline ? audibleTracks(timeline).filter(t=>AUDIO_TRACK_KINDS.has(t.kind)).flatMap(t=>t.clips) : [];
+  const slots = dialogueSlots(production);
+  const placements = timeline ? audio.filter(clip=>clip.source.kind === "performance").map(clip=>({clip,result:performanceClipTiming(clip,production.performances,slots,timeline.frameRate)})) : [];
+  const timingsValid = dialogueTimingProblems(placements.flatMap(p=>p.result.ok ? [p.result.timing] : []),slots,Math.max(0,...slots.map(s=>s.endSec))).length === 0;
   const ownImage = (id: string) => {
     const selection = production.selections[id], artifact = available(selection?.startFrameArtifactId ?? "");
     return !!artifact && /^[^/\\]+$/.test(artifact.file) && hasOwnFrame(selection,world.artifacts.filter(a=>!a.retiredAt && (!a.production || a.production === production.meta.id)));
@@ -111,14 +116,7 @@ export function deriveProductionReadiness(world: ReadinessWorld, production: Pro
       ...mentions.filter(id => !propIds.has(id) && id !== scene.inherits?.location && (!world.sheets.some(s => s.id === id) || world.sheets.some(s => s.id === id && s.type === "character")))])];
     const places = [...new Set([...(scene.inherits?.location ? [scene.inherits.location] : []), ...mentions.filter(id => world.sheets.some(s => s.id === id && s.type === "location"))])];
     const cast = (id: string) => world.sheets.find(s => s.id === id && s.type === "character" && !s.retired);
-    const spoken = shots.flatMap<{ shotId: string; blockId: string | undefined; speaker: string | undefined }>(shot => {
-      const blocks = shot.covers?.length ? shot.covers.flatMap(c => {
-        const b = scene.script?.blocks.find(b => b.id === c.blockId);
-        return b?.kind === "dialogue" ? [{ shotId: shot.id, blockId: b.id, speaker: b.speaker }] : [];
-      }) : ["dialogue", "vo"].includes(shot.audio?.kind ?? "") && shot.audio?.line?.trim()
-        ? [{ shotId: shot.id, blockId: undefined, speaker: shot.audio.speaker }] : [];
-      return blocks;
-    });
+    const spoken = deriveRehearsalLines(scene,world.sheets).map(line=>({shotId:line.shotId,blockId:line.blockId,speaker:line.speakerSheetId}));
     for (const block of scene.script?.blocks ?? []) if (block.kind === "dialogue" && block.text.trim() && !spoken.some(line => line.blockId === block.id)) {
       spoken.push({shotId:"uncovered",blockId:block.id,speaker:block.speaker});
     }
@@ -130,7 +128,7 @@ export function deriveProductionReadiness(world: ReadinessWorld, production: Pro
         performance.target.sceneId === scene.id && performance.target.shotId === line.shotId && performance.target.blockId === line.blockId &&
         performance.target.productionId === production.meta.id &&
         production.performanceReview.reviews.filter(r => r.performanceId === performance.id).at(-1)?.decision === "accept" &&
-        audio.some(clip=>clip.source.kind === "performance" && clip.source.performanceId === performance.id && clip.source.shotId === line.shotId &&
+        timingsValid && placements.some(({clip,result})=>result.ok && clip.source.kind === "performance" && clip.source.performanceId === performance.id && clip.source.shotId === line.shotId &&
           clip.source.sourceHash === performance.provenance.outputHash)) return true;
       // Legacy voice-line writes the accepted voice take into a dialogue placement. It cannot
       // prove a particular covered script block, so it satisfies only the legacy shot line.
@@ -155,14 +153,16 @@ export function deriveProductionReadiness(world: ReadinessWorld, production: Pro
       check("dialogue-voiced", "Dialogue voiced", spoken.map(l => `${l.shotId}/${l.blockId ?? "legacy"}`), voiced, "Each spoken line has a current accepted performance or legacy voice placement."),
       check("in-cut", "In the cut", shotIds, id => picture.some(c => { const source = c.source; return source.kind === "shot" ? source.shotId === id : source.kind === "take" && production.takes.some(t => t.id === source.takeId && t.coversShots.includes(id)); }), "Every scene shot has a visible picture-track placement in the saved cut.", "missing"),
     ];
-    if (shape.playsAsBeats) {
+    if (shape.dispatchCapability === "image") {
       for (const item of checks.filter(c=>c.key === "in-cut" || c.key === "dialogue-voiced")) { item.status="not-required"; item.detail=item.key === "in-cut"
-        ? "Beat playback uses selected pictures and text directly, without a video cut." : "Beat dialogue can be delivered as text; prepared voices are optional."; }
+        ? "This format delivers selected pictures directly, without a video cut." : "This format delivers images or beat text; prepared voices are optional."; }
+    }
+    if (shape.playsAsBeats) {
       const beats = sceneBeats(scene);
       const lines = scene.script?.blocks.length ? scene.script.blocks.map(b=>b.id) : beats.filter(b=>b.kind !== "picture").map(b=>b.lineId!);
       checks.push(check("beat-text","Beat text",lines,id=>!!beats.find(b=>b.blockId === id || b.lineId === id)?.text.trim(),"Authored beat lines are delivered as text when no prepared voice is present."));
-      if (production.routing?.excluded.some(e=>e.sceneId === scene.id)) for (const item of checks) { item.status="not-required"; item.detail="This scene is explicitly excluded from the playable package."; }
     }
+    if (shape.isBranching && production.routing?.excluded.some(e=>e.sceneId === scene.id)) for (const item of checks) { item.status="not-required"; item.detail="This scene is explicitly excluded from the playable package."; }
     return { sceneId: scene.id, title: scene.title, checks, ready: ready(checks) };
   });
   const exportsHere = exports.filter(e => e.worldId === world.meta.worldId && e.productionId === production.meta.id && e.episodeId === undefined)
@@ -171,18 +171,18 @@ export function deriveProductionReadiness(world: ReadinessWorld, production: Pro
   const lastExport = exportsHere.at(-1) ?? null;
   const currentFingerprint = productionExportFingerprint(world,production);
   const checks = [
-    check("cut", "Cut assembled", [production.meta.id], () => !!timeline && picture.length > 0 && scenes.length > 0 && scenes.every(s => s.checks.find(c => c.key === "in-cut")?.status === "ready"), "A saved picture cut includes every scene shot."),
+    check("cut", "Cut assembled", [production.meta.id], () => !!timeline && picture.length > 0 && scenes.some(s => s.checks.find(c => c.key === "in-cut")?.status === "ready") && scenes.every(s => ["ready","not-required"].includes(s.checks.find(c => c.key === "in-cut")?.status ?? "missing")), "A saved picture cut includes every required scene shot."),
     check("subtitles", "Subtitles", [production.meta.id], () => !!timeline?.tracks.some(t => t.kind === "subtitle" && !t.muted && t.cues?.length && t.cues.every(c => !cueStaleness(c, production).stale)), "An unmuted subtitle track contains current editable cues."),
     check("export", "Last export", [production.meta.id], () => lastExport?.status === "done" && !!lastExport.output && lastExport.sourceFingerprint === currentFingerprint,
       lastExport ? `Last production export: ${lastExport.status}.${lastExport.status === "done" && lastExport.sourceFingerprint !== currentFingerprint ? " Export again: its source snapshot is older or unavailable." : ""}` : "No production export is recorded."),
   ];
-  if (!shape.hasScenes || shape.playsAsBeats) for (const c of checks.filter(c => c.key !== "export")) { c.status = "not-required"; c.detail = "This format delivers directly without a video cut or subtitle track."; }
+  if (!shape.hasScenes || shape.dispatchCapability === "image") for (const c of checks.filter(c => c.key !== "export")) { c.status = "not-required"; c.detail = "This format delivers directly without a video cut or subtitle track."; }
   if (shape.hasChapters) {
     const chapters = production.chapters.filter(c=>!c.retired), ids = chapters.map(c=>c.id);
     checks.unshift(check("chapters","Chapters",[production.meta.id],()=>chapters.length > 0,"At least one current chapter is present."),
       check("manuscript","Manuscript",ids,id=>(chapters.find(c=>c.id === id)?.words ?? 0) > 0,"Every current chapter has saved prose.","missing"));
   }
-  if (shape.playsAsBeats) checks.unshift(check("routing","Routing",[production.meta.id],()=>!!production.routing && publicationBlockers(routingFindings(production.routing,production.scenes,production.routingTraversals ?? [])).length === 0,"The branch map has valid start, endings, destinations and current preview traversal evidence."));
-  if (shape.hasScenes && !shape.playsAsBeats && production.timeline?.status === "invalid") for (const c of checks.filter(c => c.key !== "export")) { c.status = "blocked"; c.detail = "Repair the invalid saved timeline before assessing the cut."; }
+  if (shape.isBranching) checks.unshift(check("routing","Routing",[production.meta.id],()=>!!production.routing && publicationBlockers(routingFindings(production.routing,production.scenes,production.routingTraversals ?? [])).length === 0,"The branch map has valid start, endings, destinations and current preview traversal evidence."));
+  if (shape.hasScenes && shape.dispatchCapability === "video" && production.timeline?.status === "invalid") for (const c of checks.filter(c => c.key !== "export")) { c.status = "blocked"; c.detail = "Repair the invalid saved timeline before assessing the cut."; }
   return { productionId: production.meta.id, title: production.meta.title, scenes, checks, lastExport, ready: ready(checks) && scenes.every(s => s.ready) };
 }

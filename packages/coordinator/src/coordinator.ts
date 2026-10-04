@@ -4079,11 +4079,12 @@ export class Coordinator {
   /** Validate, fold, log, broadcast — the one path every event takes (R-3). */
   emit(event: DomainEvent): void {
     const parsed = DomainEventSchema.parse(event);
+    const exportStatusChanged = parsed.type === "export.progress" && this.exportReads.get(parsed.exportId)?.status !== parsed.status;
     if (parsed.type === "export.progress") {
       this.exportReads.set(parsed.exportId, exportReadRecord(parsed));
     }
     this.readModel.apply(parsed);
-    if (parsed.type === "export.progress") {
+    if (parsed.type === "export.progress" && exportStatusChanged) {
       const state = this.readModel.getState();
       if (state.world?.meta.worldId === parsed.worldId && state.worldChat?.messages.some(m => m.productionPlan?.productionId === parsed.productionId)) {
         this.readModel.setWorldChat(refreshProductionPlanCards(state.worldChat,state.world,[...this.exportReads.values()]));

@@ -921,7 +921,7 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       } : {}),
       season,
       routing,
-      routingTraversals: routing ? await readTraversalFromDirectory(dir,id) : [],
+      routingTraversals: routing ? await readTraversalFromDirectory(dir,id,routing) : [],
       treatment,
       chapters,
       scenes,

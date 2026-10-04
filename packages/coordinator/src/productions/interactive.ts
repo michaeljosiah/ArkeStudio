@@ -5,6 +5,8 @@
  */
 
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { copyFile, lstat, mkdir, open as openFile, readFile, readdir, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
 import {
@@ -346,8 +348,33 @@ export async function readTraversal(store: WorldStore, productionId: string): Pr
   return readTraversalFromDirectory(store.dir,productionId);
 }
 
-export async function readTraversalFromDirectory(dir: string, productionId: string): Promise<TraversalEvidence[]> {
-  return (await readStoredTraversal({dir}, productionId)).map(({ requestId: _requestId, ...entry }) => entry);
+export async function readTraversalFromDirectory(dir: string, productionId: string, routing?: Routing): Promise<TraversalEvidence[]> {
+  if (!routing) return (await readStoredTraversal({dir}, productionId)).map(({ requestId: _requestId, ...entry }) => entry);
+  if (!routing.choices.length) return [];
+  const byChoice = new Map(routing.choices.map(choice => [choice.id, choice])), found = new Map<string, TraversalEvidence>();
+  const input = createReadStream(toExtendedLength(join(dir, "productions", productionId, EVIDENCE_FILE)), { encoding: "utf8" });
+  const lines = createInterface({ input, crlfDelay: Infinity });
+  let failed = false;
+  input.on("error", () => { failed = true; lines.close(); });
+  try {
+    for await (const raw of lines) {
+      if (!raw.trim()) continue;
+      try {
+        const { requestId: _requestId, ...entry } = StoredTraversalEvidenceSchema.parse(JSON.parse(raw));
+        const choice = byChoice.get(entry.choiceId);
+        if (choice && !found.has(choice.id) && choice.from === entry.from && choice.to === entry.to) {
+          // Findings need only current edge identity. The full walked route remains in the journal.
+          found.set(choice.id, { ...entry, route: [] });
+          if (found.size === byChoice.size) break;
+        }
+      } catch { /* malformed rows never block the remaining evidence */ }
+    }
+  } catch {
+    failed = true;
+  } finally {
+    lines.close(); input.destroy();
+  }
+  return failed ? [] : [...found.values()];
 }
 
 export async function hasTraversalRequest(

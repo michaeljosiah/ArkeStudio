@@ -4,7 +4,9 @@ import { DialogueTimingIntentSchema, type DialogueTimingIntent } from "./cut.js"
 import { PerformanceIdSchema } from "./performance.js";
 import { orderedShots } from "./scene-flow.js";
 import { resolvedAuthoredDuration, sortScenes } from "./scene.js";
-import { basePictureTrack, framesToSeconds, orderedTrackClips } from "./timeline.js";
+import { basePictureTrack, framesToSeconds, orderedTrackClips, type TimelineClip } from "./timeline.js";
+import type { FrameRate } from "./world.js";
+import type { PerformanceRecord } from "./performance.js";
 
 export const DispatchTimingSnapshotSchema = z.object({
   slotSource: z.enum(["shot-duration", "spine-anchor", "timeline-clip"]),
@@ -58,6 +60,26 @@ export function calculateDialogueTiming(slot: DialogueSlot, measuredSec: number 
     requiredMinimumSec, slotDurationSec, deltaSec: slotDurationSec-requiredMinimumSec,
     audioOverflowSec: Math.max(0,speechEndSec-slot.endSec), unusedSlotSec: Math.max(0,slot.endSec-speechEndSec), intent } };
 }
+/** Export and readiness must agree when picture or dialogue edits invalidate a placement. */
+export function performanceClipTiming(clip: TimelineClip, performances: readonly PerformanceRecord[], slots: readonly DialogueSlot[], frameRate: FrameRate):
+  { ok: true; timing: DialogueTiming; performance: PerformanceRecord } | { ok: false; reason: string } {
+  const source = clip.source;
+  if (source.kind !== "performance") return { ok: false, reason: `${clip.id}: not a performance placement` };
+  const performance = performances.find(p => p.id === source.performanceId);
+  if (!performance || performance.target.shotId !== source.shotId || performance.provenance.outputHash !== source.sourceHash) return { ok: false, reason: `${clip.id}: performance identity is missing or changed` };
+  const slot = slots.filter(s => s.shotId === source.shotId);
+  if (slot.length !== 1) return { ok: false, reason: `${clip.id}: choose one picture slot for this dialogue` };
+  const calculated = calculateDialogueTiming(slot[0]!, performance.provenance.outputTechnical.durationSec, source.leadInSec, source.timing);
+  if (!calculated.ok) return calculated;
+  const timing = calculated.timing, halfFrame = framesToSeconds(1, frameRate) / 2 + 0.000001;
+  if (Math.abs(framesToSeconds(clip.startFrame, frameRate) - timing.speechStartSec) > halfFrame ||
+    Math.abs(framesToSeconds(clip.sourceInFrames, frameRate) - timing.sourceInSec) > halfFrame ||
+    Math.abs(framesToSeconds(clip.durationFrames, frameRate) - timing.spokenSec) > 2 * halfFrame) {
+    return { ok: false, reason: `${clip.id}: picture or dialogue trim moved; review the performance placement again` };
+  }
+  return { ok: true, timing, performance };
+}
+
 export function dialogueTimingProblems(timings: readonly DialogueTiming[], slots: readonly DialogueSlot[], timelineEndSec: number): string[] {
   const problems: string[] = [];
   for (const timing of timings) {

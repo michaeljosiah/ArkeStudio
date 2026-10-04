@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { deriveProductionReadiness, productionExportFingerprint, INTERACTIVE_PLAYER_SOURCE, migrateLegacyScene, RoutingSchema, type ClientMessage, type DomainEvent, type ProductionBundle, type Routing, type Take } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
@@ -139,8 +139,11 @@ describe("interactive video through the coordinator (epic 401)", () => {
     });
     const before = await interactiveFindings(store, production);
     assert.ok(!before.some((finding) => finding.kind === "untraversed-edge"), "the walked edge counts");
+    const row = JSON.stringify({ts:CLOCK(),routingVersion:1,choiceId:"ch_on",from:"sc_i1",to:"sc_i2",route:["sc_i1"]}) + "\n";
+    await store.ownedWrite(() => appendFile(join(dir,"productions",production.meta.id,"routing-evidence.jsonl"),row.repeat(3000)));
     const scanned = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
-    assert.equal(scanned.routingTraversals?.length, 1, "the flushed preview journal reaches the world projection");
+    assert.equal(scanned.routingTraversals?.length, 1, "a long preview history projects one qualifying row per current edge");
+    assert.deepEqual(scanned.routingTraversals?.[0]?.route, [], "the audit route stays on disk instead of growing the client snapshot");
     const novel = { ...production, meta: { ...production.meta, kind: "visual-novel" as const }, routingTraversals: scanned.routingTraversals };
     assert.equal(deriveProductionReadiness(store.getBundle(), novel).checks.find(check => check.key === "routing")!.status, "ready");
 
@@ -157,6 +160,8 @@ describe("interactive video through the coordinator (epic 401)", () => {
       "the old traversal no longer describes the retargeted edge",
     );
     assert.equal(deriveProductionReadiness(store.getBundle(), { ...novel, routing: retargeted.routing }).checks.find(check => check.key === "routing")!.status, "missing");
+    await saveRouting(store, production.meta.id, retargeted.routing!);
+    assert.deepEqual(store.getBundle().productions.find(p=>p.meta.id === production.meta.id)!.routingTraversals, [], "retargeting sheds the entire old-edge history from the projection");
   });
 
   it("IV-K3: canon promotion is explicit, gated, and names the route it came from", async () => {

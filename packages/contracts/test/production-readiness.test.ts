@@ -29,8 +29,29 @@ it("uses the accepted artifact slot written by still acceptance and refuses reti
   const p=production(),w=world(),artifact=image(w); p.meta.format="stills";
   p.selections.sh_one={acceptedTakeId:null,trimInSec:0,startFrameArtifactId:artifact.id};
   assert.equal(sceneCheck(p,"selected-takes",w).status,"ready"); assert.equal(sceneCheck(p,"start-frames",w).status,"ready");
+  const stills=deriveProductionReadiness(w,p,[doneExport(w,p)]);
+  assert.equal(stills.ready,true,"Native Stills delivery needs no video timeline or subtitle track");
+  assert.equal(stills.scenes[0]!.checks.find(check=>check.key === "in-cut")!.status,"not-required");
+  p.timeline={status:"invalid",message:"An unused video timeline"};
+  assert.equal(deriveProductionReadiness(w,p,[doneExport(w,p)]).ready,true);
+  p.meta.format="video"; p.meta.kind="stills"; assert.equal(deriveProductionReadiness(w,p,[doneExport(w,p)]).ready,true);
   artifact.retiredAt=AT; assert.equal(sceneCheck(p,"selected-takes",w).status,"missing");
   delete artifact.retiredAt; artifact.production="other"; assert.equal(sceneCheck(p,"selected-takes",w).status,"missing");
+});
+
+it("requires valid current routing for ordinary interactive video as well as beat playback", () => {
+  const p=production(); p.meta.kind="interactive";
+  const check=()=>deriveProductionReadiness(world(),p).checks.find(c=>c.key === "routing")!;
+  assert.equal(check().status,"missing");
+  p.scenes.push({...structuredClone(p.scenes[0]!),id:"sc_end",number:2,slug:"end",shots:[{id:"sh_end",number:1,title:"End",description:"Sea."}]});
+  p.routing=RoutingSchema.parse({version:1,start:"sc_one",choices:[{id:"ch_go",from:"sc_one",to:"sc_end",label:"Go"}],endings:[{sceneId:"sc_end",title:"End"}],excluded:[],groups:[]});
+  assert.equal(check().status,"missing");
+  p.routingTraversals=[{ts:AT,routingVersion:1,choiceId:"ch_go",from:"sc_one",to:"sc_end",route:["sc_one"]}];
+  assert.equal(check().status,"ready");
+  p.scenes.push({id:"sc_unused",number:3,slug:"unused",title:"Unused",status:"draft",version:1,shots:[]});
+  p.routing.excluded.push({sceneId:"sc_unused",reason:"Alternate draft"}); p.timeline={status:"ready",timeline:seedStoryPictureTimeline(p)};
+  assert.equal(deriveProductionReadiness(world(),p).checks.find(c=>c.key === "cut")!.status,"ready","Excluded branching drafts do not demand cut placement");
+  p.routing.choices[0]!.to="sc_one"; assert.equal(check().status,"missing");
 });
 
 it("derives Visual Novel readiness from beat pictures, text and routing without a video cut or voices", () => {
@@ -100,6 +121,14 @@ it("requires a current accepted performance to be placed on an audible timeline 
   p.timeline.timeline.tracks.push({id:"tr_dialogue",kind:"dialogue",name:"Dialogue",order:1,muted:false,clips:[{id:"cl_voice",startFrame:0,durationFrames:24,sourceInFrames:0,
     source:{kind:"performance",performanceId:id,shotId:"sh_one",label:"Maren",sourceHash:hash,leadInSec:0,timing:{postHandle:{kind:"tail",durationSec:0},overflow:{mode:"forbid"}}}}]});
   assert.equal(sceneCheck(p,"dialogue-voiced").status,"ready"); p.timeline.timeline.tracks.at(-1)!.muted=true; assert.equal(sceneCheck(p,"dialogue-voiced").status,"missing");
+  p.timeline.timeline.tracks.at(-1)!.muted=false;
+  const placement=p.timeline.timeline.tracks.at(-1)!.clips[0]!, picture=p.timeline.timeline.tracks[0]!.clips[0]!;
+  placement.startFrame=24; assert.equal(sceneCheck(p,"dialogue-voiced").status,"missing"); placement.startFrame=0;
+  placement.sourceInFrames=12; assert.equal(sceneCheck(p,"dialogue-voiced").status,"missing"); placement.sourceInFrames=0;
+  placement.durationFrames=12; assert.equal(sceneCheck(p,"dialogue-voiced").status,"missing"); placement.durationFrames=24;
+  picture.startFrame=24; assert.equal(sceneCheck(p,"dialogue-voiced").status,"missing"); picture.startFrame=0;
+  scene(p).shots.push({...structuredClone(scene(p).shots[0]!),id:"sh_second",number:2});
+  const continued=sceneCheck(p,"dialogue-voiced"); assert.equal(continued.total,1,"The rehearsal reads a covered block once across a cut"); assert.equal(continued.status,"ready");
 });
 
 it("does not confuse a produced frame, claimed completion or dangling selection with a selected take", () => {
