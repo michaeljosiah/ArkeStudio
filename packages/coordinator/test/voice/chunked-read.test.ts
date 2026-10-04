@@ -63,21 +63,38 @@ class Reader extends FakeProvider {
   refuse: string | null = null;
   pieces: readonly string[] = [];
   holdUntilCancelled = false;
-  /** Every request, the refused one included — `submitCount` counts only those the fake answered. */
-  attempts = 0;
+  /**
+   * The refusal waits until this many siblings are held in flight. A refusal answered at once
+   * reached the coordinator before the lane's interval let anything else out, so on a quick
+   * machine the case never had a sibling to abort, and on a loaded one it had however many the
+   * disk's latency let through: the interleaving under test was whatever the runner allowed.
+   */
+  refuseOnceHeld = 0;
+  /** Siblings held in flight right now. */
+  held = 0;
+  /** The words of every request, the refused one included — `submitCount` counts only those the fake answered. */
+  readonly sent: string[] = [];
+  get attempts(): number {
+    return this.sent.length;
+  }
   override async submit(key: string, request: Parameters<FakeProvider["submit"]>[1] & { signal?: AbortSignal }): ReturnType<FakeProvider["submit"]> {
-    this.attempts += 1;
     const text = String(request.params["text"]);
-    if (text === this.refuse) throw new ProviderRequestRejectedError("mistral: refused this line");
+    this.sent.push(text);
+    if (text === this.refuse) {
+      await until(() => this.held >= this.refuseOnceHeld, `${this.refuseOnceHeld} sibling(s) in flight before the refusal`, PATIENCE);
+      throw new ProviderRequestRejectedError("mistral: refused this line");
+    }
     if (this.holdUntilCancelled) {
       // Keep siblings in flight until cancellation reaches them; a 500ms reply can beat a
       // busy Windows runner's journal writes and turn this into a race with completed audio.
       const signal = request.signal;
       assert.ok(signal, "the dispatcher supplies cancellation for the held request");
+      this.held += 1;
       await new Promise<void>((resolve) => {
         if (signal.aborted) resolve();
         else signal.addEventListener("abort", () => resolve(), { once: true });
       });
+      this.held -= 1;
       throw new ProviderRequestRejectedError("mistral: cancelled before accepting this line");
     }
     // Answered per request rather than through the fake's shared `inlineArtifacts`: two pieces
@@ -351,9 +368,16 @@ describe("a read over the reader's cap (issue 1208)", () => {
     const h = await harness();
     try {
       const { pieces } = await h.narrate();
-      // The Essence's pieces go first, so the Appearance is still queued when the first fails.
+      // The Essence's pieces go first, so the Appearance is still queued when the first fails —
+      // and a sibling is always in flight by then, held until cancellation reaches it. That is
+      // the interleaving a loaded windows-latest runner produced by accident (CI runs
+      // 37145304929, 37147020660, 37153706176, 37152967558): cancelled one job at a time, the
+      // held sibling's abort freed its lane slot and the pump filled it with the Appearance
+      // before the loop reached it. The lane takes two at once, so with the refusal and one
+      // held sibling it is full until the coordinator acts.
       h.reader.refuse = pieces[0]!;
       h.reader.holdUntilCancelled = true;
+      h.reader.refuseOnceHeld = 1;
       const page = (confirmationToken?: string) =>
         h.send({ kind: "read-sheet-page", requestId: PAGE, worldId: WORLD_ID, sheetId: "maren-kest", sections: ["Essence", "Appearance"], ...(confirmationToken !== undefined ? { confirmationToken } : {}) });
       await page();
@@ -363,9 +387,44 @@ describe("a read over the reader's cap (issue 1208)", () => {
       await until(() => h.audio(PAGE).some((event) => event.status === "failed"), "the refused block to fail the page", PATIENCE);
       await settle();
       assert.deepEqual(h.jobs(PAGE).sort(), [...pieces.slice(1).map(() => "cancelled"), "cancelled", "failed"].sort(), "the Appearance's job cancelled with the Essence's other pieces");
-      assert.ok(h.reader.attempts < pieces.length + 1, `the Appearance never reached the reader: ${h.reader.attempts} sent`);
+      assert.ok(h.reader.sent.every((text) => pieces.includes(text)), `the Appearance never reached the reader: ${h.reader.attempts} sent`);
       assert.equal(h.audio(PAGE).filter((event) => event.status === "failed").length, 1, "the page failed once");
       assert.equal(h.audio(PAGE).filter((event) => event.status === "ready").length, 0, "and nothing was announced over it");
+    } finally {
+      await h.coordinator.stop();
+    }
+  });
+
+  it("a page that fails while its batch is still being journalled queues nothing more, and cancels what it had (codex on PR 1560)", async () => {
+    const h = await harness();
+    try {
+      const { pieces } = await h.narrate();
+      h.reader.refuse = pieces[0]!;
+      h.reader.holdUntilCancelled = true;
+      // The second job's journal write waits for the page to have failed: the first piece is
+      // queued, sent and refused while the rest of the batch is still to come. Every job
+      // journalled after that would be pumped at once, before the batch could name it to cancel.
+      const queue = (h.coordinator as unknown as { jobQueue: { enqueue(input: unknown): Promise<unknown> } }).jobQueue;
+      const enqueue = queue.enqueue.bind(queue);
+      let journalled = 0;
+      queue.enqueue = async (input) => {
+        journalled += 1;
+        if (journalled === 2) await until(() => h.audio(PAGE).some((event) => event.status === "failed"), "the first piece to fail the page", PATIENCE);
+        return enqueue(input);
+      };
+      const page = (confirmationToken?: string) =>
+        h.send({ kind: "read-sheet-page", requestId: PAGE, worldId: WORLD_ID, sheetId: "maren-kest", sections: ["Essence", "Appearance"], ...(confirmationToken !== undefined ? { confirmationToken } : {}) });
+      await page();
+      const asked = h.audio(PAGE).find((event) => event.status === "confirmation-required")!;
+      await page(asked.confirmationToken);
+      await until(() => h.events.some((event) => event.type === "queue.enqueue-result" && event.requestId === PAGE), "the batch to return", PATIENCE);
+      await until(() => h.jobs(PAGE).every((status) => status === "failed" || status === "cancelled"), "every job the page queued to settle", PATIENCE);
+      await settle();
+      assert.equal(journalled, 2, "the batch stopped once the page had failed");
+      assert.deepEqual(h.jobs(PAGE).sort(), ["cancelled", "failed"], "the piece journalled behind the failure was cancelled");
+      assert.ok(h.reader.sent.every((text) => pieces.slice(0, 2).includes(text)), `nothing behind it reached the reader: ${JSON.stringify(h.reader.sent.map((text) => pieces.indexOf(text)))}`);
+      assert.equal(h.audio(PAGE).filter((event) => event.status === "failed").length, 1, "the page failed once, the batch's shortfall no second time");
+      assert.equal(h.audio(PAGE).filter((event) => event.status === "ready").length, 0);
     } finally {
       await h.coordinator.stop();
     }
@@ -425,8 +484,10 @@ describe("a read over the reader's cap (issue 1208)", () => {
     try {
       const { pieces } = await h.narrate();
       h.reader.refuse = pieces[0]!;
-      // A sibling already sent stays in flight until cancellation reaches it.
+      // A sibling already sent stays in flight until cancellation reaches it, and one always has
+      // been by the time the refusal lands: the page case above, without the page.
       h.reader.holdUntilCancelled = true;
+      h.reader.refuseOnceHeld = 1;
       await readSection(h.send, REQUEST);
       const asked = h.audio(REQUEST).find((event) => event.status === "confirmation-required")!;
       await readSection(h.send, REQUEST, asked.confirmationToken);
