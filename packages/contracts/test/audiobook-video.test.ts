@@ -21,6 +21,9 @@ import {
   videoFileName,
   videoFolderName,
   videoSegments,
+  computeRunning,
+  videoPlaceLine,
+  type ClientState,
   type ListeningChapter,
 } from "../src/index.js";
 
@@ -160,5 +163,13 @@ describe("the audiobook as a video (turn 197)", () => {
     assert.equal(clockTime(3725), "1:02:05");
     assert.equal(roughTime(300), "5 min");
     assert.equal(roughTime(21900), "6 h 05 m");
+  });
+
+  it("is one Activity row while it renders: the book, a percent of the chapters' length, where it is (197d)", () => {
+    const video = { title: "Na love or Juju", chapter: 1, of: 1, doneSec: 724, totalSec: 1900, leftSec: 180 };
+    assert.equal(videoPlaceLine(video), "Chapter 1 of 1 · 12:04 of 31:40 · ~3 min left");
+    assert.equal(videoPlaceLine({ ...video, leftSec: null }, false), "Chapter 1 of 1");
+    const [row] = computeRunning({ app: { jobs: [] } } as unknown as ClientState, { exports: { vb_1: { productionId: "nloj", status: "running", percent: 41, video } } });
+    assert.deepEqual(row, { kind: "export", title: "Video · Na love or Juju", detail: "Chapter 1 of 1 · 12:04 of 31:40 · ~3 min left", percent: 41, ref: "vb_1", cancellable: true, video });
   });
 });
