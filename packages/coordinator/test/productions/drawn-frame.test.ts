@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { hasOwnFrame, orderedShots, type Job, type Selections, type Take } from "@arke-studio/contracts";
+import { deriveProductionReadiness, hasOwnFrame, orderedShots, type Job, type Selections, type Take } from "@arke-studio/contracts";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { acceptStill, fileDrawnFrame, reviewAppendFor, slotAtAuthorizationOf } from "../../src/takes/drawn-frame.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
@@ -320,6 +320,12 @@ describe("accepting a still is one commit (SPEC-013 R-9, D6)", () => {
     const map = await selections(store);
     assert.equal(map["sh_13"]?.startFrameArtifactId, ok.artifactId, "and the slot names the frame");
     assert.equal(map["sh_13"]?.acceptedTakeId ?? null, null, "a still never enters the clip slot");
+    const accepted = production(store);
+    const checklist = deriveProductionReadiness(store.getBundle(), { ...accepted, meta: { ...accepted.meta, format: "stills" } });
+    const sceneId = accepted.scenes.find(scene => orderedShots(scene).some(shot => shot.id === "sh_13"))!.id;
+    const selected = checklist.scenes.find(scene => scene.sceneId === sceneId)!.checks.find(check => check.key === "selected-takes");
+    assert.ok(selected);
+    assert.ok(!selected.missingIds.includes("sh_13"), "the native accepted image slot satisfies Stills selection without a clip pointer");
   });
 
   it("refuses a still through the footage path, rather than half-writing it", async () => {

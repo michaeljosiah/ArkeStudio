@@ -1,4 +1,5 @@
 import { TimelineCardHistory } from "./timeline-card-history.js";
+import { ProductionPlanCardView } from "./production-plan-card.js";
 import { ProductionSetupOutline } from "./production-setup-outline.js";
 import { HumanDecisionCardView } from "./human-decision-card.js";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -180,6 +181,7 @@ export function ConversationTranscript({
             did, to a file, already. The rail beside this transcript holds what is waiting for a
             yes; this is the opposite kind of thing, and it needs to look like it (master §4.5).
           */}
+          {m.productionPlan && <ProductionPlanCardView card={m.productionPlan} />}
           {m.bibleEdit && (
             <div className="fy-biblecard">
               <p className="fy-biblecard__text">

@@ -60,6 +60,7 @@ import {
   ConversationActionUndoLinkSchema,
 } from "./arke-actions.js";
 import { ArkeReadTargetSchema } from "./arke-reads.js";
+import { ProductionPlanRequestSchema, ProductionPlanCardSchema } from "./production-readiness.js";
 import { ModelWorldChatActionSchema, type ModelWorldChatAction } from "./world-chat-actions.js";
 
 /**
@@ -1195,6 +1196,7 @@ export const WorldChatStoredEventSchema = valueSchema(z.discriminatedUnion("type
   z
     .object({
       type: z.literal("turn.completed"),
+      productionPlan: ProductionPlanRequestSchema.optional(),
       productionSetup: ProductionSetupStateSchema.optional(),
       message: WorldChatMessageSchema,
       run: WorldChatRunSchema,
@@ -1488,6 +1490,7 @@ export type WorldChatProblem = z.infer<typeof WorldChatProblemSchema>;
 /** The whole workspace for one conversation, folded from its events. */
 export const WorldChatLoadedSchema = z
   .object({
+    productionPlans: z.record(MessageIdSchema, ProductionPlanRequestSchema).optional(),
     productionSetup: ProductionSetupStateSchema.optional(),
     id: ConversationIdSchema,
     title: z.string().min(1).max(200),
@@ -1747,6 +1750,7 @@ export const TURN_RESULT_BOUNDS = {
 
 const WorldChatTurnResultObjectSchema = z
   .object({
+    productionPlan: ProductionPlanRequestSchema.optional(),
     setupUpdate: ProductionSetupUpdateSchema.optional(),
     reply: z.string().max(TURN_RESULT_BOUNDS.reply),
     candidateOperations: z.array(ModelCandidateOperationSchema).max(TURN_RESULT_BOUNDS.candidateOperations),
@@ -1843,6 +1847,7 @@ export type WorldChatPoint = z.infer<typeof WorldChatPointSchema>;
 
 export const WorldChatTranscriptMessageSchema = z
   .object({
+    productionPlan: ProductionPlanCardSchema.optional(),
     id: MessageIdSchema,
     /** Present on current projections so a durable card can remain beside the turn that made it. */
     turnId: TurnIdSchema.optional(),
@@ -2860,6 +2865,9 @@ const exampleEditorRequest = {
   ],
 } satisfies ModelEditorRequest;
 
+const exampleProductionPlan = { productionId: "saltlight", checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  nextSteps: ["Select the missing takes."] } satisfies z.infer<typeof ProductionPlanRequestSchema>;
+
 /** Shaped exactly as the coordinator accepts it (SPEC-036 R-38). */
 const exampleSceneEdit = { kind: "rename", title: "The tide answers" } satisfies ModelSceneEdit;
 
@@ -2898,6 +2906,7 @@ export const WORLD_CHAT_SHAPE_EXAMPLES = {
   turnResult: exampleTurnResult,
   bibleEdits: exampleBibleEdits,
   worldActions: exampleWorldActions,
+  productionPlan: exampleProductionPlan,
 } as const;
 
 /**
@@ -3180,13 +3189,19 @@ actions holds operations on the world or a production that the person decides on
 - An action marked unavailable is refused whatever you send; say why instead of preparing it.
 - production-create never replans after Approve; prose changes use proposals; order and script ids stay stable.
 
+### Production plan
+
+Read get_readiness through complete=true in a production thread, then propose productionPlan. Its checklist is derived live; nextSteps are suggestions with no Approve. Requested steps get separate cards.
+
+${JSON.stringify(exampleProductionPlan)}
+
 ### Editor requests
 
 Only a thread held to a production: an editor request prepares exact timeline commands for a permission card. Read get_timeline through complete=true first; use its clip ids, tracks and frames. Approve applies all commands as one undoable step. Invalid commands refuse the whole turn; reply prose changes nothing.
 
 ${JSON.stringify(exampleEditorRequest)}
 
-summary names concrete changes, never "improve the cut". Commands: ${TIMELINE_EDITOR_COMMAND_NAMES}. detach-audio is excluded from editorRequests; the direct editor resolves live media. Command fields are in the action guide. direction is earlier|later; indices count from 0; trim edge is start|end and negative deltaFrames shortens; audio is keep|mute. Track kinds: picture, dialogue, ambience, music, audio, subtitle. Audio roles: unspecified, dialogue, music, ambience. set-mix changes ducking; set-performance-source links a picture shot to sourceClipId audio, or null. place needs a complete clip with a shot, take, artifact or performance source. Frames count from zero at the production frame rate. New clip ids use cl_ plus letters, digits and dashes. Do not duplicate pending requests.
+summary names concrete changes. Commands: ${TIMELINE_EDITOR_COMMAND_NAMES}. detach-audio is excluded from editorRequests; the direct editor resolves live media. Fields and choices are in the action guide. Frames count from zero at the production frame rate. New clip ids use cl_ plus letters, digits and dashes. Do not duplicate pending requests.
 
 ### Scene edits
 

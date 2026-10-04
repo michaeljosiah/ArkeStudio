@@ -20,6 +20,7 @@ import {
   type WorldChangeCandidate,
   type WorldChatCheckReceipt,
   type WorldChatTurnResult,
+  type ProductionPlanRequest,
 } from "@arke-studio/contracts";
 import {
   normaliseEvidence,
@@ -92,6 +93,7 @@ export interface AcceptedTurn {
   sceneEdits: readonly ModelSceneEdit[];
   /** Exact authored operations this turn described, still unprepared. */
   actions: readonly ModelWorldChatAction[];
+  productionPlan?: ProductionPlanRequest;
   setupUpdate?: ProductionSetupUpdate;
 }
 
@@ -307,7 +309,7 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
   const result = parsed.value;
   if (input.draftOnly && (
     result.candidateOperations.length || result.groupOperations.length || result.actions.length ||
-    result.bibleEdits.length || result.editorRequests.length || result.sceneEdits.length
+    result.bibleEdits.length || result.editorRequests.length || result.sceneEdits.length || result.productionPlan
   )) return { ok: false, problems: [problem("setup-authority", "Production setup only accepts conversation and setupUpdate. Keep new world entities as openQuestions; return empty action and candidate lists.")] };
   // Which model spends on this production is the person's choice on the setup card (design turn
   // 153), not the conversation's: a reply that could pick a model could pick a price.
@@ -316,6 +318,14 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
   }
 
   const problems: TurnProblem[] = [];
+  if (result.productionPlan) {
+    if (!input.productionThread) problems.push(problem("production-plan", "A production plan belongs only to a production thread."));
+    const cited = result.productionPlan.checkReceiptIds.map(id => input.receiptsThisRun.find(r => r.id === id));
+    if (cited.some(r => !r) || !cited.some(r => r?.tool === "target-read" && r.target?.requirement === "readiness" &&
+      r.target.id === result.productionPlan!.productionId && r.complete === true && r.nextCursor === null && r.status === "complete")) {
+      problems.push(problem("production-plan-read", "Read get_readiness through complete=true for this production and cite its receipts before proposing a plan."));
+    }
+  }
   const byId = new Map(input.existing.map((c) => [c.id, c]));
   const receiptIds = new Set(input.receiptsThisRun.map((r) => r.id));
   const at = input.now();
@@ -536,6 +546,7 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
       sceneEdits: result.sceneEdits,
       actions: result.actions,
       ...(result.setupUpdate ? { setupUpdate: result.setupUpdate } : {}),
+      ...(result.productionPlan ? { productionPlan: result.productionPlan } : {}),
     },
   };
 }
@@ -854,7 +865,7 @@ function structuredChannelsIn(raw: string): boolean {
   const json = turnResultJson(raw);
   if (json === null || typeof json !== "object") return false;
   const record = json as Record<string, unknown>;
-  return ["candidateOperations", "groupOperations", "actions", "bibleEdits", "editorRequests", "sceneEdits"]
+  return record["productionPlan"] !== undefined || ["candidateOperations", "groupOperations", "actions", "bibleEdits", "editorRequests", "sceneEdits"]
     .some((key) => Array.isArray(record[key]) && (record[key] as unknown[]).length > 0);
 }
 

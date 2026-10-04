@@ -1794,6 +1794,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       episodeId: z.string().optional(),
       exportId: z.string().min(1),
       status: z.enum(["running", "done", "cancelled", "failed"]),
+      /** The source record snapshot captured when this export began, for current readiness. */
+      sourceFingerprint: z.string().min(1).max(200).optional(),
+      deliveryKind: z.enum(["video", "manuscript", "interactive"]).optional(),
       percent: z.number().min(0).max(100),
       output: z.string().nullable(),
       /** The subtitle sidecar delivered beside the video, when one was (SPEC-038 R-27). */

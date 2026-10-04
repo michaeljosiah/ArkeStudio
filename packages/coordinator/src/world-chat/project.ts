@@ -7,6 +7,7 @@ import type {
   HumanDecisionCard,
 } from "@arke-studio/contracts";
 import { type CurrentLook, lookHasMoved } from "./look.js";
+import type { ProductionPlanRequest, ProductionPlanCard } from "@arke-studio/contracts";
 
 /**
  * The conversation as a screen needs it (#70 §10.3).
@@ -216,6 +217,7 @@ export function workingLabel(tool: string): string {
 }
 
 export interface ProjectOptions {
+  productionPlan?: (request: ProductionPlanRequest) => ProductionPlanCard;
   humanDecisions?: HumanDecisionCard[];
   humanDecisionProblems?: string[];
   sheetName?: (slug: string) => string | null;
@@ -418,6 +420,7 @@ export function projectWorkspace(
       ...(loaded.bibleEdits[m.id] ? { bibleEdit: loaded.bibleEdits[m.id]! } : {}),
       ...(loaded.benchOutcomes[m.id] ? { benchOutcome: loaded.benchOutcomes[m.id]! } : {}),
       ...(loaded.frameRunOutcomes[m.id] ? { frameRunOutcome: loaded.frameRunOutcomes[m.id]! } : {}),
+      ...(loaded.productionPlans?.[m.id] && options.productionPlan ? { productionPlan: options.productionPlan(loaded.productionPlans[m.id]!) } : {}),
       createdAt: m.createdAt,
     })),
     hasMore: loaded.hasMore,

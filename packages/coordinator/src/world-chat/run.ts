@@ -6,6 +6,8 @@ import {
   type ProductionSetupDraft,
   type ProductionSetupState,
   REFUSED_TOOLS_MAX,
+  PRODUCTION_READINESS_SCHEMA_VERSION,
+  type ProductionPlanRequest,
   type BibleEdit,
   type CandidateChecks,
   type ConversationId,
@@ -74,6 +76,7 @@ import { actionGuideScopes, renderActionGuide } from "./action-guide.js";
 export const DEFAULT_TURN_TIMEOUT_MS = 15 * 60_000;
 
 export interface RunDeps {
+  validateProductionPlan?: (input: { request: ProductionPlanRequest; entryContext: WorldChatContext | undefined; receipts: readonly WorldChatCheckReceipt[] }) => Promise<void>;
   /** Closing the owning world retires this runner and aborts every request it admitted. */
   closingSignal?: AbortSignal;
   setupBrief?: (input: { leaseToken: string; draft: ProductionSetupDraft; budgetChars: number }) => Promise<string>;
@@ -1233,6 +1236,15 @@ export class WorldChatRunner {
       };
     }
 
+    if (outcome.turn.productionPlan) {
+      if (!this.deps.validateProductionPlan) return { ok: false, problems: [{ code: "production-plan", safeMessage: "Production plans are unavailable in this host. Answer without one." }] };
+      try { await this.deps.validateProductionPlan({ request: outcome.turn.productionPlan, entryContext: folded.entryContext, receipts: this.deps.receiptsFor(runId) }); }
+      catch { return { ok: false, problems: [{ code: "production-plan", safeMessage: "The production or readiness changed. Read get_readiness again for this thread before proposing a plan." }] }; }
+    }
+    if (outcome.turn.productionPlan || this.deps.receiptsFor(runId).some(r => r.target?.requirement === "readiness")) {
+      if (!this.deps.raiseSchemaBoundary) return { ok: false, problems: [{ code: "production-plan", safeMessage: "This host cannot preserve readiness receipts. Answer without a readiness read or plan." }] };
+      await this.deps.raiseSchemaBoundary(PRODUCTION_READINESS_SCHEMA_VERSION);
+    }
     const completedRun = runFrom(events, runId);
     let actions: readonly PreparedWorldChatAction[] = [];
     try {
@@ -1264,6 +1276,7 @@ export class WorldChatRunner {
     await store.append(
       {
         type: "turn.completed",
+        ...(outcome.turn.productionPlan ? { productionPlan: outcome.turn.productionPlan } : {}),
         ...(productionSetup ? { productionSetup } : {}),
         message: {
           id: newId("msg") as MessageId,

@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   migrateLegacyCut,
+  deriveProductionReadiness,
   FrameRunIdSchema,
   orderedShots,
   canonicalSceneFlow,
@@ -58,6 +59,9 @@ export interface ArkeExportReadRecord {
   readonly percent?: number;
   readonly output?: string | null;
   readonly error?: string | null;
+  readonly createdAt?: string;
+  readonly sourceFingerprint?: string;
+  readonly deliveryKind?: "video" | "manuscript" | "interactive";
 }
 
 export interface TargetReadDeps {
@@ -92,6 +96,7 @@ export class TargetReadError extends Error {
 }
 
 const padded = (value: number): string => String(value).padStart(10, "0");
+export const productionReadinessFence = (readiness: ReturnType<typeof deriveProductionReadiness> | null) => conversationActionDigest(readiness);
 
 function target(requirement: ArkeReadRequirement, id: string): ArkeReadTarget {
   return { requirement, id };
@@ -498,6 +503,9 @@ function safeExportRecord(entry: ArkeExportReadRecord) {
     ...(entry.productionId !== undefined ? { productionId: entry.productionId } : {}),
     ...(entry.episodeId !== undefined ? { episodeId: entry.episodeId } : {}),
     status: entry.status,
+    ...(entry.createdAt !== undefined ? { createdAt: entry.createdAt } : {}),
+    ...(entry.sourceFingerprint !== undefined ? { sourceFingerprint: entry.sourceFingerprint } : {}),
+    ...(entry.deliveryKind !== undefined ? { deliveryKind: entry.deliveryKind } : {}),
     ...(entry.percent !== undefined ? { percent: entry.percent } : {}),
     ...(entry.output !== undefined ? { output: safeExportOutput(entry.output) } : {}),
     ...(entry.error !== undefined ? { error: entry.error === null ? null : "export failed" } : {}),
@@ -657,6 +665,16 @@ export class WorldChatTargetReads {
         readTarget = target("production-metadata", productionId);
         rows = production ? [{ key: "metadata", value: production.meta }] : [];
         revisionOrDigest = productionMetadataFence(bundle, productionId);
+        break;
+      }
+      case "get_readiness": {
+        assertArgs(args, ["productionId"]);
+        const productionId = requireString(args, "productionId"), production = productionOf(bundle, productionId);
+        const readiness = production ? deriveProductionReadiness(bundle, production, await this.deps.getExports?.() ?? []) : null;
+        readTarget = target("readiness", productionId);
+        rows = readiness ? [{ key: "0:production", value: { kind: "production", productionId, title: readiness.title, ready: readiness.ready, checks: readiness.checks, lastExport: readiness.lastExport } },
+          ...readiness.scenes.map((scene,index) => ({ key: `1:${padded(index)}`, value: { kind: "scene", ...scene } }))] : [];
+        revisionOrDigest = productionReadinessFence(readiness);
         break;
       }
       case "get_story": {

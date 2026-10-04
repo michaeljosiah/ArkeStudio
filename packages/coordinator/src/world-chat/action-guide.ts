@@ -70,6 +70,7 @@ const READ_TOOLS: Record<ArkeReadRequirement, readonly ArkeTargetReadTool[]> = {
   exports: ["list_exports"],
   bench: ["list_bench_sessions", "get_bench_session"],
   "generation-routes": ["list_generation_routes"],
+  readiness: ["get_readiness"],
 };
 
 export function readToolsFor(requirements: readonly ArkeReadRequirement[]): readonly ArkeTargetReadTool[] {

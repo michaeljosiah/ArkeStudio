@@ -144,6 +144,19 @@ function turn(result: Partial<WorldChatTurnResult>): string {
 }
 
 describe("parsing a turn result", () => {
+  it("accepts a suggestion only in a production thread with this run's complete readiness read", async () => {
+    const receipt: WorldChatCheckReceipt = { id:newId("check"),runId:newId("run"),tool:"target-read",status:"complete",consulted:[],
+      target:{requirement:"readiness",id:"saltlight"},observedRevisionOrDigest:"current",complete:true,nextCursor:null,at:AT };
+    const plan = {productionId:"saltlight",checkReceiptIds:[receipt.id],nextSteps:["Select the missing takes."]};
+    const input = await baseInput({productionThread:true,receiptsThisRun:[receipt],raw:turn({productionPlan:plan})});
+    const accepted = validateTurnResult(input); assert.ok(accepted.ok);
+    assert.deepEqual(accepted.turn.productionPlan,plan); assert.deepEqual(accepted.turn.actions,[]);
+    for (const changed of [{productionThread:false},{receiptsThisRun:[]},{replyOnly:true},
+      {receiptsThisRun:[{...receipt,complete:false,nextCursor:"more"}]},
+      {receiptsThisRun:[{...receipt,target:{requirement:"readiness" as const,id:"other"}}]}]) {
+      assert.equal(validateTurnResult({...input,...changed}).ok,false);
+    }
+  });
   it("uses the production bounds while preserving the ordinary transport ceiling", () => {
     const raw = turn({ actions: Array.from({ length: 24 }, () => WORLD_CHAT_SHAPE_EXAMPLES.worldActions["production-scene-command"]),
       editorRequests: Array.from({ length: 6 }, () => ({ summary: "Move the close-up", commands: [{ kind: "move-to-order", clipId: "cl_sh-3", index: 0 }] })) });

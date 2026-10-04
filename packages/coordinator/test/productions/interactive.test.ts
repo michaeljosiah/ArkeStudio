@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { INTERACTIVE_PLAYER_SOURCE, migrateLegacyScene, RoutingSchema, type ProductionBundle, type Routing, type Take } from "@arke-studio/contracts";
+import { deriveProductionReadiness, productionExportFingerprint, INTERACTIVE_PLAYER_SOURCE, migrateLegacyScene, RoutingSchema, type ClientMessage, type DomainEvent, type ProductionBundle, type Routing, type Take } from "@arke-studio/contracts";
+import { Coordinator } from "../../src/coordinator.js";
+import type { ChangeLog } from "../../src/change-log.js";
 import {
   appendTraversal,
   exportInteractive,
+  exportInteractiveWithProgress,
   interactiveExportCompleted,
   interactiveFindings,
   proposeBranchCanon,
@@ -125,6 +128,7 @@ describe("interactive video through the coordinator (epic 401)", () => {
   it("IV-K2: evidence appends durably and sheds when the edge it names is retargeted", async () => {
     const { dir, store, bundle } = await open();
     const production = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
+    await saveRouting(store, production.meta.id, ROUTING);
     await appendTraversal(store, production.meta.id, {
       ts: CLOCK(),
       routingVersion: 1,
@@ -135,6 +139,13 @@ describe("interactive video through the coordinator (epic 401)", () => {
     });
     const before = await interactiveFindings(store, production);
     assert.ok(!before.some((finding) => finding.kind === "untraversed-edge"), "the walked edge counts");
+    const row = JSON.stringify({ts:CLOCK(),routingVersion:1,choiceId:"ch_on",from:"sc_i1",to:"sc_i2",route:["sc_i1"]}) + "\n";
+    await store.ownedWrite(() => appendFile(join(dir,"productions",production.meta.id,"routing-evidence.jsonl"),row.repeat(3000)));
+    const scanned = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+    assert.equal(scanned.routingTraversals?.length, 1, "a long preview history projects one qualifying row per current edge");
+    assert.deepEqual(scanned.routingTraversals?.[0]?.route, [], "the audit route stays on disk instead of growing the client snapshot");
+    const novel = { ...production, meta: { ...production.meta, kind: "visual-novel" as const }, routingTraversals: scanned.routingTraversals };
+    assert.equal(deriveProductionReadiness(store.getBundle(), novel).checks.find(check => check.key === "routing")!.status, "ready");
 
     const retargeted = await interactiveProduction(dir, bundle.productions[0]!, {
       ...ROUTING,
@@ -148,6 +159,9 @@ describe("interactive video through the coordinator (epic 401)", () => {
       after.some((finding) => finding.kind === "untraversed-edge" && finding.choiceIds.includes("ch_on")),
       "the old traversal no longer describes the retargeted edge",
     );
+    assert.equal(deriveProductionReadiness(store.getBundle(), { ...novel, routing: retargeted.routing }).checks.find(check => check.key === "routing")!.status, "missing");
+    await saveRouting(store, production.meta.id, retargeted.routing!);
+    assert.deepEqual(store.getBundle().productions.find(p=>p.meta.id === production.meta.id)!.routingTraversals, [], "retargeting sheds the entire old-edge history from the projection");
   });
 
   it("IV-K3: canon promotion is explicit, gated, and names the route it came from", async () => {
@@ -174,9 +188,12 @@ describe("interactive video through the coordinator (epic 401)", () => {
     const { dir, store, bundle } = await open();
     const production = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
     // No traversal evidence yet: the untraversed edge blocks publication (brief §4).
-    const refused = await exportInteractive(store, production, CLOCK);
+    const progress: Extract<DomainEvent, { type: "export.progress" }>[] = [];
+    const refused = await exportInteractiveWithProgress(store, production, CLOCK, { onProgress: event => { progress.push(event); } });
     assert.ok(!refused.ok);
     assert.ok(refused.blockers.some((blocker) => /ch_on.*never been traversed/.test(blocker)));
+    assert.deepEqual(progress.map(event => event.status), ["running", "failed"]);
+    assert.equal(progress.at(-1)!.output, null, "a refused native or chat package cannot prove delivery");
   });
 
   it("IV-E2/IV-E3: the package ships hashed media, an embedded player, and verifies itself", async () => {
@@ -472,6 +489,38 @@ describe("a visual novel's package (turn 174)", () => {
     } as ProductionBundle;
   }
   const walked = { ts: CLOCK(), routingVersion: 1, choiceId: "ch_on", from: "sc_i1", to: "sc_i2", route: ["sc_i1"] };
+
+  it("records a native beat export with the source snapshot used by readiness", async () => {
+    const { dir, store, bundle } = await open();
+    const drafted = await novel(dir, bundle.productions[0]!);
+    const productionDir = join(dir, "productions", drafted.meta.id), scenesDir = join(productionDir, "scenes");
+    await store.ownedWrite(async () => {
+      for (const file of await readdir(scenesDir)) if (file.endsWith(".json")) await rm(join(scenesDir, file));
+      for (const scene of drafted.scenes) await writeFile(join(scenesDir, `${scene.number}-${scene.slug}.json`), JSON.stringify(scene));
+      for (const take of drafted.takes) await writeFile(join(productionDir, "takes", take.id, "take.json"), JSON.stringify(take));
+      await writeFile(join(productionDir, "production.json"), JSON.stringify(drafted.meta));
+      await writeFile(join(productionDir, "selections.json"), JSON.stringify(drafted.selections));
+      await writeFile(join(productionDir, "routing.json"), JSON.stringify(ROUTING));
+    });
+    await appendTraversal(store, drafted.meta.id, walked);
+    const before = store.getBundle(), production = before.productions.find(p => p.meta.id === drafted.meta.id)!;
+    const fingerprint = productionExportFingerprint(before, production), events: DomainEvent[] = [];
+    const coordinator = new Coordinator({
+      provider: { listWorlds: async () => [], loadWorld: async () => store.getBundle(), openStore: () => store },
+      adapter: null, changeLogPath: join(dir, "logs", "readiness-export.jsonl"), appVersion: "test",
+      observeEvent: event => events.push(event),
+    });
+    await (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage({ kind: "export-interactive", worldId: WORLD_ID, productionId: production.meta.id });
+    const progress = events.filter((event): event is Extract<DomainEvent, { type: "export.progress" }> => event.type === "export.progress");
+    assert.deepEqual(progress.map(event => event.status), ["running", "done"]);
+    const done = progress.at(-1)!;
+    assert.equal(done.sourceFingerprint, fingerprint);
+    assert.equal(await interactiveExportCompleted(store, production.meta.id, done.exportId), true);
+    const current = store.getBundle();
+    assert.equal(done.deliveryKind,"interactive");
+    assert.equal(deriveProductionReadiness(current, current.productions.find(p => p.meta.id === production.meta.id)!, [{ id: done.exportId, worldId: WORLD_ID, productionId: production.meta.id, status: done.status, output: done.output, sourceFingerprint: done.sourceFingerprint, deliveryKind:done.deliveryKind }]).checks.find(check => check.key === "export")!.status, "ready");
+    await (coordinator as unknown as { changeLog: ChangeLog }).changeLog.drain();
+  });
 
   it("ships each scene as beats: pictures once, the prepared voice, the text as text, and verifies itself", async () => {
     const { dir, store, bundle } = await open();

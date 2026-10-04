@@ -5,6 +5,8 @@
  */
 
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { copyFile, lstat, mkdir, open as openFile, readFile, readdir, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
 import {
@@ -14,6 +16,7 @@ import {
   playbackWindow,
   playerBeats,
   productionShape,
+  productionExportFingerprint,
   publicationBlockers,
   routingFindings,
   RoutingSchema,
@@ -22,6 +25,7 @@ import {
   ulid,
   INTERACTIVE_PLAYER_SOURCE,
   type ArtifactSidecar,
+  type DomainEvent,
   type PlayerBeat,
   type ProductionBundle,
   type Routing,
@@ -319,7 +323,7 @@ export async function appendTraversal(
   }, options.precondition);
 }
 
-async function readStoredTraversal(store: WorldStore, productionId: string) {
+async function readStoredTraversal(store: Pick<WorldStore,"dir">, productionId: string) {
   try {
     const raw = await readFile(
       toExtendedLength(join(store.dir, "productions", productionId, EVIDENCE_FILE)),
@@ -341,7 +345,36 @@ async function readStoredTraversal(store: WorldStore, productionId: string) {
 }
 
 export async function readTraversal(store: WorldStore, productionId: string): Promise<TraversalEvidence[]> {
-  return (await readStoredTraversal(store, productionId)).map(({ requestId: _requestId, ...entry }) => entry);
+  return readTraversalFromDirectory(store.dir,productionId);
+}
+
+export async function readTraversalFromDirectory(dir: string, productionId: string, routing?: Routing): Promise<TraversalEvidence[]> {
+  if (!routing) return (await readStoredTraversal({dir}, productionId)).map(({ requestId: _requestId, ...entry }) => entry);
+  if (!routing.choices.length) return [];
+  const byChoice = new Map(routing.choices.map(choice => [choice.id, choice])), found = new Map<string, TraversalEvidence>();
+  const input = createReadStream(toExtendedLength(join(dir, "productions", productionId, EVIDENCE_FILE)), { encoding: "utf8" });
+  const lines = createInterface({ input, crlfDelay: Infinity });
+  let failed = false;
+  input.on("error", () => { failed = true; lines.close(); });
+  try {
+    for await (const raw of lines) {
+      if (!raw.trim()) continue;
+      try {
+        const { requestId: _requestId, ...entry } = StoredTraversalEvidenceSchema.parse(JSON.parse(raw));
+        const choice = byChoice.get(entry.choiceId);
+        if (choice && !found.has(choice.id) && choice.from === entry.from && choice.to === entry.to) {
+          // Findings need only current edge identity. The full walked route remains in the journal.
+          found.set(choice.id, { ...entry, route: [] });
+          if (found.size === byChoice.size) break;
+        }
+      } catch { /* malformed rows never block the remaining evidence */ }
+    }
+  } catch {
+    failed = true;
+  } finally {
+    lines.close(); input.destroy();
+  }
+  return failed ? [] : [...found.values()];
 }
 
 export async function hasTraversalRequest(
@@ -651,6 +684,33 @@ export async function interactiveExportCompleted(
   if (!/^iv_[0-9A-HJKMNP-TV-Z]{26}$/.test(exportId)) return false;
   const outDir = join(store.dir, "exports", `interactive-${productionId}-${exportId}`);
   return (await interactiveExportProblems(outDir, { productionId, exportId })).length === 0;
+}
+
+/** Native and approved chat exports publish the same captured source snapshot to readiness. */
+export async function exportInteractiveWithProgress(
+  store: WorldStore,
+  production: ProductionBundle,
+  clock: () => string,
+  options: NonNullable<Parameters<typeof exportInteractive>[3]> & {
+    onProgress?: (event: Extract<DomainEvent, { type: "export.progress" }>) => void | Promise<void>;
+  } = {},
+): Promise<InteractiveExportResult> {
+  const exportId = options.exportId ?? `iv_${ulid()}`;
+  const sourceFingerprint = productionExportFingerprint(store.getBundle(), production);
+  const progress = (status: "running" | "done" | "failed", output: string | null) => options.onProgress?.({
+    at: clock(), type: "export.progress", worldId: store.worldId, productionId: production.meta.id,
+    exportId, sourceFingerprint, deliveryKind: "interactive", status, percent: status === "done" ? 100 : 0, output,
+    error: status === "failed" ? "interactive export refused" : null,
+  });
+  await progress("running", null);
+  try {
+    const result = await exportInteractive(store, production, clock, { ...options, exportId });
+    await progress(result.ok ? "done" : "failed", result.ok ? result.dir : null);
+    return result;
+  } catch (error) {
+    await progress("failed", null);
+    throw error;
+  }
 }
 
 /**

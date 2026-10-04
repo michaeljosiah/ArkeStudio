@@ -1,4 +1,5 @@
-import { editShot, newId, worldChatContextSchemaVersion, BENCH_CHAT_SCHEMA_VERSION, PRODUCTION_CHAT_CONTEXT_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { editShot, newId, worldChatContextSchemaVersion, BENCH_CHAT_SCHEMA_VERSION, PRODUCTION_CHAT_CONTEXT_SCHEMA_VERSION, PRODUCTION_READINESS_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { SHEET_SHORT_NAME_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { parseSceneRecord } from "../../src/productions/scene-record.js";
 import { sha256 } from "../../src/world/text-files.js";
 import assert from "node:assert/strict";
@@ -50,6 +51,17 @@ it("raises the Bench conversation boundary lazily and refuses older readers with
   await assert.rejects(readWorldMeta(dir, { supports: BENCH_CHAT_SCHEMA_VERSION - 1 }), /newer|schema|version/i);
   assert.equal(await readFile(join(dir, "world.json"), "utf8"), before);
   assert.deepEqual((await new WorldChatService(dir, CLOCK).load(conversation.id))?.entryContext, context);
+});
+
+it("keeps a short-name reader from opening newer production plan semantics without modifying the world", async () => {
+  const {dir,store}=await open();
+  await store.raiseSchemaBoundary(SHEET_SHORT_NAME_SCHEMA_VERSION,"sheet-short-name");
+  assert.equal((await readWorldMeta(dir,{supports:SHEET_SHORT_NAME_SCHEMA_VERSION})).schemaVersion,SHEET_SHORT_NAME_SCHEMA_VERSION);
+  await store.raiseSchemaBoundary(PRODUCTION_READINESS_SCHEMA_VERSION,"world-chat-constraints");
+  const before=await readFile(join(dir,"world.json"),"utf8");
+  await assert.rejects(readWorldMeta(dir,{supports:SHEET_SHORT_NAME_SCHEMA_VERSION}),error=>error instanceof WorldOpenError && error.reason === "schema-newer");
+  assert.equal(await readFile(join(dir,"world.json"),"utf8"),before);
+  assert.equal((await readWorldMeta(dir)).schemaVersion,PRODUCTION_READINESS_SCHEMA_VERSION);
 });
 
 describe("the world schema-version boundary (issue 403)", () => {

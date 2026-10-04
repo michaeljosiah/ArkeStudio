@@ -101,6 +101,8 @@ async function setup(
     resolveLanguageModel?: RunDeps["resolveLanguageModel"];
     createdModels?: Array<string | undefined>;
     raiseSchemaBoundary?: RunDeps["raiseSchemaBoundary"];
+    validateProductionPlan?: RunDeps["validateProductionPlan"];
+    receiptsFor?: RunDeps["receiptsFor"];
     /** Narrates the entry context, which is where a reply-only turn is told to propose nothing. */
     describeEntry?: boolean;
   } = {},
@@ -132,9 +134,10 @@ async function setup(
         }
       : {}),
     ...(options.raiseSchemaBoundary ? { raiseSchemaBoundary: options.raiseSchemaBoundary } : {}),
+    ...(options.validateProductionPlan ? { validateProductionPlan: options.validateProductionPlan } : {}),
     prepare: async () => ({ cwd: worldPath, leaseToken: "t".repeat(64) }),
     release: async ({ runId }) => void released.push(runId),
-    receiptsFor: () => [],
+    receiptsFor: options.receiptsFor ?? (() => []),
     runCheckPlan: async () => ({ receipts: [], canonRevision: bundle.meta.canonRevision }),
     evidenceSources: (messages: readonly WorldChatMessage[]) => ({
       messages,
@@ -183,6 +186,25 @@ function goodAnswer(said: string, quote: string, messageId: string): string {
 }
 
 describe("taking a turn", () => {
+  it("raises floor 60 before recording plan suggestions and rebuilds the plan after restart", async () => {
+    const receiptId = newId("check"), raised: number[] = [];
+    const plan = {productionId:"saltlight",checkReceiptIds:[receiptId],nextSteps:["Select the missing takes."]};
+    const h = await setup(fakeAdapter([JSON.stringify({reply:"The selected takes still need work.",productionPlan:plan,candidateOperations:[],groupOperations:[]})]), {
+      entryContext:{kind:"production",productionId:"saltlight"},
+      receiptsFor: runId => [{id:receiptId,runId,tool:"target-read",status:"complete",consulted:[],target:{requirement:"readiness",id:"saltlight"},
+        observedRevisionOrDigest:"current",complete:true,nextCursor:null,at:AT}],
+      validateProductionPlan: async ({request}) => { assert.deepEqual(request,plan); },
+      raiseSchemaBoundary: async version => { assert.equal((await h.store.read()).events.some(e=>e.event.type === "turn.completed"),false); raised.push(version); },
+    });
+    const result = await h.runner.send(h.store,h.conversationId,"What's left?"); assert.equal(result.status,"completed");
+    assert.deepEqual(raised,[60]);
+    const durable = (await h.store.read()).events.find(e=>e.event.type === "turn.completed")!;
+    assert.equal(durable.event.type,"turn.completed"); if (durable.event.type !== "turn.completed") throw new Error("missing completion");
+    assert.deepEqual(durable.event.productionPlan,plan); assert.equal("readiness" in durable.event.productionPlan!,false);
+    const restarted = new WorldChatStore(h.store.dir);
+    const meta = await restarted.readMeta(), view = foldConversation(meta!.id,meta!.createdAt,(await restarted.read()).events).view;
+    assert.deepEqual(view.productionPlans?.[durable.event.message.id],plan); assert.deepEqual(view.actions,[]);
+  });
   it("a turn held to a passage, or to a reply, fences the world and writes its constraints before the words (codex on PR 903, round three)", async () => {
     const raised: number[] = [];
     const reply = JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] });

@@ -1,4 +1,4 @@
-import { calculateDialogueTiming, dialogueSlots, dialogueTimingProblems, type DialogueTiming } from "./dialogue-timing.js";
+import { performanceClipTiming, dialogueSlots, dialogueTimingProblems, type DialogueTiming } from "./dialogue-timing.js";
 import { resolveProductionArtifact } from "./artifact-access.js";
 import type { ProductionBundle } from "./client-state.js";
 import {
@@ -366,16 +366,9 @@ function audioFromTimeline(
         segmentInSec = resolved.inSec + (clip.source.offsetSec ?? 0);
         sourceOutSec = resolved.outSec;
       } else if (clip.source.kind === "performance") {
-        const source = clip.source;
-        const performance = production.performances.find(p => p.id === source.performanceId);
-        if (!performance || performance.target.shotId !== source.shotId || performance.provenance.outputHash !== source.sourceHash) return { ok: false, reason: `${clip.id}: performance identity is missing or changed` };
-        const slot = slots.filter(s => s.shotId === source.shotId);
-        if (slot.length !== 1) return { ok: false, reason: `${clip.id}: choose one picture slot for this dialogue` };
-        const calculated = calculateDialogueTiming(slot[0]!,performance.provenance.outputTechnical.durationSec,source.leadInSec,source.timing);
+        const calculated = performanceClipTiming(clip, production.performances, slots, frameRate);
         if (!calculated.ok) return calculated;
-        const timing = calculated.timing;
-        const halfFrame = framesToSeconds(1,frameRate)/2 + 0.000001;
-        if (Math.abs(startSec-timing.speechStartSec)>halfFrame || Math.abs(framesToSeconds(clip.sourceInFrames,frameRate)-timing.sourceInSec)>halfFrame || Math.abs((endSec-startSec)-timing.spokenSec)>2*halfFrame) return { ok:false,reason:`${clip.id}: picture or dialogue trim moved; review the performance placement again` };
+        const { timing, performance } = calculated;
         // Frame windows draw the editor, but the immutable audio plays its exact physical range.
         startSec=timing.speechStartSec; endSec=timing.speechEndSec; physicalInSec=timing.sourceInSec;
         timings.push(timing);

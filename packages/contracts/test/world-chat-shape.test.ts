@@ -12,6 +12,7 @@ import {
   WorldChatTurnResultSchema,
   WORLD_CHAT_SHAPE_EXAMPLES,
   worldChatResultShapeGuide,
+  ProductionPlanRequestSchema,
 } from "../src/index.js";
 
 /**
@@ -117,6 +118,10 @@ describe("the shape guide's examples satisfy the schemas they teach", () => {
   it("the complete result example parses", () => {
     const parsed = WorldChatTurnResultSchema.safeParse(WORLD_CHAT_SHAPE_EXAMPLES.turnResult);
     assert.ok(parsed.success, parsed.success ? "" : parsed.error.message);
+  });
+
+  it("the non-authorizing production plan example parses", () => {
+    assert.ok(ProductionPlanRequestSchema.safeParse(WORLD_CHAT_SHAPE_EXAMPLES.productionPlan).success);
   });
 
   it("every world action example parses", () => {

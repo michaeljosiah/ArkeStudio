@@ -73,6 +73,27 @@ async function harness(options: {
 }
 
 describe("leased retrieval", () => {
+  it("pages derived readiness with a receipt for every scene and refuses a changed checklist", async () => {
+    const h = await harness(), token = h.mint().token;
+    const production = h.bundle.productions.find(p => p.meta.id === "saltlight")!;
+    let cursor: string | null = null, rows = 0;
+    do {
+      const read = await h.retrieval.call(token, "get_readiness", { productionId: "saltlight", limit: 1, ...(cursor ? {cursor} : {}) });
+      const page = read.result as { items: unknown[]; complete: boolean; nextCursor: string | null };
+      rows += page.items.length; cursor = page.nextCursor;
+      assert.equal(read.receipt.tool,"target-read");
+      assert.deepEqual(read.receipt.target,{requirement:"readiness",id:"saltlight"});
+      assert.equal(read.receipt.complete,page.complete); assert.equal(page.complete,cursor === null);
+      assert.ok(read.receipt.observedRevisionOrDigest);
+    } while (cursor);
+    assert.equal(rows,1 + production.scenes.length);
+    const first = await h.retrieval.call(token,"get_readiness",{productionId:"saltlight",limit:1});
+    const nextCursor = (first.result as { nextCursor: string }).nextCursor;
+    production.scenes[0]!.script = {blocks:[{id:"blk_new",kind:"action",text:"A new script."}]};
+    await assert.rejects(() => h.retrieval.call(token,"get_readiness",{productionId:"saltlight",cursor:nextCursor}),/changed while it was being read/);
+    const absent = await h.retrieval.call(token,"get_readiness",{productionId:"absent"});
+    assert.equal(absent.receipt.status,"empty"); h.index?.close();
+  });
   it("searches canon and records what it consulted", async () => {
     const h = await harness();
     const { result, receipt } = await h.retrieval.call(h.mint().token, "search_canon", {

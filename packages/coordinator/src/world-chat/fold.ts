@@ -109,6 +109,7 @@ export function foldConversation(
   let saveInFlight = false;
 
   const messages: WorldChatMessage[] = [];
+  const productionPlans: NonNullable<WorldChatLoaded["productionPlans"]> = {};
   const imageDisclosures = new Map<string, NonNullable<WorldChatLoaded["imageDisclosures"]>[number]>();
   const imageReceipts = new Map<string, NonNullable<WorldChatLoaded["imageReceipts"]>[number]>();
   /** Landed Bible edits, by the studio message that reported them (master §4.5). */
@@ -316,6 +317,7 @@ export function foldConversation(
         runs.set(e.run.id, e.run);
         break;
       case "turn.completed":
+        if (e.productionPlan) productionPlans[e.message.id] = e.productionPlan;
         if (e.productionSetup) productionSetup = e.productionSetup;
         addMessage(e.message, envelope.seq);
         runs.set(e.run.id, e.run);
@@ -664,6 +666,7 @@ export function foldConversation(
       }),
     ),
     hasMore: shown.length < windowed.length,
+    ...(Object.keys(productionPlans).length ? { productionPlans: Object.fromEntries(shown.flatMap(m => productionPlans[m.id] ? [[m.id, productionPlans[m.id]!]] : [])) } : {}),
     ...(inputQueue.revision > 0 ? { inputQueue: projectWorldChatInputQueue(inputQueue) } : {}),
     candidates: [...candidates.values()],
     actions: actionCards,

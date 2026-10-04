@@ -6,6 +6,7 @@ import { RehearsalSessionSchema, deriveRehearsalLines, PerformanceBibleEventSche
 import { PerformanceReviewDecisionSchema, PerformanceSelectionsSchema } from "@arke-studio/contracts";
 import { PerformanceRecordSchema } from "@arke-studio/contracts";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { readTraversalFromDirectory } from "../productions/interactive.js";
 import { basename, extname } from "node:path";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
@@ -147,7 +148,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Fifty-eight adds durable chat transcription and exact timeline history cards (SPEC-051 T-7).
 // Fifty-nine is a character's `shortName` on a strict sheet (design turn 194, rule 12b): a build
 // without the field drops the sheet on scan, and with it the character.
-export const SUPPORTED_SCHEMA_VERSION = 59;
+// Sixty adds non-authorizing plan suggestions and derived-readiness receipts (SPEC-051 T-9).
+export const SUPPORTED_SCHEMA_VERSION = 60;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -919,6 +921,7 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       } : {}),
       season,
       routing,
+      routingTraversals: routing ? await readTraversalFromDirectory(dir,id,routing) : [],
       treatment,
       chapters,
       scenes,
