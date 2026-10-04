@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
   DEFAULT_SHOT_SEC,
   FrameStepRequestSchema,
@@ -245,6 +246,8 @@ function frozenDispatch(input: {
 }
 
 export interface CompileFrameRunInput {
+  /** A conversation quote fixes the run identity before approval. */
+  runId?: string;
   worldId: string;
   productionId: string;
   scene: SceneRecord;
@@ -278,6 +281,7 @@ export interface QuoteFrameRunInput {
 }
 
 export interface StartFrameRunInput {
+  preparedRun?: FrameRun;
   quotedMicroUsd: number;
   quoteSignature: string;
   jobs: () => readonly Job[];
@@ -286,7 +290,7 @@ export interface StartFrameRunInput {
 }
 
 /** Compile and persist exactly what the confirmation authorized, before the first enqueue. */
-async function compileFrameRun(input: CompileFrameRunInput): Promise<FrameRun> {
+export async function compileFrameRun(input: CompileFrameRunInput): Promise<FrameRun> {
   if (input.model.capability !== "image") throw new Error(`${input.model.displayName} is not an image model`);
   if (!input.eligible) throw new Error(`${input.model.displayName} is not currently eligible to run`);
   const shots = orderedShots(input.scene);
@@ -310,7 +314,7 @@ async function compileFrameRun(input: CompileFrameRunInput): Promise<FrameRun> {
   if (!Number.isFinite(input.boardCapSec) || input.boardCapSec <= 0) {
     throw new Error("the routed video model has no finite board duration cap");
   }
-  const runId = newId("fr");
+  const runId = input.runId ?? newId("fr");
   const routeOutput = sceneImageOutput(input.model, undefined, aspect);
   const plan = planScene(
     {
@@ -679,8 +683,9 @@ export async function startFrameRun(store: WorldStore, input: StartFrameRunInput
       }
     }
     await mkdir(toExtendedLength(runsDir(store, current.productionId)), { recursive: true });
-    await writeRun(store, current.productionId, run);
-    return run;
+    const authorized = authorizeRun(run, input.preparedRun);
+    await writeRun(store, current.productionId, authorized);
+    return authorized;
   });
 }
 
@@ -783,22 +788,46 @@ async function mutateRun(
   productionId: string,
   runId: string,
   mutate: (run: FrameRun) => FrameRun,
+  options: FrameRunMutationOptions = {},
 ): Promise<FrameRun | null> {
   return serializeFileMutation(runPath(store, productionId, runId), async () => {
     const run = await readFrameRun(store, productionId, runId);
     if (run === null) return null;
-    const next = FrameRunSchema.parse(mutate(run));
-    await writeRun(store, productionId, next);
+    const changed = mutate(run);
+    if (options.conversationActionId) changed.appliedConversationControls = [...new Set([...(run.appliedConversationControls ?? []), options.conversationActionId])];
+    const next = authorizeRun(FrameRunSchema.parse(changed), options.authorizedRun);
+    if (!options.previewOnly) await writeRun(store, productionId, next);
     return next;
   });
 }
 
-export function pauseFrameRun(store: WorldStore, productionId: string, runId: string): Promise<FrameRun | null> {
-  return mutateRun(store, productionId, runId, (run) => ({ ...run, paused: true }));
+/** A preview never writes; approval may add byte pins, but cannot replace the compiled request. */
+export interface FrameRunMutationOptions {
+  conversationActionId?: string;
+  previewOnly?: boolean;
+  authorizedRun?: FrameRun;
+}
+function authorizeRun(current: FrameRun, prepared: FrameRun | undefined): FrameRun {
+  if (!prepared) return current;
+  const withoutPins = (run: FrameRun) => {
+    const copy = structuredClone(run);
+    for (const step of copy.steps) {
+      delete step.dispatch.params.generationQuoteReferences;
+      delete step.dispatch.params.generationQuoteVideoReferences;
+    }
+    return JSON.parse(JSON.stringify(copy)) as FrameRun;
+  };
+  const parsed = FrameRunSchema.parse(prepared);
+  if (!isDeepStrictEqual(withoutPins(current), withoutPins(parsed))) throw new Error("The frame-run quote is stale; prepare a fresh card.");
+  return parsed;
 }
 
-export function resumeFrameRun(store: WorldStore, productionId: string, runId: string): Promise<FrameRun | null> {
-  return mutateRun(store, productionId, runId, (run) => ({ ...run, paused: false }));
+export function pauseFrameRun(store: WorldStore, productionId: string, runId: string, options: FrameRunMutationOptions = {}): Promise<FrameRun | null> {
+  return mutateRun(store, productionId, runId, (run) => ({ ...run, paused: true }), options);
+}
+
+export function resumeFrameRun(store: WorldStore, productionId: string, runId: string, options: FrameRunMutationOptions = {}): Promise<FrameRun | null> {
+  return mutateRun(store, productionId, runId, (run) => ({ ...run, paused: false }), options);
 }
 
 export async function cancelFrameRun(
@@ -806,8 +835,9 @@ export async function cancelFrameRun(
   productionId: string,
   runId: string,
   deps: Pick<FrameRunDriverDeps, "jobById"> & { cancel: (jobId: string) => Promise<void> },
+  options: FrameRunMutationOptions = {},
 ): Promise<FrameRun | null> {
-  const run = await mutateRun(store, productionId, runId, (current) => ({ ...current, cancelled: true }));
+  const run = await mutateRun(store, productionId, runId, (current) => ({ ...current, cancelled: true }), options);
   if (run === null) return null;
   for (const jobId of run.steps.flatMap((step) => step.jobId === null ? [] : [step.jobId])) {
     const job = deps.jobById(jobId);
@@ -932,6 +962,7 @@ export async function retryFrameStep(
   stepIndex: number,
   getProduction: () => ProductionBundle | undefined,
   jobById: (id: string) => Job | undefined,
+  options: FrameRunMutationOptions = {},
 ): Promise<FrameRun | null> {
   return store.gateOp(async () => {
     const existing = await readFrameRun(store, productionId, runId);
@@ -970,7 +1001,7 @@ export async function retryFrameStep(
       };
       delete next.dismissed;
       return next;
-    });
+    }, options);
   });
 }
 
@@ -990,6 +1021,7 @@ export async function retryFrameCell(
   shotId: string,
   getProduction: () => ProductionBundle | undefined,
   jobById: (id: string) => Job | undefined,
+  options: FrameRunMutationOptions = {},
 ): Promise<FrameRun | null> {
   return store.gateOp(() => retryFrameCellUnderGate(
     store,
@@ -999,6 +1031,7 @@ export async function retryFrameCell(
     shotId,
     getProduction,
     jobById,
+    options,
   ));
 }
 
@@ -1010,6 +1043,7 @@ async function retryFrameCellUnderGate(
   shotId: string,
   getProduction: () => ProductionBundle | undefined,
   jobById: (id: string) => Job | undefined,
+  options: FrameRunMutationOptions,
 ): Promise<FrameRun | null> {
   const existing = await readFrameRun(store, productionId, runId);
   if (existing === null) return null;
@@ -1095,7 +1129,7 @@ async function retryFrameCellUnderGate(
     };
     delete next.dismissed;
     return next;
-  });
+  }, options);
 }
 
 export async function frameRunState(

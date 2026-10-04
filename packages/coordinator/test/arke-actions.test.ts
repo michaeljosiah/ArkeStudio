@@ -56,7 +56,7 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
         }
       }
     }
-    for (const kind of ["frame-run-start", "timeline-assemble", "derive-continuity", "read-audiobook-chapter", "export-manuscript"] as const) {
+    for (const kind of ["timeline-assemble", "derive-continuity", "read-audiobook-chapter", "export-manuscript"] as const) {
       const descriptor = ARKE_CLIENT_COMMAND_REGISTRY[kind];
       assert.equal(descriptor.classification, "supported-by-arke");
       if (descriptor.classification === "supported-by-arke") assert.deepEqual(descriptor.reachedBy, [], kind);

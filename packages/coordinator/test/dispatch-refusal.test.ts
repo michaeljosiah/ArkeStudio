@@ -217,15 +217,8 @@ class TestClient {
 }
 
 describe("a dispatch the coordinator refuses (adversarial pass on #150)", () => {
-  it("answers with a refusal instead of throwing out of the handler", async () => {
-    const { root, worldDir } = await makeTempRoot();
-    // A shot longer than any route can make. Nothing in the fixture is this long, and nothing
-    // needs to be: the point is a frame arriving for work the dialog would have blocked.
-    const scenePath = join(worldDir, "productions", "saltlight", "scenes", "04-the-verse-rises.json");
-    const scene = JSON.parse(await readFile(scenePath, "utf8")) as { shots: Array<{ durationSec?: number }> };
-    scene.shots[0]!.durationSec = 22;
-    await writeFile(scenePath, `${JSON.stringify(scene, null, 2)}\n`, "utf8");
-
+  it("refuses the retired unplanned command without queueing work", async () => {
+    const { root } = await makeTempRoot();
     const provider = new FsWorldProvider(root, { clock: () => "2026-08-06T12:00:00.000Z" });
     await provider.loadWorld(WORLD_ID);
     const coordinator = new Coordinator({
@@ -243,8 +236,7 @@ describe("a dispatch the coordinator refuses (adversarial pass on #150)", () => 
       client.send({ kind: "hello", token, lastSeq: 0 });
       await client.until((f) => f.kind === "snapshot", "the opening snapshot");
 
-      // Veo 3.1 makes 4s, 6s or 8s and nothing longer. Per shot, a 22s shot is refused at
-      // composition — the case the dialog blocks, arriving anyway from a stale one.
+      // An older client receives a clear refusal; all scene spend now uses durable plans.
       const requestId = "01J8E10000000000000000RF12";
       client.send({
         kind: "dispatch-scene",
@@ -266,8 +258,8 @@ describe("a dispatch the coordinator refuses (adversarial pass on #150)", () => 
       assert.deepEqual(frame.event.acceptedJobIds, [], "nothing was queued");
       assert.match(
         frame.event.failures[0]!.reason,
-        /longer than the 8s Veo 3\.1 can make/,
-        "and the reason names the shot and the length that would fit",
+        /Unplanned scene dispatch is retired/,
+        "the compatibility command names the supported planned path",
       );
 
       // Still serving: a refused frame is a refused frame, not the end of the session.

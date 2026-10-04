@@ -99,6 +99,19 @@ their open conversation cards after filing/ledger settlement, including failure 
 Filing recovery repairs the idempotent Bench journal link before completing the card, and a
 first-frame route neither clears cast audio nor records an upload acknowledgement for it.
 
+Frame-run and planned-dispatch chat changes also run `test/world-chat/production-batch.test.ts`,
+`test/productions/frame-run.test.ts`, `test/productions/frame-run-coordinator.test.ts`,
+`test/productions/dispatch-plans.test.ts` and `test/dispatch-refusal.test.ts` in the coordinator.
+They check Generate/chat quote parity, read-only preparation, stale shots, durable run/plan
+authorization, freshly quoted resume and retries, immutable board parents, late boundary byte
+pins, human continuation gates, live card settlement and cancellation recovery without a
+second purchase. The retired unplanned scene-dispatch command must refuse explicitly.
+The same suite checks real jobs/plan receipts through model-action preparation: frame run/step
+identities are discoverable without exposing job internals, plan cancellation observes current
+folded state, automatic plan policies disclose their authorization, and long prompt display
+does not alter frozen job prompts. A proven pre-authority refusal settles stale; an unreadable
+authority continues to require reconciliation.
+
 Book/audio standards experiments use the separate [publication interoperability checks](publication-interop.md#reproduce).
 They install their own locked development dependencies and exercise Readium, package closure and EPUBCheck.
 

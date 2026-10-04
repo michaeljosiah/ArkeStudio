@@ -4904,29 +4904,6 @@ export function exportSceneBoard(worldId: string, productionId: string, sceneFil
   send({ kind: "export-scene-board", worldId, productionId, sceneFile });
 }
 
-export function dispatchScene(
-  worldId: string,
-  productionId: string,
-  sceneFile: string,
-  mode: "per-shot" | "whole-scene",
-  modelId: string,
-  resolution?: string,
-  tier?: SizeTier,
-  audioReferencesDisabled?: boolean,
-): void {
-  send({
-    kind: "dispatch-scene",
-    worldId,
-    productionId,
-    sceneFile,
-    mode,
-    modelId,
-    requestId: queueRequest("dispatch-scene"),
-    ...(resolution !== undefined ? { resolution } : {}),
-    ...(tier !== undefined ? { tier } : {}),
-    ...(audioReferencesDisabled !== undefined ? { audioReferencesDisabled } : {}),
-  });
-}
 
 // ---- SPEC-013: takes, the cut, exports -------------------------------------
 

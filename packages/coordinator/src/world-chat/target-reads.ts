@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   migrateLegacyCut,
+  FrameRunIdSchema,
   orderedShots,
   canonicalSceneFlow,
   isGraphScene,
@@ -17,13 +18,13 @@ import {
   type ArkeTargetReadPage,
   type ArkeTargetReadTool,
   type ChapterVoices,
-  type DispatchPlan,
   type Job,
   type ProductionBundle,
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { conversationActionDigest } from "../arke-actions/digest.js";
 import type { QueryLease } from "./lease.js";
+import type { DispatchPlanReadRecord } from "../productions/plans.js";
 
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 20;
@@ -56,7 +57,7 @@ export interface ArkeExportReadRecord {
 
 export interface TargetReadDeps {
   readonly getBuildItems?: () => readonly ArkeBuildItemRead[];
-  readonly getPlans?: (productionId: string) => Promise<readonly DispatchPlan[]>;
+  readonly getPlans?: (productionId: string) => Promise<readonly DispatchPlanReadRecord[]>;
   readonly getJobs?: () => readonly Job[];
   readonly getExports?: () => readonly ArkeExportReadRecord[] | Promise<readonly ArkeExportReadRecord[]>;
   readonly getChapterBody?: (productionId: string, chapterFile: string) => Promise<string | null>;
@@ -150,6 +151,7 @@ export function jobsFence(jobs: readonly Job[], worldId: string, productionId?: 
     .filter((job) => job.worldId === worldId && (productionId === undefined || job.productionId === productionId))
     .map(safeJob));
 }
+export const plansFence = (plans: readonly DispatchPlanReadRecord[]) => fence(plans);
 
 export function productionMetadataFence(bundle: WorldBundle, productionId: string): string {
   const production = productionOf(bundle, productionId);
@@ -444,6 +446,8 @@ function sceneOf(production: ProductionBundle | undefined, sceneId: string) {
 }
 
 function safeJob(job: Job): Record<string, unknown> {
+  const runId = FrameRunIdSchema.safeParse(job.params.frameRun);
+  const stepIndex = job.params.frameRunStep;
   return {
     id: job.id,
     worldId: job.worldId,
@@ -462,6 +466,8 @@ function safeJob(job: Job): Record<string, unknown> {
     providerCostMicroUsd: job.providerCostMicroUsd,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
+    ...(runId.success && typeof stepIndex === "number" && Number.isInteger(stepIndex) && stepIndex >= 0
+      ? { frameRun: { runId: runId.data, stepIndex } } : {}),
   };
 }
 
@@ -862,8 +868,8 @@ export class WorldChatTargetReads {
         const productionId = requireString(args, "productionId");
         const plans = this.deps.getPlans ? await this.deps.getPlans(productionId) : [];
         readTarget = target("plans", productionId);
-        rows = [...plans].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.planId.localeCompare(b.planId)).map((plan) => ({ key: `${plan.createdAt}:${plan.planId}`, value: plan }));
-        revisionOrDigest = fence(plans);
+        rows = plans.map(record => ({ key: `${record.plan.createdAt}:${record.plan.planId}`, value: record }));
+        revisionOrDigest = plansFence(plans);
         break;
       }
       case "list_jobs": {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   FrameRunIdSchema,
+  ConversationActionIdSchema,
   IsoDateTimeSchema,
   JobIdSchema,
   SceneIdSchema,
@@ -270,6 +271,8 @@ export const FrameRunSchema = z
     cursor: z.number().int().min(0),
     paused: z.boolean(),
     cancelled: z.boolean(),
+    /** Idempotent proof of conversation pause/cancel, written with the control itself. */
+    appliedConversationControls: z.array(ConversationActionIdSchema).optional(),
     /** Hidden from the run bar but retained because the board sheet remains a retry source. */
     dismissed: z.literal(true).optional(),
     createdAt: IsoDateTimeSchema,
