@@ -9,7 +9,7 @@ image slots, beat pictures/text/routing and scanned traversal evidence, saved bo
 audible voice placements, base picture placement and unmuted subtitles. Full production
 exports carry the captured source fingerprint; changed sources and unstamped old exports
 cannot prove current delivery, including after restart. Coverage also includes complete fenced reads,
-stale checklist refusal, suggestion-only persistence at schema 59, restart reconstruction,
+stale checklist refusal, suggestion-only persistence at schema 60, restart reconstruction,
 and live checklist rendering without Approve. `test/productions/export-receipts.test.ts` checks
 immutable world-owned completion receipts, malformed/partial delivery refusal and read purity;
 it also checks legacy and saved-timeline native video completion after receipt persistence;

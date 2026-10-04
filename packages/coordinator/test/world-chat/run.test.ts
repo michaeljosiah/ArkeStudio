@@ -186,7 +186,7 @@ function goodAnswer(said: string, quote: string, messageId: string): string {
 }
 
 describe("taking a turn", () => {
-  it("raises floor 59 before recording plan suggestions and rebuilds the plan after restart", async () => {
+  it("raises floor 60 before recording plan suggestions and rebuilds the plan after restart", async () => {
     const receiptId = newId("check"), raised: number[] = [];
     const plan = {productionId:"saltlight",checkReceiptIds:[receiptId],nextSteps:["Select the missing takes."]};
     const h = await setup(fakeAdapter([JSON.stringify({reply:"The selected takes still need work.",productionPlan:plan,candidateOperations:[],groupOperations:[]})]), {
@@ -197,7 +197,7 @@ describe("taking a turn", () => {
       raiseSchemaBoundary: async version => { assert.equal((await h.store.read()).events.some(e=>e.event.type === "turn.completed"),false); raised.push(version); },
     });
     const result = await h.runner.send(h.store,h.conversationId,"What's left?"); assert.equal(result.status,"completed");
-    assert.deepEqual(raised,[59]);
+    assert.deepEqual(raised,[60]);
     const durable = (await h.store.read()).events.find(e=>e.event.type === "turn.completed")!;
     assert.equal(durable.event.type,"turn.completed"); if (durable.event.type !== "turn.completed") throw new Error("missing completion");
     assert.deepEqual(durable.event.productionPlan,plan); assert.equal("readiness" in durable.event.productionPlan!,false);

@@ -16,7 +16,7 @@ import { routingFindings, publicationBlockers } from "./routing.js";
 import { deriveRehearsalLines } from "./rehearsal.js";
 import { performanceClipTiming, dialogueSlots, dialogueTimingProblems } from "./dialogue-timing.js";
 
-export const PRODUCTION_READINESS_SCHEMA_VERSION = 59;
+export const PRODUCTION_READINESS_SCHEMA_VERSION = 60;
 export const ReadinessCheckSchema = z.object({
   key: z.enum(["script", "shots", "cast", "place", "kits", "start-frames", "selected-takes", "dialogue-voiced", "in-cut", "cut", "subtitles", "export", "chapters", "manuscript", "routing", "beat-text"]),
   label: z.string(), status: z.enum(["ready", "missing", "not-required", "blocked"]),
