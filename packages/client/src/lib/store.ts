@@ -3707,6 +3707,12 @@ export function setWorldModel(worldId: string, capability: Capability, modelId: 
 export function setResearchWeb(enabled: boolean): void {
   send({ kind: "set-research-web", enabled });
 }
+export function setImageInspection(enabled: boolean, provider?: string): void {
+  send({ kind: "set-image-inspection", enabled, ...(provider ? { provider } : {}) });
+}
+export function setWorldImageInspection(worldId: string, enabled: boolean): void {
+  send({ kind: "set-world-image-inspection", worldId, enabled });
+}
 /** One local recipe's sampling on this device (design turn 177); null returns it to Fast. */
 export function setLocalSampling(recipeId: string, sampling: import("@arke-studio/contracts").SamplingSetting | null): void {
   send({ kind: "set-local-sampling", recipeId, sampling });

@@ -140,7 +140,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Forty-nine is a chapter's look and the look a picture was made under (turn 191c).
 // Fifty and fifty-one are world chat's (production contexts; the Bench conversation).
 // Fifty-two is a look chosen per character, the mood line and a look's close view (turn 193).
-export const SUPPORTED_SCHEMA_VERSION = 52;
+// Fifty-three protects durable conversation image receipts/disclosures and world image privacy.
+export const SUPPORTED_SCHEMA_VERSION = 53;
 
 export class WorldOpenError extends Error {
   constructor(

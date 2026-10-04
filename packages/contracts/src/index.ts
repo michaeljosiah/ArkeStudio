@@ -149,3 +149,4 @@ export * from "./interactive-player.js";
 export * from "./interactive-player-source.js";
 export * from "./audiobook-player.js";
 export * from "./audiobook-player-source.js";
+export * from "./world-chat-images.js";

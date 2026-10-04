@@ -159,6 +159,14 @@ export class AppSettingsFile {
       return { settings, value: settings };
     });
   }
+  async setImageInspection(enabled: boolean, provider?: string): Promise<AppSettings> {
+    return this.mutate(current => {
+      const imageInspection = provider === undefined ? { ...current.imageInspection, cloud: enabled }
+        : { ...current.imageInspection, providers: { ...current.imageInspection.providers, [provider]: enabled } };
+      const settings: AppSettings = { ...current, imageInspection };
+      return { settings, value: settings };
+    });
+  }
 
   async setModelEnabled(modelId: string, enabled: boolean): Promise<AppSettings> {
     return this.mutate((current) => {

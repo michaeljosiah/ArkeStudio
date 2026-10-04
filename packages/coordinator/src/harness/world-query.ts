@@ -173,6 +173,14 @@ const WORLD_CHAT_TOOLS = [
     },
   },
   {
+    name: "view_image",
+    description: "Inspect actual pixels of a selected attachment, artifact, reference/candidate file returned by world reads, or immutable Bench take. Returns a metadata-free PNG at most 1568 pixels on its longest edge, with id and byte digests. Video returns a poster frame only, never motion or audio. Refuses by name for unsupported adapters/models or cloud privacy settings. Never infer image contents when refused.",
+    inputSchema: { type: "object", properties: {
+      kind: { type: "string", enum: ["attachment", "artifact", "reference", "bench-take"] },
+      id: { type: "string" }, file: { type: "string" }, sessionId: { type: "string" }, takeId: { type: "string" },
+    }, required: ["kind"], additionalProperties: false },
+  },
+  {
     name: "describe_action",
     description:
       "The fields and one valid example of an action you may prepare, by its kind. Use it when this turn's list of actions names a kind without its fields. It reads nothing in the world.",
@@ -323,12 +331,13 @@ export class WorldQueryServer {
               const leased = surface!;
               void leased.retrieval
                 .call(token, name, args)
-                .then(({ result, receipt }) => {
+                .then(({ result, receipt, imageContent }) => {
                   leased.onReceipt(receipt);
                   reply({
                     content: [
                       { type: "text", text: JSON.stringify(result, null, 2) },
                       { type: "text", text: JSON.stringify(citation(receipt), null, 2) },
+                      ...(imageContent ?? []),
                     ],
                   });
                 })

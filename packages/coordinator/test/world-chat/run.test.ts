@@ -31,6 +31,19 @@ import { tempDir } from "../tmp.js";
 const AT = "2026-08-06T10:00:00Z";
 const NOW = () => AT;
 
+it("dispatches prepared attachment pixels beside the prompt with honest readability narration", async () => {
+  const parts: import("@arke-studio/contracts").MessagePart[][] = [];
+  const adapter = fakeAdapter([JSON.stringify({ reply: "The red look is warmer than the blue look.", candidateOperations: [], groupOperations: [] })], { parts });
+  const h = await setup(adapter, { prepareImages: async () => ({
+    parts: [{ type: "image", mimeType: "image/png", data: "cmVk" }, { type: "image", mimeType: "image/png", data: "Ymx1ZQ==" }],
+    description: "Two looks supplied as image pixels below.",
+  }) });
+  const result = await h.runner.send(h.store, h.conversationId, "Compare these looks");
+  assert.equal(result.status, "completed");
+  assert.equal(parts[0]!.filter(part => part.type === "image").length, 2);
+  assert.match(parts[0]![0]!.text!, /supplied as image pixels/);
+});
+
 /**
  * A harness that says whatever the test tells it to, one answer per turn.
  *
@@ -40,7 +53,7 @@ const NOW = () => AT;
 function fakeAdapter(
   answers: Array<string | (() => string | Promise<string>)>,
   /** `refuses` names the tools the gate turned down before the answer arrived (issue 506). */
-  options: { hang?: boolean; prompts?: string[]; refuses?: readonly string[] } = {},
+  options: { hang?: boolean; prompts?: string[]; parts?: import("@arke-studio/contracts").MessagePart[][]; refuses?: readonly string[] } = {},
 ): HarnessAdapter {
   let turn = 0;
   return {
@@ -49,7 +62,8 @@ function fakeAdapter(
     readiness: () => ({ ready: true }),
     createSession: async () => ({ sessionId: "s1" }) as never,
     sendMessage: async () => ({ ok: true }) as never,
-    dispatchAsync: async (input: { parts: Array<{ text?: string }> }) => {
+    dispatchAsync: async (input: import("@arke-studio/contracts").SendMessageInput) => {
+      options.parts?.push(input.parts);
       options.prompts?.push(input.parts.map((p) => p.text ?? "").join(""));
       return { ok: true } as never;
     },
@@ -83,6 +97,7 @@ async function setup(
     summarise?: RunDeps["summarise"];
     entryContext?: import("@arke-studio/contracts").WorldChatContext;
     chapterBrief?: RunDeps["chapterBrief"];
+    prepareImages?: RunDeps["prepareImages"];
     resolveLanguageModel?: RunDeps["resolveLanguageModel"];
     createdModels?: Array<string | undefined>;
     raiseSchemaBoundary?: RunDeps["raiseSchemaBoundary"];
@@ -106,6 +121,7 @@ async function setup(
     ...(options.describeEntry ? { describeEntry: (context: import("@arke-studio/contracts").WorldChatContext) => describeEntryContext(context, bundle) } : {}),
     ...(options.summarise ? { summarise: options.summarise } : {}),
     ...(options.chapterBrief ? { chapterBrief: options.chapterBrief } : {}),
+    ...(options.prepareImages ? { prepareImages: options.prepareImages } : {}),
     ...(options.resolveLanguageModel ? { resolveLanguageModel: options.resolveLanguageModel } : {}),
     ...(options.createdModels
       ? {

@@ -198,6 +198,11 @@ export class ArkeAdapter implements HarnessAdapter {
   }
 
   capabilities(): ReadonlySet<HarnessCapability> { return new Set(["events", "models"]); }
+  readonly imageInput = true;
+  imageInputForSession(id: string): boolean { return this.sessions.get(id)?.inputModalities?.includes("image") === true; }
+  imageDestinationForSession(_id: string) {
+    return { provider: "ollama", local: ["127.0.0.1", "[::1]", "localhost"].includes(new URL(this.baseUrl).hostname) };
+  }
   /**
    * Also how the harness recovers. The coordinator initialises an adapter it does not supervise
    * once, then only polls this; with no process to restart, Ollama starting (or coming back)
@@ -444,6 +449,8 @@ export class ArkeAdapter implements HarnessAdapter {
     const session = this.sessions.get(input.sessionId);
     if (!session) throw new Error("Unknown Arke session.");
     if (session.turn) throw new Error("A turn is already running in this session.");
+    const images = input.parts.filter(part => part.type === "image");
+    if (images.length && !this.imageInputForSession(input.sessionId)) throw new Error("This model cannot inspect images.");
     const correlationId = input.correlationId ?? randomUUID();
     const abort = new AbortController();
     let settle!: (error?: Error) => void;
@@ -451,7 +458,8 @@ export class ArkeAdapter implements HarnessAdapter {
     settled.catch(() => {});
     const turn: Turn = { correlationId, abort, settled };
     session.turn = turn;
-    session.messages.push({ role: "user", content: input.parts.map((part) => part.text).join("\n") });
+    session.messages.push({ role: "user", content: input.parts.filter(part => part.type === "text").map(part => part.text).join("\n"),
+      ...(images.length ? { images: images.map(part => part.data) } : {}) });
     void this.runTurn(session, turn).then((ending) => {
       if (session.turn === turn) session.turn = null;
       if (ending.reason !== "completed") this.answerUnrun(session);

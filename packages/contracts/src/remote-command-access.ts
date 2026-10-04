@@ -103,7 +103,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "retire-chapter": "studio", "restore-chapter-retired": "studio", "edit-chapter-plan": "studio",
   "restore-chapter": "studio", "save-bible": "studio", "restore-bible": "studio",
   "reorder-chapters": "studio", "reorder-scenes": "studio", "set-production-aspect": "studio",
-  "set-world-model": "studio", "set-production-model": "studio", "frame-run-quote": "studio",
+  "set-world-model": "studio", "set-world-image-inspection": "studio", "set-image-inspection": "studio", "set-production-model": "studio", "frame-run-quote": "studio",
   "frame-run-start": "studio", "frame-run-pause": "studio", "frame-run-resume": "studio",
   "frame-run-cancel": "studio", "frame-run-retry-step": "studio", "frame-run-retry-cell": "studio",
   "frame-run-list": "studio", "frame-run-dismiss": "studio", "prepare-master-audio-reference": "studio",

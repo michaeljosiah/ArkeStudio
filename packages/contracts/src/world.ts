@@ -61,6 +61,8 @@ export const WorldMetaSchema = z
      * not a production's default — a production falls back to Settings, never to its world.
      */
     models: ModelChoicesSchema.optional(),
+    /** Portable refusal of cloud image inspection (SPEC-050 R-32). */
+    cloudImageInspection: z.boolean().optional(),
     /** One monotonic world-level canon revision (§2.4). */
     canonRevision: z.number().int().min(0),
     /** Persisted allocation counter — canon ids are never reused (§2.3.1, R-CANON-4). */

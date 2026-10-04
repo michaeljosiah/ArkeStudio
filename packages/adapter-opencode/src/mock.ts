@@ -87,7 +87,7 @@ export class MockHarnessAdapter implements HarnessAdapter {
 
   async sendMessage(input: SendMessageInput): Promise<SendReceipt> {
     const correlationId = input.correlationId ?? `corr_${++this.correlations}`;
-    const prompt = input.parts.map((p) => p.text).join("\n");
+    const prompt = input.parts.map(p => p.type === "text" ? p.text : "[image unreadable]").join("\n");
     this.push({
       type: "message.completed",
       sessionId: input.sessionId,

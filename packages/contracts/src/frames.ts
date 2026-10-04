@@ -1327,6 +1327,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       enabled: z.boolean(),
     })
     .strict(),
+  z.object({ kind: z.literal("set-image-inspection"), enabled: z.boolean(), provider: z.string().min(1).max(200).optional() }).strict(),
+  z.object({ kind: z.literal("set-world-image-inspection"), worldId: UlidSchema, enabled: z.boolean() }).strict(),
   /**
    * Sampling for one local recipe on this device (design turn 177). Null returns the recipe to
    * Fast, its shipped values. New jobs only: nothing queued or taken changes.

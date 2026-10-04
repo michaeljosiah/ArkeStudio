@@ -105,6 +105,9 @@ export class CodexAdapter implements HarnessAdapter {
   constructor(private readonly opts: CodexAdapterOptions) {}
 
   capabilities(): ReadonlySet<HarnessCapability> { return new Set(["events", "models"]); }
+  readonly imageInput = true;
+  imageInputForSession(id: string): boolean { return this.sessions.get(id)?.inputModalities?.includes("image") === true; }
+  imageDestinationForSession(id: string) { return { provider: this.sessions.get(id)?.provider ?? "codex", local: false }; }
   readiness(): Readiness { return this.ready; }
   lifecycleRevision(): number { return this.revision; }
   // This argument-free legacy method cannot identify the selected model. Measured limits
@@ -284,6 +287,7 @@ export class CodexAdapter implements HarnessAdapter {
 
   private async startTurn(input: SendMessageInput): Promise<{ receipt: SendReceipt; turn: Turn }> {
     const session = this.sessions.get(input.sessionId); if (!session) throw new Error("Unknown Codex session.");
+    if (input.parts.some(part => part.type === "image") && !this.imageInputForSession(input.sessionId)) throw new Error("This Codex model cannot inspect images.");
     if (session.turn) throw new Error("A Codex turn is already running in this session.");
     const rpc = this.connection(); const correlationId = input.correlationId ?? randomUUID();
     let settle!: (error?: Error) => void;
@@ -292,7 +296,8 @@ export class CodexAdapter implements HarnessAdapter {
     const turn: Turn = { id: null, startPending: true, correlationId, items: new Map(), phases: new Map(), settled, settle, abort: new AbortController(), cancelled: false };
     session.turn = turn;
     try {
-      const response = object(await rpc.request("turn/start", { threadId: session.threadId, input: input.parts.map(part => ({ type: "text", text: part.text })), environments: [] }));
+      const response = object(await rpc.request("turn/start", { threadId: session.threadId, input: input.parts.map(part => part.type === "text"
+        ? { type: "text", text: part.text } : { type: "image", url: `data:${part.mimeType};base64,${part.data}` }), environments: [] }));
       turn.startPending = false;
       const id = object(response.turn).id;
       if (typeof id !== "string" || (turn.id !== null && turn.id !== id)) throw new Error("Codex returned an invalid turn identity.");

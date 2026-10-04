@@ -123,6 +123,9 @@ export function ConversationTranscript({
   }
   return (
     <div className="fy-chat__transcript" aria-live="polite">
+      {workspace?.imageDisclosures?.map(disclosure => <div key={disclosure.provider} className="fy-chat__notice" role="note">
+        Images may be shared with {disclosure.provider}: {disclosure.images.map(image => `${image.label}${image.posterOnly ? " (poster frame only)" : ""}`).join(", ")}.
+      </div>)}
       {olderActions.length > 0 && (
         <div className="fy-chat__turn fy-chat__turn--studio fy-chat__turn--action" aria-label="Earlier actions">
           {olderActions.map((action) => (
@@ -702,9 +705,9 @@ export function failureLine(failure: { status: string; detail?: string }): strin
  * file says "text only": the words came through and the pictures, tables and layout did not,
  * which somebody who attached a deck for its images needs to know before they ask about one.
  */
-export function attachmentChipLabel(attachment: { fileName: string; readability: string; promoted?: boolean }): string {
+export function attachmentChipLabel(attachment: { fileName: string; readability: string; promoted?: boolean; imageInspection?: "prepared" }): string {
   const state = [
-    ...(attachment.readability === "not-readable" ? ["not readable in chat"] : []),
+    ...(attachment.imageInspection === "prepared" ? ["image prepared for inspection"] : attachment.readability === "not-readable" ? ["not readable in chat"] : []),
     ...(attachment.readability === "extracted-text-available" ? ["text only"] : []),
     ...(attachment.promoted === true ? ["filed in world"] : []),
   ];

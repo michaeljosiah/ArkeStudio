@@ -2,6 +2,27 @@ import { lstat, open, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { imageFormatOf, mp4Problem } from "../queue/verify.js";
 import { toExtendedLength } from "./paths.js";
+import type { FileHandle } from "node:fs/promises";
+import type { Stats } from "node:fs";
+
+/** A growing file cannot turn a bounded image/video read into an unbounded allocation. */
+async function readStableBytes(handle: FileHandle, before: Stats, signal?: AbortSignal): Promise<Uint8Array> {
+  signal?.throwIfAborted();
+  const bytes = new Uint8Array(before.size);
+  let offset = 0;
+  while (offset < bytes.length) {
+    signal?.throwIfAborted();
+    const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+    if (!bytesRead) throw new WorldReferenceError("reference changed during preparation");
+    offset += bytesRead;
+  }
+  const after = await handle.stat();
+  signal?.throwIfAborted();
+  if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) {
+    throw new WorldReferenceError("reference changed during preparation");
+  }
+  return bytes;
+}
 
 const MAX_REFERENCES = 16;
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024 - 1;
@@ -38,6 +59,21 @@ export class WorldReferenceError extends Error {
     super(message);
     this.name = "WorldReferenceError";
   }
+}
+
+/** Inspection codecs accept more formats than generation references, but share containment,
+ * stable handles and bounded allocation. The caller must first authorize the catalogue id. */
+export async function readContainedMediaBytes(worldDir: string, portable: string, signal?: AbortSignal): Promise<Uint8Array> {
+  signal?.throwIfAborted();
+  const root = await realpath(toExtendedLength(worldDir));
+  const { resolved, validatedFile } = await walkContained(root, portable, "media reference");
+  const handle = await open(toExtendedLength(resolved), "r");
+  try {
+    const before = await handle.stat();
+    if (!before.isFile() || !validatedFile || before.dev !== validatedFile.dev || before.ino !== validatedFile.ino ||
+      before.size <= 0 || before.size > MAX_IMAGE_BYTES) throw new WorldReferenceError("media reference changed or exceeds its byte limit");
+    return await readStableBytes(handle, before, signal);
+  } finally { await handle.close(); }
 }
 
 /** Standalone audio references use the same containment and stable-handle checks as images. */
@@ -129,7 +165,7 @@ export async function readContainedImageReferences(
       if (info.size > MAX_IMAGE_BYTES) throw new WorldReferenceError("image reference exceeds OpenAI's 50 MB limit");
       totalBytes += info.size;
       if (totalBytes > MAX_TOTAL_BYTES) throw new WorldReferenceError("image references exceed OpenAI's 512 MB request limit");
-      const data = Uint8Array.from(await handle.readFile());
+      const data = await readStableBytes(handle, info);
       const format = imageFormatOf(data);
       if (!format) throw new WorldReferenceError("image reference must be a valid PNG, JPEG, or WebP file");
       results.push({
@@ -176,7 +212,7 @@ export async function readContainedVideoReferences(
       if (totalBytes > MAX_VIDEO_BYTES) {
         throw new WorldReferenceError(`video references exceed the ${MAX_VIDEO_BYTES / 1024 / 1024} MB inline limit`);
       }
-      const data = Uint8Array.from(await handle.readFile());
+      const data = await readStableBytes(handle, info);
       const problem =
         contentType === "video/webm"
           ? WEBM_MAGIC.every((byte, index) => data[index] === byte)

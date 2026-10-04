@@ -243,6 +243,13 @@ describe("saying that the studio is working", () => {
     assert.match(renderWorking(), /Thinking/, "a spinner with no words is a shrug");
   });
 
+  it("names cloud image handoffs once per provider before the reply arrives", () => {
+    const html = renderWorking({ imageDisclosures: [{ provider: "openai", at: AT,
+      images: [{ id: "reference:look.png", label: "look.png", posterOnly: false }] }] });
+    assert.match(html, /Images may be shared with openai: look.png/);
+    assert.equal(html.match(/Images may be shared with/g)?.length, 1);
+  });
+
   it("offers Stop beside the thing it stops, and names the shortcut", () => {
     const html = renderWorking();
     assert.match(html, /fy-working__stop/);

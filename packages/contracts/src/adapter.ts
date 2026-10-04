@@ -45,10 +45,10 @@ export interface CreateSessionInput {
   title?: string;
 }
 
-export interface MessagePart {
-  type: "text";
-  text: string;
-}
+/** Image bytes are coordinator-owned, bounded, metadata-free renditions (SPEC-050 R-31). */
+export type MessagePart = { type: "text"; text: string } | {
+  type: "image"; data: string; mimeType: "image/png"; text?: never;
+};
 
 export interface SendMessageInput {
   sessionId: string;
@@ -273,6 +273,10 @@ export type VendorOAuthAttemptState =
  * adapter reports.
  */
 export interface HarnessAdapter {
+  /** Transport support alone is insufficient: the pinned session must also accept images. */
+  readonly imageInput?: boolean;
+  imageInputForSession?(sessionId: string): boolean;
+  imageDestinationForSession?(sessionId: string): { provider: string; local: boolean };
   /** Stable identifier, e.g. "opencode" | "mock". */
   readonly id: string;
   /**

@@ -1,5 +1,19 @@
 # Running and validating changes
 
+Conversation image inspection (#1409) is covered by coordinator `test/world-chat/images.test.ts`
+(leased scope, cloud privacy, durable disclosures and byte receipts, key art/candidates/kits,
+prop states, artifacts, Bench takes, GIF/MKV codec delivery, cancellation, encoded payload
+budgets and bounded metadata-free PNGs), `fold.test.ts`, `run.test.ts` and
+`retrieval.test.ts`, and the three vision adapters' `test/adapter.test.ts` input cases. Client
+`test/world-chat.test.tsx` verifies the notice before the reply. These are scripted tests and
+do not claim live model comprehension. Desktop supplies the bounded ffmpeg rendition maker;
+headless hosts may supply the same port, otherwise the fallback reads bounded non-interlaced
+8-bit PNGs and explicitly refuses codecs it cannot decode. A text-only or unknown model must
+refuse inspection without guessing image contents or raising the world schema.
+Desktop `test/take-qc.test.ts` verifies that the shared media runner kills an active subprocess
+when its owning turn aborts. Receipt projections deduplicate source identities and retain the
+newest 256 entries; the append-only journal retains the complete byte audit.
+
 Use Node 22.12 or later; CI uses Node 22. Run `npm ci` from the repository root. See [CONTRIBUTING.md](../../CONTRIBUTING.md#getting-set-up) for browser development and its authenticated session link; `npm start` builds and starts desktop, including its native rebuild.
 
 ## Select the checks

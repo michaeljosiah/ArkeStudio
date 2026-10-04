@@ -5,6 +5,7 @@ export interface ClaudeModel {
   value: string;
   resolvedModel?: string;
   displayName: string;
+  inputModalities?: ModelInfo["inputModalities"];
 }
 
 export interface ClaudeModelDiscoveryInput {
@@ -98,7 +99,8 @@ export function normalizeClaudeModels(rows: ClaudeModel[]): ModelInfo[] {
       ...(previous?.displayName && row.value === "default" ? { displayName: previous.displayName } : {}),
       ...(aliases.size > 0 ? { aliases: [...aliases] } : {}),
       ...(row.value === "default" || previous?.isDefault ? { isDefault: true } : {}),
-      // The SDK does not report modalities or context limits. Unknown stays unknown.
+      ...(row.inputModalities ? { inputModalities: [...row.inputModalities] } : {}),
+      // Current SDK discovery omits modalities and context limits. Unknown stays unknown.
     });
   }
   return [...models.values()];
