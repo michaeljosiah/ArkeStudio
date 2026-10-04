@@ -4,6 +4,7 @@ import {
   LOOK_CHARACTERS_MAX,
   LOOK_LINE_MAX,
   chooseLook,
+  cutMoodClothing,
   editLook,
   lookClothing,
   lookKey,
@@ -43,6 +44,8 @@ export const LOOK_BOUNDS = { people: 12, section: 240, place: 200, art: 400, cha
 
 const RawLookSchema = z.object({
   place: z.object({ text: z.string(), blocks: z.array(z.string()).optional() }).nullable().optional(),
+  /** The book's look as a picture takes it (design turn 193, rule 9): light, colour, grain and lens only. */
+  mood: z.string().nullable().optional(),
   characters: z
     .array(
       z.object({
@@ -199,7 +202,7 @@ export function buildLookPrompt(input: LookDeriverInput, retryNote?: string): st
   const chosen = input.people.some((person) => person.look !== undefined);
   const places = input.places.map((place) => `${place.name}${place.look !== undefined ? ` — ${place.look}` : ""}`).join("\n");
   return `Read the chapter below for how it looks, for an illustrated audiobook: where and when it is and in what light, and what each character wears, carries and looks like IN THIS CHAPTER. Respond with ONLY a JSON object:
-{"place": {"text": "<where, when and the light: one or two phrases>", "blocks": ["<key of a block that says so>"]}, "characters": [{"who": "<the character's key>", "text": "<what they wear and carry and how they appear in this chapter>", "blocks": ["<keys of the blocks it comes from>"]}]}
+{"place": {"text": "<where, when and the light: one or two phrases>", "blocks": ["<key of a block that says so>"]}, "mood": "<the book's look as light, colour, grain and lens>", "characters": [{"who": "<the character's key>", "text": "<what they wear and carry and how they appear in this chapter>", "blocks": ["<keys of the blocks it comes from>"]}]}
 
 Rules — each is enforced mechanically after you answer:
 - "who" is one of the keys listed under Characters; any other is dropped. At most ${LOOK_CHARACTERS_MAX} characters.
@@ -208,6 +211,7 @@ Rules — each is enforced mechanically after you answer:
 - At most ${LOOK_LINE_MAX} characters a line, and short is better: a coat, a lamp, a scarf.
 - "blocks" are keys of blocks listed below, the ones the detail comes from.
 - Never rewrite the chapter. Nothing you write goes into the prose.
+- "mood" is read from "The book's look" below: where the light comes from, its colour, the grain and the lens, in one short line. Never what anyone wears, carries or how their hair is done, never a person or an object: those belong to each character's line. Any clothing in it is cut.
 ${chosen ? `- A character with "the look chosen for them" is dressed by that look in the pictures. Your "text" for them is still only what the CHAPTER says they wear: never copy the look. Add "conflicts": [{"part": "<hood, hair, coat...>", "chapter": "<what the chapter says, a few words>", "look": "<what the look says, a few words>"}] for each part where the two disagree, and leave "conflicts" out where they do not.\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
 ## The book's look
 
@@ -236,6 +240,8 @@ export interface VerifiedLook {
   look: DerivedLook;
   /** Lines the model gave that named no one in the chapter, or had no words. */
   dropped: number;
+  /** Clauses of the Mood line cut for naming clothing, hair or an ornament (rule 9). */
+  moodCut: number;
 }
 
 /**
@@ -278,7 +284,22 @@ export function verifyLook(raw: RawLook, input: Pick<LookDeriverInput, "people">
   }
   const placeText = raw.place === null || raw.place === undefined ? undefined : clip(raw.place.text, LOOK_LINE_MAX);
   const place = placeText === undefined ? undefined : { text: placeText, ...(only(raw.place?.blocks).length > 0 ? { blocks: only(raw.place?.blocks) } : {}) };
-  return { look: { ...(place !== undefined ? { place } : {}), characters }, dropped };
+  // The mood is the art direction's light only (rule 9): a garment, a hairstyle or an ornament in it is cut and counted.
+  // A reading that gave none leaves it to the picture, which cuts the art direction itself (pictureMood).
+  const mood = moodLine(raw.mood);
+  return { look: { ...(place !== undefined ? { place } : {}), ...(mood.text !== undefined ? { mood: { text: mood.text } } : {}), characters }, dropped, moodCut: mood.cut };
+}
+
+/**
+ * The Mood line from what the writing service read of the art direction (design turn 193, rule 9;
+ * SPEC-047 R-117): every clause naming clothing, hair or an ornament cut, held to a line.
+ * Undefined where nothing is left.
+ */
+export function moodLine(text: string | null | undefined): { text?: string; cut: number } {
+  if (text === null || text === undefined) return { cut: 0 };
+  const { text: kept, cut } = cutMoodClothing(text);
+  const line = clip(kept, LOOK_LINE_MAX);
+  return { ...(line !== undefined ? { text: line } : {}), cut };
 }
 
 export interface DerivedChapterLook {
@@ -288,6 +309,8 @@ export interface DerivedChapterLook {
   hash: string;
   /** The looks earlier chapters chose, by character, that start this chapter's people with one (R-116). */
   carried: Record<string, CarriedLook>;
+  /** Clauses of the Mood line cut for naming clothing, hair or an ornament (rule 9). */
+  moodCut: number;
 }
 
 /**
@@ -318,7 +341,7 @@ export async function deriveChapterLook(store: WorldStore, productionId: string,
   const raw = await deriver({ title: plan.chapter.title, ...(art !== undefined ? { art } : {}), people: told, places: chapterPlaces(store, plan), blocks }, signal);
   if (signal?.aborted) throw new Error("stopped");
   const verified = verifyLook(raw, { people: visible, blocks });
-  return { look: verified.look, dropped: verified.dropped, hash: plan.chapter.hash, carried };
+  return { look: verified.look, dropped: verified.dropped, hash: plan.chapter.hash, carried, moodCut: verified.moodCut };
 }
 
 /** What a derive wrote: the record, and how many of the author's lines it left alone. */

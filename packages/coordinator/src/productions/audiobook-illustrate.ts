@@ -51,7 +51,8 @@ export type RawIllustration = z.infer<typeof RawIllustrationSchema>;
 
 export interface IllustrateDeriverInput {
   title: string;
-  art?: string;
+  /** The chapter's Mood line: light, colour and grain only (design turn 193, rule 9). */
+  mood?: string;
   synopsis?: string;
   /** The chapter on its clock: each block by key with its start in seconds. */
   blocks: ReadonlyArray<{ key: string; at: number; text: string; speaker?: string }>;
@@ -86,9 +87,9 @@ Rules — each is enforced mechanically after you answer:
 - "who" holds keys from the characters list, only those the picture shows; "place" is a key from the places list or null.
 - Never write the book's style (it is added separately), and never ask for text, captions, titles, speech bubbles or logos in a picture.
 ${input.never.length > 0 ? `- Never show, name or hint at: ${input.never.join(", ")}.\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
-## The book's look
+## The book's mood (light, colour and grain only)
 
-${input.art ?? "none stated"}
+${input.mood ?? "none stated"}
 
 ## The chapter (${input.title})
 
@@ -147,7 +148,7 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
   const raw = await deriver(
     {
       title: plan.chapter.title,
-      ...(room.art !== undefined ? { art: room.art } : {}),
+      ...(room.mood !== undefined ? { mood: room.mood } : {}),
       ...(room.synopsis !== undefined ? { synopsis: room.synopsis } : {}),
       blocks: plan.blocks.map((planned, index) => {
         const speaker = blockSpeakers(sheets, planned.block);

@@ -8,6 +8,7 @@ import {
   lookViewFor,
   normalizeSpeechText,
   pictureLookFor,
+  pictureMood,
   referenceBudget,
   ridingPicks,
   sheetReferencePicture,
@@ -49,7 +50,8 @@ export type RawPicture = z.infer<typeof RawPictureSchema>;
 
 export interface PictureDeriverInput {
   title: string;
-  art?: string;
+  /** The chapter's Mood line: light, colour and grain only (design turn 193, rule 9). Never the art direction's free text. */
+  mood?: string;
   synopsis?: string;
   block: { key: string; text: string; speaker?: string };
   before?: string;
@@ -77,9 +79,9 @@ Rules — what the prompt says is held to these after you answer:
 - Name each character as the characters list does. "who" holds the keys of the characters the picture shows, from that list, and only those; "place" is a key from the places list or null.
 - Never write the book's style (it is added separately), and never ask for text, captions, titles, speech bubbles or logos in the picture.
 ${input.never.length > 0 ? `- Never show, name or hint at: ${input.never.join(", ")}.\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
-## The book's look
+## The book's mood (light, colour and grain only)
 
-${input.art ?? "none stated"}
+${input.mood ?? "none stated"}
 
 ## The chapter (${input.title})
 
@@ -199,7 +201,8 @@ export interface PictureRoom {
   people: ChapterPerson[];
   places: ChapterPlace[];
   look: AudiobookLook | null;
-  art: string | undefined;
+  /** The chapter's Mood line, or the art direction with its clothing cut where the look has none (R-117). */
+  mood: string | undefined;
   synopsis: string | undefined;
 }
 
@@ -211,7 +214,7 @@ export async function pictureRoom(store: WorldStore, productionId: string, chapt
     people: chapterPeople(store, plan),
     places: chapterPlaces(store, plan),
     look,
-    art: artDirectionFor(store, productionId),
+    mood: pictureMood(look, artDirectionFor(store, productionId)),
     synopsis: clip(summary?.synopsis, PICTURE_BOUNDS.synopsis),
   };
 }
@@ -249,7 +252,7 @@ export async function suggestPicture(store: WorldStore, room: PictureRoom, block
   const raw = await options.deriver(
     {
       title: room.plan.chapter.title,
-      ...(room.art !== undefined ? { art: room.art } : {}),
+      ...(room.mood !== undefined ? { mood: room.mood } : {}),
       ...(room.synopsis !== undefined ? { synopsis: room.synopsis } : {}),
       block: { key: planned.block.key, text: normalizeSpeechText(planned.block.text), ...(speaker !== undefined ? { speaker } : {}) },
       ...(index > 0 ? { before: clip(room.plan.blocks[index - 1]!.block.text, PICTURE_BOUNDS.neighbour)! } : {}),

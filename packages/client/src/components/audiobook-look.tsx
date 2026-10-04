@@ -55,7 +55,7 @@ export function lookRows(look: AudiobookLook | null, numberOf: (key: string) => 
   if (look === null) return [];
   const rows: Row[] = [];
   if (look.place !== undefined) rows.push({ id: "place", target: { kind: "place" }, label: null, text: look.place.text, source: look.place.by === "author" ? "yours" : "from the prose" });
-  if (look.mood !== undefined) rows.push({ id: "mood", target: { kind: "mood" }, label: null, text: look.mood.text, source: look.mood.by === "author" ? "yours" : "from the art direction" });
+  if (look.mood !== undefined) rows.push({ id: "mood", target: { kind: "mood" }, label: null, text: look.mood.text, source: look.mood.by === "author" ? "yours" : "from the art direction · light only" });
   for (const [key, line] of Object.entries(look.characters)) {
     const blocks = blocksLabel(line.blocks, numberOf);
     rows.push({
