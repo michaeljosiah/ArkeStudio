@@ -1,5 +1,5 @@
 import type { WorldStore } from "../world/store.js";
-import type { ConversationActionCard, PrepareConversationTakeReview } from "@arke-studio/contracts";
+import { ConversationExportStateSchema, type ConversationActionCard, type PrepareConversationTakeReview } from "@arke-studio/contracts";
 import { prepareConversationTakeReview, ConversationTakeReviewRefusal } from "./conversation-take-review.js";
 export { ConversationTakeReviewRefusal } from "./conversation-take-review.js";
 import type { ProposalManager } from "../gate/proposals.js";
@@ -66,7 +66,10 @@ export class ConversationActionService {
       actions.productionBatchQuotes ?? actions.buildGenerationQuotes ?? actions.benchGenerationQuotes;
     return Promise.all(cards.map(async card => {
       const generationWork = await quotes?.project(card).catch(() => undefined);
-      return generationWork ? { ...card, generationWork } : card;
+      const record = card.authority.kind === "export" ? actions.getExports?.().find(record => record.id === card.authority.id && record.worldId === card.worldId && record.productionId === card.productionId) : undefined;
+      const output = ConversationExportStateSchema.shape.output.safeParse(record?.output ?? null);
+      const exportState = record ? ConversationExportStateSchema.parse({ status: record.status, percent: record.percent ?? (record.status === "done" ? 100 : 0), output: output.success ? output.data : null }) : undefined;
+      return { ...card, ...(generationWork ? { generationWork } : {}), ...(exportState ? { exportState } : {}) };
     }));
   }
 

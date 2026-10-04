@@ -1,5 +1,5 @@
 import { productionCardPreview } from "./production-card-preview.js";
-import { PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, PRODUCTION_TIMELINE_CARD_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { WorldChatProductionTimelineActionSchema, WorldChatProductionTimelineTranscribeActionSchema, PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { compileProductionTimelineRequest, historyDigestFromCommitSource, discardProductionTranscriptionQuote, productionHistoryDigest, freezeProductionTimeline, productionTimelineBody, executeProductionTimeline } from "./production-timeline.js";
 import type { TranscriptionPorts } from "../productions/transcription.js";
@@ -192,6 +192,7 @@ import {
   readEditorRequestByAction,
   stageEditorRequests,
   previewProductionEditorRequest,
+  productionEditorCardPreview,
   validateEditorRequest,
 } from "../productions/editor-requests.js";
 import { applySceneEdits, sceneOfContext } from "../productions/scene-edits.js";
@@ -3429,7 +3430,7 @@ async function sharedResourceProjection(
 
   const productionPreview = productionCardPreview(bundle, payload);
   if (productionPreview) {
-    await store.ensureSchemaVersion(PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, "production-card-preview");
+    await store.ensureSchemaVersion(productionPreview.kind === "export" ? PRODUCTION_TIMELINE_CARD_SCHEMA_VERSION : PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, "production-card-preview");
     shown = { ...shown, productionPreview };
   }
   await writePreparation(store, "world", intent.actionId, payload);
@@ -4463,6 +4464,7 @@ export function worldChatActionAdapters(
         affectedTargets: [...intent.targets],
         ripples: [],
         permissionReason: "authored-change",
+        productionPreview: productionEditorCardPreview(store, request.productionId, { summary: request.summary, commands: request.commands }, now()),
         body: {
           family: "command",
           commands: preview.digest.effects.map((effect) => ({
@@ -4480,7 +4482,7 @@ export function worldChatActionAdapters(
     actionKind: "world-chat-editor-request",
     prepare: async ({ intent, payload }) => {
       const action = WorldChatEditorRequestActionSchema.parse(payload);
-      await store.ensureSchemaVersion(PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION, "production-chat-timeline");
+      await store.ensureSchemaVersion(PRODUCTION_TIMELINE_CARD_SCHEMA_VERSION, "production-timeline-card-preview");
       const [request] = await stageEditorRequests(store, {
         conversationId: intent.conversationId,
         actionId: intent.actionId,
@@ -4494,6 +4496,7 @@ export function worldChatActionAdapters(
     recoverPreparation: async (intent) => {
       const action = await editorRequestForAction(store, intent.actionId);
       if (!action) return null;
+      await store.ensureSchemaVersion(PRODUCTION_TIMELINE_CARD_SCHEMA_VERSION, "production-timeline-card-preview");
       return editorProjection(intent, action);
     },
     abandonPreparation: async (intent) => {

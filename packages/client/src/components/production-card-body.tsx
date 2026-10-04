@@ -6,6 +6,8 @@ import { boardsForScene } from "../screens/scene-workspace/boards.js";
 import { SceneStage } from "../screens/scene-workspace/stage.js";
 import { SelectionProvider } from "../screens/scene-workspace/selection.js";
 import { Portrait, characterPortraitPath, locationPortraitPath } from "./portrait.js";
+import { ProductionTimelineCard } from "./production-timeline-card.js";
+import { ProductionExportCard } from "./production-export-card.js";
 
 const EMPTY = new Set<string>();
 const nothing = () => {};
@@ -27,6 +29,8 @@ export function ProductionCardBody({ preview, action }: { preview: ProductionCar
       ["Episodes", String(preview.episodes)], ["Style", preview.style ?? "World style"], ["Model", preview.model ?? "World default"],
     ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
   </div>;
+  if (preview.kind === "timeline") return <ProductionTimelineCard preview={preview} action={action} />;
+  if (preview.kind === "export") return <ProductionExportCard preview={preview} action={action} />;
   const scene = preview.after;
   const beforeBlocks = new Map(preview.before?.script?.blocks.map(block => [block.id, block]) ?? []);
   const blocks = scene.script?.blocks ?? [];

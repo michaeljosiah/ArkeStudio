@@ -71,6 +71,8 @@ export interface ArkeBridge {
    * path — and the host resolves that pair through the very same confined lookup the media
    * server uses. No filesystem path crosses in either direction (SPEC-001 R-9).
    */
+  /** Reveal a completed export through the host's confined world lookup (SPEC-051 R-59). */
+  revealMedia?(worldSlug: string, path: string): Promise<{ ok: true } | { ok: false; reason: string }>;
   saveMedia?(
     worldSlug: string,
     path: string,

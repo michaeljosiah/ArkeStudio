@@ -580,10 +580,15 @@ export const ConversationGenerationWorkSchema = z.object({
 }).strict();
 export type ConversationGenerationWork = z.infer<typeof ConversationGenerationWorkSchema>;
 export type ConversationCardMedia = z.infer<typeof ConversationCardMediaSchema>;
+export const ConversationExportStateSchema = z.object({
+  status: z.enum(["running", "done", "failed", "cancelled"]), percent: z.number().min(0).max(100),
+  output: ConversationCardMediaSchema.shape.path.refine(path => path.startsWith("exports/"), "expected an export media address").nullable(),
+}).strict();
 export const ConversationActionCardSchema = ConversationActionRecordSchema.extend({
   availableDecisions: z.array(ConversationActionDecisionKindSchema),
   blockedReason: z.string().min(1).max(1_000).optional(),
   generationWork: ConversationGenerationWorkSchema.optional(),
+  exportState: ConversationExportStateSchema.optional(),
 }).strict();
 export type ConversationActionCard = z.infer<typeof ConversationActionCardSchema>;
 

@@ -78,7 +78,7 @@ import { BackgroundNotificationController } from "./background-notifications.js"
 import { drainDesktop, isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "./startup.js";
 import { boundaryFrameOptions, takePosterOptions, takeQcOptions } from "./take-qc.js";
 import { createExportFfmpegRunner } from "./export-ffmpeg.js";
-import { saveMediaHandler } from "./save-media.js";
+import { saveMediaHandler, revealMediaHandler } from "./save-media.js";
 import { createStageExporter, type StageExporter } from "./stage-export.js";
 import { resolveTheme, themePalette, type ResolvedTheme, type ThemePalette } from "./theme.js";
 import { fileUpdateMarker, UpdateController } from "./updates.js";
@@ -441,6 +441,13 @@ function registerHostIpc(): void {
     async (event, input: { worldSlug?: unknown; path?: unknown; name?: unknown }) =>
       await saveMediaFromHost(event.sender, input),
   );
+  const revealMediaFromHost = revealMediaHandler({
+    allowedSender: () => window?.webContents ?? null,
+    worldSlug: () => coordinator?.getState().world?.meta.slug ?? null,
+    providers: () => ({ starting: startupProvider, live: coordinator?.worldProvider ?? null }),
+    reveal: path => shell.showItemInFolder(path),
+  });
+  ipcMain.handle("arke:reveal-media", async (event, input) => revealMediaFromHost(event.sender, input));
   /*
    * Put a picture on the system clipboard.
    *

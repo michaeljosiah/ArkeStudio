@@ -143,6 +143,7 @@ export function TypedTrackRows({
   mintClipId,
   nameOf,
   tool = "select",
+  reviewMarks,
 }: {
   production?: ProductionBundle;
   artifacts?: readonly ArtifactSidecar[];
@@ -173,6 +174,7 @@ export function TypedTrackRows({
   nameOf?: (artifact: ArtifactSidecar) => string;
   /** The toolbar's tool applies to every track (round eight): Blade splits here, Hand pans here. */
   tool?: EditorTool;
+  reviewMarks?: ReadonlyMap<string, string>;
 }) {
   const [hover, setHover] = useState<{ trackId: TimelineTrackId; frame: number; refused: boolean; files: boolean } | null>(null);
   const [drag, setDrag] = useState<(GestureUpdate & { trackId: TimelineTrackId; refused: boolean }) | null>(null);
@@ -477,6 +479,7 @@ export function TypedTrackRows({
                     key={clip.id}
                     type="button"
                     data-clip={clip.id}
+                    data-review-change={reviewMarks?.get(clip.id)}
                     className={cx("fy-typedclip", audio && "fy-typedclip--audio", picture !== null && "fy-typedclip--picture", selected && "fy-typedclip--selected", isGhost && "fy-typedclip--ghost")}
                     style={{ left: percent(isGhost && ghostStart !== null ? ghostStart : clip.startFrame), width: `${Math.max((clip.durationFrames / span) * 100, 0.6)}%` }}
                     aria-pressed={selected}

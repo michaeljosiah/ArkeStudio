@@ -82,6 +82,8 @@ Frozen production previews and turn approval (#1425) use client `test/production
 
 Generation media and Select (#1425) also use client `test/production-card-media.test.tsx`, coordinator `test/world-chat/generation-quotes.test.ts` and the “Select prepares”/board cases in `test/world-chat/actions.test.ts`, plus contracts `test/production-card-media.test.ts`. They check sealed quote projection with zero dispatch, cross-purchase refusal, duplicate preparation, Deny/Approve/stale review fences, live filed results and retained receipts. The Chrome script above now checks native board grids, reference/result cards and take comparison at all four widths. This is layout coverage with fixture media addresses, not installed provider playback. Select sends `conversation-take-review-prepare`; only the resulting card’s separate decision changes a shot selection.
 
+Timeline and export bodies (#1425) use client `test/production-timeline-export.test.tsx`, contracts `test/production-timeline-card.test.ts`, the whole-cut/editor-recovery/local-export cases in coordinator `test/world-chat/actions.test.ts`, and desktop `test/reveal-media.test.ts`. They check frozen native tracks, removed ghosts, affected ranges, exact approved tracks, schema-62 reader refusal after first use, export identity isolation, retained completion playback, and confined desktop reveal including world/window changes during lookup. The Chrome script includes timeline/export modes at all four widths; its fixture addresses establish layout, not installed playback. Run desktop `npm run smoke:main --workspace @arke-studio/desktop` after bridge wiring changes.
+
 ## Select the checks
 
 For design-only production conversation work, turn 196 in the design master is the reference

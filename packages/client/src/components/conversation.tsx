@@ -1,6 +1,7 @@
 import { TimelineCardHistory } from "./timeline-card-history.js";
 import { ProductionCardBody } from "./production-card-body.js";
 import { GenerationReferences, GenerationResults } from "./generation-card-body.js";
+import { ProductionExportReceipt } from "./production-export-card.js";
 import { TakeComparisonCard } from "./take-comparison-card.js";
 import { ConversationActionGroup } from "./conversation-action-group.js";
 import { ProductionPlanCardView } from "./production-plan-card.js";
@@ -381,6 +382,7 @@ export function ConversationPermissionCard({
       ) : <>{body}{consequences}</>}
       {action.statusDetail && <p className="fy-actioncard__notice">{action.statusDetail}</p>}
       {!action.receipt?.generation && ["approved", "queued", "running", "completed", "failed", "cancelled"].includes(action.status) && action.shown.body.family === "generation" && <GenerationResults action={action} />}
+      {action.actionKind === "world-chat-production-cut-export" && <ProductionExportReceipt action={action} />}
       {action.blockedReason && <p className="fy-actioncard__notice">{action.blockedReason}</p>}
       {action.decision && (
         <div className="fy-actioncard__audit">

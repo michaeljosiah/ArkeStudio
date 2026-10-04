@@ -15,6 +15,7 @@ import {
   type ModelEditorRequest,
   type ProductionBundle,
   type ProductionTimeline,
+  type ProductionCardPreview,
   type TimelineSelectionChange,
   type WorldChatContext,
 } from "@arke-studio/contracts";
@@ -177,6 +178,21 @@ export function previewProductionEditorRequest(
   const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
   if (!production) return { ok: false as const, reason: `production ${productionId} is not in this world` };
   return previewAgainstProduction(store, production, request, now).preview;
+}
+
+/** Frozen visual content shares the exact editor request compiler and take-selection algebra. */
+export function productionEditorCardPreview(store: WorldStore, productionId: string, request: ModelEditorRequest, now: string): Extract<ProductionCardPreview, { kind: "timeline" }> {
+  const production = store.getBundle().productions.find(p => p.meta.id === productionId);
+  if (!production) throw new Error("The production is unavailable.");
+  const { base, preview } = previewAgainstProduction(store, production, request, now);
+  if (!preview.ok) throw new Error("The timeline preview is unavailable.");
+  const afterSelections = { ...production.selections };
+  const entry = preview.timeline === base.timeline ? undefined : preview.timeline.history.undo.at(-1);
+  if (entry?.kind === "change") for (const selection of entry.selections) {
+    if (selection.after) afterSelections[selection.shotId] = selection.after; else delete afterSelections[selection.shotId];
+  }
+  return { kind: "timeline", before: base.timeline, after: preview.timeline, range: preview.digest.range,
+    beforeSelections: production.selections, afterSelections };
 }
 
 /**
