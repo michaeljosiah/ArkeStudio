@@ -67,3 +67,37 @@ describe("the Audiobook view takes the whole room (turn 193)", () => {
     }
   });
 });
+
+/**
+ * Illustrate this chapter as a sheet over the main area (design turn 193h, 193j, rules 17 and 19):
+ * a grid four across where the sheet is wide, two between 600 and 1099, one list on a phone with the
+ * foot held, held rows amber. The sheet's own width decides the columns above 1099.
+ */
+const illustrate = readFileSync(join(here, "../src/components/audiobook-illustrate.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+
+describe("the Illustrate proposal is a sheet over the main area (turn 193)", () => {
+  const rule = (selector: string) => rules(illustrate).filter((candidate) => candidate.selector === selector);
+
+  it("stands in the chapter's grid cell over the centre, not over the dock", () => {
+    const sheet = rule(".fy-ills")[0]!;
+    assert.match(sheet.body, /grid-area: 1 \/ 1/);
+    assert.match(sheet.body, /position: relative/);
+    assert.ok(rule(".fy-sw:has(> .fy-ills) > .fy-sw__centre").some((candidate) => candidate.body === "grid-area: 1 / 1;"), "the centre shares the cell, so the dock keeps its column");
+  });
+
+  it("is four across, three and two as the sheet narrows, two on a tablet and a list on a phone", () => {
+    const columns = rule(".fy-ills__grid").map((candidate) => /grid-template-columns: ([^;]+);/.exec(candidate.body)?.[1]);
+    assert.deepEqual(columns, ["repeat(4, minmax(0, 1fr))", "repeat(3, minmax(0, 1fr))", "repeat(2, minmax(0, 1fr))", "repeat(2, minmax(0, 1fr))", "minmax(0, 1fr)"], "default, container 999, container 759, the 1099 media rule, the 599 media rule: in that order, so the later wins");
+    assert.match(illustrate, /@media \(max-width: 1099px\)/);
+    assert.match(illustrate, /@media \(max-width: 599px\)/);
+    assert.match(illustrate, /@container ills \(max-width: 999px\)/);
+    assert.match(rule(".fy-ills__sheet")[0]!.body, /container: ills \/ inline-size/);
+  });
+
+  it("holds the row amber and fades a skipped one; the foot stays at the bottom with Accept", () => {
+    assert.match(rule(".fy-ills__card--held .fy-ills__th")[0]!.body, /border-color: var\(--warning\)/);
+    assert.match(rule(".fy-ills__card--off")[0]!.body, /opacity: 0\.5/);
+    assert.match(rule(".fy-ills__foot")[0]!.body, /border-top: 1px solid var\(--border\)/);
+    assert.ok(rule(".fy-ills__foot .ui-btn--primary").length > 0, "Accept takes the foot on a phone");
+  });
+});
