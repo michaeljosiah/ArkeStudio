@@ -155,6 +155,16 @@ describe("the block's panel as a phone sheet stands where 194h draws it", () => 
     assert.match(grab!.body, /margin-top: 8px/);
     assert.equal(rules(responsive).filter((rule) => rule.selector.includes(":has(.fy-abp) .fy-page-sheet__grab")).length, 1);
   });
+
+  it("draws no ring round the title the sheet focuses as it opens: neither an outline nor the global ring's box-shadow (local.18)", () => {
+    // The global :focus-visible ring is a box-shadow (theme/globals.css), and Chromium matches it
+    // on a heading focused after showModal(): clearing the outline alone left the title boxed.
+    const title = rules(responsive).filter((rule) => rule.selector.split(",").map((part) => part.trim()).includes(".fy-abp__title h2:focus"));
+    assert.ok(title.some((rule) => /outline: none/.test(rule.body)));
+    assert.ok(title.some((rule) => /box-shadow: none/.test(rule.body)), "the box-shadow ring is cleared too");
+    const globals = readFileSync(join(here, "../src/theme/globals.css"), "utf8");
+    assert.match(globals, /:focus-visible \{[^}]*box-shadow: var\(--shadow-focus\)/, "the ring this clears is still the global box-shadow");
+  });
 });
 
 describe("the toolbar's menus mark focus by their filled row (turn 194, local.15)", () => {

@@ -6,6 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { audiobookTextHash, lookDigest, pictureBench, type ArtifactSidecar, type ChapterAudiobook, type ClientMessage, type ClientState, type ManifestModel, type PictureShot, type PictureSuggestion, type ProductionBundle } from "@arke-studio/contracts";
 import { BlockPicturePanel, pictureBrief, picturesByTab, useChapterPictures } from "../src/components/audiobook-picture.js";
+import { frameViewWord, ridesLabel } from "../src/components/audiobook-picture-card.js";
 import { AudiobookBlocks, type BlockRow } from "../src/screens/chapter-audiobook.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest, useStore } from "../src/lib/store.js";
@@ -288,7 +289,9 @@ describe("Suggest picture (turn 191a)", () => {
     assert.equal(text(q(m, '[data-key="sereth"]')), "SerethMake a look", "no picture: dashed, named, held");
     assert.equal(q(m, '[data-key="sereth"] img'), null);
     assert.equal(text(q(m, '[data-testid="picture-card-rides"]')), "Main photo", "no look chosen: her main photo rides");
-    assert.equal(text(q(m, '[data-key="maren-kest"] [data-testid="picture-card-why"]')), "head and shoulders");
+    assert.equal(q(m, '[data-key="maren-kest"] [data-testid="picture-card-view"]'), null, "no frame drafted, no frame's word at the row's end");
+    assert.ok(q(m, '[data-key="maren-kest"] [data-testid="picture-card-look"]'), "but the look menu is there");
+    assert.equal(q(m, '[data-key="the-vigil"] [data-testid="picture-card-look"]'), null, "a place has no look to choose");
     assert.equal(text(q(m, '[data-testid="picture-card-model"]')), "GPT Image 2 · ~$0.04");
     assert.equal(text(q(m, '[data-testid="suggest-generate"]')), "Generate · ~$0.04");
     assert.equal(asked(m, "make-audiobook-picture").length, 0, "nothing is made until Generate");
@@ -322,7 +325,7 @@ describe("Suggest picture (turn 191a)", () => {
     assert.equal(text(q(m, '[data-testid="picture-card-rides"]')), "Close view");
     const thumbs = all(m, '[data-key="maren-kest"] [data-testid="picture-card-thumb"]').map((img) => [img.dataset.view, img.dataset.on]);
     assert.deepEqual(thumbs, [["close", "true"]], "the image that rides, ringed (194g)");
-    assert.equal(text(q(m, '[data-key="maren-kest"] [data-testid="picture-card-why"]')), "close frame");
+    assert.equal(text(q(m, '[data-key="maren-kest"] [data-testid="picture-card-look"]')), "close-up", "the frame's word, then the menu's chevron (194g)");
     assert.match(text(q(m, '[data-key="maren-kest"]')), /Storm coat · close view/);
     assert.equal(text(q(m, '[data-check="expression"]')), "Expression namedtired, unsmiling, eyes on the key", "the expression is the check's, not a line of its own");
     assert.match(text(q(m, '[data-testid="picture-card-not-in-frame"]')), /Not in frame/);
@@ -402,6 +405,46 @@ describe("Suggest picture (turn 191a)", () => {
     assert.equal(q(same, '[data-testid="picture-look-changed"]'), null);
     const changed = await mount(2, { "p1.0": made("A red coat.") }, look);
     assert.equal(text(q(changed, '[data-testid="picture-look-changed"]')), "look changed");
+  });
+});
+
+/**
+ * The Rides line (design turn 193, rules 8 and 16; 194g draws `Full body · no close view`): one
+ * line, `·` between its parts, naming what rode — and who rode which where they differ.
+ */
+describe("what the Rides line says (turn 194g)", () => {
+  const person = (key: string, name: string, view?: "full" | "close") => ({ key, name, sheet: key, kind: "character" as const, reference: `references/${key}/x.png`, carried: true, ...(view !== undefined ? { look: { lookId: `tk_${key}`, view } } : {}) });
+  const TWO_SHOT = { frame: "Medium two-shot across the table" };
+  const short = { labelOf: (who: { name: string }) => who.name.split(" ")[0]! };
+
+  it("says the one image everyone rode, and why a face frame got the full body", () => {
+    const both = [person("ife", "Ife", "full"), person("ade", "Adeyemi Akinola", "full")];
+    assert.equal(ridesLabel(both, TWO_SHOT, { hasClose: () => false }), "Full body · no close view", "194g's words");
+    assert.equal(ridesLabel(both, { frame: "Wide, the booth" }, { hasClose: () => false }), "Full body", "a wide frame asks for the full body anyway");
+    assert.equal(ridesLabel(both, TWO_SHOT), "Full body", "where nothing says the look lacks one, the line does not claim it");
+    assert.equal(ridesLabel([person("ife", "Ife", "close"), person("ade", "Ade", "close")], TWO_SHOT), "Close view");
+    assert.equal(ridesLabel([person("ife", "Ife")], undefined), "Main photo");
+  });
+
+  it("names who rode which where the views differ, never one view for a mixed picture", () => {
+    const mixed = [person("tunde", "Tunde", "full"), person("ade", "Adeyemi Akinola", "close")];
+    assert.equal(ridesLabel(mixed, undefined, short), "Adeyemi close view · Tunde full body");
+    assert.equal(ridesLabel(mixed, TWO_SHOT, { ...short, hasClose: (who) => who.key !== "tunde" }), "Adeyemi close view · Tunde full body · no close view");
+    assert.equal(ridesLabel([...mixed, person("ife", "Ife")], undefined, short), "Adeyemi close view · Tunde full body · Ife main photo");
+    assert.equal(ridesLabel([person("a", "A", "full"), person("b", "B", "full"), person("c", "C", "close")], undefined), "C close view · A, B full body");
+  });
+
+  it("says a detail carries no faces and a frame with nobody carries the place", () => {
+    assert.equal(ridesLabel([person("ife", "Ife", "full")], { frame: "Detail, her hand on his wrist" }), "no reference · no faces");
+    assert.equal(ridesLabel([{ key: "club", name: "The club", sheet: "club", kind: "place", reference: "references/club/e.png", carried: true }], { frame: "Establishing, the club" }), "Place view");
+    assert.equal(ridesLabel([], undefined), "no reference");
+  });
+
+  it("reads the row's frame word from the frame, lower-cased, and none where no frame was kept", () => {
+    assert.equal(frameViewWord(TWO_SHOT), "two-shot");
+    assert.equal(frameViewWord({ frame: "Extreme close-up, Ife's eyes" }), "extreme close-up");
+    assert.equal(frameViewWord({ frame: "" }), null);
+    assert.equal(frameViewWord(undefined), null);
   });
 });
 
@@ -490,7 +533,7 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.equal(q(m, '[data-testid="picture-card-checks"]'), null);
     assert.equal(q(m, '[data-testid="picture-card-not-in-frame"]'), null);
     assert.equal(text(q(m, '[data-testid="picture-card-rides"]')), "Close view", "the stamp says which image rode");
-    assert.equal(q(m, '[data-key="maren-kest"] [data-testid="picture-card-why"]'), null, "but not the frame it rode for");
+    assert.equal(q(m, '[data-key="maren-kest"] [data-testid="picture-card-view"]'), null, "but not the frame it rode for");
     assert.equal(text(q(m, '[data-testid="suggest-generate"]')), "Make again · ~$0.06");
   });
 
@@ -500,6 +543,94 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.deepEqual(all(m, ".fy-abp__foot button").map(text), ["Remove", "Suggest picture"]);
     await press(q(m, '[data-testid="audiobook-picture-open"]'));
     assert.deepEqual(all(m, '[aria-label="Picture from"] button').map(text), ["World", "Cast", "Scenes", "Generate"], "the chooser, from the picture");
+  });
+
+  it("names each person in frame by their short name, the full name its tooltip, as the rows do (turn 194, rule 13)", async () => {
+    extraArtifacts = [madeArtifact()];
+    const m = await mount(2, { "p1.0": made({ ...SHOT, notInFrame: ["maren-kest"] }) });
+    const name = q(m, '[data-key="maren-kest"] [data-testid="picture-card-name"]');
+    assert.equal(text(name), "Maren", "not Maren Kest");
+    assert.equal(name?.getAttribute("title"), "Maren Kest");
+    assert.equal(q(m, '[data-key="the-vigil"] [data-testid="picture-card-name"]')?.getAttribute("title"), null, "a place has one name");
+    assert.match(text(q(m, '[data-testid="picture-card-not-in-frame"]')), /Not in frame\s*Maren$/);
+  });
+
+  it("ends a person's row with the frame's word and the look menu: their looks, Main photo, New look, and the chapter's choice held on", async () => {
+    extraArtifacts = [madeArtifact()];
+    const m = await mount(2, { "p1.0": made(SHOT) });
+    const toggle = q(m, '[data-key="maren-kest"] [data-testid="picture-card-look"]');
+    assert.equal(text(toggle), "close-up");
+    assert.equal(toggle?.getAttribute("aria-expanded"), "false");
+    assert.ok(toggle?.querySelector("svg"), "the chevron");
+    assert.equal(q(m, '[data-key="the-vigil"] [data-testid="picture-card-look"]'), null);
+    await press(toggle);
+    assert.equal(toggle?.getAttribute("aria-expanded"), "true");
+    const menu = q(m, '[data-key="maren-kest"] [data-testid="picture-card-look-menu"]');
+    assert.equal(menu?.getAttribute("aria-label"), "Maren · look");
+    assert.deepEqual(all(m, '[data-testid="picture-card-look-tile"]').map((tile) => [tile.dataset.look, text(tile), tile.getAttribute("aria-pressed")]), [[STORM_LOOK.id, "Storm coat", "false"], ["main", "Main photo", "true"]], "the chapter chose none: the main photo is on");
+    assert.equal(text(q(m, '[data-testid="picture-card-look-new"]')), "New look");
+    // A one-picture look is in the record but nothing makes a picture with one yet: the menu sets the chapter's choice and says so.
+    const only = q(m, '[data-testid="picture-card-look-only"]') as HTMLInputElement;
+    const chapter = q(m, '[data-testid="picture-card-look-chapter"]') as HTMLInputElement;
+    assert.deepEqual([only.checked, only.disabled], [false, true]);
+    assert.deepEqual([chapter.checked, chapter.disabled], [true, true]);
+    assert.match(text(menu), /Only this picture\s*Set for Chapter 7/);
+  });
+
+  it("files a look pressed in the menu as the chapter's choice, rings it at once, and asks once", async () => {
+    extraArtifacts = [madeArtifact()];
+    const m = await mount(2, { "p1.0": made(SHOT) });
+    await press(q(m, '[data-key="maren-kest"] [data-testid="picture-card-look"]'));
+    await press(q(m, `[data-testid="picture-card-look-tile"][data-look="${STORM_LOOK.id}"]`));
+    const chose = asked(m, "choose-audiobook-look");
+    assert.equal(chose.length, 1);
+    assert.deepEqual([chose[0]!.productionId, chose[0]!.chapterFile, chose[0]!.key, chose[0]!.sheet, chose[0]!.lookId], ["saltlight", "07-the-tenth-key", "maren-kest", "maren-kest", STORM_LOOK.id]);
+    assert.equal(q(m, `[data-testid="picture-card-look-tile"][data-look="${STORM_LOOK.id}"]`)?.getAttribute("aria-pressed"), "true", "ringed before the record comes back");
+    assert.equal(q(m, '[data-testid="picture-card-look-tile"][data-look="main"]')?.getAttribute("aria-pressed"), "false");
+    await press(q(m, `[data-testid="picture-card-look-tile"][data-look="${STORM_LOOK.id}"]`));
+    assert.equal(asked(m, "choose-audiobook-look").length, 1, "the look already chosen is not asked for again");
+  });
+
+  it("rings the look the chapter chose, and Main photo takes the choice away", async () => {
+    extraArtifacts = [madeArtifact()];
+    const look = { chapterHash: "h", at: AT, characters: { "maren-kest": { name: "Maren", sheet: "maren-kest", text: "Storm coat, hood up; two braids.", lookId: STORM_LOOK.id } } };
+    const m = await mount(2, { "p1.0": made(SHOT) }, look);
+    await press(q(m, '[data-key="maren-kest"] [data-testid="picture-card-look"]'));
+    assert.equal(q(m, `[data-testid="picture-card-look-tile"][data-look="${STORM_LOOK.id}"]`)?.getAttribute("aria-pressed"), "true");
+    await press(q(m, '[data-testid="picture-card-look-tile"][data-look="main"]'));
+    assert.equal(asked(m, "choose-audiobook-look").at(-1)!.lookId, null);
+  });
+
+  it("opens New look over the panel from the menu, and puts the menu away", async () => {
+    extraArtifacts = [madeArtifact()];
+    const m = await mount(2, { "p1.0": made(SHOT) });
+    await press(q(m, '[data-key="maren-kest"] [data-testid="picture-card-look"]'));
+    await press(q(m, '[data-testid="picture-card-look-new"]'));
+    assert.equal(q(m, '[data-testid="picture-card-look-menu"]'), null);
+    const sheet = dom.document.querySelector('[role="dialog"]');
+    assert.ok(sheet, "193b's sheet, drawn on the body");
+    assert.match(text(sheet), /New look · Maren Kest/);
+    assert.match(text(sheet), /for Chapter 7/);
+    assert.equal(m.where(), "/chapter", "made here, not on the cast page");
+  });
+
+  it("puts the menu away on Escape, and only the menu: the raised sheet it sits in stays", async () => {
+    extraArtifacts = [madeArtifact()];
+    const m = await mount(2, { "p1.0": made(SHOT) });
+    await press(q(m, '[data-key="maren-kest"] [data-testid="picture-card-look"]'));
+    assert.ok(q(m, '[data-testid="picture-card-look-menu"]'));
+    const escape = Object.assign(new dom.Event("keydown", { bubbles: true, cancelable: true }), { key: "Escape" });
+    await act(async () => void dom.document.dispatchEvent(escape as unknown as Event));
+    assert.equal(q(m, '[data-testid="picture-card-look-menu"]'), null);
+    assert.equal(escape.defaultPrevented, true, "a modal sheet's cancel is Escape's default: the menu takes it");
+  });
+
+  it("says the frame a picture's stamp kept even where its card cannot be drawn (its model gone)", async () => {
+    const gone = madeArtifact();
+    extraArtifacts = [{ ...gone, generation: { ...gone.generation!, model: "an-old-model" } } as ArtifactSidecar];
+    const m = await mount(2, { "p1.0": made(SHOT) });
+    assert.equal(q(m, '[data-testid="suggest-card"]'), null, "no card: nothing can price Make again");
+    assert.equal(text(q(m, '[data-testid="picture-card-frame"]')), "Close-up, Maren's face");
   });
 
   it("opens the chooser from a made picture too", async () => {

@@ -25,7 +25,7 @@
 .fy-pcard__sec { display: flex; flex-direction: column; gap: 7px; }
 .fy-pcard__h { font: var(--type-label); color: var(--muted-foreground); }
 .fy-pcard__none { font-size: var(--text-xs); color: var(--muted-foreground); }
-.fy-pcard__who { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 10px 0 6px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 10px; font-size: var(--text-sm); }
+.fy-pcard__who { position: relative; display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 10px 0 6px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 10px; font-size: var(--text-sm); }
 .fy-pcard__who--over { color: var(--muted-foreground); }
 .fy-pcard__thumb { width: 28px; height: 44px; flex: none; box-sizing: border-box; border-radius: 5px; object-fit: cover; object-position: top; display: block; border: 1px solid var(--border); }
 .fy-pcard__thumb--on { outline: 2px solid var(--foreground); outline-offset: 1px; }
@@ -35,7 +35,23 @@
 .fy-pcard__whotx b { font-weight: 600; }
 .fy-pcard__whotx > span { font-size: var(--text-xs); color: var(--muted-foreground); overflow-wrap: anywhere; }
 .fy-pcard__expr { font-size: var(--text-xs); color: var(--foreground); overflow-wrap: anywhere; }
-.fy-pcard__why { flex: none; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; }
+/* The row's end (194g): the frame's word, then the look menu's chevron, 10 apart as the master
+   spaces the row. The press is the word and the chevron at the row's full height, drawn as neither. */
+.fy-pcard__view { flex: none; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; }
+.fy-pcard__look { flex: none; align-self: stretch; display: inline-flex; align-items: center; gap: 10px; padding: 0; border: 0; background: none; color: var(--foreground); font: inherit; cursor: pointer; }
+.fy-pcard__look:hover .fy-pcard__view { color: var(--foreground); }
+/* The look menu (193c's popover): under its row, the row's width, over the rows below it. Scrolled
+   into view on opening, it stops clear of the panel's held foot (44-high presses on a phone). */
+.fy-pcard__menu { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 4; scroll-margin-bottom: 84px; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 12px; background: var(--popover, var(--background)); box-shadow: var(--shadow-lg); }
+.fy-pcard__tiles { display: flex; flex-wrap: wrap; gap: 12px; }
+.fy-pcard__tile { display: flex; flex-direction: column; gap: 5px; max-width: 84px; padding: 0; border: 0; background: none; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); text-align: left; cursor: pointer; }
+.fy-pcard__tile img, .fy-pcard__tile i { display: block; width: 44px; height: 78px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; object-fit: cover; object-position: top; background: var(--secondary); }
+.fy-pcard__tile span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-pcard__tile--on { color: var(--foreground); }
+.fy-pcard__tile--on img, .fy-pcard__tile--on i { outline: 2px solid var(--foreground); outline-offset: 1px; }
+.fy-pcard__tile--new i { display: flex; align-items: center; justify-content: center; border-style: dashed; border-color: var(--neutral-400); background: none; font-style: normal; font-size: 18px; color: var(--muted-foreground); }
+.fy-pcard__tile--new i::before { content: "+"; }
+.fy-pcard__tile:disabled { cursor: default; opacity: 0.6; }
 .fy-pcard__prompt { display: block; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: transparent; font-size: var(--text-sm); line-height: 1.5; color: var(--foreground); text-align: left; cursor: text; }
 /* The fold is on the words, not the box: clamped on the box, a fourth line shows through its padding. */
 .fy-pcard__prompt > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
