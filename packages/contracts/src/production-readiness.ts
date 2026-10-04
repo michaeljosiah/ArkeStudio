@@ -7,11 +7,16 @@ import { productionShape } from "./production-shape.js";
 import { attachmentFor, parseMentions, propSlug } from "./planning.js";
 import { performanceLineKey } from "./performance.js";
 import { audioSourceOf } from "./cut.js";
-import { cueStaleness } from "./subtitles.js";
+import { cueStaleness, textDigest } from "./subtitles.js";
+import { basePictureTrack, AUDIO_TRACK_KINDS } from "./timeline.js";
+import { audibleTracks } from "./render-plan.js";
+import { hasOwnFrame } from "./scene.js";
+import { beatPictureShotId, sceneBeats } from "./beats.js";
+import { routingFindings, publicationBlockers } from "./routing.js";
 
 export const PRODUCTION_READINESS_SCHEMA_VERSION = 59;
 export const ReadinessCheckSchema = z.object({
-  key: z.enum(["script", "shots", "cast", "place", "kits", "start-frames", "selected-takes", "dialogue-voiced", "in-cut", "cut", "subtitles", "export"]),
+  key: z.enum(["script", "shots", "cast", "place", "kits", "start-frames", "selected-takes", "dialogue-voiced", "in-cut", "cut", "subtitles", "export", "chapters", "manuscript", "routing", "beat-text"]),
   label: z.string(), status: z.enum(["ready", "missing", "not-required", "blocked"]),
   completed: z.number().int().nonnegative(), total: z.number().int().nonnegative(), missingIds: z.array(z.string()), detail: z.string(),
 }).strict();
@@ -19,6 +24,7 @@ export type ReadinessCheck = z.infer<typeof ReadinessCheckSchema>;
 export const ReadinessExportSchema = z.object({
   id: z.string(), worldId: z.string(), productionId: z.string().optional(), episodeId: z.string().optional(),
   status: z.enum(["running", "done", "cancelled", "failed"]), createdAt: z.string().optional(), output: z.string().nullable().optional(),
+  sourceFingerprint: z.string().max(200).optional(),
 }).strict();
 export type ReadinessExport = z.infer<typeof ReadinessExportSchema>;
 export const ProductionReadinessSchema = z.object({
@@ -49,11 +55,44 @@ const ready = (checks: readonly ReadinessCheck[]) => checks.every(c => c.status 
 
 /** SPEC-051 R-38: pure, shared and never persisted as a readiness authority. */
 export type ReadinessWorld = Pick<WorldBundle, "artifacts" | "sheets" | "props" | "referenceKits"> & { meta: Pick<WorldBundle["meta"], "worldId"> };
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>[key,canonical(item)]));
+  return value;
+}
+
+/** The render-relevant record snapshot, captured before an export begins. Old unstamped exports
+ * remain visible history but cannot prove that the current production has been delivered. */
+export function productionExportFingerprint(world: ReadinessWorld, production: ProductionBundle): string {
+  const timeline = production.timeline?.status === "ready" ? production.timeline.timeline : null;
+  const content = {meta:production.meta,chapters:production.chapters.filter(c=>!c.retired),scenes:production.scenes,
+    selections:production.selections,spine:production.spine,cut:production.cut,routing:production.routing,
+    timeline:timeline ? {frameRate:timeline.frameRate,tracks:timeline.tracks,mix:timeline.mix,migratedCut:timeline.migratedCut} : production.timeline};
+  const refs = JSON.stringify(content), takeIds = new Set(production.takes.filter(t=>refs.includes(t.id)).map(t=>t.id));
+  for (const take of production.takes) if (takeIds.has(take.id) && take.segment) takeIds.add(take.segment.passTakeId);
+  const takes = production.takes.filter(t=>takeIds.has(t.id));
+  const performances = production.performances.filter(p=>refs.includes(p.id));
+  const referenced = `${refs}${JSON.stringify(takes)}`;
+  const speakers = new Set(production.scenes.flatMap(scene=>[...Object.keys(scene.cast ?? {}),...(scene.script?.blocks.flatMap(b=>b.speaker ? [b.speaker] : []) ?? []),
+    ...orderedShots(scene).flatMap(s=>[...parseMentions(s.description),...(s.audio?.speaker ? [s.audio.speaker] : [])])]));
+  const snapshot = {...content,takes,performances,takeMediaInfo:Object.fromEntries(Object.entries(production.takeMediaInfo).filter(([id])=>takeIds.has(id))),
+    artifacts:world.artifacts.filter(a=>referenced.includes(a.id)).sort((a,b)=>a.id.localeCompare(b.id)),
+    sheets:world.sheets.filter(s=>speakers.has(s.id)).sort((a,b)=>a.id.localeCompare(b.id))};
+  return `production-export-v1:${textDigest(JSON.stringify(canonical(snapshot)))}`;
+}
+
 export function deriveProductionReadiness(world: ReadinessWorld, production: ProductionBundle, exports: readonly ReadinessExport[] = []): ProductionReadiness {
   const shape = productionShape(production.meta);
   const available = (id: string) => world.artifacts.find(a => a.id === id && !a.retiredAt && (!a.production || a.production === production.meta.id));
   const timeline = production.timeline?.status === "ready" ? production.timeline.timeline : null;
-  const picture = timeline?.tracks.filter(t => t.kind === "picture" && !t.muted).flatMap(t => t.clips) ?? [];
+  const base = timeline ? basePictureTrack(timeline) : null;
+  const picture = base && !base.muted ? base.clips : [];
+  const audio = timeline ? audibleTracks(timeline).filter(t=>AUDIO_TRACK_KINDS.has(t.kind)).flatMap(t=>t.clips) : [];
+  const ownImage = (id: string) => {
+    const selection = production.selections[id], artifact = available(selection?.startFrameArtifactId ?? "");
+    return !!artifact && /^[^/\\]+$/.test(artifact.file) && hasOwnFrame(selection,world.artifacts.filter(a=>!a.retiredAt && (!a.production || a.production === production.meta.id)));
+  };
   const takeFor = (shotId: string) => {
     const id = production.selections[shotId]?.acceptedTakeId;
     const take = production.takes.find(t => t.id === id && t.coversShots.includes(shotId) && !t.boardSheetParent);
@@ -61,8 +100,9 @@ export function deriveProductionReadiness(world: ReadinessWorld, production: Pro
     const media = take.segment ? production.takes.find(t => t.id === take.segment!.passTakeId)?.media : take.media;
     return media ? take : undefined;
   };
-  const scenes = sortScenes(production.scenes).map(scene => {
+  const scenes = sortScenes(shape.hasScenes ? production.scenes : []).map(scene => {
     const shots = orderedShots(scene), shotIds = shots.map(s => s.id);
+    const pictureId = (id: string) => shape.playsAsBeats ? beatPictureShotId(shots,id) : id;
     const propIds = new Set(world.props.map(p => propSlug(p.name)));
     const mentions = [...new Set(shots.flatMap(s => parseMentions(s.description)))];
     const castIds = [...new Set([...Object.keys(scene.cast ?? {}), ...(scene.script?.blocks.flatMap(b => b.speaker ? [b.speaker] : []) ?? []),
@@ -87,14 +127,18 @@ export function deriveProductionReadiness(world: ReadinessWorld, production: Pro
       const performance = production.performances.find(p => p.id === selection?.performanceId);
       if (performance && line.speaker && performance.target.sceneVersion === scene.version && performance.target.speakerSheetId === line.speaker &&
         performance.target.sceneId === scene.id && performance.target.shotId === line.shotId && performance.target.blockId === line.blockId &&
-        production.performanceReview.reviews.filter(r => r.performanceId === performance.id).at(-1)?.decision === "accept") return true;
+        performance.target.productionId === production.meta.id &&
+        production.performanceReview.reviews.filter(r => r.performanceId === performance.id).at(-1)?.decision === "accept" &&
+        audio.some(clip=>clip.source.kind === "performance" && clip.source.performanceId === performance.id && clip.source.shotId === line.shotId &&
+          clip.source.sourceHash === performance.provenance.outputHash)) return true;
       // Legacy voice-line writes the accepted voice take into a dialogue placement. It cannot
       // prove a particular covered script block, so it satisfies only the legacy shot line.
       return line.blockId === undefined && production.cut.audio.filter(t => t.kind === "dialogue").flatMap(t => t.entries).some(entry => {
         const source = audioSourceOf(entry), take = source?.kind === "take" ? production.takes.find(t => t.id === source.takeId) : undefined;
         return entry.shotId === line.shotId && take?.kind === "voice" && !!take.media && take.coversShots.includes(line.shotId) &&
           take.provenance.sceneId === scene.id && take.provenance.sceneVersion === scene.version && entry.sheetId === line.speaker;
-      });
+      }) && (!timeline || audio.some(clip=>clip.source.kind === "take" && production.takes.some(t=>t.id === (clip.source.kind === "take" ? clip.source.takeId : "") &&
+        t.kind === "voice" && t.coversShots.includes(line.shotId) && t.provenance.sceneId === scene.id && t.provenance.sceneVersion === scene.version)));
     };
     const checks = [
       check("script", "Script", [scene.id], () => !!scene.script?.blocks.some(b => b.text.trim()), "An authored scene script is present."),
@@ -102,25 +146,39 @@ export function deriveProductionReadiness(world: ReadinessWorld, production: Pro
       check("cast", "Cast resolved", castIds, id => !!cast(id), "Every named character resolves to a current sheet."),
       check("place", "Place resolved", places, id => !!world.sheets.find(s => s.id === id && s.type === "location" && !s.retired), "Every named place resolves to a current location sheet."),
       check("kits", "Cast references", castIds, id => { const sheet = cast(id); return !!sheet && attachmentFor(world.referenceKits.find(k => k.sheetId === id) ?? null, sheet, "primary", { productionId: production.meta.id, sceneId: scene.id }).file !== null; }, "Each character has an accepted usable reference."),
-      check("start-frames", "Start frames", shotIds, id => !!production.takes.find(t => t.coversShots.includes(id) && ["frame", "still"].includes(t.kind) && !!t.media && !t.boardSheetParent &&
+      check("start-frames", "Start frames", shotIds, id => ownImage(pictureId(id)) || !!production.takes.find(t => t.coversShots.includes(pictureId(id)) && ["frame", "still"].includes(t.kind) && !!t.media && !t.boardSheetParent &&
         (production.selections[id]?.acceptedTakeId === t.id || production.reviews.filter(r => r.takeId === t.id).at(-1)?.decision === "accept")) ||
         !!takeFor(id)?.startFrame || available(production.selections[id]?.startFrameArtifactId ?? "")?.kind === "image", "Accepted own shot frames or explicit boundary images; steering footage alone is insufficient.", "missing"),
-      check("selected-takes", "Selected takes", shotIds, id => { const t = takeFor(id); return !!t && (shape.dispatchCapability === "image" ? ["frame", "still"].includes(t.kind) : t.kind === "clip"); }, "Each shot selects available media of the required kind.", "missing"),
+      check("selected-takes", "Selected takes", shotIds, id => { const selectedId = pictureId(id), t = takeFor(selectedId); return shape.dispatchCapability === "image"
+        ? ownImage(selectedId) || !!t && ["frame", "still"].includes(t.kind) : t?.kind === "clip"; }, "Each shot selects available media of the required kind.", "missing"),
       check("dialogue-voiced", "Dialogue voiced", spoken.map(l => `${l.shotId}/${l.blockId ?? "legacy"}`), voiced, "Each spoken line has a current accepted performance or legacy voice placement."),
       check("in-cut", "In the cut", shotIds, id => picture.some(c => { const source = c.source; return source.kind === "shot" ? source.shotId === id : source.kind === "take" && production.takes.some(t => t.id === source.takeId && t.coversShots.includes(id)); }), "Every scene shot has a visible picture-track placement in the saved cut.", "missing"),
     ];
+    if (shape.playsAsBeats) {
+      for (const item of checks.filter(c=>c.key === "in-cut" || c.key === "dialogue-voiced")) { item.status="not-required"; item.detail=item.key === "in-cut"
+        ? "Beat playback uses selected pictures and text directly, without a video cut." : "Beat dialogue can be delivered as text; prepared voices are optional."; }
+      const beats = sceneBeats(scene);
+      checks.push(check("beat-text","Beat text",beats.filter(b=>b.kind !== "picture").map(b=>b.lineId!),id=>!!beats.find(b=>b.lineId === id)?.text.trim(),"Authored beat lines are delivered as text when no prepared voice is present."));
+    }
     return { sceneId: scene.id, title: scene.title, checks, ready: ready(checks) };
   });
   const exportsHere = exports.filter(e => e.worldId === world.meta.worldId && e.productionId === production.meta.id && e.episodeId === undefined)
-    .map(({ id, worldId, productionId, episodeId, status, createdAt, output }) => ({ id, worldId, productionId, episodeId, status, createdAt, output }))
+    .map(({ id, worldId, productionId, episodeId, status, createdAt, output, sourceFingerprint }) => ({ id, worldId, productionId, episodeId, status, createdAt, output, sourceFingerprint }))
     .sort((a,b) => (a.createdAt ?? a.id).localeCompare(b.createdAt ?? b.id) || a.id.localeCompare(b.id));
   const lastExport = exportsHere.at(-1) ?? null;
   const checks = [
     check("cut", "Cut assembled", [production.meta.id], () => !!timeline && picture.length > 0 && scenes.length > 0 && scenes.every(s => s.checks.find(c => c.key === "in-cut")?.status === "ready"), "A saved picture cut includes every scene shot."),
-    check("subtitles", "Subtitles", [production.meta.id], () => !!timeline?.tracks.some(t => t.kind === "subtitle" && t.cues?.length && t.cues.every(c => !cueStaleness(c, production).stale)), "A subtitle track contains current editable cues."),
-    check("export", "Last export", [production.meta.id], () => lastExport?.status === "done" && !!lastExport.output, lastExport ? `Last production export: ${lastExport.status}.` : "No production export is recorded."),
+    check("subtitles", "Subtitles", [production.meta.id], () => !!timeline?.tracks.some(t => t.kind === "subtitle" && !t.muted && t.cues?.length && t.cues.every(c => !cueStaleness(c, production).stale)), "An unmuted subtitle track contains current editable cues."),
+    check("export", "Last export", [production.meta.id], () => lastExport?.status === "done" && !!lastExport.output && lastExport.sourceFingerprint === productionExportFingerprint(world,production),
+      lastExport ? `Last production export: ${lastExport.status}.${lastExport.status === "done" && lastExport.sourceFingerprint !== productionExportFingerprint(world,production) ? " Export again: its source snapshot is older or unavailable." : ""}` : "No production export is recorded."),
   ];
-  if (!shape.hasScenes) for (const c of checks.filter(c => c.key !== "export")) c.status = "not-required";
-  if (production.timeline?.status === "invalid") for (const c of checks.filter(c => c.key !== "export")) { c.status = "blocked"; c.detail = "Repair the invalid saved timeline before assessing the cut."; }
+  if (!shape.hasScenes || shape.playsAsBeats) for (const c of checks.filter(c => c.key !== "export")) { c.status = "not-required"; c.detail = "This format delivers directly without a video cut or subtitle track."; }
+  if (shape.hasChapters) {
+    const chapters = production.chapters.filter(c=>!c.retired), ids = chapters.map(c=>c.id);
+    checks.unshift(check("chapters","Chapters",[production.meta.id],()=>chapters.length > 0,"At least one current chapter is present."),
+      check("manuscript","Manuscript",ids,id=>(chapters.find(c=>c.id === id)?.words ?? 0) > 0,"Every current chapter has saved prose.","missing"));
+  }
+  if (shape.playsAsBeats) checks.unshift(check("routing","Routing",[production.meta.id],()=>!!production.routing && publicationBlockers(routingFindings(production.routing,production.scenes)).length === 0,"The branch map has a valid start, endings and destinations."));
+  if (shape.hasScenes && !shape.playsAsBeats && production.timeline?.status === "invalid") for (const c of checks.filter(c => c.key !== "export")) { c.status = "blocked"; c.detail = "Repair the invalid saved timeline before assessing the cut."; }
   return { productionId: production.meta.id, title: production.meta.title, scenes, checks, lastExport, ready: ready(checks) && scenes.every(s => s.ready) };
 }
