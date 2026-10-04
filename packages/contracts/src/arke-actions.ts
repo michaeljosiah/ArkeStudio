@@ -577,6 +577,7 @@ export const ConversationCardMediaSchema = z.object({
 export const ConversationGenerationWorkSchema = z.object({
   jobKeys: z.array(UlidSchema).min(1).max(100),
   media: z.array(ConversationCardMediaSchema).max(100),
+  results: z.array(ArkeGenerationResultSchema).max(100).optional(),
 }).strict();
 export type ConversationGenerationWork = z.infer<typeof ConversationGenerationWorkSchema>;
 export type ConversationCardMedia = z.infer<typeof ConversationCardMediaSchema>;

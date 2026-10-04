@@ -6,7 +6,7 @@ import { prepareAudio, acceptPreparedAudio, type PreparedAudioCandidate } from "
 import type { AudioMediaTools } from "./media-tools.js";
 import { castVoiceRequests, sameVoiceAssignment, type CastVoiceNotSent, type FrozenPerformanceAudio, type PerformanceAudioRequest, type ProductionBundle, type SceneRecord } from "@arke-studio/contracts";
 import { readPerformance, currentPerformanceTarget } from "./performances.js";
-import { CharacterAudioPlanSchema, characterAudioRoute, characterAudioReferenceProblem, referenceAudioAsset, type Job } from "@arke-studio/contracts";
+import { CharacterAudioPlanSchema, characterAudioRoute, characterAudioReferenceProblem, referenceAudioAsset, referenceAudioMediaPath, type Job } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { audioWorldPath } from "./storage.js";
 import { readAudioBytes } from "./media-tools.js";
@@ -48,9 +48,7 @@ export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job,
           review?.decision !== "accept" || review.ts !== ref.acceptedReviewAt) throw new Error("The accepted performance changed. Review the dispatch again.");
       }
     }
-    const file = "master" in ref ? `productions/${ref.master.productionId}/${ref.prepared.file}` : "sample" in ref ? `references/${ref.sheetId}/${sample.file}`
-      : ref.prepared ? `productions/${ref.performance.target.productionId}/${ref.prepared.file}`
-      : `productions/${ref.performance.target.productionId}/performances/${ref.performance.id}/${sample.file}`;
+    const file = referenceAudioMediaPath(ref);
     const bytes = await readAudioBytes(await audioWorldPath(store.dir, file), store.closingSignal, route.maxBytesPerFile);
     seconds += sample.provenance.outputTechnical.durationSec ?? Infinity;
     if ((sample.provenance.outputTechnical.durationSec ?? Infinity) > route.maxFileDurationSec) throw new Error("Audio reference exceeds the per-file duration limit.");

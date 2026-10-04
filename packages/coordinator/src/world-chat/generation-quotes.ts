@@ -7,6 +7,7 @@ import {
   CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan,
   type ArkeGenerationBody, type ConversationActionCard, type ModelWorldChatAction, type WorldBundle,
   SceneIdSchema, SlugSchema, CHAT_SEQUENCING_SCHEMA_VERSION,
+  CharacterAudioPlanSchema, ReferenceMediaBindingsSchema, referenceAudioMediaPath,
 } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import type { WorldStore } from "../world/store.js";
@@ -14,6 +15,7 @@ import type { ConversationActionExecutionOutcome } from "../arke-actions/lifecyc
 import { conversationActionDigest } from "../arke-actions/lifecycle.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "../world/reference-files.js";
+import { generationCardResults } from "./generation-card-results.js";
 
 export interface GenerationQuoteScope { readonly conversationId: string; readonly sceneDependencies?: readonly { productionId: string; sceneId: string }[] }
 export interface GenerationQuoteSource {
@@ -91,6 +93,10 @@ export class GenerationQuotes {
     if (!quote || quote.body.quoteDigest !== card.shown.body.quoteDigest || quote.body.quoteDigest !== sealedDigest(quote) ||
         quote.actionDigest !== conversationActionDigest(quote.action)) return undefined;
     const media: z.infer<typeof ConversationGenerationWorkSchema>["media"] = [];
+    const addMedia = (kind: "image" | "video" | "audio", path: string, role: string) => {
+      const parsed = ConversationGenerationWorkSchema.shape.media.element.safeParse({ kind, path, alt: `${role} · ${path.split("/").at(-1)}`, role });
+      if (parsed.success && media.length < 100 && !media.some(value => value.path === path)) media.push(parsed.data);
+    };
     for (const input of quote.inputs) {
       if (input.worldId !== card.worldId) return undefined;
       for (const [parameter, kind] of [["references", "image"], ["videoReferences", "video"]] as const) {
@@ -101,13 +107,17 @@ export class GenerationQuotes {
           const roles = Array.isArray(input.params.referenceRoles) ? input.params.referenceRoles as { file?: string; role?: string }[] : [];
           const reference = quote.body.references.find(value => value.id === path || value.id === `ref_${createHash("sha256").update(path).digest("hex").slice(0, 24)}`);
           const role = roles.find(value => value.file === path)?.role ?? reference?.role ?? (kind === "image" ? "Image reference" : "Video reference");
-          const parsed = ConversationGenerationWorkSchema.shape.media.element.safeParse({ kind, path,
-            alt: `${role} · ${path.split("/").at(-1)}`, role });
-          if (parsed.success && media.length < 100) media.push(parsed.data);
+          addMedia(kind, path, role);
         }
       }
+      const bindings = ReferenceMediaBindingsSchema.safeParse(input.params.referenceMedia);
+      if (bindings.success) for (const reference of bindings.data) addMedia(reference.kind, reference.file, reference.kind === "audio" ? "Audio reference" : "Video reference");
+      const audio = CharacterAudioPlanSchema.safeParse(input.params.audioReferences);
+      if (audio.success && !audio.data.disabled) for (const reference of audio.data.references) addMedia("audio", referenceAudioMediaPath(reference), `${reference.characterName} · ${reference.intent}`);
     }
-    return ConversationGenerationWorkSchema.parse({ jobKeys: quote.inputs.map(input => input.idempotencyKey), media });
+    const jobKeys = quote.inputs.map(input => input.idempotencyKey);
+    const results = generationCardResults(this.store, this.ports.jobs().filter(job => job.worldId === card.worldId && jobKeys.includes(job.idempotencyKey)));
+    return ConversationGenerationWorkSchema.parse({ jobKeys, media, results });
   }
   async abandon(id: string) {
     const quote = await this.read(id);

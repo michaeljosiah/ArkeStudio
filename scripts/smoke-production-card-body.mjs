@@ -28,13 +28,18 @@ const scene = migrateLegacyScene({ id: "sc_review", slug: "review", number: 1, o
   shots: Array.from({length:40}, (_, i) => ({id:"sh_"+(i+1),number:i+1,title:"Picture "+(i+1),description:"@maren-kest waits by the gate.",durationSec:4,framing:{size:"MCU",movement:"slow push"}})) });
 const mode = new URLSearchParams(location.search).get("mode") ?? "shots";
 const take = production.takes.find(t => t.kind === "clip"), baseJob = state.app.jobs[0];
+if (mode === "audio") { take.kind = "voice"; take.media = "speech.wav"; }
 state.app.jobs = [{ ...baseJob, id: take.jobId, idempotencyKey: "01J8E1000000000000000000K5", status: "succeeded" },
   { ...baseJob, id: "jb_01J8E0000000000000000000J7", idempotencyKey: "01J8E1000000000000000000K7", status: "running", step: {stage:"Sampling",done:2,total:5} }];
 __setStateForTest(state);
 const action = { worldId: world.meta.worldId, productionId: production.meta.id, authority: {kind:"scene-store"},
-  actionKind: mode === "board" ? "world-chat-production-board-compile" : "world-chat-production-take-generation", status:"running",
+  actionKind: mode === "board" ? "world-chat-production-board-compile" : mode === "audio" ? "world-chat-production-audio-generation" : "world-chat-production-take-generation", status:"running",
   shown:{body:{family:"generation",cancellationSupported:true}}, generationWork:{jobKeys:state.app.jobs.map(j=>j.idempotencyKey),
     media:[{kind:"image",path:"references/maren-kest/main-photo-v1.png",role:"Identity",alt:"Maren"}]} };
+if (mode === "audio") {
+  action.generationWork.media = [{kind:"audio",path:"references/maren-kest/voice/sample.wav",role:"Voice reference",alt:"Maren"}];
+  action.generationWork.results = [{id:"jb_rehearsal",medium:"audio",status:"completed",description:"Scene rehearsal",mediaPath:".cache/table-reads/line.wav"}];
+}
 const review = {...action,shown:{body:{family:"take-review",mediaKind:"video",mediaId:take.id,currentSelection:take.id}}};
 const before = applyTimelineCommands(seedStoryPictureTimeline(production), [{kind:"add-track",trackId:"tr_music",trackKind:"music",name:"Music"},
   {kind:"place",trackId:"tr_music",clip:{id:"cl_music",source:{kind:"take",takeId:take.id,label:"Score"},startFrame:0,sourceInFrames:0,durationFrames:24}}]);
@@ -44,7 +49,8 @@ const exportPreview = {kind:"export",preset:"review-cut",durationSec:60,subtitle
 const exportAction = {...action,authority:{kind:"export",id:"ex_review"},exportState:{status:"running",percent:68,output:null}};
 const completedExport = {...exportAction,exportState:{status:"done",percent:100,output:"exports/review.mp4"}};
 flushSync(() => createRoot(document.getElementById("root")).render(<MemoryRouter><article className="fy-actioncard"><h3>{mode === "media" ? "Generation and take comparison" : "Resulting shot list"}</h3>
-  {mode === "media" ? <><GenerationReferences action={action}/><GenerationResults action={action}/><TakeComparisonCard action={review}/></>
+  {mode === "audio" ? <><GenerationReferences action={action}/><GenerationResults action={action}/></>
+    : mode === "media" ? <><GenerationReferences action={action}/><GenerationResults action={action}/><TakeComparisonCard action={review}/></>
     : mode === "timeline" ? <ProductionCardBody action={action} preview={timelinePreview}/>
     : mode === "export" ? <><ProductionCardBody action={exportAction} preview={exportPreview}/><ProductionExportReceipt action={completedExport}/></>
     : <ProductionCardBody action={action} preview={{kind:"scene",before:null,after:scene}} />}</article></MemoryRouter>));
@@ -75,7 +81,7 @@ try {
   const evaluate = async expression => { const response = await cdp("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }); if (response.exceptionDetails) throw new Error(JSON.stringify(response.exceptionDetails)); return response.result.value; };
   await cdp("Page.enable");
   const records = [];
-  for (const mode of ["shots", "board", "media", "timeline", "export"]) {
+  for (const mode of ["shots", "board", "media", "audio", "timeline", "export"]) {
   await cdp("Page.navigate", { url: "http://127.0.0.1:" + server.address().port + "?mode=" + mode });
   await until(() => evaluate("window.cardReady"));
   for (const width of [360, 390, 984, 1200]) {
@@ -85,8 +91,8 @@ try {
       overflow:document.documentElement.scrollWidth>innerWidth, tracks:document.querySelectorAll('.fy-track').length, ghosts:document.querySelectorAll('[data-review-change="removed"]').length,
       players:document.querySelectorAll('video').length, progress:document.querySelector('progress')?.value,
       bodiesContained:[...document.querySelectorAll('.fy-production-timeline__scroll,.fy-generation-card video')].every(body=>{const b=body.getBoundingClientRect();return b.left>=box.left&&b.right<=box.right;})}; })()`)
-      : mode === "media" ? await evaluate(`(() => { const box=document.querySelector('.fy-actioncard').getBoundingClientRect(); return {width:innerWidth,
-      overflow:document.documentElement.scrollWidth>innerWidth, players:document.querySelectorAll('video').length,
+      : ["media", "audio"].includes(mode) ? await evaluate(`(() => { document.querySelectorAll('.fy-generation-card__use').forEach(d=>d.open=true); const box=document.querySelector('.fy-actioncard').getBoundingClientRect(); return {width:innerWidth,
+      overflow:document.documentElement.scrollWidth>innerWidth, players:document.querySelectorAll('video,audio').length, uses:document.querySelectorAll('.fy-generation-card__use').length,
       bodiesContained:[...document.querySelectorAll('.fy-generation-card__grid figure')].every(body=>{const b=body.getBoundingClientRect();return b.left>=box.left&&b.right<=box.right;})}; })()`) : await evaluate(`(() => { const list = document.querySelector('.fy-production-preview__rows'); const box = list.getBoundingClientRect(); list.scrollTop = list.scrollHeight;
       const last = document.querySelector('[data-testid="workspace-row-sh_40"]').getBoundingClientRect();
       return { width:innerWidth, rows:document.querySelectorAll('[data-testid^="workspace-row-"]').length,
@@ -96,6 +102,7 @@ try {
     const capture = await cdp("Page.captureScreenshot", { format: "png" }); await writeFile(join(dir, `card-${mode}-${width}.png`), Buffer.from(capture.data, "base64"));
     records.push({ mode, ...metrics }); assert.equal(metrics.overflow, false, `${mode} viewport ${width}`); assert.equal(metrics.bodiesContained, true);
     if (mode === "media") assert.equal(metrics.players, 4);
+    else if (mode === "audio") { assert.equal(metrics.players, 3); assert.equal(metrics.uses, 2); }
     else if (mode === "timeline") { assert.equal(metrics.tracks, 4); assert.equal(metrics.ghosts, 1); }
     else if (mode === "export") { assert.equal(metrics.players, 1); assert.equal(metrics.progress, 68); }
     else { assert.equal(metrics.rows, 40); assert.ok(metrics.scrollWidth <= metrics.listWidth + 1, `card body ${width} overflows`); assert.equal(metrics.lastVisible, true); }

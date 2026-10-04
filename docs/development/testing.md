@@ -84,6 +84,8 @@ Generation media and Select (#1425) also use client `test/production-card-media.
 
 Timeline and export bodies (#1425) use client `test/production-timeline-export.test.tsx`, contracts `test/production-timeline-card.test.ts`, the whole-cut/editor-recovery/local-export cases in coordinator `test/world-chat/actions.test.ts`, and desktop `test/reveal-media.test.ts`. They check frozen native tracks, removed ghosts, affected ranges, exact approved tracks, schema-62 reader refusal after first use, export identity isolation, retained completion playback, and confined desktop reveal including world/window changes during lookup. The Chrome script includes timeline/export modes at all four widths; its fixture addresses establish layout, not installed playback. Run desktop `npm run smoke:main --workspace @arke-studio/desktop` after bridge wiring changes.
 
+Live audio and non-shot result use (#1425) also use coordinator `test/world-chat/generation-card-results.test.ts`, `production-audio.test.ts` and `test/bench/conversation-quotes.test.ts`. They verify filed outputs during other in-flight work, exact recorded job correlation, unchanged sealed admission evidence, pending/discarded/foreign output refusal and safe media addresses. Client media tests cover voice results without picture Select, frozen audio reference players, retained results and Use as… requests naming the owning result/action/session. Use as… sends an ordinary human request in the same conversation; filing, performance review and cue placement still use existing separately decided authorities. Chrome adds an audio mode with expanded use controls at all four widths.
+
 ## Select the checks
 
 For design-only production conversation work, turn 196 in the design master is the reference

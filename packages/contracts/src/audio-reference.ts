@@ -102,6 +102,14 @@ export function referenceAudioAsset(ref: CharacterAudioPlan["references"][number
     attestations: ref.attestations, acknowledgementId: ref.acknowledgementId };
 }
 
+/** The frozen recording's world address is shared by dispatch and conversation presentation. */
+export function referenceAudioMediaPath(ref: CharacterAudioPlan["references"][number]): string {
+  if ("master" in ref) return `productions/${ref.master.productionId}/${ref.prepared.file}`;
+  if ("sample" in ref) return `references/${ref.sheetId}/${ref.sample.file}`;
+  return ref.prepared ? `productions/${ref.performance.target.productionId}/${ref.prepared.file}`
+    : `productions/${ref.performance.target.productionId}/performances/${ref.performance.id}/${ref.performance.file}`;
+}
+
 
 /** Verified fal reference-to-video contract; neither frame nor continuation routes declare audio. */
 export function characterAudioRoute(model: { provider: string; id: string }, taskMode = "generate") {

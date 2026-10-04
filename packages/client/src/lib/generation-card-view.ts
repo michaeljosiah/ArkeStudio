@@ -8,6 +8,7 @@ type Result = NonNullable<NonNullable<ConversationActionCard["receipt"]>["genera
 
 /** Live presentation is a fold of the queue and immutable landed records, never a card counter. */
 export function generationCardView(action: ConversationActionCard, world: WorldBundle, jobs: readonly Job[], ledger: readonly LedgerEntry[] = []) {
+  if (world.meta.worldId !== action.worldId) return { jobs: [], results: [] as Result[], authorized: 0, completed: 0, failed: 0, cancelled: 0, actualMicroUsd: null };
   const keys = new Set(action.generationWork?.jobKeys ?? []);
   const owned = jobs.filter(job => world.meta.worldId === action.worldId && job.worldId === action.worldId && keys.has(job.idempotencyKey));
   const completed = owned.filter(job => job.status === "succeeded" && (!job.finalization || job.finalization.status === "complete"));
@@ -20,7 +21,7 @@ export function generationCardView(action: ConversationActionCard, world: WorldB
       const shot = production?.scenes.flatMap(scene => orderedShots(scene)).find(shot => take.coversShots.includes(shot.id));
       return view ? [{ id: take.id, medium: take.kind === "voice" ? "audio" as const : view.isVideo ? "video" as const : "image" as const,
         status: "completed" as const, description: `${shot ? `Shot ${shot.number}` : take.kind} · ${take.model}`, mediaPath: view.sourcePath, posterPath: view.posterPath,
-        shotIds: take.coversShots, segment: take.segment }] : [];
+        shotIds: take.kind === "voice" ? [] : take.coversShots, segment: take.segment }] : [];
     });
     if (productionResults.length) return productionResults;
     const take = world.meta.worldId === action.worldId ? world.referenceTakes.find(t => t.jobId === job.id) : undefined;
@@ -33,10 +34,10 @@ export function generationCardView(action: ConversationActionCard, world: WorldB
   });
   const costs = owned.map(job => job.providerCostMicroUsd ?? ledger.find(entry => entry.jobId === job.id && entry.worldId === action.worldId)?.actualMicroUsd ?? null);
   // Terminal receipts retain playable results even after Activity hides the corresponding jobs.
-  for (const result of action.receipt?.generation?.results ?? []) {
+  for (const result of [...action.generationWork?.results ?? [], ...action.receipt?.generation?.results ?? []]) {
     if (results.some(value => value.id === result.id)) continue;
     const take = production?.takes.find(t => t.id === result.id);
-    results.push({ ...result, shotIds: take?.coversShots ?? [], segment: take?.segment });
+    results.push({ ...result, shotIds: take?.kind === "voice" ? [] : take?.coversShots ?? [], segment: take?.segment });
   }
   return { jobs: owned, results, authorized: action.generationWork?.jobKeys.length ?? action.receipt?.generation?.authorized ?? 0,
     completed: completed.length, failed: owned.filter(job => job.status === "failed" || job.finalization?.status === "failed").length,
