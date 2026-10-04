@@ -52,7 +52,7 @@ import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
 import { ListenButton, listenLeads } from "../components/audiobook-player.js";
 import { BlockPicturePanel, useChapterPictures } from "../components/audiobook-picture.js";
-import { IllustrationCard, useIllustration } from "../components/audiobook-illustrate.js";
+import { IllustrationSheet, IllustrationStatus, useIllustration, useIllustrationSheet } from "../components/audiobook-illustrate.js";
 import { LookSheet } from "../components/audiobook-look.js";
 import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectSheet, DirectionCard, ReadSheet, PerformedSpeaker, ReadingMenu, ReadingNotes, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
@@ -1155,6 +1155,7 @@ export function ChapterWorkspace({
   }, [compact]);
   // Illustrate this chapter (design turn 191b): the proposal this window holds, dashed on the blocks and listed in the dock's card.
   const illustration = useIllustration(worldId, prodId, chapter);
+  const illustrationSheet = useIllustrationSheet(illustration.run);
   const [illustrationLookOpen, setIllustrationLookOpen] = useState(false);
   const audiobook = useChapterAudiobook({
     worldId,
@@ -2592,6 +2593,32 @@ export function ChapterWorkspace({
         </div>
       </main>
 
+      {/* Illustrate this chapter (design turn 193h, 193j): the proposal as a sheet over the main area,
+          beside the dock rather than in it. Closing keeps the proposal; the dock's status reopens it. */}
+      {view === "audiobook" && illustrationSheet.open && illustration.run !== undefined && (
+        <IllustrationSheet
+          run={illustration.run}
+          chapterOrder={chapter.order}
+          slug={worldSlug}
+          wordsOf={(block) => audiobook.rows.find((row) => row.block.key === block)?.block.text}
+          offline={connection !== "open"}
+          onAccept={() => {
+            illustration.accept();
+            illustrationSheet.hide();
+          }}
+          onDiscard={() => {
+            illustration.discard();
+            illustrationSheet.hide();
+          }}
+          onSkip={illustration.skip}
+          onWithout={illustration.without}
+          onMakeLook={(who) => void navigate(`/w/${worldId}/${who.kind === "place" ? "locations" : "cast"}/${who.sheet}`)}
+          onAgain={illustration.press}
+          onClose={illustrationSheet.hide}
+          onLook={() => setIllustrationLookOpen(true)}
+        />
+      )}
+
       {compact && stagedDraft !== undefined && passageChange !== null && <HeldBar className="fy-passage-decision"><span>{keptCount} of {editCount} kept</span><StagedDecision worldId={worldId} subject={chapterLabel} staged={stagedDraft.staged} {...(accept !== undefined ? { accept } : {})} /></HeldBar>}
       <ResponsiveSheet sheet={compact || !dock} open={compact && dock} title="Arke" onClose={() => setDock(false)} className="fy-season-arke-sheet">
         <ProductionConversation
@@ -2652,16 +2679,11 @@ export function ChapterWorkspace({
             : stagedDraft === undefined && view === "audiobook" && illustration.run !== undefined
             ? {
                 side: (
-                  <IllustrationCard
+                  <IllustrationStatus
                     run={illustration.run}
-                    offline={connection !== "open"}
-                    onAccept={illustration.accept}
-                    onDiscard={illustration.discard}
+                    onReview={illustrationSheet.show}
                     onStop={illustration.stop}
-                    onSkip={illustration.skip}
-                    onWithout={illustration.without}
-                    onMakeReference={(who) => void navigate(`/w/${worldId}/${who.kind === "place" ? "locations" : "cast"}/${who.sheet}`)}
-                    onLook={() => setIllustrationLookOpen(true)}
+                    onDiscard={illustration.discard}
                   />
                 ),
               }
