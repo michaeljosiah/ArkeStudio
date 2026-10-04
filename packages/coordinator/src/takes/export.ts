@@ -12,8 +12,13 @@ import { toExtendedLength } from "../world/paths.js";
 export interface FfmpegRunner {
   /** Host path to the redistributed font every generated slate uses. */
   slateFont: string;
-  /** Run one encode; resolve on success, reject on failure, honour the signal for cancel. */
-  run(args: string[], onProgress: (percent: number) => void, signal: AbortSignal): Promise<void>;
+  /**
+   * Run one encode; resolve on success, reject on failure, honour the signal for cancel.
+   * `onProgress` has only ever had ffmpeg's elapsed seconds, capped at 99; `onSeconds`, where a
+   * runner gives it, is the same clock uncapped, which a caller that knows the length can turn
+   * into a true percent (design turn 197d).
+   */
+  run(args: string[], onProgress: (percent: number) => void, signal: AbortSignal, onSeconds?: (seconds: number) => void): Promise<void>;
 }
 
 export interface ExportHandle {

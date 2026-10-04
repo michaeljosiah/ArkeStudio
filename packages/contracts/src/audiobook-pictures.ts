@@ -39,6 +39,12 @@ export const AudiobookPictureSchema = z
      * chosen rather than made, and on one made before this was kept: never reconstructed.
      */
     shot: PictureShotSchema.optional(),
+    /**
+     * Where the picture's subject stands, as shares of its width and height (design turn 197,
+     * SPEC-047): the vertical video crops a full-height column around it, and Slow push moves
+     * toward it. Kept on the picture, set by dragging in the video's preview; absent is the centre.
+     */
+    focus: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).strict().optional(),
   })
   .strict();
 export type AudiobookPicture = z.infer<typeof AudiobookPictureSchema>;

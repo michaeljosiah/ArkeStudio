@@ -10,6 +10,7 @@ import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema, DirectionReadsSchema } from "./audiobook.js";
 import { AudiobookListeningSchema } from "./audiobook-listening.js";
+import { AudiobookVideoProgressSchema, AudiobookVideoResultSchema, AudiobookVideoStateSchema } from "./audiobook-video.js";
 import { IllustrationProgressSchema, IllustrationProposalSchema, PictureSuggestionSchema } from "./audiobook-illustrate.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX } from "./cadence.js";
@@ -1449,6 +1450,21 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       ]),
     })
     .strict(),
+  /** The audiobook's video (design turn 197e): the files made and how many chapters were encoded, or what stood in the way. */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.video-exported"),
+      /** Absent on a render resumed after a restart, which no window asked for. */
+      requestId: UlidSchema.optional(),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      exportId: z.string().min(1),
+      result: AudiobookVideoResultSchema,
+    })
+    .strict(),
+  /** What a video render would make (design turn 197a): each chapter read whole and whether it is already rendered, and this machine's rates. */
+  z.object({ ...base, type: z.literal("audiobook.video-state"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, state: AudiobookVideoStateSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
   /** The world's web packages, newest first (design turn 186e). */
   z
     .object({
@@ -1456,7 +1472,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       type: z.literal("web-packages.listed"),
       requestId: UlidSchema,
       worldId: UlidSchema,
-      packages: z.array(z.object({ kind: z.enum(["interactive", "visual-novel", "audiobook"]), productionId: SlugSchema, title: z.string(), dir: z.string().min(1), exportedAt: z.string().min(1) }).strict()),
+      packages: z.array(z.object({ kind: z.enum(["interactive", "visual-novel", "audiobook", "audiobook-video"]), productionId: SlugSchema, title: z.string(), dir: z.string().min(1), exportedAt: z.string().min(1) }).strict()),
     })
     .strict(),
   /** The book as a listener hears it (design turn 186), answered to the window that asked; or none, and why. */
@@ -1798,8 +1814,10 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       status: z.enum(["running", "done", "cancelled", "failed"]),
       /** The source record snapshot captured when this export began, for current readiness. */
       sourceFingerprint: z.string().min(1).max(200).optional(),
-      deliveryKind: z.enum(["video", "manuscript", "interactive"]).optional(),
+      deliveryKind: z.enum(["video", "manuscript", "interactive", "audiobook-video"]).optional(),
       percent: z.number().min(0).max(100),
+      /** An audiobook video's place (design turn 197d): the chapter in hand and the length done, for Activity. */
+      video: AudiobookVideoProgressSchema.optional(),
       output: z.string().nullable(),
       /** The subtitle sidecar delivered beside the video, when one was (SPEC-038 R-27). */
       sidecar: z.string().optional(),

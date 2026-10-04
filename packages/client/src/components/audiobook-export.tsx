@@ -162,9 +162,9 @@ export function ExportAudiobookButton({ worldId, production }: { worldId: string
   );
 }
 
-const KIND: Record<WebPackagesListed["packages"][number]["kind"], string> = { interactive: "Interactive", "visual-novel": "Visual novel", audiobook: "Audiobook" };
+const KIND: Record<WebPackagesListed["packages"][number]["kind"], string> = { interactive: "Interactive", "visual-novel": "Visual novel", audiobook: "Audiobook", "audiobook-video": "Video" };
 
-/** The open world's web packages in Publications (186e): the audiobook beside the interactive and the visual novel. */
+/** The open world's web packages in Publications (186e), and the audiobook's videos beside them (197e). */
 export function WebPackages({ worldId }: { worldId: string }) {
   const connection = useStore().connection;
   const asked = useRef<string | null>(null);

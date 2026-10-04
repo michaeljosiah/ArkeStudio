@@ -17,7 +17,7 @@ const CompletedExportSchema = ReadinessExportSchema.extend({
   createdAt: IsoDateTimeSchema,
   output: z.string().startsWith("exports/"),
   sourceFingerprint: z.string().min(1).max(200),
-  deliveryKind: z.enum(["video", "manuscript", "interactive"]),
+  deliveryKind: z.enum(["video", "manuscript", "interactive", "audiobook-video"]),
 });
 const receiptPath = (id: string) => `exports/.completed/${id}.json`;
 

@@ -10,6 +10,7 @@ import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
 import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema } from "./audiobook.js";
 import { AudiobookPictureSourceSchema } from "./audiobook-pictures.js";
+import { AudiobookVideoOptionsSchema } from "./audiobook-video.js";
 import { LOOK_LINE_MAX, LookTargetSchema } from "./audiobook-look.js";
 import { PICTURE_PROMPT_MAX, PictureShotSchema } from "./audiobook-illustrate.js";
 import { BedInputSchema, BlockSoundInputSchema, BlockTimingInputSchema, ReactionInputSchema } from "./audiobook-timing.js";
@@ -3345,6 +3346,21 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * Where a block's picture's subject stands (design turn 197b): dragged in the video's preview,
+   * kept on the picture, `null` back to the centre. Answered as `audiobook.record`.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-picture-focus"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      block: z.string().min(1),
+      focus: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).strict().nullable(),
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /**
    * A picture suggested for a block (design turn 191a, SPEC-047 R-99): the writing service reads
    * the block, the chapter around it, who is in it and their look, and drafts one editable
    * prompt, with who rides as a reference, the model, the ratio and the price. Nothing is made
@@ -3576,7 +3592,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /** The world's exports folder, or with `dir` one package in it (design turn 186e): a single folder name, never a path. */
-  z.object({ kind: z.literal("open-exports-folder"), worldId: UlidSchema, dir: z.string().regex(/^[A-Za-z0-9._-]+$/).optional() }).strict(),
+  z
+    .object({
+      kind: z.literal("open-exports-folder"),
+      worldId: UlidSchema,
+      dir: z.string().regex(/^[A-Za-z0-9._-]+$/).optional(),
+      /** One video in that folder, opened in the system's own player (design turn 197e: Open). */
+      file: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*\.mp4$/).optional(),
+    })
+    .strict(),
   /**
    * The audiobook as the player (design turn 186e, SPEC-047 R-72): a web package of the chapters
    * read whole, their audio and their pictures, answered as `audiobook.exported`.
@@ -3591,6 +3615,24 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       exportId: z.string().regex(/^ab_[0-9A-HJKMNP-TV-Z]{26}$/).optional(),
     })
     .strict(),
+  /**
+   * The audiobook as a video (design turn 197, SPEC-047): the chapters read whole rendered to MP4
+   * on this machine, one a chapter or one for the book, answered as `audiobook.video-exported`
+   * and followed in Activity through `export.progress`.
+   */
+  z
+    .object({
+      kind: z.literal("export-audiobook-video"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      /** Chosen by the window, so it can find the render again after a reconnect lost the answer. */
+      exportId: z.string().regex(/^vb_[0-9A-HJKMNP-TV-Z]{26}$/),
+      options: AudiobookVideoOptionsSchema,
+    })
+    .strict(),
+  /** What a video render with these options would make, and this machine's rates: answered as `audiobook.video-state`. */
+  z.object({ kind: z.literal("read-audiobook-video"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, options: AudiobookVideoOptionsSchema }).strict(),
   /** The world's web packages — interactive, visual novel and audiobook — answered as `web-packages.listed`. */
   z.object({ kind: z.literal("list-web-packages"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("pick-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),

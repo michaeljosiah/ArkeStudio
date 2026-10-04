@@ -562,6 +562,7 @@ const CLIENT_COMMAND_METADATA = {
   // The book as a listener hears it, and a picture on a block (turn 186): a read, and a command on the record.
   "open-audiobook-listening": readOnly(QUERY),
   "set-audiobook-picture": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
+  "set-audiobook-picture-focus": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   // The chapter's look (turn 191c): read by the writing service (no picture provider, nothing spent), then the author's lines.
   "derive-audiobook-look": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "set-audiobook-look": action("production", "command", "voice", "authored-change", ["chapters"]),
@@ -587,6 +588,8 @@ const CLIENT_COMMAND_METADATA = {
   "accept-audiobook-timing": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   // The audiobook's web package and the world's packages (turn 186e): a file the host writes, and a read.
   "export-audiobook-player": action("production", "host-action", "export", "export", ["chapters", "artifacts", "exports"]),
+  "export-audiobook-video": action("production", "host-action", "export", "export", ["chapters", "artifacts", "exports"]),
+  "read-audiobook-video": readOnly(QUERY),
   "list-web-packages": readOnly(QUERY),
   "read-audiobook-book": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
   "stop-audiobook-book": action("production", "command", "voice", "external-network-action", ["chapters"]),
