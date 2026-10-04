@@ -1760,6 +1760,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       mode: z.enum(["stay-close", "push-it"]),
       prompt: z.string().trim().min(1).max(2000),
       count: z.number().int().min(1).max(MAX_IMAGE_PREVIEWS),
+      /**
+       * A look for a chapter's pictures (design turn 193, SPEC-047 R-112): `full-body` makes the
+       * candidates full length on a plain ground, from the main photo and the clothing line in
+       * `prompt`; `close` makes the look's head-and-shoulders view of one candidate (`closeOf.takeId`)
+       * or of an accepted look (`closeOf.lookId`), one picture. Absent is the Cast page's exploration.
+       */
+      framing: z.enum(["full-body", "close"]).optional(),
+      closeOf: z.object({ takeId: TakeIdSchema.optional(), lookId: z.string().min(1).optional() }).strict().optional(),
     })
     .strict(),
   z
@@ -1768,6 +1776,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       sheetId: SlugSchema,
       takeId: TakeIdSchema,
+      /** A close view made for a chapter's look (R-109): filed on the same look as its `closeFile`. */
+      closeTakeId: TakeIdSchema.optional(),
+      /** `takeId` is a close view (made by Make close view) for the accepted look with this id, not a look of its own. */
+      closeFor: z.string().min(1).optional(),
+      /** The chapter that asked for the look chooses it for the character in the same press (R-112). */
+      choose: z.object({ productionId: SlugSchema, chapterFile: z.string().min(1), key: z.string().min(1).max(120), name: z.string().min(1).max(120).optional(), sheet: SlugSchema.optional() }).strict().optional(),
     })
     .strict(),
   z
@@ -3385,6 +3399,24 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       chapterFile: z.string().min(1),
       target: LookTargetSchema,
       text: z.string().max(LOOK_LINE_MAX * 2).nullable(),
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /**
+   * A kit look chosen for a character in this chapter (design turn 193, SPEC-047 R-112), or the
+   * choice taken away with null. Chosen by pointer; the look stays unattached (SPEC-017 R-18). The
+   * character's line becomes the look's own clothing line. Answered as `audiobook.record`.
+   */
+  z
+    .object({
+      kind: z.literal("choose-audiobook-look"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      key: z.string().min(1).max(120),
+      name: z.string().min(1).max(120).optional(),
+      sheet: SlugSchema.optional(),
+      lookId: z.string().min(1).max(120).nullable(),
       requestId: UlidSchema.optional(),
     })
     .strict(),

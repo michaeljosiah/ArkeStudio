@@ -556,6 +556,8 @@ const CLIENT_COMMAND_METADATA = {
   // The chapter's look (turn 191c): read by the writing service (no picture provider, nothing spent), then the author's lines.
   "derive-audiobook-look": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "set-audiobook-look": action("production", "command", "voice", "authored-change", ["chapters"]),
+  // A kit look chosen for a character in a chapter (turn 193): a pointer on the chapter's record; the look is the kit's and stays unattached.
+  "choose-audiobook-look": action("production", "command", "voice", "authored-change", ["chapters"]),
   // A picture suggested for a block (turn 191a): read by the writing service, nothing spent; made through the Bench on the price shown.
   "suggest-audiobook-picture": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets", "references"]),
   // Illustrate this chapter (turn 191b): read by the writing service and held; accepted, it makes the pictures one at a time on the one confirmed total.

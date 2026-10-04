@@ -4104,6 +4104,51 @@ export function acceptCharacterLook(worldId: string, sheetId: string, takeId: st
   send({ kind: "accept-character-look", worldId, sheetId, takeId });
 }
 
+/**
+ * Candidates of a look for a chapter's pictures (design turn 193, SPEC-047 R-112): `full-body`
+ * makes `count` full-length pictures from the main photo and the clothing line; `close` makes the
+ * head-and-shoulders view of one candidate or one accepted look. Returns the request's id — the
+ * pictures that arrive carry it as their batch — or null when the coordinator is away.
+ */
+export function makeChapterLook(
+  worldId: string,
+  sheetId: string,
+  input: { framing: "full-body" | "close"; prompt: string; count: number; closeOf?: { takeId?: string; lookId?: string }; modelId?: string },
+): string | null {
+  const requestId = queueRequest("generate-character-looks");
+  return send({
+    kind: "generate-character-looks",
+    ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
+    worldId,
+    sheetId,
+    lookKind: "costume",
+    mode: "stay-close",
+    prompt: input.prompt,
+    count: input.count,
+    framing: input.framing,
+    ...(input.closeOf !== undefined ? { closeOf: input.closeOf } : {}),
+    requestId,
+  })
+    ? requestId
+    : null;
+}
+
+/** A candidate accepted as the character's look, with its close view, and chosen for the chapter that asked (R-112, R-109). */
+export function acceptChapterLook(
+  worldId: string,
+  sheetId: string,
+  takeId: string,
+  options: { closeTakeId?: string; closeFor?: string; choose?: { productionId: string; chapterFile: string; key: string; name?: string; sheet?: string } } = {},
+): void {
+  send({ kind: "accept-character-look", worldId, sheetId, takeId, ...options });
+}
+
+/** A kit look chosen for a character in this chapter, or the choice taken away with null (R-112). Answered as `audiobook.record`. */
+export function chooseAudiobookLook(worldId: string, productionId: string, chapterFile: string, who: { key: string; name?: string; sheet?: string }, lookId: string | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "choose-audiobook-look", worldId, productionId, chapterFile, ...who, lookId, requestId }) ? requestId : null;
+}
+
 export function rejectReferenceTake(worldId: string, takeId: string, field: string, note?: string): void {
   send({
     kind: "reject-reference-take",
@@ -6313,7 +6358,7 @@ export function openWorldChatMedia(
     conversationId,
     candidateId,
     expectedCandidateRevision: expectedRevision,
-  } as ClientMessage)
+  })
     ? requestId
     : null;
 }

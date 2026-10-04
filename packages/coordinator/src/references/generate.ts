@@ -357,6 +357,15 @@ export function characterLookRequests(
     generationKey: string;
     /** An image the author attached for this generation only (design 67). */
     staged?: StagedImage;
+    /**
+     * A look for a chapter's pictures (design turn 193, R-112): full length on a plain ground, or
+     * the close (head and shoulders) view of `closeOf`, a look image already in the kit or a
+     * candidate take — world-relative, so it rides as the second reference after the main photo.
+     */
+    framing?: "full-body" | "close";
+    closeOf?: { file: string; takeId?: string; lookId?: string };
+    /** The request that asked for these candidates: how a sheet finds its own among the kit's pending looks. */
+    batch?: string;
   },
 ): CharacterGenerationRequest[] {
   if (referenceBudgetFor(model) === 0) {
@@ -364,15 +373,21 @@ export function characterLookRequests(
   }
   const photo = kit.mainPhoto?.file ?? kit.anchor;
   if (!photo) throw new Error("looks need an accepted main photo");
+  if (input.framing === "close" && input.closeOf === undefined) throw new Error("a close view is made from a look");
   const style = kit.styleOverride ?? direction.description;
-  const { references: identityReferences, referenceRoles } = withStaged(
-    [`references/${sheet.id}/${photo}`],
-    "identity",
-    input.staged,
-    model,
-  );
+  const carried = [`references/${sheet.id}/${photo}`, ...(input.framing === "close" && input.closeOf !== undefined ? [input.closeOf.file] : [])];
+  const { references: identityReferences, referenceRoles } = withStaged(carried, "identity", input.staged, model);
   const tier = tierFor(model, input.tier);
   const estimatedMicroUsd = pricedCharacterImage(model, "character-look", identityReferences.length, tier);
+  // The two framings say what the picture is for (R-109, R-112): a figure whose clothes can be read
+  // from head to toe, or the same person in the same clothes from the shoulders up. Without a
+  // framing the prompt is the Cast page's exploration, unchanged.
+  const framed =
+    input.framing === "full-body"
+      ? " Full body, head to toe, standing, plain neutral background, one figure alone, clothes and hair fully visible."
+      : input.framing === "close"
+        ? " Head and shoulders of the same person in the same clothes, hair and light as the full-body picture, plain neutral background, face and identity clear, relaxed natural expression."
+        : "";
   return Array.from({ length: input.count }, (_, index) => ({
     estimatedMicroUsd,
     input: {
@@ -382,12 +397,21 @@ export function characterLookRequests(
       provider: model.provider,
       model: model.id,
       params: {
-        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}. ${input.mode === "stay-close" ? "Stay close to the accepted identity and proportions." : "Push the styling while preserving the accepted identity."} Optional ${input.kind.replace("-", " ")} exploration; do not redefine identity.${imageConstraintSuffix(direction)}`,
+        prompt: `${style}. ${sheet.name} — ${sheetDescription(sheet)}. ${input.prompt}.${framed} ${input.mode === "stay-close" ? "Stay close to the accepted identity and proportions." : "Push the styling while preserving the accepted identity."} Optional ${input.kind.replace("-", " ")} exploration; do not redefine identity.${imageConstraintSuffix(direction)}`,
         references: identityReferences,
         referenceRoles,
         output: characterImageOutput(model, "character-look", tier),
         lookKind: input.kind,
         lookPrompt: input.prompt,
+        ...(input.framing !== undefined
+          ? {
+              lookFraming: input.framing,
+              lookMain: photo,
+              ...(input.batch !== undefined ? { lookBatch: input.batch } : {}),
+              ...(input.closeOf?.takeId !== undefined ? { lookOfTake: input.closeOf.takeId } : {}),
+              ...(input.closeOf?.lookId !== undefined ? { lookOfLook: input.closeOf.lookId } : {}),
+            }
+          : {}),
         artDirection: {
           version: direction.version,
           source: kit.styleOverride ? "sheet" : "world",

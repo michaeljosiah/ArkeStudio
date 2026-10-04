@@ -1,0 +1,34 @@
+/* Making a look (design turn 193b): 1,060 wide, centred, drawn on the body. A candidate is 154 x 270, the close view 150 tall. */
+.fy-newlook { max-width: calc(100vw - 32px); }
+.fy-newlook__body { display: flex; flex-direction: column; gap: 14px; }
+.fy-newlook__top { display: grid; grid-template-columns: 84px 200px 1fr; gap: 18px; align-items: start; }
+.fy-newlook__photo { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-newlook__photo img, .fy-newlook__photo i { width: 84px; height: 84px; border-radius: 10px; object-fit: cover; display: block; }
+.fy-newlook__photo i { border: 1px dashed var(--neutral-400); box-sizing: border-box; }
+.fy-newlook__fixed { display: flex; flex-direction: column; gap: 6px; font-size: var(--text-sm); }
+.fy-newlook__clothing { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-sm); min-width: 0; }
+.fy-newlook__clothing b { font-weight: 600; }
+.fy-newlook__clothing textarea { min-height: 0; resize: vertical; }
+.fy-newlook__candheader { display: flex; align-items: center; gap: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.fy-newlook__candheader b { font-weight: 600; }
+.fy-newlook__candheader .fy-mono { color: var(--muted-foreground); font-size: var(--text-xs); flex: 1; }
+.fy-newlook__cands { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; min-height: 0; }
+.fy-newlook__cand { width: 154px; height: 270px; border: 1px solid var(--border); border-radius: 10px; padding: 0; background: var(--neutral-100); position: relative; overflow: hidden; cursor: pointer; display: block; box-sizing: border-box; }
+.fy-newlook__cand img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fy-newlook__cand .fy-mono { position: absolute; left: 6px; bottom: 6px; padding: 1px 6px; border-radius: 6px; background: var(--background); font-size: var(--text-2xs); }
+.fy-newlook__cand--on { outline: 2px solid var(--foreground); outline-offset: 1px; }
+.fy-newlook__cand--wait { border-style: dashed; cursor: default; }
+.fy-newlook__close { width: 150px; height: 150px; border: 1px solid var(--border); border-radius: 10px; position: relative; overflow: hidden; box-sizing: border-box; margin-left: auto; }
+.fy-newlook__close[data-state="making"], .fy-newlook__close[data-state="none"] { border-style: dashed; }
+.fy-newlook__close img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fy-newlook__close i { display: block; width: 100%; height: 100%; }
+.fy-newlook__close .fy-mono { position: absolute; left: 6px; bottom: 6px; padding: 1px 6px; border-radius: 6px; background: var(--background); font-size: var(--text-2xs); }
+.fy-newlook__looks { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; font-size: var(--text-sm); padding-top: 10px; border-top: 1px solid var(--border); }
+.fy-newlook__looks b { font-weight: 600; }
+.fy-newlook__look { font-size: var(--text-xs); color: var(--muted-foreground); }
+.fy-newlook__foot { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+@media (max-width: 599px) {
+  .fy-newlook__top { grid-template-columns: 1fr; }
+  .fy-newlook__cand { width: calc(50% - 6px); height: auto; aspect-ratio: 154 / 270; }
+  .fy-newlook__close { margin-left: 0; }
+}
