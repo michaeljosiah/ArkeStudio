@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { IsoDateTimeSchema, Sha256Schema } from "./ids.js";
 
-export const CHAT_IMAGES_SCHEMA_VERSION = 52;
+export const CHAT_IMAGES_SCHEMA_VERSION = 53;
 export const ImageInspectionSettingsSchema = z.object({
   cloud: z.boolean().default(true),
   providers: z.record(z.boolean()).default({}),

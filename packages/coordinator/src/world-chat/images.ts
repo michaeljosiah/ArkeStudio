@@ -23,7 +23,7 @@ const hash = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes)
 const imageFiles = (value: unknown): string[] => {
   if (!value || typeof value !== "object") return [];
   return Object.entries(value).flatMap(([key, child]) =>
-    ["file", "anchor", "designatedCompilation", "masterLook"].includes(key) && typeof child === "string" ? [child] :
+    ["file", "anchor", "anchorFile", "mainFile", "closeFile", "designatedCompilation", "masterLook"].includes(key) && typeof child === "string" ? [child] :
       typeof child === "object" ? imageFiles(child) : []);
 };
 

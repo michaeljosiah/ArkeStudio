@@ -287,18 +287,50 @@
 .fy-ch__plan-field .fy-sw__title-text, .fy-ch__plan-field .fy-sw__title-input { font: var(--type-ui); min-height: 44px; width: 100%; }
 
 /*
- * Fit on wide screens (design turn 188). The chapter is text plus rail: 640 of prose, 28 of gap and
- * the 250 rail, with the head over the same width so its presses sit above the rail. The body used
- * to take the whole column while the prose stopped at 640, which at 2000 wide left 685px of nothing
- * between the words and the rail and the presses 725px from the text. Timing keeps the whole width:
- * its lanes are a timeline, not a page.
+ * Fit on wide screens (design turn 188), amended by 193 for the Audiobook view. The Manuscript is
+ * text plus rail: 640 of prose, 28 of gap and the 250 rail, with the head over the same width so
+ * its presses sit above the rail; the prose measure is the reason for the cap and it stands there.
+ * Timing keeps the whole width: its lanes are a timeline, not a page.
+ *
+ * The Audiobook view is the other way round (193, rules 15 and 16). 188 capped it at 940 with a 250
+ * panel, and a panel that holds a picture, a look, delivery, a note, a take and timing is a column,
+ * not a rail: its rows wrapped a word to a line. The view takes the whole room beside the app's
+ * rail, head and body alike. The body is the list and the panel: the panel is
+ * clamp(420, 34% of the room, 520), docked at the right edge with a rule, and the list takes the rest
+ * with its text stopping at 920 and centring in what the panel leaves.
  */
 @media (min-width: 1100px) {
   [data-screen="chapter"] .fy-sw__centre { overflow-y: auto; }
-  [data-screen="chapter"]:not([data-view="timing"]) :is(.fy-sw__head, .fy-ch__body) { width: 100%; max-width: var(--content-max-chapter); margin-inline: auto; box-sizing: border-box; }
+  [data-screen="chapter"][data-view="manuscript"] :is(.fy-sw__head, .fy-ch__body) { width: 100%; max-width: var(--content-max-chapter); margin-inline: auto; box-sizing: border-box; }
   /* The Audiobook view's side is the block's panel and Voices; the rest of the rail is the
      manuscript's (165k/146b). */
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__panels .fy-ch__notes > .fy-bible__panel:not([data-testid="chapter-voices"]) { display: none; }
+
+  /* The panel sits against the room's right edge, so the column gives up its right padding and the
+     head keeps it for itself. The head's two note fields stop at the list's measure. */
+  [data-screen="chapter"][data-view="audiobook"] .fy-sw__centre { padding-right: 0; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-sw__head { padding-right: 24px; box-sizing: border-box; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__notes { max-width: var(--ab-list-max); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__body { gap: 0; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__panels {
+    width: var(--ab-panel);
+    box-sizing: border-box;
+    padding: 6px 24px 20px;
+    border-left: 1px solid var(--border);
+    /* The picture sits beside its facts from 480 and over them at 420 (193c): a card answers the
+       panel's own width, not the window's. */
+    container: ab-panel / inline-size;
+  }
+  /* The list scrolls in the whole room left of the panel, so its bar stays at the panel's rule; the
+     text, the filter and the foot centre at 920 inside it. */
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__manuscript { --ab-pad: max(8px, calc((100% - var(--ab-list-max)) / 2)); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__blocks { max-width: none; padding-inline: var(--ab-pad); }
+  [data-screen="chapter"][data-view="audiobook"] :is(.fy-ab__filter, .fy-ab__foot, .fy-ch__band) { margin-inline: var(--ab-pad); }
+}
+/* With Arke's dock open the room between 1100 and about 1350 is short of 420 + a list: the panel
+   gives up width before the list does, down to 300, and the list keeps about 440. */
+@container (max-width: 899px) {
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__panels { width: clamp(300px, calc(100cqw - 460px), 420px); }
 }
 /*
  * The manuscript is the page (126a, 173a: "the page scrolling, not a box inside it"). It was a

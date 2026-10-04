@@ -12,6 +12,7 @@ import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
 import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { WorldQueryServer } from "../../src/harness/world-query.js";
 import { WorldStore } from "../../src/world/store.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 import { encodePng, solidImage, decodePng } from "../../src/references/png.js";
@@ -79,7 +80,8 @@ describe("conversation image inspection — SPEC-050 R-31..R-34", () => {
     assert.equal(loaded!.imageDisclosures!.length, 1);
     assert.equal(loaded!.imageDisclosures![0]!.images.length, 2);
     assert.equal(loaded!.imageReceipts!.length, 2);
-    assert.equal(h.store.getBundle().meta.schemaVersion, 52);
+    assert.equal(h.store.getBundle().meta.schemaVersion, 53);
+    await assert.rejects(readWorldMeta(h.store.dir, { supports: 52 }), /newer|schema|version/i);
   });
   it("keeps text-only adapters honest without raising the world schema or disclosing imaginary handoffs", async () => {
     const h = await harness({ supported: false }), version = h.store.getBundle().meta.schemaVersion;
@@ -91,7 +93,8 @@ describe("conversation image inspection — SPEC-050 R-31..R-34", () => {
   });
   it("reads actual world key art, candidates and kit-relative images from the authoritative catalogue", async () => {
     const h = await harness(), bytes = encodePng(solidImage(3, 3, [8, 9, 10, 255]));
-    const files = ["world-art.png", "incoming/master-look/candidate-1.png", "references/seeing-kit/photo.png", "artifacts/seeing.png"];
+    const files = ["world-art.png", "incoming/master-look/candidate-1.png", "references/seeing-kit/photo.png",
+      "references/seeing-kit/close.png", "references/seeing-kit/old-face.png", "artifacts/seeing.png"];
     const artifactId = newId("ar");
     const binaryFiles = await Promise.all(files.map(async path => {
       const previous = await readFile(join(h.store.dir, path)).catch(() => null);
@@ -101,11 +104,12 @@ describe("conversation image inspection — SPEC-050 R-31..R-34", () => {
     await h.store.commit({ kind: "image-test", source: "test", files: [
       ...binaryFiles,
       { path: "references/seeing-kit/kit.json", action: "create", baseHash: null,
-        content: JSON.stringify({ sheetId: "seeing-kit", mainPhoto: { file: "photo.png", source: "upload" }, tiles: [], compilations: [] }) },
+        content: JSON.stringify({ sheetId: "seeing-kit", mainPhoto: { file: "photo.png", source: "upload" }, tiles: [], compilations: [],
+          looks: [{ id: "look", file: "photo.png", closeFile: "close.png", mainFile: "old-face.png", kind: "costume", prompt: "Red jacket", acceptedAt: "2026-10-04T04:00:00Z" }] }) },
       { path: "artifacts/seeing.json", action: "create", baseHash: null, content: JSON.stringify({ id: artifactId, kind: "image",
         file: "seeing.png", hash: digest(bytes), origin: { by: "user" }, links: [], created: "2026-10-04T04:00:00Z" }) },
     ] });
-    for (const file of files.slice(0, 3)) {
+    for (const file of files.slice(0, -1)) {
       const read = await h.retrieval.call(h.lease.token, "view_image", { kind: "reference", file });
       assert.ok(read.imageContent, `${file} is a catalogue-authorized picture`);
       assert.equal(read.receipt.image!.sourceHash, digest(bytes));
