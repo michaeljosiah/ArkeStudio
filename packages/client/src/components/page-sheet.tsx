@@ -5,10 +5,17 @@ import { ChevronLeft, X } from "./icons.js";
 import { focusNewestLayer, useCoveredAfter, useOverlay } from "../lib/overlays.js";
 
 /** Turn 163 uses the character sheet's shape with native focus containment and an inert page. */
-export function PageSheet({ open, onClose, title, children, footer, className, onBack, resetKey, keepMounted = false }: {
+export function PageSheet({ open, onClose, title, children, footer, className, onBack, resetKey, keepMounted = false, headless = false }: {
   open: boolean;
   onClose: () => void;
+  /** The sheet's heading, or with `headless` only its accessible name. */
   title: string;
+  /**
+   * No head of the sheet's own: what it holds draws its title and its close. The block's panel
+   * raised as a sheet has its own head, and a second over it named the block twice with two
+   * closes (194h draws one).
+   */
+  headless?: boolean;
   onBack?: () => void;
   /** A new in-sheet page starts at its heading without remounting the dialog or its opener. */
   resetKey?: string;
@@ -50,7 +57,7 @@ export function PageSheet({ open, onClose, title, children, footer, className, o
   }, [open, mounted, resetKey]);
   if (!mounted || (!open && !keepMounted)) return null;
   return createPortal(
-    <dialog ref={ref} className={["fy-page-sheet", className].filter(Boolean).join(" ")} aria-labelledby={heading}
+    <dialog ref={ref} className={["fy-page-sheet", className].filter(Boolean).join(" ")} {...(headless ? { "aria-label": title } : { "aria-labelledby": heading })}
       onCancel={(event) => { event.preventDefault(); onClose(); }}
       onClick={(event) => {
         if (event.target !== event.currentTarget) return;
@@ -58,7 +65,7 @@ export function PageSheet({ open, onClose, title, children, footer, className, o
         if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose();
       }}>
       <div className="fy-page-sheet__grab" />
-      <header className="fy-page-sheet__head">{onBack && <IconButton label="Back" onClick={onBack}><ChevronLeft size={20} /></IconButton>}<h2 id={heading} tabIndex={-1}>{title}</h2><IconButton label="Close" onClick={onClose}><X size={20} /></IconButton></header>
+      {!headless && <header className="fy-page-sheet__head">{onBack && <IconButton label="Back" onClick={onBack}><ChevronLeft size={20} /></IconButton>}<h2 id={heading} tabIndex={-1}>{title}</h2><IconButton label="Close" onClick={onClose}><X size={20} /></IconButton></header>}
       <div className="fy-page-sheet__body">{children}</div>
       {footer && <footer className="fy-page-sheet__foot">{footer}</footer>}
     </dialog>, document.body,

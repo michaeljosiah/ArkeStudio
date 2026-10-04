@@ -2020,6 +2020,41 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
     assert.equal(q(m, '[data-testid="chapter-workspace"]')!.getAttribute("data-dock"), "true", "the press opens Arke's sheet");
   });
 
+  // 0.5.60-local.17: the raised block sheet drew its own head over the panel's, so a phone read
+  // `Block 2 · narrator` twice with two closes. 194h draws one head: the panel's, under the grab.
+  for (const [name, width] of [["a phone", 390], ["a tablet", 820]] as const) {
+    it(`${name}: the block's sheet names the block once, with one close`, async () => {
+      windowOf(width);
+      const m = await mount(inkbound());
+      await answerOpen(m);
+      await act(async () => all(m, ".fy-ab__block")[1]!.click());
+      const sheet = [...dom.document.querySelectorAll("dialog.fy-chapter-block-sheet")].find((dialog) => dialog.querySelector('[data-testid="audiobook-block-panel"]') !== null) as HTMLElement | undefined;
+      assert.ok(sheet, "the block's panel is raised as a sheet");
+      // Compared as booleans: a failing equal on a linkedom node prints the whole document.
+      assert.equal(sheet.querySelector(".fy-page-sheet__head") === null, true, "the sheet draws no head of its own");
+      const titles = [...sheet.querySelectorAll("h2")];
+      assert.equal(titles.length, 1, "one title");
+      assert.equal(titles[0]!.getAttribute("data-testid"), "audiobook-block-title", "the panel's");
+      assert.match(titles[0]!.textContent!, /^Block 2 · /);
+      assert.equal(sheet.querySelectorAll('button[aria-label="Close"]').length, 1, "one close");
+      assert.equal(sheet.querySelectorAll(".fy-abp__sub").length, 1, "one meta line");
+      assert.equal(sheet.getAttribute("aria-label"), titles[0]!.textContent, "the dialog still named for the block");
+      assert.equal(sheet.hasAttribute("aria-labelledby"), false);
+      await act(async () => (sheet.querySelector('button[aria-label="Close"]') as HTMLElement).click());
+      assert.equal(sheet.querySelector('[data-testid="audiobook-block-panel"]') === null, true, "the one close puts the block down");
+    });
+  }
+
+  it("wide, the docked panel keeps its own head, and no sheet is raised", async () => {
+    windowOf(1600);
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    assert.match(q(m, '.fy-ch__panels [data-testid="audiobook-block-title"]')?.textContent ?? "", /^Block 2 · /, "the panel's head, in the page");
+    assert.equal(all(m, '.fy-ch__panels [data-testid="audiobook-block"] button[aria-label="Close"]').length, 1);
+    assert.equal(dom.document.querySelector('dialog.fy-chapter-block-sheet[open]') === null, true);
+  });
+
   it("the Manuscript and Timing keep what they had on a phone: the ⋯ page menu, the floating Arke press, no hold", async () => {
     windowOf(390);
     const manuscript = await mount(inkbound(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap`);
