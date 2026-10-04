@@ -12,6 +12,7 @@ import { Composer } from "../src/components/composer.js";
 import { ModelChip } from "../src/components/model-chip.js";
 import { filterGroups, formatDollars, matchSpan, modelCard, modelGroups, modelMatches, providerHeading, providerMarkLetter, squash } from "../src/components/model-picker-data.js";
 import { readRecentModels, rememberRecentModel } from "../src/lib/recent-models.js";
+import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -437,7 +438,10 @@ describe("the chips in a narrow tool row (195a, local.15)", () => {
     assert.match(body(".fy-mchip > .fy-mchip__btn"), /min-width: 0; flex: 0 1 auto/);
   });
   it("ellipses the model's name first, down to a floor, and only then the effort", () => {
-    assert.match(body(".fy-mchip > .fy-mchip__btn:not(.fy-mchip__btn--effort):not(.fy-mchip__btn--fixed)"), /min-width: 76px/);
+    // The floor is the name's (about four letters), plus the chip's fixed parts: local.15's 76 for
+    // the whole chip left one letter (F…, local.16). composer-row-layout.test.tsx measures it.
+    assert.match(body(".fy-mchip"), /--mchip-name-min: 40px/);
+    assert.match(body(".fy-mchip > .fy-mchip__btn:not(.fy-mchip__btn--effort):not(.fy-mchip__btn--fixed)"), /min-width: calc\(var\(--mchip-parts\) \+ var\(--mchip-name-min\)\)/);
     assert.match(body(".fy-mchip > .fy-mchip__btn--effort"), /flex-shrink: 0\.001/);
     assert.match(body(".fy-mchip__name"), /overflow: hidden; text-overflow: ellipsis/);
   });
@@ -589,6 +593,58 @@ describe("on a phone, the picker is a bottom sheet", () => {
   it("keeps the same foot", async () => {
     const element = await openSheet();
     assert.deepEqual([...element.querySelectorAll(".fy-mpick__foot button")].map((button) => button.textContent), ["Manage models"]);
+  });
+});
+
+describe("the tool row's words are tips, not text in the composer (local.16)", () => {
+  const hover = async (element: Element, on: boolean) => act(async () => void element.dispatchEvent(new dom.Event(on ? "mouseover" : "mouseout", { bubbles: true }) as unknown as Event));
+  const tip = () => document.querySelector<HTMLElement>(".fy-bodytip");
+
+  it("says why dictation is off on the mic's tip, never inline, and keeps the mic reachable", async () => {
+    __setStateForTest(state(), { voiceSidecar: { state: "unavailable", detail: "the dictation model has not been downloaded" } });
+    try {
+      await mount(<Composer value="" onChange={() => {}} onSubmit={() => {}} placeholder="Ask about chapter 01" onDictate={() => {}}
+        modelControl={<ModelChip state={state()} value="openai/gpt-5.4" set={false} onPick={() => {}} onVariant={() => {}} />} />);
+      const mic = container.querySelector<HTMLButtonElement>(".fy-cx__mic")!;
+      assert.equal(container.querySelector(".fy-cx__busy"), null, "no words in the row");
+      const shown = [...container.querySelectorAll(".fy-cx *")].filter((element) => !element.closest("[hidden]")).map((element) => [...element.childNodes].filter((node) => node.nodeType === 3).map((node) => node.textContent).join("")).join(" ");
+      assert.doesNotMatch(shown, /Dictation is off/, "nothing visible in the composer says it");
+      assert.equal(mic.disabled, false, "focusable, so the tip reaches the keyboard");
+      assert.equal(mic.getAttribute("aria-disabled"), "true");
+      assert.match(container.querySelector(`[id="${mic.getAttribute("aria-describedby")}"]`)?.textContent ?? "", /Dictation is off — the dictation model has not been downloaded/, "and a screen reader hears why");
+      assert.equal(tip(), null);
+      await hover(mic, true);
+      assert.equal(tip()?.textContent, "Dictation is off — the dictation model has not been downloaded");
+      assert.equal(tip()?.parentElement, document.body, "drawn on the body, out of the composer's clip");
+      await hover(mic, false);
+      assert.equal(tip(), null);
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  it("puts the model's whole name on its chip's tip, and the word Effort on the effort's", async () => {
+    await mount(<Holder start="opencode/fledge" chip={{ state: state({ harnessModels: MODELS.map((model) => model.id === "fledge" ? { ...model, variants: { names: ["low", "medium", "high"] } } : model) }) }} />);
+    await hover(chip(), true);
+    assert.equal(tip()?.textContent, "Fledge Alpha Free");
+    await hover(chip(), false);
+    const effort = chips()[1]!;
+    assert.equal(effort.textContent, "Effort", "a model with no default names no effort");
+    assert.ok(effort.classList.contains("fy-mchip__btn--unset"), "the class the narrow row draws as its glyph");
+    assert.ok(effort.querySelector(".fy-mchip__gauge svg"), "the glyph it collapses to");
+    assert.equal(effort.getAttribute("aria-label"), "Effort", "and its name stays on the press");
+    await hover(effort, true);
+    assert.equal(tip()?.textContent, "Effort");
+    await act(async () => effort.click());
+    assert.equal(tip(), null, "no tip over its own menu");
+  });
+
+  it("draws no glyph for an effort that has a value to say", async () => {
+    await mount(<Holder />);
+    const effort = chips()[1]!;
+    assert.equal(effort.textContent, "Medium");
+    assert.equal(effort.classList.contains("fy-mchip__btn--unset"), false);
+    assert.equal(effort.querySelector(".fy-mchip__gauge"), null);
   });
 });
 

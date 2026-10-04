@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { VoiceRuntimeStatus } from "@arke-studio/contracts";
+import { BodyTip, focusIsVisible } from "./body-tip.js";
 import { Mic } from "./icons.js";
 import { Loading } from "./loading.js";
 import { Button } from "./ui.js";
@@ -174,9 +175,17 @@ export function ComposerMic({
   onListen?: () => void;
 }) {
   const ptt = usePushToTalk(onText);
-  const say =
-    ptt.trouble ??
-    (ptt.off !== null ? `Dictation is off — ${ptt.off}` : ptt.phase === "listening" ? LISTENING : null);
+  const [tip, setTip] = useState<HTMLElement | null>(null);
+  const describedBy = useId();
+  // Why dictation is off is the mic's tip, never words in the row. Said there, it was a flex item
+  // squeezed to a word a line in the 302 production dock: four lines climbing over the editor, and
+  // the model chips pushed under send (local.16). What happened on a press, and listening, are
+  // still said beside it; they are news, and short.
+  const about = ptt.off !== null
+    ? `Dictation is off — ${ptt.off}`
+    : "Speak instead of typing — transcribed on this machine, never sent to a provider";
+  const say = ptt.trouble ?? (ptt.phase === "listening" ? LISTENING : null);
+  const off = ptt.off !== null;
 
   return (
     <>
@@ -184,23 +193,29 @@ export function ComposerMic({
         type="button"
         className="fy-cx__mic"
         data-listening={ptt.phase === "listening" ? "true" : undefined}
-        disabled={disabled || ptt.off !== null}
+        // Off for a reason is aria-disabled, not disabled: a disabled button takes no focus and,
+        // in Chromium, no pointer events, so its tip could reach nobody.
+        disabled={disabled}
+        aria-disabled={off && !disabled ? true : undefined}
         aria-label={ptt.phase === "listening" ? "Stop and transcribe" : "Dictate"}
         aria-pressed={ptt.phase === "listening"}
-        title={
-          ptt.off !== null
-            ? `Dictation is off — ${ptt.off}`
-            : "Speak instead of typing — transcribed on this machine, never sent to a provider"
-        }
+        aria-describedby={describedBy}
+        onMouseEnter={(event) => setTip(event.currentTarget)}
+        onMouseLeave={() => setTip(null)}
+        onFocus={(event) => { if (focusIsVisible(event.currentTarget)) setTip(event.currentTarget); }}
+        onBlur={() => setTip(null)}
         onClick={() => {
+          if (off) return;
           if (ptt.phase !== "listening") onListen?.();
           ptt.toggle();
         }}
       >
         <Mic size={15} />
       </button>
+      <span id={describedBy} hidden>{about}</span>
+      {tip !== null && <BodyTip anchor={tip}>{about}</BodyTip>}
       {ptt.phase === "transcribing" && <Loading inline label="transcribing locally…" />}
-      {say && <span className="fy-cx__busy">{say}</span>}
+      {say && <span className="fy-cx__busy" title={say}>{say}</span>}
     </>
   );
 }

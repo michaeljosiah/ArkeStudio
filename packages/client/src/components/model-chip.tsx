@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useInRouterContext, useNavigate } from "react-router";
 import {
@@ -7,7 +7,8 @@ import {
 } from "@arke-studio/contracts";
 import { ProviderMark } from "../screens/settings-parts.js";
 import { harnessModelLabel } from "./harness-models.js";
-import { ChipChevron, PickerTick } from "./model-chip-icons.js";
+import { BodyTip, focusIsVisible } from "./body-tip.js";
+import { ChipChevron, ChipGauge, PickerTick } from "./model-chip-icons.js";
 import { ModelPicker } from "./model-picker.js";
 import { modelGroups, providerHeading, providerMarkLetter, recentModels } from "./model-picker-data.js";
 import { cx } from "./ui.js";
@@ -209,17 +210,6 @@ function leavesOnTab(event: ReactKeyboardEvent<HTMLDivElement>, panel: HTMLDivEl
   return event.shiftKey ? at <= 0 : at === stops.length - 1;
 }
 
-/** A tip drawn on the body for the same reason the menu is: the composer clips what hangs off it. */
-function Tip({ anchor, children }: { anchor: HTMLElement; children: ReactNode }) {
-  const box = anchor.getBoundingClientRect();
-  const view = anchor.ownerDocument.defaultView;
-  const viewHeight = view?.innerHeight || anchor.ownerDocument.documentElement.clientHeight || 0;
-  return createPortal(
-    <span role="tooltip" className="fy-mchip__tip" style={{ left: `${box.left}px`, bottom: `${viewHeight - box.top + 6}px` }}>{children}</span>,
-    anchor.closest("dialog") ?? anchor.ownerDocument.body,
-  );
-}
-
 /** Opens Settings at AI models: its own component because the hook it needs only exists inside a router. */
 function useManageModels(): (() => void) | undefined {
   return useInRouterContext() ? useRouterManage() : undefined;
@@ -295,6 +285,16 @@ export function ModelChip({
   const listboxId = useId();
   const manage = useManageModels();
   const [tip, setTip] = useState<HTMLElement | null>(null);
+  /** The chips' own tips: the model's whole name, and the word for the effort. */
+  const [pressTip, setPressTip] = useState<{ anchor: HTMLElement; text: string } | null>(null);
+  // On hover and on a focus the person can see: a menu closed by the pointer hands focus back to
+  // the chip, and a tip appearing under the pointer's last press would be noise.
+  const tipFor = (text: string) => ({
+    onMouseEnter: (event: ReactMouseEvent<HTMLButtonElement>) => setPressTip({ anchor: event.currentTarget, text }),
+    onMouseLeave: () => setPressTip(null),
+    onFocus: (event: ReactFocusEvent<HTMLButtonElement>) => { if (focusIsVisible(event.currentTarget)) setPressTip({ anchor: event.currentTarget, text }); },
+    onBlur: () => setPressTip(null),
+  });
 
   const closeMenu = (refocus: boolean) => {
     const kind = menu?.kind;
@@ -348,7 +348,7 @@ export function ModelChip({
         >
           <span className="fy-mchip__name">{label}</span>
         </span>
-        {tip !== null && <Tip anchor={tip}>Chosen in Settings</Tip>}
+        {tip !== null && <BodyTip anchor={tip} className="fy-mchip__tip">Chosen in Settings</BodyTip>}
       </span>
     );
   }
@@ -481,6 +481,8 @@ export function ModelChip({
           event.preventDefault();
           show("model");
         }}
+        // The name is ellipsed in a narrow row; the whole of it is on the tip.
+        {...tipFor(label)}
       >
         {current !== undefined && <ProviderMark id={current.provider} label={providerHeading(current.provider, [current])} letter={providerMarkLetter(current.provider, providerHeading(current.provider, [current]))} size="xs" />}
         <span className="fy-mchip__name">{label}</span>
@@ -490,7 +492,9 @@ export function ModelChip({
         <button
           ref={effortButton}
           type="button"
-          className="fy-mchip__btn fy-mchip__btn--effort"
+          // Unset: the model states no default, so the chip says the word Effort, and where the row
+          // has no room for a word that names nothing it is drawn as its glyph (model-chip.css).
+          className={cx("fy-mchip__btn fy-mchip__btn--effort", inForce === undefined && "fy-mchip__btn--unset")}
           aria-label="Effort"
           aria-haspopup="menu"
           aria-expanded={effortOpen}
@@ -502,11 +506,14 @@ export function ModelChip({
             event.preventDefault();
             show("effort");
           }}
+          {...tipFor("Effort")}
         >
+          {inForce === undefined && <span className="fy-mchip__gauge"><ChipGauge /></span>}
           <span className="fy-mchip__name">{effortLabel}</span>
           <ChipChevron />
         </button>
       )}
+      {pressTip !== null && menu === null && <BodyTip anchor={pressTip.anchor} className="fy-mchip__tip">{pressTip.text}</BodyTip>}
       {menu !== null && open && (phone ? (
         <SheetLayer
           host={menu.host}

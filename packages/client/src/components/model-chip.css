@@ -1,17 +1,64 @@
 /* The chat's model chip, in the composer's tool row (design turns 190e and 195). */
-.fy-mchip { position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.fy-mchip { position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: 0; --mchip-name-min: 40px; }
 /* The tool row keeps send whole, however narrow: the model's name is ellipsed first, and only once it
-   is down to its mark and a few letters does the effort give way. In the 331 production dock the two
-   chips stood at their full width and the effort ran under send (local.15). The effort's shrink is a
-   token so it yields nothing until the model's chip stops at its floor, then takes the rest. */
+   is down to its floor does the effort give way. In the 331 production dock the two chips stood at
+   their full width and the effort ran under send (local.15). The effort's shrink is a token so it
+   yields nothing until the model's chip stops at its floor, then takes the rest.
+   The floor is the name's, not the chip's: 40px keeps about four letters and the ellipsis (Fled…,
+   GPT-…, Clau…) beside the mark. local.15's floor of 76 for the whole chip left the name 15px, one
+   letter and the ellipsis (F…, local.16). The chip's parts around the name are fixed, so its floor
+   is theirs plus the name's: padding 15, mark 20 and its gap 7, the chevron's gap 7 and the chevron
+   12 make 61; the dot adds 13; a bare chip has no mark and pads 21, so 40. */
+.fy-mchip__btn { --mchip-parts: 61px; }
+.fy-mchip__btn--set { --mchip-parts: 74px; }
+.fy-mchip__btn--bare { --mchip-parts: 40px; }
+.fy-mchip__btn--bare.fy-mchip__btn--set { --mchip-parts: 53px; }
 .fy-mchip > .fy-mchip__btn { min-width: 0; flex: 0 1 auto; }
-.fy-mchip > .fy-mchip__btn:not(.fy-mchip__btn--effort):not(.fy-mchip__btn--fixed) { min-width: 76px; }
+/* No floor wider than the chip itself: a name shorter than the floor (o3) keeps its own width rather
+   than a gap before the chevron. calc-size is Chromium's; the plain floor before it is the fallback. */
+.fy-mchip > .fy-mchip__btn:not(.fy-mchip__btn--effort):not(.fy-mchip__btn--fixed) {
+  min-width: calc(var(--mchip-parts) + var(--mchip-name-min));
+  min-width: calc-size(max-content, min(size, calc(var(--mchip-parts) + var(--mchip-name-min))));
+}
+/* World Chat's named model: the name and its padding of 12. */
+.fy-mchip > .fy-mchip__btn--fixed {
+  min-width: calc(12px + var(--mchip-name-min));
+  min-width: calc-size(max-content, min(size, calc(12px + var(--mchip-name-min))));
+}
 .fy-mchip > .fy-mchip__btn--effort { flex-shrink: 0.001; }
 /* Read replies, where it shares that row, gives way before both chips (no frame draws it in the dock's
    row): its words go, its speaker and its name for a screen reader stay. */
 .fy-cx__left > .fy-cx__tool { flex: 0 100 auto; min-width: 29px; overflow: hidden; }
 .fy-cx__left > .fy-cx__tool > svg { flex: none; }
 .fy-cx__left > .fy-cx__tool > span { min-width: 0; overflow: hidden; text-overflow: clip; white-space: nowrap; }
+/* The effort's glyph, drawn only where the row is narrow and the model names no default (below). */
+.fy-mchip__gauge { display: none; }
+.fy-mchip__btn .fy-mchip__gauge svg { width: 15px; height: 15px; }
+
+/* The row the chips share, wherever it is a row: not under a coarse pointer, where the tools stand in
+   the composer's own grid beside the editor (develop-responsive.css), and not on a phone, where the
+   bar dissolves into the composer's wrapping row. The bar is measured, not the window: the production
+   dock is 302 to 331 wide on any screen.
+   Words beside the tools (a press that failed, Listening, Read replies off) keep to one line and give
+   way first: wrapped, a sentence was squeezed to a word a line and climbed over the editor (local.16).
+   And whatever the row cannot hold is cut at its own edge, never drawn under send; the margin keeps
+   attach's pull to the edge and the chips' focus rings. */
+@media not (pointer: coarse) {
+  .fy-cx__bar:has(.fy-mchip) { container: cx-tools / inline-size; }
+  .fy-cx__left:has(> .fy-mchip) { overflow: clip; overflow-clip-margin: 8px; }
+  .fy-cx__left:has(> .fy-mchip) > :is(.fy-cx__busy, .fy-cx__agent) { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+/* Narrower than 195b's 356 composer (the dock: 302 to 331), the row tightens to the frames' 6 between
+   tools, the effort says its value and no chevron (High), and an effort with no default to name, the
+   word Effort, is its glyph: its name stays on the press for a screen reader and on its tip. */
+@container cx-tools (max-width: 339px) {
+  .fy-cx__left { gap: 6px; }
+  .fy-mchip > .fy-mchip__btn--effort { padding: 0 10px; }
+  .fy-mchip > .fy-mchip__btn--effort > svg { display: none; }
+  .fy-mchip > .fy-mchip__btn--effort.fy-mchip__btn--unset { width: 32px; padding: 0; justify-content: center; flex-shrink: 0; }
+  .fy-mchip__btn--unset > .fy-mchip__name { display: none; }
+  .fy-mchip__btn--unset > .fy-mchip__gauge { display: inline-flex; }
+}
 .fy-mchip__btn {
   display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 9px 0 6px;
   border: 0; border-radius: 999px; background: var(--secondary); color: var(--foreground);
@@ -33,10 +80,12 @@
 .fy-mchip__btn[aria-expanded="true"] { outline: 2px solid var(--ring, var(--foreground)); outline-offset: 1px; }
 .fy-mchip__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-mchip__btn--set::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--foreground); flex: none; }
-/* Drawn on the body, for the same reason as the menus: the composer clips what hangs off it. */
-.fy-mchip__tip {
+/* The tool row's tips (the chips' and the microphone's; body-tip.tsx), drawn on the body for the same
+   reason as the menus: the composer clips what hangs off it. A short tip sits on one line; a reason
+   long enough to need two gets two, inside the window. */
+.fy-bodytip {
   position: fixed; z-index: 100; padding: 6px 10px; border-radius: 8px; background: var(--foreground); color: var(--background);
-  font: var(--type-body); font-size: var(--text-xs); white-space: nowrap; pointer-events: none;
+  font: var(--type-body); font-size: var(--text-xs); width: max-content; max-width: min(260px, calc(100vw - 24px)); pointer-events: none;
 }
 
 /* Drawn on the body and fixed to the window; model-chip.tsx places it beside the chip, above it or
