@@ -34,7 +34,7 @@ export async function prepareCharacterSample(store: WorldStore, tools: AudioMedi
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
       throw error;
     });
-    const retained = exists ? await readFile(await audioWorldPath(store.dir, contextPath(identity.operationId)), "utf8").catch(error => {
+    const retained = exists ? await readFile(await audioWorldPath(store.dir, contextPath(identity.operationId), true), "utf8").catch(error => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
     }) : null;

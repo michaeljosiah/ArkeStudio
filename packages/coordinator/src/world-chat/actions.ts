@@ -4795,6 +4795,14 @@ export function worldChatActionAdapters(
         if (action.actionKind === "world-chat-production-performance-command" && action.status !== "pending") {
           const proposal = store.getBundle().proposals.find(value => value.proposal.worldChatOrigins?.some(origin => origin.requestId === action.actionId));
           if (proposal) return { status: "completed", receipt: { kind: "proposal", id: proposal.proposal.id, summary: "Duration proposal staged for human review." } };
+          const timeline = store.getBundle().productions.find(value => value.meta.id === action.productionId)?.timeline;
+          const placed = timeline?.status === "ready" && [...timeline.timeline.history.undo, ...timeline.timeline.history.redo]
+            .some(entry => entry.kind === "change" && entry.requestId === action.actionId);
+          const cleared = await committedAction(store, action.actionId);
+          if (placed || cleared) {
+            await removePreparation(store, "world", action.actionId);
+            return { status: "completed", receipt: { kind: "performance-command", id: action.actionId, summary: "The approved performance command completed." } };
+          }
         }
         if (action.actionKind === "world-chat-production-routing-traversal" && action.productionId) {
           if (await hasTraversalRequest(store, action.productionId, action.actionId)) {

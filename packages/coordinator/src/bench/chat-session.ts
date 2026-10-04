@@ -2,7 +2,7 @@ import { conversationActionDigest } from "../arke-actions/digest.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { BenchEventSchema, BenchReservedTakeSchema, BenchSubjectSchema, PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, SessionIdSchema, ConversationIdSchema,
-  benchTokenFor, characterSheetFor, mainPhotoFor, foldBenchSession,
+  benchTokenFor, characterSheetFor, mainPhotoFor, foldBenchSession, sameBenchSubjectIdentity,
   type BenchChatReference, type BenchEvent, type BenchReferenceToken, type BenchSession,
   type BenchTake, type BenchReservedTake, type BenchSubject, type WorldChatBenchGenerationAction } from "@arke-studio/contracts";
 import { readBenchRecord, readBenchSession } from "./chat-reads.js";
@@ -112,9 +112,10 @@ export async function prepareBenchChatSession(store: WorldStore, action: Action,
   const production = action.productionId ? store.getBundle().productions.find(p => p.meta.id === action.productionId) : undefined;
   if (action.productionId && (!production || action.composer.mode !== "music")) throw new Error("A production audio Bench requires a current production and music mode.");
   const subject: BenchSubject | undefined = production ? { kind: "production", productionId: production.meta.id, productionTitle: production.meta.title, role: action.cueRole ?? "music" } : undefined;
-  if (subject && record && conversationActionDigest(record.meta.subject ?? null) !== conversationActionDigest(subject)) throw new Error("This Bench belongs to another production or audio role.");
+  if (subject && record && (!record.meta.subject || !sameBenchSubjectIdentity(record.meta.subject, subject))) throw new Error("This Bench belongs to another production or audio role.");
   if (action.sessionId && !record) throw new Error("That Bench session is no longer available.");
-  if (!action.sessionId && record && (record.meta.createdAt !== at || conversationActionDigest(record.meta.subject ?? null) !== conversationActionDigest(subject ?? null) || record.events.some(e => !e.requestId?.startsWith(initializationPrefix(id))))) {
+  const sameSubject = record?.meta.subject && subject ? sameBenchSubjectIdentity(record.meta.subject, subject) : record?.meta.subject === subject;
+  if (!action.sessionId && record && (record.meta.createdAt !== at || !sameSubject || record.events.some(e => !e.requestId?.startsWith(initializationPrefix(id))))) {
     throw new Error("The proposed Bench identity is already in use.");
   }
   const meta = record?.meta ?? { schemaVersion: 1 as const, id: sessionId, createdAt: at, ...(subject ? { subject } : {}) };

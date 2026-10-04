@@ -139,6 +139,13 @@ it("sequences production music into a fenced human editor request, blocks denied
   assert.deepEqual(clip.source, { kind: "artifact", artifactId: artifact.id, label: "Music Take 1" });
   assert.equal(admitted.length, 1);
   assert.equal(production.editorRequests.filter(r => r.actionId === child.actionId).length, 1);
+  const renamed = structuredClone(store.getBundle()); renamed.productions.find(p => p.meta.id === "saltlight")!.meta.title = "New production title";
+  store.getBundle = () => renamed;
+  const reused = await prepareBenchChatSession(store, { ...music(), productionId: "saltlight", sessionId }, newId("act"), AT);
+  assert.equal(reused.session.subject?.productionId, "saltlight");
+  const { references: _references, ...rerunComposer } = music().composer;
+  await prepareBenchChatSession(store, { kind: "bench-generation", productionId: "saltlight", sessionId, rerunTakeId: take.id, composer: rerunComposer, checkReceiptIds: [] }, newId("act"), AT);
+  await assert.rejects(prepareBenchChatSession(store, { ...music(), productionId: "saltlight", cueRole: "ambience", sessionId }, newId("act"), AT), /another production or audio role/);
 });
 
 it("quotes and denies a title cue without creating a session, then approves one session and one job exactly once", async t => {

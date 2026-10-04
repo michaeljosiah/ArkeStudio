@@ -1,5 +1,5 @@
-import { link, lstat, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { link, lstat, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AudioAssetProvenanceSchema, AudioQcReportSchema, AudioRangeSchema, AudioSourceRefSchema,
   PerformanceIdSchema, ArtifactIdSchema, SlugSchema, TakeIdSchema, type AudioAssetProvenance, type AudioRange, type AudioSourceRef } from "@arke-studio/contracts";
@@ -113,18 +113,27 @@ export async function prepareAudio(store: WorldStore, tools: AudioMediaTools, re
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(operationId)) throw new Error("audio-candidate-invalid");
     const prefix = `.staging/audio/${operationId}`;
     const stagedFile = `${prefix}/prepared.wav`;
-    // A conversation approval retains its identity. Never erase or re-run a preparation
-    // whose acknowledgement was interrupted; only a complete matching candidate rejoins it.
+    // A complete candidate rejoins unchanged. An interrupted local conversion has no accepted
+    // result: preserve its bytes separately before restarting under the same approval identity.
     if (options.operationId && await lstat(join(store.dir, prefix)).then(() => true, error => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
       throw error;
     })) {
-      const retained = JSON.parse(await readFile(await audioWorldPath(store.dir, `${prefix}/candidate.json`), "utf8")) as PreparedAudioCandidate;
-      const provenance = AudioAssetProvenanceSchema.parse(retained.provenance);
-      if (retained.operationId !== operationId || retained.stagedFile !== stagedFile ||
-        JSON.stringify(retained.request) !== JSON.stringify(request) || JSON.stringify(provenance.source) !== JSON.stringify(resolved.source) ||
-        (await hashAudioFile(await audioWorldPath(store.dir, stagedFile), signal)).hash !== provenance.outputHash) throw new Error("audio-candidate-invalid");
-      return { ...retained, provenance };
+      const candidatePath = await audioWorldPath(store.dir, `${prefix}/candidate.json`, true);
+      const raw = await readFile(candidatePath, "utf8").catch(error => { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; });
+      if (raw !== null) {
+        const retained = JSON.parse(raw) as PreparedAudioCandidate;
+        const provenance = AudioAssetProvenanceSchema.parse(retained.provenance);
+        if (retained.operationId !== operationId || retained.stagedFile !== stagedFile ||
+          JSON.stringify(retained.request) !== JSON.stringify(request) || JSON.stringify(provenance.source) !== JSON.stringify(resolved.source) ||
+          (await hashAudioFile(await audioWorldPath(store.dir, stagedFile), signal)).hash !== provenance.outputHash) throw new Error("audio-candidate-invalid");
+        return { ...retained, provenance };
+      }
+      if ((await readdir(dirname(candidatePath))).includes("character.json")) throw new Error("audio-candidate-invalid");
+      const frozen = await readFile(await audioWorldPath(store.dir, `${prefix}/source.media`, true)).catch(error => { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; });
+      if (frozen && audioHash(frozen) !== resolved.source.sourceMediaHash) throw new Error("audio-source-changed");
+      const interruptedRoot = dirname(await audioWorldPath(store.dir, ".staging/audio-interrupted/.containment-check", true));
+      await rename(dirname(candidatePath), join(interruptedRoot, `${operationId}-${randomUUID()}`));
     }
     const destinationPath = await audioWorldPath(store.dir, stagedFile, true);
     try {

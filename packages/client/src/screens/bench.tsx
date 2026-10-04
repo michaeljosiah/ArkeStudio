@@ -303,6 +303,7 @@ function BenchWorkspace({
   const navigate = useNavigate();
   const worldSlug = world?.meta.slug;
   const productionAudio = session.subject?.kind === "production" ? session.subject : undefined;
+  const unscopedSession = session.subject === undefined;
   const subject = session.subject?.kind === "production" ? undefined : session.subject;
   const [chatOpen, setChatOpen] = useState(false);
   const [chatOpened, setChatOpened] = useState(false);
@@ -1496,7 +1497,7 @@ function BenchWorkspace({
           <span className="fy-bench__railmark" aria-hidden="true">
             {(productionAudio?.productionTitle ?? (subject === undefined ? world?.meta.name : subject.productionTitle))?.trim().charAt(0).toUpperCase() ?? ""}
           </span>
-          {subject === undefined && (
+          {unscopedSession && (
             <button
               type="button"
               className="fy-bench__raildest"
@@ -1585,15 +1586,17 @@ function BenchWorkspace({
             </div>
             )}
             <span style={{ flex: 1 }} />
-            {/* The bin at the bar's end (design 142a). On the world bench it starts a new session;
-                a subject session is the one session its shot has, so there it puts the words and
-                references back as the shot has them now — the rebuild. */}
-            {subject === undefined ? (
+            {/* The bin starts a new world session, rebuilds a visual subject from its shot,
+                or clears an audio brief while retaining the production's session and takes. */}
+            {productionAudio ? (
+              <button type="button" className="fy-bench__clear" data-testid="bench-clear-audio" title="Clear the music brief; keep this production's session and takes"
+                onClick={() => compose({ ...draft, brief: "" })}><Trash size={14} /></button>
+            ) : unscopedSession ? (
               <button
                 type="button"
                 className="fy-bench__clear"
                 title="Clear the bench — a new session; this one keeps running"
-                onClick={() => sendBenchNewSession(worldId)}
+                onClick={() => { sendBenchNewSession(worldId); void navigate(`/w/${worldId}/artifacts/bench`, { replace: true }); }}
               >
                 <Trash size={14} />
               </button>
@@ -2291,7 +2294,7 @@ function BenchWorkspace({
                         state?.app.models.disabled ?? [],
                         unlockedFor[preset.mode],
                       );
-                      const wrongSubjectMode = subject !== undefined && preset.mode !== draft.mode;
+                      const wrongSubjectMode = (subject !== undefined || productionAudio !== undefined) && preset.mode !== draft.mode;
                       const presetModel = manifest?.models.find(
                         (candidate) => candidate.provider === preset.provider && candidate.id === preset.model,
                       );

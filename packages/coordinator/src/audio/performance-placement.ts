@@ -56,7 +56,7 @@ export async function placeSelectedPerformance(store: WorldStore, request: Extra
   if (request.partner && placements.some((placement, index) => placement.timing.overflow.mode !== "overlap" ||
     placement.timing.overflow.withShotId !== placements[1-index]!.performance.target.shotId)) throw new Error("Both performances must explicitly approve each other as overlap partners.");
   await applyTimelineCommand(store,request.productionId,{ kind:"commands",commands,baseRevision:request.expectedTimelineRevision,sourceFingerprint:"",
-    label: request.partner ? "Place mutually approved dialogue overlap" : "Place selected dialogue performance" },async latest => {
+    label: request.partner ? "Place mutually approved dialogue overlap" : "Place selected dialogue performance", requestId: request.requestId },async latest => {
     const raw = await readFile(await audioWorldPath(store.dir,`productions/${request.productionId}/timeline.json`),"utf8");
     if (sha256(raw) !== request.expectedTimelineHash) throw new Error("The cut changed. Review the current placement before applying again.");
     if (latest.performanceReview.selectionHash !== request.expectedSelectionHash) throw new Error("The performance selection changed. Review the selected sources again.");

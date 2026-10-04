@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { newId, orderedShots, ulid, storyTimelineFingerprint, performanceLineKey, type ConversationActionCard, type ModelWorldChatAction, type ProviderStatus, type WorldChatPreparedAction } from "@arke-studio/contracts";
 import { productionAudioGenerationSource, productionAudioOperationId } from "../../src/world-chat/production-audio-generation.js";
 import { GenerationQuotes } from "../../src/world-chat/generation-quotes.js";
+import { worldChatActionAdapters } from "../../src/world-chat/actions.js";
 import { WorldStore } from "../../src/world/store.js";
 import { applyVoiceAssignment } from "../../src/sheets/authoring.js";
 import { createAudioMediaTools } from "../../src/audio/media-tools.js";
@@ -130,18 +131,24 @@ it("keeps generated dialogue unselected, requires human review, proposes duratio
   await assert.rejects(productionPerformanceBody(h.store, prepare({ operation: "propose-duration", performanceId: record.id, leadInSec: 0.25, timing })), /Audition and accept/);
   await reviewPerformance(h.store, { kind: "review-performance", worldId: h.store.worldId, requestId: ulid(), productionId: h.production.meta.id, performanceId: record.id,
     decision: "accept", select: true, expectedSceneVersion: h.scene.version, expectedReviewHash: null, expectedSelectionHash: null });
-  const card = () => ({ actionId: newId("act"), conversationId: newId("cv") }) as ConversationActionCard;
+  const card = () => ({ actionId: newId("act"), conversationId: newId("cv"), worldId: h.store.worldId, productionId: h.production.meta.id,
+    actionKind: "world-chat-production-performance-command", status: "approved", authority: { kind: "timeline", id: newId("act") } }) as ConversationActionCard;
+  const adapter = worldChatActionAdapters(h.store, null, () => AT).find(adapter => adapter.actionKind === "world-chat-production-performance-command")!;
   const duration = await executeProductionPerformance(h.store, prepare({ operation: "propose-duration", performanceId: record.id, leadInSec: 0.25, timing }), card());
   assert.equal(duration.receipt?.kind, "proposal"); assert.equal(current().scenes.find(s => s.id === h.scene.id)!.version, h.scene.version);
   await applyTimelineCommand(h.store, h.production.meta.id, { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(current()),
     commands: [{ kind: "place", trackId: "tr_picture", clip: { id: "cl_dialogue_picture", startFrame: 0, durationFrames: 300, sourceInFrames: 0,
       source: { kind: "shot", shotId: h.shot.id, sceneNumber: h.scene.number, shotNumber: h.shot.number, label: h.shot.title } } }] });
   const prepared = prepare({ operation: "place-selected", performanceId: record.id, leadInSec: 0.25, timing });
-  await executeProductionPerformance(h.store, prepared, card());
+  const placedCard = card();
+  await executeProductionPerformance(h.store, prepared, placedCard);
+  assert.equal((await adapter.reconcile!(placedCard))?.status, "completed", "the durable timeline history rejoins a committed placement after its preparation is gone");
   await assert.rejects(productionPerformanceBody(h.store, prepared), /changed/);
   assert.ok(current().timeline?.status === "ready");
   const before = structuredClone(current().timeline);
-  await executeProductionPerformance(h.store, prepare({ operation: "clear-selection", lineKey: performanceLineKey(record.target) }), card());
+  const clearedCard = card();
+  await executeProductionPerformance(h.store, prepare({ operation: "clear-selection", lineKey: performanceLineKey(record.target) }), clearedCard);
+  assert.equal((await adapter.reconcile!(clearedCard))?.status, "completed", "the native selection commit rejoins after its preparation is gone");
   assert.equal(current().performanceReview.selections[performanceLineKey(record.target)]?.performanceId, null); assert.deepEqual(current().timeline, before, "clearing selection preserves already placed dialogue");
   assert.deepEqual(current().selections, h.production.selections);
 });
@@ -167,7 +174,12 @@ it("prepares a sample only after approval, recovers its exact candidate without 
   const id = newId("act"), request = action("saltlight", { operation: "prepare-voice-sample", sheetId: "maren-kest", source: { kind: "artifact", artifactId } });
   const before = structuredClone(store.getBundle().referenceKits.find(kit => kit.sheetId === "maren-kest"));
   await quotes().prepare(request, id, AT); assert.equal(calls, 0);
+  const interrupted = join(dir, ".staging/audio", productionAudioOperationId(id));
+  await mkdir(interrupted, { recursive: true });
+  await writeFile(join(interrupted, "source.media"), bytes);
   await quotes().dispatch(request, id);
+  const quarantined = (await readdir(join(dir, ".staging/audio-interrupted"))).find(name => name.startsWith(productionAudioOperationId(id)))!;
+  assert.deepEqual(await readFile(join(dir, ".staging/audio-interrupted", quarantined, "source.media")), Buffer.from(bytes), "an incomplete local preparation is preserved before restarting");
   const count = calls;
   assert.ok(count > 0);
   const pending = await pendingCharacterSampleReviews(store);

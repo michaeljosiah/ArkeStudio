@@ -753,7 +753,7 @@ export const BenchSubjectSchema = z.discriminatedUnion("kind", [
 export type BenchSubject = z.infer<typeof BenchSubjectSchema>;
 export type VisualBenchSubject = Exclude<BenchSubject, { kind: "production" }>;
 
-function sameBenchSubjectIdentity(left: BenchSubject, right: BenchSubject): boolean {
+export function sameBenchSubjectIdentity(left: BenchSubject, right: BenchSubject): boolean {
   if (left.kind === "production" || right.kind === "production") return left.kind === "production" && right.kind === "production" && left.productionId === right.productionId && left.role === right.role;
   if (
     left.kind !== right.kind ||
