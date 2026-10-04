@@ -5,10 +5,13 @@ import {
   CARD_TITLE_SHARE,
   captionFontPx,
   clockTime,
+  coverCrop,
   cueAt,
   defaultVideoSubtitles,
   roughTime,
+  pushWindow,
   segmentAt,
+  shapeSize,
   titleCardSeconds,
   segmentFades,
   BOOK_OPENING_SEC,
@@ -32,7 +35,7 @@ import { EditorDialog } from "./editor-dialog.js";
 
 /**
  * The audiobook as a video (design turn 197): its options on the Export sheet (197a), the
- * preview with the vertical crop's focus (197b), the finished files (197e), Activity's row while
+ * preview with the pictures' focus (197b), the finished files (197e), Activity's row while
  * it renders and once it has (197d, 197f), and the phone's sheet (197f). The render itself is the
  * coordinator's; everything drawn here reads the same plan it renders from, so a frame of the
  * preview is a frame of the file.
@@ -201,21 +204,17 @@ export function withShape(options: AudiobookVideoOptions, shape: VideoShape, cho
 
 type Natural = Record<string, { width: number; height: number }>;
 
-/** The ffmpeg crop, as the render takes it: a 9:16 column (or row) around the focus, kept inside. */
-function cropBox(width: number, height: number, focus: { x: number; y: number }) {
-  const cw = Math.min(width, (height * 9) / 16);
-  const ch = Math.min(height, (width * 16) / 9);
-  const x = Math.max(0, Math.min(width - cw, width * focus.x - cw / 2));
-  const y = Math.max(0, Math.min(height - ch, height * focus.y - ch / 2));
-  return { x, y, cw, ch };
-}
+/** The shapes the file's crop is worked out against: 16:9 at either size crops alike. */
+const WIDE = shapeSize("1920x1080");
+const TALL = shapeSize("1080x1920");
 
 function Frame({
   url,
   segment,
   width,
   height,
-  vertical,
+  at,
+  slowPush,
   caption,
   captionSize,
   position,
@@ -227,7 +226,9 @@ function Frame({
   segment: VideoSegment | null;
   width: number;
   height: number;
-  vertical: boolean;
+  /** Where the preview stands on the chapter's clock: how far Slow push has come. */
+  at: number;
+  slowPush: boolean;
   caption: string | null;
   captionSize: number;
   position: "bottom" | "middle";
@@ -241,12 +242,28 @@ function Frame({
   if (segment !== null && file !== null) {
     const load = (event: { currentTarget: HTMLImageElement }) => onNatural(file, { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight });
     if (segment.kind === "card" || segment.kind === "cover") picture = <img className="blur" src={url(file)} alt="" onLoad={load} />;
-    else if (!vertical) picture = <img className="fit" src={url(file)} alt="" onLoad={load} />;
     else if (known === undefined) picture = <img className="fill" src={url(file)} alt="" onLoad={load} />;
     else {
-      const box = cropBox(known.width, known.height, segment.focus ?? { x: 0.5, y: 0.5 });
-      const scale = width / box.cw;
-      picture = <img src={url(file)} alt="" onLoad={load} style={{ left: -box.x * scale, top: -box.y * scale, width: known.width * scale, height: known.height * scale }} />;
+      // The file's own crop (turn 197's correction): the picture covering the frame around its
+      // focus, and Slow push's window at this moment, closing on the focus where it stands.
+      const shape = width < height ? TALL : WIDE;
+      const crop = coverCrop(known.width, known.height, shape.width, shape.height, segment.focus ?? { x: 0.5, y: 0.5 });
+      const scale = width / crop.width;
+      const push = slowPush ? pushWindow(crop, (at - segment.from) / Math.max(0.001, segment.to - segment.from)) : null;
+      picture = (
+        <img
+          src={url(file)}
+          alt=""
+          onLoad={load}
+          style={{
+            left: -crop.x * scale,
+            top: -crop.y * scale,
+            width: known.width * scale,
+            height: known.height * scale,
+            ...(push !== null && push.size < 1 ? { transform: `scale(${1 / push.size})`, transformOrigin: `${(crop.x + crop.focusX * crop.width) * scale}px ${(crop.y + crop.focusY * crop.height) * scale}px` } : {}),
+          }}
+        />
+      );
     }
   }
   return (
@@ -267,7 +284,7 @@ function Frame({
   );
 }
 
-/** The preview (197b): a frame at 16:9 and at 9:16 as they will render, and the vertical crop's focus. */
+/** The preview (197b): a frame at 16:9 and at 9:16 as they will render, and the focus both crops follow. */
 export function VideoPreview({ worldId, productionId, plan, options, onClose }: { worldId: string; productionId: string; plan: AudiobookListening; options: AudiobookVideoOptions; onClose: () => void }) {
   const world = useWorld();
   const slug = world?.meta.slug ?? "";
@@ -345,7 +362,8 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
     setMoved((held) => ({ ...held, [target.key!]: next }));
     setAudiobookPictureFocus(worldId, productionId, chapter.chapterId, target.key, next);
   };
-  // The focus column: the picture letterboxed in a 16:9 box, the crop and the focus drawn over it.
+  // The focus box: the whole picture in a 16:9 box, with the crops the file takes around the focus
+  // drawn over it — the shape being rendered lit, the other shape's outlined — and the focus.
   const FW = 300;
   const FH = 169;
   const size = target?.file ? natural[target.file] : undefined;
@@ -362,7 +380,16 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
   };
   const [dragFocus, setDragFocus] = useState<{ x: number; y: number } | null>(null);
   const drawn = dragFocus ?? focus;
-  const drawnCrop = size === undefined ? null : cropBox(size.width, size.height, drawn);
+  const rendered = options.shape === "1080x1920" ? TALL : WIDE;
+  const other = options.shape === "1080x1920" ? WIDE : TALL;
+  const cropStyle = (frame: { width: number; height: number }) => {
+    if (size === undefined) return null;
+    const crop = coverCrop(size.width, size.height, frame.width, frame.height, drawn);
+    return { left: fit.left + (crop.x / size.width) * fit.width, width: (crop.width / size.width) * fit.width, top: fit.top + (crop.y / size.height) * fit.height, height: (crop.height / size.height) * fit.height };
+  };
+  const renderedCrop = cropStyle(rendered);
+  const otherCrop = cropStyle(other);
+  const framed = segment === null ? null : { ...segment, ...(segment.kind === "picture" ? { focus: drawn } : {}) };
 
   const shapeNote = options.shape === "1080x1920" ? "9:16 · 1080×1920" : `16:9 · ${options.shape.replace("x", "×")}`;
   const captionNote = burned ? `burned-in captions, ${options.captionPosition}, ${options.captionSize.toUpperCase()}` : options.subtitles === "sidecar" ? "sidecar captions" : "no captions";
@@ -386,13 +413,13 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
           </button>
         </div>
         <div style={{ display: "flex", gap: 28, alignItems: "flex-start" }}>
-          <Frame url={url} segment={segment} width={720} height={405} vertical={false} caption={cueAt(wide, at)?.text ?? null} captionSize={captionFontPx(landscape, options.captionSize, 405)} position={options.captionPosition} natural={natural} onNatural={onNatural} burned={burned} />
+          <Frame url={url} segment={framed} width={720} height={405} at={at} slowPush={options.slowPush} caption={cueAt(wide, at)?.text ?? null} captionSize={captionFontPx(landscape, options.captionSize, 405)} position={options.captionPosition} natural={natural} onNatural={onNatural} burned={burned} />
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Frame url={url} segment={segment === null ? null : { ...segment, ...(segment.kind === "picture" ? { focus: drawn } : {}) }} width={228} height={405} vertical caption={cueAt(tall, at)?.text ?? null} captionSize={captionFontPx("1080x1920", options.captionSize, 405)} position={options.captionPosition} natural={natural} onNatural={onNatural} burned={burned} />
+            <Frame url={url} segment={framed} width={228} height={405} at={at} slowPush={options.slowPush} caption={cueAt(tall, at)?.text ?? null} captionSize={captionFontPx("1080x1920", options.captionSize, 405)} position={options.captionPosition} natural={natural} onNatural={onNatural} burned={burned} />
           </div>
           {target !== null && target.file !== null && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minWidth: 0 }}>
-              <b style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>9:16 · focus</b>
+              <b style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>Focus</b>
               <div
                 className="fy-abv-vid fy-abv-drag"
                 style={{ width: FW, height: FH }}
@@ -414,7 +441,8 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
                 }}
               >
                 <img src={url(target.file)} alt="" onLoad={(event) => onNatural(target.file!, { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} style={{ left: fit.left, top: fit.top, width: fit.width, height: fit.height }} />
-                {drawnCrop !== null && size !== undefined && <div className="fy-abv-crop" style={{ left: fit.left + (drawnCrop.x / size.width) * fit.width, width: (drawnCrop.cw / size.width) * fit.width, top: fit.top + (drawnCrop.y / size.height) * fit.height, bottom: FH - fit.top - ((drawnCrop.y + drawnCrop.ch) / size.height) * fit.height }} />}
+                {otherCrop !== null && <div className="fy-abv-crop alt" data-testid="audiobook-video-crop-other" style={otherCrop} />}
+                {renderedCrop !== null && <div className="fy-abv-crop" data-testid="audiobook-video-crop" style={renderedCrop} />}
                 <div className="fy-abv-focus" style={{ left: fit.left + drawn.x * fit.width, top: fit.top + drawn.y * fit.height }} />
               </div>
               <span className="fy-abv-note">drag to set · kept on the picture</span>

@@ -230,13 +230,29 @@ describe("Export audiobook · Video (turn 197)", () => {
     }
   });
 
-  it("previews a frame with the vertical crop's focus, and puts the focus back to the centre (197b)", async () => {
+  it("previews a frame filled as the file renders it, the crops around the focus, and puts the focus back to the centre (197b)", async () => {
     const m = await videoSheet();
     await answerState(m, [{ chapterId: "slack-water", seconds: 12, rendered: false }]);
     await press(q(m, '[data-testid="audiobook-video-preview-open"]'));
     const preview = q(m, '[data-testid="audiobook-video-preview"]')!;
-    assert.match(text(preview), /^Preview · Slack water16:9 · 1920×1080 · sidecar captionsDone9:16 · focusdrag to set · kept on the pictureCentre/);
+    assert.match(text(preview), /^Preview · Slack water16:9 · 1920×1080 · sidecar captionsDoneFocusdrag to set · kept on the pictureCentre/);
     assert.match(text(preview), /0:00 · cover/);
+    // A 3:2 picture, as Na love or Juju's are, once the browser knows its size: it covers both
+    // frames (no bar) and the focus box draws the crops the file takes (turn 197's correction).
+    const stair = [...preview.querySelectorAll("img")].filter((img) => img.getAttribute("src")?.includes("stair.png"));
+    for (const img of stair) Object.defineProperties(img, { naturalWidth: { value: 1536 }, naturalHeight: { value: 1024 } });
+    await act(async () => void stair[0]!.dispatchEvent(new dom.window.Event("load")));
+    const frames = [...preview.querySelectorAll(".fy-abv-vid")].filter((frame) => frame.querySelector('img[src*="stair.png"]') !== null);
+    const wideImg = frames[0]!.querySelector("img")! as unknown as HTMLElement;
+    const tallImg = frames[1]!.querySelector("img")! as unknown as HTMLElement;
+    assert.equal(wideImg.className, "", "no longer the contained (letterboxed) picture");
+    assert.deepEqual([wideImg.style.left, wideImg.style.top, wideImg.style.width, wideImg.style.height], ["0", "-37.5px", "720px", "480px"], "720 wide, the 80 rows above the 16:9 band cut away");
+    assert.ok(!wideImg.style.transform, "Slow push starts from the crop itself at the start of the hold");
+    assert.deepEqual([tallImg.style.left, tallImg.style.width], [`${(-480 * 228) / 576}px`, `${(1536 * 228) / 576}px`], "9:16: the full-height column around the centre");
+    const crop = q(m, '[data-testid="audiobook-video-crop"]')! as unknown as HTMLElement;
+    const column = q(m, '[data-testid="audiobook-video-crop-other"]')! as unknown as HTMLElement;
+    assert.deepEqual([crop.style.width, crop.style.height], ["253.5px", "142.59375px"], "the 16:9 crop, lit: the band of the picture the file shows");
+    assert.equal(column.style.height, "169px", "the 9:16 column, outlined, the picture's full height");
     await press(button("Centre"));
     const ask = lastAsk(m, "set-audiobook-picture-focus")!;
     assert.deepEqual([ask.chapterFile, ask.block, ask.focus], ["slack-water", "a", null]);

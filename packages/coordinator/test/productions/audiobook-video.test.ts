@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -17,7 +17,7 @@ import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION } from "../../src/world/commit.js";
-import { exportAudiobookVideo, forgetVideoJob, pendingVideoJobs, videoCacheFolder } from "../../src/productions/audiobook-video.js";
+import { exportAudiobookVideo, forgetVideoJob, pendingVideoJobs, readPictureSize, videoCacheFolder } from "../../src/productions/audiobook-video.js";
 import type { WorldStore } from "../../src/world/store.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
@@ -254,7 +254,7 @@ describe("the audiobook as a video (turn 197)", () => {
         assert.equal(info.chapters[0]!.tags?.title, "Neap");
         const srt = await readFile(join(h.worldDir, dir, "the-ledger-of-nights-01-neap.srt"), "utf8");
         assert.match(srt, /^1\n00:00:00,000 --> /);
-        assert.ok(srt.split("\n\n").every((cue) => cue.split("\n").slice(2).every((line) => line.length <= 42) && cue.split("\n").length <= 4), "at most two lines of 42");
+        assert.ok(srt.trim().split("\n\n").every((cue) => cue.split("\n").slice(2).every((line) => line.length <= 42) && cue.split("\n").length <= 4), `at most two lines of 42: ${srt}`);
         assert.match(await readFile(join(h.worldDir, dir, "the-ledger-of-nights-01-neap.vtt"), "utf8"), /^WEBVTT\n\n00:00:00\.000 --> /);
         // The opening is the title card over the picture blurred; the picture itself comes after.
         const card = await frameLuma(file, 0.5, 64, 36);
@@ -298,6 +298,82 @@ describe("the audiobook as a video (turn 197)", () => {
       },
       { ffmpeg: true },
     ));
+
+  it("fills the frame with a 3:2 picture at 16:9 and at 9:16, cropped around its focus, and burns two lines at most", { skip }, () =>
+    withHarness(
+      async (h) => {
+        await read(h.send, "01-neap");
+        // A 3:2 picture as Na love or Juju's are (1536 × 1024, here 600 × 400): white on its left
+        // half, black on its right, so a frame shows where the crop stands and whether bars came back.
+        await new Promise<void>((done, fail) => {
+          const child = spawn(FFMPEG!, ["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=white:s=600x400,drawbox=x=300:y=0:w=300:h=400:color=black:t=fill", "-frames:v", "1", join(h.worldDir, "artifacts", "board-v2.png")], { windowsHide: true });
+          child.on("error", fail);
+          child.on("exit", (code) => (code === 0 ? done() : fail(new Error(`ffmpeg exited ${code}`))));
+        });
+        assert.deepEqual(await readPictureSize(join(h.worldDir, "artifacts", "board-v2.png")), { width: 600, height: 400 });
+        await h.send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p1.0", picture: { file: "artifacts/board-v2.png", source: "scenes" }, requestId: REQUEST });
+        const column = (frame: Buffer, width: number, height: number, x: number) => Array.from({ length: height }, (_, y) => frame[y * width + x]!);
+        const mean = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+
+        // 16:9 with Slow push: the picture covers the frame; its left edge is the picture's white,
+        // not a bar, at the start of the hold and at its end.
+        const wide = await render(h, { shape: "1280x720", subtitles: "burn-in+sidecar", titleCards: false });
+        assert.ok(wide.result.ok, JSON.stringify(wide.result));
+        const wideFile = join(h.worldDir, wide.result.dir, wide.result.files[0]!.name);
+        const seconds = wide.result.files[0]!.seconds;
+        for (const at of [seconds * 0.55, seconds - 0.1]) {
+          const frame = await frameLuma(wideFile, at, 64, 36);
+          assert.ok(mean(column(frame, 64, 36, 0).slice(0, 18)) > 200, `the left edge is picture, not a bar, at ${at}`);
+          assert.ok(mean(column(frame, 64, 36, 63).slice(0, 18)) < 40, `the right edge is the picture's black half at ${at}`);
+          assert.ok(mean(Array.from({ length: 30 }, (_, x) => frame[x]!)) > 200, "the top row is picture");
+        }
+        const srt = await readFile(join(h.worldDir, wide.result.dir, wide.result.files[0]!.name.replace(/\.mp4$/, ".srt")), "utf8");
+        for (const cue of srt.trim().split(/\n\n/)) assert.ok(cue.split("\n").length <= 4, `two lines at most: ${cue}`);
+
+        // 9:16: a full-height column around the focus — on the white half, then the black.
+        await h.send({ kind: "set-audiobook-picture-focus", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p1.0", focus: { x: 0.25, y: 0.5 } });
+        const left = await render(h, { shape: "1080x1920", slowPush: false, subtitles: "none", titleCards: false });
+        assert.ok(left.result.ok, JSON.stringify(left.result));
+        const leftFrame = await frameLuma(join(h.worldDir, left.result.dir, left.result.files[0]!.name), left.result.files[0]!.seconds - 0.2, 18, 32);
+        assert.ok(Math.min(...leftFrame) > 200, "the column stands on the white half, edge to edge");
+        await h.send({ kind: "set-audiobook-picture-focus", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p1.0", focus: { x: 0.8, y: 0.5 } });
+        const right = await render(h, { shape: "1080x1920", slowPush: false, subtitles: "none", titleCards: false });
+        assert.ok(right.result.ok, JSON.stringify(right.result));
+        const rightFrame = await frameLuma(join(h.worldDir, right.result.dir, right.result.files[0]!.name), right.result.files[0]!.seconds - 0.2, 18, 32);
+        assert.ok(Math.max(...rightFrame) < 40, "and moved, on the black half");
+      },
+      { ffmpeg: true },
+    ));
+
+  it("reads a picture's size from its header, and none from a JPEG that says it is turned", async () => {
+    const { root } = await makeTempRoot();
+    const jpeg = (orientation: number | null) => {
+      const exif = orientation === null ? Buffer.alloc(0) : (() => {
+        const tiff = Buffer.alloc(26);
+        tiff.write("MM", 0, "latin1");
+        tiff.writeUInt16BE(42, 2);
+        tiff.writeUInt32BE(8, 4);
+        tiff.writeUInt16BE(1, 8);
+        tiff.writeUInt16BE(0x0112, 10);
+        tiff.writeUInt16BE(3, 12);
+        tiff.writeUInt32BE(1, 14);
+        tiff.writeUInt16BE(orientation, 18);
+        const body = Buffer.concat([Buffer.from("Exif\0\0", "latin1"), tiff]);
+        const head = Buffer.from([0xff, 0xe1, 0, 0]);
+        head.writeUInt16BE(body.length + 2, 2);
+        return Buffer.concat([head, body]);
+      })();
+      const frame = Buffer.from([0xff, 0xc0, 0, 17, 8, 0x04, 0x00, 0x06, 0x00, 3, 1, 0x11, 0, 2, 0x11, 1, 3, 0x11, 1]);
+      return Buffer.concat([Buffer.from([0xff, 0xd8]), exif, frame, Buffer.from([0xff, 0xd9])]);
+    };
+    await writeFile(join(root, "plain.jpg"), jpeg(null));
+    await writeFile(join(root, "upright.jpg"), jpeg(1));
+    await writeFile(join(root, "turned.jpg"), jpeg(6));
+    assert.deepEqual(await readPictureSize(join(root, "plain.jpg")), { width: 1536, height: 1024 });
+    assert.deepEqual(await readPictureSize(join(root, "upright.jpg")), { width: 1536, height: 1024 });
+    assert.equal(await readPictureSize(join(root, "turned.jpg")), null, "cropped in ffmpeg's own terms instead");
+    assert.equal(await readPictureSize(join(root, "missing.png")), null);
+  });
 
   it("joins one file for the book from the cached chapters: the cover first, a marker a chapter, the vertical crop", { skip }, () =>
     withHarness(

@@ -16,7 +16,11 @@ import {
   segmentAt,
   segmentFades,
   titleCardSeconds,
-  verticalCrop,
+  coverCrop,
+  pushWindow,
+  burnedLineChars,
+  CUE_MAX_SEC,
+  CUE_MIN_SEC,
   videoEstimate,
   videoFileName,
   videoFolderName,
@@ -103,16 +107,18 @@ describe("the audiobook as a video (turn 197)", () => {
   it("times the words as the player's Text does, at most two lines of 42 in a sidecar cue", () => {
     const cues = chapterCues(chapter());
     assert.deepEqual(cues[0], { text: "Chapter 1", startSec: 0, endSec: 2 });
-    assert.deepEqual(cues[1], { text: "Tunde was telling the goat story again.", startSec: 2, endSec: 20 });
+    assert.deepEqual(cues[1], { text: "Tunde was telling the goat story again.", startSec: 2, endSec: 8 }, "a short sentence over a long pause clears after six seconds");
     const long = cues.filter((cue) => cue.startSec >= 20 && cue.endSec <= 50);
-    assert.equal(long.length, 2, "a long sentence is cut at a line break into two cues");
     assert.equal(long[0]!.startSec, 20);
-    assert.equal(long[1]!.endSec, 50, "sharing its time by length, ending where the block ends");
+    // Sharing its time by length; a cue that ends a sentence over a long pause clears early, so only there may a gap open.
+    long.slice(1).forEach((cue, at) => assert.ok(cue.startSec === long[at]!.endSec || (/[.!?]$/.test(long[at]!.text) && cue.startSec > long[at]!.endSec), cue.text));
+    assert.ok(long.at(-1)!.endSec <= 50, "never past the block");
     for (const cue of cues) {
       const lines = cue.text.split("\n");
       assert.ok(lines.length <= 2 && lines.every((line) => line.length <= 42), cue.text);
     }
-    assert.equal(cueAt(cues, 10)!.text, "Tunde was telling the goat story again.");
+    assert.equal(cueAt(cues, 5)!.text, "Tunde was telling the goat story again.");
+    assert.equal(cueAt(cues, 10), null);
   });
 
   it("burns only the sentence being read, broken to the frame, and none over the card", () => {
@@ -128,11 +134,91 @@ describe("the audiobook as a video (turn 197)", () => {
     assert.equal(Math.round(captionFontPx("1080x1920", "m", 405)), 15, "and its 9:16 is --text-md");
   });
 
-  it("crops a full-height 9:16 column around the focus, kept inside the picture", () => {
-    assert.deepEqual(verticalCrop(1920, 1080, 0.5), { left: 0.3418, width: 0.3164 });
-    assert.deepEqual(verticalCrop(1920, 1080, 0.98), { left: 0.6836, width: 0.3164 }, "never past the edge");
-    assert.deepEqual(verticalCrop(1920, 1080, 0), { left: 0, width: 0.3164 });
-    assert.deepEqual(verticalCrop(900, 1600, 0.5), { left: 0, width: 1 }, "a picture already narrow keeps its width");
+  it("fills the frame: a picture scaled to cover and cropped around its focus, kept inside, at 16:9 and at 9:16", () => {
+    // Na love or Juju's pictures are 3:2; 16:9 loses a strip top and bottom, never a black bar.
+    assert.deepEqual(coverCrop(1536, 1024, 1920, 1080), { x: 0, y: 80, width: 1536, height: 864, focusX: 0.5, focusY: 0.5 });
+    assert.deepEqual(coverCrop(1536, 1024, 1280, 720, { x: 0.3, y: 0.1 }), { x: 0, y: 0, width: 1536, height: 864, focusX: 0.3, focusY: 0.1185 }, "kept inside: the focus near the top keeps the top");
+    assert.deepEqual(coverCrop(1536, 1024, 1080, 1920), { x: 480, y: 0, width: 576, height: 1024, focusX: 0.5, focusY: 0.5 }, "9:16 is a full-height column");
+    assert.deepEqual(coverCrop(1536, 1024, 1080, 1920, { x: 0.95, y: 0.5 }), { x: 960, y: 0, width: 576, height: 1024, focusX: 0.8667, focusY: 0.5 }, "never past the edge");
+    assert.deepEqual(coverCrop(1920, 1080, 1920, 1080, { x: 0.9, y: 0.9 }), { x: 0, y: 0, width: 1920, height: 1080, focusX: 0.9, focusY: 0.9 }, "a picture of the frame's shape is whole");
+    assert.deepEqual(coverCrop(900, 1600, 1920, 1080), { x: 0, y: 547, width: 900, height: 506, focusX: 0.5, focusY: 0.5 }, "a tall picture gives a band of its middle");
+  });
+
+  it("pushes toward the focus inside the crop and never past its edge", () => {
+    assert.deepEqual(pushWindow({ focusX: 0.5, focusY: 0.5 }, 0), { left: 0, top: 0, size: 1 });
+    for (const focus of [{ focusX: 0, focusY: 0 }, { focusX: 1, focusY: 1 }, { focusX: 0.3, focusY: 0.8 }]) {
+      for (const progress of [0, 0.4, 1, 3]) {
+        const window = pushWindow(focus, progress);
+        assert.ok(window.left >= 0 && window.top >= 0 && window.left + window.size <= 1 + 1e-9 && window.top + window.size <= 1 + 1e-9, JSON.stringify({ focus, progress, window }));
+        // The focus stands where it stood: the push moves toward it, not past it.
+        assert.ok(Math.abs((focus.focusX - window.left) / window.size - focus.focusX) < 1e-9);
+      }
+    }
+    assert.equal(Math.round(1 / pushWindow({ focusX: 0.5, focusY: 0.5 }, 1).size * 100) / 100, 1.06, "6% closer by the end of the hold");
+  });
+
+  it("cuts Na love or Juju's chapter 1 into short cues: two lines at most, at the phrases, on screen 1.2 to 6 s", () => {
+    // The opening of the real chapter as its render timed it (the .srt of 0.5.60-local.20), each
+    // block read alone save the grouped take whose quote runs over a sentence's end.
+    const block = (key: string, at: number, to: number, ...sentences: Array<[number, string]>) => ({ key, number: 1, file: `artifacts/${key}.wav`, at, seconds: to - at, sentences: sentences.map(([start, text]) => ({ at: start, text })) });
+    const opening: Pick<ListeningChapter, "blocks"> = {
+      blocks: [
+        block("title", 0, 1.6, [0, "Chapter 1"]),
+        block("p0", 1.6, 4.785, [1.6, "Tunde was telling the goat story again."]),
+        block("p1", 4.785, 29.18, [4.785, "Ade had been in the car the first time it happened, on the Ibadan expressway in 2004, and he had heard it told since at two weddings, one naming ceremony and Tunde's fortieth, and every time the goat grew larger and the customs officer more corrupt and Tunde's cousin from Ilesha more heroic. Tonight the goat had learned to open doors."]),
+        block("p2", 29.18, 33.09, [29.18, "\"It is not possible,\" Ade said."]),
+        block("p3", 33.09, 46.743, [33.09, "\"Ade, I am telling you."], [34.449, "The goat looked at me like this —\" Tunde widened his eyes and lowered his chin, and the effect, under the purple lights of the club, was so exactly that of an offended goat that Ade had to put his glass down."]),
+        block("p4", 46.743, 48.575, [46.743, "\"— like say na me get the car.\""]),
+        block("p5", 48.575, 57.82, [48.575, "\"The goat was in the boot.\""], [51.205, "\"The goat was in the boot spiritually."], [54.957, "Physically, he was in front.\""]),
+      ],
+    };
+    const cues = chapterCues(opening);
+    const lines = cues.map((cue) => cue.text.split("\n"));
+    for (const [index, cue] of cues.entries()) {
+      assert.ok(lines[index]!.length <= 2 && lines[index]!.every((line) => line.length <= 42), `two lines of 42: ${JSON.stringify(cue.text)}`);
+      const seconds = cue.endSec - cue.startSec;
+      assert.ok(seconds >= CUE_MIN_SEC - 0.001 && seconds <= CUE_MAX_SEC + 0.001, `on screen ${seconds} s: ${JSON.stringify(cue.text)}`);
+    }
+    // The cue the render showed as three lines ending "…an offended goat that Ade" is cut at its
+    // clauses, and the quote ends a line before its dialogue tag.
+    const goat = cues.filter((cue) => cue.startSec >= 34.4 && cue.endSec <= 46.75);
+    assert.deepEqual(
+      goat.map((cue) => cue.text),
+      ["The goat looked at me like this —\"\nTunde widened his eyes", "and lowered his chin, and the effect,\nunder the purple lights of the club,", "was so exactly that of an offended goat\nthat Ade had to put his glass down."],
+    );
+    assert.ok(!cues.some((cue) => /\bthat Ade$/m.test(cue.text)), "never a line ending mid-phrase on a name before its verb");
+    // No cue or line ends on an article, a preposition or a possessive.
+    for (const line of lines.flat()) assert.doesNotMatch(line, /\b(a|an|the|of|to|for|with|from|his|her|their|in|on|at)$/i, line);
+    // The long sentence of p1 is cut at its commas and its conjunctions, each cue continuing the last at once.
+    const p1 = cues.filter((cue) => cue.startSec >= 4.785 && cue.endSec <= 29.18);
+    assert.ok(p1.length >= 5, String(p1.length));
+    assert.equal(p1[0]!.startSec, 4.785);
+    assert.equal(p1.at(-1)!.endSec, 29.18);
+    for (let at = 1; at < p1.length; at++) {
+      assert.equal(p1[at]!.startSec, p1[at - 1]!.endSec, "no gap inside a sentence");
+      assert.match(`${p1[at - 1]!.text} | ${p1[at]!.text}`, /([,.] \| )|( \| (and|on|from|to) )/, `cut at a phrase: ${p1[at - 1]!.text} | ${p1[at]!.text}`);
+    }
+    // A short block that could not be read in its own time borrows from the cue beside it.
+    const short = chapterCues({ blocks: [block("a", 0, 0.6, [0, "\"Nothing.\""]), block("b", 0.6, 4, [0.6, "Tunde was grinning at him across the table."])] });
+    assert.deepEqual(short.map((cue) => [cue.startSec, cue.endSec]), [[0, 1.2], [1.2, 4]]);
+  });
+
+  it("burns two lines at most at every shape and size: the vertical frame's line is shorter, so its cues are", () => {
+    assert.equal(burnedLineChars("1920x1080", "l"), 42, "never longer than 42 at 16:9");
+    assert.ok(burnedLineChars("1080x1920", "l") < 42);
+    const text = "It was the laugh only Tunde could get out of him: undignified, helpless, a laugh that belonged to the boy he had been at Unilag, sharing a room in Mariere Hall with a boy who could not cook and would not stop talking.";
+    const long: Pick<ListeningChapter, "blocks"> = { blocks: [{ key: "p", number: 1, file: "a.wav", at: 60.477, seconds: 17.473, sentences: [{ at: 60.477, text }] }] };
+    for (const shape of ["1920x1080", "1280x720", "1080x1920"] as const) {
+      for (const size of ["s", "m", "l"] as const) {
+        const cues = burnedCues(long, shape, size);
+        const width = burnedLineChars(shape, size);
+        for (const cue of cues) {
+          const lines = cue.text.split("\n");
+          assert.ok(lines.length <= 2 && lines.every((line) => line.length <= width), `${shape} ${size}: ${JSON.stringify(cue.text)}`);
+        }
+        assert.equal(cues.map((cue) => cue.text.replace(/\n/g, " ")).join(" "), text, "every word, in order");
+      }
+    }
   });
 
   it("splits a book over twelve hours into parts at the last chapter boundary under the cap; a chapter over it is a part alone", () => {
