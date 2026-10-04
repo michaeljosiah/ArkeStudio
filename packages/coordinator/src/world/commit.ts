@@ -379,6 +379,15 @@ export const AUDIOBOOK_TIMING_SCHEMA_VERSION = 48;
  * again — so the world is raised before the first record carrying either.
  */
 export const AUDIOBOOK_LOOK_SCHEMA_VERSION = 49;
+/**
+ * Looks per character (design turn 193, SPEC-047 R-112..R-117): `lookId`, `from`, `reading` and
+ * `conflicts` on a chapter look's characters, `mood` on the look, the look each person rode on a
+ * picture's stamp, and on a kit look `framing`, `mainFile`, `closeFile` and `closeTakeId`. A
+ * build before it reads the chapter's record, and a kit that holds such a look, as unreadable, so
+ * the world is raised before the first write of any of them. The design drew this as 50; 50 and
+ * 51 were taken by world chat while it waited, so it is 52.
+ */
+export const AUDIOBOOK_LOOKS_SCHEMA_VERSION = 52;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

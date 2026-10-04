@@ -9,6 +9,7 @@ import {
   audiobookNoteFor,
   audiobookReadingNotes,
   hasReadingNotes,
+  lookNeedsChoiceBoundary,
   audiobookDirectionFor,
   audiobookRekeyed,
   audiobookBlockState,
@@ -42,7 +43,7 @@ import {
 import { clipFor } from "../voice/library.js";
 import { directionPlan } from "../voice/direction.js";
 import { atomicWriteFile } from "../world/atomic.js";
-import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_LOOKS_SCHEMA_VERSION, AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
@@ -154,6 +155,9 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
   // The chapter's look, or a picture that keeps the lines it was made under (design turn 191c,
   // R-98): fields the builds before it read as unreadable, so the world is raised first.
   if (record.look !== undefined || Object.values(pictures ?? {}).some((picture) => picture.look !== undefined)) await store.ensureSchemaVersion(AUDIOBOOK_LOOK_SCHEMA_VERSION, "audiobook-look");
+  // A look chosen for a character, the mood line, or the look a picture rode (design turn 193,
+  // R-112): more fields the builds before it read as unreadable, so the world is raised first.
+  if (lookNeedsChoiceBoundary({ look: record.look, pictures })) await store.ensureSchemaVersion(AUDIOBOOK_LOOKS_SCHEMA_VERSION, "audiobook-looks");
   const { direction, ...undirected } = pictured ? { ...unpictured, pictures } : unpictured;
   const directed = Object.keys(direction).length > 0;
   if (directed) await store.ensureSchemaVersion(AUDIOBOOK_DIRECTION_SCHEMA_VERSION, "audiobook-direction");
