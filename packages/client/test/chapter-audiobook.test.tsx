@@ -1915,3 +1915,119 @@ describe("grouped reads (design turn 185)", () => {
     assert.deepEqual(reread.blocks, ["p3.0"], "one block, which the coordinator reads with its neighbours");
   });
 });
+
+/**
+ * The toolbar folded below 1100 (design turn 194, rule 15; 194h): the view switch over one line of
+ * quiet presses — the reading, Notes, the filter and a ⋯ holding Direct and illustrate — with Read and
+ * Listen held at the foot, and the Arke press in the bar instead of floating over the list.
+ */
+describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
+  /** A window `width` wide: the width queries answer by it, a fine pointer, nothing else. */
+  function windowOf(width: number): void {
+    Object.assign(dom.window, {
+      matchMedia: (query: string) => {
+        const widths = [...query.matchAll(/\((min|max)-width: (\d+)px\)/g)];
+        return {
+          matches: widths.length > 0 && !query.includes("pointer") && widths.every(([, kind, value]) => (kind === "min" ? width >= Number(value) : width <= Number(value))),
+          addEventListener() {},
+          removeEventListener() {},
+        };
+      },
+    });
+  }
+  afterEach(() => {
+    delete (dom.window as unknown as { matchMedia?: unknown }).matchMedia;
+  });
+  const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+  /** What stands in the toolbar line, the foot's hold, and the bar, by test id. */
+  const where = (m: Mounted, testId: string): string[] =>
+    [".fy-ch__viewline", '[data-testid="audiobook-hold"]', ".fy-scene-back"].filter((area) => q(m, `${area} [data-testid="${testId}"]`) !== null);
+
+  it("wide, one line: Direct and illustrate is the pill, Read and Listen and the Arke press end the toolbar, and nothing is held", async () => {
+    windowOf(1600);
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    for (const testId of ["direct-illustrate", "read-audiobook", "audiobook-listen", "audiobook-arke"]) assert.deepEqual(where(m, testId), [".fy-ch__viewline"], `${testId} is on the toolbar line`);
+    assert.equal(q(m, '[data-testid="direct-illustrate"]')!.textContent, "Direct and illustrate", "named, with its chevron");
+    assert.equal(q(m, '[data-testid="audiobook-hold"]'), null, "nothing is held at the foot");
+  });
+
+  for (const [name, width] of [["a tablet", 820], ["a phone", 390]] as const) {
+    it(`${name}: Direct and illustrate is a ⋯ on the line, the reading, Notes and the filter beside it, Read and Listen held at the foot`, async () => {
+      windowOf(width);
+      const m = await mount(inkbound());
+      await answerOpen(m);
+      const line = q(m, ".fy-ch__viewline")!;
+      assert.ok(line.querySelector('[aria-label="Chapter view"]'), "the view switch");
+      for (const testId of ["audiobook-reading", "reading-notes-press", "audiobook-filter"]) assert.deepEqual(where(m, testId), [".fy-ch__viewline"], `${testId} stays on the line`);
+      const more = q(m, '[data-testid="direct-illustrate"]')!;
+      assert.deepEqual(where(m, "direct-illustrate"), [".fy-ch__viewline"], "the menu is on the line");
+      assert.equal(more.getAttribute("aria-label"), "Direct and illustrate", "named for a screen reader");
+      assert.equal(more.textContent, "", "a ⋯, no label");
+      assert.ok(more.className.includes("fy-ab__ico") && !more.className.includes("fy-ab__pill"));
+      for (const testId of ["read-audiobook", "audiobook-listen"]) assert.deepEqual(where(m, testId), ['[data-testid="audiobook-hold"]'], `${testId} is held at the foot, not on the line`);
+      const hold = q(m, '[data-testid="audiobook-hold"]')!;
+      assert.deepEqual([...hold.querySelectorAll("button")].map((button) => button.getAttribute("data-testid")), ["read-audiobook", "audiobook-listen"], "Read, then Listen");
+      assert.equal(q(m, '[data-testid="read-audiobook"]')!.textContent, "Read the chapter · 4 blocks", "the press says what it says wide; the foot's width drops the tails");
+      // The ⋯ opens the one menu, its items the same presses.
+      await act(async () => more.click());
+      assert.equal(more.getAttribute("aria-expanded"), "true");
+      assert.deepEqual(
+        all(m, '.fy-ab__toolmenu [role="menuitem"]').map((item) => item.querySelector(".fy-ab__menu-label")!.textContent),
+        ["Direct this chapter", "Illustrate this chapter", "Looks"],
+      );
+    });
+  }
+
+  it("a tablet's Arke press ends the line, and no press floats over the list", async () => {
+    windowOf(820);
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    assert.deepEqual(where(m, "audiobook-arke"), [".fy-ch__viewline"]);
+    assert.equal(q(m, ".fy-season-arke-rail"), null, "the rail's Ask Arke would stand over the foot");
+    assert.equal(q(m, ".fy-season-arke"), null);
+    await act(async () => q(m, '[data-testid="audiobook-arke"]')!.click());
+    assert.equal(q(m, '[data-testid="chapter-workspace"]')!.getAttribute("data-dock"), "true", "the press opens Arke's sheet");
+    assert.equal(q(m, '[data-testid="audiobook-arke"]')!.getAttribute("aria-pressed"), "true");
+  });
+
+  it("a phone's Arke press is in the app bar in the place of its ⋯ menu, and nothing floats over the foot", async () => {
+    windowOf(390);
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    assert.deepEqual(where(m, "audiobook-arke"), [".fy-scene-back"], "in the bar, not on the toolbar line");
+    assert.equal(q(m, '.fy-scene-back [aria-label="Page actions"]'), null, "the ⋯ held only Notes, which is on the line, and Ask Arke");
+    assert.equal(q(m, ".fy-season-arke"), null, "no press over the Read and Listen");
+    await act(async () => q(m, '[data-testid="audiobook-arke"]')!.click());
+    assert.equal(q(m, '[data-testid="chapter-workspace"]')!.getAttribute("data-dock"), "true", "the press opens Arke's sheet");
+  });
+
+  it("the Manuscript and Timing keep what they had on a phone: the ⋯ page menu, the floating Arke press, no hold", async () => {
+    windowOf(390);
+    const manuscript = await mount(inkbound(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap`);
+    assert.ok(q(manuscript, '.fy-scene-back [aria-label="Page actions"]'), "the page menu");
+    assert.ok(q(manuscript, ".fy-season-arke"), "the floating press");
+    assert.equal(q(manuscript, '[data-testid="audiobook-hold"]'), null);
+    await act(async () => manuscript.root.unmount());
+    manuscript.container.remove();
+    const timing = await mount(inkbound(), `${ROUTE.replace("view=audiobook", "view=timing")}`);
+    await answerOpen(timing);
+    assert.ok(q(timing, ".fy-season-arke"), "Timing's floating press");
+    assert.ok(q(timing, '.fy-scene-back [aria-label="Page actions"]'));
+    assert.equal(q(timing, '[data-testid="audiobook-hold"]'), null);
+  });
+
+  it("while a read runs, the foot holds its progress and Stop, and the line's menu gives way; the price is held where Read was", async () => {
+    windowOf(390);
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    await act(async () => q(m, '[data-testid="read-audiobook"]')!.click());
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4 }));
+    const hold = q(m, '[data-testid="audiobook-hold"]')!;
+    assert.match(hold.textContent ?? "", /reading… 0 of 4/, "the progress is held at the foot");
+    assert.ok([...hold.querySelectorAll("button")].some((button) => button.textContent === "Stop"), "and Stop");
+    assert.ok(hold.querySelector('[data-testid="audiobook-listen"]'), "beside Listen");
+    assert.equal(q(m, '.fy-ch__viewline [data-testid="direct-illustrate"]'), null, "a menu of things that cannot be pressed says nothing");
+    assert.equal(q(m, '.fy-ch__viewline [data-testid="audiobook-progress"]'), null, "the line does not repeat it");
+  });
+});

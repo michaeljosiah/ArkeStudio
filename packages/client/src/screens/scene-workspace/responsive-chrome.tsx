@@ -5,17 +5,17 @@ import { PageSheet } from "../../components/page-sheet.js";
 import { ChevronLeft, More, Pin, Sparkle } from "../../components/icons.js";
 
 /** Turn 168: a deep page owns the phone's head and the assistant overlays its work. */
-export function SceneBackRow({ context, title, onBack, children }: { context: string; title: string; onBack: () => void; children: ReactNode }) {
+export function SceneBackRow({ context, title, onBack, press, children }: { context: string; title: string; onBack: () => void; /** One press in the place of the ⋯ menu, for a page whose menu would hold only that press (design turn 194, rule 15). */ press?: ReactNode; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
   return <>
     <header className="fy-scene-back">
       <button type="button" aria-label="Back" onClick={onBack}><ChevronLeft size={20} /></button>
       <div><span>{context}</span><h1>{title}</h1></div>
-      <button type="button" aria-label="Page actions" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><More size={20} /></button>
+      {press ?? <button type="button" aria-label="Page actions" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><More size={20} /></button>}
     </header>
-    <PageSheet open={open} onClose={() => setOpen(false)} title={title} className="fy-scene-page-menu">
+    {press === undefined && <PageSheet open={open} onClose={() => setOpen(false)} title={title} className="fy-scene-page-menu">
       <div className="fy-scene-menu" onClick={event => { if ((event.target as Element).closest("button")) setOpen(false); }}>{children}</div>
-    </PageSheet>
+    </PageSheet>}
   </>;
 }
 

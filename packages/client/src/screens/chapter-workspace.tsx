@@ -1186,6 +1186,7 @@ export function ChapterWorkspace({
     connection,
     locked: locked || record === null,
     listenLeads: listenLeads(production, chapter.id),
+    compact,
     // What the Direct and illustrate menu says of each (design turn 194, rule 3), and the run line
     // that takes the menu's place while pictures are read or made.
     illustrate: {
@@ -1815,8 +1816,11 @@ export function ChapterWorkspace({
   };
   // The Arke press ends the Audiobook and Timing toolbars (design turn 194, rule 13), where the
   // folded rail's Ask Arke stood: put away, the dock leaves no strip and the list and the panel run
-  // to the window's edge. Narrow, the dock is a sheet and keeps its own press.
-  const toolbarDock = !compact && view !== "manuscript";
+  // to the window's edge. Below 1100 (rule 15) the press is still in the bar: a tablet's toolbar
+  // ends with it, a phone's app bar takes it in the place of the ⋯ menu, which held only Notes
+  // (now on the toolbar) and Ask Arke. Timing's narrow dock keeps its floating press.
+  const foldedAudiobook = compact && view === "audiobook";
+  const toolbarDock = view !== "manuscript" && (!compact || foldedAudiobook);
   const arkePress = toolbarDock ? (
     <button
       type="button"
@@ -1830,10 +1834,11 @@ export function ChapterWorkspace({
       <Chat size={16} />
     </button>
   ) : null;
+  const barArke = phone && foldedAudiobook ? arkePress : null;
   return (
     <div className="fy-sw" data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"} data-view={view}>
       <main className="fy-sw__centre" ref={chapterCentre}>
-        {phone && <SceneBackRow context={`${production.meta.title} · Chapters`} title={`${String(chapter.order).padStart(2,"0")} · ${chapter.title}`} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)}><Button onClick={() => setNotesOpen(true)}>Notes</Button><Button onClick={() => setDock(true)}>Ask Arke</Button></SceneBackRow>}
+        {phone && <SceneBackRow context={`${production.meta.title} · Chapters`} title={`${String(chapter.order).padStart(2,"0")} · ${chapter.title}`} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)} {...(barArke !== null ? { press: barArke } : {})}><Button onClick={() => setNotesOpen(true)}>Notes</Button><Button onClick={() => setDock(true)}>Ask Arke</Button></SceneBackRow>}
         <header className="fy-sw__head">
           {/* The page head is the Manuscript's (design turn 194, rule 2): the label, the title, the
               synopsis and the marks are set there. Audiobook and Timing open on their toolbar, and
@@ -1998,10 +2003,12 @@ export function ChapterWorkspace({
                 />
                 {record !== null && <AudiobookFilterMenu filters={audiobook.filters} filter={audiobook.filter} onFilter={audiobook.setFilter} />}
                 <span className="fy-ch__viewpush" />
-                {stagedDraft === undefined && audiobook.head}
+                {/* Below 1100 (194, rule 15) the line ends with the Direct and illustrate ⋯ and the
+                    tablet's Arke press; the read and Listen are held at the foot, under the list. */}
+                {stagedDraft === undefined && (compact ? audiobook.headMenu : audiobook.head)}
                 {/* Listen (design turn 186): the book from this chapter, after the chapter's own read. */}
-                {stagedDraft === undefined && <ListenButton worldId={worldId} production={production} chapterId={chapter.id} solid />}
-                {arkePress}
+                {stagedDraft === undefined && !compact && <ListenButton worldId={worldId} production={production} chapterId={chapter.id} solid />}
+                {!phone && arkePress}
               </>
             )}
           </div>
@@ -2717,6 +2724,15 @@ export function ChapterWorkspace({
             </span>
           </div>
         )}
+        {/* Below 1100 (design turn 194, rule 15) Read and Listen are held at the foot, 44 high, in the
+            place the toolbar's line gave up: the read's own control (or its price, its progress) at
+            the left and Listen at the right, both the width of the room they share. */}
+        {foldedAudiobook && stagedDraft === undefined && (
+          <div className="fy-ab__hold" data-testid="audiobook-hold">
+            {audiobook.headRead}
+            <ListenButton worldId={worldId} production={production} chapterId={chapter.id} solid />
+          </div>
+        )}
       </main>
 
       {/* Illustrate this chapter (design turn 193h, 193j): the proposal as a sheet over the main area,
@@ -2848,7 +2864,7 @@ export function ChapterWorkspace({
               })}
         />
       </ResponsiveSheet>
-      {(compact || (!dock && !toolbarDock)) && (
+      {((compact && !foldedAudiobook) || (!dock && !toolbarDock)) && (
         <button type="button" className={phone ? "fy-season-arke" : "fy-sw__rail fy-season-arke-rail"} aria-label="Open Arke" title="Pin the assistant back" onClick={() => setDock(true)}>
           {compact ? <Sparkle size={16} /> : <span className="fy-sw__rail-dot" aria-hidden="true" />}
           <span className="fy-sw__rail-label">{phone ? "Arke" : "Ask Arke"}</span>

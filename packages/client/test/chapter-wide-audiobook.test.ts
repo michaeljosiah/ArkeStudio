@@ -62,6 +62,22 @@ describe("the Audiobook view takes the whole room (turn 193)", () => {
     assert.ok(audiobook.every((rule) => !/margin-inline: auto/.test(rule.body)), "nothing in the Audiobook view centres itself against a cap");
   });
 
+  it("below 1100 the toolbar folds to two lines and Read and Listen are held at a 44-high foot, on the Audiobook view alone (194, rule 15)", () => {
+    const folded = (needle: string) => mentioning(responsive, needle).filter((rule) => rule.selector.startsWith('[data-screen="chapter"][data-view="audiobook"]'));
+    assert.match(responsive, /\.fy-ab__hold \{ display: none; \}/, "nothing is held until the window is narrow");
+    const hold = folded(".fy-ab__hold").find((rule) => rule.selector.endsWith(".fy-ab__hold") && rule.body.includes("position: sticky"))!;
+    assert.match(hold.body, /bottom: 0/);
+    assert.match(hold.body, /border-top: 1px solid var\(--border\)/);
+    assert.ok(folded(".fy-ab__hold :is(.ui-btn, .fy-ab__pill)").some((rule) => /min-height: 44px/.test(rule.body)), "the held presses are 44 high");
+    const line = folded(".fy-ch__viewline").find((rule) => rule.selector.endsWith(".fy-ch__viewline") && rule.body.includes("padding: 10px"))!;
+    assert.match(line.body, /flex-wrap: wrap/, "the view switch on its own line, the presses on the next");
+    assert.ok(folded(".fy-seg__item").some((rule) => /height: 30px; min-height: 0/.test(rule.body)), "the quiet presses are the toolbar's 30, not 173's 44 targets");
+    // Each is scoped to the Audiobook view: Timing and the Manuscript are not drawn here.
+    for (const rule of mentioning(responsive, ".fy-ab__hold").filter((rule) => !rule.selector.startsWith(".fy-ab__hold"))) {
+      assert.match(rule.selector, /\[data-view="audiobook"\]/);
+    }
+  });
+
   it("only the Audiobook view's panel changes width: Timing and the Manuscript keep the 250 side", () => {
     const base = rules(responsive).find((rule) => rule.selector === ".fy-ch__panels");
     assert.match(base!.body, /width: 250px/);
