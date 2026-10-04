@@ -522,8 +522,13 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
     assert.match(html, /Who is ringing the drowned bell\?/);
     assert.match(html, /season\.json/, "the file is the fact under the buttons, with no sentence around it");
     assert.doesNotMatch(html, /the gate writes/, "no caption under the gate (turn 137)");
-    // The rail has two states and never both at once (turns 89, 91).
-    assert.doesNotMatch(html, /What it understood/, "the points are not up beside a decision");
+    // The rail has two states and never both at once (turns 89, 91). Development now opens in the
+    // Studio (SPEC-051 §2.5, PR 1589), where both are canvas views and "What it understood" is a
+    // tab: the decision is the view showing, and the points are put away behind theirs.
+    const view = (name: string) => html.match(new RegExp(`<div data-studio-view="${name}"( hidden="")?>`));
+    assert.ok(view("proposal") && view("understanding"), "both are views of the one canvas");
+    assert.equal(view("proposal")![1], undefined, "the staged season is up");
+    assert.equal(view("understanding")![1], ' hidden=""', "the points are not up beside a decision");
   });
 
   it("a production with no season stages its overview instead", () => {

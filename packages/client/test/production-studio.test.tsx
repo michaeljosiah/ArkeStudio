@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, it } from "node:test";
 import { act, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
 import { migrateLegacyScene, newId, orderedShots, type ConversationActionCard, type HumanDecisionCard, type WorldChatWorkspace } from "@arke-studio/contracts";
@@ -132,6 +133,33 @@ it("the proposal canvas opens the existing human card and returns to live state 
   decisions = []; await render();
   assert.equal(dom.document.querySelector('.fy-production-studio__full-card')?.hasAttribute("hidden"), true);
   await click("Production"); assert.ok(dom.document.querySelector('[aria-label="Current production outline"]'));
+});
+
+it("a closed Studio draws no canvas, so a docked screen is never rendered twice", async () => {
+  // Kept behind `hidden`, the canvas was a second copy of the screen under the dock: a Cut's clips
+  // and a storyboard's rows answered twice, and a 200-shot scene paid for both.
+  await setup();
+  assert.equal(dom.document.querySelector(".fy-production-studio"), null);
+  await click("Studio"); assert.ok(dom.document.querySelector(".fy-production-studio"));
+  await click("Close Studio"); assert.equal(dom.document.querySelector(".fy-production-studio"), null);
+});
+
+it("opens on a staged proposal, the newest thing a wrap-up leaves", async () => {
+  await setup(); await click("Studio");
+  const view = (text: string) => [...dom.document.querySelectorAll('.fy-production-studio nav button')].find(b => b.textContent === text);
+  assert.equal(view("Proposal")?.getAttribute("aria-pressed"), "true");
+  assert.equal(view("What it understood")?.getAttribute("aria-pressed"), "false");
+});
+
+it("renders to a string beside a global document, its side holding what a closed Studio rests there", () => {
+  // The string-rendering screen tests run with this linkedom document installed globally; a
+  // portal host made because `document` existed sent a portal to the server renderer, which throws.
+  const html = (proposal?: string) => renderToString(<MemoryRouter><ProductionStudio world={state.world} productionId={production.meta.id}
+    entry={{ kind: "production", productionId: production.meta.id }} workspace={workspace([card()])} docked
+    understanding={<p>Current notes</p>} {...(proposal ? { proposal: <p>{proposal}</p> } : {})}><aside><StudioSidebar /></aside></ProductionStudio></MemoryRouter>);
+  assert.match(html(), /<aside><div><p>Current notes<\/p><\/div><\/aside>/);
+  assert.doesNotMatch(html(), /class="fy-production-studio"/, "and no canvas behind it");
+  assert.match(html("Staged work"), /<aside><div><p>Staged work<\/p><\/div><\/aside>/, "the understanding gives way to a decision");
 });
 
 it("a phone Stage keeps its Conversation control reachable", async () => {

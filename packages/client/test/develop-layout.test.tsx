@@ -25,6 +25,7 @@ Object.defineProperty(dom.HTMLElement.prototype,"innerText",{configurable:true,g
 Object.assign(globalThis,{window:dom.window,document:dom.document,HTMLElement:dom.HTMLElement,Element:dom.Element,Node:dom.Node,Event:dom.Event,IS_REACT_ACT_ENVIRONMENT:true});
 let root:Root|null=null, sent:ClientMessage[]=[], acknowledgeUploads=true;
 const find=(selector:string)=>document.querySelector<HTMLElement>(selector)!;
+const button=(selector:string,text:string)=>[...document.querySelectorAll<HTMLElement>(selector)].find(element=>element.textContent===text)!;
 const props=(element:HTMLElement)=>{const key=Object.keys(element).find(key=>key.startsWith('__reactProps$'))!;return (element as unknown as Record<string,Record<string,(event:never)=>void>>)[key]!;};
 const click=async(element:HTMLElement)=>{assert.ok(element);await act(async()=>element.click());};
 async function mount(route='p/saltlight/story',size=390,mode='normal',remote=false,touch=true){
@@ -64,10 +65,13 @@ it('device files selected before a thread exists wait for its creation',async()=
   assert.equal(sent.filter(m=>m.kind==='world-chat-upload').length,1);assert.equal(sent.some(m=>m.kind==='world-chat-send'),false);
 });
 it('understood decisions keep their revision and wrap-up survives resize',async()=>{
-  await mount();await draft('Keep my draft');await click(find('.fy-thread-peek'));
-  await click(find('.fy-develop-sheet .fy-panel__pointacts button'));
+  // Development opens in the Studio (SPEC-051 §2.5, PR 1589): on a phone the understanding is a
+  // canvas view reached from the thread, not the side sheet the thread peek used to open.
+  await mount();await draft('Keep my draft');
+  await click(button('.fy-production-studio__head button','Canvas'));await click(button('.fy-production-studio nav button','What it understood'));
+  await click(find('.fy-production-studio .fy-panel__pointacts button'));
   const save=sent.find(m=>m.kind==='world-chat-save-point');assert.equal(save?.expectedCandidateRevision,1);
-  await click(find('.fy-develop-sheet .fy-wrapup button'));
+  await click(find('.fy-production-studio .fy-wrapup button'));
   await act(async()=>{width=1360;for(const listener of listeners)listener();});
   assert.equal(find('.fy-cx__editor').innerText,'Keep my draft');assert.match(find('.fy-wrapup button').textContent!,/Writing/);assert.equal(sent.filter(m=>m.kind==='world-chat-wrap-up').length,1);
 });
