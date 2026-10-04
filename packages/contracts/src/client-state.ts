@@ -63,7 +63,7 @@ import { SetupStatusSchema } from "./setup.js";
 import { VendorAuthStatusSchema, vendorAuthUnavailable } from "./vendor-auth.js";
 import { ReferenceKitSchema } from "./reference.js";
 import { PropSchema } from "./prop.js";
-import { RoutingSchema } from "./routing.js";
+import { RoutingSchema, TraversalEvidenceSchema } from "./routing.js";
 import { SelectionsSchema } from "./scene.js";
 import { SceneRecordSchema } from "./scene-flow.js";
 import { EpisodeIdSchema, SceneIdSchema } from "./ids.js";
@@ -173,6 +173,8 @@ export const ProductionBundleSchema = z
     season: SeasonSchema.nullable().default(null),
     /** routing.json — Interactive video's one graph authority, or null (epic #401, brief §2). */
     routing: RoutingSchema.nullable().default(null),
+    /** Derived from the durable preview journal; export findings use these same rows. */
+    routingTraversals: z.array(TraversalEvidenceSchema).optional(),
     /** story.md — freeform treatment / script prose, per format (§2.2). */
     treatment: z.string().nullable(),
     chapters: z.array(ChapterSummarySchema),

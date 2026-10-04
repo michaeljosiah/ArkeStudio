@@ -3,8 +3,12 @@
 Production readiness (#1422, SPEC-051 T-9) is covered by contracts
 `test/production-readiness.test.ts` and `test/world-chat-shape.test.ts`; coordinator
 `test/world-chat/production-readiness.test.ts`, `retrieval.test.ts`, `turn-result.test.ts` and
-`run.test.ts`; and client `test/production-plan-card.test.tsx`. These check actual selections,
-current voice placements, saved cut placement, scoped exports, complete fenced reads,
+`run.test.ts`, plus native `test/productions/drawn-frame.test.ts`, `interactive.test.ts` and
+`manuscript.test.ts`; and client `test/production-plan-card.test.tsx`. These check accepted
+image slots, beat pictures/text/routing and scanned traversal evidence, saved book prose,
+audible voice placements, base picture placement and unmuted subtitles. Full production
+exports carry the captured source fingerprint; changed sources and unstamped old exports
+cannot prove current delivery, including after restart. Coverage also includes complete fenced reads,
 stale checklist refusal, suggestion-only persistence at schema 59, restart reconstruction,
 and live checklist rendering without Approve. Run client tests from `packages/client`.
 

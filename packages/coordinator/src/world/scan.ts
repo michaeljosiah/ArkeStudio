@@ -6,6 +6,7 @@ import { RehearsalSessionSchema, deriveRehearsalLines, PerformanceBibleEventSche
 import { PerformanceReviewDecisionSchema, PerformanceSelectionsSchema } from "@arke-studio/contracts";
 import { PerformanceRecordSchema } from "@arke-studio/contracts";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { readTraversalFromDirectory } from "../productions/interactive.js";
 import { basename, extname } from "node:path";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
@@ -920,6 +921,7 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       } : {}),
       season,
       routing,
+      routingTraversals: routing ? await readTraversalFromDirectory(dir,id) : [],
       treatment,
       chapters,
       scenes,

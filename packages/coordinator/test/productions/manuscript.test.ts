@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import type { ClientMessage, DomainEvent } from "@arke-studio/contracts";
+import { deriveProductionReadiness, productionExportFingerprint, type ReadinessExport, type ClientMessage, type DomainEvent } from "@arke-studio/contracts";
+import type { ChangeLog } from "../../src/change-log.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { exportManuscript, importManuscript, manuscriptOf, readDocxDocument, readManuscript, writeDocx, writeEpub } from "../../src/productions/manuscript.js";
 import { openChapter, saveChapter } from "../../src/productions/ops.js";
@@ -224,6 +225,17 @@ describe("the manuscript in (R-50)", () => {
       assert.deepEqual(progress.map((e) => e.type === "export.progress" && e.status), ["running", "done"]);
       const done = progress.at(-1);
       assert.ok(done && done.type === "export.progress" && done.output?.startsWith("exports/") && done.output.endsWith(".epub"));
+      const bundle = provider.openStore()!.getBundle(), production = bundle.productions.find(p => p.meta.id === PRODUCTION)!;
+      assert.equal(done.sourceFingerprint, productionExportFingerprint(bundle, production));
+      await (coordinator as unknown as { changeLog: ChangeLog }).changeLog.drain();
+      const restarted = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test" });
+      const records = await (restarted as unknown as { durableExportReads(worldId: string): Promise<ReadinessExport[]> }).durableExportReads(WORLD_ID);
+      assert.equal(deriveProductionReadiness(bundle, production, records).checks.find(check => check.key === "export")!.status, "ready");
+      const chapter = production.chapters[0]!;
+      const opened = await openChapter(provider.openStore()!, PRODUCTION, chapter.id);
+      await saveChapter(provider.openStore()!, PRODUCTION, chapter.file, opened.body + "\nA new ending.\n", { baseHash: opened.hash });
+      const changed = provider.openStore()!.getBundle();
+      assert.equal(deriveProductionReadiness(changed, changed.productions.find(p => p.meta.id === PRODUCTION)!, records).checks.find(check => check.key === "export")!.status, "missing", "the durable export does not prove the newly saved manuscript");
     } finally {
       await provider.close();
     }

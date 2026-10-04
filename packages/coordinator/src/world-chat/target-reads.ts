@@ -60,6 +60,7 @@ export interface ArkeExportReadRecord {
   readonly output?: string | null;
   readonly error?: string | null;
   readonly createdAt?: string;
+  readonly sourceFingerprint?: string;
 }
 
 export interface TargetReadDeps {
@@ -502,6 +503,7 @@ function safeExportRecord(entry: ArkeExportReadRecord) {
     ...(entry.episodeId !== undefined ? { episodeId: entry.episodeId } : {}),
     status: entry.status,
     ...(entry.createdAt !== undefined ? { createdAt: entry.createdAt } : {}),
+    ...(entry.sourceFingerprint !== undefined ? { sourceFingerprint: entry.sourceFingerprint } : {}),
     ...(entry.percent !== undefined ? { percent: entry.percent } : {}),
     ...(entry.output !== undefined ? { output: safeExportOutput(entry.output) } : {}),
     ...(entry.error !== undefined ? { error: entry.error === null ? null : "export failed" } : {}),

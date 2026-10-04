@@ -196,7 +196,7 @@ import { applySceneEdits, sceneOfContext } from "../productions/scene-edits.js";
 import {
   appendTraversal,
   applyRoutingCommand,
-  exportInteractive,
+  exportInteractiveWithProgress,
   hasTraversalRequest,
   interactiveExportCompleted,
   interactiveFindings,
@@ -416,6 +416,7 @@ export interface WorldChatActionAdapterDeps {
    * the branch map's export uses, so the two exports cannot ship different packages.
    */
   readonly interactiveExportVoices?: (productionId: string) => BeatVoices | undefined;
+  readonly onExportProgress?: (event: Extract<import("@arke-studio/contracts").DomainEvent, { type: "export.progress" }>) => void;
 }
 
 function completeObservation(
@@ -4174,9 +4175,10 @@ async function executeSharedResource(
       const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
       if (!production) throw new Error("That production is no longer in this world.");
       const voices = deps.interactiveExportVoices?.(production.meta.id);
-      const result = await exportInteractive(store, production, now, {
+      const result = await exportInteractiveWithProgress(store, production, now, {
         exportId: action.authority.id,
         precondition,
+        ...(deps.onExportProgress ? { onProgress: deps.onExportProgress } : {}),
         ...(voices === undefined ? {} : { voices }),
       });
       return result.ok

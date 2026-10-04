@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { deriveProductionReadiness, newId, WorldChatWorkspaceSchema, type WorldChatCheckReceipt } from "@arke-studio/contracts";
+import { deriveProductionReadiness, productionExportFingerprint, newId, WorldChatWorkspaceSchema, type WorldChatCheckReceipt } from "@arke-studio/contracts";
 import { fixtureBundle } from "../index-db/helpers.js";
 import { validateProductionPlan, projectProductionPlan, refreshProductionPlanCards } from "../../src/world-chat/production-readiness.js";
 import { productionReadinessFence } from "../../src/world-chat/target-reads.js";
@@ -29,7 +29,8 @@ it("refreshes an open plan's export check without rereading or writing its conve
   const bundle = await fixtureBundle(), request = {productionId:"saltlight",nextSteps:["Export the cut."]}, at="2026-10-04T00:00:00Z";
   const workspace = WorldChatWorkspaceSchema.parse({conversationId:newId("cv"),status:"open",points:[],attachments:[],messages:[{id:newId("msg"),role:"studio",text:"Plan",createdAt:at,receipts:[],
     productionPlan:projectProductionPlan(bundle,[],request)}]});
-  const done = {id:"export",worldId:bundle.meta.worldId,productionId:"saltlight",status:"done" as const,output:"exports/film.mp4",createdAt:at};
+  const done = {id:"export",worldId:bundle.meta.worldId,productionId:"saltlight",status:"done" as const,output:"exports/film.mp4",createdAt:at,
+    sourceFingerprint:productionExportFingerprint(bundle,bundle.productions.find(p=>p.meta.id === "saltlight")!)};
   const refreshed = refreshProductionPlanCards(workspace,bundle,[done]);
   assert.equal(refreshed.messages[0]!.productionPlan!.readiness!.checks.find(c=>c.key === "export")!.status,"ready");
   assert.equal(workspace.messages[0]!.productionPlan!.readiness!.checks.find(c=>c.key === "export")!.status,"missing","Projection does not mutate its input");

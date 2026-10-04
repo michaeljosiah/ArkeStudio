@@ -282,7 +282,7 @@ import { recordFrameRunOutcome } from "./productions/frame-run-outcome.js";
 import {
   appendTraversal,
   applyRoutingCommandOnDisk,
-  exportInteractive,
+  exportInteractiveWithProgress,
   interactiveFindings,
   proposeBranchCanon,
   saveRouting,
@@ -587,6 +587,7 @@ import {
 } from "./world-chat/attachments.js";
 import { projectWorkspace } from "./world-chat/project.js";
 import { projectProductionPlan, refreshProductionPlanCards } from "./world-chat/production-readiness.js";
+import { productionExportFingerprint } from "@arke-studio/contracts";
 import {
   ConversationActionLifecycle,
   conversationActionDigest,
@@ -675,6 +676,7 @@ function exportReadRecord(event: ExportProgressEvent): ArkeExportReadRecord {
     ...(event.episodeId !== undefined ? { episodeId: event.episodeId } : {}),
     status: event.status,
     createdAt: event.at,
+    ...(event.sourceFingerprint ? { sourceFingerprint: event.sourceFingerprint } : {}),
     percent: event.percent,
     output: safeExportOutput(event.output),
     error: event.error === null ? null : "export failed",
@@ -11031,6 +11033,7 @@ export class Coordinator {
         }).catch(() => {});
         if (!this.stillOpen(store)) return;
         await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "list-routing-findings": {
@@ -11063,7 +11066,9 @@ export class Coordinator {
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production) return;
         const voices = this.interactiveExportVoices(store, production.meta.id);
-        const result = await exportInteractive(store, production, () => new Date().toISOString(), voices === undefined ? {} : { voices }).catch(
+        const result = await exportInteractiveWithProgress(store, production, () => this.nowIso(), {
+          onProgress: event => this.emit(event), ...(voices === undefined ? {} : { voices }),
+        }).catch(
           (err): InteractiveExportResult => ({
             ok: false,
             blockers: [describeCoordinatorError(err)],
@@ -11743,6 +11748,7 @@ export class Coordinator {
         if (!store) return;
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production) return;
+        const sourceFingerprint = productionExportFingerprint(store.getBundle(),production);
         /*
          * One export per production at a time (Codex round 3).
          *
@@ -11776,6 +11782,7 @@ export class Coordinator {
               productionId: msg.productionId,
               ...(msg.episodeId !== undefined ? { episodeId: msg.episodeId } : {}),
               exportId,
+              sourceFingerprint,
               status,
               percent,
               output: safeExportOutput(output),
@@ -11881,6 +11888,7 @@ export class Coordinator {
                     productionId: msg.productionId,
                     ...(msg.episodeId !== undefined ? { episodeId: msg.episodeId } : {}),
                     exportId: handle.id,
+                    sourceFingerprint,
                     status: "done",
                     percent: 100,
                     output: safeExportOutput(result.output),
@@ -12134,6 +12142,7 @@ export class Coordinator {
                   worldId: msg.worldId,
                   productionId: msg.productionId,
                   exportId: handle.id,
+                  sourceFingerprint,
                   status: "done",
                   percent: 100,
                   output: safeExportOutput(result.output),
@@ -13877,6 +13886,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         const exportId = `ms_${ulid()}`;
+        let sourceFingerprint: string | undefined;
         const progress = (status: "running" | "done" | "cancelled" | "failed", percent: number, output: string | null, error: string | null) =>
           this.emit({
             at: this.nowIso(),
@@ -13884,6 +13894,7 @@ export class Coordinator {
             worldId: msg.worldId,
             productionId: msg.productionId,
             exportId,
+            ...(sourceFingerprint ? {sourceFingerprint} : {}),
             status,
             percent,
             output: safeExportOutput(output),
@@ -13900,6 +13911,9 @@ export class Coordinator {
           try {
             await Promise.allSettled(this.chapterSaves);
             if (control.signal.aborted) throw new Error("cancelled");
+            const production = store.getBundle().productions.find(p=>p.meta.id === msg.productionId);
+            if (!production) throw new Error("production unavailable");
+            sourceFingerprint = productionExportFingerprint(store.getBundle(),production);
             const made = await exportManuscript(store, msg.productionId, msg.format, {
               exportId,
               language: msg.language ?? "en",
@@ -20244,6 +20258,7 @@ export class Coordinator {
       startProductionExport: (action, card) =>
         this.startProductionExportForConversationAction(store, action, card),
       interactiveExportVoices: (productionId) => this.interactiveExportVoices(store, productionId),
+      onExportProgress: event => this.emit(event),
       cancelExport: (exportId) => {
         const handle = this.exports.get(exportId);
         if (!handle) return false;
@@ -20557,7 +20572,7 @@ export class Coordinator {
       projectWorkspace(loaded, new Map(), {
         productionPlan: (request) => {
           const exports = [...this.exportReads.values()].filter(e => e.worldId === store.worldId && e.productionId === request.productionId)
-            .map(({ id, worldId, productionId, episodeId, status, output, createdAt }) => ({ id, worldId, productionId, episodeId, status, output, createdAt }));
+            .map(({ id, worldId, productionId, episodeId, status, output, createdAt, sourceFingerprint }) => ({ id, worldId, productionId, episodeId, status, output, createdAt, sourceFingerprint }));
           return projectProductionPlan(bundle, exports, request);
         },
         humanDecisions: human.cards, humanDecisionProblems: human.problems,

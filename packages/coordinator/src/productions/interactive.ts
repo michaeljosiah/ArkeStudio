@@ -14,6 +14,7 @@ import {
   playbackWindow,
   playerBeats,
   productionShape,
+  productionExportFingerprint,
   publicationBlockers,
   routingFindings,
   RoutingSchema,
@@ -22,6 +23,7 @@ import {
   ulid,
   INTERACTIVE_PLAYER_SOURCE,
   type ArtifactSidecar,
+  type DomainEvent,
   type PlayerBeat,
   type ProductionBundle,
   type Routing,
@@ -319,7 +321,7 @@ export async function appendTraversal(
   }, options.precondition);
 }
 
-async function readStoredTraversal(store: WorldStore, productionId: string) {
+async function readStoredTraversal(store: Pick<WorldStore,"dir">, productionId: string) {
   try {
     const raw = await readFile(
       toExtendedLength(join(store.dir, "productions", productionId, EVIDENCE_FILE)),
@@ -341,7 +343,11 @@ async function readStoredTraversal(store: WorldStore, productionId: string) {
 }
 
 export async function readTraversal(store: WorldStore, productionId: string): Promise<TraversalEvidence[]> {
-  return (await readStoredTraversal(store, productionId)).map(({ requestId: _requestId, ...entry }) => entry);
+  return readTraversalFromDirectory(store.dir,productionId);
+}
+
+export async function readTraversalFromDirectory(dir: string, productionId: string): Promise<TraversalEvidence[]> {
+  return (await readStoredTraversal({dir}, productionId)).map(({ requestId: _requestId, ...entry }) => entry);
 }
 
 export async function hasTraversalRequest(
@@ -651,6 +657,33 @@ export async function interactiveExportCompleted(
   if (!/^iv_[0-9A-HJKMNP-TV-Z]{26}$/.test(exportId)) return false;
   const outDir = join(store.dir, "exports", `interactive-${productionId}-${exportId}`);
   return (await interactiveExportProblems(outDir, { productionId, exportId })).length === 0;
+}
+
+/** Native and approved chat exports publish the same captured source snapshot to readiness. */
+export async function exportInteractiveWithProgress(
+  store: WorldStore,
+  production: ProductionBundle,
+  clock: () => string,
+  options: NonNullable<Parameters<typeof exportInteractive>[3]> & {
+    onProgress?: (event: Extract<DomainEvent, { type: "export.progress" }>) => void;
+  } = {},
+): Promise<InteractiveExportResult> {
+  const exportId = options.exportId ?? `iv_${ulid()}`;
+  const sourceFingerprint = productionExportFingerprint(store.getBundle(), production);
+  const progress = (status: "running" | "done" | "failed", output: string | null) => options.onProgress?.({
+    at: clock(), type: "export.progress", worldId: store.worldId, productionId: production.meta.id,
+    exportId, sourceFingerprint, status, percent: status === "done" ? 100 : 0, output,
+    error: status === "failed" ? "interactive export refused" : null,
+  });
+  progress("running", null);
+  try {
+    const result = await exportInteractive(store, production, clock, { ...options, exportId });
+    progress(result.ok ? "done" : "failed", result.ok ? result.dir : null);
+    return result;
+  } catch (error) {
+    progress("failed", null);
+    throw error;
+  }
 }
 
 /**
