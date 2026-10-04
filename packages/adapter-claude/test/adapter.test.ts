@@ -38,16 +38,36 @@ const result = (over: Record<string, unknown> = {}) => ({ type: "result", subtyp
 
 it("passes image parts to the Claude SDK as native base64 content blocks", async () => {
   let handed: unknown;
-  const run: RunQuery = ({ prompt }) => (async function* () {
+  const run: RunQuery = ({ prompt, options }) => (async function* () {
+    assert.equal(options["model"], "verified-vision");
     handed = (await prompt[Symbol.asyncIterator]().next()).value;
     yield result();
   })();
-  const adapter = new ClaudeAdapter({ command: "claude", runQuery: run });
+  const adapter = new ClaudeAdapter({ command: "claude", runQuery: run,
+    discoverModels: async () => [{ value: "default", resolvedModel: "verified-vision", displayName: "Vision", inputModalities: ["text", "image"] }] });
+  const catalog = await adapter.listModels();
+  catalog[0]!.inputModalities = ["text"];
   const session = await adapter.createSession({ cwd: await tempDir("arke-claude-image-"), agent: "world-builder", purpose: "world-chat" });
   await adapter.sendMessage({ sessionId: session.sessionId, parts: [{ type: "text", text: "Compare" }, { type: "image", mimeType: "image/png", data: "cmVk" }] });
   await adapter.dispose();
   assert.deepEqual((handed as { message: { content: unknown } }).message.content, [{ type: "text", text: "Compare" },
     { type: "image", source: { type: "base64", media_type: "image/png", data: "cmVk" } }]);
+});
+
+it("refuses Claude images for unknown and text-only models before starting a turn", async () => {
+  for (const inputModalities of [undefined, ["text"] as const]) {
+    let started = false;
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: () => { started = true; throw new Error("must not start"); },
+      discoverModels: async () => [{ value: "default", resolvedModel: "unverified", displayName: "Unknown",
+        ...(inputModalities ? { inputModalities: [...inputModalities] } : {}) }] });
+    try {
+      await adapter.listModels();
+      const session = await adapter.createSession({ cwd: await tempDir("arke-claude-no-image-"), agent: "world-builder", purpose: "world-chat" });
+      assert.equal(adapter.imageInputForSession(session.sessionId), false);
+      await assert.rejects(adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "image", mimeType: "image/png", data: "cmVk" }] }), /unverified or text-only/);
+      assert.equal(started, false);
+    } finally { await adapter.dispose(); }
+  }
 });
 
 async function collect(adapter: ClaudeAdapter, run: () => Promise<unknown>): Promise<HarnessEvent[]> {
@@ -84,6 +104,14 @@ describe("the confinement, enforced per tool call", () => {
     assert.equal(intentOf("Write"), "edit");
     assert.equal(intentOf("Grep"), "search");
     assert.equal(intentOf("mcp__arke-world__search_canon"), "world-query");
+  });
+
+  it("allows only the image read's coordinator-authorized catalogue file field", async () => {
+    assert.deepEqual(await decide(readOnly, "mcp__arke-world__view_image", { kind: "reference", file: "references/kit/main.png" }), { allow: true });
+    assert.deepEqual(await decide(readOnly, "mcp__arke-world__view_image", { kind: "reference", file: "references/kit/main.png", directory: "outside" }),
+      { allow: false, reason: "undeclared-path", intent: "world-query", argument: "directory" });
+    assert.deepEqual(await decide(readOnly, "mcp__arke-world__get_sheet", { file: "references/kit/main.png" }),
+      { allow: false, reason: "undeclared-path", intent: "world-query", argument: "file" });
   });
 
   it("allows an authoring agent to edit, and refuses the same tool to one that answers", async () => {

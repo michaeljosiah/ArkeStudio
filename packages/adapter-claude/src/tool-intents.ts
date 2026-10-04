@@ -21,6 +21,7 @@ interface ToolPolicy {
   readonly intent: ToolIntent;
   /** Input keys naming a filesystem path. Every one is confined to the working directory. */
   readonly paths: readonly string[];
+  readonly catalogueArguments?: readonly string[];
 }
 
 const TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
@@ -52,6 +53,9 @@ export const WORLD_QUERY_PREFIX = "mcp__arke-world__";
  * argument appearing here would mean that surface had changed shape underneath us.
  */
 const WORLD_QUERY_POLICY: ToolPolicy = { intent: "world-query", paths: [] };
+// This is a portable catalogue identity, checked by the coordinator's image read; it never
+// asks Claude to open a file in its scratch directory or grants an arbitrary filesystem read.
+const VIEW_IMAGE_POLICY: ToolPolicy = { intent: "world-query", paths: [], catalogueArguments: ["file"] };
 
 /**
  * Argument names that look like a place on disk.
@@ -64,6 +68,7 @@ const WORLD_QUERY_POLICY: ToolPolicy = { intent: "world-query", paths: [] };
 const UNDECLARED_PATH_ARGUMENT = /(^|_)(path|paths|dir|dirs|directory|directories|cwd|file|files)(_|$)/i;
 
 function policyFor(toolName: string): ToolPolicy | null {
+  if (toolName === `${WORLD_QUERY_PREFIX}view_image`) return VIEW_IMAGE_POLICY;
   if (toolName.startsWith(WORLD_QUERY_PREFIX)) return WORLD_QUERY_POLICY;
   return TOOL_POLICIES[toolName] ?? null;
 }
@@ -151,6 +156,7 @@ export async function decideTool(
 
   for (const key of Object.keys(call.input)) {
     if (paths.includes(key)) continue;
+    if (policy.catalogueArguments?.includes(key)) continue;
     if (UNDECLARED_PATH_ARGUMENT.test(key)) return { allow: false, reason: "undeclared-path", intent, argument: key };
   }
 

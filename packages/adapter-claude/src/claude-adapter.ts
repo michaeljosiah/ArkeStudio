@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   agentPromptFor,
   confinementFor,
+  findHarnessModel,
   ROSTER,
   sessionSkillForAgent,
   type AgentConfinement,
@@ -89,6 +90,7 @@ interface ClaudeSession {
   worldQueryUrl: string | undefined;
   /** Claude's model id, without the provider prefix used at Studio's harness boundary. */
   model: string | undefined;
+  imageInput: boolean;
   inbox: AsyncQueue<unknown>;
   abort: AbortController;
   normalize: NormalizeState;
@@ -185,6 +187,7 @@ export class ClaudeAdapter implements HarnessAdapter {
   /** Prepared settings keyed by an opaque one-use token, never by a reusable directory. */
   private readonly pending = new Map<string, SessionConfigInput>();
   private readonly discoveries = new Set<AbortController>();
+  private models: ModelInfo[] = [];
 
   constructor(private readonly opts: ClaudeAdapterOptions) {}
 
@@ -198,15 +201,18 @@ export class ClaudeAdapter implements HarnessAdapter {
     return new Set<HarnessCapability>(["events", ...(this.opts.discoverModels ? ["models" as const] : [])]);
   }
   readonly imageInput = true;
-  imageInputForSession(id: string): boolean { return this.sessions.has(id); }
+  imageInputForSession(id: string): boolean { return this.sessions.get(id)?.imageInput === true; }
   imageDestinationForSession(_id: string) { return { provider: "anthropic", local: false }; }
 
   async listModels(): Promise<ModelInfo[]> {
+    this.models = [];
     if (!this.opts.discoverModels) throw new Error("Claude model discovery is not configured");
     const abort = new AbortController();
     this.discoveries.add(abort);
     try {
-      return normalizeClaudeModels(await this.opts.discoverModels({ command: this.opts.command, signal: abort.signal }));
+      const models = normalizeClaudeModels(await this.opts.discoverModels({ command: this.opts.command, signal: abort.signal }));
+      this.models = structuredClone(models);
+      return models;
     } finally {
       this.discoveries.delete(abort);
     }
@@ -265,6 +271,11 @@ export class ClaudeAdapter implements HarnessAdapter {
     if (requestedModel !== undefined && !requestedModel.startsWith("anthropic/")) {
       throw new Error(`${requestedModel} is not available through Claude Code`);
     }
+    const selected = requestedModel === undefined ? this.models.find(model => model.isDefault)
+      : findHarnessModel(requestedModel, this.models);
+    // Native image transport alone says nothing about an unknown model. Pin a verified image
+    // identity instead of allowing a mutable Claude default or alias to authorize inspection.
+    const imageInput = selected?.inputModalities?.includes("image") === true;
     if (!input.cwd) throw new Error("a Claude session needs an explicit cwd — it is the confinement boundary");
     /*
      * From the session that was just prepared, not from how the adapter was built (codex,
@@ -309,7 +320,8 @@ export class ClaudeAdapter implements HarnessAdapter {
       // affirmative default is exactly the mistake a default-off privacy setting exists to avoid.
       confinement: confinementFor(member, { web: prepared.researchWeb === true }),
       worldQueryUrl: input.preparationId !== undefined ? prepared.worldQueryUrl : this.opts.worldQueryUrl,
-      model: requestedModel?.slice("anthropic/".length),
+      model: imageInput ? selected!.id : requestedModel?.slice("anthropic/".length),
+      imageInput,
       systemPrompt: agentPromptFor({
         ...member,
         researchWeb: prepared.researchWeb === true,
@@ -339,6 +351,9 @@ export class ClaudeAdapter implements HarnessAdapter {
     const session = this.sessions.get(input.sessionId);
     if (!session) throw new Error(`unknown session ${input.sessionId}`);
     if (session.refused) throw new Error(session.refused);
+    if (input.parts.some(part => part.type === "image") && !session.imageInput) {
+      throw new Error("view_image is unavailable: Claude session image capabilities are unverified or text-only");
+    }
     const correlationId = input.correlationId ?? randomUUID();
     const content = input.parts.some(p => p.type === "image") ? input.parts.map(p => p.type === "text" ? p : {
       type: "image", source: { type: "base64", media_type: p.mimeType, data: p.data },
