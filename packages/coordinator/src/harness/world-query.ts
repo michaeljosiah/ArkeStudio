@@ -174,10 +174,11 @@ const WORLD_CHAT_TOOLS = [
   },
   {
     name: "view_image",
-    description: "Inspect actual pixels of a selected attachment, artifact, reference/candidate file returned by world reads, or immutable Bench take. Returns a metadata-free PNG at most 1568 pixels on its longest edge, with id and byte digests. Video returns a poster frame only, never motion or audio. Refuses by name for unsupported adapters/models or cloud privacy settings. Never infer image contents when refused.",
+    description: "Inspect actual pixels of a selected attachment, artifact, reference/candidate file, immutable Bench take, or production take. For production-take, use productionId, takeId and frame (poster or start-frame); list_takes returns copyable imageSources. A segment poster comes from its own in-point; start-frame is the take's frozen seed, never today's selection. Returns a metadata-free PNG at most 1568 pixels, with byte digests. Video returns a poster only, never motion or audio. Refuses unsupported adapters/models or cloud privacy settings; never guess when refused.",
     inputSchema: { type: "object", properties: {
-      kind: { type: "string", enum: ["attachment", "artifact", "reference", "bench-take"] },
+      kind: { type: "string", enum: ["attachment", "artifact", "reference", "bench-take", "production-take"] },
       id: { type: "string" }, file: { type: "string" }, sessionId: { type: "string" }, takeId: { type: "string" },
+      productionId: { type: "string" }, frame: { type: "string", enum: ["poster", "start-frame"] },
     }, required: ["kind"], additionalProperties: false },
   },
   {

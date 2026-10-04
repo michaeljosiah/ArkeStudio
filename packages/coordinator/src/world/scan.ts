@@ -141,7 +141,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Fifty and fifty-one are world chat's (production contexts; the Bench conversation).
 // Fifty-two is a look chosen per character, the mood line and a look's close view (turn 193).
 // Fifty-three protects durable conversation image receipts/disclosures and world image privacy.
-export const SUPPORTED_SCHEMA_VERSION = 53;
+// Fifty-four retains original landed-media hashes on immutable production takes.
+export const SUPPORTED_SCHEMA_VERSION = 54;
 
 export class WorldOpenError extends Error {
   constructor(

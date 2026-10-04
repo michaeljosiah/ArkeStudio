@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
-import { newId, type HarnessAdapter, type WorldChatAttachment } from "@arke-studio/contracts";
+import { newId, type HarnessAdapter, type Take, type WorldChatAttachment } from "@arke-studio/contracts";
 import { ConversationImages } from "../../src/world-chat/images.js";
 import { QueryLeaseRegistry, LeaseDeniedError } from "../../src/world-chat/lease.js";
 import { WorldChatStore, conversationDir } from "../../src/world-chat/store.js";
@@ -129,6 +130,99 @@ describe("conversation image inspection — SPEC-050 R-31..R-34", () => {
     await bench.append({ type: "take-completed", takeId, media: { file: "look.png", hash: digest(bytes) }, completedAt: "2026-10-04T04:00:00Z" });
     const image = await h.retrieval.call(h.lease.token, "view_image", { kind: "bench-take", sessionId, takeId });
     assert.ok(image.imageContent); assert.equal(image.receipt.image!.sourceHash, digest(bytes));
+  });
+  it("discovers production images, reads a frozen seed and seeks a pass segment's own poster", async () => {
+    const positions: number[] = [], red = encodePng(solidImage(2, 2, [255, 0, 0, 255])), blue = encodePng(solidImage(2, 2, [0, 0, 255, 255]));
+    const h = await harness({ maker: { render: async (bytes, extension, _signal, atSec = 0) => {
+      if (extension === ".png") return bytes;
+      positions.push(atSec); return atSec === 2 ? blue : red;
+    }, renderFile: async (_path, _signal, atSec = 0) => { positions.push(atSec); return atSec === 2 ? blue : red; } } });
+    const production = h.store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
+    const { media: _media, ...base } = production.takes.find(t => t.kind === "clip")!;
+    const seedId = newId("ar"), seedHash = digest(blue);
+    const frame: Take = { ...base, id: newId("tk"), kind: "frame", media: "frame.png", mediaHash: digest(red), startFrame: "artifacts/frozen-seed.png",
+      params: { ...base.params, frameArtifact: { id: seedId, hash: seedHash } } };
+    const pass: Take = { ...base, id: newId("tk"), media: "pass.mp4", mediaHash: digest(red) };
+    const segment: Take = { ...base, id: newId("tk"), segment: { passTakeId: pass.id, inSec: 2, outSec: 4 } };
+    await h.store.commit({ kind: "production-images-test", source: "test", raiseSchemaVersion: 54, files: [
+      { path: "artifacts/frozen-seed.json", action: "create", baseHash: null, content: JSON.stringify({ id: seedId, kind: "image", file: "frozen-seed.png", hash: seedHash,
+        origin: { by: "user" }, links: [], created: "2026-10-04T04:00:00Z" }) },
+      ...[frame, pass, segment].map(take => ({ path: `productions/saltlight/takes/${take.id}/take.json`, action: "create" as const, baseHash: null, content: JSON.stringify(take) })),
+      ...[[`productions/saltlight/takes/${frame.id}/frame.png`, red], [`productions/saltlight/takes/${pass.id}/pass.mp4`, red], ["artifacts/frozen-seed.png", blue]].map(([path, bytes]) =>
+        ({ path: path as string, action: "create" as const, baseHash: null, encoding: "base64" as const, content: Buffer.from(bytes as Uint8Array).toString("base64") })),
+    ] });
+    const sources = new Map<string, Record<string, Record<string, unknown>>>();
+    let cursor: string | undefined;
+    do {
+      const read = await h.retrieval.call(h.lease.token, "list_takes", { productionId: "saltlight", limit: 20, ...(cursor ? { cursor } : {}) });
+      const page = read.result as { items: Array<{ kind: string; take?: Take; imageSources?: Record<string, Record<string, unknown>> }>; nextCursor: string | null };
+      for (const row of page.items) if (row.take && row.imageSources) sources.set(row.take.id, row.imageSources);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    const picture = await h.retrieval.call(h.lease.token, "view_image", sources.get(frame.id)!.poster!);
+    const seed = await h.retrieval.call(h.lease.token, "view_image", sources.get(frame.id)!.startFrame!);
+    assert.equal(picture.receipt.image!.posterOnly, false);
+    assert.equal(seed.receipt.image!.sourceHash, digest(blue));
+    assert.deepEqual(Array.from(decodePng(Buffer.from(seed.imageContent![0]!.data, "base64")).pixels.slice(0, 4)), [0, 0, 255, 255]);
+    const whole = await h.retrieval.call(h.lease.token, "view_image", sources.get(pass.id)!.poster!);
+    const part = await h.retrieval.call(h.lease.token, "view_image", sources.get(segment.id)!.poster!);
+    assert.deepEqual(positions, [0, 2]);
+    assert.equal(part.receipt.image!.sourceHash, whole.receipt.image!.sourceHash);
+    assert.notEqual(part.receipt.image!.id, whole.receipt.image!.id);
+    assert.notEqual(part.receipt.image!.renditionHash, whole.receipt.image!.renditionHash);
+    assert.equal(part.receipt.image!.posterOnly, true);
+    assert.match(JSON.stringify(part.result), /motion and audio were not inspected/);
+    await assert.rejects(readWorldMeta(h.store.dir, { supports: 53 }), /newer|schema|version/i);
+    await writeFile(join(h.store.dir, `productions/saltlight/takes/${frame.id}/frame.png`), blue);
+    const changed = await h.retrieval.call(h.lease.token, "view_image", sources.get(frame.id)!.poster!);
+    assert.equal(changed.receipt.status, "unavailable"); assert.equal(changed.imageContent, undefined);
+    const legacy = await h.retrieval.call(h.lease.token, "view_image", { kind: "production-take", productionId: "saltlight", takeId: base.id, frame: "poster" });
+    assert.match(JSON.stringify(legacy.result), /no original media hash/);
+    const sidecarPath = join(h.store.dir, "artifacts/frozen-seed.json"), previous = await readFile(sidecarPath);
+    await h.store.commit({ kind: "edited-seed-test", source: "test", files: [{ path: "artifacts/frozen-seed.json", action: "replace", baseHash: digest(previous),
+      content: JSON.stringify({ id: seedId, kind: "image", file: "frozen-seed.png", hash: digest(red), origin: { by: "user" }, links: [], created: "2026-10-04T04:00:00Z" }) }] });
+    const replacedSeed = await h.retrieval.call(h.lease.token, "view_image", sources.get(frame.id)!.startFrame!);
+    assert.equal(replacedSeed.receipt.status, "unavailable"); assert.equal(replacedSeed.imageContent, undefined);
+  });
+  it("decodes a verified production video larger than 50 MiB through a private file snapshot", async () => {
+    const png = encodePng(solidImage(2, 2, [1, 2, 3, 255]));
+    let worldPath = "", snapshotPath = "";
+    const h = await harness({ maker: { render: async () => { throw new Error("large video must not enter the byte-array decoder"); },
+      renderFile: async path => { snapshotPath = path; assert.ok(!path.startsWith(worldPath)); assert.equal((await stat(path)).size, 52 * 1024 ** 2); return png; } } });
+    worldPath = h.store.dir;
+    const production = h.store.getBundle().productions.find(p => p.meta.id === "saltlight")!, id = newId("tk");
+    const folder = join(h.store.dir, `productions/saltlight/takes/${id}`), path = join(folder, "large.mp4");
+    await mkdir(folder, { recursive: true });
+    const handle = await open(path, "wx");
+    try { await handle.write(png); await handle.truncate(52 * 1024 ** 2); } finally { await handle.close(); }
+    const sha = createHash("sha256");
+    for await (const chunk of createReadStream(path)) sha.update(chunk);
+    const mediaHash = `sha256:${sha.digest("hex")}`;
+    const take: Take = { ...production.takes.find(t => t.kind === "clip")!, id, media: "large.mp4", mediaHash };
+    await h.store.commit({ kind: "large-take-test", source: "test", raiseSchemaVersion: 54, files: [{ path: `productions/saltlight/takes/${id}/take.json`,
+      action: "create", baseHash: null, content: JSON.stringify(take) }] });
+    const read = await h.retrieval.call(h.lease.token, "view_image", { kind: "production-take", productionId: "saltlight", takeId: id, frame: "poster" });
+    assert.ok(read.imageContent); assert.equal(read.receipt.image!.sourceHash, mediaHash); assert.equal(read.receipt.image!.posterOnly, true);
+    await assert.rejects(stat(snapshotPath), /ENOENT/);
+  });
+  it("refuses missing, audio, escaping and conversation-attachment production image sources", async () => {
+    const h = await harness(), production = h.store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
+    const base = production.takes.find(t => t.kind === "clip")!;
+    const cases = [
+      { media: "../../world-art.png", frame: "poster" },
+      { media: "voice.wav", kind: "voice", frame: "poster" },
+      { startFrame: "../world-art.png", frame: "start-frame" },
+      { startFrame: `.conversations/${h.cv}/attachments/${h.attachments[0]!.id}/look-0.png`, frame: "start-frame" },
+      { frame: "start-frame" },
+    ];
+    for (const { frame, ...overrides } of cases) {
+      const take = { ...base, ...overrides, id: newId("tk") };
+      await h.store.commit({ kind: "production-images-test", source: "test", files: [{ path: `productions/saltlight/takes/${take.id}/take.json`, action: "create", baseHash: null, content: JSON.stringify(take) }] });
+      const read = await h.retrieval.call(h.lease.token, "view_image", { kind: "production-take", productionId: "saltlight", takeId: take.id, frame });
+      assert.equal(read.receipt.status, "unavailable"); assert.equal(read.imageContent, undefined);
+    }
+    const missing = await h.retrieval.call(h.lease.token, "view_image", { kind: "production-take", productionId: "the-ledger-of-nights", takeId: base.id, frame: "poster" });
+    assert.equal(missing.receipt.status, "unavailable");
   });
   it("hands out only a labelled poster and metadata when inspecting a video artifact", async () => {
     const poster = encodePng(solidImage(2, 2, [4, 5, 6, 255]));
@@ -263,9 +357,12 @@ describe("bounded metadata-free renditions", () => {
       args = command; await writeFile(command.at(-1)!, encodePng(solidImage(2, 2, [1, 2, 3, 255])));
       return { code: 0, stdout: "", stderr: "", timedOut: false };
     } });
-    const result = await maker.render(new Uint8Array([1]), ".mp4", controller.signal);
+    const result = await maker.render(new Uint8Array([1]), ".mp4", controller.signal, 2.25);
     assert.equal(decodePng(result).width, 2); assert.ok(args.includes("-map_metadata"));
     assert.equal(args[args.indexOf("-frames:v") + 1], "1");
     assert.equal(args[args.indexOf("-map") + 1], "0:v:0");
+    assert.equal(args[args.indexOf("-ss") + 1], "2.25");
+    assert.ok(args.indexOf("-ss") > args.indexOf("-i"));
+    await assert.rejects(imageRendition(result, ".png", undefined, undefined, 2.25), /decoder/);
   });
 });

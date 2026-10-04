@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import {
   orderedShots,
+  TAKE_MEDIA_IDENTITY_SCHEMA_VERSION,
   ulid,
   type ArtifactSidecar,
   type ProductionBundle,
@@ -25,8 +26,8 @@ import type { BoundaryFrameMaker } from "./boundary.js";
  *
  * Both land in the same place, `startFrameArtifactId`, because both answer the same question and
  * the dispatch can only send an artifact: the request records `{id, hash}` so the exact bytes can
- * be audited afterwards, and a take carries no hash to record. Filing here is what earns a drawn
- * frame the same durability the chained one already has — its own bytes, its own hash, and a life
+ * be audited afterwards. A take's original-media hash may name a JPEG before this normalized
+ * frame existed. Filing here gives the drawn frame its own bytes, hash, and a life
  * independent of the take it came from.
  *
  * What tells the two apart afterwards is provenance already on the sidecar: a boundary still
@@ -165,6 +166,7 @@ export async function recordUploadedShotFrameTake(
       dispatchedAt: now,
       completedAt: now,
       media,
+      mediaHash: `sha256:${createHash("sha256").update(data).digest("hex")}`,
     };
     const dir = join(store.dir, "productions", productionId, "takes", id);
     await atomicWriteFile(join(dir, media), data);
@@ -172,6 +174,7 @@ export async function recordUploadedShotFrameTake(
     // in place so request-id recovery cannot delete the bytes belonging to a durable take.
     await store.commitUnserialised({
       kind: "take-upload",
+      raiseSchemaVersion: TAKE_MEDIA_IDENTITY_SCHEMA_VERSION,
       source: options.source ?? "user",
       files: [{
         path: `productions/${productionId}/takes/${id}/take.json`,

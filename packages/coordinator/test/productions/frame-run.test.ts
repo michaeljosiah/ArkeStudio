@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -846,6 +847,13 @@ describe("frame-run coordinator service", () => {
     assert.ok(children.every((take) => take.panel?.parentTakeId === parent!.id));
     assert.ok(children.every((take) => take.panel?.parentHash !== take.panel?.cropSourceHash));
     assert.ok(children.every((take) => take.panel?.crop.width === 16 && take.panel.crop.height === 9));
+    for (const take of takes) {
+      const bytes = await readFile(join(f.dir, "productions", f.production.meta.id, "takes", take.id, take.media!));
+      const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+      const identity = take.panel?.hash ?? take.mediaHash;
+      assert.ok(identity !== undefined && digest.startsWith(identity), "each take identifies its own media bytes");
+      if (take.mediaHash !== undefined) assert.equal(take.mediaHash, digest, "a crop must not inherit its parent's checksum");
+    }
     assert.equal(children.reduce((sum, take) => sum + take.cost.estimatedMicroUsd, 0), 999);
     assert.equal(children.reduce((sum, take) => sum + (take.cost.actualMicroUsd ?? 0), 0), 900);
     const bundle = f.store.getBundle();

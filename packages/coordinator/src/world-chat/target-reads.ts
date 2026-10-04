@@ -29,6 +29,7 @@ import type { QueryLease } from "./lease.js";
 import type { DispatchPlanReadRecord } from "../productions/plans.js";
 
 import { audioCutReadRows, editorRequestReadRows, performanceReadRows, voiceSampleReadRows, productionReadFence, type ProductionReadRow } from "./production-reads.js";
+import { productionTakeImageSources } from "./production-take-images.js";
 
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 20;
@@ -207,7 +208,8 @@ export function sceneFence(production: ProductionBundle | undefined, sceneId: st
 
 function takeRows(production: ProductionBundle | undefined): Row[] {
   return [
-    ...(production?.takes ?? []).map((take) => ({ key: `take:${take.id}`, value: { kind: "take", take, mediaInfo: production?.takeMediaInfo[take.id] ?? null } })),
+    ...(production?.takes ?? []).map((take) => ({ key: `take:${take.id}`, value: { kind: "take", take, mediaInfo: production?.takeMediaInfo[take.id] ?? null,
+      imageSources: productionTakeImageSources(production!, take) } })),
     ...(production?.reviews ?? []).map((review, index) => ({ key: `review:${review.ts}:${padded(index)}`, value: { kind: "review", review } })),
     ...Object.entries(production?.selections ?? {}).map(([shotId, selection]) => ({ key: `selection:${shotId}`, value: { kind: "selection", shotId, selection } })),
   ].sort((a, b) => a.key.localeCompare(b.key));

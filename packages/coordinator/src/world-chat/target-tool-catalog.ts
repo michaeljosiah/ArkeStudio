@@ -69,7 +69,7 @@ export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
   tool("get_scene_shots", "Read every shot in one scene in canonical order.", SCENE, ["productionId", "sceneId"]),
   tool("get_scene_stage", "Read scene blocking and all shot staging in one scene.", SCENE, ["productionId", "sceneId"]),
   tool("get_scene_boards", "Read authored board controls, compiled board and storyboard for one scene.", SCENE, ["productionId", "sceneId"]),
-  tool("list_takes", "Read every take, review, selection and available media measurement.", PRODUCTION, ["productionId"]),
+  tool("list_takes", "Read every take, review, selection and available media measurement; each visual take includes copyable view_image imageSources for its poster and recorded start frame.", PRODUCTION, ["productionId"]),
   tool("list_generation_routes", "Read enabled image, video, speech and music models, route capabilities, reference limits, locality and pricing; no account secrets.", {}),
   tool("list_bench_sessions", "List durable Bench sessions. Read a session before reusing its composer or takes.", {}),
   tool("get_bench_session", "Read one complete Bench composer, reference tokens and immutable takes.", { sessionId: { type: "string", description: "Bench session id" } }, ["sessionId"]),
