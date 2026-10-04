@@ -412,6 +412,15 @@ const SCREENS = [
   { group: "Around it", screen: "Audiobook view on a phone (story)", frame: "194h", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-10-04",
     controls: ["Listen", "Notes", "Everyone"],
     notes: ["Turn 194h: the view switch and one line of quiet presses with a menu for Direct and illustrate; Read and Listen held at the foot; the block's sheet with the same three tabs. Not built yet."] },
+  { group: "Around it", screen: "Audiobook export · Video (story)", frame: "197a", route: "#/w/:worldId/p/:prodId/story/audiobook · Export", status: "drawn", checked: "2026-10-04",
+    controls: ["Video", "One a chapter", "One for the book", "Slow push", "Subtitles", "Preview", "Render 1 chapter"],
+    notes: ["Turn 197a: the audiobook's Export sheet gains Video beside the player package and chapter files: one MP4 a chapter or one for the book, the Cut's sizes (1920 × 1080, 1280 × 720, 1080 × 1920 · vertical), Slow push, the Cut's Subtitles control, chapter title cards, the chapter mix at −18 LUFS, priced in size and time before Render. Not built yet."] },
+  { group: "Around it", screen: "Audiobook video preview (story)", frame: "197b", route: "#/w/:worldId/p/:prodId/story/audiobook · Export", status: "drawn", checked: "2026-10-04",
+    controls: ["Preview", "Centre", "Done"],
+    notes: ["Turn 197b-c: a frame of the video as it will render, 16:9 and vertical, with the 9:16 crop following a focus kept on each picture; openings: the cover for a book file, the chapter's title card, the cover blurred before a chapter's first picture. Not built yet."] },
+  { group: "Around it", screen: "Audiobook video render and files (story)", frame: "197e", route: "#/w/:worldId/p/:prodId/story/audiobook · Export", status: "drawn", checked: "2026-10-04",
+    controls: ["Open", "Show in folder", "Render again"],
+    notes: ["Turn 197d-f: one Activity row per render with a real percent and Cancel; finished files with Open and Show in folder; Render again remakes only chapters whose content changed; a phone starts a render on the desktop and downloads the file. Not built yet."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
