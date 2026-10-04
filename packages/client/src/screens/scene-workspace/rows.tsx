@@ -277,7 +277,7 @@ export function StoryboardRows({
             ? null
             : finalizationRetryJobId(frameRun, runState.stepIndex, jobs);
           return (
-            <li key={shot.id} className="fy-swrow" data-testid={`workspace-row-${shot.id}`}>
+            <li key={shot.id} className="fy-swrow" data-testid={`workspace-row-${shot.id}`} data-review-change={newShotIds.has(shot.id) ? "inserted" : reviewMarks?.get(shot.id) ? "changed" : undefined}>
               {reviewMarks?.get(shot.id) && <div className="fy-production-preview__mark">{reviewMarks.get(shot.id)}</div>}
               {reviewShots && <div className="fy-production-preview__shotmeta"><span>{reviewShots.get(shot.id)?.framing}</span>{reviewShots.get(shot.id)?.cast.map(name => <span className="fy-swchip" key={name}>{name}</span>)}</div>}
               {showBoards && board !== undefined ? (

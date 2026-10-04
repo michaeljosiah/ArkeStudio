@@ -86,6 +86,8 @@ Timeline and export bodies (#1425) use client `test/production-timeline-export.t
 
 Live audio and non-shot result use (#1425) also use coordinator `test/world-chat/generation-card-results.test.ts`, `production-audio.test.ts` and `test/bench/conversation-quotes.test.ts`. They verify filed outputs during other in-flight work, exact recorded job correlation, unchanged sealed admission evidence, pending/discarded/foreign output refusal and safe media addresses. Client media tests cover voice results without picture Select, frozen audio reference players, retained results and Use as… requests naming the owning result/action/session. Use as… sends an ordinary human request in the same conversation; filing, performance review and cue placement still use existing separately decided authorities. Chrome adds an audio mode with expanded use controls at all four widths.
 
+Production Chat Studio (#1426) uses client `test/production-studio.test.tsx` with the existing conversation, human-decision, card, timeline and frame-run cases. It checks non-authorizing Show, forty pending shots, live settlement, pinning, single mounted full-size cards, unsent drafts, proposal settlement and phone Stage access. Run `node scripts/smoke-production-studio.mjs` with Chrome installed (`ARKE_CHROME` overrides its path) for the full cascade at 360, 390, 984 and 1200 px: phone view switching, Fold/desktop columns, native shots/board/Stage/Cut, Understanding/Proposal, widening and preservation of the original composer/card DOM instances. These checks use fixture media; installed provider playback and the complete conversation journey remain #1427.
+
 ## Select the checks
 
 For design-only production conversation work, turn 196 in the design master is the reference

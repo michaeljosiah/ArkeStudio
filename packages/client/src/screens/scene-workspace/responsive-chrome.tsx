@@ -45,7 +45,7 @@ export function SceneDock({ open, onOpen, onClose, stage = false, children }: { 
     if (parent && conversationHost) { conversationHost.className = "fy-scene-dock-content"; parent.appendChild(conversationHost); }
   }, [compact, conversationHost]);
   useEffect(() => {
-    if (!phone || stage) return;
+    if (!phone) return;
     let frame = 0;
     const place = () => {
       cancelAnimationFrame(frame);
@@ -67,10 +67,10 @@ export function SceneDock({ open, onOpen, onClose, stage = false, children }: { 
     return () => { cancelAnimationFrame(frame); if (trigger.current) trigger.current.style.translate = "none"; window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
   }, [phone, stage]);
   const rail = <button ref={trigger} type="button" className="fy-sw__rail" title="Open Arke" aria-haspopup={compact ? "dialog" : undefined} onClick={onOpen}>
-    {phone ? <Sparkle size={16} /> : <span className="fy-sw__rail-dot" aria-hidden="true" />}<span className="fy-sw__rail-label">{phone ? "Arke" : "Ask Arke"}</span><span className="fy-sw__rail-pin"><Pin size={13} /></span>
+    {phone ? <Sparkle size={16} /> : <span className="fy-sw__rail-dot" aria-hidden="true" />}<span className="fy-sw__rail-label">{phone ? stage ? "Conversation" : "Arke" : "Ask Arke"}</span><span className="fy-sw__rail-pin"><Pin size={13} /></span>
   </button>;
   return <>
-    {compact ? phone && stage ? null : rail : open ? null : rail}
+    {compact ? rail : open ? null : rail}
     <div ref={inlineHost} className="fy-scene-dock-inline" hidden={compact || !open} />
     <PageSheet open={compact && open} keepMounted onClose={onClose} title="Arke" className="fy-scene-dock"><div ref={sheetHost} className="fy-scene-dock-content" /></PageSheet>
     {conversationHost ? createPortal(children, conversationHost) : children}

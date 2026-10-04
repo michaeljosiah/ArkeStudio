@@ -8,7 +8,7 @@ import { SubtitleTrackRow } from "../screens/editor-subtitles.js";
 
 const nothing = () => {};
 const mint = () => "cl_readonly" as const;
-export function ProductionTimelineCard({ preview, action }: { preview: Extract<ProductionCardPreview, { kind: "timeline" }>; action: ConversationActionCard }) {
+export function ProductionTimelineCard({ preview, action, comparison = true }: { preview: Extract<ProductionCardPreview, { kind: "timeline" }>; action: Pick<ConversationActionCard, "worldId" | "productionId">; comparison?: boolean }) {
   const world = useStore().state?.world;
   const production = world?.meta.worldId === action.worldId ? world.productions.find(p => p.meta.id === action.productionId) : undefined;
   const marks = useMemo(() => timelineReviewMarks(preview), [preview]);
@@ -37,8 +37,8 @@ export function ProductionTimelineCard({ preview, action }: { preview: Extract<P
   };
   return <div className="fy-production-timeline" aria-label="Timeline change preview">
     <p>{range ? `Frames ${range.startFrame}–${range.endFrame}` : "Track settings"} · {preview.after.frameRate} fps</p>
-    {version(preview.before, preview.beforeSelections, "Before", marks.before)}
-    {version(preview.after, preview.afterSelections, "After", marks.after)}
-    <p>Inserted · changed · removed</p>
+    {comparison && version(preview.before, preview.beforeSelections, "Before", marks.before)}
+    {version(preview.after, preview.afterSelections, comparison ? "After" : "Current", marks.after)}
+    {comparison && <p>Inserted · changed · removed</p>}
   </div>;
 }

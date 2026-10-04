@@ -1,3 +1,4 @@
+import { StudioCard, useProductionStudio } from "./production-studio-context.js";
 import { useMemo, useState } from "react";
 import { orderedShots, productionFrameRate, timelineSourceFingerprint, type HumanDecisionCard,
   type HumanDecisionControl, type ProductionBundle, type SceneRecord, type WorldBundle } from "@arke-studio/contracts";
@@ -20,6 +21,7 @@ import { Button } from "./ui.js";
 /** These controls send the person's existing command; they never approve a model action. */
 export function HumanDecisionCardView({ card }: { card: HumanDecisionCard }) {
   const { state } = useStore();
+  const studio = useProductionStudio();
   const world = state?.world;
   if (!world || world.meta.worldId !== card.worldId) return null;
   const control = card.body.control;
@@ -64,11 +66,12 @@ export function HumanDecisionCardView({ card }: { card: HumanDecisionCard }) {
       break;
     }
   }
-  return <article className="fy-actioncard" data-family="human-decision" data-status={card.status} data-decision={card.id} aria-label={card.title}>
+  return <StudioCard id={card.id}><article className="fy-actioncard" data-family="human-decision" data-status={card.status} data-decision={card.id} aria-label={card.title}>
     <header className="fy-actioncard__head"><div><span className="fy-actioncard__reason">{card.body.reason}</span><h3>{card.title}</h3></div></header>
+    {studio && <button type="button" className="fy-studio-toggle" onClick={() => studio.showDecision(card)}>Show</button>}
     {card.detail && <p role="status">{card.detail}</p>}
     <div className="fy-actioncard__body">{content}</div>
-  </article>;
+  </article></StudioCard>;
 }
 
 function ThreadStage({ world, production, scene, control, conversationId }: {
