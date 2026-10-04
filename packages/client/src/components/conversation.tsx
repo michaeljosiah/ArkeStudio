@@ -1,5 +1,7 @@
 import { TimelineCardHistory } from "./timeline-card-history.js";
 import { ProductionCardBody } from "./production-card-body.js";
+import { GenerationReferences, GenerationResults } from "./generation-card-body.js";
+import { TakeComparisonCard } from "./take-comparison-card.js";
 import { ConversationActionGroup } from "./conversation-action-group.js";
 import { ProductionPlanCardView } from "./production-plan-card.js";
 import { ProductionSetupOutline } from "./production-setup-outline.js";
@@ -58,11 +60,9 @@ import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
 import { Film, Pin, ChevronDown, ChevronUp, Sparkle } from "./icons.js";
-import { PosterVideo } from "./player.js";
 import { ReplyRead } from "./read-aloud.js";
 import { useReadReplies } from "./read-replies.js";
 import { renderInlineMarkdown } from "./inline-markdown.js";
-import { mediaUrl } from "../lib/media.js";
 
 /**
  * One conversation, drawn once (design turn 86).
@@ -360,6 +360,7 @@ export function ConversationPermissionCard({
       ref={card}
       tabIndex={-1}
       className="fy-actioncard"
+      data-action-id={action.actionId}
       data-status={action.status}
       aria-label={`${action.shown.title}, ${ACTION_STATUS[action.status]}`}
     >
@@ -379,6 +380,7 @@ export function ConversationPermissionCard({
         </details>
       ) : <>{body}{consequences}</>}
       {action.statusDetail && <p className="fy-actioncard__notice">{action.statusDetail}</p>}
+      {!action.receipt?.generation && ["approved", "queued", "running", "completed", "failed", "cancelled"].includes(action.status) && action.shown.body.family === "generation" && <GenerationResults action={action} />}
       {action.blockedReason && <p className="fy-actioncard__notice">{action.blockedReason}</p>}
       {action.decision && (
         <div className="fy-actioncard__audit">
@@ -390,37 +392,7 @@ export function ConversationPermissionCard({
         <div className="fy-actioncard__receipt">
           <strong>Result</strong>
           <span>{action.receipt.summary}</span>
-          {action.receipt.generation && state?.world ? (
-            <div className="fy-actioncard__body">
-              <p>
-                {action.receipt.generation.completed} completed · {action.receipt.generation.failed} failed · {action.receipt.generation.cancelled} cancelled · {action.receipt.generation.unattempted} unattempted
-              </p>
-              <p>{action.shown.body.family === "generation" && usesCodexImagePlan(action.shown.body) ? `${CODEX_IMAGE_PLAN_LABEL} · allowance used is unknown` : `Actual cost: ${action.receipt.generation.actualMicroUsd === null ? "Not reported" : `$${(action.receipt.generation.actualMicroUsd / 1_000_000).toFixed(4)}`}`}</p>
-              {action.receipt.generation.results.map((result) => (
-                <div key={result.id} className="fy-actioncard__line">
-                  {result.status === "completed" && result.mediaPath ? (
-                    result.medium === "image" ? (
-                      <a href={mediaUrl(state.world!.meta.slug, result.mediaPath)} aria-label={`Open ${result.description}`}>
-                        <img className="fy-actioncard__media" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} alt={result.description} />
-                      </a>
-                    ) : result.medium === "video" ? (
-                      /* The one place the platform's player stays (SPEC-041 R-81): a generation
-                         result SHALL provide native playback controls, so seeking, volume and
-                         fullscreen are the requirement rather than an accident. The take-review
-                         card below owes only playable media (R-26) and uses the house player. */
-                      <video className="fy-actioncard__media" controls preload="metadata" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} {...(result.posterPath ? { poster: mediaUrl(state.world!.meta.slug, result.posterPath) } : {})} />
-                    ) : result.medium === "audio" ? (
-                      <audio className="fy-actioncard__media" controls preload="metadata" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} />
-                    ) : (
-                      <a href={mediaUrl(state.world!.meta.slug, result.mediaPath)}>Open {result.medium}</a>
-                    )
-                  ) : null}
-                  <strong>{result.description}</strong>
-                  <span>{result.status}{result.detail ? ` · ${result.detail}` : ""}</span>
-                </div>
-              ))}
-            </div>
-          ) : null}
+          {action.receipt.generation && <GenerationResults action={action} />}
           {action.receipt.kind === "bench-session" && state?.world ? (
             <Button variant="ghost" onClick={() => void navigate(`/w/${state.world!.meta.worldId}/artifacts/bench/${action.receipt!.id}`)}>
               Open Bench
@@ -448,7 +420,7 @@ export function ConversationPermissionCard({
           </Button>}
         </div>
       )}
-      {(action.status === "queued" || action.status === "running") && action.shown.body.family === "generation" && action.shown.body.cancellationSupported && state?.world ? (
+      {(action.status === "queued" || action.status === "running") && action.actionKind === "world-chat-bench-generation" && action.shown.body.family === "generation" && action.shown.body.cancellationSupported && state?.world ? (
         <div className="fy-actioncard__actions">
           <Button variant="ghost" onClick={() => void navigate(`/w/${state.world!.meta.worldId}/artifacts/bench/${action.authority.id}`)}>
             Manage or cancel in Bench
@@ -464,7 +436,6 @@ export function ConversationPermissionCard({
 }
 
 function ConversationActionBody({ action, supported }: { action: ConversationActionCard; supported: boolean }) {
-  const { state } = useStore();
   const body = action.shown.body;
   if (!supported) return null;
   if (action.shown.productionPreview) return <><ProductionCardBody preview={action.shown.productionPreview} action={action} />
@@ -498,22 +469,7 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
       </div>;
     case "take-review":
       return <div className="fy-actioncard__body">
-        {body.mediaPath && state?.world ? (
-          body.mediaKind === "video" ? (
-            <PosterVideo
-              className="fy-actioncard__media"
-              src={mediaUrl(state.world.meta.slug, body.mediaPath)}
-              label={`Take ${body.mediaId}`}
-              {...(body.posterPath ? { poster: mediaUrl(state.world.meta.slug, body.posterPath) } : {})}
-            />
-          ) : body.mediaKind === "audio" ? (
-            <audio className="fy-actioncard__media" controls preload="metadata" src={mediaUrl(state.world.meta.slug, body.mediaPath)} />
-          ) : body.mediaKind === "image" ? (
-            <img className="fy-actioncard__media" src={mediaUrl(state.world.meta.slug, body.mediaPath)} alt={`Take ${body.mediaId}`} />
-          ) : (
-            <a href={mediaUrl(state.world.meta.slug, body.mediaPath)}>Open source document</a>
-          )
-        ) : null}
+        <TakeComparisonCard action={action} />
         <p>{body.mediaKind} · {body.destination}</p>
         {body.scene && <p>Scene: {body.scene}</p>}
         {body.shot && <p>Shot: {body.shot}</p>}
@@ -535,15 +491,16 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
         <p>{body.prompt}</p>
         {(body.exclusions ?? []).length > 0 && <p>Exclusions: {(body.exclusions ?? []).join(" · ")}</p>}
         {body.references.length > 0 && <p>References: {body.references.map((reference) => `${reference.id} · ${reference.role}`).join("; ")}</p>}
+        <GenerationReferences action={action} />
         <p>{body.provider} · {body.model} · {body.quantity} output{body.quantity === 1 ? "" : "s"}</p>
         {(body.options ?? []).length > 0 && <p>Options: {(body.options ?? []).map((option) => `${option.label}: ${option.value}`).join(" · ")}</p>}
         {(body.dimensions || body.durationSec) && <p>{[body.dimensions, body.durationSec ? `${body.durationSec}s` : null].filter(Boolean).join(" · ")}</p>}
         {body.audioPolicy && <p>Audio: {body.audioPolicy}</p>}
         {(body.deterministicInputs ?? []).length > 0 && <p>Frozen inputs: {(body.deterministicInputs ?? []).join(" · ")}</p>}
         {(body.privacy ?? []).map((line) => <p key={line}>{line}</p>)}
-        <p>{body.cost}</p>
-        {body.quoteDigest && <p>Quote digest: {body.quoteDigest}</p>}
-        {body.quoteExpiresAt && <p>Quote expires: {body.quoteExpiresAt}</p>}
+        <p>{body.estimatedMicroUsd !== undefined ? `$${(body.estimatedMicroUsd / 1_000_000).toFixed(4)} · ${body.quantity} ${body.medium} · ${body.provider}` : body.cost}</p>
+        {usesCodexImagePlan(body) && <p>{CODEX_IMAGE_PLAN_LABEL}</p>}
+        {body.quoteDigest && <details><summary>Quote details</summary><p>Digest · {body.quoteDigest}</p><p>Expires · {body.quoteExpiresAt}</p></details>}
         {body.enforceableCapMicroUsd !== undefined && <p>Enforceable cap: ${(body.enforceableCapMicroUsd / 1_000_000).toFixed(4)}</p>}
         {body.estimateMayVary && <p className="fy-actioncard__notice">Estimate only. Actual provider cost may differ.</p>}
       </div>;

@@ -183,6 +183,7 @@ export function PosterVideo({
   label,
   className,
   muted,
+  range,
 }: {
   src: string;
   poster?: string;
@@ -190,6 +191,7 @@ export function PosterVideo({
   /** The video element's own class — each surface keeps its own frame. */
   className?: string;
   muted?: boolean;
+  range?: { inSec: number; outSec: number };
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -207,6 +209,10 @@ export function PosterVideo({
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
+        onLoadedMetadata={event => { if (range) event.currentTarget.currentTime = range.inSec; }}
+        onTimeUpdate={event => {
+          if (range && event.currentTarget.currentTime >= range.outSec) { event.currentTarget.pause(); event.currentTarget.currentTime = range.inSec; }
+        }}
       />
       <button
         type="button"
@@ -215,7 +221,10 @@ export function PosterVideo({
         onClick={() => {
           const element = video.current;
           if (element === null) return;
-          if (element.paused) void element.play().catch(() => setPlaying(false));
+          if (element.paused) {
+            if (range && (element.currentTime < range.inSec || element.currentTime >= range.outSec)) element.currentTime = range.inSec;
+            void element.play().catch(() => setPlaying(false));
+          }
           else element.pause();
         }}
       >

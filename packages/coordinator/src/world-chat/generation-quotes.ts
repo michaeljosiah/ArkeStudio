@@ -3,7 +3,7 @@ import { readFile, readdir, rm } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { z } from "zod";
 import {
-  ArkeGenerationBodySchema, ConversationIdSchema, JobSchema, ModelWorldChatActionSchema, isReplayableFinalization, ulid,
+  ArkeGenerationBodySchema, ConversationGenerationWorkSchema, ConversationIdSchema, JobSchema, ModelWorldChatActionSchema, isReplayableFinalization, ulid,
   CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan,
   type ArkeGenerationBody, type ConversationActionCard, type ModelWorldChatAction, type WorldBundle,
   SceneIdSchema, SlugSchema, CHAT_SEQUENCING_SCHEMA_VERSION,
@@ -83,6 +83,31 @@ export class GenerationQuotes {
   }
   private write(id: string, quote: Quote) {
     return this.store.ownedWrite(() => atomicWriteFile(this.path(id), JSON.stringify(QuoteSchema.parse(quote)) + "\n"));
+  }
+  /** Read the exact approved quote, without recompiling, admitting or rewriting it. */
+  async project(card: ConversationActionCard) {
+    if (card.worldId !== this.store.worldId || card.shown.body.family !== "generation") return undefined;
+    const quote = await this.read(card.actionId);
+    if (!quote || quote.body.quoteDigest !== card.shown.body.quoteDigest || quote.body.quoteDigest !== sealedDigest(quote) ||
+        quote.actionDigest !== conversationActionDigest(quote.action)) return undefined;
+    const media: z.infer<typeof ConversationGenerationWorkSchema>["media"] = [];
+    for (const input of quote.inputs) {
+      if (input.worldId !== card.worldId) return undefined;
+      for (const [parameter, kind] of [["references", "image"], ["videoReferences", "video"]] as const) {
+        const paths = input.params[parameter];
+        if (!Array.isArray(paths)) continue;
+        for (const path of paths) {
+          if (typeof path !== "string" || media.some(value => value.path === path)) continue;
+          const roles = Array.isArray(input.params.referenceRoles) ? input.params.referenceRoles as { file?: string; role?: string }[] : [];
+          const reference = quote.body.references.find(value => value.id === path || value.id === `ref_${createHash("sha256").update(path).digest("hex").slice(0, 24)}`);
+          const role = roles.find(value => value.file === path)?.role ?? reference?.role ?? (kind === "image" ? "Image reference" : "Video reference");
+          const parsed = ConversationGenerationWorkSchema.shape.media.element.safeParse({ kind, path,
+            alt: `${role} · ${path.split("/").at(-1)}`, role });
+          if (parsed.success && media.length < 100) media.push(parsed.data);
+        }
+      }
+    }
+    return ConversationGenerationWorkSchema.parse({ jobKeys: quote.inputs.map(input => input.idempotencyKey), media });
   }
   async abandon(id: string) {
     const quote = await this.read(id);

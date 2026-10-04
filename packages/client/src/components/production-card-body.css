@@ -32,3 +32,11 @@
 .fy-actiongroup__sequence { list-style: decimal; padding-left: 20px; margin: 0; }
 .fy-actiongroup__sequence > li { min-width: 0; }
 .fy-actiongroup__sequence .fy-actioncard { margin-bottom: 10px; }
+.fy-generation-card { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.fy-generation-card__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px; min-width: 0; }
+.fy-generation-card__grid figure { margin: 0; min-width: 0; }
+.fy-generation-card__grid :is(img, video) { display: block; width: 100%; max-height: 240px; object-fit: contain; background: var(--muted); }
+.fy-generation-card__grid audio { max-width: 100%; width: 100%; }
+.fy-generation-card__grid figcaption { margin: 6px 0; font: var(--type-meta); overflow-wrap: anywhere; }
+.fy-generation-card__grid :is(.ui-btn, a), .fy-generation-card__job .ui-btn { min-height: 44px; }
+.fy-generation-card__job { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

@@ -1,4 +1,5 @@
 import { freezeProductionTimeline, productionTimelineBody } from "../../src/world-chat/production-timeline.js";
+import { prepareConversationTakeReview } from "../../src/application/conversation-take-review.js";
 import { applyTimelineCommand } from "../../src/productions/timeline.js";
 import { productionFrameRate, storyTimelineFingerprint } from "@arke-studio/contracts";
 import { wav } from "../audio/helpers.js";
@@ -1856,6 +1857,7 @@ describe("World Chat authority adapters", () => {
     await appendTurn(w.log, compiled.oneTurn, compiled.prepared);
     await bindAll(w.lifecycle, compiled.prepared);
     const compileCard = (await loaded(w.log)).actions[0]!;
+    assert.equal(compileCard.shown.productionPreview?.kind, "scene");
     assert.equal((await decide(w.lifecycle, w.log, compileCard)).status, "completed");
     const compiledScene = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
       .scenes.find((scene) => scene.id === context.sceneId)!;
@@ -1866,6 +1868,7 @@ describe("World Chat authority adapters", () => {
     await appendTurn(w.log, exported.oneTurn, exported.prepared);
     await bindAll(w.lifecycle, exported.prepared);
     const exportCard = (await loaded(w.log)).actions.at(-1)!;
+    assert.equal(exportCard.shown.productionPreview?.kind, "scene");
     assert.equal(exportCard.shown.body.family, "host-action");
     assert.equal((await decide(w.lifecycle, w.log, exportCard)).status, "completed");
     const artifacts = w.store.getBundle().artifacts;
@@ -1955,6 +1958,49 @@ describe("World Chat authority adapters", () => {
     assert.equal(dispatched, 1, "repeated approval does not dispatch again");
     assert.equal(w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
       .selections["sh_12"]?.acceptedTakeId, selectedBefore);
+  });
+
+  it("Select prepares one fenced review without accepting, refuses another purchase and remains stale after a selection change", async () => {
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
+    const w = await setup(context, store => ({ productionGenerationQuotes: quotedProduction(store, () => {}) }));
+    const receipts = [currentReceipt(w.store, "scenes", `${PRODUCTION}:sc_04`), currentReceipt(w.store, "takes", PRODUCTION)];
+    const one = turn(w.conversationId, context, { receipts, actions: [{ kind: "production-take-generation", productionId: PRODUCTION,
+      sceneId: "sc_04", target: { kind: "shot", shotId: "sh_12" }, mode: "video", checkReceiptIds: receipts.map(r => r.id) }] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared); await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions.at(-1)!;
+    await decide(w.lifecycle, w.log, card);
+    const source = (await loaded(w.log)).actions.at(-1)!;
+    const quotes = w.actionDeps.productionGenerationQuotes!;
+    const work = (await quotes.project(source))!;
+    const production = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
+    const take = production.takes.find(t => t.kind === "clip" && t.coversShots.includes("sh_12"))!;
+    const jobs: Job[] = [{ id: take.jobId!, idempotencyKey: work.jobKeys[0]!, worldId: w.store.worldId, productionId: PRODUCTION,
+      target: { kind: "shot", id: "sh_12" }, capability: "video", provider: "fal", model: "test-model", params: {}, estimatedMicroUsd: 40_000,
+      status: "succeeded", providerJobId: null, attempt: 1, error: null, createdAt: AT, updatedAt: AT }];
+    const ports = { jobs: () => jobs, project: async (card: ConversationActionCard) => ({ ...card, generationWork: await quotes.project(card) }) };
+    const input = { kind: "conversation-take-review-prepare" as const, worldId: w.store.worldId, conversationId: w.conversationId,
+      sourceActionId: source.actionId, takeId: take.id, shotId: "sh_12", requestId: ulid(), expectedConversationSeq: (await loaded(w.log)).seq };
+    const before = structuredClone(production.selections), reviewCount = production.reviews.length;
+    const [first, duplicate] = await Promise.all([prepareConversationTakeReview(w.store, w.lifecycle, input, ports), prepareConversationTakeReview(w.store, w.lifecycle, input, ports)]);
+    assert.equal(first.actionId, duplicate.actionId);
+    assert.equal((await prepareConversationTakeReview(w.store, w.lifecycle, input, ports)).actionId, first.actionId, "replay reads the bound review before testing the old sequence");
+    assert.deepEqual(w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.selections, before);
+    assert.equal(w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.reviews.length, reviewCount);
+    assert.equal(first.shown.body.family, "take-review");
+    await assert.rejects(prepareConversationTakeReview(w.store, w.lifecycle, { ...input, shotId: "sh_13" }, ports), /another review/);
+    jobs[0]!.idempotencyKey = ulid();
+    await assert.rejects(prepareConversationTakeReview(w.store, w.lifecycle, { ...input, requestId: ulid(), expectedConversationSeq: (await loaded(w.log)).seq }, ports), /another generation/);
+    jobs[0]!.idempotencyKey = work.jobKeys[0]!;
+    assert.equal((await decide(w.lifecycle, w.log, first, "deny")).status, "denied");
+    assert.deepEqual(w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.selections, before);
+    const second = await prepareConversationTakeReview(w.store, w.lifecycle, { ...input, requestId: ulid(), expectedConversationSeq: (await loaded(w.log)).seq }, ports);
+    assert.equal((await decide(w.lifecycle, w.log, second)).status, "completed");
+    assert.equal(w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.selections.sh_12!.acceptedTakeId, take.id);
+    const third = await prepareConversationTakeReview(w.store, w.lifecycle, { ...input, requestId: ulid(), expectedConversationSeq: (await loaded(w.log)).seq }, ports);
+    // Change the take read fence through the existing take authority, after the preview was shown.
+    await recordUploadedShotFrameTake(w.store, PRODUCTION, "sh_12", "new.png", encodePng(solidImage(2, 2, [20, 40, 60, 255])));
+    assert.equal((await decide(w.lifecycle, w.log, third)).reason, "stale");
   });
 
   it("reviews a Bench result before filing and clears only the approved shot frame", async () => {

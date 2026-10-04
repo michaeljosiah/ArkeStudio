@@ -17,15 +17,27 @@ import { flushSync } from "react-dom";
 import { MemoryRouter } from "react-router";
 import { migrateLegacyScene } from "@arke-studio/contracts";
 import { ProductionCardBody } from "./components/production-card-body";
+import { GenerationReferences, GenerationResults } from "./components/generation-card-body";
+import { TakeComparisonCard } from "./components/take-comparison-card";
 import { __setStateForTest } from "./lib/store";
 import { FIXTURE_STATE } from "../test/fixture-state";
 ${styles}
 const state = structuredClone(FIXTURE_STATE), world = state.world, production = world.productions[0];
 const scene = migrateLegacyScene({ id: "sc_review", slug: "review", number: 1, order: 1, title: "The forty-shot scene", status: "draft", version: 1,
   shots: Array.from({length:40}, (_, i) => ({id:"sh_"+(i+1),number:i+1,title:"Picture "+(i+1),description:"@maren-kest waits by the gate.",durationSec:4,framing:{size:"MCU",movement:"slow push"}})) });
+const mode = new URLSearchParams(location.search).get("mode") ?? "shots";
+const take = production.takes.find(t => t.kind === "clip"), baseJob = state.app.jobs[0];
+state.app.jobs = [{ ...baseJob, id: take.jobId, idempotencyKey: "01J8E1000000000000000000K5", status: "succeeded" },
+  { ...baseJob, id: "jb_01J8E0000000000000000000J7", idempotencyKey: "01J8E1000000000000000000K7", status: "running", step: {stage:"Sampling",done:2,total:5} }];
 __setStateForTest(state);
-const action = { worldId: world.meta.worldId, productionId: production.meta.id, authority: {kind:"scene-store"} };
-flushSync(() => createRoot(document.getElementById("root")).render(<MemoryRouter><article className="fy-actioncard"><h3>Resulting shot list</h3><ProductionCardBody action={action} preview={{kind:"scene",before:null,after:scene}} /></article></MemoryRouter>));
+const action = { worldId: world.meta.worldId, productionId: production.meta.id, authority: {kind:"scene-store"},
+  actionKind: mode === "board" ? "world-chat-production-board-compile" : "world-chat-production-take-generation", status:"running",
+  shown:{body:{family:"generation",cancellationSupported:true}}, generationWork:{jobKeys:state.app.jobs.map(j=>j.idempotencyKey),
+    media:[{kind:"image",path:"references/maren-kest/main-photo-v1.png",role:"Identity",alt:"Maren"}]} };
+const review = {...action,shown:{body:{family:"take-review",mediaKind:"video",mediaId:take.id,currentSelection:take.id}}};
+flushSync(() => createRoot(document.getElementById("root")).render(<MemoryRouter><article className="fy-actioncard"><h3>{mode === "media" ? "Generation and take comparison" : "Resulting shot list"}</h3>
+  {mode === "media" ? <><GenerationReferences action={action}/><GenerationResults action={action}/><TakeComparisonCard action={review}/></>
+    : <ProductionCardBody action={action} preview={{kind:"scene",before:null,after:scene}} />}</article></MemoryRouter>));
 window.cardReady = true;
 ` }, bundle: true, platform: "browser", format: "iife", define: { "import.meta.env": "{}" }, loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js") });
 await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="view.css"><style>body{margin:8px;background:var(--background)}#root{width:min(800px,100%);margin:auto}</style></head><body><div id="root"></div><script src="view.js"></script></body></html>');
@@ -51,21 +63,27 @@ try {
   socket.onmessage = ({ data }) => { const message = JSON.parse(data), request = pending.get(message.id); if (request) { pending.delete(message.id); message.error ? request.reject(message.error) : request.resolve(message.result); } };
   const cdp = (method, params = {}) => new Promise((resolve, reject) => { const id = ++sequence; pending.set(id, { resolve, reject }); socket.send(JSON.stringify({ id, method, params })); });
   const evaluate = async expression => { const response = await cdp("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }); if (response.exceptionDetails) throw new Error(JSON.stringify(response.exceptionDetails)); return response.result.value; };
-  await cdp("Page.enable"); await cdp("Page.navigate", { url: "http://127.0.0.1:" + server.address().port });
-  await until(() => evaluate("window.cardReady"));
+  await cdp("Page.enable");
   const records = [];
+  for (const mode of ["shots", "board", "media"]) {
+  await cdp("Page.navigate", { url: "http://127.0.0.1:" + server.address().port + "?mode=" + mode });
+  await until(() => evaluate("window.cardReady"));
   for (const width of [360, 390, 984, 1200]) {
     await cdp("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
     await evaluate("document.fonts.ready");
-    const metrics = await evaluate(`(() => { const list = document.querySelector('.fy-production-preview__rows'); const box = list.getBoundingClientRect(); list.scrollTop = list.scrollHeight;
+    const metrics = mode === "media" ? await evaluate(`(() => { const box=document.querySelector('.fy-actioncard').getBoundingClientRect(); return {width:innerWidth,
+      overflow:document.documentElement.scrollWidth>innerWidth, players:document.querySelectorAll('video').length,
+      bodiesContained:[...document.querySelectorAll('.fy-generation-card__grid figure')].every(body=>{const b=body.getBoundingClientRect();return b.left>=box.left&&b.right<=box.right;})}; })()`) : await evaluate(`(() => { const list = document.querySelector('.fy-production-preview__rows'); const box = list.getBoundingClientRect(); list.scrollTop = list.scrollHeight;
       const last = document.querySelector('[data-testid="workspace-row-sh_40"]').getBoundingClientRect();
       return { width:innerWidth, rows:document.querySelectorAll('[data-testid^="workspace-row-"]').length,
         overflow:document.documentElement.scrollWidth>innerWidth, listWidth:box.width, scrollWidth:list.scrollWidth, scrollHeight:list.scrollHeight,
         bodiesContained:[...document.querySelectorAll('.fy-swrow__body')].every(body => {const b=body.getBoundingClientRect(); return b.left>=box.left && b.right<=box.right;}),
         lastVisible:last.top<box.bottom && last.bottom>box.top }; })()`);
-    const capture = await cdp("Page.captureScreenshot", { format: "png" }); await writeFile(join(dir, `card-${width}.png`), Buffer.from(capture.data, "base64"));
-    records.push(metrics); assert.equal(metrics.rows, 40); assert.equal(metrics.overflow, false, `viewport ${width}`);
-    assert.ok(metrics.scrollWidth <= metrics.listWidth + 1, `card body ${width} overflows`); assert.equal(metrics.bodiesContained, true); assert.equal(metrics.lastVisible, true);
+    const capture = await cdp("Page.captureScreenshot", { format: "png" }); await writeFile(join(dir, `card-${mode}-${width}.png`), Buffer.from(capture.data, "base64"));
+    records.push({ mode, ...metrics }); assert.equal(metrics.overflow, false, `${mode} viewport ${width}`); assert.equal(metrics.bodiesContained, true);
+    if (mode === "media") assert.equal(metrics.players, 4);
+    else { assert.equal(metrics.rows, 40); assert.ok(metrics.scrollWidth <= metrics.listWidth + 1, `card body ${width} overflows`); assert.equal(metrics.lastVisible, true); }
+  }
   }
   await writeFile(join(dir, "measurements.json"), JSON.stringify(records, null, 2));
   console.log(JSON.stringify({ directory: dir, records }));

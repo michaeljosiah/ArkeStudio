@@ -236,6 +236,7 @@ const CLIENT_COMMAND_METADATA = {
   "proposal-update-passage": humanOnly(HUMAN_DECISION),
   "world-chat-open": readOnly("Selects a conversation projection; it does not mutate creative state."),
   "conversation-action-decide": humanOnly("Only the local person may approve or deny a prepared conversation action."),
+  "conversation-take-review-prepare": humanOnly("Only the person may select a landed result to prepare its separate take review."),
   "world-chat-send": humanOnly("Only the person may add a user message; Arke cannot converse with or prompt itself."),
   "world-chat-send-status": readOnly("Asks whether a sent line was taken; it changes nothing."),
   "production-setup": humanOnly("The setup lifecycle belongs to the author; setup turns can update only their draft."),

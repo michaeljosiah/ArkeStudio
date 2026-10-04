@@ -48,6 +48,25 @@ async function setup(beforeOpen?: (dir: string) => Promise<void>) {
 }
 
 describe("durable generation quotes (SPEC-050 R-11..20)", () => {
+  it("projects only sealed job bindings without compiling or admitting a purchase", async () => {
+    const h = await setup();
+    const id = newId("act"), body = await h.quotes().prepare(mainPhoto(2), id, AT);
+    const card = { actionId: id, worldId: h.store.worldId, shown: { body } } as ConversationActionCard;
+    const path = join(h.dir, ".history/world/prepared", `${id}.generation.json`);
+    const original = await readFile(path, "utf8"), quote = JSON.parse(original);
+    const view = (await h.quotes().project(card))!;
+    assert.deepEqual(view.jobKeys, quote.inputs.map((input: { idempotencyKey: string }) => input.idempotencyKey));
+    assert.equal(new Set(view.jobKeys).size, 2);
+    assert.deepEqual(await h.quotes().project(card), view);
+    assert.equal(await readFile(path, "utf8"), original, "projection does not rewrite dispatch evidence");
+    assert.equal(h.fake.submitCount, 0); assert.equal(h.queue.listJobs().length, 0);
+    assert.equal(await h.quotes().project({ ...card, worldId: "another-world" }), undefined);
+    assert.equal(await h.quotes().project({ ...card, shown: { ...card.shown, body: { ...body, quoteDigest: "f".repeat(64) } } }), undefined);
+    quote.inputs[0].idempotencyKey = quote.inputs[1].idempotencyKey;
+    await writeFile(path, JSON.stringify(quote));
+    assert.equal(await h.quotes().project(card), undefined, "modified input bindings cannot become a trusted projection");
+    await writeFile(path, original);
+  });
   it("discloses Codex allowance in a durable zero-dollar quote without admitting work", async () => {
     const h = await setup();
     h.manifest.models[0] = { ...MODEL, id: "codex-image", provider: "codex", limits: { providerSelectedSize: true }, pricing: { kind: "included-plan" } };

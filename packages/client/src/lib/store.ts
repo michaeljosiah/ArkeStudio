@@ -18,6 +18,7 @@ import {
   type ChangeRecord,
   type ClientMessage,
   type ClientState,
+  type ConversationActionCard,
   type DomainEvent,
   type Delivery,
   type Frame,
@@ -844,6 +845,8 @@ export type ConversationActionDecisionResult = Extract<
   { type: "conversation-action.decision-result" }
 >;
 const conversationActionDecisionListeners = new Set<(answer: ConversationActionDecisionResult) => void>();
+type TakeReviewPrepared = Extract<DomainEvent, { type: "conversation-action.take-review-prepared" }>;
+const takeReviewPreparedListeners = new Set<(answer: TakeReviewPrepared) => void>();
 export function subscribeConversationActionDecision(
   listener: (answer: ConversationActionDecisionResult) => void,
 ): () => void {
@@ -1722,6 +1725,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "conversation-action.decision-result") {
       for (const listener of conversationActionDecisionListeners) listener(event);
+    }
+    if (event.type === "conversation-action.take-review-prepared") {
+      for (const listener of takeReviewPreparedListeners) listener(event);
     }
     if (event.type === "bench.lyrics-drafted") {
       for (const listener of lyricsDraftedListeners) listener(event);
@@ -6256,6 +6262,27 @@ export function worldChatHold(conversationId: string | null | undefined): WorldC
 }
 
 /** Decide exactly the card and conversation revision currently on screen. */
+export function prepareConversationTakeReview(action: ConversationActionCard, takeId: string, shotId: string): Promise<string> {
+  const state = current.state;
+  const workspace = state?.worldChat;
+  if (state?.world?.meta.worldId !== action.worldId || !workspace || workspace.conversationId !== action.conversationId) return Promise.reject(new Error("The conversation is no longer open."));
+  const expectedConversationSeq = workspace.seq;
+  const requestId = ulid();
+  return new Promise((resolve, reject) => {
+    const listener = (answer: TakeReviewPrepared) => {
+      if (answer.requestId !== requestId || answer.worldId !== action.worldId || answer.conversationId !== action.conversationId) return;
+      clearTimeout(timer); takeReviewPreparedListeners.delete(listener);
+      if (answer.actionId) resolve(answer.actionId); else reject(new Error(answer.detail ?? "The review could not be prepared."));
+    };
+    const timer = setTimeout(() => { takeReviewPreparedListeners.delete(listener); reject(new Error("The preparation acknowledgement is unavailable.")); }, 30_000);
+    takeReviewPreparedListeners.add(listener);
+    if (!send({ kind: "conversation-take-review-prepare", worldId: action.worldId, conversationId: action.conversationId,
+      sourceActionId: action.actionId, takeId, shotId, expectedConversationSeq, requestId })) {
+      clearTimeout(timer); takeReviewPreparedListeners.delete(listener); reject(new Error("The review could not be sent."));
+    }
+  });
+}
+
 export function decideConversationAction(
   worldId: string,
   conversationId: string,
