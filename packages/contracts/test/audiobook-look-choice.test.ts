@@ -5,6 +5,7 @@ import {
   AudiobookLookSchema,
   PictureLookSchema,
   chooseLook,
+  cutMoodClothing,
   editLook,
   lookDigest,
   lookLinesFor,
@@ -12,6 +13,7 @@ import {
   mergeLook,
   pictureLookChanged,
   pictureLookFor,
+  pictureMood,
   type AudiobookLook,
 } from "../src/audiobook-look.js";
 import { CharacterLookSchema, ReferenceKitSchema, chapterLooksOf, lookClothing, lookName, lookOlderFace, type ReferenceKit } from "../src/reference.js";
@@ -258,5 +260,28 @@ describe("a look's clothing line", () => {
     assert.equal(lookName({ prompt: ADE }), "Unstructured soft cream…");
     assert.equal(lookName({ prompt: TUNDE }), "Washed navy polo shirt with…");
     assert.equal(lookName({ prompt: "Storm coat, hood up; two braids.", framing: "full-body" }), "Storm coat");
+  });
+});
+
+describe("the Mood line (design turn 193, rule 9)", () => {
+  // Na Love or Juju's art direction as the world holds it: the agbada that dressed every man in chapter 1.
+  const ART = "Lagos at night, shot close and handheld. Sodium orange from streetlamps, the cold blue-green of a generator-lit compound, deep unlit shadow between them — light that comes from inside the frame, never from a lamp we cannot see. Warm dark skin held in low key, sweat and gold and lace-trimmed agbada catching the little light there is.";
+
+  it("cuts every clause that names clothing, hair or an ornament, keeps the light, and counts what went", () => {
+    const { text, cut } = cutMoodClothing(ART);
+    assert.doesNotMatch(text, /agbada|lace/);
+    assert.match(text, /Sodium orange from streetlamps/);
+    assert.match(text, /Warm dark skin held in low key\./);
+    assert.equal(cut, 1);
+    assert.deepEqual(cutMoodClothing("Teal water, amber lamplight; fine grain, a long lens."), { text: "Teal water, amber lamplight, fine grain, a long lens.", cut: 0 });
+    assert.deepEqual(cutMoodClothing("Everyone in white kaftans."), { text: "", cut: 1 });
+  });
+
+  it("is the chapter's own line when it has one, else the art direction with its clothing cut", () => {
+    assert.equal(pictureMood({ mood: { text: "Purple club light, warm gold, fine grain." } }, ART), "Purple club light, warm gold, fine grain.");
+    const fallback = pictureMood({}, ART)!;
+    assert.doesNotMatch(fallback, /agbada/);
+    assert.match(fallback, /^Lagos at night/);
+    assert.equal(pictureMood(null, undefined), undefined);
   });
 });

@@ -247,6 +247,52 @@ export function lookNeedsChoiceBoundary(record: { look?: AudiobookLook | undefin
   return Object.values(record.pictures ?? {}).some((picture) => picture.look?.looks !== undefined);
 }
 
+/**
+ * Words for what someone wears, how their hair is done, or what they have on them: the things a
+ * Mood line never names (design turn 193, rule 9; SPEC-047 R-117). Clothing belongs to the look.
+ */
+export const GARMENT_WORDS =
+  /\b(agbada|kaftans?|caftans?|buba|iro|sokoto|gele|aso[- ]oke|ankara|lace(?:[- ]trimmed)?|embroider(?:y|ed)|wrappers?|headwraps?|head[- ]?ties?|dress(?:es)?|gowns?|shirts?|blouses?|polos?|t-shirts?|jackets?|coats?|overcoats?|greatcoats?|oilskins?|cloaks?|capes?|robes?|uniforms?|trousers|jeans|shorts|skirts?|jumpers?|sweaters?|hoodies?|hoods?|scarf|scarves|veils?|hats?|caps?|berets?|boots?|shoes?|sandals?|high heels|trainers|sneakers|slippers|neckties?|bow[- ]ties?|gloves?|aprons?|sleeves?|collars?|silk|satin|velvet|linen|denim|leather|braids?|braided|cornrows|dreadlocks|locs|afro|wigs?|weaves?|ponytails?|hairstyles?|earrings?|hoops?|bangles?|bracelets?|necklaces?|pendants?|jewell?ery|brooch(?:es)?|wristwatch(?:es)?|clutch(?:es)?|handbags?|purses?)\b/i;
+
+/**
+ * A Mood line with every clause that names a garment, a hairstyle or an ornament cut out (rule 9):
+ * the art direction gives light, colour, grain and lens, and nothing about what anyone wears — so a
+ * world whose art direction says "lace-trimmed agbada" puts no agbada on a man whose sheet says
+ * linen. Cut at clause level (commas, semicolons, dashes, full stops) so the light in the same
+ * sentence stays; returns the line and how many clauses went.
+ */
+export function cutMoodClothing(text: string): { text: string; cut: number } {
+  let cut = 0;
+  const sentences = text.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+/);
+  const kept = sentences.flatMap((sentence) => {
+    const end = /[.!?]$/.test(sentence) ? sentence.slice(-1) : "";
+    const body = end === "" ? sentence : sentence.slice(0, -1);
+    const clauses = body.split(/\s*(?:[,;:]|\s[—–-]\s)\s*/).filter((clause) => clause.trim() !== "");
+    const left = clauses.filter((clause) => {
+      if (!GARMENT_WORDS.test(clause)) return true;
+      cut += 1;
+      return false;
+    });
+    if (left.length === 0) return [];
+    return [`${left.join(", ")}${end}`];
+  });
+  return { text: kept.join(" ").trim(), cut };
+}
+
+/**
+ * The light and mood a picture is given (rule 9; SPEC-047 R-117): the chapter's Mood line, the
+ * author's or derived; for a chapter whose look was read before it had one, the art direction with
+ * every clause about clothing, hair or ornament cut. The art direction's free text never rides.
+ */
+export function pictureMood(look: Pick<AudiobookLook, "mood"> | null | undefined, art: string | null | undefined): string | undefined {
+  const own = look?.mood?.text.trim();
+  if (own !== undefined && own !== "") return own;
+  if (art === null || art === undefined) return undefined;
+  const { text } = cutMoodClothing(art);
+  if (text === "") return undefined;
+  return text.length <= LOOK_LINE_MAX ? text : `${text.slice(0, LOOK_LINE_MAX - 1).replace(/\s+\S*$/, "")}…`;
+}
+
 export interface DerivedLook {
   place?: { text: string; blocks?: string[] };
   mood?: { text: string };

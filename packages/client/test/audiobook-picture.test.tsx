@@ -152,7 +152,7 @@ describe("what a picture can be (turn 186c)", () => {
   it("writes a generated picture's brief from the block's words and the book's look", () => {
     const brief = pictureBrief("Odile did not answer.", null, { artDirection: { description: "Wet ink on salt paper." } } as never);
     assert.match(brief, /Odile did not answer\./);
-    assert.match(brief, /The look: Wet ink on salt paper\./);
+    assert.match(brief, /Light and mood: Wet ink on salt paper\./);
   });
 });
 

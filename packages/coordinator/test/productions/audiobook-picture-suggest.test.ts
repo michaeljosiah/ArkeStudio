@@ -100,6 +100,50 @@ describe("Suggest picture (R-99)", () => {
   });
 });
 
+describe("the art direction gives light and mood only (design turn 193, rule 9, R-117)", () => {
+  const AGBADA = "Lagos at night, sodium orange and generator blue-green. Warm dark skin held in low key, sweat and gold and lace-trimmed agbada catching the little light there is. Fine grain.";
+  const withArt = async (worldDir: string) => {
+    const file = join(worldDir, "art-direction", "art-direction.json");
+    const direction = JSON.parse(await readFile(file, "utf8")) as { description: string };
+    await writeFile(file, `${JSON.stringify({ ...direction, description: AGBADA }, null, 2)}\n`, "utf8");
+  };
+
+  it("never lets a garment the art direction names reach the writing service, a picture prompt or the Bench", () =>
+    withHarness(
+      async ({ events, send, seen, store, worldDir }) => {
+        await suggest(send);
+        const picked = suggestion(events).suggestion!;
+        // The look was read with a Mood line, cut of the agbada; only that line is given.
+        const held = await readAudiobook(store()!, LEDGER, CHAPTER);
+        assert.ok(held !== null && held !== "unreadable");
+        assert.doesNotMatch(held.look!.mood!.text, /agbada|lace/);
+        assert.match(held.look!.mood!.text, /sodium orange/i);
+        assert.equal(seen[0]!.mood, held.look!.mood!.text);
+        assert.doesNotMatch(buildPicturePrompt(seen[0]!), /agbada|lace-trimmed/);
+        await send({ kind: "make-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, block: "p0.0", prompt: picked.prompt, who: picked.who.map((who) => who.key), confirmedMicroUsd: picked.estimatedMicroUsd, requestId: "01J00000000000000000000006" });
+        const done = madeEvents(events).at(-1)!;
+        assert.equal(done.state, "made", done.reason);
+        const session = await new BenchStore(sessionDir(worldDir, done.sessionId as never)).fold();
+        const brief = session!.takes[0]!.request.brief;
+        assert.doesNotMatch(brief, /agbada|lace/);
+        assert.match(brief, /Light and mood: .*sodium orange/i);
+      },
+      { prepare: withArt, look: async () => ({ place: { text: "The rail desk at dawn." }, mood: "Sodium orange and generator blue-green, lace-trimmed agbada catching the light, fine grain.", characters: [{ who: "maren-kest", text: "Oilskin coat." }] }) },
+    ));
+
+  it("cuts the garment from the art direction itself for a look read without a Mood line", () =>
+    withHarness(
+      async ({ events, send, seen }) => {
+        await suggest(send);
+        assert.equal(suggestion(events).refused, undefined);
+        assert.ok(seen[0]!.mood !== undefined);
+        assert.doesNotMatch(seen[0]!.mood!, /agbada|lace/);
+        assert.match(seen[0]!.mood!, /^Lagos at night/);
+      },
+      { prepare: withArt },
+    ));
+});
+
 describe("who rides as a reference (R-100)", () => {
   const world = (kits: string[], places: string[] = []): Pick<WorldBundle, "referenceKits" | "sheets"> =>
     ({
@@ -177,10 +221,10 @@ describe("the prompt and the price", () => {
     assert.equal(pictureQuote(IMAGE, 2), 50_000);
   });
 
-  it("sends the block, the look lines and the people with their sheets' words, and the book's art direction", () => {
+  it("sends the block, the look lines and the people with their sheets' words, and the chapter's mood", () => {
     const prompt = buildPicturePrompt({
       title: "Her own hand",
-      art: "Salt-bleached realism.",
+      mood: "Salt-bleached realism.",
       synopsis: "Maren audits the ledger.",
       block: { key: "p0.0", text: "Maren reads it twice." },
       before: "The rail is wet.",
@@ -225,7 +269,7 @@ describe("Generate (R-99)", () => {
       assert.equal(take.request.references.length, 1);
       assert.match(take.request.brief, /Maren on the rail at dawn\./);
       assert.match(take.request.brief, /Maren Kest is shown in @Image 1\./);
-      assert.match(take.request.brief, /The look: /);
+      assert.match(take.request.brief, /Light and mood: /);
       assert.equal(take.disposition, "filed", "kept as an artifact of the world");
       assert.ok(store()!.getBundle().artifacts.some((artifact) => `artifacts/${artifact.file}` === picture.file));
       // The look has since changed: the picture is marked, never remade.

@@ -177,7 +177,7 @@ describe("what the chapter is asked", () => {
   it("gives the model the chapter on its clock with who is in it, their look, where pictures already stand and the pace", () => {
     const prompt = buildIllustratePrompt({
       title: "Her own hand",
-      art: "Salt-bleached realism.",
+      mood: "Grey dawn light, fine grain.",
       blocks: [{ key: "p0.0", at: 0, text: "Maren reads." }, { key: "p1.0", at: 75, text: "Bray tells a story.", speaker: "Bray" }],
       lines: [{ label: "Place", text: "Dawn." }, { label: "Maren", text: "Oilskin." }],
       people: [{ key: "maren-kest", name: "Maren", appearance: "Wiry." }],
@@ -187,7 +187,7 @@ describe("what the chapter is asked", () => {
       cap: 3,
       maxChars: 900,
     });
-    for (const part of ["[p1.0] 1:15 Bray: Bray tells a story.", "At most 3 pictures", "about one every 90 seconds", "at least 20 seconds apart", "(at 2:30)", "Maren: Oilskin.", "[maren-kest] Maren — Wiry.", "Never show, name or hint at: Odile", "at most 900 characters"]) assert.ok(prompt.includes(part), part);
+    for (const part of ["[p1.0] 1:15 Bray: Bray tells a story.", "At most 3 pictures", "about one every 90 seconds", "at least 20 seconds apart", "(at 2:30)", "Maren: Oilskin.", "[maren-kest] Maren — Wiry.", "Never show, name or hint at: Odile", "at most 900 characters", "## The book's mood (light, colour and grain only)\n\nGrey dawn light, fine grain."]) assert.ok(prompt.includes(part), part);
   });
 });
 

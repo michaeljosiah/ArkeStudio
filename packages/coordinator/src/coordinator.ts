@@ -1678,7 +1678,7 @@ export class Coordinator {
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${row.block === "title" ? "title" : row.title}`,
             prompt: row.prompt,
-            ...(room.art !== undefined ? { art: room.art } : {}),
+            ...(room.mood !== undefined ? { mood: room.mood } : {}),
             model,
             ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
             who,
@@ -15163,7 +15163,7 @@ export class Coordinator {
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${msg.block === "title" ? "title" : `block ${index + 1}`}`,
             prompt: clipPrompt(msg.prompt, promptRoom(model)),
-            ...(room.art !== undefined ? { art: room.art } : {}),
+            ...(room.mood !== undefined ? { mood: room.mood } : {}),
             model,
             ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
             who,
@@ -19083,7 +19083,7 @@ export class Coordinator {
    */
   private async makeBenchPicture(
     store: WorldStore,
-    input: { title: string; prompt: string; art?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal },
+    input: { title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal },
   ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null; estimatedMicroUsd: number } | { ok: false; reason: string; sessionId?: SessionId }> {
     const worldId = store.worldId;
     const params = { kind: "image" as const, count: 1, ...(input.aspect !== undefined ? { aspect: input.aspect } : {}) };
@@ -19111,7 +19111,7 @@ export class Coordinator {
       if (outcome.outcome === "refused") void this.appLog?.append({ kind: "bench.reference-refused", worldId, reason: outcome.reason });
       else cited.push({ name: entry.name, kind: entry.kind, token: outcome.token });
     }
-    const brief = pictureBench(input.prompt, cited, input.art);
+    const brief = pictureBench(input.prompt, cited, input.mood);
     const composed = await this.benchFor(worldId, sessionId);
     if (composed === null) return fail("the Bench session is gone");
     await composed.store.append({ type: "composer-set", mode: "image", provider: input.model.provider, model: input.model.id, params, brief }, { at: this.nowIso(), requestId: `pic-brief:${input.requestId}` });
