@@ -152,7 +152,7 @@ describe("parsing a turn result", () => {
   });
 
   it("rejects an oversized merged scene batch before turn completion", () => {
-    const { command: _command, commands: _commands, ...action } = WORLD_CHAT_SHAPE_EXAMPLES.worldActions["production-scene-command"];
+    const { command: _command, ...action } = WORLD_CHAT_SHAPE_EXAMPLES.worldActions["production-scene-command"];
     const raw = turn({ actions: [{ ...action, commands: Array.from({ length: 24 }, () => ({ kind: "edit-scene" as const, title: "The bell" })) },
       { ...action, command: { kind: "edit-scene", title: "The tide" } }] });
     const result = parseTurnResult(raw, true);
