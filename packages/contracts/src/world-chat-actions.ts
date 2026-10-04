@@ -2,7 +2,7 @@ import { z } from "zod";
 import { PropAuthoringChangeSchema, PropIdSchema, PropStateIdSchema } from "./prop.js";
 export { ProductionCreationPlanSchema, type ProductionCreationPlan } from "./production-creation.js";
 import { ProductionCreationPlanSchema } from "./production-creation.js";
-import { ArkeReadObservationSchema, ConversationActionSemanticIdSchema } from "./arke-actions.js";
+import { ArkeReadObservationSchema, ConversationActionSemanticIdSchema, type ArkeReadObservation } from "./arke-actions.js";
 import { AudioPolicySchema, FailureModesSchema, KeyArtIntentSchema } from "./art-direction.js";
 import { BenchModeSchema, BenchParamsSchema } from "./bench.js";
 import { BibleEditSchema } from "./bible.js";
@@ -28,7 +28,7 @@ import { CompilationFormatSchema, ReferenceAngleSchema } from "./reference.js";
 import { CapabilitySchema } from "./provider.js";
 import { ScriptBlockSchema, ShotFramingSchema } from "./scene.js";
 import { SceneCommandSchema } from "./scene-operations.js";
-import { SceneRecordSchema } from "./scene-flow.js";
+import { SceneRecordSchema, type SceneRecord } from "./scene-flow.js";
 import { AudioSpineCommandSchema } from "./spine.js";
 import { SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { TimelineTrackIdSchema } from "./timeline.js";
@@ -1320,11 +1320,14 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
 
-export const WorldChatDependencyPreviewSchema = z.object({
+export interface WorldChatDependencyPreview {
+  scenes: Array<{ productionId: string; scene: SceneRecord }>;
+  expectedObservations: ArkeReadObservation[];
+}
+export const WorldChatDependencyPreviewSchema: z.ZodType<WorldChatDependencyPreview, z.ZodTypeDef, unknown> = z.object({
   scenes: z.array(z.object({ productionId: SlugSchema, scene: SceneRecordSchema }).strict()).min(1).max(24),
   expectedObservations: z.array(ArkeReadObservationSchema),
 }).strict();
-export type WorldChatDependencyPreview = z.infer<typeof WorldChatDependencyPreviewSchema>;
 const preparedAction = <K extends string, T extends z.ZodTypeAny>(kind: K, action: T) => z
   .object({ kind: z.literal(kind), worldId: UlidSchema, productionId: SlugSchema.optional(), action,
     dependencyPreview: WorldChatDependencyPreviewSchema.optional(),
