@@ -293,10 +293,17 @@ export function withWrites(look: AudiobookLook | null, writing: ReadonlyArray<{ 
   if (look === null || writing.length === 0) return look;
   let next = look;
   for (const { target, text } of writing) {
-    if (text === null) continue;
-    if (target.kind === "place" && next.place !== undefined) next = { ...next, place: { ...next.place, text } };
-    else if (target.kind === "mood" && next.mood !== undefined) next = { ...next, mood: { ...next.mood, text } };
-    else if (target.kind === "character" && next.characters[target.key] !== undefined) next = { ...next, characters: { ...next.characters, [target.key]: { ...next.characters[target.key]!, text } } };
+    // A line taken away (null) is shown gone, as the record will have it.
+    if (target.kind === "place" && next.place !== undefined) {
+      const { place: _place, ...rest } = next;
+      next = text === null ? rest : { ...next, place: { ...next.place, text } };
+    } else if (target.kind === "mood" && next.mood !== undefined) {
+      const { mood: _mood, ...rest } = next;
+      next = text === null ? rest : { ...next, mood: { ...next.mood, text } };
+    } else if (target.kind === "character" && next.characters[target.key] !== undefined) {
+      const { [target.key]: line, ...others } = next.characters;
+      next = { ...next, characters: text === null ? others : { ...next.characters, [target.key]: { ...line!, text } } };
+    }
   }
   return next;
 }
@@ -342,7 +349,8 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
   // that snapshot's kit has no close view the accept did not land, and the row offers it again
   // rather than saying `saving…` for good (codex on PR 1559).
   const [closeAccepted, setCloseAccepted] = useState<Record<string, { path: string; under: unknown }>>({});
-  const [discarded, setDiscarded] = useState<readonly string[]>([]);
+  // Hidden until the next snapshot, which records the rejection or shows the take still pending.
+  const [discarded, setDiscarded] = useState<ReadonlyArray<{ takeId: string; under: unknown }>>([]);
   /**
    * Choices and line writes pressed and not yet in the record (2026-10-04, 0.5.60-local.14): the
    * coordinator wrote the choice, but the record it answers with took seconds to come back and the
@@ -432,7 +440,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
   const pendingClose = (sheet: string, lookId: string): { id: string; path: string } | null => {
     if (world === null) return null;
     const found = world.referenceTakes
-      .filter((take) => take.kind === "look" && take.reference?.sheetId === sheet && take.media !== undefined && take.params["lookFraming"] === "close" && take.params["lookOfLook"] === lookId && !discarded.includes(take.id) && !world.referenceReviews.some((review) => review.takeId === take.id))
+      .filter((take) => take.kind === "look" && take.reference?.sheetId === sheet && take.media !== undefined && take.params["lookFraming"] === "close" && take.params["lookOfLook"] === lookId && !discarded.some((entry) => entry.takeId === take.id && entry.under === world) && !world.referenceReviews.some((review) => review.takeId === take.id))
       .sort((a, b) => (a.id < b.id ? 1 : -1))[0];
     return found === undefined ? null : { id: found.id, path: `references/${sheet}/takes/${found.id}/${found.media}` };
   };
@@ -490,7 +498,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
                   // Hidden at once only when the command went (codex on PR 1559); a take another window
                   // decided is gone from the snapshot anyway.
                   if (!rejectReferenceTake(worldId, takeId, "close view", again ? "made again" : "discarded")) return;
-                  setDiscarded((heldTakes) => [...heldTakes, takeId]);
+                  setDiscarded((heldTakes) => [...heldTakes, { takeId, under: world }]);
                   setCloseAsked(({ [chosen.id]: _gone, ...rest }) => rest);
                   if (again) makeClose(row, chosen);
                 }}

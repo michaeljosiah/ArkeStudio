@@ -19194,8 +19194,14 @@ export class Coordinator {
           return fail(describeCoordinatorError(err));
         }
       }
-      // The provider's own answer: the one failure a run holds for Try again (codex on PR 1559).
-      if (take !== undefined && take.status === "failed") return { ...(await fail(take.error ?? "the picture could not be made")), provider: true as const };
+      // The provider's own answer: the one failure a run holds for Try again (codex on PR 1559). The
+      // queue fails a job the same way before any provider call (no client, a reference it cannot
+      // send); only a job that made a submission call (`attempt`) reached the provider.
+      if (take !== undefined && take.status === "failed") {
+        const ran = jobId === undefined ? undefined : this.jobQueue?.listJobs().find((candidate) => candidate.id === jobId);
+        const failed = await fail(take.error ?? "the picture could not be made");
+        return (ran?.attempt ?? 0) > 0 ? { ...failed, provider: true as const } : failed;
+      }
       if (take !== undefined && (take.status === "cancelled" || take.status === "needs-reconciliation")) return fail(take.error ?? (take.status === "cancelled" ? "cancelled" : "the picture could not be made"));
       if (Date.now() > deadline) return fail("the picture took too long");
       await new Promise((resolve) => setTimeout(resolve, PICTURE_POLL_MS));

@@ -211,10 +211,12 @@ const BARE_PART = "(?:shoulders?|back|arms?|legs?|skin|neck|midriff|stomach|ches
 /** Words for how much a garment shows, its cut, or the body under it: never in a picture's words once the look image rides. */
 const CUT_WORDS = [
   "low[- ]backed", "open[- ]backed", "backless", "strapless", "off[- ]the[- ]shoulder", "one[- ]shoulder(?:ed)?", "spaghetti[- ]strap(?:ped|s)?",
-  "halter[- ]?neck(?:ed)?", "plunging(?: neckline)?", "low[- ]cut", "deep[- ]cut", "deep[- ]v", "low[- ]necked", "sweetheart neckline",
-  // Only words that say how a garment shows the body: "sheer" before a cloth, never a sheer drop.
-  "sheer(?= (?:silk|chiffon|fabric|lace|mesh|organza|tulle|dress|blouse|top|gown|robe|slip))", "see[- ]through", "skin[- ]tight", "figure[- ]hugging",
-  "body[- ]hugging", "curve[- ]hugging", "form[- ]fitting", "body[- ]?con", "tight[- ]fitting", "revealing", "sexy", "sultry", "seductive", "racy", "skimpy", "cut[- ]?outs?",
+  "halter[- ]?neck(?:ed)?", "plunging (?:neckline|v|back)", "low[- ]cut", "deep[- ]cut", "deep[- ]v", "low[- ]necked", "sweetheart neckline",
+  // Only words that say how a garment shows the body: "sheer" before a cloth, never a sheer drop;
+  // "revealing" or "sultry" before a garment, never the box revealing the map or a sultry voice
+  // (codex on PR 1559): the prompt's action and expressions are not clothing.
+  `(?:sheer|revealing|sultry|seductive)(?= (?:silk|satin|chiffon|fabric|lace|mesh|organza|tulle|${"dress|gown|blouse|top|robe|slip|outfit|neckline|costume|skirt|bodice"}))`,
+  "see[- ]through", "skin[- ]tight", "figure[- ]hugging", "body[- ]hugging", "curve[- ]hugging", "form[- ]fitting", "body[- ]?con", "tight[- ]fitting", "sexy", "racy", "skimpy", "cut[- ]?outs?",
 ];
 /** A phrase that is only about skin or the body: bare shoulders, a slit to the thigh, the back beneath her braids. */
 const EXPOSURE_PHRASES = [

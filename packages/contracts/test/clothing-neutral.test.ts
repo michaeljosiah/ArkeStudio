@@ -30,7 +30,7 @@ describe("neutralClothing", () => {
   });
 
   it("leaves clothing that shows nothing, and words that only sound like a cut, as they are", () => {
-    for (const line of ["Oilskin coat, dark and stiff with salt; hood up, two braids.", "Harbour coat, bare head.", "Maren, clinging to the rail, looks down a sheer drop as the road curves away.", "A slit of light under the door."]) {
+    for (const line of ["Oilskin coat, dark and stiff with salt; hood up, two braids.", "Harbour coat, bare head.", "Maren, clinging to the rail, looks down a sheer drop as the road curves away.", "A slit of light under the door.", "She opens the box, revealing the map.", "A sultry, level look; the gull plunging toward the water."]) {
       assert.equal(neutralClothing(line), line);
     }
   });

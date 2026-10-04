@@ -56,6 +56,8 @@ export interface HarnessOptions {
   land?: boolean | "fail" | ((n: number) => Landing);
   /** What a failed job says, as the provider would. */
   failure?: string;
+  /** False: a job the queue failed before any provider call (attempt 0). */
+  reached?: boolean;
   prepare?: (worldDir: string) => Promise<void>;
 }
 
@@ -94,12 +96,16 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
       (async () => ({ place: { text: "The rail desk at dawn, grey light." }, characters: [{ who: "maren-kest", text: "Oilskin coat, dark with salt." }, { who: "bray-half-hitch", text: "Three belts, a wet cap." }] })),
     ...(options.illustrate !== undefined ? { illustrateDeriver: options.illustrate } : {}),
   });
+  // Every job made a submission call, as a provider refusal does: `attempt` is how a run tells one.
+  const jobs: Array<{ id: string; attempt: number }> = [];
   (coordinator as unknown as { jobQueue: unknown }).jobQueue = {
+    listJobs: () => jobs,
     enqueue: async (input: { target: { id: string }; landing: { dir: string }; params: Record<string, unknown>; estimatedMicroUsd: number }) => {
       const n = enqueued.length;
       enqueued.push({ params: input.params, estimatedMicroUsd: input.estimatedMicroUsd, at: Date.now() });
       const what = behaviour(n);
       const id = `jb_01J${String(n).padStart(23, "0")}`;
+      jobs.push({ id, attempt: options.reached === false ? 0 : 1 });
       const [sessionId, takeId] = input.target.id.split("/") as [string, string];
       const bench = new BenchStore(sessionDir(worldDir, sessionId as never));
       if (what === "hold") return { id };

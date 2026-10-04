@@ -17,7 +17,8 @@ export function lookJobState(job: Job | undefined): LookJobState | null {
   if (job === undefined) return null;
   if (job.status === "succeeded") return job.finalization?.status === "failed" ? { state: "failed", reason: "made, not filed · see Activity", retry: false } : null;
   if (ACTIVE.has(job.status)) return { state: "making" };
-  if (job.status === "cancelled") return { state: "failed", reason: "stopped", retry: true };
+  // A cancel after submission may still be completed or charged by the provider: Activity settles it, not a second request.
+  if (job.status === "cancelled") return job.cancellationUncertain === true ? { state: "failed", reason: "stopped · see Activity", retry: false } : { state: "failed", reason: "stopped", retry: true };
   // A provider outcome Arke did not see may have been charged: Activity settles it, not a new request.
   if (job.status === "needs-reconciliation") return { state: "failed", reason: "held · see Activity", retry: false };
   return { state: "failed", reason: pictureRefusal(job.error), retry: true };

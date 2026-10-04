@@ -329,6 +329,18 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
       { illustrate: says(MARENS), land: (n) => (n === 1 ? "fail" : "land") },
     ));
 
+  it("holds no row for Try again when the queue failed it before any provider call (codex on PR 1559)", () =>
+    withHarness(
+      async (h) => {
+        const proposal = await proposed(h);
+        const free = rowsWithoutNeeds(proposal);
+        await accept(h.send, proposal, { blocks: free.map((row) => row.block), confirmedMicroUsd: 10_000_000 });
+        assert.equal(progressOf(h.events).at(-1)!.progress.failed[0]?.block, free[0]!.block, "it failed, and says why");
+        assert.equal(finished(h.events).proposal!.rows.find((row) => row.block === free[0]!.block)!.refused, undefined, "not a refusal Try again could undo");
+      },
+      { illustrate: says(MARENS), land: (n) => (n === 0 ? "fail" : "land"), failure: "no openai client is configured", reached: false },
+    ));
+
   it("says a safety refusal in plain words on the row it holds", () =>
     withHarness(
       async (h) => {
