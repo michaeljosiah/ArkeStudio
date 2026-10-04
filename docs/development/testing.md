@@ -6,7 +6,9 @@ Production whole-cut chat (#1420, SPEC-051 T-7) is covered by coordinator
 They exercise approval-only ordered assembly, exact history and stale cards, typed overlay
 split/rejoin with independently edited audio retained, local transcription quotes with no
 pre-approval STT calls, changed bytes, cited subtitle drafts, and direct human Undo/Redo
-matching. The contracts test replays placement into a remembered tail hole through both
+matching. The suite also refuses overlay windows beyond measured video, undoes/redoes rejoin
+with its empty split track removed, and cleans failed transcription files only after a durable
+failure, including restart cleanup without another speech call. The contracts test replays placement into a remembered tail hole through both
 history stacks. Run client tests from `packages/client`. Installed-app and real Voxa
 acceptance remains #1427.
 

@@ -4738,6 +4738,7 @@ export function worldChatActionAdapters(
         return sharedResourceProjection(store, intent, input, deps);
       },
       abandonPreparation: (intent) => abandon(intent.actionId),
+      ...(actionKind === "world-chat-production-timeline-transcribe" ? { settleFailed: (action: ConversationActionCard) => removePreparation(store, "world", action.actionId) } : {}),
       validate: async (action) => {
         const payload = await readPreparation(store, "world", action);
         if (!payload) return { ok: false, reason: "blocked", detail: "The prepared shared-resource action is unavailable." };

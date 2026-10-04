@@ -1,4 +1,4 @@
-import { applyTimelineCommands, assembleSceneCommands, detachAudioCommands, ModelEditorRequestSchema,
+import { applyTimelineCommands, assembleSceneCommands, detachAudioCommands, sourceLengthFramesFor, ModelEditorRequestSchema,
   ulid, AUDIO_TRACK_KINDS, type ModelWorldChatAction, type ModelEditorRequest, type WorldChatPreparedAction,
   type ConversationActionCard, type ArkeGenerationBody, type ArkeCommandBodySchema } from "@arke-studio/contracts";
 import { z } from "zod";
@@ -68,8 +68,11 @@ export function compileProductionTimelineRequest(store: WorldStore, action: Acti
     if (track?.kind !== "picture") throw new Error("Place a picture overlay on a named picture track.");
     const artifact = store.getBundle().artifacts.find(a => a.id === request.artifactId && !a.retiredAt && (!a.production || a.production === action.productionId));
     if (!artifact || !["image", "video", "board"].includes(artifact.kind)) throw new Error("Choose an available picture artifact in this production.");
-    commands.push({ kind: "place", trackId: request.trackId, clip: { id: `cl_overlay_${suffix}`, source: { kind: "artifact", artifactId: artifact.id, label: artifact.file },
-      startFrame: request.startFrame, durationFrames: request.durationFrames, sourceInFrames: request.sourceInFrames, gainDb: 0, audio: "keep" } });
+    const clip = { id: `cl_overlay_${suffix}` as const, source: { kind: "artifact" as const, artifactId: artifact.id, label: artifact.file },
+      startFrame: request.startFrame, durationFrames: request.durationFrames, sourceInFrames: request.sourceInFrames, gainDb: 0, audio: "keep" as const };
+    const available = artifact.kind === "video" ? sourceLengthFramesFor(production, store.getBundle().artifacts)(clip) : undefined;
+    if (available !== undefined && clip.sourceInFrames + clip.durationFrames > available) throw new Error("The overlay window extends beyond the measured video. Choose a shorter window or earlier source in.");
+    commands.push({ kind: "place", trackId: request.trackId, clip });
     summary = `Place ${artifact.file} at frame ${request.startFrame}`;
   } else if ("clipId" in request) {
     const track = base.timeline.tracks.find(t => t.clips.some(c => c.id === request.clipId));
@@ -91,6 +94,7 @@ export function compileProductionTimelineRequest(store: WorldStore, action: Acti
         audio.startFrame !== clip.startFrame || audio.durationFrames !== clip.durationFrames || audio.sourceInFrames !== clip.sourceInFrames ||
         (audio.gainDb ?? 0) !== (clip.gainDb ?? 0) || (audio.role ?? "unspecified") !== (clip.role ?? "unspecified") || audio.audio === "mute" || clip.audio !== "mute") throw new Error("Rejoin requires the unchanged audio twin of this muted overlay. Independently edited audio must be kept.");
       commands.push({ kind: "set-clip-audio", clipId: clip.id, audio: "keep" }, { kind: "delete", clipId: audio.id });
+      if (audioTrack.clips.length === 1 && !(audioTrack.cues?.length)) commands.push({ kind: "remove-track", trackId: audioTrack.id });
     }
   } else throw new Error("Transcription and history use their own approval card.");
   return ModelEditorRequestSchema.parse({ summary: summary.slice(0, 500), commands });
