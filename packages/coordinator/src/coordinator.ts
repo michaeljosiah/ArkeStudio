@@ -18768,7 +18768,9 @@ export class Coordinator {
         const model = modelFor(production, "video", action.modelId, settings);
         const route = characterAudioRoute(model);
         const disabled = action.audioReferencesDisabled || !route;
-        const cast = disabled ? { references: [], notSent: [], refused: [] }
+        const cast = disabled ? { references: [], notSent: !route ? Object.entries(scene.cast ?? {})
+          .filter(([, member]) => member.voice?.kind === "performance")
+          .map(([sheetId]) => ({ sheetId, name: bundle.sheets.find(sheet => sheet.id === sheetId)?.name ?? sheetId, reason: "takes no audio" })) : [], refused: [] }
           : await resolveCastVoices(store, production, scene, id, acknowledgeShotIds, route?.local === true, { acknowledge: acknowledgeShotIds !== undefined, at });
         const audioDesign = await audioDesignFor(store, production.meta.id);
         const plan = planScene({ timingProduction: production, world: bundle.meta, artDirection: bundle.artDirection, productionId: action.productionId,

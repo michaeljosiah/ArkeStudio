@@ -331,4 +331,42 @@ describe("Production Chat batch authority (SPEC-051 R-8..10)", () => {
     assert.equal(h.jobs.length, 0);
     assert.equal((await listPlans(h.store, "saltlight")).length, 0);
   });
+  it("discloses selected cast performances on a route that takes no audio without resolving an upload", async () => {
+    const h = await setup();
+    const p = h.store.getBundle().productions.find(p => p.meta.id === "saltlight")!, speaker = h.store.getBundle().sheets.find(sheet => sheet.type === "character")!;
+    await h.store.ownedWrite(async () => {
+      const path = join(h.worldDir, "productions/saltlight/scenes", `${p.sceneFiles.sc_04!}.json`);
+      const scene = JSON.parse(await readFile(path, "utf8"));
+      scene.cast = { [speaker.id]: { voice: { kind: "performance", performanceId: newId("pf"), hash: `sha256:${"a".repeat(64)}` } } };
+      scene.version += 1;
+      await writeFile(path, JSON.stringify(scene));
+    });
+    const id = newId("act"), action = planAction();
+    const body = await h.quotes().prepare(action, id, AT);
+    assert.ok(body.options!.some(option => option.label.includes(speaker.name) && option.value === "takes no audio"));
+    const compiled = await h.source.compile(action, id, AT);
+    assert.deepEqual((compiled.materialization as { plan: { castNotSent: unknown } }).plan.castNotSent, [{ sheetId: speaker.id, name: speaker.name, reason: "takes no audio" }]);
+    assert.ok(compiled.inputs.every(input => !input.params.audioReferences || (input.params.audioReferences as { references: unknown[] }).references.length === 0));
+    assert.equal(h.jobs.length, 0);
+    await h.quotes().dispatch(action, id);
+    assert.deepEqual((await listPlans(h.store, "saltlight"))[0]!.castNotSent, [{ sheetId: speaker.id, name: speaker.name, reason: "takes no audio" }]);
+  });
+  it("bounds large dropped-input display while preserving the complete frozen plan", async () => {
+    const h = await setup(), original = h.ports.planInput;
+    h.ports.planInput = async (...args) => {
+      const input = await original(...args);
+      for (const pass of input.plan.passReferences) pass.budget.dropped = Array.from({ length: 800 }, (_, index) => ({ sheetId: `dropped-character-${index}`,
+        kind: "character", appearanceOrder: index, hasReference: true }));
+      return input;
+    };
+    const id = newId("act"), action = planAction();
+    const body = await h.quotes().prepare(action, id, AT);
+    const display = body.options!.find(option => option.label === "Dropped inputs")!.value;
+    assert.equal(display.length, 20_000);
+    assert.match(display, /Display truncated/);
+    const quote = await h.quotes().validate(action, id);
+    const plan = (quote.materialization as { plan: { passes: { compiled: { dropped: unknown[] } }[] } }).plan;
+    assert.equal(plan.passes[0]!.compiled.dropped.length, 800);
+    assert.equal(h.jobs.length, 0);
+  });
 });

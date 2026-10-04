@@ -64,7 +64,10 @@ function generationBody(inputs: readonly EnqueueInput[], purpose: string, output
       return paths.map(path => ({ id: `ref_${key(path)}`, role: `Step ${index + 1}: ${path}`.slice(0, 200) }));
     }),
     exclusions: inputs.flatMap(input => ((input.params.request as { droppedReferences?: { path: string; reason: string }[] } | undefined)?.droppedReferences ?? []).map(ref => `${ref.path}: ${ref.reason}`)),
-    options, output, cost: "Coordinator quote", privacy: ["Resolved prompts and carried image, video and audio references go to the configured provider runtime."], cancellationSupported: true };
+    options: options.map(option => {
+      const suffix = "\n[Display truncated; complete data remains frozen in the approved plan or run.]";
+      return { label: option.label.slice(0, 200), value: option.value.length > 20_000 ? option.value.slice(0, 20_000 - suffix.length) + suffix : option.value };
+    }), output, cost: "Coordinator quote", privacy: ["Resolved prompts and carried image, video and audio references go to the configured provider runtime."], cancellationSupported: true };
 }
 
 /** Chat quotes reuse the same run/plan compilers and persist the domain authority before enqueue. */
