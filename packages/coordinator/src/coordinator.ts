@@ -586,7 +586,7 @@ import {
   WorldChatAttachmentStore,
 } from "./world-chat/attachments.js";
 import { projectWorkspace } from "./world-chat/project.js";
-import { projectProductionPlan } from "./world-chat/production-readiness.js";
+import { projectProductionPlan, refreshProductionPlanCards } from "./world-chat/production-readiness.js";
 import {
   ConversationActionLifecycle,
   conversationActionDigest,
@@ -4081,6 +4081,13 @@ export class Coordinator {
       this.exportReads.set(parsed.exportId, exportReadRecord(parsed));
     }
     this.readModel.apply(parsed);
+    if (parsed.type === "export.progress") {
+      const state = this.readModel.getState();
+      if (state.world?.meta.worldId === parsed.worldId && state.worldChat?.messages.some(m => m.productionPlan?.productionId === parsed.productionId)) {
+        this.readModel.setWorldChat(refreshProductionPlanCards(state.worldChat,state.world,[...this.exportReads.values()]));
+        this.transport.broadcastSnapshot();
+      }
+    }
     if (
       parsed.type !== "health.changed" &&
       parsed.type !== "appearance.changed" &&

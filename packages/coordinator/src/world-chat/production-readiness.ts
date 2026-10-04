@@ -1,5 +1,5 @@
 import { deriveProductionReadiness, type WorldBundle, type ProductionPlanRequest, type ProductionPlanCard,
-  type WorldChatContext, type WorldChatCheckReceipt, type ReadinessExport } from "@arke-studio/contracts";
+  type WorldChatContext, type WorldChatCheckReceipt, type ReadinessExport, type WorldChatWorkspace } from "@arke-studio/contracts";
 import { productionReadinessFence } from "./target-reads.js";
 
 export function validateProductionPlan(bundle: WorldBundle, exports: readonly ReadinessExport[], request: ProductionPlanRequest,
@@ -13,9 +13,14 @@ export function validateProductionPlan(bundle: WorldBundle, exports: readonly Re
     r.observedRevisionOrDigest === fence)) throw new Error("Read fresh complete readiness before proposing a plan.");
 }
 
-export function projectProductionPlan(bundle: WorldBundle, exports: readonly ReadinessExport[], request: ProductionPlanRequest): ProductionPlanCard {
+export function projectProductionPlan(bundle: WorldBundle, exports: readonly ReadinessExport[], request: Pick<ProductionPlanRequest,"productionId" | "nextSteps">): ProductionPlanCard {
   const production = bundle.productions.find(p => p.meta.id === request.productionId);
   const readiness = production ? deriveProductionReadiness(bundle, production, exports) : null;
   return { kind: "production-plan", worldId: bundle.meta.worldId, productionId: request.productionId, nextSteps: request.nextSteps,
     exports: readiness?.lastExport ? [readiness.lastExport] : [], readiness };
+}
+
+export function refreshProductionPlanCards(workspace: WorldChatWorkspace, bundle: WorldBundle, exports: readonly ReadinessExport[]): WorldChatWorkspace {
+  return {...workspace,messages:workspace.messages.map(message => message.productionPlan?.worldId === bundle.meta.worldId
+    ? {...message,productionPlan:projectProductionPlan(bundle,exports,message.productionPlan)} : message)};
 }
