@@ -216,7 +216,9 @@ const CUT_WORDS = [
   // "revealing" or "sultry" before a garment, never the box revealing the map or a sultry voice
   // (codex on PR 1559): the prompt's action and expressions are not clothing.
   `(?:sheer|revealing|sultry|seductive)(?= (?:silk|satin|chiffon|fabric|lace|mesh|organza|tulle|${"dress|gown|blouse|top|robe|slip|outfit|neckline|costume|skirt|bodice"}))`,
-  "see[- ]through", "skin[- ]tight", "figure[- ]hugging", "body[- ]hugging", "curve[- ]hugging", "form[- ]fitting", "body[- ]?con", "tight[- ]fitting", "sexy", "racy", "skimpy", "cut[- ]?outs?",
+  "see[- ]through", "skin[- ]tight", "figure[- ]hugging", "body[- ]hugging", "curve[- ]hugging", "form[- ]fitting", "body[- ]?con", "tight[- ]fitting", "sexy", "racy", "skimpy",
+  // The garment's cut-outs, never the verb: "they cut out the lights" is an action (codex on PR 1559).
+  "cut-?outs?",
 ];
 /** A phrase that is only about skin or the body: bare shoulders, a slit to the thigh, the back beneath her braids. */
 const EXPOSURE_PHRASES = [

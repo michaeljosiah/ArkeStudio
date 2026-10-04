@@ -1684,7 +1684,8 @@ export class Coordinator {
             title: `Chapter ${chapter.order} · ${row.block === "title" ? "title" : row.title}`,
             // Held to rule 4 again: a look chosen since the proposal rides now, and its image carries the clothes (codex on PR 1559).
             prompt: neutralWhereLooksRide(row.prompt, who),
-            ...(room.mood !== undefined ? { mood: room.mood } : {}),
+            // The Mood line rides after the prompt, so it is held to rule 4 the same way (codex on PR 1559).
+            ...(room.mood !== undefined ? { mood: neutralWhereLooksRide(room.mood, who) } : {}),
             model,
             ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
             who,
@@ -15186,7 +15187,8 @@ export class Coordinator {
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${msg.block === "title" ? "title" : `block ${index + 1}`}`,
             prompt: clipPrompt(msg.prompt, promptRoom(model)),
-            ...(room.mood !== undefined ? { mood: room.mood } : {}),
+            // The Mood line rides after the prompt, so it is held to rule 4 the same way (codex on PR 1559).
+            ...(room.mood !== undefined ? { mood: neutralWhereLooksRide(room.mood, who) } : {}),
             model,
             ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
             who,
