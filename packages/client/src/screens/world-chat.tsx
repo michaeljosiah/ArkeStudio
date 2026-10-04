@@ -1061,6 +1061,14 @@ function aboutLabel(context: NonNullable<WorldChatSummary["entryContext"]>, worl
       return `episode · ${context.episodeId}`;
     case "scene":
       return `scene · ${context.sceneId}`;
+    case "shot":
+    case "stage":
+    case "takes":
+      return `${context.kind} · ${context.shotId}`;
+    case "generate":
+      return `Generate · ${context.shotId ?? context.sceneId ?? context.productionId}`;
+    case "cut":
+      return `Cut · ${context.productionId}`;
     default:
       return "";
   }

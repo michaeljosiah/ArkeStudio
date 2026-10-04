@@ -55,12 +55,17 @@ async function recordBenchOutcomeUnserialised(
   const subject = session.subject!;
   const requestId = `bench-outcome:${session.id}/${take.id}`;
   const matching = (await discoverConversations(store.dir)).summaries
-    .filter(
-      (summary) =>
-        summary.entryContext?.kind === "scene" &&
-        summary.entryContext.productionId === subject.productionId &&
-        summary.entryContext.sceneId === subject.sceneId,
-    )
+    .filter((summary) => {
+      const context = summary.entryContext;
+      if (
+        context === undefined || !("sceneId" in context) ||
+        context.productionId !== subject.productionId || context.sceneId !== subject.sceneId
+      ) return false;
+      const shotId = "shotId" in context ? context.shotId : undefined;
+      return shotId === undefined || (subject.kind === "shot"
+        ? subject.shotId === shotId
+        : subject.members.some((member) => member.shotId === shotId));
+    })
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 
   for (const summary of matching) {

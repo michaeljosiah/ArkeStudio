@@ -1451,6 +1451,20 @@ describe("frame-run coordinator service", () => {
 });
 
 describe("frame-run Arke outcomes", () => {
+  it("recovers a terminal report into the matching Generate dock", async () => {
+    const f = await fixture();
+    const completed = await finishRun(f, "succeeded");
+    const conversationId = newId("cv") as ConversationId;
+    await f.store.ensureSchemaVersion(50, "world-chat");
+    const log = new WorldChatStore(conversationDir(f.dir, conversationId));
+    await log.create(conversationId, CLOCK());
+    await log.append({ type: "conversation.created", title: "Generate this shot",
+      entryContext: { kind: "generate", productionId: f.production.meta.id, sceneId: f.scene.id,
+        shotId: completed.state.run.steps[0]!.updateShotIds[0]! } }, { at: CLOCK() });
+    assert.equal(await recordFrameRunOutcome(f.store, completed.state), conversationId);
+    assert.equal(await recordFrameRunOutcome(f.store, completed.state), conversationId);
+    assert.equal((await log.read()).events.filter(event => event.event.type === "frame-run.outcome-recorded").length, 1);
+  });
   it("raises schema 4 before appending to an existing scene conversation", async () => {
     const f = await fixture();
     const conversationId = newId("cv") as ConversationId;

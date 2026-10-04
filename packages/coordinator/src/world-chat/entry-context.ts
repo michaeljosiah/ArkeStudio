@@ -59,6 +59,23 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
     }
     case "attachment":
       return "This conversation was opened from a document that was handed over. Read it before drawing anything from it.";
+    case "shot":
+    case "stage":
+    case "takes":
+    case "generate":
+    case "cut": {
+      const subject = "shotId" in context && context.shotId !== undefined ? `shot ${context.shotId} in scene ${context.sceneId}`
+        : "sceneId" in context && context.sceneId !== undefined ? `scene ${context.sceneId}` : `production ${context.productionId}`;
+      const first = context.kind === "stage" ? "Start with production-stage-construct for blocking, camera and motion, and production-scene-command for authored shot changes. Read get_scene_stage and get_scene."
+        : context.kind === "takes" ? "Start with production-take-review, production-take-trim and production-take-generation. Read list_takes and get_scene. A review based only on records must say metadata-only in its reason; do not claim to have seen pixels or heard audio."
+        : context.kind === "generate" ? "Start with production-frame-run-start, its pause/resume/cancel/retry controls, and production-scene-dispatch. Read list_frame_runs, list_plans, get_scene and list_takes. Resume and retry that may spend need a fresh generation approval."
+        : context.kind === "cut" ? "Start with editorRequests for timeline picture, audio and subtitle commands, audio-spine-command and production-cut-export. Before an editorRequest, page get_timeline to complete=true this turn. Read list_editor_requests for pending decisions and history, and get_audio_cut for legacy audio placements."
+        : "Start with production-scene-command, production-take-generation and production-stage-construct. Read get_scene, get_scene_shots, get_scene_stage and list_takes.";
+      const base = "sceneId" in context && context.sceneId !== undefined
+        ? describeEntryContext({ kind: "scene", productionId: context.productionId, sceneId: context.sceneId }, bundle)
+        : describeEntryContext({ kind: "production", productionId: context.productionId }, bundle);
+      return `This is the ${context.kind} workspace for ${subject} in production ${context.productionId}. ${first} ${base}`;
+    }
     case "production": {
       const production = bundle.productions.find((p) => p.meta.id === context.productionId);
       const named = production ? `"${production.meta.title}" (${context.productionId})` : context.productionId;

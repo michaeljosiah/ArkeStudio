@@ -592,7 +592,7 @@ function ShotWorkspace({
           <ProductionConversation
             worldId={world.meta.worldId}
             productionId={production.meta.id}
-            entry={{ kind: "scene", productionId: production.meta.id, sceneId: scene.id }}
+            entry={{ kind: view === "stage" ? "stage" : "shot", productionId: production.meta.id, sceneId: scene.id, shotId: shot.id }}
             subject={conversationSubject}
             dock={{
               title: `Arke · Shot ${shot.number}`,

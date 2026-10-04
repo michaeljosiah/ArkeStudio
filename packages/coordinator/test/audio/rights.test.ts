@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
 import type { AudioRightsEvent } from "@arke-studio/contracts";
-import { appendAudioRights, readAudioRights, effectiveAudioRights } from "../../src/audio/rights.js";
+import { appendAudioRights, readAudioRights, readAudioRightsSync, effectiveAudioRights } from "../../src/audio/rights.js";
 import { cachedAudioTranscript } from "../../src/audio/transcript-comparison.js";
 import { audioHash } from "../../src/audio/qc.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { wav } from "./helpers.js";
+import { tempDir } from "../tmp.js";
 
 it("rights append and withdrawal preserve history; damaged logs fail closed", async t => {
   const dir = await makeTempWorld();
@@ -21,12 +22,22 @@ it("rights append and withdrawal preserve history; damaged logs fail closed", as
   assert.equal((await readAudioRights(store)).length, 1);
   await appendAudioRights(store, { schemaVersion: 1, action: "withdraw", audioHash: hash, acknowledgementId: "ack", at: "2026-09-05T12:01:00Z" });
   const events = await readAudioRights(store);
+  assert.deepEqual(readAudioRightsSync(store), events);
   assert.equal(events.length, 2);
   assert.equal(effectiveAudioRights(events, hash, "cloud-reference-upload").length, 0);
   const path = join(dir, "audio/rights.jsonl"), intact = await readFile(path, "utf8");
   await writeFile(path, `${intact}{"action":"withdraw"`);
   await assert.rejects(readAudioRights(store), /rights-unavailable/);
+  assert.throws(() => readAudioRightsSync(store), /rights-unavailable/);
   await assert.rejects(appendAudioRights(store, { ...ack, id: "another" }), /rights-unavailable/);
+});
+
+it("rights reads refuse a linked audio directory rather than borrowing another world's permission", async () => {
+  const dir = await tempDir("arke-rights-linked-world-"), other = await tempDir("arke-rights-other-world-");
+  await writeFile(join(other, "rights.jsonl"), "");
+  await symlink(other, join(dir, "audio"), "junction");
+  await assert.rejects(readAudioRights({ dir }), /rights-unavailable/);
+  assert.throws(() => readAudioRightsSync({ dir }), /rights-unavailable/);
 });
 it("local transcript cache needs no rights and is reused only for matching text and engine", async t => {
   const dir = await makeTempWorld();

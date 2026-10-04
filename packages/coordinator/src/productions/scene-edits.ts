@@ -23,7 +23,8 @@ export class SceneEditRefused extends Error {
 
 /** The scene a thread is about, or null for a thread that is not about one. */
 export function sceneOfContext(context: WorldChatContext | undefined): { productionId: string; sceneId: string } | null {
-  return context?.kind === "scene" ? { productionId: context.productionId, sceneId: context.sceneId } : null;
+  return context && "sceneId" in context && context.sceneId !== undefined
+    ? { productionId: context.productionId, sceneId: context.sceneId } : null;
 }
 
 /** The version the prompt shows the model, so the edit it returns is fenced by what it saw. */

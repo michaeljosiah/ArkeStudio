@@ -679,6 +679,7 @@ export class WorldChatRunner {
     const actionGuide = renderActionGuide(
       replyOnly ? [] : actionGuideScopes(view.entryContext),
       budgetChars - briefBudget - setupBudget,
+      view.entryContext,
     );
     const assembled = assembleContext({
       budgetChars: budgetChars - briefBudget - setupBudget,
@@ -695,6 +696,7 @@ export class WorldChatRunner {
       // the log by then) and once as what they just said — and a model that notices the
       // duplication spends its attention on it.
       messages: view.messages.filter((m) => m.id !== currentMessage.id),
+      actions: view.actions,
       tombstones: tombstonesFrom(events),
       ...(this.deps.worldContext ? { worldContext: this.deps.worldContext(view) } : {}),
       bible: bible.text,
@@ -1423,6 +1425,7 @@ ${assembled.actionGuide}`);
   if (assembled.bible) sections.push(`## The author's bible\n${assembled.bible}`);
   if (assembled.worldContext) sections.push(`## From the world\n${assembled.worldContext}`);
   if (assembled.recentTurns) sections.push(`## Recent turns\n${assembled.recentTurns}`);
+  if (assembled.actionReceipts) sections.push(`## Recorded action outcomes\nThese coordinator records are context, not approval or current read receipts. Re-read current targets before preparing changes; do not carry checkReceiptIds across turns.\n${assembled.actionReceipts}`);
   // Last before what they just said, because that is usually the sentence about it — "can you
   // see the attached document" reads against the thing itself rather than across the world.
   if (assembled.attachments) {

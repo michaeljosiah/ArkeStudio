@@ -53,6 +53,11 @@ const READ_TOOLS: Record<ArkeReadRequirement, readonly ArkeTargetReadTool[]> = {
   stage: ["get_scene_stage"],
   boards: ["get_scene_boards"],
   takes: ["list_takes"],
+  "frame-runs": ["list_frame_runs"],
+  performances: ["list_performances"],
+  "voice-samples": ["list_voice_samples"],
+  "audio-cut": ["get_audio_cut"],
+  "editor-requests": ["list_editor_requests"],
   timeline: ["get_timeline"],
   audio: ["get_timeline"],
   subtitles: ["get_timeline"],
@@ -148,6 +153,11 @@ export function actionGuideScopes(context: WorldChatContext | undefined): readon
     case "production":
     case "episode":
     case "scene":
+    case "shot":
+    case "stage":
+    case "takes":
+    case "generate":
+    case "cut":
       return ["world", "production"];
     default:
       return ["world"];
@@ -193,12 +203,28 @@ export interface RenderedActionGuide {
 export function renderActionGuide(
   scopes: readonly ArkeActionScope[],
   budgetChars: number,
+  context?: WorldChatContext,
 ): RenderedActionGuide {
   if (scopes.length === 0) return { text: "", mode: "none" };
-  const entries = ACTION_GUIDE_ENTRIES.filter((entry) => scopes.includes(entry.scope));
-  const full = [FULL_HEAD, ...entries.map(fullEntry)].join("\n");
+  const priorities: Partial<Record<WorldChatContext["kind"], readonly ModelActionKind[]>> = {
+    production: ["production-overview", "production-season", "production-episode"],
+    episode: ["production-episode", "production-scene"],
+    scene: ["production-scene-command", "production-board-compile", "production-scene"],
+    shot: ["production-scene-command", "production-take-generation", "production-stage-construct"],
+    stage: ["production-stage-construct", "production-scene-command", "production-take-generation"],
+    takes: ["production-take-review", "production-take-trim", "production-take-generation"],
+    generate: ["production-frame-run-start", "production-scene-dispatch", "production-frame-run-resume", "production-frame-run-retry-step", "production-frame-run-retry-cell", "production-frame-run-pause", "production-frame-run-cancel", "production-plan-cancel"],
+    cut: ["audio-spine-command", "production-cut-export"],
+  };
+  const first = priorities[context?.kind ?? "world"] ?? [];
+  const rank = (kind: ModelActionKind) => { const index = first.indexOf(kind); return index < 0 ? first.length : index; };
+  const entries = ACTION_GUIDE_ENTRIES.filter((entry) => scopes.includes(entry.scope)).sort((a, b) => rank(a.kind) - rank(b.kind));
+  const timelineGuide = scopes.includes("production")
+    ? "For editorRequests, first call get_timeline with productionId this turn and follow nextCursor until complete=true. Its final complete receipt is required even when the entry brief describes clips. Read list_editor_requests for pending decisions and history. Take review based on metadata alone must say metadata-only in its reason; never imply pixels or audio were inspected."
+    : "";
+  const full = [FULL_HEAD, timelineGuide, ...entries.map(fullEntry)].filter(Boolean).join("\n");
   if (full.length <= Math.floor(budgetChars / 5)) return { text: full, mode: "full" };
-  return { text: [COMPACT_HEAD, ...entries.map(compactEntry)].join("\n"), mode: "compact" };
+  return { text: [COMPACT_HEAD, timelineGuide, ...entries.map(compactEntry)].filter(Boolean).join("\n"), mode: "compact" };
 }
 
 /** What describe_action answers: one entry, whole, or null for a kind the schema does not take. */

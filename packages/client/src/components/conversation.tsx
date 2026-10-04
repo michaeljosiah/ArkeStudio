@@ -1350,7 +1350,7 @@ export function ProductionConversation({
       ? { onPromoteAttachment: (attachmentId: string) => promoteWorldChatAttachment(worldId, conversationId, attachmentId) }
       : {}),
   };
-  const sceneDock = dock?.conversationFirst === true && context.kind === "scene";
+  const sceneDock = dock?.conversationFirst === true && ["scene", "shot", "stage", "takes"].includes(context.kind);
   // The model is a chip in the composer's row, beside attach and voice, in a dock and on the page
   // alike (design turn 190e); the models' own status is said only while there is something to say
   // about them. The scene dock has none (turn 143).
@@ -1794,6 +1794,7 @@ function sameContext(a: WorldChatContext | undefined, b: WorldChatContext): bool
       "productionId" in c ? c.productionId : null,
       "episodeId" in c ? c.episodeId : null,
       "sceneId" in c ? c.sceneId : null,
+      "shotId" in c ? c.shotId : null,
     ]);
   return key(a) === key(b);
 }

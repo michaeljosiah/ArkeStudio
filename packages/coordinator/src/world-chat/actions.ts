@@ -1,3 +1,5 @@
+import { frameRunReadRows, performanceReadRows, voiceSampleReadRows, audioCutReadRows, editorRequestReadRows, productionReadFence } from "./production-reads.js";
+import { readAudioRightsSync } from "../audio/rights.js";
 import type { ProductionBatchControls } from "./production-batch.js";
 import { readPlanRecords } from "../productions/plans.js";
 import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema, checkPropName, newId } from "@arke-studio/contracts";
@@ -596,6 +598,20 @@ function currentWorldObservation(
         target: targetId,
         fence: jobsFence(deps.getJobs(), store.worldId, targetId === store.worldId ? undefined : targetId),
       };
+    }
+    case "frame-runs": {
+      const productionId = target ?? store.worldId;
+      return { target: productionId, fence: productionReadFence(frameRunReadRows(store, productionId, deps.getJobs?.() ?? [])) };
+    }
+    case "voice-samples": return { target: store.worldId, fence: productionReadFence(voiceSampleReadRows(bundle, readAudioRightsSync(store))) };
+    case "performances":
+    case "audio-cut":
+    case "editor-requests": {
+      const productionId = target ?? store.worldId;
+      const production = bundle.productions.find(entry => entry.meta.id === productionId);
+      const rows = requirement === "performances" ? performanceReadRows(production)
+        : requirement === "audio-cut" ? audioCutReadRows(production) : editorRequestReadRows(production);
+      return { target: productionId, fence: productionReadFence(rows) };
     }
     case "plans": {
       const productionId = target ?? store.worldId;
@@ -2911,6 +2927,7 @@ async function sharedResourceProjection(
           family: "take-review",
           mediaKind,
           mediaId: take.id,
+          reason: "Metadata-only review; Arke has not inspected this take's image or audio.",
           destination: located ? `${located.scene.title} · ${located.shot.title}` : production.meta.title,
           currentSelection,
           ...(mediaPath ? { mediaPath } : {}),

@@ -1,4 +1,4 @@
-import { editShot } from "@arke-studio/contracts";
+import { editShot, worldChatContextSchemaVersion, PRODUCTION_CHAT_CONTEXT_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { parseSceneRecord } from "../../src/productions/scene-record.js";
 import { sha256 } from "../../src/world/text-files.js";
 import assert from "node:assert/strict";
@@ -27,6 +27,17 @@ async function open() {
   closeOnCleanup(() => store.close());
   return { dir, store };
 }
+
+it("fences new production context kinds before persisting them and leaves ordinary conversations at their old boundary", async () => {
+  const { dir, store } = await open();
+  assert.equal(worldChatContextSchemaVersion({ kind: "production", productionId: "saltlight" }), 2);
+  const context = { kind: "shot" as const, productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" };
+  await store.ensureSchemaVersion(worldChatContextSchemaVersion(context), "world-chat");
+  const conversation = await new WorldChatService(dir, CLOCK).create({ title: "Shot", entryContext: context });
+  assert.equal((await readWorldMeta(dir)).schemaVersion, PRODUCTION_CHAT_CONTEXT_SCHEMA_VERSION);
+  await assert.rejects(readWorldMeta(dir, { supports: PRODUCTION_CHAT_CONTEXT_SCHEMA_VERSION - 1 }), /newer|schema|version/i);
+  assert.deepEqual((await new WorldChatService(dir, CLOCK).load(conversation.id))?.entryContext, context);
+});
 
 describe("the world schema-version boundary (issue 403)", () => {
   it("a new world is born at schema 1, not at the newest this build knows", async () => {

@@ -1,6 +1,7 @@
 import { audioWorldPath } from "./storage.js";
 import { lstat, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { AudioRightsEventSchema, type AudioRightsEvent, type AudioRightsScope } from "@arke-studio/contracts";
 import { appendFlushed } from "../flushed-append.js";
 import type { WorldStore } from "../world/store.js";
@@ -27,10 +28,35 @@ export async function readAudioRights(store: Pick<WorldStore, "dir">): Promise<A
     text = await readFile(await audioWorldPath(store.dir, "audio/rights.jsonl"), "utf8");
   }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw new Error("audio-rights-unavailable"); }
+  return parseAudioRights(text);
+}
+
+function parseAudioRights(text: string): AudioRightsEvent[] {
   try {
     if (text.length && !text.endsWith("\n")) throw new Error("torn-rights-log");
     return text.split("\n").filter(line => line.trim()).map(line => AudioRightsEventSchema.parse(JSON.parse(line)));
   } catch { throw new Error("audio-rights-unavailable"); }
+}
+
+/** Current rights for synchronous world-state preconditions, with the same journal parser. */
+export function readAudioRightsSync(store: Pick<WorldStore, "dir">): AudioRightsEvent[] {
+  let text: string;
+  try {
+    const root = realpathSync(store.dir);
+    let path = root;
+    for (const part of ["audio", "rights.jsonl"]) {
+      path = join(path, part);
+      const info = lstatSync(path);
+      if (info.isSymbolicLink() || (part === "audio" ? !info.isDirectory() : !info.isFile())) throw new Error("audio-path-invalid");
+      const rel = relative(root, realpathSync(path));
+      if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error("audio-path-invalid");
+    }
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new Error("audio-rights-unavailable");
+  }
+  return parseAudioRights(text);
 }
 
 export async function appendAudioRights(store: WorldStore, input: AudioRightsEvent): Promise<void> {
