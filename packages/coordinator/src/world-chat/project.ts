@@ -4,6 +4,7 @@ import type {
   WorldChatLoaded,
   WorldChatPoint,
   WorldChatWorkspace,
+  HumanDecisionCard,
 } from "@arke-studio/contracts";
 import { type CurrentLook, lookHasMoved } from "./look.js";
 
@@ -215,6 +216,8 @@ export function workingLabel(tool: string): string {
 }
 
 export interface ProjectOptions {
+  humanDecisions?: HumanDecisionCard[];
+  humanDecisionProblems?: string[];
   sheetName?: (slug: string) => string | null;
   sheetVersion?: (slug: string) => number | null;
   /**
@@ -421,7 +424,13 @@ export function projectWorkspace(
     seq: loaded.seq,
     points: projectPoints(loaded.candidates, { ...options, mediaHandoffs: loaded.mediaHandoffs }),
     actions: loaded.actions,
+    ...(options.humanDecisions ? { humanDecisions: options.humanDecisions } : {}),
+    ...(options.humanDecisionProblems?.length ? { humanDecisionProblems: options.humanDecisionProblems } : {}),
+    ...(loaded.imageDisclosures ? { imageDisclosures: loaded.imageDisclosures } : {}),
+    ...(loaded.imageReceipts ? { imageReceipts: loaded.imageReceipts } : {}),
     attachments: loaded.attachments.map((a) => ({
+      ...(loaded.imageReceipts?.some(receipt => receipt.image?.id === a.id && receipt.image.sourceHash.startsWith(a.contentHash))
+        ? { imageInspection: "prepared" as const } : {}),
       id: a.id,
       fileName: a.fileName,
       kind: a.kind,

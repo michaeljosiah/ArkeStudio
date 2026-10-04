@@ -10,6 +10,7 @@ import {
   type CandidateChecks,
   type ConversationId,
   type HarnessAdapter,
+  type MessagePart,
   type MessageId,
   type ModelCandidateDraft,
   type RunId,
@@ -91,6 +92,7 @@ export interface RunDeps {
   }) => Promise<{ cwd: string; leaseToken: string }>;
   /** Atomically configure and create the harness session after preparation succeeds. */
   createSession?: (input: { cwd: string; runId: RunId; model?: string; signal?: AbortSignal }) => Promise<{ sessionId: string }>;
+  prepareImages?: (input: { leaseToken: string; attachments: readonly WorldChatAttachment[] }) => Promise<{ parts: MessagePart[]; description: string }>;
   /** Resolve an explicit or production language choice without ever substituting another model. */
   resolveLanguageModel?: (input: {
     entryContext: WorldChatContext | undefined;
@@ -266,6 +268,7 @@ async function askOnce(
   onProgress?: (label: string) => void,
   /** Every tool the confinement refused this turn, by harness name, as it happens (#506). */
   onRefused?: (tool: string) => void,
+  imageParts: readonly MessagePart[] = [],
 ): Promise<string> {
   if (signal.aborted) throw new Error("cancelled");
   let finalText = "";
@@ -312,7 +315,7 @@ async function askOnce(
     }
   })();
 
-  await adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: prompt }] });
+  await adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: prompt }, ...imageParts] });
 
   // Refed deliberately: an unref'd deadline never fires in a process with nothing else pending,
   // which is exactly the case a timeout is for.
@@ -828,8 +831,10 @@ export class WorldChatRunner {
       const refusedTools = new Set<string>();
       const refused = (tool: string) => refusedTools.add(tool);
 
-      const prompt = renderPrompt(assembled) + (brief ? `\n\n${brief}` : "");
-      let raw = await askOnce(adapter, session.sessionId, prompt, timeoutMs, controller.signal, progress, refused);
+      const images = await this.deps.prepareImages?.({ leaseToken, attachments: view.attachments.filter(a => attachmentIds.includes(a.id)) });
+      controller.signal.throwIfAborted();
+      const prompt = renderPrompt(assembled) + (brief ? `\n\n${brief}` : "") + (images?.description ? `\n\n${images.description}` : "");
+      let raw = await askOnce(adapter, session.sessionId, prompt, timeoutMs, controller.signal, progress, refused, images?.parts);
 
       let outcome = await this.applyResult(
         store,
@@ -1047,6 +1052,7 @@ export class WorldChatRunner {
     const attachmentText = this.quotableAttachmentText(readable, inlined, runId);
 
     const outcome = validateTurnResult({
+      productionThread: folded.entryContext !== undefined && "productionId" in folded.entryContext,
       draftOnly: folded.entryContext?.kind === "production-setup",
       replyOnly,
       raw,

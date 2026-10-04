@@ -30,7 +30,7 @@ function paeth(a: number, b: number, c: number): number {
   return c;
 }
 
-export function decodePng(data: Uint8Array): RgbaImage {
+export function decodePng(data: Uint8Array, maxPixels?: number): RgbaImage {
   for (let i = 0; i < 8; i++) {
     if (data[i] !== SIGNATURE[i]) throw new Error("not a PNG");
   }
@@ -62,8 +62,10 @@ export function decodePng(data: Uint8Array): RgbaImage {
   if (interlace !== 0) throw new Error("interlaced PNGs are unsupported");
   const channels = colorType === 0 ? 1 : colorType === 2 ? 3 : colorType === 6 ? 4 : -1;
   if (channels === -1) throw new Error(`unsupported PNG color type ${colorType}`);
+  if (!width || !height || (maxPixels !== undefined && width * height > maxPixels)) throw new Error("PNG dimensions exceed the image inspection limit");
 
-  const raw = inflateSync(Buffer.concat(idat.map((b) => Buffer.from(b))));
+  const raw = inflateSync(Buffer.concat(idat.map((b) => Buffer.from(b))), maxPixels === undefined ? undefined : { maxOutputLength: height * (width * channels + 1) });
+  if (maxPixels !== undefined && raw.length !== height * (width * channels + 1)) throw new Error("PNG pixel data is incomplete");
   const stride = width * channels;
   const pixels = new Uint8Array(width * height * 4);
   const prior = new Uint8Array(stride);

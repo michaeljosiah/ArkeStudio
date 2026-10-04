@@ -5,6 +5,7 @@ import {
   formatRunningTime,
   pictureBench,
   pictureLookChanged,
+  pictureMood,
   pictureSpans,
   productionStyleFor,
   worldImageReferences,
@@ -22,7 +23,8 @@ import { sendBenchAddReference, sendBenchCompose, sendBenchNewSession, setAudiob
 import type { BlockRow } from "../screens/chapter-audiobook.js";
 import { Button, Textarea, cx } from "./ui.js";
 import { LookSheet } from "./audiobook-look.js";
-import { PictureSuggestionCard, usePictureSuggestion } from "./audiobook-suggest.js";
+import { usePictureSuggestion } from "./audiobook-suggest.js";
+import { PictureCard } from "./audiobook-picture-card.js";
 
 /**
  * Pictures that follow the words (design turn 186c, SPEC-047 R-69): in a chapter's Audiobook
@@ -110,10 +112,14 @@ export function PictureChip({ slug, picture, estimated }: { slug: string; pictur
   );
 }
 
-/** The brief a generated picture starts from: the block's words, then the book's look (R-69). */
-export function pictureBrief(words: string, production: Pick<ProductionBundle, "meta"> | null, world: Pick<WorldBundle, "artDirection"> | null): string {
-  const look = productionStyleFor(production?.meta, world?.artDirection.description);
-  return [`A picture for an audiobook, showing this moment: ${words.replace(/\s+/g, " ").trim()}`, ...(look !== undefined ? [`The look: ${look}`] : [])].join("\n\n");
+/**
+ * The brief a generated picture starts from: the block's words, then the chapter's light and mood
+ * (R-69; design turn 193, rule 9) — the Mood line, never the art direction's free text, which
+ * named clothes and dressed everyone in them.
+ */
+export function pictureBrief(words: string, production: Pick<ProductionBundle, "meta"> | null, world: Pick<WorldBundle, "artDirection"> | null, look?: ChapterAudiobook["look"] | null): string {
+  const mood = pictureMood(look, productionStyleFor(production?.meta, world?.artDirection.description));
+  return [`A picture for an audiobook, showing this moment: ${words.replace(/\s+/g, " ").trim()}`, ...(mood !== undefined ? [`Light and mood: ${mood}`] : [])].join("\n\n");
 }
 
 export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrder, row, rows, pictures, record = null }: {
@@ -166,7 +172,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
     void navigate(`/w/${worldId}/artifacts/bench/${session.id}`);
   }, [bench, worldId, navigate, store.state]);
   const generate = () => {
-    pending.current = { before: bench?.session.id ?? null, brief: brief ?? pictureBrief(row.block.text, production, world) };
+    pending.current = { before: bench?.session.id ?? null, brief: brief ?? pictureBrief(row.block.text, production, world, record?.look) };
     sendBenchNewSession(worldId);
   };
 
@@ -174,7 +180,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   const editInBench = (picked: PictureSuggestion, prompt: string) => {
     const carried = picked.who.filter((who) => who.carried && who.reference !== null);
     const cited = carried.map((who, order) => ({ name: who.name, kind: who.kind, token: `Image ${order + 1}` }));
-    pending.current = { before: bench?.session.id ?? null, brief: pictureBench(prompt, cited, productionStyleFor(production.meta, world?.artDirection.description)), refs: carried.map((who) => who.reference!) };
+    pending.current = { before: bench?.session.id ?? null, brief: pictureBench(prompt, cited, pictureMood(record?.look, productionStyleFor(production.meta, world?.artDirection.description))), refs: carried.map((who) => who.reference!) };
     sendBenchNewSession(worldId);
   };
   // A picture Arke made keeps the look it was made under: marked when that has since changed (R-98).
@@ -190,7 +196,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
       <h2 className="fy-ab__blocktitle">Picture · {blockName}</h2>
       {shownCaption !== null && <p className={cx("fy-mono fy-ab__card-line", here?.short && "fy-ch__who-where--warn")}>{shownCaption}</p>}
       {lookChanged && <p className="fy-mono fy-ab__card-line fy-ch__who-where--warn" data-testid="picture-look-changed">look changed</p>}
-      {!open && world !== null && <PictureSuggestionCard world={world} worldId={worldId} state={suggestion} onEdit={editInBench} offline={connection !== "open"} />}
+      {!open && world !== null && <PictureCard world={world} worldId={worldId} state={suggestion} onEdit={editInBench} offline={connection !== "open"} />}
       {!open ? (
         <div className="fy-ab__control">
           {here !== null && world !== null && <img className="fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" />}
@@ -223,7 +229,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
           </nav>
           {tab === "generated" && (
             <div className="fy-ab__picgen">
-              <Textarea aria-label="Brief" rows={4} value={brief ?? pictureBrief(row.block.text, production, world)} onChange={(event) => setBrief(event.target.value)} />
+              <Textarea aria-label="Brief" rows={4} value={brief ?? pictureBrief(row.block.text, production, world, record?.look)} onChange={(event) => setBrief(event.target.value)} />
               <Button variant="primary" disabled={connection !== "open"} onClick={generate} data-testid="audiobook-picture-generate">
                 Generate
               </Button>

@@ -1,3 +1,4 @@
+import { ExtractionReviewCandidates } from "../components/extraction-review.js";
 import { useRef, useState } from "react";
 import { useParams } from "react-router";
 import { formatSeconds, isGeneratedArtifact, type ArtifactSidecar } from "@arke-studio/contracts";
@@ -21,7 +22,6 @@ import {
 import {
   extractArtifact,
   fileArtifactMsg,
-  resolveExtraction,
   restoreArtifact,
   retireArtifact,
   uploadArtifacts,
@@ -247,43 +247,7 @@ export function ProductionArtifactsScreen() {
               </span>
             }
           >
-            <div className="scr-sectionlist">
-              {artifact.extraction!.pending.map((candidate) => (
-                <div key={candidate.hash} className="scr-sheetsection">
-                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
-                    <Badge tone="outline">{candidate.kind}</Badge>
-                    <strong style={{ font: "var(--type-ui)" }}>{candidate.name}</strong>
-                    {candidate.section && (
-                      <span style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>
-                        → {candidate.section}
-                      </span>
-                    )}
-                  </div>
-                  <span>{candidate.body}</span>
-                  <span className="scr-field__hint">
-                    “{candidate.quote}”{candidate.line !== undefined ? ` — line ${candidate.line}` : ""} ·
-                    verified against the source
-                  </span>
-                  <div style={{ display: "flex", gap: "var(--space-2)" }}>
-                    <Button
-                      onClick={() => {
-                        if (worldId) resolveExtraction(worldId, artifact.id, candidate.hash, "accept");
-                      }}
-                    >
-                      Accept — commits on its own
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        if (worldId) resolveExtraction(worldId, artifact.id, candidate.hash, "reject");
-                      }}
-                    >
-                      Reject — leaves no trace
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
+            {worldId && <ExtractionReviewCandidates worldId={worldId} artifact={artifact} />}
           </Section>
         ))}
       </div>

@@ -20,9 +20,11 @@ export function productionGenerationSource(store: WorldStore, ports: {
   planOptions?: Pick<Parameters<typeof planBenchDispatch>[3], "recipeVersionOf" | "adapterRecipeFor" | "localFreeze">;
 }): GenerationQuoteSource {
   return {
-    compile: async (action, actionId, at) => {
+    compile: async (action, actionId, at, scope, prospectiveWorld) => {
       if (action.kind !== "production-take-generation") throw new Error("The production generation action is unavailable.");
-      const world = store.getBundle();
+      const world = prospectiveWorld ?? store.getBundle();
+      const readStore = prospectiveWorld ? Object.create(store) as WorldStore : store;
+      if (prospectiveWorld) readStore.getBundle = () => world;
       const production = world.productions.find(p => p.meta.id === action.productionId);
       const scene = production?.scenes.find(s => s.id === action.sceneId);
       if (!production || !scene) throw new Error("That scene is no longer available.");
@@ -69,7 +71,7 @@ export function productionGenerationSource(store: WorldStore, ports: {
         if (framePlan && !framePlan.ok) throw new Error(framePlan.reason);
         const taskMode = framePlan?.ok ? framePlan.mode : "generate";
         const route = action.mode === "video" ? characterAudioRoute(model, taskMode) : null;
-        const cast = route ? await resolveSubjectCastVoices(store, prefill.subject, actionId, route.local === true, { acknowledge: false, at })
+        const cast = route ? await resolveSubjectCastVoices(readStore, prefill.subject, actionId, route.local === true, { acknowledge: false, at })
           : { references: [], notSent: [], refused: [] };
         if (cast.refused.length) throw new Error(cast.refused.map(ref => `${ref.name}: ${ref.reason}`).join(" · "));
         if (route) audioSubjects.push(prefill.subject);
@@ -131,7 +133,10 @@ export function productionGenerationSource(store: WorldStore, ports: {
             .map(([label, value]) => ({ label, value: typeof value === "string" ? value : JSON.stringify(value) }))],
         privacy: ["The resolved prompts and carried image, video and cast-audio references go to the configured provider runtime."], cancellationSupported: true };
       return { inputs, body, authority: { model, sceneVersion: scene.version, defaultModel: production.meta.models?.[action.mode] ?? settings?.routing?.[action.mode] ?? null,
-        subjects: authorities, missingKits: withoutKit.map(sheet => sheet.id) }, materialization: audioSubjects };
+        subjects: authorities, missingKits: withoutKit.map(sheet => sheet.id),
+        ...(scope?.sceneDependencies ? { dependencies: scope.sceneDependencies.map(dep => ({ ...dep,
+          scene: world.productions.find(p => p.meta.id === dep.productionId)?.scenes.find(s => s.id === dep.sceneId) ?? null })) } : {}),
+      }, materialization: audioSubjects };
     },
     beforeDispatch: async (_action, actionId, _inputs, materialization, at) => {
       for (const subject of materialization as BenchSubject[]) {

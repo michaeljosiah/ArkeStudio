@@ -1,5 +1,46 @@
 # Running and validating changes
 
+Production sequencing (#1417, SPEC-051 R-14..R-17) is covered by contracts
+`test/turn-action-sequencing.test.ts` and coordinator `test/world-chat/actions.test.ts`,
+`turn-result.test.ts`, `generation-quotes.test.ts`, `production-generation.test.ts` and
+`test/productions/scene-commands.test.ts`. The cases cover fixed new-shot identities, blocked
+and denied parents, interrupted binding recovery before/after parent approval, schema-54
+reader refusal, prospective generation without dispatch, stale parent results, single-version
+atomic batches and combined selection cleanup. These tests use scripted actions and fake
+admission ports; the installed-app journey remains a separate acceptance check.
+
+
+Conversation image inspection (#1409) is covered by coordinator `test/world-chat/images.test.ts`
+(leased scope, cloud privacy, durable disclosures and byte receipts, key art/candidates/kits,
+prop states, artifacts, Bench takes, GIF/MKV codec delivery, cancellation, encoded payload
+budgets and bounded metadata-free PNGs), `fold.test.ts`, `run.test.ts` and
+`retrieval.test.ts`, and the three vision adapters' `test/adapter.test.ts` input cases. Client
+`test/world-chat.test.tsx` verifies the notice before the reply. These are scripted tests and
+do not claim live model comprehension. Desktop supplies the bounded ffmpeg rendition maker;
+headless hosts may supply the same port, otherwise the fallback reads bounded non-interlaced
+8-bit PNGs and explicitly refuses codecs it cannot decode. A text-only or unknown model must
+refuse inspection without guessing image contents or raising the world schema.
+Desktop `test/take-qc.test.ts` verifies that the shared media runner kills an active subprocess
+when its owning turn aborts. Receipt projections deduplicate source identities and retain the
+newest 256 entries; the append-only journal retains the complete byte audit.
+
+Production take inspection (#1414, SPEC-051 R-43) uses `list_takes`'s copyable `imageSources`
+and the `production-take` arm of `view_image`. A frame take supplies its produced image; a
+video take supplies one poster, seeking to the recorded in-point for a pass segment. Its
+optional start-frame source names the take's frozen seeding frame, never the shot's current
+selection. Coordinator `images.test.ts` checks discovery, pixels, segment positions and
+refusals; `actions.test.ts` checks that the card's reason counts only current bytes served to
+its own completed turn. A receipt from another turn/run or a changed image leaves the reason
+metadata-only. These remain scripted model tests; the codec smoke uses real ffmpeg bytes.
+Original media checksums are recorded on new generated, uploaded and Bench-filed production
+takes at schema 54. Legacy takes without a frozen hash remain metadata-only; current probe
+sidecars are not a substitute for original identity. A start frame must match the artifact ID,
+path and hash frozen in `params.frameArtifact`. Production video inspection streams a verified
+private file snapshot (4 GiB scratch ceiling, eight-second verification budget) into the bounded
+decoder, rather than using the 50 MiB image-input allocation ceiling. The image suite includes
+a 52 MiB source and verifies snapshot cleanup; take arrival tests verify original hashes and
+the schema-53 reader refusal.
+
 Use Node 22.12 or later; CI uses Node 22. Run `npm ci` from the repository root. See [CONTRIBUTING.md](../../CONTRIBUTING.md#getting-set-up) for browser development and its authenticated session link; `npm start` builds and starts desktop, including its native rebuild.
 
 ## Select the checks
@@ -142,6 +183,18 @@ identities are discoverable without exposing job internals, plan cancellation ob
 folded state, automatic plan policies disclose their authorization, and long prompt display
 does not alter frozen job prompts. A proven pre-authority refusal settles stale; an unreadable
 authority continues to require reconciliation.
+
+Production human controls also run coordinator `test/world-chat/human-decisions.test.ts`,
+`test/productions/stage-review.test.ts`, `test/arke-actions/human-decision-parity.test.ts`,
+`test/audio/character-sample.test.ts` and `test/audio/preparation.test.ts`, plus client
+`test/human-decisions.test.tsx`, `test/scene-stage.test.tsx` and `test/voice-sample-take.test.tsx`.
+These exercise ordinary screen commands settling the thread, read-only voice review discovery,
+inline rights attestations, operation-specific cross-surface voice settlement, metadata-only
+voice discovery with full Resume/Accept revalidation, retained Stage draft reopening without
+overwriting unsaved edits, stale/duplicate Keep, discard, settled-draft archival, path containment
+and interrupted host completion from pending or archived drafts without another construction. The parity
+fixture requires every pipeline human command's in-thread surface and keeps those commands
+out of model preparation. This scripted evidence does not replace installed-renderer acceptance.
 
 Book/audio standards experiments use the separate [publication interoperability checks](publication-interop.md#reproduce).
 They install their own locked development dependencies and exercise Readium, package closure and EPUBCheck.

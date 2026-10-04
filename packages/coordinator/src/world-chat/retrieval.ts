@@ -53,6 +53,7 @@ const TOOL_BY_NAME: Record<string, RetrievalTool> = {
   list_entities: "list-entities",
   related: "related",
   get_attachment_text: "get-attachment-text",
+  view_image: "view-image",
   fetch_url: "fetch-url",
   get_production: "get-production",
   describe_action: "describe-action",
@@ -72,6 +73,7 @@ export class RetrievalError extends Error {
 export interface RetrievalOutcome {
   result: unknown;
   receipt: WorldChatCheckReceipt;
+  imageContent?: Array<{ type: "image"; mimeType: "image/png"; data: string }>;
 }
 
 function boundedLimit(raw: unknown): number {
@@ -91,6 +93,7 @@ function summarise(text: string): string {
 }
 
 export interface RetrievalDeps extends TargetReadDeps {
+  readImage?: (lease: QueryLease, args: Record<string, unknown>) => Promise<RetrievalOutcome>;
   leases: QueryLeaseRegistry;
   getBundle: () => WorldBundle | null;
   getIndex: () => WorldIndex | null;
@@ -204,6 +207,9 @@ export class WorldChatRetrieval {
     }
 
     switch (toolName) {
+      case "view_image":
+        if (!this.deps.readImage) throw new RetrievalError("unavailable", "view_image: image inspection is unavailable for this adapter.");
+        return this.deps.readImage(lease, args);
       case "describe_action": {
         const kind = String(args["kind"] ?? "");
         const described = describeAction(kind);

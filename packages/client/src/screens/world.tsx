@@ -1,3 +1,4 @@
+import { ExtractionReviewCandidates } from "../components/extraction-review.js";
 import { HeldBar } from "../components/held-bar.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
@@ -114,7 +115,6 @@ import {
   requestVoicePreview,
   readSheetSection,
   readSheetPage,
-  resolveExtraction,
   useArtifactNotices,
   useImportReport,
   useAskResults,
@@ -4288,43 +4288,7 @@ export function ArtifactsScreen() {
               </span>
             }
           >
-            <div className="scr-sectionlist">
-              {artifact.extraction!.pending.map((candidate) => (
-                <div key={candidate.hash} className="scr-sheetsection">
-                  <div className="fy-artifact-candidate">
-                    <Badge tone="outline">{candidate.kind}</Badge>
-                    <strong style={{ font: "var(--type-ui)" }}>{candidate.name}</strong>
-                    {candidate.section && (
-                      <span style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>
-                        → {candidate.section}
-                      </span>
-                    )}
-                  </div>
-                  <span>{candidate.body}</span>
-                  <span className="scr-field__hint">
-                    “{candidate.quote}”{candidate.line !== undefined ? ` — line ${candidate.line}` : ""} ·
-                    verified against the source
-                  </span>
-                  <div className="fy-artifact-candidate__actions">
-                    <Button
-                      onClick={() => {
-                        if (worldId) resolveExtraction(worldId, artifact.id, candidate.hash, "accept");
-                      }}
-                    >
-                      Accept — commits on its own
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        if (worldId) resolveExtraction(worldId, artifact.id, candidate.hash, "reject");
-                      }}
-                    >
-                      Reject — leaves no trace
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
+            {worldId && <ExtractionReviewCandidates worldId={worldId} artifact={artifact} />}
           </Section>
         ))}
       </div>

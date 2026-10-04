@@ -1,5 +1,6 @@
 import { valueSchema } from "./value-schema.js";
 import { DesignedVoiceSchema } from "./designed-voice.js";
+import { StageReviewSchema } from "./human-decision.js";
 import { AdapterLibraryStateSchema } from "./adapters.js";
 import { BorrowedImageOriginSchema } from "./take.js";
 import { TakeDialogueFeedbackSchema } from "./take-feedback.js";
@@ -7,6 +8,7 @@ import { RehearsalSessionSchema } from "./rehearsal.js";
 import { PerformanceBibleStateSchema } from "./performance-bible.js";
 import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformanceReviewState } from "./performance.js";
 import { z } from "zod";
+import { ImageInspectionSettingsSchema } from "./world-chat-images.js";
 import { ModelResidencySchema } from "./local-ai.js";
 import { ProductionNarrativeSchema } from "./production-narrative.js";
 import { AudiobookBookSchema } from "./audiobook.js";
@@ -500,6 +502,7 @@ export const ClientStateSchema = valueSchema(z
         account: AccountStateSchema.default(SIGNED_OUT),
         /** Whether the Studio may read a page online when a conversation asks it to (SPEC-005 R-10). */
         research: z.object({ web: z.boolean() }).strict().default({ web: false }),
+        imageInspection: ImageInspectionSettingsSchema.optional(),
         appearance: AppearanceSettingsSchema.default({ theme: "system" }),
         /** Who reads the app's prose aloud. Null is the shipped local voice, and free. */
         narrator: NarratorSettingsSchema.default(null),
@@ -599,6 +602,8 @@ export const ClientStateSchema = valueSchema(z
      * it — the same reason the world snapshot carries conversation rows and not their contents.
      */
     worldChat: WorldChatWorkspaceSchema.nullable().default(null),
+    /** Retained, unkept Stage drafts shared by the thread and Stage screen. */
+    stageReviews: z.array(StageReviewSchema).optional(),
     /** Approved Stage handoffs survive closing their source conversation during navigation. */
     stagePlayblastRequests: z.array(z.object({
       worldId: z.string().min(1),

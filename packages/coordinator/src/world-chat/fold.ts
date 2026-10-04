@@ -47,6 +47,7 @@ export interface FoldResult {
 }
 
 const MAX_MESSAGES = 50;
+const MAX_IMAGE_RECEIPTS = 256;
 
 const ACTION_STATUS_TRANSITIONS: Record<ConversationActionStatus, readonly ConversationActionStatus[]> = {
   // Recovery may discover that the bound authority was decided through its original surface.
@@ -108,6 +109,8 @@ export function foldConversation(
   let saveInFlight = false;
 
   const messages: WorldChatMessage[] = [];
+  const imageDisclosures = new Map<string, NonNullable<WorldChatLoaded["imageDisclosures"]>[number]>();
+  const imageReceipts = new Map<string, NonNullable<WorldChatLoaded["imageReceipts"]>[number]>();
   /** Landed Bible edits, by the studio message that reported them (master §4.5). */
   const bibleEdits = new Map<string, BibleEditRecord>();
   /** Tools each turn was refused, by the studio message written despite them (#506). */
@@ -215,6 +218,17 @@ export function foldConversation(
     updatedAt = envelope.at;
     const e = envelope.event;
     switch (e.type) {
+      case "image.disclosed":
+        imageDisclosures.set(e.disclosure.provider, e.disclosure);
+        break;
+      case "image.receipt":
+        if (e.receipt.image) {
+          const key = `${e.receipt.image.id}:${e.receipt.image.sourceHash}`;
+          imageReceipts.delete(key);
+          imageReceipts.set(key, e.receipt);
+          if (imageReceipts.size > MAX_IMAGE_RECEIPTS) imageReceipts.delete(imageReceipts.keys().next().value!);
+        }
+        break;
       case "input.promoted":
         // Only a promotion replay accepted becomes a turn; a rejected one is a named problem.
         if (inputFold.acceptedSequences.has(envelope.seq)) {
@@ -656,6 +670,8 @@ export function foldConversation(
     mediaHandoffs,
     groups: [...groups.values()],
     attachments: [...attachments.values()],
+    ...(imageDisclosures.size ? { imageDisclosures: [...imageDisclosures.values()] } : {}),
+    ...(imageReceipts.size ? { imageReceipts: [...imageReceipts.values()] } : {}),
     // Only a start without a terminal event is active. Cleanup owed by a finished interruption
     // must not keep setup Review locked or hide a newer live turn (#1030).
     activeRun,

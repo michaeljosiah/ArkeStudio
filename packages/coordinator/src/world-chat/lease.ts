@@ -79,6 +79,7 @@ export const LEASED_OPERATIONS = [
   "list_entities",
   "related",
   "get_attachment_text",
+  "view_image",
   // Reading a page the person named, kept as an attachment (2026-08-22).
   "fetch_url",
   // The production read (round 3, 2026-08-22): a read like the others — no write it could reach.

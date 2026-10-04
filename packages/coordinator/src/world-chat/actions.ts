@@ -6,6 +6,8 @@ import { readPlanRecords } from "../productions/plans.js";
 import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema, checkPropName, newId } from "@arke-studio/contracts";
 import { createProp, addPropState, renameProp, acceptPropStateReference } from "../references/props.js";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import { sceneCommandBatchCandidate, CHAT_SEQUENCING_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { readContainedImageReferences } from "../world/reference-files.js";
 import { readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -213,7 +215,8 @@ import {
   landBoard,
 } from "../productions/ops.js";
 import { applyProductionSpineCommand, previewAudioSpineCommand } from "../productions/spine.js";
-import { applySceneCommand, sceneCommandFrom } from "../productions/scene-commands.js";
+import { applySceneCommand, applySceneCommands, sceneCommandFrom } from "../productions/scene-commands.js";
+import { sceneActionCommands, sequenceTurnActions, dependencyPreviewWorld } from "./action-sequencing.js";
 import { modelActionInputRefusal } from "./model-action-input.js";
 import { filePlayblast } from "../productions/stage-playblast.js";
 import {
@@ -260,6 +263,7 @@ import { foldConversation } from "./fold.js";
 import { evaluateReadiness } from "./readiness.js";
 import { sendBack } from "./resolution.js";
 import { conversationDir, WorldChatStore } from "./store.js";
+import { takeReviewInspectionReason } from "./take-review-inspection.js";
 import {
   artDirectionFence,
   artifactsFence,
@@ -1288,12 +1292,14 @@ function worldActionTargets(
 function actionPolicyRefusal(store: WorldStore, action: ModelWorldChatAction): string | null {
   const refusal = modelActionInputRefusal(action);
   if (refusal) return refusal;
-  if (action.kind !== "production-scene-command" || action.command.kind !== "duplicate-shot") return null;
-  const { productionId, sceneId, command } = action;
+  if (action.kind !== "production-scene-command") return null;
+  const { productionId, sceneId } = action;
   const scene = store.getBundle().productions.find((production) => production.meta.id === productionId)?.scenes.find((candidate) => candidate.id === sceneId);
-  const shot = scene && orderedShots(scene).find((candidate) => candidate.id === command.shotId);
-  // The copied assertions belong to the reviewed source shot, not a new shot invented by chat.
-  return shot?.visualFacts ? "Duplicating this shot would copy visual facts. Use the shot panel so the person can review them." : null;
+  for (const command of sceneActionCommands(action)) {
+    const shot = command.kind === "duplicate-shot" && scene && orderedShots(scene).find(candidate => candidate.id === command.shotId);
+    if (shot && shot.visualFacts) return "Duplicating this shot would copy visual facts. Use the shot panel so the person can review them.";
+  }
+  return null;
 }
 
 /** Build strict, digest-bound intents. This is pure and runs before `turn.completed` is appended. */
@@ -1318,6 +1324,9 @@ export function prepareWorldChatActions(
     const refusal = actionPolicyRefusal(store, action);
     if (refusal) throw new Error(refusal);
   }
+  const contextProductionId = productionOfContext(turn.entryContext) ?? undefined;
+  const groups = sequenceTurnActions(store.getBundle(), turn.actions.map(action => scopedWorldAction(store, action, contextProductionId)));
+  const actionIds = groups.map(() => newId("act"));
   const prepared: PreparedWorldChatAction[] = [];
   const candidateById = new Map(turn.existingCandidates.map((candidate) => [candidate.id, candidate]));
   for (const candidate of turn.candidates) candidateById.set(candidate.id, candidate);
@@ -1371,10 +1380,10 @@ export function prepareWorldChatActions(
     });
   }
 
-  const contextProductionId = productionOfContext(turn.entryContext) ?? undefined;
   const plannedProductionIds = new Set<string>();
   const plannedSeriesIds = new Set<string>();
-  for (const [index, rawAction] of turn.actions.entries()) {
+  for (const [index, group] of groups.entries()) {
+    const rawAction = group.action;
     const scoped = scopedWorldAction(store, rawAction, contextProductionId);
     const action = scoped.kind === "bench-generation" ? completeBenchChatAction(store.dir, scoped) : scoped;
     heldToPassage(store, action, turn.subject);
@@ -1382,8 +1391,24 @@ export function prepareWorldChatActions(
     if (action.kind === "production-chapter" && action.change.operation === "edit") {
       resolveChapterViewpointEdit(store, action.productionId, action.change.changes.viewpointCharacter);
     }
-    const actionId = newId("act");
-    const payload = preparedWorldPayload(store, action, productionId, turn.at);
+    const actionId = actionIds[index]!;
+    const baseObservations = worldActionObservations(store, turn.receipts ?? [], action, deps);
+    let payload = preparedWorldPayload(store, action, productionId, turn.at);
+    if (group.dependencyPreview && "action" in payload) {
+      const projected = Object.create(store) as WorldStore;
+      projected.getBundle = () => group.dependencyPreview!.beforeBundle;
+      const expectedObservations = baseObservations.map(observation => observation.requirement !== "scenes" ? observation :
+        { ...observation, revisionOrDigest: currentWorldObservation(projected, observation.requirement, observation.target, deps)!.fence });
+      payload = WorldChatPreparedActionSchema.parse({ ...payload, dependencyPreview: { scenes: group.dependencyPreview.scenes, expectedObservations } });
+    }
+    if (payload.kind === "world-chat-production-scene-command" && group.scene) {
+      const projected = Object.create(store) as WorldStore;
+      projected.getBundle = () => group.scene!.beforeBundle;
+      const expectedObservations = baseObservations.map(observation => observation.requirement !== "scenes" ? observation :
+        { ...observation, revisionOrDigest: currentWorldObservation(projected, observation.requirement, observation.target, deps)!.fence });
+      payload = WorldChatProductionSceneCommandActionSchema.parse({ ...payload,
+        scenePlan: { before: group.scene.before, after: group.scene.after, expectedObservations } });
+    }
     if (payload.kind === "world-chat-production-create") {
       if (plannedProductionIds.has(payload.plan.production.id)) {
         throw new Error("Two production creations in one turn cannot claim the same fixed identity.");
@@ -1404,6 +1429,7 @@ export function prepareWorldChatActions(
         worldId: store.worldId,
         ...(productionId !== undefined ? { productionId } : {}),
         actionId,
+        dependencies: group.dependencies.map(parent => actionIds[parent]!),
         actionKind: payload.kind,
         targets: [
           ...worldActionTargets(
@@ -1416,7 +1442,7 @@ export function prepareWorldChatActions(
             : []),
         ],
         payload,
-        baseObservations: worldActionObservations(store, turn.receipts ?? [], action, deps),
+        baseObservations,
         createdAt: turn.at,
       }),
     });
@@ -1559,6 +1585,11 @@ const preparationPath = (store: WorldStore, authority: "bible" | "scene" | "worl
   join(store.dir, ".history", authority, "prepared", `${actionId}.json`);
 
 async function writePreparation(store: WorldStore, authority: "bible" | "scene" | "world", actionId: string, payload: WorldChatPreparedAction): Promise<void> {
+  if ((payload.kind === "world-chat-production-scene-command" && payload.scenePlan) || ("dependencyPreview" in payload && payload.dependencyPreview)) {
+    await store.ensureSchemaVersion(CHAT_SEQUENCING_SCHEMA_VERSION, "world-chat-sequencing");
+    await store.ownedWrite(() => atomicWriteFile(preparationPath(store, authority, actionId), `${JSON.stringify(payload, null, 2)}\n`));
+    return;
+  }
   await atomicWriteFile(preparationPath(store, authority, actionId), `${JSON.stringify(payload, null, 2)}\n`);
 }
 
@@ -1678,6 +1709,27 @@ function observationsCurrent(
     ) return { ok: false, reason: "stale", detail: `The ${observation.requirement} changed after this action was prepared.` };
   }
   return { ok: true };
+}
+
+/** A dependent scene's future fence is validated at approval. Its original read was checked
+ * before the turn completed; preparation must also survive partially completed dependencies. */
+function preparationObservations(payload: WorldChatPreparedAction, intent: ConversationActionPrepareIntent) {
+  return (payload.kind === "world-chat-production-scene-command" && payload.scenePlan) || ("dependencyPreview" in payload && payload.dependencyPreview)
+    ? { baseObservations: intent.baseObservations.filter(observation => observation.requirement !== "scenes") } : intent;
+}
+
+function approvalObservations(payload: WorldChatPreparedAction, action: Pick<ConversationActionPrepareIntent, "baseObservations">) {
+  return payload.kind === "world-chat-production-scene-command" && payload.scenePlan ? { baseObservations: payload.scenePlan.expectedObservations } :
+    "dependencyPreview" in payload && payload.dependencyPreview ? { baseObservations: payload.dependencyPreview.expectedObservations } : action;
+}
+
+function dependencyScenesCurrent(store: WorldStore, payload: WorldChatPreparedAction): string | null {
+  if (!("dependencyPreview" in payload) || !payload.dependencyPreview) return null;
+  for (const { productionId, scene } of payload.dependencyPreview.scenes) {
+    const actual = store.getBundle().productions.find(p => p.meta.id === productionId)?.scenes.find(s => s.id === scene.id);
+    if (!actual || !isDeepStrictEqual(actual, scene)) return "A dependency's actual scene result differs from this preview.";
+  }
+  return null;
 }
 
 function observationPrecondition(
@@ -1947,7 +1999,8 @@ async function sharedResourceProjection(
   let authorityRevision = 0;
   let approvalBlockedReason: string | undefined;
   let shown: PreparedConversationActionAuthority["shown"];
-  const bundle = store.getBundle();
+  const dependency = "dependencyPreview" in payload ? payload.dependencyPreview : undefined;
+  const bundle = dependencyPreviewWorld(store.getBundle(), dependency);
 
   switch (payload.kind) {
     case "world-chat-artifact-import": {
@@ -2775,7 +2828,38 @@ async function sharedResourceProjection(
       if (!production || !scene || !production.sceneFiles[scene.id]) {
         throw new Error("That scene is no longer in this production.");
       }
-      const command = payload.action.command;
+      const commands = sceneActionCommands(payload.action);
+      if (payload.scenePlan) {
+        const result = payload.scenePlan.after;
+        const rows: Array<{ label: string; detail?: string }> = [];
+        const valueRows = (label: string, value: unknown) => {
+          if (value === undefined) return;
+          const text = typeof value === "string" ? value : JSON.stringify(value);
+          for (let offset = 0; offset < Math.max(text.length, 1); offset += 4_000) {
+            rows.push({ label: `${label}${offset ? " (continued)" : ""}`.slice(0, 200), detail: text.slice(offset, offset + 4_000) });
+          }
+        };
+        for (const [field, value] of Object.entries(result)) {
+          if (!["id", "version", "flow", "shots"].includes(field)) valueRows(`Scene ${field}`, value);
+        }
+        for (const shot of orderedShots(result)) {
+          rows.push({ label: `${shot.number}. ${shot.title} (${shot.id})`.slice(0, 200) });
+          for (const [field, value] of Object.entries(shot)) {
+            if (!["id", "number"].includes(field)) valueRows(`${shot.id} ${field}`, value);
+          }
+        }
+        shown = { title: `Edit ${result.title}`, consequence: `Applies ${commands.length} scene command${commands.length === 1 ? "" : "s"} atomically at one version boundary.`,
+          affectedTargets: [...intent.targets], ripples: commands.some(command => command.kind === "delete-shot")
+            ? ["The authority rechecks takes, selections and active plans before deleting any shot."] : [],
+          permissionReason: "authored-change", body: { family: "command",
+            commands: rows,
+            expectedResult: `The resulting shot list above is scene ${result.id} at v${result.version}. All commands land together.`, undoAvailable: true } };
+        if (shown.body.family === "command" && !shown.body.commands.length) shown.body.commands.push({ label: "The scene has no shots." });
+        authorityRevision = payload.scenePlan.before.version;
+        break;
+      }
+      if (commands.length !== 1) throw new Error("This batch has no frozen scene plan.");
+      const command = commands[0]!;
       const namedShot = "shotId" in command ? command.shotId : undefined;
       if (namedShot !== undefined && !orderedShots(scene).some((shot) => shot.id === namedShot)) {
         throw new Error(`Shot ${namedShot} is no longer in this scene.`);
@@ -2886,7 +2970,9 @@ async function sharedResourceProjection(
     case "world-chat-production-take-generation": {
       authority = { kind: "job-queue", id: intent.actionId };
       if (!deps.productionGenerationQuotes) approvalBlockedReason = "The production generation quote source is unavailable.";
-      const body = await deps.productionGenerationQuotes?.prepare(payload.action, intent.actionId, intent.createdAt);
+      const scope = dependency ? { conversationId: intent.conversationId,
+        sceneDependencies: dependency.scenes.map(({ productionId, scene }) => ({ productionId, sceneId: scene.id })) } : undefined;
+      const body = await deps.productionGenerationQuotes?.prepare(payload.action, intent.actionId, intent.createdAt, scope, dependency ? bundle : undefined);
       shown = {
         title: payload.action.retakeOf ? "Generate a retake" : "Generate production takes",
         consequence: "Dispatches the quoted image or video jobs and files immutable candidates on the named shots.",
@@ -2958,7 +3044,7 @@ async function sharedResourceProjection(
           family: "take-review",
           mediaKind,
           mediaId: take.id,
-          reason: "Metadata-only review; Arke has not inspected this take's image or audio.",
+          reason: await takeReviewInspectionReason(store, intent, production, take),
           destination: located ? `${located.scene.title} · ${located.shot.title}` : production.meta.title,
           currentSelection,
           ...(mediaPath ? { mediaPath } : {}),
@@ -3843,7 +3929,16 @@ async function executeSharedResource(
       const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
       const sceneFile = production?.sceneFiles[payload.action.sceneId];
       if (!scene || !sceneFile) throw new Error("That scene is no longer in this production.");
-      const command = sceneCommandFrom(payload.action.command);
+      if (payload.scenePlan) {
+        await applySceneCommands(store, { productionId: payload.action.productionId, sceneFile, sceneId: scene.id,
+          baseVersion: payload.scenePlan.before.version, commands: sceneActionCommands(payload.action).map(sceneCommandFrom),
+          expectedBefore: payload.scenePlan.before, expectedAfter: payload.scenePlan.after, requestId: action.actionId,
+          precondition,
+        }, deps.activePlans ? { activePlans: deps.activePlans } : {});
+        return { status: "completed", receipt: { kind: "scene-version", id: `${scene.id}-v${payload.scenePlan.after.version}`,
+          summary: "The approved scene-command batch was applied atomically." } };
+      }
+      const command = sceneCommandFrom(sceneActionCommands(payload.action)[0]!);
       await applySceneCommand(store, {
         productionId: payload.action.productionId,
         sceneFile,
@@ -4533,16 +4628,18 @@ export function worldChatActionAdapters(
       actionKind,
       ...(actionKind === "world-chat-production-take-generation" ? { obsoletePermissionReasons: ["authored-change" as const] } : {}),
       prepare: async ({ intent, payload }) => {
-        const current = observationsCurrent(store, intent, deps);
+        const input = parse(payload);
+        const current = observationsCurrent(store, preparationObservations(input, intent), deps);
         if (!current.ok) throw new Error(current.detail);
-        return sharedResourceProjection(store, intent, parse(payload), deps);
+        return sharedResourceProjection(store, intent, input, deps);
       },
       recoverPreparation: async (intent) => {
         const payload = await readPreparation(store, "world", intent);
         if (!payload) return null;
-        const current = observationsCurrent(store, intent, deps);
+        const input = parse(payload);
+        const current = observationsCurrent(store, preparationObservations(input, intent), deps);
         if (!current.ok) throw new Error(current.detail);
-        return sharedResourceProjection(store, intent, parse(payload), deps);
+        return sharedResourceProjection(store, intent, input, deps);
       },
       abandonPreparation: (intent) => abandon(intent.actionId),
       validate: async (action) => {
@@ -4553,14 +4650,25 @@ export function worldChatActionAdapters(
           const refusal = actionPolicyRefusal(store, payload.action);
           if (refusal) return { ok: false, reason: "blocked", detail: refusal };
         }
-        const current = observationsCurrent(store, action, deps);
+        const input = parse(payload);
+        const expected = approvalObservations(input, action);
+        const current = observationsCurrent(store, expected, deps);
         if (!current.ok) {
           await removePreparation(store, "world", action.actionId);
           return current;
         }
         let projection: PreparedConversationActionAuthority;
         try {
-          projection = await sharedResourceProjection(store, action, parse(payload), deps);
+          const dependencyChanged = dependencyScenesCurrent(store, input);
+          if (dependencyChanged) throw new Error(dependencyChanged);
+          if (input.kind === "world-chat-production-scene-command" && input.scenePlan) {
+            const scene = store.getBundle().productions.find(p => p.meta.id === input.action.productionId)?.scenes.find(s => s.id === input.action.sceneId);
+            if (!scene || !isDeepStrictEqual(scene, input.scenePlan.before) || !isDeepStrictEqual(
+              sceneCommandBatchCandidate(store.getBundle(), input.action.productionId, scene, sceneActionCommands(input.action).map(sceneCommandFrom)), input.scenePlan.after)) {
+              throw new Error("The dependency result or fixed shot identities differ from this preview.");
+            }
+          }
+          projection = await sharedResourceProjection(store, action, input, deps);
         } catch {
           await removePreparation(store, "world", action.actionId);
           return { ok: false, reason: "stale", detail: "The shared resource changed after this card was prepared." };
@@ -4582,7 +4690,7 @@ export function worldChatActionAdapters(
             gate,
             payload,
             action,
-            observationPrecondition(store, action, deps),
+            () => dependencyScenesCurrent(store, payload) ?? observationPrecondition(store, approvalObservations(payload, action), deps)(),
             now,
             deps,
           );

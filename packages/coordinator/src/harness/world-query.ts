@@ -173,6 +173,15 @@ const WORLD_CHAT_TOOLS = [
     },
   },
   {
+    name: "view_image",
+    description: "Inspect actual pixels of a selected attachment, artifact, reference/candidate file, immutable Bench take, or production take. For production-take, use productionId, takeId and frame (poster or start-frame); list_takes returns copyable imageSources. A segment poster comes from its own in-point; start-frame is the take's frozen seed, never today's selection. Returns a metadata-free PNG at most 1568 pixels, with byte digests. Video returns a poster only, never motion or audio. Refuses unsupported adapters/models or cloud privacy settings; never guess when refused.",
+    inputSchema: { type: "object", properties: {
+      kind: { type: "string", enum: ["attachment", "artifact", "reference", "bench-take", "production-take"] },
+      id: { type: "string" }, file: { type: "string" }, sessionId: { type: "string" }, takeId: { type: "string" },
+      productionId: { type: "string" }, frame: { type: "string", enum: ["poster", "start-frame"] },
+    }, required: ["kind"], additionalProperties: false },
+  },
+  {
     name: "describe_action",
     description:
       "The fields and one valid example of an action you may prepare, by its kind. Use it when this turn's list of actions names a kind without its fields. It reads nothing in the world.",
@@ -323,12 +332,13 @@ export class WorldQueryServer {
               const leased = surface!;
               void leased.retrieval
                 .call(token, name, args)
-                .then(({ result, receipt }) => {
+                .then(({ result, receipt, imageContent }) => {
                   leased.onReceipt(receipt);
                   reply({
                     content: [
                       { type: "text", text: JSON.stringify(result, null, 2) },
                       { type: "text", text: JSON.stringify(citation(receipt), null, 2) },
+                      ...(imageContent ?? []),
                     ],
                   });
                 })

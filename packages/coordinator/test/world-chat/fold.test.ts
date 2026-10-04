@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { newId, type WorldChangeCandidate, type WorldChatStoredEvent } from "@arke-studio/contracts";
+import { newId, type WorldChangeCandidate, type WorldChatStoredEvent, type WorldChatEventEnvelope } from "@arke-studio/contracts";
 import { WorldChatStore } from "../../src/world-chat/store.js";
 import { foldConversation, summarise } from "../../src/world-chat/fold.js";
 import {
@@ -85,6 +85,24 @@ async function store(): Promise<WorldChatStore> {
 }
 
 describe("world chat fold", () => {
+  it("deduplicates prepared byte receipts and bounds the checkpoint/snapshot window", () => {
+    const events: WorldChatEventEnvelope[] = [];
+    const append = (id: string) => {
+      const seq = events.length + 1;
+      events.push({ schemaVersion: 1, seq, eventId: newId("wce"), at: AT, event: { type: "image.receipt", receipt: {
+        id: newId("check"), runId: newId("run"), tool: "view-image", status: "complete", consulted: [], at: AT,
+        image: { id, label: id, sourceHash: `sha256:${"a".repeat(64)}`, renditionHash: `sha256:${"b".repeat(64)}`,
+          width: 2, height: 2, posterOnly: false },
+      } } });
+    };
+    for (let i = 0; i < 300; i++) append("same-image");
+    assert.equal(foldConversation(CV, AT, events).view.imageReceipts!.length, 1);
+    assert.equal(foldConversation(CV, AT, events).view.imageReceipts![0]!.id, (events.at(-1)!.event as Extract<WorldChatStoredEvent, { type: "image.receipt" }>).receipt.id);
+    for (let i = 0; i < 300; i++) append(`image-${i}`);
+    const receipts = foldConversation(CV, AT, events).view.imageReceipts!;
+    assert.equal(receipts.length, 256); assert.equal(receipts[0]!.image!.id, "image-44");
+    assert.equal(receipts.at(-1)!.image!.id, "image-299");
+  });
   it("keeps a durable media handoff without removing the candidate", async () => {
     const s = await store();
     const candidateId = newId("cand");

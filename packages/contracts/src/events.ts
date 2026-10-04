@@ -688,6 +688,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("performance.result"), audioReference: PreparedPerformanceAudioReviewSchema.optional(), masterAudioReference: MasterAudioReviewSchema.optional(), quote: PerformanceGenerationQuoteSchema.optional(), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, status: z.enum(["kept", "purged", "reviewed", "prepared", "queued", "refused"]), performance: PerformanceRecordSchema.optional(), reason: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("voice.sample-result"), requestId: UlidSchema, worldId: UlidSchema,
+    operationId: z.string().uuid().optional(),
     sheetId: SlugSchema, status: z.enum(["prepared", "assigned", "cleared", "withdrawn", "refused"]),
     review: VoiceSampleReviewSchema.optional(), reason: z.string().optional() }).strict(),
   /** A direct voice assignment committed or refused. Every request receives exactly one result. */
@@ -1334,6 +1335,21 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       refused: z.string().min(1).optional(),
       /** How many controls a direction lost to its reader's row, when a whole chapter was accepted (R-10). */
       dropped: z.number().int().min(0).optional(),
+    })
+    .strict(),
+  /**
+   * The looks a book's chapters have chosen (design turn 193, SPEC-047 R-114), answered to the
+   * window that asked: for each kit look, the chapters (by their number) that chose it, so a
+   * picker can say `chapters 3, 5`. Nothing was changed or spent.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.looks"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      usage: z.record(z.string().min(1).max(120), z.array(z.number().int().min(0)).max(400)),
     })
     .strict(),
   /**

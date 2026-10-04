@@ -2,7 +2,7 @@ import { productionSetupBrief } from "../productions/setup-brief.js";
 import { createPreparedSession } from "../harness/session-files.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type WorldChatCheckReceipt, applyBibleEdits, BENCH_CHAT_SCHEMA_VERSION, CONVERSATIONAL_PROPS_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { type WorldChatCheckReceipt, applyBibleEdits, BENCH_CHAT_SCHEMA_VERSION, CONVERSATIONAL_PROPS_SCHEMA_VERSION, CHAT_SEQUENCING_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { benchReadRows } from "../bench/chat-reads.js";
 import { frameRunReadRows } from "../world-chat/production-reads.js";
 import { readAudioRights } from "../audio/rights.js";
@@ -20,6 +20,9 @@ import { describeEntryContext } from "../world-chat/entry-context.js";
 import { budgetFor, currentLookContext } from "../world-chat/context.js";
 import { QueryLeaseRegistry } from "../world-chat/lease.js";
 import { WorldChatRetrieval } from "../world-chat/retrieval.js";
+import { ConversationImages } from "../world-chat/images.js";
+import type { ImageRenditionMaker } from "../world-chat/image-rendition.js";
+import { LeaseDeniedError } from "../world-chat/lease.js";
 import { WorldChatAttachmentStore, MAX_TEXT_PER_RUN_CHARS } from "../world-chat/attachments.js";
 import { planFor } from "../world-chat/check-plan.js";
 import { createRunScratch, removeRunScratch } from "../world-chat/run-scratch.js";
@@ -48,6 +51,9 @@ export interface ConversationRunDependencies {
   exports: NonNullable<RetrievalDeps["getExports"]>;
   actionExports: NonNullable<NonNullable<Parameters<typeof prepareWorldChatActions>[3]>["getExports"]>;
   researchAllowed: NonNullable<RetrievalDeps["researchAllowed"]>;
+  imageRenditionMaker?: ImageRenditionMaker;
+  imageInspectionAllowed?: (provider: string) => Promise<boolean>;
+  publishImageDisclosure?: (conversationId: import("@arke-studio/contracts").ConversationId) => Promise<void>;
   resolveLanguageModel: NonNullable<RunDeps["resolveLanguageModel"]>;
   onTurnFailed: NonNullable<RunDeps["onTurnFailed"]>;
   onProgress: NonNullable<RunDeps["onProgress"]>;
@@ -64,7 +70,13 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
   const receipts = new Map<string, WorldChatCheckReceipt[]>();
   /** Which token each run is reading under, so releasing it stops resolving at the server too. */
   const tokenByRun = new Map<string, string>();
+  const images = new ConversationImages(store, leases, { adapter: deps.adapter,
+    ...(deps.imageRenditionMaker ? { maker: deps.imageRenditionMaker } : {}),
+    allowed: provider => deps.imageInspectionAllowed?.(provider) ?? Promise.resolve(false),
+    publish: id => deps.publishImageDisclosure?.(id) ?? Promise.resolve(),
+  });
   const retrieval = new WorldChatRetrieval({
+    readImage: (lease, args) => images.read(lease, args),
     leases,
     // The same window the prompt is budgeted from: a run that may be handed a whole library
     // should be able to page back through it as well.
@@ -166,6 +178,9 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),
     prepareActions: async (turn) => {
       const prepared = await prepareWorldChatActions(store, actionLifecycle, turn, { getGenerationRouteRows: deps.generationRoutes, getExports: () => deps.actionExports(), getJobs: () => deps.jobs(), getBuildItems: () => deps.buildItems?.() ?? [] });
+      if (prepared.some(item => item.intent.dependencies.length > 0 || (item.payload.kind === "world-chat-production-scene-command" && item.payload.scenePlan))) {
+        await store.ensureSchemaVersion(CHAT_SEQUENCING_SCHEMA_VERSION, "world-chat");
+      }
       if (prepared.some(item => item.payload.kind.startsWith("world-chat-bench-"))) await store.ensureSchemaVersion(BENCH_CHAT_SCHEMA_VERSION, "world-chat");
       if (turn.actions.some(action => action.kind === "prop-authoring" || action.kind === "prop-reference")) await store.ensureSchemaVersion(CONVERSATIONAL_PROPS_SCHEMA_VERSION, "world-chat");
       return prepared;
@@ -225,6 +240,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
         tokenByRun.delete(runId);
       }
       leases.revokeRun(runId);
+      images.release(runId);
       retrieval.forgetRun(runId);
       receipts.delete(runId);
       await removeRunScratch(deps.scratchRoot, conversationId, runId);
@@ -247,10 +263,10 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     ),
     receiptsFor: (runId) => receipts.get(runId) ?? [],
     resolveLanguageModel: deps.resolveLanguageModel,
-    createSession: ({ cwd, runId, model, signal }) => {
+    createSession: async ({ cwd, runId, model, signal }) => {
       const token = tokenByRun.get(runId);
       const url = token ? (deps.query.leasedUrl(token) ?? undefined) : undefined;
-      return createPreparedSession(
+      const session = await createPreparedSession(
         deps.adapter!,
         cwd,
         deps.sessionInput({
@@ -262,6 +278,31 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
         undefined,
         signal,
       );
+      images.start(runId, session.sessionId, signal);
+      return session;
+    },
+    prepareImages: async ({ leaseToken, attachments: selected }) => {
+      const parts: import("@arke-studio/contracts").MessagePart[] = [], descriptions: string[] = [];
+      const selectedImages = selected.filter(a => a.kind === "image" || a.kind === "video");
+      for (const [index, attachment] of selectedImages.entries()) {
+        if (index >= 8) { descriptions.push(`${attachment.id}: unreadable in this message (8-image limit); use view_image to inspect it.`); continue; }
+        try {
+          const outcome = await retrieval.call(leaseToken, "view_image", { kind: "attachment", id: attachment.id });
+          const seen = receipts.get(outcome.receipt.runId) ?? [];
+          receipts.set(outcome.receipt.runId, [...seen, outcome.receipt]);
+          if (outcome.imageContent) {
+            const observation = outcome.receipt.image!;
+            const label = `${observation.id}: ${observation.label}${observation.posterOnly ? " (poster frame only; no motion or audio)" : ""}`;
+            parts.push({ type: "text", text: label }, ...outcome.imageContent.map(image => ({ type: "image" as const, mimeType: image.mimeType, data: image.data })));
+            descriptions.push(`${label}: supplied as image pixels below. Stored text readability does not describe these pixels.`);
+          } else descriptions.push(`${attachment.id} (${attachment.fileName}): unreadable. ${JSON.stringify(outcome.result)}`);
+        } catch (error) {
+          if (error instanceof LeaseDeniedError) throw error;
+          descriptions.push(`${attachment.id} (${attachment.fileName}): unreadable. view_image could not prepare these bytes; do not guess their contents.`);
+        }
+      }
+      if (parts.length) await images.validate(leases.verify(leaseToken));
+      return { parts, description: descriptions.join("\n") };
     },
     runCheckPlan: async ({ draft, leaseToken }) => {
       const plan = planFor(draft);

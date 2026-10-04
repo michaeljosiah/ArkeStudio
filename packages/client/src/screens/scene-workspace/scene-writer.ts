@@ -12,7 +12,7 @@ export interface SceneWriter {
   /** The scene as the staged proposal would leave it, or the accepted scene when nothing is staged. */
   workingScene: SceneRecord;
   /** Sends one named, versioned command; false when the page refuses to (staged, no file, one in flight). */
-  write: (command: Command) => boolean;
+  write: (command: Command, stageReviewId?: string) => boolean;
   /** What every editor on the scene already knows: a staged proposal or a command in flight refuses a write. */
   locked: boolean;
   commandPending: boolean;
@@ -83,7 +83,7 @@ export function useSceneWriter(world: WorldBundle, production: ProductionBundle,
     pendingCommand.current = false;
     setCommandPending(false);
   }, [scene.id, sceneFile, scene.version]);
-  const write = (command: Command): boolean => {
+  const write = (command: Command, stageReviewId?: string): boolean => {
     if (sceneFile === undefined || staged !== undefined || pendingCommand.current) return false;
     const sent = sceneCommand({
       worldId: world.meta.worldId,
@@ -92,6 +92,7 @@ export function useSceneWriter(world: WorldBundle, production: ProductionBundle,
       sceneId: scene.id,
       baseVersion: scene.version,
       command,
+      ...(stageReviewId ? { stageReviewId } : {}),
     });
     if (sent) {
       pendingCommand.current = true;

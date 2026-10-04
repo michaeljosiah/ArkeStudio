@@ -142,7 +142,9 @@ export type AudiobookAsk =
   | { state: "suggested"; suggestion: import("@arke-studio/contracts").PictureSuggestion }
   /** A suggested picture on its block (R-99), or held with the reason it was not made. */
   | { state: "made"; sessionId?: string }
-  | { state: "failed"; reason: string; sessionId?: string };
+  | { state: "failed"; reason: string; sessionId?: string }
+  /** Which chapters (by number) of the book chose each kit look (design turn 193, R-114). */
+  | { state: "looks"; usage: Record<string, number[]> };
 
 /**
  * `Illustrate this chapter` (design turn 191b, 191d, SPEC-047 R-101, R-102), keyed like a run: the proposal the
@@ -2130,6 +2132,8 @@ function handleFrame(json: string): void {
           },
         };
       }
+    } else if (event.type === "audiobook.looks") {
+      if (audiobookAsks[event.requestId] !== undefined) audiobookAsks = { ...audiobookAsks, [event.requestId]: { state: "looks", usage: event.usage } };
     } else if (event.type === "audiobook.picture-suggestion") {
       if (audiobookAsks[event.requestId] !== undefined) {
         audiobookAsks = { ...audiobookAsks, [event.requestId]: event.suggestion !== undefined ? { state: "suggested", suggestion: event.suggestion } : { state: "refused", refused: event.refused ?? "no picture suggested" } };
@@ -3707,6 +3711,12 @@ export function setWorldModel(worldId: string, capability: Capability, modelId: 
 export function setResearchWeb(enabled: boolean): void {
   send({ kind: "set-research-web", enabled });
 }
+export function setImageInspection(enabled: boolean, provider?: string): void {
+  send({ kind: "set-image-inspection", enabled, ...(provider ? { provider } : {}) });
+}
+export function setWorldImageInspection(worldId: string, enabled: boolean): void {
+  send({ kind: "set-world-image-inspection", worldId, enabled });
+}
 /** One local recipe's sampling on this device (design turn 177); null returns it to Fast. */
 export function setLocalSampling(recipeId: string, sampling: import("@arke-studio/contracts").SamplingSetting | null): void {
   send({ kind: "set-local-sampling", recipeId, sampling });
@@ -4102,6 +4112,59 @@ export function generateCharacterLooks(
 
 export function acceptCharacterLook(worldId: string, sheetId: string, takeId: string): void {
   send({ kind: "accept-character-look", worldId, sheetId, takeId });
+}
+
+/**
+ * Candidates of a look for a chapter's pictures (design turn 193, SPEC-047 R-112): `full-body`
+ * makes `count` full-length pictures from the main photo and the clothing line; `close` makes the
+ * head-and-shoulders view of one candidate or one accepted look. Returns the request's id — the
+ * pictures that arrive carry it as their batch — or null when the coordinator is away.
+ */
+export function makeChapterLook(
+  worldId: string,
+  sheetId: string,
+  input: { framing: "full-body" | "close"; prompt: string; count: number; closeOf?: { takeId?: string; lookId?: string }; modelId?: string },
+): string | null {
+  const requestId = queueRequest("generate-character-looks");
+  return send({
+    kind: "generate-character-looks",
+    ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
+    worldId,
+    sheetId,
+    lookKind: "costume",
+    mode: "stay-close",
+    prompt: input.prompt,
+    count: input.count,
+    framing: input.framing,
+    ...(input.closeOf !== undefined ? { closeOf: input.closeOf } : {}),
+    requestId,
+  })
+    ? requestId
+    : null;
+}
+
+/** A candidate accepted as the character's look, with its close view, and chosen for the chapter that asked (R-112, R-118). */
+export function acceptChapterLook(
+  worldId: string,
+  sheetId: string,
+  takeId: string,
+  options: { closeTakeId?: string; closeFor?: string; choose?: { productionId: string; chapterFile: string; key: string; name?: string; sheet?: string } } = {},
+): void {
+  send({ kind: "accept-character-look", worldId, sheetId, takeId, ...options });
+}
+
+/** Which chapters of the book chose each kit look (R-114), answered under the id returned and held in `audiobookAsks`. */
+export function readAudiobookLooks(worldId: string, productionId: string): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "read-audiobook-looks", worldId, productionId, requestId })) return null;
+  emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
+  return requestId;
+}
+
+/** A kit look chosen for a character in this chapter, or the choice taken away with null (R-112). Answered as `audiobook.record`. */
+export function chooseAudiobookLook(worldId: string, productionId: string, chapterFile: string, who: { key: string; name?: string; sheet?: string }, lookId: string | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "choose-audiobook-look", worldId, productionId, chapterFile, ...who, lookId, requestId }) ? requestId : null;
 }
 
 export function rejectReferenceTake(worldId: string, takeId: string, field: string, note?: string): void {
@@ -5544,9 +5607,9 @@ export function suggestAudiobookPicture(worldId: string, productionId: string, c
 }
 
 /** A suggestion made (R-99): the prompt as the author left it and the price the press showed; made through the Bench and filed on the block. */
-export function makeAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, input: { prompt: string; who: readonly string[]; confirmedMicroUsd: number }): string | null {
+export function makeAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, input: { prompt: string; who: readonly string[]; frame?: string; confirmedMicroUsd: number }): string | null {
   const requestId = ulid();
-  if (!send({ kind: "make-audiobook-picture", worldId, productionId, chapterFile, block, prompt: input.prompt, who: [...input.who], confirmedMicroUsd: input.confirmedMicroUsd, requestId })) return null;
+  if (!send({ kind: "make-audiobook-picture", worldId, productionId, chapterFile, block, prompt: input.prompt, who: [...input.who], ...(input.frame !== undefined ? { frame: input.frame } : {}), confirmedMicroUsd: input.confirmedMicroUsd, requestId })) return null;
   emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
   return requestId;
 }
@@ -6313,7 +6376,7 @@ export function openWorldChatMedia(
     conversationId,
     candidateId,
     expectedCandidateRevision: expectedRevision,
-  } as ClientMessage)
+  })
     ? requestId
     : null;
 }

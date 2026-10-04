@@ -1,5 +1,7 @@
 import { valueSchema } from "./value-schema.js";
 import { z } from "zod";
+import { ImageDisclosureSchema, ImageObservationSchema } from "./world-chat-images.js";
+import { HumanDecisionCardSchema } from "./human-decision.js";
 
 /** A browser upload stays below the authenticated websocket frame budget, including base64. */
 export const BROWSER_ATTACHMENT_MAX_BYTES = 16 * 1024 * 1024;
@@ -379,6 +381,7 @@ export const CheckToolSchema = z.enum([
   "list-entities",
   "related",
   "get-attachment-text",
+  "view-image",
   /** Reading a page from the web, kept as an attachment so its quotes stay checkable. */
   "fetch-url",
   /*
@@ -415,6 +418,7 @@ export const WorldChatCheckReceiptSchema = z
         .strict(),
     ),
     searchedCount: z.number().int().min(0).optional(),
+    image: ImageObservationSchema.optional(),
     /** Present together on target reads; optional so every stored search receipt remains readable. */
     target: ArkeReadTargetSchema.optional(),
     observedRevisionOrDigest: z.string().min(1).max(200).optional(),
@@ -424,6 +428,10 @@ export const WorldChatCheckReceiptSchema = z
   })
   .strict()
   .superRefine((receipt, context) => {
+    if ((receipt.tool !== "view-image" && receipt.image !== undefined) ||
+      (receipt.tool === "view-image" && receipt.status === "complete" && receipt.image === undefined)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "complete image receipts require an image observation; other tools cannot carry one" });
+    }
     const targetFields = [
       receipt.target,
       receipt.observedRevisionOrDigest,
@@ -1120,6 +1128,8 @@ export type FrameRunOutcomeReport = z.infer<typeof FrameRunOutcomeReportSchema>;
  * never landed, and the panel would then describe changes that do not exist.
  */
 export const WorldChatStoredEventSchema = valueSchema(z.discriminatedUnion("type", [
+  z.object({ type: z.literal("image.disclosed"), disclosure: ImageDisclosureSchema }).strict(),
+  z.object({ type: z.literal("image.receipt"), receipt: WorldChatCheckReceiptSchema }).strict(),
   ...WorldChatInputEventSchemas,
   // A queued input becomes a primary turn in one record: message, constraints and run together,
   // so a crash can never pop an input without keeping the turn it became (SPEC-045 §2.4).
@@ -1489,6 +1499,8 @@ export const WorldChatLoadedSchema = z
     /** Set when a sent-back proposal reopened this conversation. Survives checkpointing. */
     reopened: z.boolean().optional(),
     messages: z.array(WorldChatMessageSchema),
+    imageDisclosures: z.array(ImageDisclosureSchema).optional(),
+    imageReceipts: z.array(WorldChatCheckReceiptSchema).optional(),
     /** Absent for conversations that have never used additional input (SPEC-045). */
     inputQueue: WorldChatInputQueueViewSchema.optional(),
     /** True when older messages exist before `messages[0]`. */
@@ -1728,9 +1740,11 @@ export const TURN_RESULT_BOUNDS = {
   candidateOperations: 12,
   groupOperations: 6,
   actions: 12,
+  productionActions: 24,
+  productionEditorRequests: 6,
 } as const;
 
-export const WorldChatTurnResultSchema = valueSchema(z
+const WorldChatTurnResultObjectSchema = z
   .object({
     setupUpdate: ProductionSetupUpdateSchema.optional(),
     reply: z.string().max(TURN_RESULT_BOUNDS.reply),
@@ -1762,7 +1776,12 @@ export const WorldChatTurnResultSchema = valueSchema(z
     /** Exact world-authoring operations prepared as permission cards; none writes during the turn. */
     actions: z.array(ModelWorldChatActionSchema).max(TURN_RESULT_BOUNDS.actions).default([]),
   })
-  .strict());
+  .strict();
+export const WorldChatTurnResultSchema = valueSchema(WorldChatTurnResultObjectSchema);
+export const ProductionChatTurnResultSchema = valueSchema(WorldChatTurnResultObjectSchema.extend({
+  actions: z.array(ModelWorldChatActionSchema).max(TURN_RESULT_BOUNDS.productionActions).default([]),
+  editorRequests: z.array(ModelEditorRequestSchema).max(TURN_RESULT_BOUNDS.productionEditorRequests).default([]),
+}));
 export type WorldChatTurnResult = z.infer<typeof WorldChatTurnResultSchema>;
 
 // ---------------------------------------------------------------------------
@@ -1862,6 +1881,11 @@ export type WorldChatTranscriptMessage = z.infer<typeof WorldChatTranscriptMessa
  */
 export const WorldChatWorkspaceSchema = z
   .object({
+    /** Live projections of existing human authorities; never part of a model turn result. */
+    humanDecisions: z.array(HumanDecisionCardSchema).optional(),
+    humanDecisionProblems: z.array(z.string().min(1).max(500)).optional(),
+    imageDisclosures: z.array(ImageDisclosureSchema).optional(),
+    imageReceipts: z.array(WorldChatCheckReceiptSchema).optional(),
     productionSetup: ProductionSetupStateSchema.optional(),
     conversationId: ConversationIdSchema,
     status: WorldChatStatusSchema,
@@ -1920,6 +1944,7 @@ export const WorldChatWorkspaceSchema = z
             kind: z.enum(["document", "image", "audio", "video", "other"]),
             readability: z.enum(["text-readable", "not-readable", "extracted-text-available"]),
             promoted: z.boolean(),
+            imageInspection: z.literal("prepared").optional(),
           })
           .strict(),
       )
@@ -2779,7 +2804,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-scene-restore": "Restore a scene to an earlier version.",
   "production-style": "Set the style this production's images and video are made in.",
   "production-prose-style": "Set the story's point of view, tense, voice and samples.",
-  "production-scene-command": "One change to a scene: edit its cast and place, insert, edit, move, duplicate or delete a shot, set a shot's staging or prompt override, or change its boards. Visual facts require the person's review on the shot panel and cannot be set here.",
+  "production-scene-command": "One command or an ordered commands list on a scene: cast and place, shots, staging, prompt overrides or boards. Independent commands on the same scene share an atomic card showing the resulting shot list. Explicit after dependencies stay separate cards. Use ref:name in a shot target to name the one shot a preceding action with ref=name creates; include that ref in after when it is a separate card. Visual facts require the person's review on the shot panel and cannot be set here.",
   "production-board-compile": "Compile a scene's storyboard from its shots and frames.",
   "production-board-export": "Export a scene's storyboard to a file the person chooses.",
   "production-take-import": "Import a take for a shot from a file the person picks.",
@@ -3025,7 +3050,7 @@ Return one JSON object and nothing else — no prose around it, no markdown fenc
 
 {"reply": "...", "candidateOperations": [...], "groupOperations": [...], "bibleEdits": [...], "editorRequests": [...], "sceneEdits": [...], "actions": [...]}
 
-reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn}, sceneEdits at most ${SCENE_EDIT_BOUNDS.perTurn}, actions at most ${TURN_RESULT_BOUNDS.actions}; all are [] when there is nothing to record.
+reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn} (${TURN_RESULT_BOUNDS.productionEditorRequests} in production threads), sceneEdits at most ${SCENE_EDIT_BOUNDS.perTurn}, actions at most ${TURN_RESULT_BOUNDS.actions} (${TURN_RESULT_BOUNDS.productionActions} in production threads); all are [] when there is nothing to record.
 
 A complete result:
 ${JSON.stringify(exampleTurnResult, null, 1)}

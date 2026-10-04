@@ -56,14 +56,16 @@ function Tick({ on, onChange, label, note, testId }: {
  * attestations and the same rights ledger, including every recovery path — a review that
  * outlives a reload, a legacy sample that has to be revalidated, a source that vanished.
  */
-export function VoiceSampleFlow({ world, sheet, onClose }: { world: WorldBundle; sheet: Sheet; onClose: () => void }) {
+export function VoiceSampleFlow({ world, sheet, onClose, initialReview, inline = false }: {
+  world: WorldBundle; sheet: Sheet; onClose: () => void; initialReview?: VoiceSampleReview; inline?: boolean;
+}) {
   const { state } = useStore();
   const sample = world.referenceKits.find(k => k.sheetId === sheet.id)?.designatedVoiceSample;
   const models = characterSpeakingVideoRoutes(state?.app.manifest?.models ?? []);
   const [modelId, setModelId] = useState(""), [script, setScript] = useState("");
   const [durationSec, setDurationSec] = useState(8), [sourceId, setSourceId] = useState("");
   const [trim, setTrim] = useState(false), [inSec, setInSec] = useState(0), [outSec, setOutSec] = useState(8);
-  const [review, setReview] = useState<VoiceSampleReview | null>(null);
+  const [review, setReview] = useState<VoiceSampleReview | null>(initialReview ?? null);
   const [singleSpeaker, setSingleSpeaker] = useState(false), [noMusic, setNoMusic] = useState(false);
   const [ackWarnings, setAckWarnings] = useState(false);
   const [rightsBasis, setRightsBasis] = useState<"self" | "authorized" | "licensed" | "">("");
@@ -86,13 +88,17 @@ export function VoiceSampleFlow({ world, sheet, onClose }: { world: WorldBundle;
   const estimate = model ? estimateMicroUsd(model, { durationSec: length, resolution: model.limits.resolutions?.[0] ?? "720p" }) : 0;
   const warnings = review ? Object.values(review.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code) : [];
   useEffect(() => subscribeVoiceSampleResults(result => {
-    if (result.requestId !== pending.current || result.worldId !== world.meta.worldId || result.sheetId !== sheet.id) return;
+    if (result.worldId !== world.meta.worldId || result.sheetId !== sheet.id) return;
+    if (result.requestId !== pending.current) {
+      if (result.status === "assigned" && review && result.operationId === review.operationId) { setReview(null); retainReview(null); setNotice("This voice review was decided on another surface."); }
+      return;
+    }
     pending.current = null; setBusy(false);
     if (result.review) { retainReview(result.review.operationId); setReview(result.review); setSingleSpeaker(false); setNoMusic(false); setAckWarnings(false); }
-    else if (result.status === "assigned" || result.status === "cleared") { setReview(null); retainReview(null); }
+    else if (result.status === "assigned" && (!result.operationId || result.operationId === review?.operationId)) { setReview(null); retainReview(null); }
     setNotice(result.reason ?? ({ prepared: "Prepared locally. Audition and review before assigning.", assigned: "Character voice reference assigned.",
       cleared: "Voice reference cleared. Source media is retained.", withdrawn: "Cloud reuse withdrawn. Future uploads are blocked; submitted work is unchanged.", refused: "Unable to complete this action." }[result.status]));
-  }), [world.meta.worldId, sheet.id]);
+  }), [world.meta.worldId, sheet.id, review?.operationId]);
   useEffect(() => subscribeQueueResults(result => {
     if (result.requestId !== generation.current) return;
     generation.current = null; setBusy(false);
@@ -119,11 +125,11 @@ export function VoiceSampleFlow({ world, sheet, onClose }: { world: WorldBundle;
       <strong>{review ? "Review the sample" : "The voice on screen"}</strong>
       <span className="fy-mono">{review ? "one speaker, no music — your review, not a finding" : `${sheet.name} speaking, for routes that carry a voice`}</span>
     </div>
-    <button className="fy-character-sheet-close" type="button" aria-label="Close voice sample" onClick={onClose}><X size={18} /></button>
+    {!inline && <button className="fy-character-sheet-close" type="button" aria-label="Close voice sample" onClick={onClose}><X size={18} /></button>}
   </header>;
-  if (review) return <BodyLayer>
-    <div className="fy-voicescrim" onClick={onClose} />
-    <div className="fy-voicesheet fy-voicesheet--wide" role="dialog" aria-label="Review the sample" data-testid="voice-review">
+  if (review) return <VoiceReviewSurface inline={inline}>
+    {!inline && <div className="fy-voicescrim" onClick={onClose} />}
+    <div className={cx("fy-voicesheet fy-voicesheet--wide", inline && "fy-voicesheet--inline")} role={inline ? "group" : "dialog"} aria-label="Review the sample" data-testid="voice-review">
       {head}
       <div className="fy-vsbody">
         <div className="fy-vsab">
@@ -153,14 +159,15 @@ export function VoiceSampleFlow({ world, sheet, onClose }: { world: WorldBundle;
       <footer className="fy-voicesheet__foot">
         <span className="fy-mono">sets on screen · source kept</span>
         <span className="fy-voicesheet__push" />
-        <Button variant="ghost" onClick={() => { setReview(null); retainReview(null); }}>Cancel</Button>
+        {!inline && <Button variant="ghost" onClick={() => { setReview(null); retainReview(null); }}>Cancel</Button>}
         <Button variant="primary" data-testid="sample-use" disabled={busy || !singleSpeaker || !noMusic || (warnings.length > 0 && !ackWarnings)}
           onClick={() => act({ kind: "accept-character-voice-sample", worldId: world.meta.worldId, sheetId: sheet.id, requestId: ulid(),
             operationId: review.operationId, warningCodes: warnings, singleSpeaker, noMusic, rightsBasis: rightsBasis || null })}>Use on screen</Button>
       </footer>
       <p className="fy-vsnotice" role="status" aria-live="polite">{notice}</p>
     </div>
-  </BodyLayer>;
+  </VoiceReviewSurface>;
+  if (inline) return <p role="status">{notice || "This voice review is settled."}</p>;
   return <BodyLayer>
     <div className="fy-voicescrim" onClick={onClose} />
     <div className="fy-voicesheet fy-voicesheet--wide" role="dialog" aria-label="The voice on screen" data-testid="voice-sample">
@@ -259,4 +266,8 @@ export function VoiceSampleFlow({ world, sheet, onClose }: { world: WorldBundle;
       <p className="fy-vsnotice" role="status" aria-live="polite">{notice}</p>
     </div>
   </BodyLayer>;
+}
+
+function VoiceReviewSurface({ inline, children }: { inline: boolean; children: React.ReactNode }) {
+  return inline ? <>{children}</> : <BodyLayer>{children}</BodyLayer>;
 }

@@ -2,6 +2,8 @@ import { createMediaProcessRunner } from "./media-tools.js";
 import { spawn as nodeSpawn } from "node:child_process";
 import {
   createBoundaryFrameMaker,
+  createImageRenditionMaker,
+  type ImageRenditionMaker,
   createTakePosterMaker,
   createTakeQcAnalyzer,
   type BoundaryFrameMaker,
@@ -25,7 +27,7 @@ type SpawnLike = typeof nodeSpawn;
 export function createFfmpegProbeRunner(ffmpeg: string, spawn: SpawnLike = nodeSpawn): MediaProbeRunner {
   const runner = createMediaProcessRunner({ ffmpeg, ffprobe: ffmpeg }, spawn);
   return { async run(args, limits) {
-    const result = await runner.run("ffmpeg", args, { signal: new AbortController().signal,
+    const result = await runner.run("ffmpeg", args, { signal: limits.signal ?? new AbortController().signal,
       timeoutMs: limits.timeoutMs, maxStdoutBytes: limits.maxOutputBytes, maxStderrBytes: limits.maxOutputBytes, maxCombinedBytes: limits.maxOutputBytes });
     return { code: result.code, stdout: new TextDecoder().decode(result.stdout), stderr: result.stderr, timedOut: result.timedOut };
   } };
@@ -70,7 +72,8 @@ export function takePosterOptions(
 export function boundaryFrameOptions(
   ffmpeg: string | null,
   spawn: SpawnLike = nodeSpawn,
-): { boundaryFrameMaker?: BoundaryFrameMaker } {
+): { boundaryFrameMaker?: BoundaryFrameMaker; imageRenditionMaker?: ImageRenditionMaker } {
   if (ffmpeg === null) return {};
-  return { boundaryFrameMaker: createBoundaryFrameMaker(createFfmpegProbeRunner(ffmpeg, spawn)) };
+  const runner = createFfmpegProbeRunner(ffmpeg, spawn);
+  return { boundaryFrameMaker: createBoundaryFrameMaker(runner), imageRenditionMaker: createImageRenditionMaker(runner) };
 }

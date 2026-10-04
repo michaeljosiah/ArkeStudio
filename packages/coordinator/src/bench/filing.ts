@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import {
+  TAKE_MEDIA_IDENTITY_SCHEMA_VERSION,
   type ArtifactSidecar,
   type BenchSession,
   type BenchTake,
@@ -396,6 +397,7 @@ async function fileBenchSubjectTakeUnserialised(
     const productionTake = {
       ...baseTake(take, filing.productionTakeId, [filing.shotId], "frame", referencePaths),
       media: mediaName,
+      mediaHash: `sha256:${fullHash}`,
     } satisfies Take;
     const decision: ReviewDecision = {
       ts: at,
@@ -428,7 +430,7 @@ async function fileBenchSubjectTakeUnserialised(
     await store.commitUnserialised({
       kind: "bench-subject-accept",
       source: `bench:${session.id}`,
-      raiseSchemaVersion: 2,
+      raiseSchemaVersion: TAKE_MEDIA_IDENTITY_SCHEMA_VERSION,
       files: [
         {
           path: `productions/${filing.productionId}/takes/${filing.productionTakeId}/take.json`,
@@ -476,6 +478,7 @@ async function fileBenchSubjectTakeUnserialised(
   const parent = {
     ...baseTake(take, filing.productionTakeId, filing.members.map((member) => member.shotId), "clip", referencePaths),
     media: mediaName,
+    mediaHash: `sha256:${fullHash}`,
   } satisfies Take;
   const totalSec = filing.members.reduce((sum, member) => sum + member.endSec - member.startSec, 0);
   const estimatedCharge = take.cost?.estimatedMicroUsd ?? 0;
@@ -538,6 +541,7 @@ async function fileBenchSubjectTakeUnserialised(
   const info = mediaInfoFile(take, fullHash);
   await store.commitUnserialised({
     kind: "bench-subject-accept",
+    raiseSchemaVersion: TAKE_MEDIA_IDENTITY_SCHEMA_VERSION,
     source: `bench:${session.id}`,
     files: [
       ...[parent, ...children].map((filed) => ({

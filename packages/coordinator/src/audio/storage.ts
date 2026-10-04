@@ -1,39 +1,23 @@
-import { link, lstat, mkdir, open, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { link, lstat, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AudioAssetProvenanceSchema, AudioQcReportSchema, AudioRangeSchema, AudioSourceRefSchema,
   PerformanceIdSchema, ArtifactIdSchema, SlugSchema, TakeIdSchema, type AudioAssetProvenance, type AudioRange, type AudioSourceRef } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import type { CommitInput } from "../world/commit.js";
 import { atomicWriteFile } from "../world/atomic.js";
+import { containedWorldFilePath } from "../world/contained-file.js";
 import { type AudioMediaTools, readAudioBytes, hashAudioFile } from "./media-tools.js";
 import { audioHash, audioQcCacheKey } from "./qc.js";
 
 /** All paths reaching this module come from authoritative records, still checked because
  * imported worlds can contain traversal, ADS or junctions. Errors contain no paths. */
 export async function audioWorldPath(root: string, portable: string, createParents = false): Promise<string> {
-  if (!portable || (/[\\:]/.test(portable) || portable.includes("\0")) || isAbsolute(portable)) throw new Error("audio-path-invalid");
-  const parts = portable.split("/");
-  if (parts.some(p => !p || p === "." || p === ".." || /[. ]$/.test(p))) throw new Error("audio-path-invalid");
-  const base = await realpath(root);
-  let cursor = base;
-  for (let i = 0; i < parts.length; i++) {
-    cursor = join(cursor, parts[i]!);
-    if (createParents && i < parts.length - 1) await mkdir(cursor).catch(error => {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw new Error("audio-directory-unavailable");
-    });
-    const info = await lstat(cursor).catch(error => {
-      if (createParents && i === parts.length - 1 && (error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw new Error("audio-source-unavailable");
-    });
-    if (info?.isSymbolicLink() || (i < parts.length - 1 && !info?.isDirectory()) ||
-      (i === parts.length - 1 && info && !info.isFile())) throw new Error("audio-path-invalid");
-    if (info) {
-      const rel = relative(base, await realpath(cursor));
-      if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error("audio-path-invalid");
-    }
+  try { return await containedWorldFilePath(root, portable, createParents, "audio"); }
+  catch (error) {
+    if (error instanceof Error && ["audio-path-invalid", "audio-directory-unavailable"].includes(error.message)) throw error;
+    throw new Error("audio-source-unavailable");
   }
-  return cursor;
 }
 
 export type AudioSourceRequest = { kind: "performance"; productionId: string; performanceId: string; range?: AudioRange } | { kind: "performance-recording"; productionId: string; performanceId: string } | { kind: "legacy-character-sample"; sheetId: string; range?: AudioRange } |

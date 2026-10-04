@@ -47,7 +47,7 @@ export interface TakeQcAnalyzer {
 export interface MediaProbeRunner {
   run(
     args: readonly string[],
-    limits: { timeoutMs: number; maxOutputBytes: number },
+    limits: { timeoutMs: number; maxOutputBytes: number; signal?: AbortSignal },
   ): Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean }>;
 }
 

@@ -58,6 +58,17 @@ describe("desktop take-QC wiring (#248)", () => {
     assert.deepEqual(result, { code: 0, stdout: "#tb 0: 1/24\n", stderr: "", timedOut: false });
   });
 
+  it("kills an active image/media probe when its owning turn aborts", async () => {
+    const { spawn, child } = fakeSpawn(), controller = new AbortController();
+    const pending = createFfmpegProbeRunner("ffmpeg", spawn).run([], {
+      timeoutMs: 20_000, maxOutputBytes: 1_000, signal: controller.signal,
+    });
+    controller.abort();
+    const result = await pending;
+    assert.equal(child.killed, "SIGKILL"); assert.equal(result.code, null);
+    assert.equal(result.timedOut, false);
+  });
+
   it("kills the probe on its wall clock and on its output ceiling", async () => {
     // Wall clock: a probe that never exits is stopped and reported as a timeout.
     const slow = fakeSpawn();

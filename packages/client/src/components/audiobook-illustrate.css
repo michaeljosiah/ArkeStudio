@@ -1,20 +1,89 @@
 /* Illustrate this chapter (design turn 191b, 191d): the proposal dashed until it is accepted, then made one at a time. */
 .fy-ab__picchip--prop { border-style: dashed; border-color: var(--neutral-400); }
 .fy-ab__picchip--prop i { width: 28px; height: 18px; border-radius: 4px; border: 1px dashed var(--neutral-400); display: inline-block; box-sizing: border-box; }
-.fy-ill { gap: 10px; }
-.fy-ill__rows { display: flex; flex-direction: column; }
-.fy-ill__row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); font-size: var(--text-sm); }
-.fy-ill__row:first-child { border-top: 0; }
-.fy-ill__row--off { opacity: 0.5; }
-.fy-ill__ph { width: 64px; height: 40px; border-radius: 8px; border: 1px dashed var(--neutral-400); flex: none; box-sizing: border-box; }
-.fy-ill__t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.fy-ill__t b { font-weight: 500; }
-.fy-ill__t span { color: var(--muted-foreground); font-size: var(--text-xs); }
-.fy-ill__at { flex: none; font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; }
-.fy-ill__acts { display: inline-flex; align-items: center; gap: 4px; flex: none; }
-.fy-ill__line { display: flex; gap: 12px; font-size: var(--text-sm); }
-.fy-ill__line b { width: 40px; flex: none; font-weight: 500; color: var(--muted-foreground); }
+
+/* The dock's one line of status (193): the line, the press it needs, and while pictures are made a
+   thin bar under them. */
+.fy-illst { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 12px; }
+.fy-illst__line { flex: 1; min-width: 0; margin: 0; display: flex; gap: 8px; align-items: baseline; font-size: var(--text-xs); color: var(--muted-foreground); }
+.fy-illst__line b { flex: none; font-weight: 500; color: var(--foreground); }
+.fy-illst__line span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-illst .ui-btn { flex: none; }
+.fy-illst .fy-ill__bar { flex-basis: 100%; height: 4px; }
 .fy-ill__bar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--foreground) 14%, transparent); position: relative; overflow: hidden; }
 .fy-ill__bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--foreground); border-radius: 3px; }
-.fy-ill__acts .ui-btn { padding-inline: 8px; font-size: var(--text-xs); }
-.fy-ill__row .ui-btn { flex: none; }
+
+/*
+ * The proposal as a sheet over the main area (design turn 193h, 193j). It stands in the chapter's
+ * grid cell, over the centre and not over the dock, so Arke stays where it is. A grid of cards:
+ * four across where the sheet is wide, three, two; between 600 and 1099 always two; on a phone one
+ * list with Accept held at the foot. The sheet is the size container the columns answer to.
+ */
+.fy-sw:has(> .fy-ills) > .fy-sw__centre { grid-area: 1 / 1; }
+.fy-ills { grid-area: 1 / 1; position: relative; z-index: 6; min-width: 0; min-height: 0; display: flex; padding: 14px 28px 18px; box-sizing: border-box; background: color-mix(in srgb, var(--background) 62%, transparent); }
+.fy-ills__sheet { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 16px; padding: 20px 26px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 14px; background: var(--background); box-shadow: 0 18px 50px color-mix(in srgb, var(--foreground) 14%, transparent); container: ills / inline-size; }
+.fy-ills__head { display: flex; align-items: center; gap: 12px; flex: none; }
+.fy-ills__head h3 { margin: 0; font: 600 var(--text-md)/1.3 var(--font-sans); outline: none; white-space: nowrap; }
+.fy-ills__sum { min-width: 0; font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-ills__short { display: none; }
+.fy-ills__push { flex: 1; }
+.fy-ills__grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px 16px; align-content: start; align-items: start; }
+.fy-ills__card { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.fy-ills__th { position: relative; aspect-ratio: 16 / 9; box-sizing: border-box; padding: 8px 10px; display: flex; align-items: flex-end; overflow: hidden; border: 1px dashed var(--neutral-400); border-radius: 10px; }
+.fy-ills__tm { position: absolute; right: 8px; top: 8px; font-size: var(--text-2xs); color: var(--muted-foreground); }
+/* The frame word in the slot's top-left corner (193h): Wide, Two-shot, Detail. */
+.fy-ills__frame { position: absolute; left: 8px; top: 8px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--background); font-size: var(--text-2xs); color: var(--foreground); }
+.fy-ills__words { margin: 0; font-size: var(--text-xs); line-height: 1.5; color: var(--muted-foreground); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.fy-ills__figs { display: none; }
+.fy-ills__hd { display: flex; align-items: baseline; gap: 8px; font-size: var(--text-sm); }
+.fy-ills__t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fy-ills__t b { font-weight: 600; }
+.fy-ills__meta { display: none; font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-ills__hd .ui-btn { flex: none; height: auto; min-height: 0; padding: 0 2px; font: var(--type-label); color: var(--muted-foreground); background: transparent; }
+.fy-ills__hd .ui-btn:hover:not(:disabled) { color: var(--foreground); background: transparent; }
+.fy-ills__wh { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; font-size: var(--text-xs); color: var(--muted-foreground); }
+.fy-ills__who { display: inline-flex; align-items: center; gap: 6px; }
+.fy-ills__note { font: 400 var(--text-2xs) var(--font-mono); color: var(--muted-foreground); }
+.fy-ills__wh .ui-btn { height: auto; min-height: 0; padding: 0 2px; font: 400 var(--text-2xs) var(--font-mono); color: var(--muted-foreground); text-decoration: underline; text-underline-offset: 3px; background: transparent; }
+.fy-ills__fig { width: 22px; height: 30px; flex: none; box-sizing: border-box; border-radius: 6px; border: 1px solid var(--border); object-fit: cover; object-position: top; display: block; background: var(--secondary); }
+.fy-ills__fig--none { border-style: dashed; border-color: var(--neutral-400); background: transparent; }
+.fy-ills__fig--over { opacity: 0.45; }
+.fy-ills__card--held .fy-ills__th { border-color: var(--warning); }
+.fy-ills__card--off { opacity: 0.5; }
+.fy-ills__foot { display: flex; align-items: center; gap: 8px; flex: none; padding-top: 14px; border-top: 1px solid var(--border); }
+.fy-ills__read { padding-inline: 0; font: 400 var(--text-2xs) var(--font-mono); color: var(--muted-foreground); }
+@container ills (max-width: 999px) {
+  .fy-ills__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@container ills (max-width: 759px) {
+  .fy-ills__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fy-ills__sum { display: none; }
+  .fy-ills__short { display: inline; }
+}
+/* 600 to 1099: two across, the sheet over the whole page below the app's bar and beside Arke's rail. */
+@media (max-width: 1099px) {
+  .fy-ills { position: fixed; inset: 52px 42px 0 0; grid-area: auto; padding: 0; z-index: 30; background: var(--background); }
+  .fy-ills__sheet { border: 0; border-radius: 0; box-shadow: none; padding: 16px 24px 0; }
+  .fy-ills__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fy-ills__foot { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+  .fy-ills :is(.ui-btn) { min-height: 44px; }
+}
+/* A phone: one list, a card a row (193j) with its people in the picture's place, Accept at the foot. */
+@media (max-width: 599px) {
+  .fy-ills { inset: 52px 0 0 0; }
+  .fy-ills__sheet { padding: 12px 20px 0; gap: 8px; }
+  .fy-ills__again, .fy-ills__read, .fy-ills__sum { display: none; }
+  .fy-ills__short { display: inline; }
+  .fy-ills__grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .fy-ills__card { display: grid; grid-template-columns: 104px minmax(0, 1fr); column-gap: 12px; row-gap: 2px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .fy-ills__th { grid-row: 1 / 3; grid-column: 1; aspect-ratio: auto; width: 104px; height: 58px; align-items: center; justify-content: center; padding: 0; }
+  .fy-ills__words, .fy-ills__tm, .fy-ills__frame { display: none; }
+  .fy-ills__figs { display: flex; gap: 6px; }
+  .fy-ills__hd { grid-column: 2; grid-row: 1; align-items: center; }
+  .fy-ills__meta { display: block; }
+  .fy-ills__card:not(.fy-ills__card--held) .fy-ills__wh { display: none; }
+  .fy-ills__wh { grid-column: 2; grid-row: 2; }
+  .fy-ills__card > .fy-mono { grid-column: 1 / -1; }
+  .fy-ills__foot { gap: 12px; }
+  .fy-ills__foot .ui-btn--primary { flex: 1; }
+}

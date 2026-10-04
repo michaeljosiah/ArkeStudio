@@ -18,6 +18,7 @@ import {
   type Take,
 } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
+import { AUDIOBOOK_LOOKS_SCHEMA_VERSION } from "../world/commit.js";
 import { sha256 } from "../world/text-files.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
@@ -441,9 +442,18 @@ export async function acceptCharacterLook(
     takeId: Take["id"];
     artDirectionVersion: number;
     review?: ReviewDecision;
+    /**
+     * A look made for a chapter's pictures (design turn 193, R-112): its framing, the main photo it
+     * was made from (for `older face`, R-113) and its close view (R-118). Each is a field the
+     * builds before turn 193 read as an unreadable kit, so the world is raised before the first.
+     */
+    framing?: "full-body" | "portrait";
+    mainFile?: string;
+    close?: { file: string; takeId: Take["id"] };
   },
   options: ReferenceMutationOptions = {},
 ): Promise<void> {
+  if (input.framing !== undefined || input.mainFile !== undefined || input.close !== undefined) await store.ensureSchemaVersion(AUDIOBOOK_LOOKS_SCHEMA_VERSION, "character-look");
   const { kit, raw } = await loadOrEmpty(store, sheetId);
   const others = (kit.looks ?? []).filter((look) => look.id !== input.id);
   await writeKit(
@@ -462,11 +472,42 @@ export async function acceptCharacterLook(
           sourceTakeId: input.takeId,
           artDirectionVersion: input.artDirectionVersion,
           acceptedAt: store.now(),
+          ...(input.framing !== undefined ? { framing: input.framing } : {}),
+          ...(input.mainFile !== undefined ? { mainFile: input.mainFile } : {}),
+          ...(input.close !== undefined ? { closeFile: input.close.file, closeTakeId: input.close.takeId } : {}),
         },
       ],
     },
     raw,
     input.review,
+    options,
+  );
+}
+
+/**
+ * A close view filed on a look already accepted (design turn 193, R-118): Make close view on a look
+ * made without one. The look keeps its own image and id; only the second image is added, and it is
+ * never replaced silently — a look that has one is refused, so a paid picture is not lost.
+ */
+export async function attachCloseView(
+  store: WorldStore,
+  sheetId: string,
+  lookId: string,
+  close: { file: string; takeId: Take["id"] },
+  review?: ReviewDecision,
+  options: ReferenceMutationOptions = {},
+): Promise<void> {
+  await store.ensureSchemaVersion(AUDIOBOOK_LOOKS_SCHEMA_VERSION, "character-look");
+  const { kit, raw } = await loadOrEmpty(store, sheetId);
+  const looks = kit.looks ?? [];
+  const index = looks.findIndex((look) => look.id === lookId);
+  if (index < 0) throw new Error(`no accepted look "${lookId}"`);
+  await writeKit(
+    store,
+    sheetId,
+    { ...kit, looks: looks.map((look, at) => (at === index ? { ...look, closeFile: close.file, closeTakeId: close.takeId } : look)) },
+    raw,
+    review,
     options,
   );
 }

@@ -138,7 +138,13 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Forty-seven is a picture set on a block of a chapter's audiobook (turn 186).
 // Forty-eight is timing on an audiobook's blocks, its reactions, beds and sounds (turn 187).
 // Forty-nine is a chapter's look and the look a picture was made under (turn 191c).
-export const SUPPORTED_SCHEMA_VERSION = 51;
+// Fifty and fifty-one are world chat's (production contexts; the Bench conversation).
+// Fifty-two is a look chosen per character, the mood line and a look's close view (turn 193).
+// Fifty-three protects durable conversation image receipts/disclosures and world image privacy.
+// Fifty-four retains original landed-media hashes on immutable production takes.
+// Fifty-five protects turn-local dependencies, frozen scene batches and prospective generation quotes.
+// Fifty-six protects retained human Stage-review drafts and their Keep/discard binding.
+export const SUPPORTED_SCHEMA_VERSION = 56;
 
 export class WorldOpenError extends Error {
   constructor(

@@ -47,19 +47,21 @@ export function toolsFor(session: ToolSession): ToolDefinition[] {
 export async function worldRequest(url: string, method: string, params: JsonObject, signal?: AbortSignal): Promise<JsonObject> {
   const parsed = new URL(url);
   if (parsed.protocol !== "http:" || !["127.0.0.1", "[::1]", "localhost"].includes(parsed.hostname) || parsed.username || parsed.password || parsed.search || parsed.hash || !/^\/mcp(?:\/[0-9a-f]{64})?$/.test(parsed.pathname)) throw new ConfinementError();
-  const timeout = AbortSignal.timeout(15_000);
+  const inspectingImage = method === "tools/call" && params.name === "view_image";
+  const maximumBytes = inspectingImage ? 20 * 1024 * 1024 : 2 * 1024 * 1024;
+  const timeout = AbortSignal.timeout(inspectingImage ? 30_000 : 15_000);
   const response = await fetch(url, {
     method: "POST", redirect: "error", headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   });
   if (!response.ok) throw new Error("The prepared world-query endpoint is no longer available.");
   const length = Number(response.headers.get("content-length") ?? 0);
-  if (length > 2 * 1024 * 1024) { await response.body?.cancel(); throw new Error("World-query response exceeds the session limit."); }
+  if (length > maximumBytes) { await response.body?.cancel(); throw new Error("World-query response exceeds the session limit."); }
   if (!response.body) throw new Error("World-query returned no response.");
   const chunks: Uint8Array[] = []; let total = 0;
   for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
     total += chunk.length;
-    if (total > 2 * 1024 * 1024) throw new Error("World-query response exceeds the session limit.");
+    if (total > maximumBytes) throw new Error("World-query response exceeds the session limit.");
     chunks.push(chunk);
   }
   const body = object(JSON.parse(Buffer.concat(chunks).toString("utf8")));
@@ -149,8 +151,20 @@ async function executeOneTool(session: ToolSession, name: string, args: JsonObje
     if (!session.worldQueryUrl) throw new ConfinementError();
     const result = await worldRequest(session.worldQueryUrl, "tools/call", { name: name.slice(6), arguments: args }, signal);
     signal.throwIfAborted();
-    if (!Array.isArray(result.content) || result.content.some(item => object(item).type !== "text" || typeof object(item).text !== "string")) throw new Error("World-query returned unsupported content.");
-    return { result: { success: result.isError !== true, content: result.content.map(item => ({ type: "text" as const, text: object(item).text as string })) }, ...(result.isError === true ? {} : { summary: `read the world: ${name.slice(6).replaceAll("_", " ")}` }) };
+    if (!Array.isArray(result.content)) throw new Error("World-query returned unsupported content.");
+    const content: ToolContent[] = result.content.map(item => {
+      const block = object(item);
+      if (block.type === "text" && typeof block.text === "string") return { type: "text", text: block.text };
+      if (name !== "world_view_image" || !session.inputModalities?.includes("image") || block.type !== "image" ||
+        block.mimeType !== "image/png" || typeof block.data !== "string" || block.data.length > 16 * 1024 * 1024 ||
+        !/^[A-Za-z0-9+/]+={0,2}$/.test(block.data)) throw new Error("World-query returned unsupported image content for this model.");
+      const bytes = Buffer.from(block.data, "base64");
+      if (imageType(bytes) !== "image/png") throw new Error("World-query image is not a PNG.");
+      validatePng(bytes);
+      if (bytes.readUInt32BE(16) > 1568 || bytes.readUInt32BE(20) > 1568) throw new Error("World-query image exceeds its rendition limit.");
+      return { type: "image", mimeType: "image/png", data: block.data };
+    });
+    return { result: { success: result.isError !== true, content }, ...(result.isError === true ? {} : { summary: `read the world: ${name.slice(6).replaceAll("_", " ")}` }) };
   }
   const files = await ConfinedFiles.create(session.root, session.rootIdentity, signal);
   try { return await executeFileTool(session, files, name, args, signal); }

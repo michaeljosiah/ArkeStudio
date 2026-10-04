@@ -5,7 +5,8 @@ import { z } from "zod";
 import {
   ArkeGenerationBodySchema, ConversationIdSchema, JobSchema, ModelWorldChatActionSchema, isReplayableFinalization, ulid,
   CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan,
-  type ArkeGenerationBody, type ConversationActionCard, type ModelWorldChatAction,
+  type ArkeGenerationBody, type ConversationActionCard, type ModelWorldChatAction, type WorldBundle,
+  SceneIdSchema, SlugSchema, CHAT_SEQUENCING_SCHEMA_VERSION,
 } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import type { WorldStore } from "../world/store.js";
@@ -14,9 +15,9 @@ import { conversationActionDigest } from "../arke-actions/lifecycle.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "../world/reference-files.js";
 
-export interface GenerationQuoteScope { readonly conversationId: string }
+export interface GenerationQuoteScope { readonly conversationId: string; readonly sceneDependencies?: readonly { productionId: string; sceneId: string }[] }
 export interface GenerationQuoteSource {
-  compile(action: ModelWorldChatAction, actionId: string, createdAt: string, scope?: GenerationQuoteScope): Promise<{
+  compile(action: ModelWorldChatAction, actionId: string, createdAt: string, scope?: GenerationQuoteScope, prospectiveWorld?: WorldBundle): Promise<{
     body: ArkeGenerationBody;
     inputs: readonly EnqueueInput[];
     /** Source-owned authority, such as a founding item, participates in staleness checks. */
@@ -41,7 +42,9 @@ const QuoteSchema = z.object({
   inputs: z.array(InputSchema.extend({ idempotencyKey: JobSchema.shape.idempotencyKey })),
   dispatchStarted: z.boolean().default(false), admissionComplete: z.boolean().default(false),
   admissionIndex: z.number().int().min(0).optional(),
-  scope: z.object({ conversationId: ConversationIdSchema }).strict().optional(),
+  scope: z.object({ conversationId: ConversationIdSchema,
+    sceneDependencies: z.array(z.object({ productionId: SlugSchema, sceneId: SceneIdSchema }).strict()).min(1).max(24).optional(),
+  }).strict().optional(),
   materialization: z.unknown().optional(),
 }).strict();
 type Quote = z.infer<typeof QuoteSchema>;
@@ -86,8 +89,8 @@ export class GenerationQuotes {
     // A dispatched quote is recovery evidence, even after its preparation payload is gone.
     if (!quote?.dispatchStarted) await this.store.ownedWrite(() => rm(this.path(id), { force: true }));
   }
-  private async compile(action: ModelWorldChatAction, id: string, at: string, scope?: GenerationQuoteScope) {
-    const resolved = await this.source.compile(action, id, at, scope);
+  private async compile(action: ModelWorldChatAction, id: string, at: string, scope?: GenerationQuoteScope, prospectiveWorld?: WorldBundle) {
+    const resolved = await this.source.compile(action, id, at, scope, prospectiveWorld);
     // These screens own one pending candidate set. Keep it until selection/discard, and
     // serialize quote admissions so two cards cannot buy outputs at the same filenames.
     for (const kind of new Set(resolved.inputs.map(input => input.target.kind))) {
@@ -128,14 +131,15 @@ export class GenerationQuotes {
     });
     return { fingerprint, inputs, body, materialization: resolved.materialization };
   }
-  async prepare(action: ModelWorldChatAction, id: string, at: string, scope?: GenerationQuoteScope): Promise<ArkeGenerationBody> {
-    const compiled = await this.compile(action, id, at, scope);
+  async prepare(action: ModelWorldChatAction, id: string, at: string, scope?: GenerationQuoteScope, prospectiveWorld?: WorldBundle): Promise<ArkeGenerationBody> {
+    if (scope?.sceneDependencies?.length) await this.store.ensureSchemaVersion(CHAT_SEQUENCING_SCHEMA_VERSION, "world-chat-sequencing");
+    const compiled = await this.compile(action, id, at, scope, prospectiveWorld);
     const existing = await this.read(id);
     if (existing) {
       if (existing.actionDigest !== conversationActionDigest(action) || existing.fingerprint !== compiled.fingerprint || existing.body.quoteDigest !== sealedDigest(existing)) throw new Error("Generation inputs changed. Prepare a fresh card.");
       return existing.body;
     }
-    const quote: Quote = { ...(scope ? { scope } : {}), action, actionDigest: conversationActionDigest(action), createdAt: at, fingerprint: compiled.fingerprint,
+    const quote: Quote = { ...(scope ? { scope: QuoteSchema.shape.scope.parse(scope) } : {}), action, actionDigest: conversationActionDigest(action), createdAt: at, fingerprint: compiled.fingerprint,
       body: compiled.body, inputs: compiled.inputs.map(input => ({ ...input, idempotencyKey: input.idempotencyKey ?? ulid() })), materialization: compiled.materialization, dispatchStarted: false, admissionComplete: false };
     quote.body.quoteDigest = sealedDigest(quote);
     await this.write(id, quote);

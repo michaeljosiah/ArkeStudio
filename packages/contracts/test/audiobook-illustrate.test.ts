@@ -82,8 +82,9 @@ describe("what the card says (191b)", () => {
 describe("the brief a picture is made from (R-99)", () => {
   it("is the prompt, then who is shown in which attached picture, then the book's look", () => {
     const brief = pictureBench("  Maren on   the stair. ", [{ name: "Maren", kind: "character", token: "Image 1" }, { name: "The stairwell", kind: "place", token: "Image 2" }], "Wet ink.");
-    assert.equal(brief, "Maren on the stair.\n\nMaren is shown in @Image 1. The setting is The stairwell, shown in @Image 2.\n\nThe look: Wet ink.");
-    assert.equal(pictureBench("Maren.", [], undefined), "Maren.");
+    assert.equal(brief, "Maren on the stair.\n\nMaren is shown in @Image 1. The setting is The stairwell, shown in @Image 2. Keep each person's identity, hair and clothes as in the references; the expression is as written above, not the reference's.\n\nLight and mood: Wet ink.\n\nNo text in the picture.");
+    assert.equal(pictureBench("A hand on a forearm.", [], undefined), "A hand on a forearm.\n\nNo text in the picture.", "nobody cited: no identity line");
+    assert.equal(pictureBench("The quarter.", [{ name: "The quarter", kind: "place", token: "Image 1" }], undefined), "The quarter.\n\nThe setting is The quarter, shown in @Image 1.\n\nNo text in the picture.", "a place alone: no identity line");
     assert.equal(referenceBriefLine([]), "");
   });
 });

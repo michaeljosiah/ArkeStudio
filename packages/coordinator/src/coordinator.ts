@@ -30,6 +30,8 @@ import { withModelValidation } from "./harness/model-validation.js";
 import { HarnessModelCatalog, selectHarnessModel, type LanguageModelSelection } from "./harness/model-catalog.js";
 import { prepareReferences, validateSeedanceReferences } from "./media/prepare-references.js";
 import { stageConstructionHandoff } from "./world-chat/actions.js";
+import { projectHumanDecisions } from "./world-chat/human-decisions.js";
+import { compactSettledStageReviews, discardStageReview, keepStageReview, keptStageReviewIds, listStageReviews, recoverRetainedStageReviews, retainStageReview } from "./productions/stage-review.js";
 import { handleProductionSetupCommand } from "./productions/setup-command.js";
 import { recoverProductionSetups } from "./productions/setup.js";
 import { saveProductionNarrative } from "./productions/narrative.js";
@@ -155,6 +157,7 @@ import {
   type ArtifactGeneration,
   type CharacterReferenceWorkflow,
   pictureLookFor,
+  ridingPicks,
   type PictureWho,
   pictureBench,
   priceLabel,
@@ -329,7 +332,8 @@ import {
 import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiobookBook } from "./productions/audiobook-book.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
 import { anyNarrator, audiobookListening, setAudiobookPicture } from "./productions/audiobook-listening.js";
-import { deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
+import { bookLookChoices, lookUsage } from "./productions/audiobook-look-book.js";
+import { chooseChapterLook, deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
 import { makeAdapterIllustrateDeriver, proposeIllustrations, type IllustrateDeriver } from "./productions/audiobook-illustrate.js";
 import { clipPrompt, depictable, makeAdapterPictureDeriver, pictureAspect, pictureRoom, pictureWho, promptRoom, suggestPicture, type PictureDeriver } from "./productions/audiobook-picture-suggest.js";
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
@@ -483,6 +487,7 @@ import {
   acceptCharacterSheet,
   acceptLocationView,
   attachCharacterLook,
+  attachCloseView,
   compileGrid,
   designate,
   landGrid,
@@ -867,6 +872,7 @@ export interface CoordinatorOptions {
    * steering pointer, and the reason is logged rather than silent.
    */
   boundaryFrameMaker?: BoundaryFrameMaker;
+  imageRenditionMaker?: import("./world-chat/image-rendition.js").ImageRenditionMaker;
   /**
    * The credential file's name inside the app root. Only dev overrides it, and only because its
    * cipher is not safeStorage: `ARKE_STUDIO_ROOT` can point the dev coordinator at a real app
@@ -1669,11 +1675,12 @@ export class Coordinator {
             continue;
           }
           const chosen = row.who.map((entry) => ({ key: entry.key, name: entry.name, ...(entry.sheet !== undefined ? { sheet: entry.sheet } : {}), kind: entry.kind, ...(room.people.find((person) => person.key === entry.key)?.billing !== undefined ? { billing: room.people.find((person) => person.key === entry.key)!.billing! } : {}) }));
-          const who = pictureWho(store, model, chosen);
+          // The chapter's look as it stands now: a look chosen since the proposal rides (R-119).
+          const who = pictureWho(store, model, chosen, { look: record?.look ?? null, frame: row.shot?.frame ?? null });
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${row.block === "title" ? "title" : row.title}`,
             prompt: row.prompt,
-            ...(room.art !== undefined ? { art: room.art } : {}),
+            ...(room.mood !== undefined ? { mood: room.mood } : {}),
             model,
             ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
             who,
@@ -1687,7 +1694,7 @@ export class Coordinator {
             continue;
           }
           progress.spentMicroUsd += made.costMicroUsd ?? made.estimatedMicroUsd;
-          const stamp = pictureLookFor(record?.look ?? null, who.filter((entry) => entry.kind === "character").map((entry) => entry.key));
+          const stamp = pictureLookFor(record?.look ?? null, who.filter((entry) => entry.kind === "character").map((entry) => entry.key), ridingPicks(who));
           const next = await setAudiobookPicture(store, productionId, chapter.file, row.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, stamp !== undefined ? { look: stamp } : {});
           progress.made.push(row.block);
           this.refreshIfStillOpen(store);
@@ -5381,7 +5388,7 @@ export class Coordinator {
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
       ...(settings ? { activitySeen: settings.activity } : {}),
       account: this.account.current(),
-      ...(settings ? { research: settings.research } : {}),
+      ...(settings ? { research: settings.research, imageInspection: settings.imageInspection } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
       // Without this the narrator was correct on disk and absent from every snapshot, so a
       // restart showed the shipped local voice while a cloud one was actually stored.
@@ -9434,6 +9441,21 @@ export class Coordinator {
         this.transport.broadcastSnapshot();
         return;
       }
+      case "set-image-inspection": {
+        if (!this.appSettings) return;
+        const settings = await this.appSettings.setImageInspection(msg.enabled, msg.provider);
+        this.readModel.seedAppConfig({ imageInspection: settings.imageInspection });
+        this.transport.broadcastSnapshot();
+        return;
+      }
+      case "set-world-image-inspection": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await store.commit({ kind: "world-image-inspection", source: "settings", files: [],
+          worldFields: { cloudImageInspection: msg.enabled }, raiseSchemaVersion: 52 });
+        this.refreshIfStillOpen(store);
+        return;
+      }
       case "set-local-sampling": {
         if (!this.appSettings) return;
         // The catalogue is the authority, as it is for every recipe value: a recipe that offers
@@ -9975,21 +9997,12 @@ export class Coordinator {
          * refusal and snapshot bookkeeping still named the old one.
          */
         if (!store || store.worldId !== msg.worldId) return;
-        await applySceneCommand(
-          store,
-          {
-            productionId: msg.productionId,
-            sceneFile: msg.sceneFile,
-            sceneId: msg.sceneId,
-            baseVersion: msg.baseVersion,
-            command: sceneCommandFrom(msg.command),
-          },
-          {
-            // Plan status is folded from the journal joined with live queue facts, so the probe
-            // comes from here rather than from the write path reaching for the dispatcher.
-            activePlans: (productionId) => this.activeScenePlans(store, productionId),
-          },
-        ).catch((err: unknown) => {
+        const input = {
+          productionId: msg.productionId, sceneFile: msg.sceneFile, sceneId: msg.sceneId,
+          baseVersion: msg.baseVersion, command: sceneCommandFrom(msg.command),
+        };
+        const deps = { activePlans: (productionId: string) => this.activeScenePlans(store, productionId) };
+        await (msg.stageReviewId ? keepStageReview(store, msg.stageReviewId, input, deps) : applySceneCommand(store, input, deps)).catch((err: unknown) => {
           // Said, never swallowed: the surfaces repaint from the snapshot, so a silent refusal
           // throws away the edit with nothing to show for it (the save-scene lesson).
           this.emit({
@@ -11071,10 +11084,24 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId) return;
         let approved = false;
         const emit = (event: Extract<DomainEvent,{type:"stage.construction"}>) => {
-          this.emit(event);
-          if (approved && (event.status === "ready" || event.status === "failed") && msg.conversationId && msg.actionId) {
-            this.trackBackground(this.conversationActionLifecycle(store).completeHostAction({ conversationId: msg.conversationId, actionId: msg.actionId, payload: { kind: "stage-constructor-result", shotId: msg.shotId, sceneId: msg.sceneId, status: event.status, detail: event.detail } }).then(() => this.refreshConversationOutcome(store, msg.conversationId!)));
-          }
+          if (!approved || !msg.conversationId || !msg.actionId || (event.status !== "ready" && event.status !== "failed")) { this.emit(event); return; }
+          const conversationId = msg.conversationId, actionId = msg.actionId;
+          this.trackBackground((async () => {
+            if (!this.stillOpen(store)) return;
+            let result = event;
+            if (event.status === "ready" && event.draft) {
+              try {
+                await retainStageReview(store, { id: msg.requestId, worldId: msg.worldId, productionId: msg.productionId,
+                  sceneId: msg.sceneId, shotId: msg.shotId, baseVersion: msg.baseVersion, conversationId, actionId,
+                  createdAt: event.at, draft: event.draft, status: "pending" });
+              } catch { result = { ...event, status: "failed", draft: undefined, detail: "The Stage draft could not be retained. Reopen the world and construct again before Keep." }; }
+            }
+            if (!this.stillOpen(store)) return;
+            this.emit(result);
+            await this.conversationActionLifecycle(store).completeHostAction({ conversationId, actionId,
+              payload: { kind: "stage-constructor-result", shotId: msg.shotId, sceneId: msg.sceneId, status: result.status, detail: result.detail } });
+            await this.refreshConversationOutcome(store, conversationId);
+          })());
         };
         const fail = (detail: string) => emit({ type: "stage.construction", at: store.now(), worldId: msg.worldId, requestId: msg.requestId, sceneId: msg.sceneId, shotId: msg.shotId, baseVersion: msg.baseVersion, status: "failed", round: 0, detail });
         if (msg.actionId || msg.conversationId) {
@@ -11089,7 +11116,11 @@ export class Coordinator {
         // Claimed before the model decision, which may wait on discovery: a Stop in that wait
         // has to find the request, or the build starts after it.
         let claimed: AbortSignal;
-        try { claimed = this.stageConstructor.begin(msg); } catch (error) { fail(describeCoordinatorError(error)); return; }
+        try { claimed = this.stageConstructor.begin(msg); } catch (error) {
+          // Another renderer can show the same handoff. Its refusal must not fail the first
+          // renderer's live authority, which is still constructing the reviewed draft.
+          approved = false; fail(describeCoordinatorError(error)); return;
+        }
         const selected = await this.languageModelFor({ kind: "production", productionId: msg.productionId }, undefined, "stage-designer", claimed);
         const configured = selected.sessionModel;
         if (selected.reason || !configured) {
@@ -11102,6 +11133,14 @@ export class Coordinator {
           scratchRoot: this.opts.appRoot ? join(this.opts.appRoot, ".stage") : `${this.opts.changeLogPath}.stage`,
           emit, current: () => this.opts.provider.openStore?.() === store,
         }).catch(error => fail(describeCoordinatorError(error))));
+        return;
+      }
+      case "stage-review-discard": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await discardStageReview(store, msg.reviewId).catch(error => this.emit({ at: store.now(), type: "command.failed",
+          command: msg.kind, requestId: msg.reviewId, reason: describeCoordinatorError(error) }));
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "stage-playblast": {
@@ -15139,11 +15178,11 @@ export class Coordinator {
           const who = pictureWho(store, model, [
             ...characters.map((person) => ({ key: person.key, name: person.name, ...(person.sheet !== undefined ? { sheet: person.sheet } : {}), kind: "character" as const, ...(person.billing !== undefined ? { billing: person.billing } : {}) })),
             ...(place === undefined ? [] : [{ key: place.key, name: place.name, sheet: place.key, kind: "place" as const }]),
-          ]);
+          ], { look, frame: msg.frame ?? null });
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${msg.block === "title" ? "title" : `block ${index + 1}`}`,
             prompt: clipPrompt(msg.prompt, promptRoom(model)),
-            ...(room.art !== undefined ? { art: room.art } : {}),
+            ...(room.mood !== undefined ? { mood: room.mood } : {}),
             model,
             ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
             who,
@@ -15152,7 +15191,7 @@ export class Coordinator {
             signal: control.signal,
           });
           if (!made.ok) return fail(made.reason, made.sessionId);
-          const stamp = pictureLookFor(look, characters.map((person) => person.key));
+          const stamp = pictureLookFor(look, characters.map((person) => person.key), ridingPicks(who));
           const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, stamp !== undefined ? { look: stamp } : {});
           this.refreshIfStillOpen(store);
           // The record the picture now stands in goes to every window as any record write does: the margin's chip and the panel read it from there, and the card's own word is only that it is done.
@@ -15276,6 +15315,34 @@ export class Coordinator {
         const at = () => new Date().toISOString();
         try {
           const record = await setChapterLook(store, msg.productionId, chapter.id, msg.target, msg.text);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: at(), type: "audiobook.record", ...ids, record });
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.look-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "read-audiobook-looks": {
+        // Which chapters chose each kit look (turn 193, R-114): read from the records, answered
+        // to the window that asked, nothing changed.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const usage = lookUsage(await bookLookChoices(store, msg.productionId));
+        this.emit({ at: new Date().toISOString(), type: "audiobook.looks", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, usage });
+        return;
+      }
+      case "choose-audiobook-look": {
+        // A kit look chosen for a character in this chapter (turn 193, R-112): by pointer on the
+        // chapter's record, the look left unattached. Answered as the record, or in one clause.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
+        const at = () => new Date().toISOString();
+        try {
+          const record = await chooseChapterLook(store, msg.productionId, chapter.id, { key: msg.key, ...(msg.name !== undefined ? { name: msg.name } : {}), ...(msg.sheet !== undefined ? { sheet: msg.sheet } : {}) }, msg.lookId);
           this.refreshIfStillOpen(store);
           this.emit({ at: at(), type: "audiobook.record", ...ids, record });
         } catch (err) {
@@ -15513,7 +15580,7 @@ export class Coordinator {
       case "resolve-extraction": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
-        if (!gate || !store) return;
+        if (!gate || !store || store.worldId !== msg.worldId) return;
         const artifact = store.getBundle().artifacts.find((a) => a.id === msg.artifactId);
         if (!artifact) return;
         await resolveCandidate(store, gate, artifact, msg.candidateHash, msg.decision).catch((err) => {
@@ -15521,6 +15588,8 @@ export class Coordinator {
             kind: "extraction.resolve-failed",
             message: err instanceof Error ? err.message : String(err),
           });
+          this.emit({ at: store.now(), type: "command.failed", command: msg.kind, requestId: msg.artifactId,
+            reason: "This extracted fact could not be decided. Review its current source and try again." });
         });
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -18050,14 +18119,15 @@ export class Coordinator {
             if (msg.kind === "prepare-character-voice-sample" && !this.opts.audioMediaTools) throw new Error("Audio preparation needs the configured FFmpeg and ffprobe tools.");
             const review = msg.kind === "resume-character-voice-sample" ? await resumeCharacterSample(store, msg.sheetId, msg.operationId) : await prepareCharacterSample(store, this.opts.audioMediaTools!, msg);
             this.emit({ at: new Date().toISOString(), type: "voice.sample-result", requestId: msg.requestId,
-              worldId: msg.worldId, sheetId: msg.sheetId, status: "prepared", review });
+              worldId: msg.worldId, sheetId: msg.sheetId, operationId: review.operationId, status: "prepared", review });
+            await this.refreshSelectedHumanDecisions(store);
           } else {
             if (msg.kind === "accept-character-voice-sample") await acceptCharacterSample(store, msg);
             else if (msg.kind === "clear-character-voice-sample") await clearCharacterSample(store, msg.sheetId, msg.expectedHash);
             else await withdrawCharacterSample(store, msg.sheetId, msg.expectedHash);
             await this.refreshWorldSnapshot(msg.worldId);
             this.emit({ at: new Date().toISOString(), type: "voice.sample-result", requestId: msg.requestId,
-              worldId: msg.worldId, sheetId: msg.sheetId, status: msg.kind === "accept-character-voice-sample" ? "assigned" :
+              worldId: msg.worldId, sheetId: msg.sheetId, ...(msg.kind === "accept-character-voice-sample" ? { operationId: msg.operationId } : {}), status: msg.kind === "accept-character-voice-sample" ? "assigned" :
                 msg.kind === "clear-character-voice-sample" ? "cleared" : "withdrawn" });
           }
         } catch {
@@ -18188,6 +18258,19 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "An accepted main photo and image model are required.");
           return;
         }
+        // The image a close view is made from (design turn 193, R-118): a candidate take still
+        // pending, or a look already in the kit — world-relative, so it rides as a reference.
+        let closeOf: { file: string; takeId?: string; lookId?: string } | undefined;
+        if (msg.framing === "close") {
+          const fromTake = msg.closeOf?.takeId === undefined ? undefined : pendingReferenceTake(bundle.referenceTakes, bundle.referenceReviews, msg.closeOf.takeId, msg.sheetId, "look");
+          const fromLook = msg.closeOf?.lookId === undefined ? undefined : kit.looks?.find((candidate) => candidate.id === msg.closeOf?.lookId);
+          if (fromTake?.media !== undefined) closeOf = { file: `references/${msg.sheetId}/takes/${fromTake.id}/${fromTake.media}`, takeId: fromTake.id };
+          else if (fromLook !== undefined) closeOf = { file: `references/${msg.sheetId}/${fromLook.file}`, lookId: fromLook.id };
+          if (closeOf === undefined) {
+            this.rejectEnqueue(msg.requestId, msg.kind, "The look to make a close view of is gone. Nothing was queued.");
+            return;
+          }
+        }
         let requests;
         try {
           const stagedLook = stagedWorldImage(bundle, stagedReferenceKey("look", msg.sheetId));
@@ -18199,6 +18282,8 @@ export class Coordinator {
             count: msg.count,
             generationKey: Date.now().toString(36),
             ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
+            ...(msg.framing !== undefined ? { framing: msg.framing, batch: msg.requestId } : {}),
+            ...(closeOf !== undefined ? { closeOf } : {}),
           });
         } catch (error) {
           this.rejectEnqueue(
@@ -18249,6 +18334,17 @@ export class Coordinator {
         )
           return;
         const review = referenceReviewDecision(store.now(), take, "accept");
+        // A close view made for a look (design turn 193, R-118): either the second picture of the
+        // look being accepted, or — with `closeFor` — the close view of a look already in the kit.
+        const closeTake = msg.closeTakeId === undefined ? null : pendingReferenceTake(bundle.referenceTakes, bundle.referenceReviews, msg.closeTakeId, msg.sheetId, "look");
+        const close = closeTake?.media !== undefined && basename(closeTake.media) === closeTake.media && (await stat(toExtendedLength(join(store.dir, `references/${msg.sheetId}/takes/${closeTake.id}/${closeTake.media}`))).catch(() => null)) !== null ? { file: `takes/${closeTake.id}/${closeTake.media}`, takeId: closeTake.id } : undefined;
+        if (msg.closeFor !== undefined) {
+          await attachCloseView(store, msg.sheetId, msg.closeFor, { file: `takes/${take.id}/${take.media}`, takeId: take.id }, review).catch(() => {});
+          await this.refreshWorldSnapshot(msg.worldId);
+          return;
+        }
+        const forChapter = (take.params["lookFraming"] ?? producingJob?.params["lookFraming"]) === "full-body";
+        const mainFile = take.params["lookMain"] ?? producingJob?.params["lookMain"];
         await acceptCharacterLook(store, msg.sheetId, {
           id: take.id,
           file: `takes/${take.id}/${take.media}`,
@@ -18258,7 +18354,26 @@ export class Coordinator {
           takeId: take.id,
           artDirectionVersion: take.provenance.artDirectionVersion ?? store.getBundle().artDirection.version,
           review,
+          ...(forChapter ? { framing: "full-body" as const } : {}),
+          ...(forChapter && typeof mainFile === "string" ? { mainFile } : {}),
+          ...(forChapter && close !== undefined ? { close } : {}),
         }).catch(() => {});
+        if (forChapter && close !== undefined && closeTake !== null) await recordReferenceReview(store, closeTake, "accept").catch(() => {});
+        // The chapter that asked for the look chooses it for the character in the same press
+        // (R-112): by pointer, nothing attached, answered as the record like any choice.
+        if (msg.choose !== undefined) {
+          const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.choose!.productionId)?.chapters.find((c) => c.file === msg.choose!.chapterFile || c.id === msg.choose!.chapterFile);
+          if (chapter !== undefined) {
+            const ids = { worldId: msg.worldId, productionId: msg.choose.productionId, chapterId: chapter.id };
+            try {
+              const record = await chooseChapterLook(store, msg.choose.productionId, chapter.id, { key: msg.choose.key, ...(msg.choose.name !== undefined ? { name: msg.choose.name } : {}), ...(msg.choose.sheet !== undefined ? { sheet: msg.choose.sheet } : { sheet: msg.sheetId }) }, take.id);
+              this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record });
+            } catch (err) {
+              void this.appLog?.append({ kind: "audiobook.look-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+              this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
+            }
+          }
+        }
         // Accepting settles the ask this reference was staged for (design 67). A rejection does
         // not: the usual answer to one is to run it again, and running it again with the
         // picture you had just chosen is the point of having staged it.
@@ -18918,6 +19033,7 @@ export class Coordinator {
       productionId,
       states,
     });
+    await this.refreshSelectedHumanDecisions(store);
   }
 
   /** A settled plan job unblocks its dependents (SPEC-024 R-18): refresh, advance, push state. */
@@ -18990,7 +19106,7 @@ export class Coordinator {
    */
   private async makeBenchPicture(
     store: WorldStore,
-    input: { title: string; prompt: string; art?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal },
+    input: { title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal },
   ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null; estimatedMicroUsd: number } | { ok: false; reason: string; sessionId?: SessionId }> {
     const worldId = store.worldId;
     const params = { kind: "image" as const, count: 1, ...(input.aspect !== undefined ? { aspect: input.aspect } : {}) };
@@ -19018,7 +19134,7 @@ export class Coordinator {
       if (outcome.outcome === "refused") void this.appLog?.append({ kind: "bench.reference-refused", worldId, reason: outcome.reason });
       else cited.push({ name: entry.name, kind: entry.kind, token: outcome.token });
     }
-    const brief = pictureBench(input.prompt, cited, input.art);
+    const brief = pictureBench(input.prompt, cited, input.mood);
     const composed = await this.benchFor(worldId, sessionId);
     if (composed === null) return fail("the Bench session is gone");
     await composed.store.append({ type: "composer-set", mode: "image", provider: input.model.provider, model: input.model.id, params, brief }, { at: this.nowIso(), requestId: `pic-brief:${input.requestId}` });
@@ -20287,6 +20403,15 @@ export class Coordinator {
         const settings = this.appSettings ? await this.appSettings.load().catch(() => null) : null;
         return settings?.research.web === true;
       },
+      ...(this.opts.imageRenditionMaker ? { imageRenditionMaker: this.opts.imageRenditionMaker } : {}),
+      imageInspectionAllowed: async provider => {
+        const settings = this.appSettings ? await this.appSettings.load().catch(() => null) : null;
+        return settings?.imageInspection.cloud === true && settings.imageInspection.providers[provider] !== false;
+      },
+      publishImageDisclosure: async id => {
+        if (this.stillOpen(store) && this.getState().worldChat?.conversationId === id) await this.openWorldChat(store, id);
+        if (this.stillOpen(store)) this.transport.broadcastSnapshot();
+      },
       resolveLanguageModel: (input) => this.languageModelFor(input.entryContext, input.modelId, "world-builder", input.signal),
       onTurnFailed: ({ conversationId, runId, cause }) => {
         void this.appLog?.append({ level: "warn", event: "world-chat.turn-failed", conversationId, runId, cause });
@@ -20309,7 +20434,12 @@ export class Coordinator {
    * none of them would otherwise be noticed.
    */
   private async refreshConversations(store: WorldStore): Promise<void> {
-    const { summaries, activeActions } = await store.ownedWrite(() => discoverConversations(store.dir));
+    await compactSettledStageReviews(store);
+    let discovery = await store.ownedWrite(() => discoverConversations(store.dir));
+    if (await recoverRetainedStageReviews(store, discovery.activeActions, this.conversationActionLifecycle(store))) {
+      discovery = await store.ownedWrite(() => discoverConversations(store.dir));
+    }
+    const { summaries, activeActions } = discovery;
     if (!this.stillOpen(store)) return;
     this.readModel.setConversations(summaries);
     const constructions = await Promise.all(activeActions.filter(action => action.actionKind === "world-chat-production-stage-construct" && action.status === "awaiting-host").map(async action => {
@@ -20326,6 +20456,7 @@ export class Coordinator {
         action.baseObservations.find((observation) => observation.requirement === "scenes" && observation.target.startsWith(prefix))?.target.slice(prefix.length);
       return shotId && sceneId ? [{ worldId: action.worldId, conversationId: action.conversationId, actionId: action.actionId, productionId: action.productionId, sceneId, shotId }] : [];
     }));
+    await this.refreshStageReviews(store);
   }
 
   private async refreshConversationOutcome(store: WorldStore, conversationId: ConversationId): Promise<void> {
@@ -20406,7 +20537,10 @@ export class Coordinator {
     onlyIfStillSelected?: ConversationId,
   ): Promise<void> {
     const service = new WorldChatService(store.dir);
-    const loaded = await store.ownedWrite(() => service.load(conversationId));
+    let loaded = await store.ownedWrite(() => service.load(conversationId));
+    if (loaded && this.stillOpen(store) && await recoverRetainedStageReviews(store, loaded.actions, this.conversationActionLifecycle(store))) {
+      loaded = await store.ownedWrite(() => service.load(conversationId));
+    }
     if (
       !this.stillOpen(store) ||
       (onlyIfStillSelected !== undefined && this.readModel.getState().worldChat?.conversationId !== onlyIfStillSelected)
@@ -20418,8 +20552,12 @@ export class Coordinator {
     }
     const bundle = store.getBundle();
     const sheets = new Map(bundle.sheets.map((s) => [s.id, s]));
+    const human = await projectHumanDecisions(store, loaded, bundle, this.jobQueue?.listJobs() ?? this.getState().app.jobs);
+    if (!this.stillOpen(store) || (onlyIfStillSelected !== undefined && this.getState().worldChat?.conversationId !== onlyIfStillSelected)) return;
+    this.readModel.setStageReviews(human.stageReviews);
     this.readModel.setWorldChat(
       projectWorkspace(loaded, new Map(), {
+        humanDecisions: human.cards, humanDecisionProblems: human.problems,
         sheetName: (slug) => sheets.get(slug)?.name ?? null,
         sheetVersion: (slug) => sheets.get(slug)?.version ?? null,
         // Asked of the runner, which is the only thing that knows a turn is happening now rather
@@ -20593,7 +20731,29 @@ export class Coordinator {
         reason: "The world display could not refresh. Reopen the world to see its current state." });
       return;
     }
+    const store = this.opts.provider.openStore?.();
+    if (store?.worldId === worldId) {
+      await this.refreshStageReviews(store);
+      await this.refreshSelectedHumanDecisions(store);
+    }
     this.transport.broadcastSnapshot();
+  }
+
+  private async refreshStageReviews(store: WorldStore): Promise<void> {
+    try {
+      const reviews = await listStageReviews(store), kept = reviews.length ? await keptStageReviewIds(store) : new Set<string>();
+      const pending = reviews.filter(review => review.status === "pending" && !kept.has(review.id));
+      if (this.stillOpen(store)) this.readModel.setStageReviews(pending);
+    } catch {
+      if (this.stillOpen(store)) this.readModel.setStageReviews([]);
+      this.emit({ at: store.now(), type: "command.failed", command: "stage-review-read", requestId: null,
+        reason: "Stage review drafts could not be read. Reopen the world before Keep." });
+    }
+  }
+
+  private async refreshSelectedHumanDecisions(store: WorldStore): Promise<void> {
+    const id = this.getState().worldChat?.conversationId;
+    if (id && this.stillOpen(store)) await this.openWorldChat(store, id, id);
   }
 
   private async seed(): Promise<void> {

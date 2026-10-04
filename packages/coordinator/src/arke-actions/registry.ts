@@ -116,6 +116,7 @@ type SupportedMetadata = Omit<ArkeSupportedClientCommand<ClientMessageKind>, "ki
 type ExcludedMetadata = {
   readonly classification: Exclude<ArkeCommandClassification, "supported-by-arke">;
   readonly reason: string;
+  readonly inThreadCard?: "plan" | "stage" | "voice-sample" | "proposal" | "editor-request" | "extraction";
 };
 type CommandMetadata = SupportedMetadata | ExcludedMetadata;
 
@@ -149,9 +150,10 @@ function action(
 }
 
 const readOnly = (reason: string): ExcludedMetadata => ({ classification: "read-only", reason });
-const humanOnly = (reason: string): ExcludedMetadata => ({
+const humanOnly = (reason: string, inThreadCard?: ExcludedMetadata["inThreadCard"]): ExcludedMetadata => ({
   classification: "human-only-control-plane",
   reason,
+  ...(inThreadCard ? { inThreadCard } : {}),
 });
 const globalOnly = (reason: string): ExcludedMetadata => ({
   classification: "out-of-scope-global",
@@ -221,12 +223,12 @@ const CLIENT_COMMAND_METADATA = {
   "restore-sheet-version": action("world", "authored-diff", "world-store", "authored-change", ["sheets"], { preparation: SHEET_TARGET, execution: SHEET_TARGET }),
   "stage-art-direction-change": action("world", "authored-diff", "proposal-manager", "authored-change", ["art-direction"]),
   "set-art-direction": action("world", "authored-diff", "proposal-manager", "authored-change", ["art-direction"]),
-  "proposal-accept": humanOnly(HUMAN_DECISION),
-  "proposal-discard": humanOnly(HUMAN_DECISION),
-  "proposal-rebase": humanOnly(HUMAN_DECISION),
-  "proposal-resolve-conflict": humanOnly(HUMAN_DECISION),
-  "proposal-mark-seen": humanOnly(HUMAN_DECISION),
-  "proposal-resolve-choice": humanOnly(HUMAN_DECISION),
+  "proposal-accept": humanOnly(HUMAN_DECISION, "proposal"),
+  "proposal-discard": humanOnly(HUMAN_DECISION, "proposal"),
+  "proposal-rebase": humanOnly(HUMAN_DECISION, "proposal"),
+  "proposal-resolve-conflict": humanOnly(HUMAN_DECISION, "proposal"),
+  "proposal-mark-seen": humanOnly(HUMAN_DECISION, "proposal"),
+  "proposal-resolve-choice": humanOnly(HUMAN_DECISION, "proposal"),
   "proposal-update-field": humanOnly(HUMAN_DECISION),
   "proposal-update-passage": humanOnly(HUMAN_DECISION),
   "world-chat-open": readOnly("Selects a conversation projection; it does not mutate creative state."),
@@ -240,7 +242,7 @@ const CLIENT_COMMAND_METADATA = {
   "world-chat-reject-point": humanOnly(HUMAN_DECISION),
   "world-chat-open-media": humanOnly(HUMAN_DECISION),
   "world-chat-retry-turn": humanOnly(HUMAN_DECISION),
-  "proposal-send-back": humanOnly(HUMAN_DECISION),
+  "proposal-send-back": humanOnly(HUMAN_DECISION, "proposal"),
   "world-chat-cancel": humanOnly(HUMAN_DECISION),
   "world-chat-create": humanOnly("Conversation creation is a human control; Arke cannot recursively create a conversation."),
   "world-chat-delete": humanOnly(HUMAN_DECISION),
@@ -323,6 +325,8 @@ const CLIENT_COMMAND_METADATA = {
   "set-routing-default": globalOnly(GLOBAL_OPERATION),
   "set-model-enabled": globalOnly(GLOBAL_OPERATION),
   "set-research-web": globalOnly(GLOBAL_OPERATION),
+  "set-image-inspection": humanOnly("Cloud image disclosure policy belongs to the person."),
+  "set-world-image-inspection": humanOnly("World image disclosure policy belongs to the person."),
   "set-local-sampling": globalOnly(GLOBAL_OPERATION),
   "set-agent-config": globalOnly(GLOBAL_OPERATION),
   "list-harness-models": readOnly(QUERY),
@@ -414,7 +418,7 @@ const CLIENT_COMMAND_METADATA = {
   "create-scene": action("production", "command", "scene-store", "authored-change", ["production-metadata", "episodes", "scenes"]),
   "restore-scene": action("production", "authored-diff", "scene-store", "authored-change", ["scenes"]),
   "delete-scene": action("production", "destructive", "scene-store", "destructive-change", ["scenes", "episodes", "takes", "routing"]),
-  "scene-command": action("production", "command", "scene-store", "authored-change", ["scenes", "shots", "stage", "boards"]),
+  "scene-command": { ...action("production", "command", "scene-store", "authored-change", ["scenes", "shots", "stage", "boards"]), inThreadCard: "stage" },
   "create-chapter": action("production", "command", "chapter-store", "authored-change", ["chapters"]),
   "save-chapter": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   // The chapter workspace's own commands (turn 126): a read, and an undo shaped like the bible's.
@@ -439,8 +443,8 @@ const CLIENT_COMMAND_METADATA = {
   "frame-run-list": readOnly(QUERY),
   "frame-run-dismiss": humanOnly("Dismissing a run from the person's workspace is a human interface control."),
   "dispatch-scene-planned": action("production", "generation", "dispatch-plan", "spend-and-compute", ["scenes", "shots", "references", "plans", "jobs"]),
-  "plan-continue": humanOnly("Continuing a review-gated plan is an explicit human authorization."),
-  "plan-reconfirm": humanOnly("Reconfirming changed spend is an explicit human authorization."),
+  "plan-continue": humanOnly("Continuing a review-gated plan is an explicit human authorization.", "plan"),
+  "plan-reconfirm": humanOnly("Reconfirming changed spend is an explicit human authorization.", "plan"),
   "plan-cancel": action("production", "command", "dispatch-plan", "external-network-action", ["plans", "jobs"]),
   "list-plans": readOnly(QUERY),
   "save-routing": action("production", "command", "routing", "authored-change", ["routing", "scenes"], {
@@ -459,16 +463,17 @@ const CLIENT_COMMAND_METADATA = {
   "accept-take": action("production", "take-review", "take-review", "authored-change", ["takes", "shots", "scenes"]),
   "import-shot-frame": action("production", "host-action", "host", "host-file-access", ["shots", "takes"]),
   "clear-shot-frame": action("production", "command", "take-review", "authored-change", ["shots", "takes"]),
-  "stage-construct": humanOnly("Construction starts from the Stage review surface."),
-  "stage-inspection": humanOnly("Only the renderer supplies construction inspection frames."),
-  "stage-construct-cancel": humanOnly("The person can stop Stage construction."),
+  "stage-construct": humanOnly("Construction starts from the Stage review surface.", "stage"),
+  "stage-inspection": humanOnly("Only the renderer supplies construction inspection frames.", "stage"),
+  "stage-construct-cancel": humanOnly("The person can stop Stage construction.", "stage"),
+  "stage-review-discard": humanOnly("Only the person can discard a constructed Stage draft.", "stage"),
   "stage-playblast": action("production", "host-action", "scene-store", "host-file-access", ["scenes", "shots", "stage"], { preparation: ARTIFACT_SOURCE }),
-  "conversation-action-stage-playblast-complete": humanOnly("Only the renderer may complete an approved Stage recording handoff."),
+  "conversation-action-stage-playblast-complete": humanOnly("Only the renderer may complete an approved Stage recording handoff.", "stage"),
   "reject-take": action("production", "take-review", "take-review", "authored-change", ["takes", "shots", "sheets"]),
   "set-trim": action("production", "command", "take-review", "authored-change", ["takes", "shots"]),
   "timeline-move-picture": action("production", "command", "timeline", "authored-change", ["timeline", "shots"], { reads: COMPLETE_TIMELINE_READ }),
   "timeline-command": action("production", "command", "timeline", "authored-change", ["timeline", "shots", "takes", "artifacts", "subtitles", "audio"], { reads: COMPLETE_TIMELINE_READ }),
-  "editor-request-decide": humanOnly("Only the person may accept or reject an existing Arke editor request."),
+  "editor-request-decide": humanOnly("Only the person may accept or reject an existing Arke editor request.", "editor-request"),
   "timeline-history": action("production", "command", "timeline", "authored-change", ["timeline"], { reads: COMPLETE_TIMELINE_READ }),
   "save-audio-tracks": action("production", "command", "audio-cut", "authored-change", ["audio", "timeline"], {
     preparation: blocked(["typed-audio-command"], "Audio tracks are still submitted as unknown cut JSON; semantic audio commands are required."),
@@ -556,6 +561,9 @@ const CLIENT_COMMAND_METADATA = {
   // The chapter's look (turn 191c): read by the writing service (no picture provider, nothing spent), then the author's lines.
   "derive-audiobook-look": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "set-audiobook-look": action("production", "command", "voice", "authored-change", ["chapters"]),
+  // A kit look chosen for a character in a chapter (turn 193): a pointer on the chapter's record; the look is the kit's and stays unattached.
+  "choose-audiobook-look": action("production", "command", "voice", "authored-change", ["chapters"]),
+  "read-audiobook-looks": readOnly(QUERY),
   // A picture suggested for a block (turn 191a): read by the writing service, nothing spent; made through the Bench on the price shown.
   "suggest-audiobook-picture": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets", "references"]),
   // Illustrate this chapter (turn 191b): read by the writing service and held; accepted, it makes the pictures one at a time on the one confirmed total.
@@ -586,7 +594,7 @@ const CLIENT_COMMAND_METADATA = {
   "import-manuscript": action("production", "host-action", "artifact-store", "host-file-access", ["chapters"]),
   "reread-manuscript": action("production", "command", "artifact-store", "host-file-access", ["chapters"]),
   "cancel-manuscript": action("production", "command", "artifact-store", "host-file-access", ["chapters"]),
-  "resolve-extraction": action("world", "take-review", "proposal-manager", "authored-change", ["artifacts", "canon", "sheets"]),
+  "resolve-extraction": humanOnly("Only the person can resolve extracted facts and their open choices.", "extraction"),
   "check-updates": readOnly(QUERY),
   "download-update": globalOnly(GLOBAL_OPERATION),
   "install-update-and-restart": globalOnly(GLOBAL_OPERATION),
@@ -641,9 +649,9 @@ const CLIENT_COMMAND_METADATA = {
   "review-performance": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
   "purge-performance": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
   "keep-performance-recording": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
-  "resume-character-voice-sample": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
+  "resume-character-voice-sample": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions.", "voice-sample"),
   "prepare-character-voice-sample": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
-  "accept-character-voice-sample": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
+  "accept-character-voice-sample": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions.", "voice-sample"),
   "clear-character-voice-sample": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
   "withdraw-character-voice-sample": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
   "generate-character-voice-sample": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
@@ -761,7 +769,6 @@ const COMMAND_MODEL_PATHS = {
   "import-folder": ["artifact-import"],
   "extract-artifact": ["artifact-extraction"],
   "stop-extraction": ["artifact-extraction-stop"],
-  "resolve-extraction": ["artifact-extraction-review"],
   "bench-dispatch": ["bench-generation"],
   "bench-rerun": ["bench-generation"],
   "bench-keep": ["bench-keep"],
@@ -794,7 +801,7 @@ function conversationCommandSchema(kind: ClientMessageKind, schema: z.ZodDiscrim
   // live-source audio, and ordinary imports do not place media or choose borrowed paths.
   switch (kind) {
     case "timeline-command": return schema.extend({ commands: ModelEditorRequestSchema.shape.commands });
-    case "scene-command": return schema.extend({ command: ChatSceneCommandSchema });
+    case "scene-command": return schema.omit({ stageReviewId: true }).extend({ command: ChatSceneCommandSchema });
     case "stage-art-direction-change":
     case "set-art-direction": return schema.extend({ masterLook: z.null().optional() });
     case "open-thread": return schema.extend({ candidates: z.array(CanonIdSchema).max(10).default([]) });
@@ -927,7 +934,10 @@ const WORLD_CHAT_ACTION_REGISTRY = {
   "world-chat-artifact-extraction-review": {
     kind: "world-chat-artifact-extraction-review",
     schema: WorldChatArtifactExtractionReviewActionSchema,
-    ...action("world", "take-review", "extraction", "authored-change", ["artifacts", "canon", "sheets"]),
+    ...action("world", "take-review", "extraction", "authored-change", ["artifacts", "canon", "sheets"], {
+      preparation: blocked(["no-model-action"], "Extraction choices belong to the person's in-thread review card."),
+      execution: blocked(["no-model-action"], "Extraction choices belong to the person's in-thread review card."),
+    }),
   },
   "world-chat-artifact-reference": {
     kind: "world-chat-artifact-reference",

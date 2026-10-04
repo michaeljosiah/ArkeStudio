@@ -9,6 +9,7 @@ import {
   JobIdSchema,
   PassIdSchema,
   SceneIdSchema,
+  Sha256Schema,
   ShotIdSchema,
   SlugSchema,
   TakeIdSchema,
@@ -36,6 +37,7 @@ export const TakeKindSchema = z.enum([
   "prop-state",
 ]);
 export type TakeKind = z.infer<typeof TakeKindSchema>;
+export const TAKE_MEDIA_IDENTITY_SCHEMA_VERSION = 54;
 
 /**
  * Where an actual cost figure came from (SPEC-008): the provider said so, the manifest priced
@@ -156,6 +158,8 @@ export const TakeSchema = z
     completedAt: IsoDateTimeSchema.optional(),
     /** Media filename within the take directory, e.g. "clip.mp4". */
     media: z.string().optional(),
+    /** Captured from landed bytes before take.json becomes immutable; never inferred later. */
+    mediaHash: Sha256Schema.optional(),
     /** Durable provider sheet retained for review/context, never a shot-selectable frame. */
     boardSheetParent: z.literal(true).optional(),
     /**

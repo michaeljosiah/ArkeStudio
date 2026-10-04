@@ -1,7 +1,30 @@
-import { lstat, open, realpath } from "node:fs/promises";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { lstat, mkdtemp, open, realpath, rm } from "node:fs/promises";
+import { extname, isAbsolute, join, relative, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import { imageFormatOf, mp4Problem } from "../queue/verify.js";
 import { toExtendedLength } from "./paths.js";
+import type { FileHandle } from "node:fs/promises";
+import type { Stats } from "node:fs";
+
+/** A growing file cannot turn a bounded image/video read into an unbounded allocation. */
+async function readStableBytes(handle: FileHandle, before: Stats, signal?: AbortSignal): Promise<Uint8Array> {
+  signal?.throwIfAborted();
+  const bytes = new Uint8Array(before.size);
+  let offset = 0;
+  while (offset < bytes.length) {
+    signal?.throwIfAborted();
+    const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+    if (!bytesRead) throw new WorldReferenceError("reference changed during preparation");
+    offset += bytesRead;
+  }
+  const after = await handle.stat();
+  signal?.throwIfAborted();
+  if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) {
+    throw new WorldReferenceError("reference changed during preparation");
+  }
+  return bytes;
+}
 
 const MAX_REFERENCES = 16;
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024 - 1;
@@ -38,6 +61,80 @@ export class WorldReferenceError extends Error {
     super(message);
     this.name = "WorldReferenceError";
   }
+}
+
+/** Inspection codecs accept more formats than generation references, but share containment,
+ * stable handles and bounded allocation. The caller must first authorize the catalogue id. */
+export async function readContainedMediaBytes(worldDir: string, portable: string, signal?: AbortSignal): Promise<Uint8Array> {
+  signal?.throwIfAborted();
+  const root = await realpath(toExtendedLength(worldDir));
+  const { resolved, validatedFile } = await walkContained(root, portable, "media reference");
+  const handle = await open(toExtendedLength(resolved), "r");
+  try {
+    const before = await handle.stat();
+    if (!before.isFile() || !validatedFile || before.dev !== validatedFile.dev || before.ino !== validatedFile.ino ||
+      before.size <= 0 || before.size > MAX_IMAGE_BYTES) throw new WorldReferenceError("media reference changed or exceeds its byte limit");
+    return await readStableBytes(handle, before, signal);
+  } finally { await handle.close(); }
+}
+
+const PRODUCTION_MEDIA_SCRATCH_BYTES = 4 * 1024 ** 3;
+/** Stream a known take through a stable descriptor, with a separate video scratch/time budget.
+ * Hashes come from arrival, never from the current file being retrospectively called original. */
+async function verifyProductionMedia(worldDir: string, portable: string, expected: string, signal?: AbortSignal, output?: FileHandle) {
+  signal?.throwIfAborted();
+  const root = await realpath(toExtendedLength(worldDir));
+  const { resolved, validatedFile } = await walkContained(root, portable, "production media");
+  const handle = await open(toExtendedLength(resolved), "r"), deadline = Date.now() + 8_000;
+  try {
+    const before = await handle.stat();
+    if (!before.isFile() || !validatedFile || before.dev !== validatedFile.dev || before.ino !== validatedFile.ino ||
+      before.size <= 0 || before.size > PRODUCTION_MEDIA_SCRATCH_BYTES) throw new WorldReferenceError("production media exceeds its 4 GiB scratch budget or changed");
+    const chunk = Buffer.alloc(256 * 1024), digest = createHash("sha256");
+    let offset = 0;
+    while (offset < before.size) {
+      signal?.throwIfAborted();
+      if (Date.now() > deadline) throw new WorldReferenceError("production media verification exceeded its time budget");
+      const { bytesRead } = await handle.read(chunk, 0, Math.min(chunk.length, before.size - offset), offset);
+      if (!bytesRead) throw new WorldReferenceError("production media changed during preparation");
+      digest.update(chunk.subarray(0, bytesRead));
+      if (output) {
+        let written = 0;
+        while (written < bytesRead) {
+          signal?.throwIfAborted();
+          const result = await output.write(chunk, written, bytesRead - written, offset + written);
+          if (!result.bytesWritten) throw new WorldReferenceError("production media snapshot could not be written");
+          written += result.bytesWritten;
+        }
+      }
+      offset += bytesRead;
+    }
+    const after = await handle.stat();
+    signal?.throwIfAborted();
+    if (Date.now() > deadline) throw new WorldReferenceError("production media verification exceeded its time budget");
+    if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) throw new WorldReferenceError("production media changed during preparation");
+    const sourceHash = `sha256:${digest.digest("hex")}`;
+    if (!sourceHash.startsWith(expected)) throw new WorldReferenceError("production media no longer matches its original landed hash");
+    return { sourceHash, byteLength: before.size };
+  } finally { await handle.close(); }
+}
+
+export async function hashContainedProductionMedia(worldDir: string, portable: string, expected: string, signal?: AbortSignal) {
+  return verifyProductionMedia(worldDir, portable, expected, signal);
+}
+
+/** The decoder sees only a verified private snapshot, never a world path that can be replaced. */
+export async function withContainedProductionMedia<T>(worldDir: string, portable: string, expected: string, signal: AbortSignal | undefined,
+  consume: (source: { path: string; sourceHash: string; byteLength: number }) => Promise<T>): Promise<T> {
+  const dir = await mkdtemp(join(tmpdir(), "arke-take-inspection-"));
+  try {
+    const path = join(dir, `source${extname(portable)}`), output = await open(path, "wx");
+    let identity;
+    try { identity = await verifyProductionMedia(worldDir, portable, expected, signal, output); }
+    finally { await output.close(); }
+    signal?.throwIfAborted();
+    return await consume({ path, ...identity });
+  } finally { await rm(dir, { recursive: true, force: true }); }
 }
 
 /** Standalone audio references use the same containment and stable-handle checks as images. */
@@ -129,7 +226,7 @@ export async function readContainedImageReferences(
       if (info.size > MAX_IMAGE_BYTES) throw new WorldReferenceError("image reference exceeds OpenAI's 50 MB limit");
       totalBytes += info.size;
       if (totalBytes > MAX_TOTAL_BYTES) throw new WorldReferenceError("image references exceed OpenAI's 512 MB request limit");
-      const data = Uint8Array.from(await handle.readFile());
+      const data = await readStableBytes(handle, info);
       const format = imageFormatOf(data);
       if (!format) throw new WorldReferenceError("image reference must be a valid PNG, JPEG, or WebP file");
       results.push({
@@ -176,7 +273,7 @@ export async function readContainedVideoReferences(
       if (totalBytes > MAX_VIDEO_BYTES) {
         throw new WorldReferenceError(`video references exceed the ${MAX_VIDEO_BYTES / 1024 / 1024} MB inline limit`);
       }
-      const data = Uint8Array.from(await handle.readFile());
+      const data = await readStableBytes(handle, info);
       const problem =
         contentType === "video/webm"
           ? WEBM_MAGIC.every((byte, index) => data[index] === byte)

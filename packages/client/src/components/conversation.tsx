@@ -1,4 +1,5 @@
 import { ProductionSetupOutline } from "./production-setup-outline.js";
+import { HumanDecisionCardView } from "./human-decision-card.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, type NavigateFunction } from "react-router";
 import type {
@@ -109,12 +110,14 @@ export function ConversationTranscript({
   const worldId = useStore().state?.world?.meta.worldId;
   const messages = workspace?.messages ?? [];
   const visibleTurns = new Set(messages.filter((message) => message.role === "studio").map((message) => message.turnId));
+  const humanDecisions = workspace?.humanDecisions ?? [];
+  const olderHumanDecisions = humanDecisions.filter(card => !card.turnId || !visibleTurns.has(card.turnId));
   // The message window is bounded; outstanding decisions and running work must stay reachable.
   const olderActions = (workspace?.actions ?? []).filter((action) =>
     !visibleTurns.has(action.turnId) &&
     ["pending", "approved", "awaiting-host", "queued", "running", "stale"].includes(action.status),
   );
-  if (messages.length === 0 && olderActions.length === 0 && !running && !failure && empty) {
+  if (messages.length === 0 && olderActions.length === 0 && humanDecisions.length === 0 && !workspace?.humanDecisionProblems?.length && !running && !failure && empty) {
     return (
       <div className="fy-chat__transcript" aria-live="polite">
         {empty}
@@ -123,6 +126,11 @@ export function ConversationTranscript({
   }
   return (
     <div className="fy-chat__transcript" aria-live="polite">
+      {workspace?.humanDecisionProblems?.map(problem => <p key={problem} className="fy-chat__notice" role="status">{problem}</p>)}
+      {olderHumanDecisions.map(card => <HumanDecisionCardView key={card.id} card={card} />)}
+      {workspace?.imageDisclosures?.map(disclosure => <div key={disclosure.provider} className="fy-chat__notice" role="note">
+        Images may be shared with {disclosure.provider}: {disclosure.images.map(image => `${image.label}${image.posterOnly ? " (poster frame only)" : ""}`).join(", ")}.
+      </div>)}
       {olderActions.length > 0 && (
         <div className="fy-chat__turn fy-chat__turn--studio fy-chat__turn--action" aria-label="Earlier actions">
           {olderActions.map((action) => (
@@ -233,6 +241,7 @@ export function ConversationTranscript({
               conversationSeq={workspace?.seq ?? 0}
             />
           ))}
+          {m.role === "studio" && humanDecisions.filter(card => card.turnId === m.turnId).map(card => <HumanDecisionCardView key={card.id} card={card} />)}
         </div>
         );
       })}
@@ -341,7 +350,6 @@ export function ConversationPermissionCard({
     setAnnouncement("");
   };
 
-  const stageRequest = state?.stageConstructionRequests?.find(request=>request.actionId===action.actionId&&request.conversationId===action.conversationId);
   const body = <ConversationActionBody action={action} supported={supported} />;
   const consequences = action.shown.ripples.length > 0 ? (
     <div className="fy-actioncard__body">
@@ -422,7 +430,6 @@ export function ConversationPermissionCard({
           ) : null}
         </div>
       )}
-      {action.status === "awaiting-host" && stageRequest ? <Button variant="primary" onClick={()=>void navigate(`/w/${action.worldId}/p/${stageRequest.productionId}/scenes/${stageRequest.sceneId}`)}>Open Stage to construct</Button>:null}
       {action.undo && <div className="fy-actioncard__audit">Undo available · {action.undo.kind}</div>}
       {supported && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
         <div className="fy-actioncard__actions">
@@ -702,9 +709,9 @@ export function failureLine(failure: { status: string; detail?: string }): strin
  * file says "text only": the words came through and the pictures, tables and layout did not,
  * which somebody who attached a deck for its images needs to know before they ask about one.
  */
-export function attachmentChipLabel(attachment: { fileName: string; readability: string; promoted?: boolean }): string {
+export function attachmentChipLabel(attachment: { fileName: string; readability: string; promoted?: boolean; imageInspection?: "prepared" }): string {
   const state = [
-    ...(attachment.readability === "not-readable" ? ["not readable in chat"] : []),
+    ...(attachment.imageInspection === "prepared" ? ["image prepared for inspection"] : attachment.readability === "not-readable" ? ["not readable in chat"] : []),
     ...(attachment.readability === "extracted-text-available" ? ["text only"] : []),
     ...(attachment.promoted === true ? ["filed in world"] : []),
   ];
