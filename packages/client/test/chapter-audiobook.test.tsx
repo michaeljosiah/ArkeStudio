@@ -145,6 +145,7 @@ async function mount(state: ClientState, route = ROUTE, keepStore = false): Prom
       <MemoryRouter initialEntries={[route]}>
         <Routes>
           <Route path="/w/:worldId/p/:prodId/story/chapters/:chapterId" element={<ChapterScreen />} />
+          <Route path="/w/:worldId/p/:prodId/story/chapters" element={<div data-testid="chapters-door" />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -2032,6 +2033,33 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
     assert.ok(q(timing, ".fy-season-arke"), "Timing's floating press");
     assert.ok(q(timing, '.fy-scene-back [aria-label="Page actions"]'));
     assert.equal(q(timing, '[data-testid="audiobook-hold"]'), null);
+  });
+
+  // 194h draws the Audiobook view; the bar is the same line in all three, so switching views does
+  // not move it.
+  for (const view of ["manuscript", "audiobook", "timing"] as const) {
+    it(`a phone's app bar is one line in the ${view}: the chevron back to Chapters, the chapter's title, one press`, async () => {
+      windowOf(390);
+      const m = await mount(inkbound(), ROUTE.replace("view=audiobook", `view=${view}`));
+      if (view !== "manuscript") await answerOpen(m);
+      const bar = q(m, ".fy-scene-back")!;
+      assert.ok(bar.classList.contains("fy-scene-back--line"), "the one-line bar");
+      assert.equal(bar.querySelector("span"), null, "no context line over the title");
+      assert.equal(bar.querySelector("h1")!.textContent, "The counting of bells", "the chapter's title, without its number");
+      const presses = [...bar.querySelectorAll(":scope > button")];
+      assert.equal(presses.length, 2, "back and one press at the end");
+      assert.equal(presses[0]!.getAttribute("aria-label"), "Back to Chapters", "the back press names where it goes");
+      assert.equal(presses[1]!.getAttribute("aria-label"), view === "audiobook" ? "Open Arke" : "Page actions");
+      await act(async () => (presses[0] as HTMLElement).click());
+      assert.ok(q(m, '[data-testid="chapters-door"]'), "back goes to the production's Chapters");
+    });
+  }
+
+  it("a tablet has no phone app bar: the shell's titlebar keeps the chapter's crumbs", async () => {
+    windowOf(820);
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    assert.equal(q(m, ".fy-scene-back"), null);
   });
 
   it("while a read runs, the foot holds its progress and Stop, and the line's menu gives way; the price is held where Read was", async () => {

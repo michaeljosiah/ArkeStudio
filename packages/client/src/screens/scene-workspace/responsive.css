@@ -190,6 +190,14 @@
   .fy-scene-back > div { flex: 1; min-width: 0; }
   .fy-scene-back span { display: block; font: var(--type-meta); color: var(--muted-foreground); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
   .fy-scene-back h1 { margin: 0; font: 600 var(--text-md)/1.25 var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* 194h's one line: 44 high, the chevron at the 16 edge and the title beside it at 31, the right
+     press's 30 face at the other 16 edge, both quiet. The back press keeps its 44 hit area by
+     reaching under the title's first letters rather than pushing the title out to 48. */
+  .fy-scene-back--line { height: 44px; gap: 0; padding: 0 9px 0 0; }
+  .fy-scene-back--line > button { color: var(--muted-foreground); }
+  .fy-scene-back--line > button:first-child { position: relative; z-index: 1; place-items: center start; padding-left: 10px; margin-right: -13px; }
+  .fy-scene-back--line > button[aria-pressed="true"] { color: var(--foreground); }
+  .fy-scene-back--line h1 { font: var(--type-ui); color: var(--foreground); }
   :is([data-screen="scene-detail"], [data-screen="shot"]) .fy-sw__head { padding: 0; flex: none; }
   :is([data-screen="scene-detail"], [data-screen="shot"]) .fy-sw__breadcrumb, :is([data-screen="scene-detail"], [data-screen="shot"]) .fy-sw__title { display: none; }
   [data-screen="scene-detail"] .fy-sw__head { display: flex; flex-direction: column; }
