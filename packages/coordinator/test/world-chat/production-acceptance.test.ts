@@ -92,6 +92,7 @@ it("makes and exports a thirteen-step film through Production Chat with no pre-a
   const loaded = async () => { const meta = (await log.readMeta())!; return foldConversation(meta.id, meta.createdAt, (await log.read()).events).view; };
   const production = () => store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
   const rows: RecordRow[] = [];
+  const humanDecisions: unknown[] = [];
   // Editor preparation records a pending review. That operational record is permitted;
   // authored production data, selections and timeline must stay unchanged until a decision.
   const stateDigest = () => createHash("sha256").update(JSON.stringify(store.getBundle().productions.map(({ editorRequests: _reviews, ...authored }) => authored))).digest("hex");
@@ -110,8 +111,11 @@ it("makes and exports a thirteen-step film through Production Chat with no pre-a
   }
   async function prepare(step: number, prompt: string, input: Record<string, unknown>, reads: Read[]) {
     const before = stateDigest(), submissions = fake.submitCount, jobs = queue.listJobs().length, encodes = encoded.length;
-    answer = async url => JSON.stringify({ reply: "Review this step.", candidateOperations: [], groupOperations: [], actions: [{ ...input,
-      checkReceiptIds: await Promise.all(reads.map(([tool, args]) => read(url, tool, args))) }] });
+    answer = async url => {
+      const checkReceiptIds = await Promise.all(reads.map(([tool, args]) => read(url, tool, args)));
+      return JSON.stringify({ reply: "Review this step.", candidateOperations: [], groupOperations: [],
+        ...(input.kind === "editor-request" ? { actions: [], editorRequests: [input.request] } : { actions: [{ ...input, checkReceiptIds }] }) });
+    };
     const sent = await runner.send(log, conversation.id, prompt);
     assert.equal(sent.status, "completed", JSON.stringify(sent));
     const card = (await loaded()).actions.at(-1)!;
@@ -158,6 +162,7 @@ it("makes and exports a thirteen-step film through Production Chat with no pre-a
     assert.ok(card, "the editor decision must be available in this same thread");
     assert.equal(card.body.control.kind, "editor-request"); if (card.body.control.kind !== "editor-request") assert.fail();
     const requestId = card.body.control.requestId;
+    humanDecisions.push({ step: 11, shown: card, requestId, decision: "accept" });
     await internal.handleClientMessage({ kind: "editor-request-decide", worldId: WORLD_ID, productionId: PRODUCTION, requestId, decision: "accept" });
     assert.equal(production().editorRequests.find(request => request.id === requestId)?.status, "accepted");
   }
@@ -233,7 +238,7 @@ it("makes and exports a thirteen-step film through Production Chat with no pre-a
   if (media.real) { const info = await media.probe.info(join(store.dir, exported.output)); assert.equal(info.width, 1280); assert.equal(info.height, 720); assert.equal(info.durationSec, 12); assert.equal(info.hasAudio, true); }
   const report = { platform: process.platform, providerMode: "stub", encoderMode: media.real ? "ffmpeg" : "stub", installedAcceptance: false, productionId: PRODUCTION, exportedFile: exported.output,
     outputBytes: (await stat(join(store.dir, exported.output))).size, subtitleFile, cards: rows,
-    settledActions: (await loaded()).actions.map(card => ({ actionId: card.actionId, status: card.status })) };
+    humanDecisions, settledActions: (await loaded()).actions.map(card => ({ actionId: card.actionId, status: card.status })) };
   await writeFile(join(made.root, "production-acceptance.json"), JSON.stringify(report, null, 2));
   if (process.env.ARKE_PRODUCTION_ACCEPTANCE_DIR) {
     await mkdir(process.env.ARKE_PRODUCTION_ACCEPTANCE_DIR, { recursive: true });
