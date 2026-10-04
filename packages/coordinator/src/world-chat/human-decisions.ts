@@ -23,6 +23,11 @@ export async function projectHumanDecisions(store: WorldStore, loaded: WorldChat
   for (const productionId of scopedProductions) {
     const production = bundle.productions.find(value => value.meta.id === productionId);
     if (!production) continue;
+    for (const performance of production.performances.filter(value => value.kind === "generated-tts" && !production.performanceReview.reviews.some(review => review.performanceId === value.id))) {
+      const action = loaded.actions.find(value => value.actionKind === "world-chat-production-audio-generation" && `pf_${value.actionId.slice(4)}` === performance.id);
+      add(`performance:${performance.id}`, "Review the generated performance", "Only you can audition, accept or purge this performance",
+        { kind: "performance-review", productionId, performanceId: performance.id }, action);
+    }
     for (const { plan, state } of readPlanRecords(store, productionId, jobs)) {
       const action = loaded.actions.find(value => value.actionKind === "world-chat-production-scene-dispatch" && `pl_${value.actionId.slice(4)}` === plan.planId);
       if (!action || !["approved", "queued", "running", "completed"].includes(action.status) ||

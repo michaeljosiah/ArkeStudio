@@ -23,6 +23,16 @@ const SCHEMA_KINDS = ModelWorldChatActionSchema.options.map(
 );
 const HUGE = 10_000_000;
 
+it("advertises available audio actions, dependent cues, spine verbs and the human audition boundary", () => {
+  for (const kind of ["production-audio-generation", "production-performance-command", "production-audio-cue", "production-audio-edit"]) {
+    const entry = describeAction(kind)!;
+    assert.ok("example" in entry && !("unavailable" in entry), kind);
+  }
+  const guide = renderActionGuide(["world", "production"], 1000, { kind: "cut", productionId: "saltlight" }).text;
+  assert.match(guide, /source.actionRef/); assert.match(guide, /after containing it/);
+  assert.match(guide, /sample rights and purge remain human/); assert.match(guide, /attach\/detach/); assert.match(guide, /Refuse sound effects\/SFX/);
+});
+
 /** The kinds a rendered guide names, read back out of its entry lines. */
 function namedKinds(text: string): string[] {
   return [...text.matchAll(/^- ([a-z-]+) ·/gm)].map((match) => match[1]!);

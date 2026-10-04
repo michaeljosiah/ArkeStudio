@@ -197,6 +197,7 @@ export async function stageEditorRequests(
     now: string;
     /** Validate every request against the base and write nothing (round eight). */
     dryRun?: boolean;
+    expectedTimeline?: { revision: number; hash: string };
   },
 ): Promise<EditorRequest[]> {
   const productionId = productionOfContext(input.entryContext);
@@ -206,6 +207,9 @@ export async function stageEditorRequests(
     const dryRun = input.dryRun === true;
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
     if (!production) throw new EditorRequestRefused(`production ${productionId} is not in this world`);
+    if (input.expectedTimeline && (production.timeline?.status !== "ready" || production.timeline.timeline.revision !== input.expectedTimeline.revision || production.timeline.hash !== input.expectedTimeline.hash)) {
+      throw new EditorRequestRefused("The timeline changed after this cue was approved. Prepare a fresh placement.");
+    }
     const { raw, file } = await readRequests(store, productionId);
     const staged: EditorRequest[] = [];
     const added: EditorRequest[] = [];

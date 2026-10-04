@@ -2060,18 +2060,17 @@ describe("retry classification (R-7, R-9, D5)", () => {
     fake.submitError = new Error("HTTP 503 unavailable");
     fake.submitErrorTimes = 1;
     fake.submitDelayMs = 40;
-    // The same clock as the queue-position tests below: between the failed attempt and the
-    // second sibling's submit sit the 200 ms wait, two enqueues and the dispatches, every
-    // transition an fsync'd journal append. At 1200 ms a loaded Windows runner ran the retry's
-    // backoff out inside that stretch and sent the retry among the siblings (CI runs
-    // 34415278836, 34416898303), so the backoff is widened to dwarf the latency while the
-    // 150 ms interval the siblings ride stays where it was; the gap they must fit inside is
-    // widened with it, still a third of the backoff, so what is asserted does not change.
-    // At 6000/2000 a Windows runner took 2228 ms between the two siblings' submits — the
-    // retry still waited, so the claim held and only the gap's tolerance did not (CI run
-    // 35210484083, after a new test file moved this one to another shard); widened again at
-    // the same ratio, still well inside FOLD_MS.
-    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 150, backoffBaseMs: 9000, backoffCapMs: 9000, rng: () => 1 });
+    // The backoff is an hour, so no runner is slow enough to see it end: the siblings either
+    // ride the interval or never go at all. This used to be a backoff a few times the latency
+    // of the stretch between the failure and the siblings — every transition an fsync'd
+    // journal append — and a ceiling on the gap between the siblings' submits, and a loaded
+    // Windows runner outran each widening in turn: the retry went out among the siblings at a
+    // 1200 ms backoff (CI runs 34415278836, 34416898303), and the gap passed its ceiling at
+    // 2228 ms (CI run 35210484083) and 3682 ms (CI run 37135130264) while the retry still
+    // waited. A gap is a measure of speed; whether the third job goes out before the backoff
+    // ends is the claim, and with a backoff no test outlives, finishing at all proves it.
+    const hour = 3_600_000;
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 150, backoffBaseMs: hour, backoffCapMs: hour, rng: () => 1 });
     await h.queue.start();
     const first = await h.queue.enqueue(INPUT);
     await until(
@@ -2080,15 +2079,17 @@ describe("retry classification (R-7, R-9, D5)", () => {
       FOLD_MS,
     );
     // Let the interval wakeup from the failed attempt fire and re-arm the timer for the backoff.
+    // Not a guess at how long that takes: the wakeup was armed at the first dispatch for 150 ms,
+    // this sleep is armed after the requeue for 200, and Node fires timers in expiry order.
     await new Promise((resolve) => setTimeout(resolve, 200));
     const second = await h.queue.enqueue(INPUT);
     const third = await h.queue.enqueue(INPUT);
-    await until(() => [second.id, third.id].every((id) => foldedJob(h, id)?.status === "succeeded"), "both siblings to succeed", FOLD_MS);
+    await until(() => [second.id, third.id].every((id) => foldedJob(h, id)?.status === "succeeded"), "both siblings to succeed on the 150 ms interval, not the hour's backoff", FOLD_MS);
     const [a, b, c] = fake.submittedKeys;
     assert.ok(b !== a && c !== a && c !== b, "the two siblings went out while the first job waited");
-    const gap = fake.submitStartedAt[2]! - fake.submitStartedAt[1]!;
-    assert.ok(gap < 3000, `the third job went out ${gap} ms after the second; it rides the 150 ms interval, not the 9000 ms backoff`);
-    await until(() => foldedJob(h, first.id)?.status === "succeeded", "the retry to succeed", FOLD_MS);
+    assert.equal(fake.submitCount, 3, "and the retry has not gone again");
+    assert.equal(foldedJob(h, first.id)?.status, "queued", "it is still sitting out its backoff");
+    assert.equal(foldedJob(h, first.id)?.attempt, 1);
     h.queue.dispose();
   });
 

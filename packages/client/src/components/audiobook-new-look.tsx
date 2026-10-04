@@ -4,15 +4,19 @@ import { resolveModel, worldModel } from "./dispatch-bar.js";
 import { EditorDialog } from "./editor-dialog.js";
 import { mediaUrl } from "../lib/media.js";
 import { acceptChapterLook, makeChapterLook, useStore } from "../lib/store.js";
+import { lookJobState, lookJobs, useQueueRefusals, type LookJobState } from "./look-jobs.js";
 import { Button, Checkbox, Textarea, cx } from "./ui.js";
 
 /**
  * Making a look (design turn 193b, SPEC-047 R-112, R-118): a character's main photo and a clothing
  * line become three full-length candidates on a plain ground, under the book's art direction, with
  * the main photo as the face reference; the author chooses one, an optional close view of it (head
- * and shoulders, ~$0.04, on by default) is made beside the candidates, and Accept look files both as
- * a kit look of kind costume — chosen for the chapter that asked, by default. Nothing is made until
- * Make, which is the price the sheet shows; nothing here reaches the writing service.
+ * and shoulders, on by default, at the image model's own price for one picture from two references —
+ * GPT Image 2's is ~$0.26, not the ~$0.04 the drawing guessed) is made beside the candidates, and
+ * Accept look files both as a kit look of kind costume — chosen for the chapter that asked, by
+ * default. Nothing is made until Make, which is the price the sheet shows; nothing here reaches the
+ * writing service. A candidate or a close view the provider refuses says so in its slot, with the
+ * reason, and never stays `making` (2026-10-04).
  */
 
 /** Candidates asked for at a time (193b). */
@@ -45,8 +49,9 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
   const [chooseOn, setChooseOn] = useState(true);
   const [batch, setBatch] = useState<string | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
-  /** Close views already asked for, by the candidate they are of: asked once, never twice by a second press. */
-  const [asked, setAsked] = useState<Record<string, true>>({});
+  /** Close views already asked for, by the candidate they are of, with the request that asked: asked once, never twice by a second press. */
+  const [asked, setAsked] = useState<Record<string, string>>({});
+  const queueRefused = useQueueRefusals();
   useEffect(() => {
     if (!open) return;
     setClothing(line);
@@ -64,7 +69,19 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
   const candidates = pending.filter((take) => batch !== null && take.params["lookBatch"] === batch && take.params["lookFraming"] === "full-body").sort((a, b) => (a.id < b.id ? -1 : 1));
   const chosenTake = candidates.find((take) => take.id === chosen) ?? null;
   const closeTake = chosenTake === null ? null : (pending.find((take) => take.params["lookFraming"] === "close" && take.params["lookOfTake"] === chosenTake.id) ?? null);
-  const closeWaiting = closeOn && chosenTake !== null && closeTake === null && asked[chosenTake.id] === true;
+  const jobs = store.state?.app.jobs ?? [];
+  // The batch's jobs and the close view's: a job that ended without a picture is a slot that says
+  // why, never one left making (2026-10-04, a close view the safety system refused).
+  const batchJobs = batch === null ? [] : lookJobs(jobs, (params) => params["lookBatch"] === batch && params["lookFraming"] === "full-body");
+  const batchFailures = batchJobs.map(lookJobState).filter((state): state is Extract<LookJobState, { state: "failed" }> => state?.state === "failed");
+  const batchRefused = batch === null ? undefined : queueRefused[batch];
+  const closeRequest = chosenTake === null ? undefined : asked[chosenTake.id];
+  const closeJob = closeRequest === undefined ? undefined : lookJobs(jobs, (params) => params["lookBatch"] === closeRequest)[0];
+  const closeEnded = lookJobState(closeJob);
+  const closeFailed = closeTake !== null || closeRequest === undefined ? null : (queueRefused[closeRequest]?.reason ?? (closeEnded?.state === "failed" ? closeEnded.reason : null));
+  // A picture made and paid for whose filing failed is Activity's to retry, at no charge: no paid Try again.
+  const closeRetry = closeFailed !== null && !(closeEnded?.state === "failed" && !closeEnded.retry && queueRefused[closeRequest ?? ""] === undefined);
+  const closeWaiting = closeOn && chosenTake !== null && closeTake === null && closeRequest !== undefined && closeFailed === null;
   const looks = chapterLooksOf(kit);
 
   const priceOf = (images: number, references: number): string => (model === null ? "" : priceLabel(estimateCharacterImageMicroUsd(model, "character-look", images, references)));
@@ -72,9 +89,10 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
   const closeCost = priceOf(1, 2);
   const againCost = model === null ? "" : priceLabel(estimateCharacterImageMicroUsd(model, "character-look", LOOK_CANDIDATES, LOOK_CANDIDATES) + (closeOn ? estimateCharacterImageMicroUsd(model, "character-look", 1, 2) : 0));
 
-  const askClose = (takeId: string) => {
-    if (asked[takeId] === true) return;
-    if (makeChapterLook(worldId, who.sheet, { framing: "close", prompt: clothing.trim(), count: 1, closeOf: { takeId } }) !== null) setAsked((held) => ({ ...held, [takeId]: true }));
+  const askClose = (takeId: string, again = false) => {
+    if (asked[takeId] !== undefined && !again) return;
+    const request = makeChapterLook(worldId, who.sheet, { framing: "close", prompt: clothing.trim(), count: 1, closeOf: { takeId } });
+    if (request !== null) setAsked((held) => ({ ...held, [takeId]: request }));
   };
   const make = () => {
     const request = makeChapterLook(worldId, who.sheet, { framing: "full-body", prompt: clothing.trim(), count: LOOK_CANDIDATES });
@@ -138,6 +156,20 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
             ? null
             : Array.from({ length: LOOK_CANDIDATES }, (_, index) => {
                 const take = candidates[index];
+                // The slots past the pictures made: those whose job ended without one say why, last.
+                // A picture the coordinator would not queue has no job: counted from its answer, not left making.
+                const left = LOOK_CANDIDATES - candidates.length;
+                const unqueued = batchRefused === undefined ? 0 : batchRefused.whole ? LOOK_CANDIDATES : batchRefused.count;
+                const reasons = [...batchFailures.map((failure) => failure.reason), ...Array.from({ length: unqueued }, () => batchRefused!.reason)];
+                const failedSlots = Math.min(reasons.length, left);
+                if (take === undefined && index >= LOOK_CANDIDATES - failedSlots) {
+                  const reason = reasons[index - (LOOK_CANDIDATES - failedSlots)] ?? "not made";
+                  return (
+                    <div key={`failed-${index}`} className="fy-newlook__cand fy-newlook__cand--wait" data-testid="new-look-candidate" data-state="failed">
+                      <span className="fy-mono fy-ch__who-where--warn" data-testid="new-look-candidate-reason">{reason}</span>
+                    </div>
+                  );
+                }
                 if (take === undefined) return <i key={`wait-${index}`} className="fy-newlook__cand fy-newlook__cand--wait" data-testid="new-look-candidate" data-state="making" aria-hidden="true" />;
                 return (
                   <button key={take.id} type="button" className={cx("fy-newlook__cand", chosen === take.id && "fy-newlook__cand--on")} aria-pressed={chosen === take.id} aria-label={`Candidate ${String.fromCharCode(65 + index)}`} data-testid="new-look-candidate" data-state={chosen === take.id ? "chosen" : "made"} onClick={() => choose(take)}>
@@ -147,9 +179,19 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
                 );
               })}
           {closeOn && chosenTake !== null && (
-            <div className="fy-newlook__close" data-testid="new-look-close" data-state={closeTake !== null ? "made" : closeWaiting ? "making" : "none"}>
+            <div className="fy-newlook__close" data-testid="new-look-close" data-state={closeTake !== null ? "made" : closeFailed !== null ? "failed" : closeWaiting ? "making" : "none"}>
               {closeTake !== null ? <img src={tileOf(slug, who.sheet, closeTake)} alt="" /> : <i aria-hidden="true" />}
               <span className="fy-mono">Close view</span>
+              {closeFailed !== null && (
+                <>
+                  <span className="fy-mono fy-ch__who-where--warn" data-testid="new-look-close-reason">{closeFailed}</span>
+                  {closeRetry && (
+                    <button type="button" className="fy-sugg__make" disabled={off} onClick={() => askClose(chosenTake.id, true)} data-testid="new-look-close-retry">
+                      Try again · {closeCost}
+                    </button>
+                  )}
+                </>
+              )}
             </div>
           )}
         </div>

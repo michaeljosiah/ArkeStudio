@@ -42,7 +42,7 @@ describe("Production Chat contexts and records (SPEC-051 R-37, R-41..45)", () =>
   it("puts relevant real actions first without dropping the full guide, and announces timeline reads in both modes", async () => {
     const bundle = await fixtureBundle();
     const kinds = ["shot", "stage", "takes", "generate", "cut"] as const;
-    const expected = ["production-scene-command", "production-stage-construct", "production-take-review", "production-frame-run-start", "audio-spine-command"];
+    const expected = ["production-scene-command", "production-stage-construct", "production-take-review", "production-frame-run-start", "production-audio-generation"];
     for (const [index, kind] of kinds.entries()) {
       const context = (kind === "cut" ? { kind, productionId: "saltlight" }
         : { kind, productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" }) as WorldChatContext;

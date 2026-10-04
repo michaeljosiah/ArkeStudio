@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { lookViewFor, type PictureWho } from "@arke-studio/contracts";
-import { briefRiders, holdBrief, pictureChecks, type RawBrief } from "../../src/productions/audiobook-picture-brief.js";
+import { BRIEF_EXAMPLES, briefRiders, briefRules, holdBrief, pictureChecks, type RawBrief } from "../../src/productions/audiobook-picture-brief.js";
 import { buildPicturePrompt } from "../../src/productions/audiobook-picture-suggest.js";
 import type { ChapterPerson } from "../../src/productions/audiobook-look.js";
 
@@ -162,5 +162,24 @@ describe("the brief the writing service is given (193k)", () => {
       "## The block [p34.0]",
     ]) assert.ok(prompt.includes(part), part);
     assert.match(buildPicturePrompt({ title: "t", block: { key: "p0.0", text: "x" }, lines: [], people: [], places: [], never: [], maxChars: 900, retry: "it names Ade" }), /Your previous response was rejected: it names Ade/);
+  });
+
+  // 0.5.60-local.14: in the hands detail her bangles were drawn on his wrist.
+  it("tells a detail shot to say whose hand wears what, and its worked example does", () => {
+    const rules = briefRules(900, []);
+    assert.match(rules, /In a detail shot say whose hand wears what: every ring, bangle, watch or sleeve stays on the person whose line has it/);
+    assert.match(rules, /"her hand, with her old-gold bangles, rests on his forearm above his steel watch"/);
+    const hands = BRIEF_EXAMPLES.slice(BRIEF_EXAMPLES.indexOf("Block p64.0"));
+    assert.match(hands, /Her hand, with her heavy old-gold bangles, rests on his forearm above his steel watch/);
+    assert.doesNotMatch(hands, /Heavy gold bangles have slid down against the steel of his watch/, "never bangles left to float between two hands");
+  });
+
+  // 0.5.60-local.14: the club-table pictures of Ife were refused for "bare shoulders" and "low-backed slip dress" with the dress riding.
+  it("tells the writing service to name clothes neutrally once a look image rides, and keeps the expression and frame rules", () => {
+    const rules = briefRules(900, []);
+    assert.match(rules, /that look's image rides and already carries the clothes: name each garment once, briefly and neutrally, by the garment and its colour \("her cream-gold silk evening dress"\)/);
+    assert.match(rules, /Never write skin exposure, the cut of a garment or the body under it/);
+    assert.match(rules, /2\. NAME THE FRAME FIRST\./);
+    assert.match(rules, /5\. NAME EVERY FACE'S EXPRESSION AND GAZE\./);
   });
 });

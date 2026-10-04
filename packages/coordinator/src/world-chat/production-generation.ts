@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   attachmentFor, characterAudioRoute, characterImageEstimateIsUsable, foldBenchSession, keyframePlan, orderedShots, resolveCast,
-  type AppSettings, type ArkeGenerationBody, type BenchSubject, type ModelManifest,
+  type AppSettings, type ArkeGenerationBody, type ModelManifest,
 } from "@arke-studio/contracts";
 import { resolveSubjectCastVoices } from "../audio/reference-inputs.js";
 import { planBenchDispatch } from "../bench/service.js";
@@ -52,7 +52,7 @@ export function productionGenerationSource(store: WorldStore, ports: {
       const offered = new Map<string, { id: string; role: string }>();
       const exclusions: string[] = [];
       const authorities: unknown[] = [];
-      const audioSubjects: BenchSubject[] = [];
+      const audioSubjects: import("@arke-studio/contracts").VisualBenchSubject[] = [];
       let durationSec: number | undefined;
       // A board of start frames means one ordinary candidate frame per member, not an accepted grid.
       for (const target of targets) {
@@ -139,7 +139,7 @@ export function productionGenerationSource(store: WorldStore, ports: {
       }, materialization: audioSubjects };
     },
     beforeDispatch: async (_action, actionId, _inputs, materialization, at) => {
-      for (const subject of materialization as BenchSubject[]) {
+      for (const subject of materialization as import("@arke-studio/contracts").VisualBenchSubject[]) {
         // The quote already resolved the exact destination; acknowledgement records the person's approval.
         const model = ports.manifest?.models.find(m => m.id === _inputs[0]?.model);
         const taskMode = typeof _inputs[0]?.params.taskMode === "string" ? _inputs[0].params.taskMode : "generate";

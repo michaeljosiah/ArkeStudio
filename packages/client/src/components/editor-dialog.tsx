@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { BodyLayer } from "./body-layer.js";
+import { useOverlay } from "../lib/overlays.js";
 
 /**
  * A sheet over the editor (SPEC-039 R-5): mounted above the app frame, focus held inside it,
@@ -42,6 +43,8 @@ export function EditorDialog({
   // focus set-up on every parent render would pull focus back to the first control mid-use.
   const close = useRef(onClose);
   close.current = onClose;
+  // A block drawer (a modal dialog) open beneath gives way while this is open (overlays.ts).
+  useOverlay("layer", open, () => panel.current);
   useEffect(() => {
     if (!open) return;
     opener.current = document.activeElement;

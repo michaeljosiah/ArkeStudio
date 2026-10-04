@@ -41,7 +41,7 @@ import {
 } from "@arke-studio/contracts";
 
 export interface PreparedBenchSubject {
-  subject: BenchSubject;
+  subject: import("@arke-studio/contracts").VisualBenchSubject;
   title: string;
   composer: BenchComposer;
   references: BenchReferenceToken[];
@@ -83,7 +83,7 @@ function subjectPackingModelFor(
     : manifest?.models.find((candidate) => candidate.id === chosen && candidate.capability === "video") ?? null;
 }
 
-function episodeFor(production: ProductionBundle, sceneId: string): BenchSubject["episode"] {
+function episodeFor(production: ProductionBundle, sceneId: string): import("@arke-studio/contracts").VisualBenchSubject["episode"] {
   const episode = production.episodes.find((candidate) => candidate.scenes.includes(sceneId as never));
   return episode
     ? { id: episode.id, order: episode.order, title: episode.title }
@@ -305,6 +305,7 @@ export function subjectReferenceRouting(
   subject: BenchSubject,
   model: ManifestModel | null,
 ): Pick<BenchComposer, "activeTokens" | "keyframeTokens"> {
+  if (subject.kind === "production") return { activeTokens: [], keyframeTokens: [] };
   if (model === null) return { activeTokens: [], keyframeTokens: [] };
   const frames = references.filter((reference) => reference.subjectRole === "board-frame");
   const ordinary = references.filter((reference) => reference.subjectRole !== "board-frame");

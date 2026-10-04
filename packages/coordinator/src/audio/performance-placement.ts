@@ -56,7 +56,7 @@ export async function placeSelectedPerformance(store: WorldStore, request: Extra
   if (request.partner && placements.some((placement, index) => placement.timing.overflow.mode !== "overlap" ||
     placement.timing.overflow.withShotId !== placements[1-index]!.performance.target.shotId)) throw new Error("Both performances must explicitly approve each other as overlap partners.");
   await applyTimelineCommand(store,request.productionId,{ kind:"commands",commands,baseRevision:request.expectedTimelineRevision,sourceFingerprint:"",
-    label: request.partner ? "Place mutually approved dialogue overlap" : "Place selected dialogue performance" },async latest => {
+    label: request.partner ? "Place mutually approved dialogue overlap" : "Place selected dialogue performance", requestId: request.requestId },async latest => {
     const raw = await readFile(await audioWorldPath(store.dir,`productions/${request.productionId}/timeline.json`),"utf8");
     if (sha256(raw) !== request.expectedTimelineHash) throw new Error("The cut changed. Review the current placement before applying again.");
     if (latest.performanceReview.selectionHash !== request.expectedSelectionHash) throw new Error("The performance selection changed. Review the selected sources again.");
@@ -111,7 +111,8 @@ export async function validatePlacedPerformanceBytes(store: WorldStore, producti
 }
 
 /** Duration suggestions enter the existing scene JSON proposal/rebase path, never direct authorship. */
-export async function proposePerformanceDuration(store: WorldStore, request: Extract<ClientMessage,{kind:"propose-performance-duration"}>) {
+export async function proposePerformanceDuration(store: WorldStore, request: Extract<ClientMessage,{kind:"propose-performance-duration"}>,
+  worldChatOrigins?: import("@arke-studio/contracts").WorldChatProposalOrigin[]) {
   const production=store.getBundle().productions.find(p=>p.meta.id===request.productionId);
   const performance=await readPerformance(store,request.productionId,request.performanceId);
   const scene=production?.scenes.find(s=>s.id===performance.target.sceneId);
@@ -132,5 +133,5 @@ export async function proposePerformanceDuration(store: WorldStore, request: Ext
   const retimed=shot.staging ? stagingRetimed(shot.staging,durationSec,resolvedAuthoredDuration(shot)) : undefined;
   const next=editShot(record,{shotId:shot.id,change:{durationSec,...(retimed ? {staging:{...retimed,version:retimed.version+1}} : {})}});
   return new ProposalManager(store).stage({kind:"scene-edit",summary:`Set ${shot.id} to ${durationSec}s for reviewed dialogue timing`,source:"performance-timing",production:request.productionId,
-    targets:[{path,content:JSON.stringify(next,null,2)+"\n",expectedBaseHash:sha256(raw)}]});
+    targets:[{path,content:JSON.stringify(next,null,2)+"\n",expectedBaseHash:sha256(raw)}], ...(worldChatOrigins ? { worldChatOrigins } : {})});
 }
