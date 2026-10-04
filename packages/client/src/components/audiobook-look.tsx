@@ -303,6 +303,10 @@ export function withWrites(look: AudiobookLook | null, writing: ReadonlyArray<{ 
     } else if (target.kind === "character" && next.characters[target.key] !== undefined) {
       const { [target.key]: line, ...others } = next.characters;
       next = { ...next, characters: text === null ? others : { ...next.characters, [target.key]: { ...line!, text } } };
+    } else if (target.kind === "character" && text !== null && target.name !== undefined) {
+      // A character added here and not yet in the record: drawn from the write, so the row stays
+      // and Add does not offer them twice (codex on PR 1559).
+      next = { ...next, characters: { ...next.characters, [target.key]: { name: target.name, ...(target.sheet !== undefined ? { sheet: target.sheet } : {}), text, by: "author" as const } } };
     }
   }
   return next;
@@ -420,7 +424,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
   const shownLook = withWrites(withChoices(look, choosing, (sheet, lookId) => chapterLooksOf(kitOf(world, sheet)).find((candidate) => candidate.id === lookId) ?? null), writing);
   const rows = lookRows(shownLook, numberOf);
   // A character the look holds no line for, offered to add: a sheet of the world's, by name.
-  const held = new Set(Object.keys(look?.characters ?? {}));
+  const held = new Set(Object.keys(shownLook?.characters ?? {}));
   const addable = (world?.sheets ?? []).filter((sheet) => sheet.type === "character" && sheet.retired !== true && sheet.neverDepicted !== true && !held.has(sheet.id) && !adding.some((entry) => entry.key === sheet.id));
   const count = Object.keys(shownLook?.characters ?? {}).length;
   const chosenCount = Object.values(shownLook?.characters ?? {}).filter((line) => line.lookId !== undefined).length;

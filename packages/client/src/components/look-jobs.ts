@@ -15,7 +15,11 @@ const ACTIVE = new Set<Job["status"]>(["queued", "submitting", "running"]);
 /** One job's state for a row, or null once it succeeded (its picture is the row's). */
 export function lookJobState(job: Job | undefined): LookJobState | null {
   if (job === undefined) return null;
-  if (job.status === "succeeded") return job.finalization?.status === "failed" ? { state: "failed", reason: "made, not filed · see Activity", retry: false } : null;
+  if (job.status === "succeeded") {
+    if (job.finalization?.status === "failed") return { state: "failed", reason: "made, not filed · see Activity", retry: false };
+    // Made and still being filed: the picture is on its way, not a reason to pay for another (codex on PR 1559).
+    return job.finalization?.status === "pending" ? { state: "making" } : null;
+  }
   if (ACTIVE.has(job.status)) return { state: "making" };
   // A cancel after submission may still be completed or charged by the provider: Activity settles it, not a second request.
   if (job.status === "cancelled") return job.cancellationUncertain === true ? { state: "failed", reason: "stopped · see Activity", retry: false } : { state: "failed", reason: "stopped", retry: true };

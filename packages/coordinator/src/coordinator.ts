@@ -335,7 +335,7 @@ import { anyNarrator, audiobookListening, setAudiobookPicture } from "./producti
 import { bookLookChoices, lookUsage } from "./productions/audiobook-look-book.js";
 import { chooseChapterLook, deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
 import { makeAdapterIllustrateDeriver, proposeIllustrations, type IllustrateDeriver } from "./productions/audiobook-illustrate.js";
-import { clipPrompt, depictable, makeAdapterPictureDeriver, pictureAspect, pictureRoom, pictureWho, promptRoom, suggestPicture, type PictureDeriver } from "./productions/audiobook-picture-suggest.js";
+import { clipPrompt, depictable, makeAdapterPictureDeriver, neutralWhereLooksRide, pictureAspect, pictureRoom, pictureWho, promptRoom, suggestPicture, type PictureDeriver } from "./productions/audiobook-picture-suggest.js";
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
 import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
@@ -1682,7 +1682,8 @@ export class Coordinator {
           const who = pictureWho(store, model, chosen, { look: record?.look ?? null, frame: row.shot?.frame ?? null });
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${row.block === "title" ? "title" : row.title}`,
-            prompt: row.prompt,
+            // Held to rule 4 again: a look chosen since the proposal rides now, and its image carries the clothes (codex on PR 1559).
+            prompt: neutralWhereLooksRide(row.prompt, who),
             ...(room.mood !== undefined ? { mood: room.mood } : {}),
             model,
             ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
