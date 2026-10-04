@@ -89,6 +89,25 @@ const click = async (element: HTMLElement): Promise<void> => {
 
 type Dock = NonNullable<Parameters<typeof ProductionConversation>[0]["dock"]>;
 
+it("keeps shot and Stage contexts distinct when the same dock navigates between shots", async () => {
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest(capture(sent));
+  const node = (kind: "shot" | "stage", shotId: string) => <ProductionConversation worldId={FIXTURE_WORLD_ID}
+    placeholder="Ask about this shot" emptyLine="No conversation yet"
+    productionId="saltlight" entry={{ kind, productionId: "saltlight", sceneId: "sc_04", shotId }}
+    subject={{ kind: "shot", sceneId: "sc_04", shotId }}
+    dock={{ title: "Arke", subject: shotId, conversationFirst: true, prompts: ["Tighten this shot"] }} />;
+  const mounted = await mountNode(node("shot", "sh_12"));
+  for (const [kind, shotId] of [["shot", "sh_12"], ["shot", "sh_13"], ["stage", "sh_13"]] as const) {
+    await act(async () => mounted.root.render(<MemoryRouter initialEntries={[SCENE_PATH]}>{node(kind, shotId)}</MemoryRouter>));
+    await click(q(mounted, ".fy-arke__prompt")!);
+    const create = sent.filter(message => message.kind === "world-chat-create").at(-1);
+    assert.equal(create?.kind, "world-chat-create");
+    if (create?.kind === "world-chat-create") assert.deepEqual(create.entryContext, { kind, productionId: "saltlight", sceneId: "sc_04", shotId });
+  }
+  assert.equal(sent.filter(message => message.kind === "world-chat-create").length, 3);
+});
+
 function dockConversation(dock: Dock) {
   return (
     <ProductionConversation

@@ -489,7 +489,8 @@ export function TakesView({
       <ProductionConversation
         worldId={worldId}
         productionId={prodId}
-        entry={{ kind: "scene", productionId: prodId ?? "", sceneId: scene.id }}
+        entry={{ kind: "takes", productionId: prodId ?? "", sceneId: scene.id, shotId: shot.id }}
+        subject={picked ? { kind: "take", takeId: picked.id } : { kind: "shot", sceneId: scene.id, shotId: shot.id }}
         dock={{
           onPutAway: () => setDock(false),
           title: `Arke · Shot ${shot.number}`,

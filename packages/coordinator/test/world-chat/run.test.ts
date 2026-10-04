@@ -1,3 +1,4 @@
+import { receiptBinding } from "./production-context-fixtures.js";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
@@ -1211,4 +1212,23 @@ describe("running a durable queued input (SPEC-045 R-16)", () => {
     assert.deepEqual(createdModels, models, "the invalid model never creates a session");
     assert.deepEqual((await h.store.read()).events, before, "no retry or replacement constraints are recorded");
   });
+});
+
+
+it("renders a recovered earlier action's completed receipt in the next model prompt (SPEC-051 R-41)", async () => {
+  const prompts: string[] = [];
+  const { runner, store, conversationId } = await setup(fakeAdapter([JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] })], { prompts }));
+  const world = (await scanWorld(FIXTURE_WORLD)).bundle;
+  const binding = receiptBinding(conversationId, world.meta.worldId);
+  const { authority: _authority, authorityRevision: _authorityRevision, previewDigest: _previewDigest, shown: _shown, status: _status, preparedAt: _preparedAt, ...intent } = binding;
+  await store.append({ type: "action.prepare-intent", intent }, { at: AT });
+  await store.append({ type: "action.prepared", binding }, { at: AT });
+  const takeId = newId("tk");
+  await store.append({ type: "action.status-changed", actionId: binding.actionId, expectedStatus: "pending", status: "completed",
+    receipt: { kind: "take", id: takeId, summary: "C:/private/result" } }, { at: AT });
+  await runner.send(store, conversationId, "What did we make?");
+  assert.match(prompts[0]!, /Recorded action outcomes/);
+  assert.match(prompts[0]!, new RegExp(takeId));
+  assert.match(prompts[0]!, /"status":"completed"/);
+  assert.doesNotMatch(prompts[0]!, /C:\/private/);
 });

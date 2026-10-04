@@ -69,7 +69,7 @@ export function retainEditorRequests(requests: readonly EditorRequest[]): Editor
 /** The production a thread is about (R-26), or null for a thread that is not about one. */
 export function productionOfContext(context: WorldChatContext | undefined): string | null {
   if (context === undefined) return null;
-  return context.kind === "production" || context.kind === "episode" || context.kind === "scene" ? context.productionId : null;
+  return "productionId" in context ? context.productionId : null;
 }
 
 /** The fingerprint a first assembly is fenced by right now, or null when none can be derived. */

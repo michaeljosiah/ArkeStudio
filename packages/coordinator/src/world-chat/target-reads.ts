@@ -26,6 +26,8 @@ import { conversationActionDigest } from "../arke-actions/digest.js";
 import type { QueryLease } from "./lease.js";
 import type { DispatchPlanReadRecord } from "../productions/plans.js";
 
+import { audioCutReadRows, editorRequestReadRows, performanceReadRows, voiceSampleReadRows, productionReadFence, type ProductionReadRow } from "./production-reads.js";
+
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 20;
 const TEXT_CHUNK_CHARS = 4_000;
@@ -56,6 +58,7 @@ export interface ArkeExportReadRecord {
 }
 
 export interface TargetReadDeps {
+  readonly getFrameRunRows?: (productionId: string) => readonly ProductionReadRow[] | Promise<readonly ProductionReadRow[]>;
   readonly getBuildItems?: () => readonly ArkeBuildItemRead[];
   readonly getPlans?: (productionId: string) => Promise<readonly DispatchPlanReadRecord[]>;
   readonly getJobs?: () => readonly Job[];
@@ -826,6 +829,36 @@ export class WorldChatTargetReads {
         readTarget = target("takes", productionId);
         rows = takeRows(production);
         revisionOrDigest = takesFence(production);
+        break;
+      }
+      case "list_frame_runs": {
+        assertArgs(args, ["productionId"]);
+        const productionId = requireString(args, "productionId");
+        productionOf(bundle, productionId);
+        if (!this.deps.getFrameRunRows) throw new TargetReadError("Frame run records are unavailable.");
+        const records = await this.deps.getFrameRunRows(productionId);
+        rows = [...records];
+        readTarget = target("frame-runs", productionId);
+        revisionOrDigest = productionReadFence(rows);
+        break;
+      }
+      case "list_voice_samples": {
+        assertArgs(args, []);
+        rows = voiceSampleReadRows(bundle);
+        readTarget = target("voice-samples", lease.worldId);
+        revisionOrDigest = productionReadFence(rows);
+        break;
+      }
+      case "list_performances":
+      case "get_audio_cut":
+      case "list_editor_requests": {
+        assertArgs(args, ["productionId"]);
+        const productionId = requireString(args, "productionId");
+        const production = productionOf(bundle, productionId);
+        rows = tool === "list_performances" ? performanceReadRows(production)
+          : tool === "get_audio_cut" ? audioCutReadRows(production) : editorRequestReadRows(production);
+        readTarget = target(tool === "list_performances" ? "performances" : tool === "get_audio_cut" ? "audio-cut" : "editor-requests", productionId);
+        revisionOrDigest = productionReadFence(rows);
         break;
       }
       case "get_timeline": {

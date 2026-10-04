@@ -148,8 +148,21 @@ export const WorldChatContextSchema = z.discriminatedUnion("kind", [
     .object({ kind: z.literal("episode"), productionId: SlugSchema, episodeId: EpisodeIdSchema })
     .strict(),
   z.object({ kind: z.literal("scene"), productionId: SlugSchema, sceneId: SceneIdSchema }).strict(),
+  // The dock's workspace and subject are distinct from its per-turn selection (SPEC-051 R-44).
+  z.object({ kind: z.literal("shot"), productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema }).strict(),
+  z.object({ kind: z.literal("stage"), productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema }).strict(),
+  z.object({ kind: z.literal("takes"), productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema }).strict(),
+  z.object({ kind: z.literal("generate"), productionId: SlugSchema, sceneId: SceneIdSchema.optional(), shotId: ShotIdSchema.optional() }).strict(),
+  z.object({ kind: z.literal("cut"), productionId: SlugSchema }).strict(),
 ]);
 export type WorldChatContext = z.infer<typeof WorldChatContextSchema>;
+
+/** Older readers cannot parse these persisted conversation entry kinds. */
+export const PRODUCTION_CHAT_CONTEXT_SCHEMA_VERSION = 50;
+export function worldChatContextSchemaVersion(context: WorldChatContext | undefined): number {
+  return context && ["shot", "stage", "takes", "generate", "cut"].includes(context.kind)
+    ? PRODUCTION_CHAT_CONTEXT_SCHEMA_VERSION : 2;
+}
 
 /**
  * The conversation's initiative mode (Scope §04; SPEC-023 R-21): how eagerly the studio

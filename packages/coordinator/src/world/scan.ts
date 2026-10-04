@@ -138,7 +138,7 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Forty-seven is a picture set on a block of a chapter's audiobook (turn 186).
 // Forty-eight is timing on an audiobook's blocks, its reactions, beds and sounds (turn 187).
 // Forty-nine is a chapter's look and the look a picture was made under (turn 191c).
-export const SUPPORTED_SCHEMA_VERSION = 49;
+export const SUPPORTED_SCHEMA_VERSION = 50;
 
 export class WorldOpenError extends Error {
   constructor(

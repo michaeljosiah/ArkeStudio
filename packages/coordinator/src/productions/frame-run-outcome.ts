@@ -33,10 +33,12 @@ async function recordFrameRunOutcomeUnserialised(
   const requestId = `frame-run-outcome:${run.id}`;
   const matching = (await discoverConversations(store.dir)).summaries
     .filter(
-      (summary) =>
-        summary.entryContext?.kind === "scene" &&
-        summary.entryContext.productionId === state.productionId &&
-        summary.entryContext.sceneId === run.sceneId,
+      (summary) => {
+        const context = summary.entryContext;
+        if (context === undefined || !("sceneId" in context) || context.productionId !== state.productionId || context.sceneId !== run.sceneId) return false;
+        const shotId = "shotId" in context ? context.shotId : undefined;
+        return shotId === undefined || run.steps.some(step => step.updateShotIds.includes(shotId));
+      },
     )
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 

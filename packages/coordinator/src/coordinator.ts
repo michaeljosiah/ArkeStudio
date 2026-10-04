@@ -442,6 +442,7 @@ import { WorldOpenError, scanWorld } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
 import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
 import { worldChatContextExists } from "./world-chat/context-validation.js";
+import { worldChatContextSchemaVersion } from "@arke-studio/contracts";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
@@ -7834,10 +7835,10 @@ export class Coordinator {
         let made = false;
         this.worldChatCreates.set(msg.requestId, new Promise((resolve) => { settle = resolve; }));
         try {
-          // The first conversation crosses the schema boundary (#70 §4.1, issue #403): older
-          // builds must refuse this world rather than export `.conversations` they do not know
-          // to exclude. The raise is durable before the conversation directory exists.
-          await store.ensureSchemaVersion(2, "world-chat");
+          // Raise the persisted-context boundary before creating its log (SPEC-002 R-25):
+          // older builds must refuse conversation kinds they cannot read. Ordinary contexts
+          // retain the first-conversation boundary (#70 §4.1, issue #403).
+          await store.ensureSchemaVersion(worldChatContextSchemaVersion(msg.entryContext), "world-chat");
           const service = new WorldChatService(store.dir);
           const create = () =>
             service.create({

@@ -1,6 +1,7 @@
 import type {
   CandidateGroup,
   CandidateTombstone,
+  ConversationActionCard,
   WorldChangeCandidate,
   WorldChatMessage,
 } from "@arke-studio/contracts";
@@ -123,7 +124,7 @@ const HARNESS_CHARS_PER_TOKEN = 3;
  * they are what the person handed over for *this* turn, which is the same reason the current
  * message is not on this list at all. The bible is absent for the reason stated beside it.
  */
-const SACRIFICE_ORDER = ["recentTurns", "worldContext", "summary", "registry", "attachments"] as const;
+const SACRIFICE_ORDER = ["recentTurns", "actionReceipts", "worldContext", "summary", "registry", "attachments"] as const;
 
 /**
  * When a conversation is long enough to be worth summarising.
@@ -209,6 +210,8 @@ export interface ContextInput {
   /** Live groups, so an operation on one can name it. Empty when nothing has been grouped. */
   groups?: readonly CandidateGroup[];
   messages: readonly WorldChatMessage[];
+  /** Current lifecycle fold, not a previous model's claim that a card completed (SPEC-051 R-41). */
+  actions?: readonly ConversationActionCard[];
   tombstones: readonly CandidateTombstone[];
   worldContext?: string;
   /** The author's Bible, whole and untrimmed (master §4.5). Empty when they have not started one. */
@@ -240,6 +243,7 @@ export interface AssembledContext {
   /** Live propositions, so the model can correct rather than repeat them. */
   registry: string;
   recentTurns: string;
+  actionReceipts: string;
   worldContext: string;
   /** The bible with its framing line, or "" when there is none. Never trimmed. */
   bible: string;
@@ -328,6 +332,27 @@ function renderTurns(messages: readonly WorldChatMessage[]): string {
   return messages
     .map((m) => (m.role === "user" ? `User [${m.id}]: ${m.text}` : `Studio: ${m.text}`))
     .join("\n\n");
+}
+
+/** Keep complete identities, never receipt prose, paths or writable authority payloads. */
+function renderActionReceipts(actions: readonly ConversationActionCard[], bound: number): string {
+  const rows: string[] = [];
+  let spent = 0;
+  for (const card of actions.slice(-32).reverse()) {
+    const results = card.receipt?.generation?.results ?? [];
+    const row = JSON.stringify({ actionId: card.actionId, kind: card.actionKind,
+      targets: card.targets.map(({ kind, id }) => ({ kind, id })), status: card.status,
+      authority: card.authority,
+      ...(card.receipt ? { receipt: { kind: card.receipt.kind, id: card.receipt.id,
+        results: results.slice(0, 8).map(({ id, status }) => ({ id, status })),
+        ...(results.length > 8 ? { omittedResults: results.length - 8 } : {}) } } : {}) });
+    if (spent + row.length + 1 > bound - 100) break;
+    rows.unshift(row);
+    spent += row.length + 1;
+  }
+  const omitted = actions.length - rows.length;
+  const note = omitted > 0 ? `[${omitted} earlier action records omitted; use current reads for other ids.]` : "";
+  return [...(note && note.length <= bound ? [note] : []), ...rows].join("\n");
 }
 
 /**
@@ -463,6 +488,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
    */
   const sections: Record<(typeof SACRIFICE_ORDER)[number], string> = {
     recentTurns: renderTurns(input.messages.slice(-RECENT_TURN_COUNT * 2)),
+    actionReceipts: renderActionReceipts(input.actions ?? [], Math.min(12_000, Math.floor(budget / 10))),
     worldContext: input.worldContext ?? "",
     summary: input.summary ?? "",
     registry: renderRegistry(input.candidates, input.groups ?? []),
@@ -492,7 +518,9 @@ export function assembleContext(input: ContextInput): AssembledContext {
     if (text.length === 0) continue;
     const keep = Math.max(0, text.length - over);
     sections[name] =
-      name === "attachments"
+      name === "actionReceipts"
+        ? renderActionReceipts(input.actions ?? [], keep)
+        : name === "attachments"
         ? renderAttachments(input.attachments ?? [], keep)
         : trimToBound(text, keep).text;
     trimmed.push(name);
@@ -505,6 +533,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
     summary: sections.summary,
     registry: sections.registry,
     recentTurns: sections.recentTurns,
+    actionReceipts: sections.actionReceipts,
     worldContext: sections.worldContext,
     bible,
     attachments: sections.attachments,
@@ -518,6 +547,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
       summary: sections.summary,
       registry: sections.registry,
       recentTurns: sections.recentTurns,
+      actionReceipts: sections.actionReceipts,
       worldContext: sections.worldContext,
       // In the digest because the bible is editable from inside the conversation as well as from
       // outside it. Two turns that read different bibles are different turns, and a run record

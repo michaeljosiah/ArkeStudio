@@ -1658,9 +1658,10 @@ function CutEditorScreen() {
             <ProductionConversation
               worldId={worldId}
               productionId={prodId}
+              entry={{ kind: "cut", productionId: prodId ?? "" }}
               dock={{ title: "Arke", subject: `${production?.meta.title ?? "production"} · production conversation` }}
               openingNote="opening production conversation…"
-              emptyLine="No production conversation yet. This tab uses the same real thread as Develop. Ask for a change to the cut and Arke stages it as a request you accept or reject."
+              emptyLine="Nothing written with Arke about this cut yet. Ask for a change and Arke stages it as a request you accept or reject."
               placeholder="Ask Arke about this production…"
               pointsEmpty="Nothing understood yet."
               subject={selectedAny ? { kind: "timeline-clip", clipId: selectedAny.clip.id } : undefined}

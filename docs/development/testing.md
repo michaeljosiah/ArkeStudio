@@ -59,6 +59,17 @@ Close stores, sockets, watchers, timers and supervisors in test cleanup before d
 
 ## Boundary-specific checks
 
+Production Chat context and state-read changes run coordinator
+`test/world-chat/production-contexts.test.ts`, `test/world-chat/context-validation.test.ts`,
+`test/world-chat/entry-context.test.ts`, `test/world-chat/action-guide.test.ts`,
+`test/world-chat/context.test.ts`, `test/world-chat/run.test.ts`,
+`test/world-chat/retrieval.test.ts` and `test/world/schema-version.test.ts`.
+Client `test/scene-workspace-dock.test.tsx` checks context changes between shots and Stage.
+The regressions cover bounded current action outcomes in later prompts, complete paged
+production reads, changed-record cursors, durable frame-run reads without provider inputs,
+explicit editor-request read requirements and the lazy schema-50 context boundary.
+Run client tests from `packages/client`, and typecheck after the last test edit.
+
 For conversation command reachability and input policy, run contracts
 `test/world-chat-actions.test.ts`, coordinator `test/arke-actions.test.ts`,
 `test/world-chat/action-guide.test.ts`, `test/world-chat/turn-result.test.ts` and

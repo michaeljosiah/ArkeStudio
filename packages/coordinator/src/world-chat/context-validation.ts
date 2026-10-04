@@ -19,7 +19,20 @@ export function worldChatContextExists(bundle: WorldBundle, context: WorldChatCo
       // this arm against their folded attachment list because the world bundle cannot see it.
       return false;
     case "production":
+    case "cut":
       return bundle.productions.some((production) => production.meta.id === context.productionId);
+    case "generate": {
+      const production = bundle.productions.find((entry) => entry.meta.id === context.productionId);
+      if (!production) return false;
+      if (context.sceneId === undefined) return context.shotId === undefined;
+      const scene = production.scenes.find((entry) => entry.id === context.sceneId);
+      return scene !== undefined && (context.shotId === undefined || orderedShots(scene).some((shot) => shot.id === context.shotId));
+    }
+    case "shot":
+    case "stage":
+    case "takes":
+      return bundle.productions.some((production) => production.meta.id === context.productionId &&
+        production.scenes.some((scene) => scene.id === context.sceneId && orderedShots(scene).some((shot) => shot.id === context.shotId)));
     case "episode":
       return bundle.productions.some((production) =>
         production.meta.id === context.productionId &&
@@ -37,7 +50,7 @@ export function worldChatSubjectExists(
   context: WorldChatContext,
   subject: WorldChatSubject,
 ): boolean {
-  const productionId = context.kind === "production" || context.kind === "episode" || context.kind === "scene"
+  const productionId = "productionId" in context
     ? context.productionId
     : null;
   if (productionId === null) return false;
@@ -58,7 +71,7 @@ export function worldChatSubjectExists(
     return production.chapters.some((chapter) => !chapter.retired && (chapter.id === subject.chapterId || chapter.file === subject.chapterId));
   }
   const scene = production.scenes.find((candidate) => candidate.id === subject.sceneId);
-  if (scene === undefined || (context.kind === "scene" && context.sceneId !== scene.id)) return false;
+  if (scene === undefined || ("sceneId" in context && context.sceneId !== undefined && context.sceneId !== scene.id)) return false;
   if (subject.kind === "scene") return true;
   const hasShot = (shotId: string | null) => shotId === null || orderedShots(scene).some((shot) => shot.id === shotId);
   if (subject.kind === "shot") return hasShot(subject.shotId);
