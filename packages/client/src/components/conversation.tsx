@@ -13,7 +13,7 @@ import type {
   WorldChatSubject,
   WorldChatWorkspace,
 } from "@arke-studio/contracts";
-import { CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan, findHarnessModel, harnessModelManifestEntry, PROVIDERS, proposalDecisionOf, isRemoteHostConversationAction } from "@arke-studio/contracts";
+import { CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan, findHarnessModel, harnessModelManifestEntry, harnessModelReference, PROVIDERS, proposalDecisionOf, isRemoteHostConversationAction } from "@arke-studio/contracts";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { OnYourPC } from "./on-your-pc.js";
 import { Composer } from "./composer.js";
@@ -48,7 +48,7 @@ import {
   promoteWorldChatAttachment,
   wrapUpWorldChat,
 } from "../lib/store.js";
-import { productionModel } from "./dispatch-bar.js";
+import { productionModel, productionVariants } from "./dispatch-bar.js";
 import { HarnessModelStatus, harnessModelsNeedAWord, harnessModelLabel, harnessModelUnavailableReason } from "./harness-models.js";
 import { ModelChip } from "./model-chip.js";
 import { Working } from "./working.js";
@@ -916,6 +916,8 @@ export function ProductionConversation({
   const navigate = useNavigate();
   const [message, setMessage] = useState("");
   const [languageModelId, setLanguageModelId] = useState<string | undefined>();
+  /** This chat's own effort per model, by the model's reference (design turn 195): chosen with the model, spent with it. */
+  const [chatVariants, setChatVariants] = useState<Readonly<Record<string, string>>>({});
   const pendingRemember = useRef<string | undefined>(undefined);
   /*
    * Wrap-up state lives here rather than inside WrapUp (review 2026-08-22): retry is a way of
@@ -943,6 +945,8 @@ export function ProductionConversation({
     was: string | null;
     subject?: WorldChatSubject;
     modelId?: string;
+    /** This turn's effort for the model that answers (design turn 195). */
+    variant?: string;
     replyOnly?: boolean;
     /** Told the request id once the line is sent into the thread this opened. */
     onSent?: (requestId: string) => void;
@@ -979,6 +983,7 @@ export function ProductionConversation({
     setMessage("");
     setOmittedAttachments(new Set());
     setLanguageModelId(undefined);
+    setChatVariants({});
     pendingRemember.current = undefined;
     setOpening(previous => { previous?.onAttached?.([]); return null; });
     setBusyMedia(null);
@@ -1006,6 +1011,16 @@ export function ProductionConversation({
     : state?.app.harnessInfo?.generation === "arke" ? "local"
       : ["claude", "codex"].includes(state?.app.harnessInfo?.generation ?? "") ? "cloud" : "model";
   const languageUnavailableReason = languageChoiceReason(state, effectiveLanguageModelId);
+  // The effort belongs to a model, so it is kept by the model's reference: this chat's own choice,
+  // else what the production kept for that model. Nothing is sent for a model nobody named: the
+  // harness's default has no session pinned to it for an effort to apply to.
+  const chipModel = effectiveLanguageModelId ? model : state?.app.harnessModels.find((candidate) => candidate.isDefault);
+  const effortRef = chipModel ? harnessModelReference(chipModel) : effectiveLanguageModelId;
+  const keptVariant = effortRef !== undefined ? productionVariants(state, productionId)?.[effortRef] : undefined;
+  const chatVariant = effortRef !== undefined ? chatVariants[effortRef] : undefined;
+  const effectiveVariant = chatVariant ?? keptVariant;
+  const variantSet = chatVariant !== undefined && chatVariant !== keptVariant;
+  const modelSet = languageModelId !== undefined && languageModelId !== rememberedLanguageModel;
   const thread = useMemo(() => {
     const wanted = JSON.parse(contextKey) as WorldChatContext;
     const rows = (state?.world?.conversations ?? []).filter((c) => sameContext(c.entryContext, wanted));
@@ -1063,7 +1078,7 @@ export function ProductionConversation({
     if (opening.files) void attachHostFiles(worldChatAttachTarget(worldId, opened), opening.files).then(refusals => { setAttachmentTrouble(refusals); opening.onAttached?.(refusals); });
     else if (opening.attach) worldChatAttachFiles(worldId, opened);
     else {
-      const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
+      const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false, undefined, opening.variant);
       if (requestId === null) return;
       opening.onSent?.(requestId);
     }
@@ -1099,13 +1114,14 @@ export function ProductionConversation({
     }
     handedOver.current = true;
     if (conversationId) {
-      sendWorldChat(worldId, conversationId, openWith, [], undefined, languageModelId);
+      sendWorldChat(worldId, conversationId, openWith, [], undefined, languageModelId, false, undefined, chatVariant);
       return;
     }
     setOpening({
       text: openWith,
       was: workspace?.conversationId ?? null,
       ...(languageModelId !== undefined ? { modelId: languageModelId } : {}),
+      ...(chatVariant !== undefined ? { variant: chatVariant } : {}),
     });
     createWorldChat(worldId, conversationTitle(openWith), crypto.randomUUID(), context);
     // context is derived from route params and rebuilt each render; the latch above is what
@@ -1149,18 +1165,21 @@ export function ProductionConversation({
         was: workspace?.conversationId ?? null,
         ...(about !== undefined ? { subject: about } : {}),
         ...(languageModelId !== undefined ? { modelId: languageModelId } : {}),
+        ...(chatVariant !== undefined ? { variant: chatVariant } : {}),
         ...(replyOnly ? { replyOnly: true } : {}),
         ...(onSent !== undefined ? { onSent } : {}),
       });
       setLanguageModelId(undefined);
+      setChatVariants({});
       return true;
     }
     // Only the turn's explicit choice travels as an override. The coordinator resolves the
     // captured agent preference before the production default; sending the displayed fallback
     // here would promote that default above the agent and run a different model.
-    const requestId = sendWorldChat(worldId, conversationId, text, turnAttachments.map(attachment => attachment.id), about, languageModelId, replyOnly, again);
+    const requestId = sendWorldChat(worldId, conversationId, text, turnAttachments.map(attachment => attachment.id), about, languageModelId, replyOnly, again, chatVariant);
     if (requestId === null) return false;
     setLanguageModelId(undefined);
+    setChatVariants({});
     onSent?.(requestId);
     return true;
   };
@@ -1369,13 +1388,26 @@ export function ProductionConversation({
     <ModelChip
       state={state}
       value={effectiveLanguageModelId}
-      set={languageModelId !== undefined && languageModelId !== rememberedLanguageModel}
+      set={modelSet || variantSet}
       onPick={(id) => setLanguageModelId(id)}
-      {...(languageModelId !== undefined && languageModelId !== rememberedLanguageModel && worldId && languageUnavailableReason === undefined
-        ? { onRemember: () => { pendingRemember.current = languageModelId; setProductionModel(worldId, productionId, "llm", languageModelId); } }
+      variant={effectiveVariant}
+      onVariant={(name) => {
+        if (effortRef === undefined) return;
+        setChatVariants((previous) => ({ ...previous, [effortRef]: name }));
+        // A model nobody named has no session for an effort to apply to: choosing one names it.
+        if (effectiveLanguageModelId === undefined) setLanguageModelId(effortRef);
+      }}
+      {...((modelSet || (variantSet && effectiveLanguageModelId !== undefined)) && worldId && languageUnavailableReason === undefined
+        ? { onRemember: () => {
+            const kept = languageModelId ?? effectiveLanguageModelId;
+            if (kept === undefined) return;
+            // Only a model chosen here waits for its save to land; an effort alone leaves the model as it is.
+            if (languageModelId !== undefined) pendingRemember.current = kept;
+            setProductionModel(worldId, productionId, "llm", kept, chatVariant);
+          } }
         : {})}
       {...(rememberedLanguageModel !== undefined && worldId
-        ? { onClear: () => { setProductionModel(worldId, productionId, "llm", null); setLanguageModelId(undefined); } }
+        ? { onClear: () => { setProductionModel(worldId, productionId, "llm", null); setLanguageModelId(undefined); setChatVariants({}); } }
         : {})}
     />
   ) : null;

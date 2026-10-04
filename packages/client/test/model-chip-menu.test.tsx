@@ -35,10 +35,10 @@ Object.assign(globalThis, {
 
 type Box = { top: number; bottom: number; left: number; width: number; height: number };
 let chipBox: Box = { top: 700, bottom: 732, left: 40, width: 120, height: 32 };
-let menuHeight = 320;
+let menuHeight = 560;
 dom.HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
   const box = this.classList.contains("fy-mchip__btn") ? chipBox
-    : this.classList.contains("fy-mchip__menu") ? { top: 0, bottom: menuHeight, left: 0, width: 250, height: menuHeight }
+    : this.classList.contains("fy-mchip__menu") ? { top: 0, bottom: menuHeight, left: 0, width: 430, height: menuHeight }
     : { top: 0, bottom: 0, left: 0, width: 0, height: 0 };
   return { ...box, x: box.left, y: box.top, right: box.left + box.width, toJSON() { return box; } } as DOMRect;
 };
@@ -91,7 +91,7 @@ afterEach(async () => {
   container?.remove();
   focusLog.length = 0;
   chipBox = { top: 700, bottom: 732, left: 40, width: 120, height: 32 };
-  menuHeight = 320;
+  menuHeight = 560;
   Object.assign(dom.window, { innerWidth: 1200, innerHeight: 800 });
 });
 
@@ -107,6 +107,15 @@ function key(target: Element, name: string) {
   const event = new dom.Event("keydown", { bubbles: true, cancelable: true }) as Event & { key: string };
   event.key = name;
   target.dispatchEvent(event);
+}
+/**
+ * A key on the search field. React's input-event polyfill (linkedom has no `oninput`) throws on a
+ * native keydown at an input nothing focused, so the key is handed to the handler React holds for
+ * it, as the audiobook tests hand it a change.
+ */
+function typeKey(target: Element, name: string) {
+  const props = (target as unknown as Record<string, { onKeyDown?: (event: unknown) => void }>)[Object.keys(target).find((candidate) => candidate.startsWith("__reactProps$"))!];
+  props!.onKeyDown!({ key: name, preventDefault() {}, stopPropagation() {} });
 }
 function press(target: Element) {
   target.dispatchEvent(new dom.Event("mousedown", { bubbles: true, cancelable: true }));
@@ -128,6 +137,7 @@ describe("the model chip's menu is out of the composer's clip", () => {
     const element = await open();
     assert.equal(element.getAttribute("data-side"), "up");
     assert.equal(element.style.bottom, `${800 - 700 + 8}px`, "8px above the chip");
+    assert.equal(element.id, chip().getAttribute("aria-controls"));
     assert.equal(element.style.top, "");
     assert.equal(element.style.left, "40px");
     assert.equal(element.style.maxHeight, "", "the stylesheet's own cap holds when it fits");
@@ -140,7 +150,7 @@ describe("the model chip's menu is out of the composer's clip", () => {
     assert.equal(element.getAttribute("data-side"), "down");
     assert.equal(element.style.top, `${72 + 8}px`);
     assert.equal(element.style.bottom, "");
-    assert.equal(element.style.left, `${1200 - 250 - 8}px`);
+    assert.equal(element.style.left, `${1200 - 430 - 12}px`, "12 from the window's edge");
   });
 
   it("takes the roomier side and shortens to fit it when neither side holds the whole menu", async () => {
@@ -149,14 +159,14 @@ describe("the model chip's menu is out of the composer's clip", () => {
     await mount(<ChatComposer />);
     const element = await open();
     assert.equal(element.getAttribute("data-side"), "down", "202px below against 134px above");
-    assert.equal(element.style.maxHeight, `${400 - 182 - 8 - 8}px`);
+    assert.equal(element.style.maxHeight, `${400 - 182 - 8 - 12}px`);
   });
 
   it("closes on Escape and hands focus back to the chip", async () => {
     await mount(<ChatComposer />);
     const element = await open();
-    assert.equal(focused()?.getAttribute("data-model"), "anthropic/model-3", "focus goes to the model in force");
-    await act(async () => key(element.querySelector("[data-model]")!, "Escape"));
+    assert.equal(focused(), element.querySelector("input"), "the search holds focus on opening");
+    await act(async () => key(element, "Escape"));
     assert.equal(menu(), null);
     assert.equal(focused(), chip());
     assert.equal(chip().getAttribute("aria-expanded"), "false");
@@ -171,19 +181,34 @@ describe("the model chip's menu is out of the composer's clip", () => {
     assert.equal(menu(), null);
   });
 
-  it("moves through the models by arrow keys, opens from the keyboard and picks", async () => {
+  it("moves through the models by arrow keys from the search, opens from the keyboard and picks with Enter", async () => {
     await mount(<ChatComposer />);
     await act(async () => key(chip(), "ArrowDown"));
     const element = menu();
     assert.ok(element, "ArrowDown on the chip opens it");
-    await act(async () => key(focused()!, "ArrowDown"));
-    assert.equal(focused()?.getAttribute("data-model"), "anthropic/model-4");
-    await act(async () => key(focused()!, "End"));
-    assert.equal(focused()?.getAttribute("data-model"), "anthropic/model-89");
-    await act(async () => (focused() as HTMLButtonElement).click());
+    const search = element.querySelector("input")!;
+    const named = () => document.getElementById(search.getAttribute("aria-activedescendant")!)?.getAttribute("data-model");
+    assert.equal(named(), "anthropic/model-3", "it opens on the model in force");
+    await act(async () => typeKey(search, "ArrowDown"));
+    assert.equal(named(), "anthropic/model-4");
+    await act(async () => typeKey(search, "ArrowUp"));
+    await act(async () => typeKey(search, "ArrowUp"));
+    assert.equal(named(), "anthropic/model-2");
+    for (let step = 0; step < 3; step++) await act(async () => typeKey(search, "ArrowUp"));
+    assert.equal(named(), "anthropic/model-89", "it wraps from the first to the last");
+    assert.equal(focused(), search, "keyboard focus stays in the search; the list is followed by aria-activedescendant");
+    await act(async () => typeKey(search, "Enter"));
     assert.equal(menu(), null);
     assert.equal(focused(), chip(), "focus back on the chip after a pick");
     assert.match(chip().textContent ?? "", /Model 89/);
+  });
+
+  it("presses on a model with the pointer", async () => {
+    await mount(<ChatComposer />);
+    const element = await open();
+    await act(async () => element.querySelector<HTMLElement>('[data-model="anthropic/model-12"]')!.click());
+    assert.equal(menu(), null);
+    assert.match(chip().textContent ?? "", /Model 12/);
   });
 
   it("gives way to a sheet opened after it", async () => {

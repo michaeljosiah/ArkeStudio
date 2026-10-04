@@ -1,10 +1,15 @@
-/* The chat's model chip, in the composer's tool row (design turn 190e). */
-.fy-mchip { position: relative; display: inline-flex; }
+/* The chat's model chip, in the composer's tool row (design turns 190e and 195). */
+.fy-mchip { position: relative; display: inline-flex; align-items: center; gap: 6px; }
 .fy-mchip__btn {
-  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px 0 12px;
+  display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 9px 0 6px;
   border: 0; border-radius: 999px; background: var(--secondary); color: var(--foreground);
-  font: var(--type-ui); font-size: var(--text-sm); cursor: pointer; max-width: 168px;
+  font: var(--type-ui); font-size: var(--text-sm); cursor: pointer; max-width: 190px; white-space: nowrap;
 }
+.fy-mchip__btn svg { width: 12px; height: 12px; flex: none; }
+/* A model the catalogue has no mark for (a lost choice, the word Model) has nothing to sit beside. */
+.fy-mchip__btn--bare { padding: 0 9px 0 12px; }
+/* The effort: a second, quieter chip with the same shape. */
+.fy-mchip__btn--effort { padding: 0 9px 0 11px; color: var(--muted-foreground); }
 /* On a phone the composer's editor and tools share one wrapping row (attach, voice, chip, send);
    a chip wider than this pushes the tools onto a second line under the text. */
 @media (max-width: 599px) { .fy-mchip__btn { max-width: 120px; } }
@@ -12,24 +17,110 @@
 /* Named, not chosen: World Chat's model is Settings'. A label in the chip's own shape. */
 .fy-mchip__btn--fixed { cursor: default; background: none; padding: 0 6px; color: var(--muted-foreground); }
 .fy-mchip__btn:focus-visible { outline: 2px solid var(--ring, var(--foreground)); outline-offset: 2px; }
+/* The chip whose menu is open wears the ring, as 195b draws it. */
+.fy-mchip__btn[aria-expanded="true"] { outline: 2px solid var(--ring, var(--foreground)); outline-offset: 1px; }
 .fy-mchip__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-mchip__btn--set::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--foreground); flex: none; }
+/* Drawn on the body, for the same reason as the menus: the composer clips what hangs off it. */
+.fy-mchip__tip {
+  position: fixed; z-index: 100; padding: 6px 10px; border-radius: 8px; background: var(--foreground); color: var(--background);
+  font: var(--type-body); font-size: var(--text-xs); white-space: nowrap; pointer-events: none;
+}
+
 /* Drawn on the body and fixed to the window; model-chip.tsx places it beside the chip, above it or
    below by the room there is. Hung off the chip, the composer's own clip showed 40px of it. Above
    the dock's popovers and the body's sheets (60); a modal sheet is in the top layer, above it. */
 .fy-mchip__menu {
-  position: fixed; z-index: 100; width: 250px; max-width: calc(100vw - 16px); max-height: 320px; overflow-y: auto;
-  padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover, var(--background));
-  box-shadow: var(--shadow-lg); display: flex; flex-direction: column; gap: 1px;
+  position: fixed; z-index: 100; width: 430px; max-width: calc(100vw - 24px); max-height: 560px;
+  display: flex; flex-direction: column; overflow: hidden;
+  border: 1px solid var(--border); border-radius: 14px; background: var(--popover, var(--background));
+  box-shadow: var(--shadow-lg); color: var(--foreground); font: var(--type-body);
 }
-.fy-mchip__item {
-  display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; padding: 8px 10px;
-  border: 0; border-radius: 8px; background: none; color: var(--foreground); font: var(--type-ui); font-size: var(--text-sm);
-  text-align: left; cursor: pointer;
+/* The effort's menu is a short list and no more. */
+.fy-mchip__menu--effort { width: 200px; display: block; overflow: visible; padding: 6px; border-radius: 12px; }
+/* The design master sizes these boxes as content-box, so its 430 popover, 200 menu, 270 card and 44 bars
+   draw 432, 214, 304 and 45 with their borders and padding; the frames are what is compared, so they
+   are sized the same way here rather than shaved to the numbers' face value. */
+.fy-mchip__menu, .fy-mpick__search, .fy-mpick__foot, .fy-mchip__card { box-sizing: content-box; }
+
+/* The provider's mark, as the frames draw it: 18 inside its border, in the picker's own mono. A letter
+   takes the theme's plate; a logo keeps Settings' light one, since half of them are a black glyph on
+   nothing and would vanish on a dark plate. */
+.fy-mchip .fy-mark, .fy-mpick .fy-mark { box-sizing: content-box; width: 18px; height: 18px; border-radius: 5px; }
+.fy-mchip .fy-mark img, .fy-mpick .fy-mark img { width: 14px; height: 14px; padding: 0; }
+.fy-mchip .fy-mark--letter, .fy-mpick .fy-mark--letter {
+  background: var(--background); color: var(--foreground); border-color: var(--border);
+  font: var(--type-mono); font-size: var(--text-2xs); font-weight: 600;
 }
-.fy-mchip__item:hover:not(:disabled), .fy-mchip__item:focus-visible { background: var(--secondary); }
-.fy-mchip__item:disabled { color: var(--muted-foreground); cursor: default; }
-.fy-mchip__item--on { background: var(--secondary); font-weight: 600; }
-.fy-mchip__item--quiet { color: var(--muted-foreground); }
-.fy-mchip__why { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
-.fy-mchip__rule { border: 0; border-top: 1px solid var(--border); margin: 6px 4px; width: auto; }
+
+.fy-mpick__search {
+  display: flex; align-items: center; gap: 9px; height: 44px; flex: none; padding: 0 14px;
+  border-bottom: 1px solid var(--border); font-size: var(--text-sm); color: var(--muted-foreground);
+}
+.fy-mpick__search svg { width: 15px; height: 15px; flex: none; }
+.fy-mpick__input {
+  flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: none;
+  font: inherit; color: var(--foreground);
+}
+/* The caret is the search's focus mark, as 195c draws it; the global focus ring would box the field inside the popover's own box. */
+.fy-mpick__input:focus-visible { box-shadow: none; border-radius: 0; }
+.fy-mpick__input::placeholder { color: var(--muted-foreground); opacity: 1; }
+.fy-mpick__count { margin-left: auto; font: var(--type-mono); font-size: var(--text-2xs); }
+.fy-mpick__list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; }
+.fy-mpick__grp {
+  padding: 10px 10px 4px; display: flex; align-items: center; gap: 8px;
+  font: var(--type-label); color: var(--muted-foreground);
+}
+.fy-mpick__grp--first { padding-top: 6px; }
+.fy-mpick__row {
+  display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px; border: 0; border-radius: 8px;
+  background: none; color: var(--foreground); font: var(--type-body); font-size: var(--text-sm); text-align: left; cursor: pointer;
+}
+.fy-mpick__name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-mpick__name b { font-weight: 600; }
+.fy-mpick__tag { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-mpick__row svg { width: 14px; height: 14px; flex: none; }
+/* The list's highlight follows the pointer and the arrow keys by one class, so two rows are never lit at once. */
+.fy-mpick__row--active, .fy-mchip__menu--effort .fy-mpick__row:hover, .fy-mpick__row:focus-visible { background: var(--secondary); }
+.fy-mpick__row:focus-visible { outline: 2px solid var(--ring, var(--foreground)); outline-offset: -2px; }
+.fy-mpick__row--quiet { color: var(--muted-foreground); }
+/* A model this chat cannot use: listed, struck and muted. Its reason is on its card. */
+.fy-mpick__row--off .fy-mpick__name {
+  color: var(--muted-foreground); text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+}
+.fy-mpick__row[aria-disabled="true"] { cursor: default; }
+.fy-mpick__row[aria-disabled="true"]:not(.fy-mpick__row--off) { color: var(--muted-foreground); }
+.fy-mpick__empty { display: flex; align-items: center; height: 34px; padding: 0 10px; font-size: var(--text-sm); color: var(--muted-foreground); }
+
+.fy-mpick__foot {
+  display: flex; align-items: center; gap: 10px; height: 44px; flex: none; padding: 0 14px;
+  border-top: 1px solid var(--border); font-size: var(--text-sm);
+}
+.fy-mpick__manage, .fy-mpick__quiet {
+  display: inline-flex; align-items: center; gap: 10px; padding: 0; border: 0; border-radius: 4px; background: none;
+  font: inherit; cursor: pointer;
+}
+.fy-mpick__manage { color: var(--foreground); }
+.fy-mpick__manage svg { width: 15px; height: 15px; flex: none; }
+.fy-mpick__quiet { margin-left: auto; color: var(--muted-foreground); }
+.fy-mpick__quiet + .fy-mpick__quiet { margin-left: 0; }
+.fy-mpick__quiet:hover { color: var(--foreground); }
+.fy-mpick__manage:focus-visible, .fy-mpick__quiet:focus-visible { outline: 2px solid var(--ring, var(--foreground)); outline-offset: 2px; }
+
+/* The hovered model's card, on the side of the list with room; model-picker.tsx places it. */
+.fy-mchip__card {
+  position: fixed; z-index: 1; width: 270px; padding: 14px 16px; display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--popover, var(--background));
+  box-shadow: var(--shadow-lg); pointer-events: none;
+}
+.fy-mchip__card[data-side="none"] { display: none; }
+.fy-mchip__card-name { font: var(--type-ui); font-weight: 600; padding-bottom: 4px; }
+.fy-mchip__card-ref { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); padding-bottom: 10px; }
+.fy-mchip__card-row { display: flex; gap: 12px; padding: 7px 0; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.fy-mchip__card-row b { width: 76px; flex: none; font-weight: 400; color: var(--muted-foreground); }
+.fy-mchip__why {
+  display: flex; gap: 8px; align-items: center; padding: 8px 10px; margin-bottom: 10px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--warning) 60%, transparent); font-size: var(--text-sm);
+}
+.fy-mchip__why::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--warning); flex: none; }

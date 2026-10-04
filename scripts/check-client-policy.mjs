@@ -146,7 +146,8 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
   // as the window lives (turn 152); publication preferences keep only position and caption id,
   // keyed by edition and manifest digest; paired-device notifications keep one on/off preference,
   // and so does Read replies (turn 183); a chapter's Arke dock keeps open or closed per view
-  // (turn 194). Each strips that one word; keys, auth and decryption still fail.
+  // (turn 194); the model picker remembers the last three models picked on this device (turn 195).
+  // Each strips that one word; keys, auth and decryption still fail.
   const stripped = new Map([
     [join("lib", "chapter-dock.ts"), "localStorage"],
     [join("lib", "dev-session.ts"), "sessionStorage"],
@@ -156,6 +157,7 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
     [join("components", "character-voice-sample.tsx"), "localStorage"],
     [join("components", "device-notifications.tsx"), "localStorage"],
     [join("lib", "reply-reads.ts"), "localStorage"],
+    [join("lib", "recent-models.ts"), "localStorage"],
     [join("components", "update-announcement.tsx"), "sessionStorage"],
   ]);
   const offenders = [];

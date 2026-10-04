@@ -101,7 +101,7 @@ describe("production setup interaction (issue #976)", () => {
     await open();
     const items = [...dom.document.body.querySelectorAll<HTMLButtonElement>(".fy-mchip__menu [data-model]")];
     assert.ok(items.some(item => item.getAttribute("data-model") === "anthropic/opus[1m]"));
-    assert.deepEqual([...dom.document.body.querySelectorAll(".fy-mchip__menu button[role=menuitem]")].map(item => item.textContent), [], "nothing to remember the choice in");
+    assert.deepEqual([...dom.document.body.querySelectorAll(".fy-mchip__menu .fy-mpick__foot button")].map(item => item.textContent), ["Manage models"], "nothing to remember the choice in");
     await act(async () => items.find(item => item.getAttribute("data-model") === "anthropic/opus[1m]")!.click());
     assert.ok(chip().className.includes("fy-mchip__btn--set"), "the choice is this conversation's");
     await act(async () => __setStateForTest({
@@ -111,7 +111,7 @@ describe("production setup interaction (issue #976)", () => {
     await open();
     assert.match(dom.document.body.querySelector(".fy-mchip__menu")!.textContent!, /anthropic\/opus\[1m\]\s*unavailable/);
     assert.match(m.container.textContent!, /Discovery failed/, "the catalogue's trouble is said while there is trouble");
-    const reset = [...dom.document.body.querySelectorAll<HTMLButtonElement>(".fy-mchip__menu button[role=menuitem]")].find(item => /Use the default/.test(item.textContent!))!;
+    const reset = [...dom.document.body.querySelectorAll<HTMLElement>(".fy-mchip__menu [role=option]:not([data-model])")].find(item => /Use the default/.test(item.textContent!))!;
     await act(async () => reset.click());
     assert.equal(chip().className.includes("fy-mchip__btn--set"), false);
     await open();
