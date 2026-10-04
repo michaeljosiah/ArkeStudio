@@ -156,8 +156,11 @@ function renderMediaConversation(): string {
 
 function renderActionConversation(
   family: "authored-diff" | "generation" | "take-review" = "authored-diff",
-  options: { status?: "pending" | "stale" | "queued" | "running" | "completed"; older?: boolean; cancellable?: boolean; delivered?: boolean; host?: boolean; blocked?: boolean } = {},
+  options: { status?: "pending" | "stale" | "queued" | "running" | "completed"; older?: boolean; cancellable?: boolean; delivered?: boolean; host?: boolean; blocked?: boolean; actionKind?: string } = {},
 ): string {
+  // A world-scope generation card is a Bench generation: only that kind has a Bench session for
+  // its way to Bench to open (PR 1583). The others keep the kind the review cards always used.
+  const actionKind = options.actionKind ?? (options.host ? "world-chat-artifact-import" : family === "generation" ? "world-chat-bench-generation" : "rename-world");
   const state = stateWithConversation();
   const turnId = "turn_01J8F3K2QW9VZX4N7M0RTYB6HC";
   state.worldChat!.messages[0]!.turnId = turnId as never;
@@ -169,7 +172,7 @@ function renderActionConversation(
     worldId: FIXTURE_WORLD_ID,
     actorId: "local-user",
     scope: "world",
-    actionKind: options.host ? "world-chat-artifact-import" : "rename-world",
+    actionKind,
     authorityKind: "world-store",
     cardFamily: family,
     targets: [{ kind: "world", id: FIXTURE_WORLD_ID, label: "This world" }],
@@ -330,6 +333,9 @@ describe("conversation permission cards", () => {
     }
     assert.doesNotMatch(renderActionConversation("generation", { status: "completed", cancellable: true }), bench, "nothing left to cancel");
     assert.doesNotMatch(renderActionConversation("generation", { status: "running" }), bench, "a provider that cannot cancel is not offered as if it could");
+    // A production take generation has no Bench session to open; its jobs cancel on the card.
+    assert.doesNotMatch(renderActionConversation("generation", { status: "running", cancellable: true, actionKind: "world-chat-production-take-generation" }), bench,
+      "only a Bench generation is sent to Bench");
   });
 
   it("gives a delivered generation result the platform's player, controls and all (SPEC-041 R-81)", () => {
@@ -338,8 +344,12 @@ describe("conversation permission cards", () => {
     const html = renderActionConversation("generation", { status: "completed", delivered: true });
     const receipt = html.slice(html.indexOf('class="fy-actioncard__receipt"'));
     assert.match(receipt, /1 video landed/);
-    assert.match(receipt, /<video class="fy-actioncard__media" controls=""/, "native controls on the result's video");
-    assert.match(receipt, /poster="[^"]*frame\.png"/);
+    // PR 1583 moved the result into the shared generation grid, which sizes it (and lifts the
+    // 280 px cap in the Studio canvas, SPEC-051 R-65); the platform's controls are what R-81 owes.
+    const video = receipt.match(/<video[^>]*clip\.mp4[^>]*>/)?.[0] ?? "";
+    assert.match(video, / controls=""/, "native controls on the result's video");
+    assert.match(video, /poster="[^"]*frame\.png"/);
+    assert.doesNotMatch(receipt, /fy-playbtn/, "and no house play button over it");
   });
 
   it("renders playable take evidence, destination, history, and rejection citation", () => {
@@ -347,7 +357,9 @@ describe("conversation permission cards", () => {
     // The house player, not the browser's chrome (issue 1010, U2): a poster and one drawn button.
     assert.match(html, /<video[^>]*poster="/);
     assert.doesNotMatch(html, /<video[^>]*controls=""/);
-    assert.match(html, /aria-label="Play Take tk_/);
+    // The review compares the frozen current selection with the candidate (PR 1583), so the
+    // take under review is named for its place in that comparison.
+    assert.match(html, /aria-label="Play Candidate tk_01J8F0000000000000000000B2"/);
     assert.match(html, /clip\.mp4/);
     assert.match(html, /Maren at the rail, listening/);
     assert.match(html, /tk_01J8A0000000000000000000A1/);
