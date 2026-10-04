@@ -1,3 +1,6 @@
+import { WorldChatProductionTimelineActionSchema, WorldChatProductionTimelineTranscribeActionSchema, PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { compileProductionTimelineRequest, productionHistoryDigest, freezeProductionTimeline, productionTimelineBody, executeProductionTimeline } from "./production-timeline.js";
+import type { TranscriptionPorts } from "../productions/transcription.js";
 import { WorldChatBenchKeepActionSchema, WorldChatBenchSelectActionSchema, WorldChatBenchDiscardActionSchema } from "@arke-studio/contracts";
 import { WorldChatProductionAudioGenerationActionSchema, WorldChatProductionPerformanceActionSchema, WorldChatProductionAudioCueActionSchema, PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { freezeProductionPerformance, productionPerformanceBody, executeProductionPerformance } from "./production-performance.js";
@@ -387,6 +390,7 @@ export interface WorldChatActionAdapterDeps {
   readonly generationQuotes?: GenerationQuotes;
   readonly productionGenerationQuotes?: GenerationQuotes;
   readonly productionAudioQuotes?: GenerationQuotes;
+  readonly transcription?: TranscriptionPorts;
   readonly productionBatchQuotes?: GenerationQuotes;
   readonly productionBatchControls?: ProductionBatchControls;
   readonly productionTakeFiling?: ProductionTakeFiling;
@@ -529,6 +533,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-audio-generation": ["scenes", "sheets", "voices"],
   "production-performance-command": ["performances", "scenes", "timeline"],
   "production-audio-edit": ["timeline"],
+  "production-timeline-operation": ["timeline"],
   "production-audio-cue": ["timeline"],
 };
 
@@ -756,6 +761,7 @@ function productionActionTargets(
       { requirement: "scenes", target: `${action.productionId}:${action.sceneId}` },
     ];
     case "audio-spine-command": return [{ requirement: "spine", target: action.productionId }];
+    case "production-timeline-operation": return [{ requirement: "timeline", target: action.productionId }, { requirement: "scenes", target: action.productionId }, { requirement: "takes", target: action.productionId }, { requirement: "artifacts", target: worldId }];
     case "production-audio-edit": return [{ requirement: "timeline", target: action.productionId }];
     case "production-audio-cue": return [{ requirement: "timeline", target: action.productionId },
       ...(action.source.kind === "bench-take" ? [{ requirement: "bench" as const, target: action.source.sessionId }] : []),
@@ -852,6 +858,7 @@ function preparedWorldPayload(
   action: ModelWorldChatAction,
   productionId?: string,
   at = store.now(),
+  actionId?: string,
 ): WorldChatPreparedAction {
   const worldId = store.worldId;
   const common = { worldId, ...(productionId !== undefined ? { productionId } : {}), action };
@@ -936,6 +943,11 @@ function preparedWorldPayload(
     case "audio-spine-command": return WorldChatAudioSpineActionSchema.parse({ kind: "world-chat-audio-spine-command", ...common });
     case "production-audio-generation": return WorldChatProductionAudioGenerationActionSchema.parse({ kind: "world-chat-production-audio-generation", ...common });
     case "production-performance-command": return WorldChatProductionPerformanceActionSchema.parse({ kind: "world-chat-production-performance-command", ...common, frozen: freezeProductionPerformance(store, action) });
+    case "production-timeline-operation": return action.request.operation === "transcribe"
+      ? WorldChatProductionTimelineTranscribeActionSchema.parse({ kind: "world-chat-production-timeline-transcribe", ...common, frozenHash: freezeProductionTimeline(store, action.productionId) })
+      : ["undo", "redo"].includes(action.request.operation)
+      ? WorldChatProductionTimelineActionSchema.parse({ kind: "world-chat-production-timeline-operation", ...common, frozenHash: freezeProductionTimeline(store, action.productionId), historyEntryDigest: productionHistoryDigest(store, action) })
+      : WorldChatEditorRequestActionSchema.parse({ kind: "world-chat-editor-request", worldId, productionId: action.productionId, request: compileProductionTimelineRequest(store, action, actionId) });
     case "production-audio-edit": return WorldChatEditorRequestActionSchema.parse({ kind: "world-chat-editor-request", worldId, productionId: action.productionId, request: action.request });
     case "production-audio-cue": return WorldChatProductionAudioCueActionSchema.parse({ kind: "world-chat-production-audio-cue", ...common, ...freezeProductionAudioCue(store, action.productionId) });
     case "production-routing": return WorldChatProductionRoutingActionSchema.parse({ kind: "world-chat-production-routing", ...common });
@@ -1313,6 +1325,7 @@ function worldActionTargets(
     case "bench-discard": return [{ kind: "bench-session", id: action.sessionId, label: "Bench session" }, { kind: "bench-take", id: action.takeId, label: "Bench take" }];
     case "bench-generation": return [{ kind: "bench-session", id: benchChatSessionId(action, fallbackId), label: "Bench session" }];
     case "production-performance-command":
+    case "production-timeline-operation":
     case "production-audio-edit":
     case "production-audio-cue": return [{ kind: "production", id: action.productionId, label: action.productionId }];
     case "production-audio-generation": return [{ kind: "production", id: action.productionId, label: action.productionId },
@@ -1424,7 +1437,7 @@ export function prepareWorldChatActions(
     }
     const actionId = actionIds[index]!;
     const baseObservations = worldActionObservations(store, turn.receipts ?? [], action, deps);
-    let payload = preparedWorldPayload(store, action, productionId, turn.at);
+    let payload = preparedWorldPayload(store, action, productionId, turn.at, actionId);
     if (payload.kind === "world-chat-production-audio-cue" && payload.action.source.kind === "generation") {
       const ref = payload.action.source.actionRef;
       const parentIndex = groups.findIndex(parent => parent.members.some(member => member.ref === ref));
@@ -1627,6 +1640,7 @@ const preparationPath = (store: WorldStore, authority: "bible" | "scene" | "worl
   join(store.dir, ".history", authority, "prepared", `${actionId}.json`);
 
 async function writePreparation(store: WorldStore, authority: "bible" | "scene" | "world", actionId: string, payload: WorldChatPreparedAction): Promise<void> {
+  if (payload.kind === "world-chat-production-timeline-operation" || payload.kind === "world-chat-production-timeline-transcribe") await store.ensureSchemaVersion(PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION, "production-chat-timeline");
   if (["world-chat-production-audio-generation", "world-chat-production-performance-command", "world-chat-production-audio-cue"].includes(payload.kind)) await store.ensureSchemaVersion(PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, "production-chat-audio");
   if ((payload.kind === "world-chat-production-scene-command" && payload.scenePlan) || ("dependencyPreview" in payload && payload.dependencyPreview)) {
     await store.ensureSchemaVersion(CHAT_SEQUENCING_SCHEMA_VERSION, "world-chat-sequencing");
@@ -3017,6 +3031,13 @@ async function sharedResourceProjection(
       shown = { title: body.purpose, consequence: body.output, affectedTargets: [...intent.targets], ripples: [], permissionReason: "spend-and-compute", body };
       break;
     }
+    case "world-chat-production-timeline-transcribe":
+    case "world-chat-production-timeline-operation": {
+      const body = await productionTimelineBody(store, payload, deps.transcription ?? {}, intent.actionId);
+      authority = { kind: "timeline", id: intent.actionId };
+      shown = { title: body.family === "generation" ? body.purpose : body.commands[0]!.label, consequence: body.family === "generation" ? body.output : body.expectedResult, affectedTargets: [...intent.targets], ripples: [], permissionReason: body.family === "generation" ? "privacy-sensitive" : "authored-change", body };
+      break;
+    }
     case "world-chat-production-performance-command": {
       const body = await productionPerformanceBody(store, payload);
       authority = { kind: "timeline", id: intent.actionId };
@@ -4048,6 +4069,9 @@ async function executeSharedResource(
       return deps.productionBatchControls?.execute(payload.action, action.actionId, precondition) ?? { status: "failed", detail: "Production batch controls are unavailable." };
     case "world-chat-production-audio-generation":
       return deps.productionAudioQuotes?.dispatch(payload.action, action.actionId) ?? { status: "failed", detail: "The production audio quote is unavailable." };
+    case "world-chat-production-timeline-transcribe":
+    case "world-chat-production-timeline-operation":
+      return executeProductionTimeline(store, payload, action, deps.transcription ?? {});
     case "world-chat-production-performance-command":
       return executeProductionPerformance(store, payload, action);
     case "world-chat-production-audio-cue":
@@ -4449,6 +4473,7 @@ export function worldChatActionAdapters(
           })),
           expectedResult: clipped(result, 4_000) ?? request.summary.slice(0, 4_000),
           undoAvailable: true,
+          pictureStrip: preview.timeline.tracks.filter(t => t.kind === "picture").flatMap(t => [...t.clips].sort((a,b) => a.startFrame - b.startFrame).map(c => ({ id: c.id, label: (c.source.label ?? c.id).slice(0,500), startFrame: c.startFrame, durationFrames: c.durationFrames }))),
         },
       },
     };
@@ -4457,6 +4482,7 @@ export function worldChatActionAdapters(
     actionKind: "world-chat-editor-request",
     prepare: async ({ intent, payload }) => {
       const action = WorldChatEditorRequestActionSchema.parse(payload);
+      await store.ensureSchemaVersion(PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION, "production-chat-timeline");
       const [request] = await stageEditorRequests(store, {
         conversationId: intent.conversationId,
         actionId: intent.actionId,
@@ -4780,6 +4806,14 @@ export function worldChatActionAdapters(
       },
       deny: (action) => abandon(action.actionId),
       reconcile: async (action) => {
+        if (["world-chat-production-timeline-operation", "world-chat-production-timeline-transcribe"].includes(action.actionKind) && action.status !== "pending") {
+          const committed = await committedAction(store, action.actionId);
+          if (committed) {
+            const payload = await readPreparation(store, "world", action);
+            const digest = payload && "historyEntryDigest" in payload ? payload.historyEntryDigest : undefined;
+            return { status: "completed", receipt: { kind: digest ? "timeline-history" : "timeline-command", id: action.actionId, ...(digest ? { digest } : {}), summary: "The approved timeline operation is durable." } };
+          }
+        }
         if (["world-chat-production-frame-run-pause", "world-chat-production-frame-run-cancel", "world-chat-production-plan-cancel"].includes(action.actionKind)) return deps.productionBatchControls?.reconcile(action) ?? null;
         if (action.actionKind === "world-chat-production-take-file") {
           const filed = await deps.productionTakeFiling?.reconcile(action.actionId);
@@ -5051,6 +5085,7 @@ export function worldChatActionAdapters(
     "world-chat-production-stage-playblast",
     "world-chat-production-stage-construct",
     "world-chat-audio-spine-command",
+    "world-chat-production-timeline-operation", "world-chat-production-timeline-transcribe",
     "world-chat-production-audio-generation", "world-chat-production-performance-command", "world-chat-production-audio-cue",
     "world-chat-production-routing",
     "world-chat-production-routing-traversal",

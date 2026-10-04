@@ -210,6 +210,8 @@ export const REMOTE_PREPARED_ACTION_ACCESS = {
   "world-chat-image-generation": "studio", "world-chat-build-item-run": "studio",
   "world-chat-production-audio-generation": "studio", "world-chat-production-performance-command": "studio",
   "world-chat-production-audio-cue": "studio",
+  "world-chat-production-timeline-operation": "studio",
+  "world-chat-production-timeline-transcribe": "studio",
 } as const satisfies Record<WorldChatPreparedAction["kind"], "host" | "studio">;
 
 export function isRemoteHostConversationAction(kind: string): boolean {

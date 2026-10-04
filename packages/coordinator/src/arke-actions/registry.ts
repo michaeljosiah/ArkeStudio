@@ -1,3 +1,4 @@
+import { ProductionTimelineModelActionSchema, WorldChatProductionTimelineActionSchema, WorldChatProductionTimelineTranscribeActionSchema } from "@arke-studio/contracts";
 import { WorldChatBenchKeepActionSchema, WorldChatBenchSelectActionSchema, WorldChatBenchDiscardActionSchema } from "@arke-studio/contracts";
 import { WorldChatProductionAudioGenerationActionSchema, WorldChatProductionPerformanceActionSchema, WorldChatProductionAudioCueActionSchema,
   ProductionAudioGenerationModelActionSchema, ProductionPerformanceModelActionSchema, ProductionAudioEditModelActionSchema, ProductionAudioCueModelActionSchema } from "@arke-studio/contracts";
@@ -675,6 +676,14 @@ export type ArkeClientCommandRegistry = {
 // atomic import-and-select commands, and chapter edits cannot restore or retire a chapter.
 type ConversationPath = ModelWorldChatAction["kind"] | "bibleEdits" | "editorRequests" | "sceneEdits" | "candidateOperations";
 const COMMAND_MODEL_PATHS = {
+  "timeline-assemble": ["production-timeline-operation"],
+  "timeline-history": ["production-timeline-operation"],
+  "timeline-transcribe": ["production-timeline-operation"],
+  "place-overlay": ["production-timeline-operation"],
+  "move-overlay": ["production-timeline-operation"],
+  "split-overlay-audio": ["production-timeline-operation"],
+  "rejoin-overlay-audio": ["production-timeline-operation"],
+  "remove-overlay": ["production-timeline-operation"],
   "voice-line": ["production-audio-generation"],
   "prepare-table-read": ["production-audio-generation"],
   "prepare-performance-generation": ["production-audio-generation"],
@@ -1208,6 +1217,10 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     schema: WorldChatAudioSpineActionSchema,
     ...action("production", "command", "audio-spine", "authored-change", ["spine"]),
   },
+  "world-chat-production-timeline-transcribe": { kind: "world-chat-production-timeline-transcribe", schema: WorldChatProductionTimelineTranscribeActionSchema,
+    ...action("production", "generation", "timeline", "privacy-sensitive", ["timeline"]) },
+  "world-chat-production-timeline-operation": { kind: "world-chat-production-timeline-operation", schema: WorldChatProductionTimelineActionSchema,
+    ...action("production", "command", "timeline", "authored-change", ["timeline"]) },
   "world-chat-production-audio-generation": { kind: "world-chat-production-audio-generation", schema: WorldChatProductionAudioGenerationActionSchema,
     ...action("production", "generation", "job-queue", "spend-and-compute", ["scenes", "sheets", "voices"]) },
   "world-chat-production-performance-command": { kind: "world-chat-production-performance-command", schema: WorldChatProductionPerformanceActionSchema,
@@ -1277,6 +1290,8 @@ export interface ArkeBlockedAuthoritySeam {
 
 /** Typed authorities that do not have a ClientMessage command to classify (SPEC-041 R-52). */
 export const ARKE_AUTHORITY_ACTION_REGISTRY = {
+  "production-timeline-operation": { kind: "production-timeline-operation", schema: ProductionTimelineModelActionSchema,
+    ...action("production", "command", "timeline", "authored-change", ["timeline"]) },
   "production-audio-generation": { kind: "production-audio-generation", schema: ProductionAudioGenerationModelActionSchema,
     ...action("production", "generation", "job-queue", "spend-and-compute", ["scenes", "sheets", "voices"]) },
   "production-performance-command": { kind: "production-performance-command", schema: ProductionPerformanceModelActionSchema,

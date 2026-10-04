@@ -1,5 +1,15 @@
 # Running and validating changes
 
+Production whole-cut chat (#1420, SPEC-051 T-7) is covered by coordinator
+`test/world-chat/actions.test.ts` (the `production whole cut` suite), contracts
+`test/timeline-commands.test.ts`, and client `test/timeline-card-history.test.ts`.
+They exercise approval-only ordered assembly, exact history and stale cards, typed overlay
+split/rejoin with independently edited audio retained, local transcription quotes with no
+pre-approval STT calls, changed bytes, cited subtitle drafts, and direct human Undo/Redo
+matching. The contracts test replays placement into a remembered tail hole through both
+history stacks. Run client tests from `packages/client`. Installed-app and real Voxa
+acceptance remains #1427.
+
 Production sequencing (#1417, SPEC-051 R-14..R-17) is covered by contracts
 `test/turn-action-sequencing.test.ts` and coordinator `test/world-chat/actions.test.ts`,
 `turn-result.test.ts`, `generation-quotes.test.ts`, `production-generation.test.ts` and

@@ -1,3 +1,4 @@
+import { TimelineCardHistory } from "./timeline-card-history.js";
 import { ProductionSetupOutline } from "./production-setup-outline.js";
 import { HumanDecisionCardView } from "./human-decision-card.js";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -430,6 +431,7 @@ export function ConversationPermissionCard({
           ) : null}
         </div>
       )}
+      {state?.world?.meta.worldId === action.worldId && state.world.productions.filter(p => p.meta.id === action.productionId).map(production => <TimelineCardHistory key={production.meta.id} action={action} production={production} />)}
       {action.undo && <div className="fy-actioncard__audit">Undo available · {action.undo.kind}</div>}
       {supported && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
         <div className="fy-actioncard__actions">
@@ -482,6 +484,7 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
     case "command":
       return <div className="fy-actioncard__body">
         {body.commands.map((command) => <div key={`${command.label}:${command.detail ?? ""}`} className="fy-actioncard__line"><strong>{command.label}</strong>{command.detail && <span>{command.detail}</span>}</div>)}
+        {body.pictureStrip && <ol aria-label="Resulting picture strip" className="fy-actioncard__strip">{body.pictureStrip.map(clip => <li key={clip.id}><strong>{clip.label}</strong><span> Frames {clip.startFrame}–{clip.startFrame + clip.durationFrames}</span></li>)}</ol>}
         <p>{body.expectedResult}</p>
       </div>;
     case "destructive":

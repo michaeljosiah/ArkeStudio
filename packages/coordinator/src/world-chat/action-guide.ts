@@ -4,6 +4,7 @@ import {
   type ArkeTargetReadTool,
   WORLD_ACTION_DESCRIPTIONS,
   WORLD_CHAT_SHAPE_EXAMPLES,
+  TIMELINE_EDITOR_COMMAND_GUIDE,
   type ArkeActionScope,
   type ModelWorldChatAction,
   type WorldChatContext,
@@ -216,7 +217,7 @@ export function renderActionGuide(
     stage: ["production-stage-construct", "production-scene-command", "production-take-generation"],
     takes: ["production-take-review", "production-take-trim", "production-take-generation"],
     generate: ["production-frame-run-start", "production-scene-dispatch", "production-frame-run-resume", "production-frame-run-retry-step", "production-frame-run-retry-cell", "production-frame-run-pause", "production-frame-run-cancel", "production-plan-cancel"],
-    cut: ["production-audio-generation", "production-performance-command", "production-audio-cue", "production-audio-edit", "audio-spine-command", "production-cut-export"],
+    cut: ["production-timeline-operation", "production-audio-generation", "production-performance-command", "production-audio-cue", "production-audio-edit", "audio-spine-command", "production-cut-export"],
   };
   priorities.bench = ["bench-generation", "bench-keep", "bench-select", "bench-discard"];
   const first = priorities[context?.kind ?? "world"] ?? [];
@@ -227,9 +228,10 @@ export function renderActionGuide(
     : "";
   const benchGuide = "Bench has image, video, voice (speech) and music modes; no sound-effects/SFX mode. Refuse sound-effect requests by name; never substitute music. Before bench-generation read list_generation_routes and list_jobs completely. For instrumental music, request no vocals in the brief and use only the [instrumental] structure tag as lyrics; never invent sung words. Bench text fragments name their owner and JSON path; follow all pages and reconstruct the full text before quoting a rerun. Omit sessionId to propose a new session; it is created only on approval. Reusing a session or rerunning/selecting/keeping/discarding a take requires a complete get_bench_session receipt for that exact session. Include the complete composer, all reference roles and requested count; never drop a reference silently. A rerun repeats the frozen take composer and references and always prepares a new card.";
   const audioGuide = scopes.includes("production") ? "Production audio: voice-line quotes the shot's authored line and assigned voice; performance quotes one current dialogue block and supported direction; table-read prepares derived rehearsal audio; voice-sample generates an unassigned speaking video; prepare-voice-sample creates a local review candidate. Audition, performance review, sample rights and purge remain human decisions shown in the thread. Never attest that you heard audio from metadata. Use production-performance-command for reviewed duration proposals, selected placement or clearing selection. Use production-audio-edit with typed timeline gain, mute, role, move/track and set-mix ducking commands; never submit whole audio-track JSON. For music or ambience, bench-generation names productionId and cueRole, uses music mode and makes the production its subject. To generate then place in one turn, give generation ref and give production-audio-cue source.actionRef that ref and after containing it; name an existing audio track and exact frame range. Approvals remain separate: generation completes before the placement card, and its staged editor request still needs the person's acceptance. Audio spine: choose/clear a master with audio-spine-command, create/clear anchors, attach/detach a shot, or choose a take for an anchored shot; read get_spine and get_timeline first. Refuse sound effects/SFX by name." : "";
-  const full = [FULL_HEAD, timelineGuide, benchGuide, audioGuide, ...entries.map(fullEntry)].filter(Boolean).join("\n");
+  const commandGuide = scopes.includes("production") ? `Timeline command vocabulary: ${TIMELINE_EDITOR_COMMAND_GUIDE}. Frames use the production's frame rate; subtitle commands create editable timed text and set-mix controls ducking.` : "";
+  const full = [FULL_HEAD, timelineGuide, commandGuide, benchGuide, audioGuide, ...entries.map(fullEntry)].filter(Boolean).join("\n");
   if (full.length <= Math.floor(budgetChars / 5)) return { text: full, mode: "full" };
-  return { text: [COMPACT_HEAD, timelineGuide, benchGuide, audioGuide, ...entries.map(compactEntry)].filter(Boolean).join("\n"), mode: "compact" };
+  return { text: [COMPACT_HEAD, timelineGuide, commandGuide, benchGuide, audioGuide, ...entries.map(compactEntry)].filter(Boolean).join("\n"), mode: "compact" };
 }
 
 /** What describe_action answers: one entry, whole, or null for a kind the schema does not take. */

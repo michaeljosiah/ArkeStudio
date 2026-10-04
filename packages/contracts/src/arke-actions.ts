@@ -308,6 +308,7 @@ export const ArkeCommandBodySchema = z
     commands: z.array(ShownLineSchema).min(1),
     expectedResult: z.string().min(1).max(4_000),
     undoAvailable: z.boolean(),
+    pictureStrip: z.array(z.object({ id: z.string().min(1), label: z.string().min(1).max(500), startFrame: z.number().int().nonnegative(), durationFrames: z.number().int().positive() }).strict()).max(10_000).optional(),
   })
   .strict();
 

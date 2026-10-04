@@ -1271,6 +1271,11 @@ function replaceTrackClips(working: Working, trackId: TimelineTrackId, clips: Ti
   if (overlaps.length > 0) throw new TimelineOperationRefused(overlaps[0]!);
   // Stored in play order so the file a person opens reads the way the track plays.
   const sorted = orderedTrackClips({ clips });
+  // Filling the remembered tail clears endFrame. That property change belongs to the same
+  // history entry as the placement, so Undo can restore the hole before replaying older entries.
+  if (track.endFrame !== undefined && track.endFrame <= trackEndFrame({ clips: sorted }) && !working.touchedTracks.has(trackId)) {
+    working.touchedTracks.set(trackId, { kind: track.kind, before: trackProps(track) });
+  }
   working.tracks = working.tracks.map((candidate) => {
     if (candidate.id !== trackId) return candidate;
     const { endFrame, ...rest } = candidate;

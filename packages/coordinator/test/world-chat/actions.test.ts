@@ -1,3 +1,7 @@
+import { freezeProductionTimeline, productionTimelineBody } from "../../src/world-chat/production-timeline.js";
+import { applyTimelineCommand } from "../../src/productions/timeline.js";
+import { productionFrameRate, storyTimelineFingerprint } from "@arke-studio/contracts";
+import { wav } from "../audio/helpers.js";
 import { benchReadRows } from "../../src/bench/chat-reads.js";
 import { productionReadFence } from "../../src/world-chat/production-reads.js";
 import { stageReferenceFrames } from "@arke-studio/contracts";
@@ -2841,5 +2845,104 @@ describe("turn-local scene action sequencing (#1417)", () => {
       assert.deepEqual(calls[0]!.target, { kind: "shot", id: inserted.id, coversShots: [inserted.id] });
       assert.deepEqual(scene(w).version, before.version + 2);
     }
+  });
+});
+
+
+describe("production whole cut from chat (SPEC-051 T-7)", () => {
+  async function prepare(w: Awaited<ReturnType<typeof setup>>, request: Record<string, unknown>) {
+    const receipts = (["timeline", "scenes", "takes", "artifacts"] as const).map(requirement => currentReceipt(w.store, requirement, requirement === "artifacts" ? undefined : PRODUCTION));
+    const action = ModelWorldChatActionSchema.parse({ kind: "production-timeline-operation", productionId: PRODUCTION, request, checkReceiptIds: receipts.map(r => r.id) });
+    const one = turn(w.conversationId, w.entryContext, { actions: [action], receipts });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one, w.actionDeps);
+    await appendTurn(w.log, one, prepared);
+    await bindAll(w.lifecycle, prepared);
+    return (await loaded(w.log)).actions.find(a => a.actionId === prepared[0]!.intent.actionId)!;
+  }
+  const production = (w: Awaited<ReturnType<typeof setup>>) => w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
+  it("assembles named scenes in supplied order only on approval, shows the strip, and restores them with exact history", async () => {
+    const w = await setup({ kind: "production", productionId: PRODUCTION });
+    const sceneIds = production(w).scenes.slice(0,2).map(s => s.id).reverse();
+    const card = await prepare(w, { operation: "assemble", sceneIds });
+    assert.equal(card.actionKind, "world-chat-editor-request");
+    assert.equal(production(w).timeline?.status ?? "absent", "absent");
+    assert.equal(card.shown.body.family, "command");
+    if (card.shown.body.family !== "command") throw new Error("Wrong family");
+    assert.ok(card.shown.body.pictureStrip!.length > 0);
+    assert.equal((await decide(w.lifecycle,w.log,card)).status, "completed");
+    let state = production(w).timeline;
+    if (state?.status !== "ready") throw new Error("Missing timeline");
+    const shotClips = orderedTrackClips(state.timeline.tracks[0]!).filter(c => c.source.kind === "shot");
+    const sceneNumber = production(w).scenes.find(s => s.id === sceneIds[0])!.number;
+    assert.ok(shotClips[0]!.source.kind === "shot" && shotClips[0]!.source.sceneNumber === sceneNumber);
+    assert.equal(state.timeline.history.undo.length,1);
+    const undo = await prepare(w,{ operation: "undo" });
+    assert.match(undo.shown.title,/Undo/);
+    assert.equal(production(w).timeline?.status,"ready");
+    assert.equal((await decide(w.lifecycle,w.log,undo)).status,"completed");
+    const undone = (await loaded(w.log)).actions.find(a => a.actionId === undo.actionId)!;
+    assert.equal(undone.receipt?.kind,"timeline-history"); assert.ok(undone.receipt?.digest);
+    const redo = await prepare(w,{ operation: "redo" });
+    assert.equal((await decide(w.lifecycle,w.log,redo)).status,"completed");
+    const stale = await prepare(w,{ operation: "undo" });
+    state = production(w).timeline;
+    if (state?.status !== "ready") throw new Error("Missing timeline");
+    await applyTimelineCommand(w.store,PRODUCTION,{ kind: "commands",commands:[{kind:"set-track",trackId:state.timeline.tracks[0]!.id,name:"Changed"}],baseRevision:state.timeline.revision,sourceFingerprint:storyTimelineFingerprint(production(w)) });
+    assert.equal((await decide(w.lifecycle,w.log,stale)).status,"stale");
+  });
+  it("places, moves, splits and rejoins typed overlays, preserving independently edited audio", async () => {
+    const w = await setup({ kind: "production", productionId: PRODUCTION });
+    const file = join(w.store.dir,"overlay.mp4"); await writeFile(file,"overlay-video");
+    const filed = await fileArtifact(w.store,{sourcePath:file,production:PRODUCTION,mediaProbe:{ durationSec:async()=>2,info:async()=>({durationSec:2,width:64,height:64,hasAudio:true}) }});
+    assert.ok("artifact" in filed); if (!("artifact" in filed)) throw new Error("No artifact");
+    await applyTimelineCommand(w.store,PRODUCTION,{kind:"commands",commands:[{kind:"add-track",trackId:"tr_overlay",trackKind:"picture",name:"Overlay"}],baseRevision:null,sourceFingerprint:storyTimelineFingerprint(production(w))});
+    const place = await prepare(w,{operation:"overlay-place",artifactId:filed.artifact.id,trackId:"tr_overlay",startFrame:0,durationFrames:24});
+    assert.equal((await decide(w.lifecycle,w.log,place)).status,"completed");
+    const timeline = () => {const state=production(w).timeline;if(state?.status!=="ready")throw new Error("No timeline");return state.timeline;};
+    const clip = timeline().tracks.find(t=>t.id==="tr_overlay")!.clips[0]!;
+    const moved = await prepare(w,{operation:"overlay-move",clipId:clip.id,startFrame:24});
+    assert.equal((await decide(w.lifecycle,w.log,moved)).status,"completed");
+    const split = await prepare(w,{operation:"overlay-split-audio",clipId:clip.id});
+    assert.equal((await decide(w.lifecycle,w.log,split)).status,"completed");
+    const twin = timeline().tracks.filter(t=>t.kind!=="picture").flatMap(t=>t.clips).find(c=>c.source.kind==="artifact" && c.source.artifactId===filed.artifact.id)!;
+    assert.ok(twin); assert.equal(twin.startFrame,24);
+    const rejoin = await prepare(w,{operation:"overlay-rejoin-audio",clipId:clip.id,audioClipId:twin.id});
+    assert.equal((await decide(w.lifecycle,w.log,rejoin)).status,"completed");
+    assert.ok(!timeline().tracks.flatMap(t=>t.clips).some(c=>c.id===twin.id));
+    const splitAgain = await prepare(w,{operation:"overlay-split-audio",clipId:clip.id});
+    const splitDecision = await decide(w.lifecycle,w.log,splitAgain);
+    assert.equal(splitDecision.status,"completed");
+    const editedTwin = timeline().tracks.filter(t=>t.kind!=="picture").flatMap(t=>t.clips).find(c=>c.source.kind==="artifact" && c.source.artifactId===filed.artifact.id)!;
+    await applyTimelineCommand(w.store,PRODUCTION,{kind:"commands",commands:[{kind:"set-clip-gain",clipId:editedTwin.id,gainDb:-6}],baseRevision:timeline().revision,sourceFingerprint:storyTimelineFingerprint(production(w))});
+    await assert.rejects(prepare(w,{operation:"overlay-rejoin-audio",clipId:clip.id,audioClipId:editedTwin.id}),/unchanged audio twin/);
+    const remove = await prepare(w,{operation:"overlay-remove",clipId:clip.id});
+    assert.equal((await decide(w.lifecycle,w.log,remove)).status,"completed");
+    assert.ok(timeline().tracks.flatMap(t=>t.clips).some(c=>c.id===editedTwin.id),"Removing picture preserves separately edited audio");
+  });
+  it("quotes local speech-to-text without dispatch, freezes bytes, produces cited editable cues and replays once", async () => {
+    let calls=0;
+    const w=await setup({kind:"production",productionId:PRODUCTION},{transcription:{transcribe:async(audio,type)=>{calls++;assert.equal(type,"audio/wav");assert.ok(audio.length);return "Locally spoken words.";}}});
+    const file=join(w.store.dir,"dialogue.wav");await writeFile(file,wav(Array(48000).fill(1000)));
+    const filed=await fileArtifact(w.store,{sourcePath:file,production:PRODUCTION,mediaProbe:{durationSec:async()=>1,info:async()=>({durationSec:1,hasAudio:true})}});
+    if (!("artifact" in filed)) throw new Error("No audio");
+    await applyTimelineCommand(w.store,PRODUCTION,{kind:"commands",commands:[{kind:"add-track",trackId:"tr_dialogue",trackKind:"dialogue",name:"Dialogue"},{kind:"place",trackId:"tr_dialogue",clip:{id:"cl_dialogue",startFrame:0,durationFrames:productionFrameRate(production(w).meta),sourceInFrames:0,gainDb:0,role:"dialogue",source:{kind:"artifact",artifactId:filed.artifact.id,label:"Dialogue"}}}],baseRevision:null,sourceFingerprint:storyTimelineFingerprint(production(w))});
+    const card=await prepare(w,{operation:"transcribe",trackId:"tr_subtitles_local",language:"en"});
+    assert.equal(card.shown.body.family,"generation");
+    if (card.shown.body.family!=="generation")throw new Error("Wrong family");
+    assert.equal(card.shown.body.estimatedMicroUsd,0); assert.match(card.shown.body.privacy!.join(" "),/local Voxa/); assert.ok(card.shown.body.quoteDigest);
+    assert.equal(calls,0,"Preparing a card sends no audio to speech-to-text");
+    await w.log.append({ type: "action.decision-recorded", actionId: card.actionId, decision: { requestId: ulid(), decision: "approve", actorId: "local-user", expectedConversationSeq: (await loaded(w.log)).seq, expectedStatus: "pending", decidedAt: AT } }, { at: AT });
+    await w.lifecycle.recoverConversation(w.conversationId);
+    assert.equal((await loaded(w.log)).actions.find(a => a.actionId === card.actionId)!.status,"completed");
+    assert.equal(calls,1,"Restart resumes the approved local operation");
+    const state=production(w).timeline;if(state?.status!=="ready")throw new Error("No timeline");
+    const cue=state.timeline.tracks.find(t=>t.id==="tr_subtitles_local")!.cues![0]!;
+    assert.equal(cue.text,"Locally spoken words.");assert.equal(cue.provenance?.kind,"speech-to-text");assert.deepEqual(cue.citation,{kind:"clip",clipId:"cl_dialogue"});
+    await decide(w.lifecycle,w.log,card);assert.equal(calls,1);
+    const changed=await prepare(w,{operation:"transcribe",trackId:"tr_other_subtitles",language:"en"});
+    await writeFile(join(w.store.dir,"artifacts",filed.artifact.file),wav(Array(48000).fill(2000)));
+    assert.equal((await decide(w.lifecycle,w.log,changed)).status,"stale"); assert.equal(calls,1,"Changed bytes are refused before STT");
+    const offline={kind:"world-chat-production-timeline-transcribe" as const, worldId:w.store.worldId,action:ModelWorldChatActionSchema.parse({kind:"production-timeline-operation",productionId:PRODUCTION,request:{operation:"transcribe",trackId:"tr_subtitles",language:"en"},checkReceiptIds:[newId("check")]}),frozenHash:freezeProductionTimeline(w.store,PRODUCTION)};
+    await assert.rejects(productionTimelineBody(w.store,offline as Parameters<typeof productionTimelineBody>[1],{},newId("act")),/unavailable/);
   });
 });

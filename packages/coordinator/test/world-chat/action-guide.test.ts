@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ModelWorldChatActionSchema, type WorldChatContext } from "@arke-studio/contracts";
+import { ModelWorldChatActionSchema, TimelineCommandSchema, type WorldChatContext } from "@arke-studio/contracts";
 import {
   ACTION_GUIDE_ENTRIES,
   actionGuideScopes,
@@ -34,6 +34,16 @@ it("advertises available audio actions, dependent cues, spine verbs and the huma
 });
 
 /** The kinds a rendered guide names, read back out of its entry lines. */
+it("names every timeline command in full and compact guides and explicitly excludes live detachment", () => {
+  for (const budget of [HUGE, 1000]) {
+    const text = renderActionGuide(["world", "production"], budget).text;
+    for (const option of TimelineCommandSchema.options) assert.ok(text.includes(option.shape.kind.value), option.shape.kind.value);
+    assert.match(text, /detach-audio is excluded from editorRequests/);
+    assert.match(text, /set-performance-source \(clipId, sourceClipId\)/);
+    assert.match(text, /import-cues \(trackId, cues, replace, provenance\)/);
+  }
+});
+
 function namedKinds(text: string): string[] {
   return [...text.matchAll(/^- ([a-z-]+) ·/gm)].map((match) => match[1]!);
 }

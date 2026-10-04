@@ -144,7 +144,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Fifty-four retains original landed-media hashes on immutable production takes.
 // Fifty-five protects turn-local dependencies, frozen scene batches and prospective generation quotes.
 // Fifty-six protects retained human Stage-review drafts and their Keep/discard binding.
-export const SUPPORTED_SCHEMA_VERSION = 57;
+// Fifty-eight adds durable chat transcription and exact timeline history cards (SPEC-051 T-7).
+export const SUPPORTED_SCHEMA_VERSION = 58;
 
 export class WorldOpenError extends Error {
   constructor(

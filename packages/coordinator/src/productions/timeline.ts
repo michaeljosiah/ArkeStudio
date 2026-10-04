@@ -66,7 +66,7 @@ export type TimelineWrite =
       baseRevision: number | null;
       sourceFingerprint: string;
     }
-  | { kind: "undo" | "redo"; baseRevision: number };
+  | { kind: "undo" | "redo"; baseRevision: number; requestId?: string };
 
 export class TimelineCommandRefused extends Error {
   constructor(readonly reason: string) {
@@ -381,6 +381,7 @@ export async function applyTimelineCommand(
     await store.commitUnserialised({
       kind: "timeline-command",
       source: command.kind,
+      ...(command.requestId ? { requestId: command.requestId } : {}),
       // A build that does not understand timeline authority must refuse this world rather than
       // export the old derived order. The boundary lands atomically with first materialisation.
       raiseSchemaVersion: 5,

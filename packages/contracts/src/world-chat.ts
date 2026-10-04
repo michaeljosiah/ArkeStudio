@@ -40,6 +40,7 @@ import {
 import { BIBLE_EDIT_BOUNDS, BibleEditRecordSchema, BibleEditSchema, type BibleEdit } from "./bible.js";
 import {
   EDITOR_REQUEST_BOUNDS,
+  TIMELINE_EDITOR_COMMAND_GUIDE,
   ModelEditorRequestSchema,
   ModelSceneEditSchema,
   SCENE_EDIT_BOUNDS,
@@ -2742,6 +2743,7 @@ const exampleWorldActions = {
     artifactId: `ar_${EXAMPLE_ULID}`, replace: false, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "image-generation": { kind: "image-generation", request: { operation: "world-image", count: 1 }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "build-item-run": { kind: "build-item-run", itemKey: "main-photo:maren", checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-timeline-operation": { kind: "production-timeline-operation", productionId: "saltlight", request: { operation: "assemble", sceneIds: ["sc_12"] }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-audio-generation": { kind: "production-audio-generation", productionId: "saltlight", request: { operation: "voice-line", shotId: "sh_12" }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-performance-command": { kind: "production-performance-command", productionId: "saltlight", command: { operation: "clear-selection", lineKey: `sh_${EXAMPLE_ULID}` }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-audio-edit": { kind: "production-audio-edit", productionId: "saltlight", request: { summary: "Mute the music track", commands: [{ kind: "set-track", trackId: "tr_music", muted: true }] }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
@@ -2842,6 +2844,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "prop-reference": "Use a filed artifact image as a prop state's reference; say replace only when the person asked to replace one.",
   "image-generation": "Generate pending key art, a master look, or a prop-state image at the coordinator's quote. Selection is a separate card. Omit modelId to use the world's image default.",
   "build-item-run": "Retry one unfinished founding item from list_build_items at the coordinator's quote. The original founding decision installs the result.",
+  "production-timeline-operation": "Assemble named sceneIds in their given order, or place/move/split-audio/rejoin-audio/remove a picture overlay as an ordinary editor request. Use exact clip and track ids and frame ranges from a complete get_timeline read. Transcribe prepares a local Voxa generation card with no provider upload. Undo/redo prepares a new card naming the exact current history entry; completed cards also offer direct human history controls.",
   "production-audio-generation": "Quote a shot voice line, a generated performance, a scene table read, a speaking character sample, or local sample preparation. Read the exact source, assigned voice and current production first. Audition, rights, performance review and purge remain human controls.",
   "production-performance-command": "Propose a kept performance's duration, place its selected audio with explicit timing, or clear a line's selection. Versions, review and source hashes are frozen by the coordinator.",
   "production-audio-edit": "Propose typed timeline audio changes: tracks, gains, mute, roles and mix ducking. The person reviews and applies the ordinary editor request atomically.",
@@ -3183,7 +3186,7 @@ Only in a production, episode or scene thread, and only when the person asks for
 
 ${JSON.stringify(exampleEditorRequest)}
 
-summary says what moves, what goes and what comes, in their terms — never "improve the cut". kind is one of move-adjacent (clipId, direction earlier|later) | move-to-order (clipId, index from 0) | move-to-frame (clipId, startFrame) | trim (clipId, edge start|end, deltaFrames — negative shortens) | split (clipId, atFrame, newClipId) | duplicate (clipId, newClipId) | delete (clipId) | ripple-delete (clipId) | switch-take (shotId, takeId) | set-clip-gain (clipId, gainDb) | set-track (trackId, then any of name, muted, solo, order). Frames count from zero at the production's frame rate. A newClipId is one you invent, cl_ followed by letters, digits and dashes. Do not repeat a request that is already pending; say that it is waiting for their decision.
+summary says what moves, what goes and what comes, in their terms — never "improve the cut". Timeline commands: ${TIMELINE_EDITOR_COMMAND_GUIDE}. direction is earlier|later; indices count from 0; trim edge is start|end and negative deltaFrames shortens; audio is keep|mute. Track kinds are picture, dialogue, ambience, music, audio or subtitle; audio roles are unspecified, dialogue, music or ambience. set-mix changes ducking; set-performance-source chooses the performance audio clip a picture shot plays, or null to clear it. place supplies a complete clip with an explicit shot, take, artifact or performance source. Subtitle commands carry editable timed text, language and style; library commands change memberships. Frames count from zero at the production's frame rate. A newClipId is one you invent, cl_ followed by letters, digits and dashes. Do not repeat a request that is already pending; say that it is waiting for their decision.
 
 ### Scene edits
 

@@ -2,7 +2,7 @@ import { productionSetupBrief } from "../productions/setup-brief.js";
 import { createPreparedSession } from "../harness/session-files.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type WorldChatCheckReceipt, applyBibleEdits, BENCH_CHAT_SCHEMA_VERSION, CONVERSATIONAL_PROPS_SCHEMA_VERSION, CHAT_SEQUENCING_SCHEMA_VERSION, PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { type WorldChatCheckReceipt, applyBibleEdits, BENCH_CHAT_SCHEMA_VERSION, CONVERSATIONAL_PROPS_SCHEMA_VERSION, CHAT_SEQUENCING_SCHEMA_VERSION, PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { benchReadRows } from "../bench/chat-reads.js";
 import { frameRunReadRows } from "../world-chat/production-reads.js";
 import { readAudioRights } from "../audio/rights.js";
@@ -178,6 +178,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),
     prepareActions: async (turn) => {
       const prepared = await prepareWorldChatActions(store, actionLifecycle, turn, { getGenerationRouteRows: deps.generationRoutes, getExports: () => deps.actionExports(), getJobs: () => deps.jobs(), getBuildItems: () => deps.buildItems?.() ?? [] });
+      if (turn.actions.some(action => action.kind === "production-timeline-operation") || prepared.some(item => item.payload.kind === "world-chat-editor-request")) await store.ensureSchemaVersion(PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION, "production-chat-timeline");
       if (turn.actions.some(action => action.kind.startsWith("production-audio-") || action.kind === "production-performance-command") || prepared.some(item => item.payload.kind === "world-chat-bench-generation" && item.payload.action.productionId)) await store.ensureSchemaVersion(PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, "world-chat");
       if (prepared.some(item => item.intent.dependencies.length > 0 || (item.payload.kind === "world-chat-production-scene-command" && item.payload.scenePlan))) {
         await store.ensureSchemaVersion(CHAT_SEQUENCING_SCHEMA_VERSION, "world-chat");

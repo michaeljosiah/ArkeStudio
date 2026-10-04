@@ -85,7 +85,7 @@ export function currentSourceFingerprint(store: WorldStore, production: Producti
  * command would materialise (SPEC-037 R-13). The song clock has no derivable first assembly
  * for a request — it is opened by the person's own choice — so an unopened spine refuses.
  */
-function requestBase(
+export function requestBase(
   store: WorldStore,
   production: ProductionBundle,
 ): { timeline: ProductionTimeline; baseRevision: number | null; sourceFingerprint: string } {

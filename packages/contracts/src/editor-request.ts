@@ -77,6 +77,13 @@ const EditorRequestCommandSchema = z.discriminatedUnion("kind", TimelineCommandS
   (option): option is PreviewableCommandOption => option.shape.kind.value !== "detach-audio",
 ) as [PreviewableCommandOption, ...PreviewableCommandOption[]]);
 
+/** SPEC-051 R-33: both prompt paths name the actual vocabulary, including explicit exclusions. */
+export const TIMELINE_EDITOR_COMMAND_GUIDE = TimelineCommandSchema.options.map(option => {
+  const kind = option.shape.kind.value;
+  if (kind === "detach-audio") return "detach-audio is excluded from editorRequests; the direct editor resolves live selected media before detaching";
+  return `${kind} (${Object.keys(option.shape).filter(field => field !== "kind").join(", ")})`;
+}).join(" | ");
+
 /** What the model returns: a summary in the person's terms and the exact commands (R-27, R-34). */
 export const ModelEditorRequestSchema = z
   .object({
