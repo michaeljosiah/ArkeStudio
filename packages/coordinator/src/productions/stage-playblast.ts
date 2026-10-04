@@ -10,6 +10,16 @@ import { sha256 } from "../world/text-files.js";
 import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 import { parseSceneRecord } from "./scene-record.js";
 import { stemOrThrow } from "./scene-commands.js";
+import { readChanges } from "../world/change-writer.js";
+
+/** Recover the immutable video filed by this action, even after the shot acquires a newer pin. */
+export async function conversationStagePlayblastArtifact(store: WorldStore, actionId: string, productionId: string | undefined, shotId: string | undefined): Promise<string | null> {
+  const lines = (await readChanges(join(store.dir, "changes.jsonl"))).filter(line => line.requestId === actionId ||
+    typeof line.source === "string" && line.source.endsWith(`:${actionId}`));
+  const artifact = store.getBundle().artifacts.find(a => a.kind === "video" && a.production === productionId &&
+    a.origin.by === "system" && a.origin.producedBy === `stage:${shotId}` && lines.some(line => line.path === `artifacts/${a.file}.json`));
+  return artifact?.id ?? null;
+}
 
 /**
  * Filing a playblast and its reference stills from the Stage (SPEC-036 R-35; issue 1043).

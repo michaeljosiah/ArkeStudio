@@ -25,9 +25,10 @@ export function productionCardPreview(world: WorldBundle, payload: WorldChatPrep
       sceneActionCommands(payload.action).map(sceneCommandFrom));
     return { kind: "scene", before, after };
   }
-  if (payload.kind === "world-chat-production-board-compile" || payload.kind === "world-chat-production-board-export") {
+  if (payload.kind === "world-chat-production-board-compile" || payload.kind === "world-chat-production-board-export" ||
+      payload.kind === "world-chat-production-stage-construct" || payload.kind === "world-chat-production-stage-playblast") {
     const scene = world.productions.find(p => p.meta.id === payload.action.productionId)?.scenes.find(s => s.id === payload.action.sceneId);
-    if (!scene) throw new Error("The board preview is unavailable.");
+    if (!scene) throw new Error("The scene preview is unavailable.");
     return { kind: "scene", before: scene, after: scene };
   }
   if (payload.kind === "world-chat-production-cut-export") {

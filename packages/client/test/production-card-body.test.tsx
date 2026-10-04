@@ -3,7 +3,8 @@ import { it, afterEach } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
-import { migrateLegacyScene, newId, ulid, type ConversationActionCard } from "@arke-studio/contracts";
+import { migrateLegacyScene, stageShot, newId, ulid, type ConversationActionCard } from "@arke-studio/contracts";
+import { StagePlayblastReceipt } from "../src/components/production-stage-card.js";
 import { ProductionCardBody } from "../src/components/production-card-body.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { approveConversationGroup, type GroupApprovalPort, type GroupApprovalSnapshot } from "../src/lib/conversation-group-approval.js";
@@ -67,3 +68,23 @@ it("stops at refusal and retains every later pending card", async () => {
     decide: async action => { sent++; return { worldId: world.meta.worldId, conversationId: first.conversationId, actionId: action.actionId, requestId: ulid(), disposition: "refused", reason: "stale", detail: "Stale", deduplicated: false }; }, changed: async () => {} }, first.turnId, new AbortController().signal);
   assert.equal(sent, 1); assert.equal(result.left, 2); assert.equal(second.status, "pending");
 });
+
+it("shows the frozen target Stage before host approval and only the correlated completed video", () => {
+  const copy = structuredClone(state), shot = orderedStageShot();
+  __setStateForTest(copy);
+  const after = migrateLegacyScene({ ...scene, shots: [{ ...shot, staging: stageShot(shot, { cast: [], sets: [], durationSec: 4 }) }] });
+  const action = card({ actionKind: "world-chat-production-stage-construct", targets: [{ kind: "shot", id: shot.id }] });
+  const { document } = parseHTML(renderToString(<MemoryRouter><ProductionCardBody action={action} preview={{ kind: "scene", before: after, after }} /></MemoryRouter>));
+  assert.equal(document.querySelectorAll('[data-testid="workspace-stage"]').length, 1);
+  assert.match(document.toString(), /Stage review preview/);
+  const id = newId("ar");
+  copy.world!.artifacts.push({ id, kind: "video", file: "playblast.mp4", hash: "sha256:1234567890abcdef", origin: { by: "system", producedBy: `stage:${shot.id}` }, links: [production.meta.id, scene.id, shot.id], production: production.meta.id as never, created: "2026-10-04T12:00:00Z" });
+  __setStateForTest(copy);
+  const complete = { ...action, status: "completed" as const, receipt: { kind: "stage-playblast", id, summary: "Filed" } };
+  const render = (value: ConversationActionCard) => parseHTML(renderToString(<MemoryRouter><StagePlayblastReceipt action={value} /></MemoryRouter>)).document;
+  assert.equal(render(complete).querySelectorAll("video").length, 1);
+  assert.ok(render(complete).querySelector('[aria-label^="Play Stage playblast"]'));
+  assert.equal(render({ ...complete, receipt: { ...complete.receipt, id: newId("ar") } }).querySelector("video"), null);
+  assert.equal(render({ ...complete, worldId: ulid() }).querySelector("video"), null);
+});
+function orderedStageShot() { return { id: "sh_stage", number: 1, title: "Stage shot", description: "A room", durationSec: 4 }; }

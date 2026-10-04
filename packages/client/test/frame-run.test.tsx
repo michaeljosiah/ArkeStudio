@@ -20,6 +20,8 @@ import {
   type WorldChatWorkspace,
 } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
+import { ConversationFrameRunCard } from "../src/components/conversation-frame-run-card.js";
+import type { ConversationActionCard } from "@arke-studio/contracts";
 import { ConversationTranscript } from "../src/components/conversation.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import {
@@ -1211,4 +1213,21 @@ describe("frame-run store event flow", () => {
     assert.equal(__stateForTest().frameRunQuotes[abandoned.requestId], undefined, "an abandoned response is not cached");
     assert.equal(frameRunCommand(command), false, "the send boundary still owns disconnected delivery");
   });
+});
+
+it("shows live run steps from the sealed job keys and only their immutable frames", async () => {
+  const run = frameState({ first: { status: "succeeded", finalization: "complete", etaSec: null }, firstLanding: "filed" });
+  const state = stateWith({ runs: [run] }), production = state.world!.productions.find(p => p.meta.id === "saltlight")!;
+  const base = production.takes[0]!;
+  production.takes.push({ ...base, id: "tk_01J8E0000000000000000000T1", kind: "frame", jobId: JOB_1, coversShots: ["sh_12"], media: "exact-run.png" });
+  const action = { worldId: FIXTURE_WORLD_ID, productionId: "saltlight", actionId: "act_01J8E0000000000000000000A1", actionKind: "world-chat-production-frame-run-retry-step", status: "running", generationWork: { jobKeys: [run.run.steps[0]!.dispatch.idempotencyKey], media: [] } } as unknown as ConversationActionCard;
+  __setStateForTest(state);
+  const container = dom.document.createElement("div") as unknown as HTMLElement, root = createRoot(container);
+  mounted.push({ container, root });
+  await act(async () => root.render(<MemoryRouter><ConversationFrameRunCard action={action} /></MemoryRouter>));
+  assert.equal(container.querySelectorAll('.fy-chat__runreport-row[data-kind="step"]').length, 2);
+  const imgs = [...container.querySelectorAll("img")];
+  assert.equal(imgs.length, 1); assert.match(imgs[0]!.getAttribute("src")!, /exact-run.png/);
+  await act(async () => root.render(<MemoryRouter><ConversationFrameRunCard action={{ ...action, generationWork: { jobKeys: ["01J8E0000000000000000000XX"], media: [] } }} /></MemoryRouter>));
+  assert.equal(container.querySelector(".fy-chat__runsummary"), null, "a different purchase cannot borrow the run");
 });

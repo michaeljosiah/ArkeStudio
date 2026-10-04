@@ -227,7 +227,7 @@ import { applyProductionSpineCommand, previewAudioSpineCommand } from "../produc
 import { applySceneCommand, applySceneCommands, sceneCommandFrom } from "../productions/scene-commands.js";
 import { sceneActionCommands, sequenceTurnActions, dependencyPreviewWorld } from "./action-sequencing.js";
 import { modelActionInputRefusal } from "./model-action-input.js";
-import { filePlayblast } from "../productions/stage-playblast.js";
+import { filePlayblast, conversationStagePlayblastArtifact } from "../productions/stage-playblast.js";
 import {
   acceptCharacterLook,
   acceptCharacterSheet,
@@ -4901,6 +4901,10 @@ export function worldChatActionAdapters(
         if (action.actionKind === "world-chat-build-item-run") return deps.buildGenerationQuotes?.reconcile(action) ?? null;
         const committed = await committedAction(store, action.actionId);
         if (committed) await removePreparation(store, "world", action.actionId);
+        if (committed && action.actionKind === "world-chat-production-stage-playblast") {
+          const id = await conversationStagePlayblastArtifact(store, action.actionId, action.productionId, action.targets.find(target => target.kind === "shot")?.id);
+          return { status: "completed", receipt: { kind: "stage-playblast", id: id ?? committed.commitId, summary: "The playblast and opening frame were filed and pinned atomically." } };
+        }
         return committed
           ? {
               status: "completed",
@@ -4942,7 +4946,7 @@ export function worldChatActionAdapters(
                   status: "completed",
                   receipt: {
                     kind: "stage-playblast",
-                    id: existing.commitId,
+                    id: await conversationStagePlayblastArtifact(store, action.actionId, action.productionId, action.targets.find(target => target.kind === "shot")?.id) ?? existing.commitId,
                     summary: "The playblast and opening frame were already filed and pinned atomically.",
                   },
                 };
@@ -5010,7 +5014,7 @@ export function worldChatActionAdapters(
                     status: "completed",
                     receipt: {
                       kind: "stage-playblast",
-                      id: committed.commitId,
+                      id: await conversationStagePlayblastArtifact(store, action.actionId, action.productionId, action.targets.find(target => target.kind === "shot")?.id) ?? committed.commitId,
                       summary: "The playblast and opening frame were filed and pinned atomically.",
                     },
                   };

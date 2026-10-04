@@ -768,3 +768,10 @@ local speech route must stay absent from recipes, manifest preferences, setup do
 voice candidates; regressions live in provider `test/comfyui.test.ts`, desktop
 `test/comfyui-setup.test.ts`, and coordinator `test/voice/service.test.ts`. Old queued model
 identities must refuse before contacting an engine.
+
+For SPEC-051 R-55/R-57 (#1425), client `production-card-body.test.tsx` and
+`frame-run.test.tsx` cover frozen native Stage targets, exact playblast completion,
+live run correlation and per-job frame thumbnails. The focused `approved Stage action`
+coordinator case verifies host replay and recovery preserve the immutable video receipt;
+`retained construction` cases preserve human Keep without another renderer handoff.
+The production-card Chrome smoke also checks Stage and run bodies at all four widths.

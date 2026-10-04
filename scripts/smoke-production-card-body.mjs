@@ -15,7 +15,9 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { MemoryRouter } from "react-router";
-import { migrateLegacyScene, seedStoryPictureTimeline, applyTimelineCommands } from "@arke-studio/contracts";
+import { migrateLegacyScene, orderedShots, stageShot, seedStoryPictureTimeline, applyTimelineCommands } from "@arke-studio/contracts";
+import { FrameRunReport } from "./components/conversation-frame-run-card";
+import { StagePlayblastReceipt } from "./components/production-stage-card";
 import { ProductionCardBody } from "./components/production-card-body";
 import { GenerationReferences, GenerationResults } from "./components/generation-card-body";
 import { TakeComparisonCard } from "./components/take-comparison-card";
@@ -48,8 +50,22 @@ const timelinePreview = {kind:"timeline",before,after,beforeSelections:productio
 const exportPreview = {kind:"export",preset:"review-cut",durationSec:60,subtitles:"Burn-in · English",dimensions:"1280 × 720",frameRate:24,scope:"Complete production"};
 const exportAction = {...action,authority:{kind:"export",id:"ex_review"},exportState:{status:"running",percent:68,output:null}};
 const completedExport = {...exportAction,exportState:{status:"done",percent:100,output:"exports/review.mp4"}};
+const stagedShot = { ...orderedShots(scene)[0], staging: stageShot(orderedShots(scene)[0], {cast:[],sets:[],durationSec:4}) };
+const stageScene = migrateLegacyScene({id:scene.id,slug:scene.slug,number:1,order:1,title:scene.title,status:"draft",version:1,shots:[stagedShot]});
+const stageAction = {...action,actionKind:"world-chat-production-stage-construct",targets:[{kind:"shot",id:stagedShot.id}],shown:{body:{family:"host-action",action:"Construct a camera move",effect:"Keep after inspection"}}};
+const videoArtifact = {id:"ar_playblast",kind:"video",file:"playblast.mp4",production:production.meta.id,origin:{by:"system",producedBy:"stage:"+stagedShot.id}};
+if (mode === "stage") { world.artifacts.push(videoArtifact); __setStateForTest(state); }
+const playblastAction = {...stageAction,status:"completed",receipt:{kind:"stage-playblast",id:videoArtifact.id}};
+const frame = {...take,id:"tk_run",kind:"frame",media:"frame.png",coversShots:["sh_run"]};
+if (mode === "run") { production.takes.push(frame); __setStateForTest(state); }
+const run = {worldId:world.meta.worldId,productionId:production.meta.id,status:"active",supersededShots:0,run:{id:"fr_run",sceneId:"sc_review",mode:"per-shot",cancelled:false,
+  steps:[{label:"Shot 1",grain:"initial",jobId:frame.jobId,updateShotIds:["sh_run"],dispatch:{target:{kind:"shot"}}},{label:"Shot 2",grain:"initial",jobId:"jb_other",updateShotIds:["sh_other"],dispatch:{target:{kind:"shot"}}}]},
+  steps:[{status:"succeeded",canRetry:false,shots:[{shotId:"sh_run",status:"succeeded",failureClass:null,error:null}]},{status:"failed",canRetry:true,shots:[{shotId:"sh_other",status:"failed",failureClass:"transient",error:"Provider timed out",canRetryCell:false}]}]};
+
 flushSync(() => createRoot(document.getElementById("root")).render(<MemoryRouter><article className="fy-actioncard"><h3>{mode === "media" ? "Generation and take comparison" : "Resulting shot list"}</h3>
-  {mode === "audio" ? <><GenerationReferences action={action}/><GenerationResults action={action}/></>
+  {mode === "stage" ? <><ProductionCardBody action={stageAction} preview={{kind:"scene",before:stageScene,after:stageScene}}/><StagePlayblastReceipt action={playblastAction}/></>
+    : mode === "run" ? <FrameRunReport run={run} worldId={world.meta.worldId} productionId={production.meta.id} sceneId="sc_review" navigate={()=>{}}/>
+    : mode === "audio" ? <><GenerationReferences action={action}/><GenerationResults action={action}/></>
     : mode === "media" ? <><GenerationReferences action={action}/><GenerationResults action={action}/><TakeComparisonCard action={review}/></>
     : mode === "timeline" ? <ProductionCardBody action={action} preview={timelinePreview}/>
     : mode === "export" ? <><ProductionCardBody action={exportAction} preview={exportPreview}/><ProductionExportReceipt action={completedExport}/></>
@@ -81,13 +97,17 @@ try {
   const evaluate = async expression => { const response = await cdp("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }); if (response.exceptionDetails) throw new Error(JSON.stringify(response.exceptionDetails)); return response.result.value; };
   await cdp("Page.enable");
   const records = [];
-  for (const mode of ["shots", "board", "media", "audio", "timeline", "export"]) {
+  for (const mode of ["shots", "board", "media", "audio", "timeline", "export", "stage", "run"]) {
   await cdp("Page.navigate", { url: "http://127.0.0.1:" + server.address().port + "?mode=" + mode });
   await until(() => evaluate("window.cardReady"));
   for (const width of [360, 390, 984, 1200]) {
     await cdp("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
     await evaluate("document.fonts.ready");
-    const metrics = ["timeline", "export"].includes(mode) ? await evaluate(`(() => { const box=document.querySelector('.fy-actioncard').getBoundingClientRect(); return {width:innerWidth,
+    const metrics = ["stage", "run"].includes(mode) ? await evaluate(`(() => { const box=document.querySelector('.fy-actioncard').getBoundingClientRect(); return {width:innerWidth,
+      overflow:document.documentElement.scrollWidth>innerWidth, stages:document.querySelectorAll('[data-testid="workspace-stage"]').length, players:document.querySelectorAll('video').length,
+      frames:document.querySelectorAll('.fy-chat__runreport-frames [data-run-frame="filed"]').length, retry:document.querySelectorAll('.fy-chat__runreport-retry').length,
+      bodiesContained:[...document.querySelectorAll('.fy-production-preview__stage,.fy-generation-card__grid,.fy-chat__runreport')].every(body=>{const b=body.getBoundingClientRect();return b.left>=box.left&&b.right<=box.right;})}; })()`)
+      : ["timeline", "export"].includes(mode) ? await evaluate(`(() => { const box=document.querySelector('.fy-actioncard').getBoundingClientRect(); return {width:innerWidth,
       overflow:document.documentElement.scrollWidth>innerWidth, tracks:document.querySelectorAll('.fy-track').length, ghosts:document.querySelectorAll('[data-review-change="removed"]').length,
       players:document.querySelectorAll('video').length, progress:document.querySelector('progress')?.value,
       bodiesContained:[...document.querySelectorAll('.fy-production-timeline__scroll,.fy-generation-card video')].every(body=>{const b=body.getBoundingClientRect();return b.left>=box.left&&b.right<=box.right;})}; })()`)
@@ -101,7 +121,9 @@ try {
         lastVisible:last.top<box.bottom && last.bottom>box.top }; })()`);
     const capture = await cdp("Page.captureScreenshot", { format: "png" }); await writeFile(join(dir, `card-${mode}-${width}.png`), Buffer.from(capture.data, "base64"));
     records.push({ mode, ...metrics }); assert.equal(metrics.overflow, false, `${mode} viewport ${width}`); assert.equal(metrics.bodiesContained, true);
-    if (mode === "media") assert.equal(metrics.players, 4);
+    if (mode === "stage") { assert.equal(metrics.stages,1); assert.equal(metrics.players,1); }
+    else if (mode === "run") { assert.equal(metrics.frames,1); assert.equal(metrics.retry,1); }
+    else if (mode === "media") assert.equal(metrics.players, 4);
     else if (mode === "audio") { assert.equal(metrics.players, 3); assert.equal(metrics.uses, 2); }
     else if (mode === "timeline") { assert.equal(metrics.tracks, 4); assert.equal(metrics.ghosts, 1); }
     else if (mode === "export") { assert.equal(metrics.players, 1); assert.equal(metrics.progress, 68); }
