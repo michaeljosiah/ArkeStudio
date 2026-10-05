@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LOOK_LINE_MAX, LookViewSchema, PictureLookSchema } from "./audiobook-look.js";
+import { LOOK_LINE_MAX, LookViewSchema, MAIN_PHOTO_LOOK, PictureLookSchema, type PictureLookPick } from "./audiobook-look.js";
 import { CODEX_IMAGE_PLAN_LABEL, aspectOffered, estimateMicroUsd, imageOutputFor, type ManifestModel } from "./manifest.js";
 
 /**
@@ -34,14 +34,28 @@ export const PictureWhoSchema = z
      * never the main photo — the two never ride together. Absent where the main photo rides.
      */
     look: z.object({ lookId: z.string().min(1).max(120), view: LookViewSchema }).strict().optional(),
+    /**
+     * The look that rides — or, with no `look`, the main photo — was chosen for this picture alone
+     * (design turn 193d, SPEC-047 R-115, R-146), not the chapter's choice: the card says `this
+     * picture only` and the picture's stamp keeps it as its own.
+     */
+    only: z.literal(true).optional(),
   })
   .strict();
 export type PictureWho = z.infer<typeof PictureWhoSchema>;
 
-/** The look stamp's picks from who rode (R-119): each person whose chosen look rode, with the image the frame took. */
-export function ridingPicks(who: readonly PictureWho[]): Record<string, { lookId: string; view: "full" | "close" }> {
-  const picks: Record<string, { lookId: string; view: "full" | "close" }> = {};
-  for (const entry of who) if (entry.kind === "character" && entry.look !== undefined) picks[entry.key] = { lookId: entry.look.lookId, view: entry.look.view };
+/**
+ * The look stamp's picks from who rode (R-119): each person whose chosen look rode, with the image
+ * the frame took; a look chosen for this picture alone is `only`, and so is the main photo chosen
+ * for it (R-146), kept under `MAIN_PHOTO_LOOK`.
+ */
+export function ridingPicks(who: readonly PictureWho[]): Record<string, PictureLookPick> {
+  const picks: Record<string, PictureLookPick> = {};
+  for (const entry of who) {
+    if (entry.kind !== "character") continue;
+    if (entry.look !== undefined) picks[entry.key] = { lookId: entry.look.lookId, view: entry.look.view, ...(entry.only === true ? { only: true as const } : {}) };
+    else if (entry.only === true) picks[entry.key] = { lookId: MAIN_PHOTO_LOOK, view: "close", only: true };
+  }
   return picks;
 }
 

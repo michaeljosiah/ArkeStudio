@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import { audiobookTextHash, lookDigest, pictureBench, type ArtifactSidecar, type ChapterAudiobook, type ClientMessage, type ClientState, type ManifestModel, type PictureShot, type PictureSuggestion, type ProductionBundle } from "@arke-studio/contracts";
+import { audiobookTextHash, kitLookLibrary, lookDigest, pictureBench, pictureLookFor, type ArtifactSidecar, type ChapterAudiobook, type ClientMessage, type ClientState, type ManifestModel, type PictureShot, type PictureSuggestion, type ProductionBundle } from "@arke-studio/contracts";
 import { BlockPicturePanel, pictureBrief, picturesByTab, useChapterPictures } from "../src/components/audiobook-picture.js";
 import { frameViewWord, ridesLabel } from "../src/components/audiobook-picture-card.js";
 import { AudiobookBlocks, type BlockRow } from "../src/screens/chapter-audiobook.js";
@@ -61,11 +61,12 @@ const rows: BlockRow[] = TEXTS.map((text, index) => ({
   turns: { parts: [{ text }] },
   split: null,
 }) as unknown as BlockRow);
-const record = (pictures: ChapterAudiobook["pictures"], look?: ChapterAudiobook["look"]): ChapterAudiobook => ({
+const record = (pictures: ChapterAudiobook["pictures"], look?: ChapterAudiobook["look"], ownLooks?: ChapterAudiobook["ownLooks"]): ChapterAudiobook => ({
   schemaVersion: 1, chapterVersion: 4, hash: "h", updatedAt: AT, flags: {}, direction: {},
   takes: Object.fromEntries(rows.map((row, index) => [row.block.key, { artifactId: `ar_take${index}`, textHash: audiobookTextHash(row.block.text), reader: { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george" }, format: "wav", characters: 1, parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, madeAt: AT }])),
   ...(pictures !== undefined ? { pictures } : {}),
   ...(look !== undefined ? { look } : {}),
+  ...(ownLooks !== undefined ? { ownLooks } : {}),
 });
 
 /** GPT Image 2 as the manifest prices it here: $0.045 a picture and $0.005 a reference. */
@@ -93,11 +94,13 @@ function state(): ClientState {
         ...rows.map((row) => row.artifact!),
       ],
       // Maren's storm coat, with its close view (design turn 193c).
-      referenceKits: world.referenceKits.map((kit) => (kit.sheetId === "maren-kest" ? ({ ...kit, looks: [STORM_LOOK] } as never) : kit)),
+      referenceKits: world.referenceKits.map((kit) => (kit.sheetId === "maren-kest" ? ({ ...kit, looks: [STORM_LOOK, HARBOUR_LOOK] } as never) : kit)),
     },
   };
 }
 const STORM_LOOK = { id: "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2S1", file: "takes/tk_storm/storm.png", kind: "costume", prompt: "Storm coat, hood up; two braids.", acceptedAt: "2026-10-03T09:00:00.000Z", framing: "full-body", closeFile: "takes/tk_close/close.png" };
+/** Her harbour coat (193d), made before the storm coat and with no close view. */
+const HARBOUR_LOOK = { id: "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2H1", file: "takes/tk_harbour/harbour.png", kind: "costume", prompt: "Harbour coat, brass buttons.", acceptedAt: "2026-10-02T09:00:00.000Z", framing: "full-body" };
 
 type Mounted = { container: HTMLElement; root: Root; sent: ClientMessage[]; where: () => string };
 const open: Mounted[] = [];
@@ -106,35 +109,40 @@ function Where() {
   location = useLocation().pathname;
   return null;
 }
-function Panel({ selected, pictures, look }: { selected: number; pictures?: ChapterAudiobook["pictures"]; look?: ChapterAudiobook["look"] }) {
+function Panel({ selected, pictures, look, own }: { selected: number; pictures?: ChapterAudiobook["pictures"]; look?: ChapterAudiobook["look"]; own?: ChapterAudiobook["ownLooks"] }) {
   const world = useStore().state?.world ?? null;
   const production = world?.productions.find((p) => p.meta.id === "saltlight") as ProductionBundle;
-  const placed = useChapterPictures(world, rows, record(pictures, look));
+  const placed = useChapterPictures(world, rows, record(pictures, look, own));
   return (
     <>
       <AudiobookBlocks rows={rows} sounding={null} selected={rows[selected]!.block.key} onSelect={() => {}} onPlayOne={() => {}} slug="the-undersong" pictures={placed} />
-      <BlockPicturePanel worldId={FIXTURE_WORLD_ID} production={production} chapterFile="07-the-tenth-key" chapterOrder={7} row={rows[selected]!} rows={rows} pictures={placed} record={record(pictures, look)} />
+      <BlockPicturePanel worldId={FIXTURE_WORLD_ID} production={production} chapterFile="07-the-tenth-key" chapterOrder={7} row={rows[selected]!} rows={rows} pictures={placed} record={record(pictures, look, own)} />
     </>
   );
 }
-async function mount(selected: number, pictures?: ChapterAudiobook["pictures"], look?: ChapterAudiobook["look"]): Promise<Mounted> {
+/** The record as it comes back with the looks held on its blocks (design turn 193d, R-146): the panel is drawn again from it. */
+let rerender: ((own: ChapterAudiobook["ownLooks"]) => Promise<void>) | null = null;
+async function mount(selected: number, pictures?: ChapterAudiobook["pictures"], look?: ChapterAudiobook["look"], own?: ChapterAudiobook["ownLooks"]): Promise<Mounted> {
   const sent: ClientMessage[] = [];
   __setBridgeForTest({ appVersion: "test", platform: "test", connect: () => {}, subscribe: () => {}, send: (json: string) => sent.push(JSON.parse(json) as ClientMessage) } as unknown as ArkeBridge);
   const container = dom.document.createElement("div") as unknown as HTMLElement;
   dom.document.body.append(container);
   const root = createRoot(container);
-  await act(async () => {
-    __setStateForTest(state(), { connection: "open" });
+  const draw = (held: ChapterAudiobook["ownLooks"]) =>
     root.render(
       <MemoryRouter initialEntries={["/chapter"]}>
         <Where />
         <Routes>
-          <Route path="/chapter" element={<Panel selected={selected} {...(pictures !== undefined ? { pictures } : {})} {...(look !== undefined ? { look } : {})} />} />
+          <Route path="/chapter" element={<Panel selected={selected} {...(pictures !== undefined ? { pictures } : {})} {...(look !== undefined ? { look } : {})} {...(held !== undefined ? { own: held } : {})} />} />
           <Route path="*" element={<div data-testid="elsewhere" />} />
         </Routes>
       </MemoryRouter>,
     );
+  await act(async () => {
+    __setStateForTest(state(), { connection: "open" });
+    draw(own);
   });
+  rerender = async (held) => act(async () => draw(held));
   const mounted = { container, root, sent, where: () => location };
   open.push(mounted);
   return mounted;
@@ -154,6 +162,13 @@ const press = async (el: Element | null | undefined) => {
   await act(async () => void el.dispatchEvent(new dom.Event("click", { bubbles: true }) as unknown as Event));
 };
 const button = (m: Mounted, label: string) => all(m, "button").find((el) => text(el) === label);
+/** A box ticked or cleared, as React hears it (linkedom's click does not change a checkbox). */
+const tick = async (el: Element | null, checked: boolean) => {
+  assert.ok(el, "the box exists");
+  const props = (el as unknown as Record<string, { onChange: (event: { target: { checked: boolean } }) => void }>)[Object.keys(el).find((key) => key.startsWith("__reactProps$"))!]!;
+  await act(async () => props.onChange({ target: { checked } }));
+};
+const chapterBox = (m: Mounted) => tick(q(m, '[data-testid="picture-card-look-chapter"]'), true);
 const picture = (index: number, file: string) => ({ file, source: "world" as const, textHash: audiobookTextHash(TEXTS[index]!), at: AT });
 
 describe("what a picture can be (turn 186c)", () => {
@@ -555,7 +570,7 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.match(text(q(m, '[data-testid="picture-card-not-in-frame"]')), /Not in frame\s*Maren$/);
   });
 
-  it("ends a person's row with the frame's word and the look menu: their looks, Main photo, New look, and the chapter's choice held on", async () => {
+  it("ends a person's row with the frame's word and the look menu: their looks, Main photo, New look, Only this picture on (rule 8)", async () => {
     extraArtifacts = [madeArtifact()];
     const m = await mount(2, { "p1.0": made(SHOT) });
     const toggle = q(m, '[data-key="maren-kest"] [data-testid="picture-card-look"]');
@@ -567,38 +582,154 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.equal(toggle?.getAttribute("aria-expanded"), "true");
     const menu = q(m, '[data-key="maren-kest"] [data-testid="picture-card-look-menu"]');
     assert.equal(menu?.getAttribute("aria-label"), "Maren · look");
-    assert.deepEqual(all(m, '[data-testid="picture-card-look-tile"]').map((tile) => [tile.dataset.look, text(tile), tile.getAttribute("aria-pressed")]), [[STORM_LOOK.id, "Storm coat", "false"], ["main", "Main photo", "true"]], "the chapter chose none: the main photo is on");
+    assert.deepEqual(all(m, '[data-testid="picture-card-look-tile"]').map((tile) => [tile.dataset.look, text(tile), tile.getAttribute("aria-pressed")]), [[STORM_LOOK.id, "Storm coat", "false"], [HARBOUR_LOOK.id, "Harbour coat", "false"], ["main", "Main photo", "true"]], "the chapter chose none: the main photo is on");
     assert.equal(text(q(m, '[data-testid="picture-card-look-new"]')), "New look");
-    // A one-picture look is in the record but nothing makes a picture with one yet: the menu sets the chapter's choice and says so.
+    // 193d: two boxes, Only this picture on as the menu opens, and both pressable.
     const only = q(m, '[data-testid="picture-card-look-only"]') as HTMLInputElement;
     const chapter = q(m, '[data-testid="picture-card-look-chapter"]') as HTMLInputElement;
-    assert.deepEqual([only.checked, only.disabled], [false, true]);
-    assert.deepEqual([chapter.checked, chapter.disabled], [true, true]);
+    assert.deepEqual([only.checked, only.disabled], [true, false]);
+    assert.deepEqual([chapter.checked, chapter.disabled], [false, false]);
     assert.match(text(menu), /Only this picture\s*Set for Chapter 7/);
+    await tick(chapter, true);
+    assert.deepEqual([only.checked, chapter.checked], [false, true], "one box or the other");
+    await tick(only, true);
+    assert.deepEqual([only.checked, chapter.checked], [true, false]);
   });
 
-  it("files a look pressed in the menu as the chapter's choice, rings it at once, and asks once", async () => {
+  it("with Set for Chapter N on, files a look pressed in the menu as the chapter's choice, rings it at once, and asks once", async () => {
     extraArtifacts = [madeArtifact()];
     const m = await mount(2, { "p1.0": made(SHOT) });
     await press(q(m, '[data-key="maren-kest"] [data-testid="picture-card-look"]'));
+    await chapterBox(m);
     await press(q(m, `[data-testid="picture-card-look-tile"][data-look="${STORM_LOOK.id}"]`));
     const chose = asked(m, "choose-audiobook-look");
     assert.equal(chose.length, 1);
-    assert.deepEqual([chose[0]!.productionId, chose[0]!.chapterFile, chose[0]!.key, chose[0]!.sheet, chose[0]!.lookId], ["saltlight", "07-the-tenth-key", "maren-kest", "maren-kest", STORM_LOOK.id]);
+    assert.deepEqual([chose[0]!.productionId, chose[0]!.chapterFile, chose[0]!.key, chose[0]!.sheet, chose[0]!.lookId, chose[0]!.block, chose[0]!.only], ["saltlight", "07-the-tenth-key", "maren-kest", "maren-kest", STORM_LOOK.id, "p1.0", undefined], "the chapter's, and this picture follows it");
     assert.equal(q(m, `[data-testid="picture-card-look-tile"][data-look="${STORM_LOOK.id}"]`)?.getAttribute("aria-pressed"), "true", "ringed before the record comes back");
     assert.equal(q(m, '[data-testid="picture-card-look-tile"][data-look="main"]')?.getAttribute("aria-pressed"), "false");
     await press(q(m, `[data-testid="picture-card-look-tile"][data-look="${STORM_LOOK.id}"]`));
     assert.equal(asked(m, "choose-audiobook-look").length, 1, "the look already chosen is not asked for again");
   });
 
-  it("rings the look the chapter chose, and Main photo takes the choice away", async () => {
+  it("rings the look the chapter chose, and with Set for Chapter N on, Main photo takes the choice away", async () => {
     extraArtifacts = [madeArtifact()];
     const look = { chapterHash: "h", at: AT, characters: { "maren-kest": { name: "Maren", sheet: "maren-kest", text: "Storm coat, hood up; two braids.", lookId: STORM_LOOK.id } } };
     const m = await mount(2, { "p1.0": made(SHOT) }, look);
     await press(q(m, '[data-key="maren-kest"] [data-testid="picture-card-look"]'));
     assert.equal(q(m, `[data-testid="picture-card-look-tile"][data-look="${STORM_LOOK.id}"]`)?.getAttribute("aria-pressed"), "true");
+    await chapterBox(m);
     await press(q(m, '[data-testid="picture-card-look-tile"][data-look="main"]'));
-    assert.equal(asked(m, "choose-audiobook-look").at(-1)!.lookId, null);
+    assert.deepEqual([asked(m, "choose-audiobook-look").at(-1)!.lookId, asked(m, "choose-audiobook-look").at(-1)!.only], [null, undefined]);
+  });
+
+  /**
+   * Only this picture (design turn 193d, rule 8; SPEC-047 R-146): a look pressed with the box on is
+   * held on the block for this picture alone, the row says so, the prompt is marked until Update
+   * prompt rewrites that person's clothing words, and Make again sends it.
+   */
+  const STORM_CHAPTER = { chapterHash: "h", at: AT, characters: { "maren-kest": { name: "Maren", sheet: "maren-kest", text: "Storm coat, hood up; two braids.", lookId: STORM_LOOK.id } } };
+  const madeInStorm = () => ({ ...made(SHOT), look: { hash: "h", who: ["maren-kest"], looks: { "maren-kest": { lookId: STORM_LOOK.id, view: "close" as const } } } });
+
+  it("holds a look pressed with Only this picture on for this picture alone, says `this picture only`, and marks the prompt", async () => {
+    extraArtifacts = [madeArtifact()];
+    const m = await mount(2, { "p1.0": madeInStorm() }, STORM_CHAPTER);
+    assert.equal(q(m, '[data-testid="picture-card-only"]'), null, "the chapter's look: nothing said");
+    assert.equal(q(m, '[data-testid="picture-card-update-prompt"]'), null);
+    await press(q(m, '[data-key="maren-kest"] [data-testid="picture-card-look"]'));
+    await press(q(m, `[data-testid="picture-card-look-tile"][data-look="${HARBOUR_LOOK.id}"]`));
+    const chose = asked(m, "choose-audiobook-look").at(-1)!;
+    assert.deepEqual([chose.lookId, chose.block, chose.only], [HARBOUR_LOOK.id, "p1.0", true], "for this block's picture alone");
+    assert.equal(q(m, `[data-testid="picture-card-look-tile"][data-look="${HARBOUR_LOOK.id}"]`)?.getAttribute("aria-pressed"), "true", "ringed at once");
+    // The record comes back holding it on the block: the row, the Rides line and the marks follow from it.
+    await rerender!({ "p1.0": { "maren-kest": HARBOUR_LOOK.id } });
+    assert.equal(text(q(m, '[data-key="maren-kest"] [data-testid="picture-card-only"]')), "this picture only");
+    assert.match(text(q(m, '[data-key="maren-kest"]')), /Harbour coat · full body/, "no close view: the full body rides");
+    assert.deepEqual(all(m, '[data-key="maren-kest"] [data-testid="picture-card-thumb"]').map((img) => img.getAttribute("src")?.includes("tk_harbour/harbour.png")), [true]);
+    assert.equal(text(q(m, '[data-testid="picture-card-rides"]')), "Full body · no close view", "a close-up, and the harbour coat has no close view");
+    assert.match(text(q(m, '[data-testid="picture-card-look-changed"]')), /^!\s*Look changed\s*prompt still says Storm coat$/);
+    assert.equal(text(q(m, '[data-testid="picture-card-update-prompt"]')), "Update prompt");
+    assert.equal(asked(m, "rewrite-audiobook-picture-prompt").length, 0, "nothing is rewritten unasked");
+  });
+
+  it("Update prompt asks for that person's clothing words rewritten, puts the answer in the prompt, and the mark goes", async () => {
+    extraArtifacts = [madeArtifact()];
+    const m = await mount(2, { "p1.0": madeInStorm() }, STORM_CHAPTER, { "p1.0": { "maren-kest": HARBOUR_LOOK.id } });
+    await press(q(m, '[data-testid="picture-card-update-prompt"]'));
+    const rewrite = asked(m, "rewrite-audiobook-picture-prompt").at(-1)!;
+    assert.deepEqual([rewrite.block, rewrite.prompt, rewrite.changes], ["p1.0", PROMPT, [{ key: "maren-kest", from: STORM_LOOK.id, to: HARBOUR_LOOK.id }]]);
+    assert.equal(text(q(m, '[data-testid="picture-card-update-prompt"]')), "Updating…");
+    assert.equal((q(m, '[data-testid="suggest-generate"]') as HTMLButtonElement).disabled, true, "not made while its words are being rewritten");
+    const rewritten = "Close on Maren at the Vigil's rail in her harbour coat, rain in the lamp's light.";
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.picture-prompt", requestId: rewrite.requestId, worldId: FIXTURE_WORLD_ID, productionId: "saltlight", chapterId: "07-the-tenth-key", block: "p1.0", prompt: rewritten } as never));
+    assert.equal(text(q(m, '[data-testid="picture-card-prompt"]')), rewritten);
+    assert.equal(q(m, '[data-testid="picture-card-look-changed"]'), null);
+    assert.equal(q(m, '[data-testid="picture-card-update-prompt"]'), null);
+    // Make again sends the rewritten prompt and the look of its own.
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    const make = asked(m, "make-audiobook-picture").at(-1)!;
+    assert.deepEqual([make.prompt, make.looks], [rewritten, { "maren-kest": HARBOUR_LOOK.id }]);
+  });
+
+  it("says why an Update prompt was refused on the mark, and the prompt stays as it was", async () => {
+    extraArtifacts = [madeArtifact()];
+    const m = await mount(2, { "p1.0": madeInStorm() }, STORM_CHAPTER, { "p1.0": { "maren-kest": HARBOUR_LOOK.id } });
+    await press(q(m, '[data-testid="picture-card-update-prompt"]'));
+    const rewrite = asked(m, "rewrite-audiobook-picture-prompt").at(-1)!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.picture-prompt", requestId: rewrite.requestId, worldId: FIXTURE_WORLD_ID, productionId: "saltlight", chapterId: "07-the-tenth-key", block: "p1.0", refused: "the writing service is not running" } as never));
+    assert.match(text(q(m, '[data-testid="picture-card-look-changed"]')), /^!\s*Look changed\s*the writing service is not running$/);
+    assert.equal(text(q(m, '[data-testid="picture-card-prompt"]')), PROMPT);
+    assert.equal(text(q(m, '[data-testid="picture-card-update-prompt"]')), "Update prompt", "to try again");
+  });
+
+  it("keeps a look held on the block through a reload, and a picture made with one alone says so and makes again with it", async () => {
+    extraArtifacts = [madeArtifact()];
+    // Held on the block: drawn from the record alone, as after a reload.
+    const held = await mount(2, { "p1.0": madeInStorm() }, STORM_CHAPTER, { "p1.0": { "maren-kest": "main-photo" } });
+    assert.equal(text(q(held, '[data-key="maren-kest"] [data-testid="picture-card-only"]')), "this picture only");
+    assert.match(text(q(held, '[data-key="maren-kest"]')), /main photo/);
+    assert.equal(text(q(held, '[data-testid="picture-card-rides"]')), "Main photo");
+    assert.match(text(q(held, '[data-testid="picture-card-look-changed"]')), /prompt still says Storm coat/);
+    await press(q(held, '[data-key="maren-kest"] [data-testid="picture-card-look"]'));
+    assert.equal(q(held, '[data-testid="picture-card-look-tile"][data-look="main"]')?.getAttribute("aria-pressed"), "true", "the held main photo is ringed");
+    await press(q(held, '[data-testid="suggest-generate"]'));
+    assert.deepEqual(asked(held, "make-audiobook-picture").at(-1)!.looks, { "maren-kest": "main-photo" });
+    // Made with the harbour coat alone: its stamp says so, and Make again keeps it without its being chosen again.
+    const own = { ...made(SHOT), look: { hash: "h", who: ["maren-kest"], looks: { "maren-kest": { lookId: HARBOUR_LOOK.id, view: "full" as const, only: true as const } } } };
+    const m = await mount(2, { "p1.0": own }, STORM_CHAPTER);
+    assert.equal(text(q(m, '[data-key="maren-kest"] [data-testid="picture-card-only"]')), "this picture only");
+    assert.equal(q(m, '[data-testid="picture-card-look-changed"]'), null, "the prompt was written for the look it rode");
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    assert.deepEqual(asked(m, "make-audiobook-picture").at(-1)!.looks, { "maren-kest": HARBOUR_LOOK.id });
+  });
+
+  it("never marks a picture made with a look of its own `look changed` for the chapter's choice, and does for that look's own words", async () => {
+    extraArtifacts = [madeArtifact()];
+    const kits = state().world!.referenceKits;
+    const stamp = pictureLookFor(STORM_CHAPTER, ["maren-kest"], { "maren-kest": { lookId: HARBOUR_LOOK.id, view: "full", only: true } }, kitLookLibrary(kits, STORM_CHAPTER))!;
+    const own = { ...made(SHOT), look: stamp };
+    for (const chapter of [STORM_CHAPTER, { ...STORM_CHAPTER, characters: { "maren-kest": { name: "Maren", sheet: "maren-kest", text: "A red coat." } } }]) {
+      const m = await mount(2, { "p1.0": own }, chapter);
+      assert.equal(q(m, '[data-testid="picture-look-changed"]'), null);
+    }
+    const following = { ...made(SHOT), look: pictureLookFor(STORM_CHAPTER, ["maren-kest"], { "maren-kest": { lookId: STORM_LOOK.id, view: "close" } }, kitLookLibrary(kits, STORM_CHAPTER))! };
+    const m = await mount(2, { "p1.0": following }, { ...STORM_CHAPTER, characters: { "maren-kest": { name: "Maren", sheet: "maren-kest", text: "Harbour coat, brass buttons.", lookId: HARBOUR_LOOK.id } } });
+    assert.ok(q(m, '[data-testid="picture-look-changed"]'), "a picture that followed the chapter is marked");
+  });
+
+  it("sends no looks of its own where none are held, and lets one go with Set for Chapter N", async () => {
+    extraArtifacts = [madeArtifact()];
+    const m = await mount(2, { "p1.0": madeInStorm() }, STORM_CHAPTER, { "p1.0": { "maren-kest": HARBOUR_LOOK.id } });
+    await press(q(m, '[data-key="maren-kest"] [data-testid="picture-card-look"]'));
+    await chapterBox(m);
+    assert.equal(q(m, `[data-testid="picture-card-look-tile"][data-look="${STORM_LOOK.id}"]`)?.getAttribute("aria-pressed"), "true", "the chapter's choice, with its box on");
+    await press(q(m, `[data-testid="picture-card-look-tile"][data-look="${STORM_LOOK.id}"]`));
+    const chose = asked(m, "choose-audiobook-look").at(-1)!;
+    assert.deepEqual([chose.lookId, chose.block, chose.only], [STORM_LOOK.id, "p1.0", undefined], "the chapter's choice already, and the picture's own let go");
+    assert.equal(q(m, '[data-testid="picture-card-only"]'), null, "the row follows the chapter at once");
+    assert.equal(q(m, '[data-testid="picture-card-look-changed"]'), null);
+    await rerender!({ "p1.0": {} });
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    assert.deepEqual(asked(m, "make-audiobook-picture").at(-1)!.looks, {});
   });
 
   it("opens New look over the panel from the menu, and puts the menu away", async () => {

@@ -146,7 +146,9 @@ export type AudiobookAsk =
   | { state: "made"; sessionId?: string }
   | { state: "failed"; reason: string; sessionId?: string }
   /** Which chapters (by number) of the book chose each kit look (design turn 193, R-114). */
-  | { state: "looks"; usage: Record<string, number[]> };
+  | { state: "looks"; usage: Record<string, number[]> }
+  /** Update prompt answered (design turn 193d, R-146): the prompt with the changed people's clothing words rewritten. */
+  | { state: "prompt"; prompt: string };
 
 /**
  * `Illustrate this chapter` (design turn 191b, 191d, SPEC-047 R-101, R-102), keyed like a run: the proposal the
@@ -2164,6 +2166,10 @@ function handleFrame(json: string): void {
     } else if (event.type === "audiobook.picture-suggestion") {
       if (audiobookAsks[event.requestId] !== undefined) {
         audiobookAsks = { ...audiobookAsks, [event.requestId]: event.suggestion !== undefined ? { state: "suggested", suggestion: event.suggestion } : { state: "refused", refused: event.refused ?? "no picture suggested" } };
+      }
+    } else if (event.type === "audiobook.picture-prompt") {
+      if (audiobookAsks[event.requestId] !== undefined) {
+        audiobookAsks = { ...audiobookAsks, [event.requestId]: event.prompt !== undefined ? { state: "prompt", prompt: event.prompt } : { state: "refused", refused: event.refused ?? "the prompt was not updated" } };
       }
     } else if (event.type === "audiobook.picture-made") {
       // A picture on its block carries the record it stands in, taken as any record write is: a window that has it
@@ -4201,10 +4207,14 @@ export function readAudiobookLooks(worldId: string, productionId: string): strin
   return requestId;
 }
 
-/** A kit look chosen for a character in this chapter, or the choice taken away with null (R-112). Answered as `audiobook.record`. */
-export function chooseAudiobookLook(worldId: string, productionId: string, chapterFile: string, who: { key: string; name?: string; sheet?: string }, lookId: string | null): string | null {
+/**
+ * A kit look chosen for a character in this chapter, or the choice taken away with null (R-112). Answered as `audiobook.record`.
+ * From a block's look menu (design turn 193d, R-146) it names the block: with `only`, for that block's picture alone (null: the
+ * main photo), held on the block until made; without, the chapter's choice, which that block's picture then follows.
+ */
+export function chooseAudiobookLook(worldId: string, productionId: string, chapterFile: string, who: { key: string; name?: string; sheet?: string }, lookId: string | null, picture?: { block: string; only?: boolean }): string | null {
   const requestId = ulid();
-  return send({ kind: "choose-audiobook-look", worldId, productionId, chapterFile, ...who, lookId, requestId }) ? requestId : null;
+  return send({ kind: "choose-audiobook-look", worldId, productionId, chapterFile, ...who, lookId, ...(picture !== undefined ? { block: picture.block, ...(picture.only === true ? { only: true as const } : {}) } : {}), requestId }) ? requestId : null;
 }
 
 export function rejectReferenceTake(worldId: string, takeId: string, field: string, note?: string): boolean {
@@ -5652,9 +5662,21 @@ export function suggestAudiobookPicture(worldId: string, productionId: string, c
 }
 
 /** A suggestion made (R-99): the prompt as the author left it and the price the press showed; made through the Bench and filed on the block. */
-export function makeAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, input: { prompt: string; who: readonly string[]; frame?: string; shot?: PictureShot; confirmedMicroUsd: number }): string | null {
+export function makeAudiobookPicture(worldId: string, productionId: string, chapterFile: string, block: string, input: { prompt: string; who: readonly string[]; frame?: string; shot?: PictureShot; looks?: Readonly<Record<string, string>>; confirmedMicroUsd: number }): string | null {
   const requestId = ulid();
-  if (!send({ kind: "make-audiobook-picture", worldId, productionId, chapterFile, block, prompt: input.prompt, who: [...input.who], ...(input.frame !== undefined ? { frame: input.frame } : {}), ...(input.shot !== undefined ? { shot: input.shot } : {}), confirmedMicroUsd: input.confirmedMicroUsd, requestId })) return null;
+  // The looks chosen for this picture alone ride with it (design turn 193d, R-146), each in place of the chapter's for that person.
+  if (!send({ kind: "make-audiobook-picture", worldId, productionId, chapterFile, block, prompt: input.prompt, who: [...input.who], ...(input.frame !== undefined ? { frame: input.frame } : {}), ...(input.shot !== undefined ? { shot: input.shot } : {}), ...(input.looks !== undefined ? { looks: { ...input.looks } } : {}), confirmedMicroUsd: input.confirmedMicroUsd, requestId })) return null;
+  emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
+  return requestId;
+}
+
+/**
+ * Update prompt (design turn 193d, R-146): the writing service rewrites these people's clothing words from the look the prompt
+ * was written for to the look now chosen, every other word left as it is. Answered under the id returned, held in `audiobookAsks`.
+ */
+export function rewriteAudiobookPicturePrompt(worldId: string, productionId: string, chapterFile: string, block: string, prompt: string, changes: ReadonlyArray<{ key: string; from: string; to: string }>): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "rewrite-audiobook-picture-prompt", worldId, productionId, chapterFile, block, prompt, changes: changes.map((change) => ({ ...change })), requestId })) return null;
   emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
   return requestId;
 }

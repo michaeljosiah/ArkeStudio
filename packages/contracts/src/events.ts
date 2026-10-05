@@ -11,7 +11,7 @@ import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema, DirectionReadsSchema } from "./audiobook.js";
 import { AudiobookListeningSchema } from "./audiobook-listening.js";
 import { AudiobookVideoProgressSchema, AudiobookVideoResultSchema, AudiobookVideoStateSchema } from "./audiobook-video.js";
-import { IllustrationProgressSchema, IllustrationProposalSchema, PictureSuggestionSchema } from "./audiobook-illustrate.js";
+import { IllustrationProgressSchema, IllustrationProposalSchema, PICTURE_PROMPT_MAX, PictureSuggestionSchema } from "./audiobook-illustrate.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX } from "./cadence.js";
 import { FreePlanShortSchema } from "./provider-plans.js";
@@ -1369,6 +1369,24 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       productionId: SlugSchema,
       chapterId: SlugSchema,
       suggestion: PictureSuggestionSchema.optional(),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
+  /**
+   * Update prompt answered (design turn 193d, SPEC-047 R-146), to the window that asked: the prompt
+   * with the changed people's clothing words rewritten from the look now chosen for this picture,
+   * every other word as it was — or why not. Nothing was made or spent.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.picture-prompt"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      block: z.string().min(1).max(40),
+      prompt: z.string().min(1).max(PICTURE_PROMPT_MAX).optional(),
       refused: z.string().min(1).optional(),
     })
     .strict(),

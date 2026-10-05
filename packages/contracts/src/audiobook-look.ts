@@ -162,6 +162,43 @@ export type PictureLookPick = z.infer<typeof PictureLookPickSchema>;
 /** A kit look's own clothing line, for the one-picture override: the look and its words, or undefined where it is gone. */
 export type LookLibrary = (key: string, lookId: string) => { text: string } | undefined;
 
+/**
+ * The main photo chosen for one picture alone (design turn 193d, the Main photo tile under Only
+ * this picture; SPEC-047 R-146): kept where a kit look's id would be, on a picture's stamp and on a
+ * block's pending looks. No kit look is ever named this — a kit look's id is the take's.
+ */
+export const MAIN_PHOTO_LOOK = "main-photo";
+
+/**
+ * The looks chosen for one block's picture alone (design turn 193d, SPEC-047 R-115, R-146): by
+ * person (their look key), a kit look's id or `MAIN_PHOTO_LOOK`. Held on the chapter's record
+ * under the block until the picture is made with them, then stamped on it (`looks[key].only`).
+ */
+export type PictureOwnLooks = Record<string, string>;
+export const PictureOwnLooksSchema: z.ZodType<PictureOwnLooks, z.ZodTypeDef, unknown> = z
+  .record(z.string().min(1).max(120), z.string().min(1).max(120))
+  .refine((looks) => Object.keys(looks).length <= LOOK_CHARACTERS_MAX, { message: `at most ${LOOK_CHARACTERS_MAX} people` });
+
+/**
+ * The looks a block's next picture is made with for itself (R-146): those the author chose for it
+ * and not yet made (`pending`, the record's), else those its picture was made with alone — so
+ * Make again keeps a one-picture look without its being chosen again. A pending entry, even an
+ * empty one, stands over the picture's own: `{}` is a picture put back to the chapter's choices.
+ */
+export function pictureOwnLooks(pending: PictureOwnLooks | undefined, made: PictureLook | undefined): PictureOwnLooks {
+  if (pending !== undefined) return { ...pending };
+  const own: PictureOwnLooks = {};
+  for (const [key, pick] of Object.entries(made?.looks ?? {})) if (pick.only === true) own[key] = pick.lookId;
+  return own;
+}
+
+/** Looks chosen for one picture as `lookLinesFor` takes them: each one `only`, its view not yet known (the frame decides). */
+export function ownLookPicks(own: Readonly<PictureOwnLooks> | undefined): Record<string, PictureLookPick> {
+  const picks: Record<string, PictureLookPick> = {};
+  for (const [key, lookId] of Object.entries(own ?? {})) picks[key] = { lookId, view: lookId === MAIN_PHOTO_LOOK ? "close" : "full", only: true };
+  return picks;
+}
+
 export interface PictureLookLine {
   label: string;
   key: string | null;
@@ -169,6 +206,8 @@ export interface PictureLookLine {
   /** The kit look the line comes from, and which of its images rides: absent where the main photo rides. */
   lookId?: string;
   view?: LookView;
+  /** The main photo chosen for this picture alone (R-146): the words are the chapter's reading, and they never mark it. */
+  main?: true;
 }
 
 /**
@@ -177,7 +216,9 @@ export interface PictureLookLine {
  *
  * `picks` are the looks chosen for one picture alone (R-115): that person's words are the chosen
  * look's own line, from `library`, not the chapter's. A look the library no longer holds leaves
- * the chapter's line, marked, so the picture reads as changed.
+ * the chapter's line, marked, so the picture reads as changed. The main photo chosen for one
+ * picture (R-146) has no line of its own: its words are what the chapter's prose says they wear
+ * (the reading kept beside a chosen look, else the chapter's line).
  */
 export function lookLinesFor(
   look: AudiobookLook | null | undefined,
@@ -185,12 +226,18 @@ export function lookLinesFor(
   picks?: Readonly<Record<string, PictureLookPick>>,
   library?: LookLibrary,
 ): PictureLookLine[] {
-  if (look === null || look === undefined) return [];
+  // A chapter whose look was never read still has the looks chosen for one picture: those are the picture's own.
+  if ((look === null || look === undefined) && !Object.values(picks ?? {}).some((pick) => pick.only === true)) return [];
   const lines: PictureLookLine[] = [];
-  if (look.place !== undefined) lines.push({ label: "Place", key: null, text: look.place.text });
+  if (look?.place !== undefined) lines.push({ label: "Place", key: null, text: look.place.text });
   for (const key of who) {
-    const line = look.characters[key];
+    const line = look?.characters[key];
     const pick = picks?.[key];
+    if (pick?.only === true && pick.lookId === MAIN_PHOTO_LOOK) {
+      if (line === undefined) continue;
+      lines.push({ label: line.name, key, text: line.reading ?? line.text, main: true });
+      continue;
+    }
     if (pick?.only === true) {
       // The override's words are the look's own; the chapter's line is not in this picture at all.
       const own = library?.(key, pick.lookId);
@@ -208,11 +255,13 @@ export function lookLinesFor(
  * each person rode with (R-112). A picture stores it with who was in it, and is marked `look
  * changed` when the lines for those same people now say something else — one character's coat
  * changed does not mark another character's pictures. A line with no look hashes as it did in 191,
- * so a picture made before looks existed is not marked by their arrival alone.
+ * so a picture made before looks existed is not marked by their arrival alone. The main photo
+ * chosen for one picture hashes as itself alone (R-146): the chapter's choosing or unchoosing a
+ * look moves the words beside it, and that change is the chapter's, not this picture's.
  */
-export function lookDigest(lines: ReadonlyArray<{ key: string | null; text: string; lookId?: string | undefined; view?: string | undefined }>): string {
+export function lookDigest(lines: ReadonlyArray<{ key: string | null; text: string; lookId?: string | undefined; view?: string | undefined; main?: true | undefined }>): string {
   return textDigest(
-    `look-v1:${JSON.stringify(lines.map((line) => (line.lookId === undefined ? [line.key, line.text.replace(/\s+/g, " ").trim()] : [line.key, line.text.replace(/\s+/g, " ").trim(), line.lookId, line.view ?? "full"])))}`,
+    `look-v1:${JSON.stringify(lines.map((line) => (line.main === true ? [line.key, MAIN_PHOTO_LOOK] : line.lookId === undefined ? [line.key, line.text.replace(/\s+/g, " ").trim()] : [line.key, line.text.replace(/\s+/g, " ").trim(), line.lookId, line.view ?? "full"])))}`,
   );
 }
 

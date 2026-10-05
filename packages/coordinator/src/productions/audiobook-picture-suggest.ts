@@ -1,14 +1,19 @@
 import {
+  MAIN_PHOTO_LOOK,
   PICTURE_PROMPT_MAX,
+  kitLookLibrary,
   lookLinesFor,
   lookName,
   lookViewFor,
   neutralClothing,
   normalizeSpeechText,
+  ownLookPicks,
   pictureAspect,
   pictureLookFor,
   pictureMood,
+  pictureOwnLooks,
   pictureQuote,
+  placePictures,
   referenceBudget,
   ridingPicks,
   sheetReferencePicture,
@@ -18,6 +23,7 @@ import {
   type HarnessAdapter,
   type LookView,
   type ManifestModel,
+  type PictureOwnLooks,
   type PictureSuggestion,
   type PictureWho,
 } from "@arke-studio/contracts";
@@ -92,10 +98,11 @@ export function makeAdapterPictureDeriver(adapter: HarnessAdapter, sessionInput:
  * kit look it is the line of where the chapter chose one (`[ife] Ife, look "Cream-gold silk slip
  * dress": …`).
  */
-export function briefLines(store: Pick<WorldStore, "getBundle">, look: AudiobookLook | null, keys: readonly string[], carries = true): BriefLine[] {
+export function briefLines(store: Pick<WorldStore, "getBundle">, look: AudiobookLook | null, keys: readonly string[], carries = true, own?: Readonly<PictureOwnLooks>): BriefLine[] {
   const kits = store.getBundle().referenceKits;
-  return lookLinesFor(look, keys).map((line): BriefLine => {
-    const sheet = line.key === null ? undefined : look?.characters[line.key]?.sheet;
+  // A look chosen for this picture alone gives that person's line (R-146): the brief is written for it.
+  return lookLinesFor(look, keys, ownLookPicks(ownLooksThatRide(store, look, own)), kitLookLibrary(kits, look)).map((line): BriefLine => {
+    const sheet = line.key === null ? undefined : (look?.characters[line.key]?.sheet ?? line.key);
     const chosen = line.lookId === undefined || sheet === undefined ? undefined : kits.find((kit) => kit.sheetId === sheet)?.looks?.find((candidate) => candidate.id === line.lookId);
     // The look's image carries the clothes, so its line is given neutrally (rule 4, 2026-10-04): the
     // garment and its colour, never the skin, the cut or the body a model would copy word for word.
@@ -104,6 +111,16 @@ export function briefLines(store: Pick<WorldStore, "getBundle">, look: Audiobook
     // model that takes no reference picture carries no look image, so its lines stay whole (`carries`).
     return { label: line.label, key: line.key, text: chosen !== undefined && carries ? neutralClothing(line.text) : line.text, ...(chosen !== undefined ? { look: lookName(chosen) } : {}) };
   });
+}
+
+/**
+ * The looks chosen for one picture that can still ride (R-146): a kit look the kit no longer holds
+ * is passed over for the chapter's choice, as `pictureWho` passes it over, so its words never
+ * reach a brief or a stamp.
+ */
+export function ownLooksThatRide(store: Pick<WorldStore, "getBundle">, look: AudiobookLook | null | undefined, own: Readonly<PictureOwnLooks> | undefined): PictureOwnLooks {
+  const library = kitLookLibrary(store.getBundle().referenceKits, look);
+  return Object.fromEntries(Object.entries(own ?? {}).filter(([key, lookId]) => lookId === MAIN_PHOTO_LOOK || library(key, lookId) !== undefined));
 }
 
 /**
@@ -154,17 +171,30 @@ export function pictureWho(
    * chapter chose a kit look for rides that look's image instead of the main photo — the close
    * view for a frame that shows faces where the look has one, the full body otherwise.
    */
-  options: { look?: AudiobookLook | null; frame?: string | null } = {},
+  options: {
+    look?: AudiobookLook | null;
+    frame?: string | null;
+    /**
+     * The looks chosen for this picture alone (design turn 193d, R-146): that person rides the
+     * look chosen for it — or the main photo — in place of the chapter's choice, marked `only`. One
+     * the kit no longer holds is passed over for the chapter's choice.
+     */
+    own?: Readonly<PictureOwnLooks>;
+  } = {},
 ): PictureWho[] {
   const world = store.getBundle();
-  const riding = (entry: (typeof chosen)[number]): { file: string | null; look?: { lookId: string; view: LookView } } => {
+  const kitLook = (sheet: string, lookId: string) => world.referenceKits.find((kit) => kit.sheetId === sheet)?.looks?.find((candidate) => candidate.id === lookId && candidate.kind === "costume");
+  const riding = (entry: (typeof chosen)[number]): { file: string | null; look?: { lookId: string; view: LookView }; only?: true } => {
     if (entry.sheet === undefined) return { file: null };
+    const ownId = entry.kind === "character" ? options.own?.[entry.key] : undefined;
+    if (ownId === MAIN_PHOTO_LOOK) return { file: sheetReferencePicture(world, entry.sheet), only: true };
+    const own = ownId === undefined ? undefined : kitLook(entry.sheet, ownId);
     const lookId = entry.kind === "character" ? options.look?.characters[entry.key]?.lookId : undefined;
-    const look = lookId === undefined ? undefined : world.referenceKits.find((kit) => kit.sheetId === entry.sheet)?.looks?.find((candidate) => candidate.id === lookId && candidate.kind === "costume");
+    const look = own ?? (lookId === undefined ? undefined : kitLook(entry.sheet, lookId));
     // A look the kit no longer holds leaves the main photo to ride, and the stamp records none.
     if (look === undefined) return { file: sheetReferencePicture(world, entry.sheet) };
     const view = lookViewFor(options.frame) === "close" && look.closeFile !== undefined ? "close" : "full";
-    return { file: `references/${entry.sheet}/${view === "close" ? look.closeFile! : look.file}`, look: { lookId: look.id, view } };
+    return { file: `references/${entry.sheet}/${view === "close" ? look.closeFile! : look.file}`, look: { lookId: look.id, view }, ...(own !== undefined ? { only: true as const } : {}) };
   };
   const resolved = chosen.map(riding);
   const candidates: BudgetCandidate[] = chosen.flatMap((entry, index) =>
@@ -175,7 +205,7 @@ export function pictureWho(
   const budget = referenceBudget(candidates, { ...model, accepts: { ...model.accepts, referenceImages: referenceBudgetFor(model) } });
   const carried = new Set(budget.carried.filter((candidate) => candidate.referenceRole === "primary").map((candidate) => candidate.sheetId));
   return chosen.map((entry, index): PictureWho => {
-    const { file, look } = resolved[index]!;
+    const { file, look, only } = resolved[index]!;
     return {
       key: entry.key,
       name: entry.name,
@@ -184,6 +214,7 @@ export function pictureWho(
       reference: file,
       carried: file !== null && entry.sheet !== undefined && carried.has(entry.sheet),
       ...(look !== undefined ? { look } : {}),
+      ...(only !== undefined ? { only } : {}),
     };
   });
 }
@@ -199,6 +230,21 @@ export interface PictureRoom {
   synopsis: string | undefined;
   /** The chapter's reading note (the book record's), which a face is read from where the block states no feeling (193k, rule 5). */
   note: string | undefined;
+  /**
+   * The looks a block's next picture is made with for itself (design turn 193d, R-146): those held
+   * on the block, else those its picture was made with alone.
+   */
+  own: (block: string) => PictureOwnLooks;
+}
+
+/** What a block's next picture is made with for itself, from the chapter's record as the plan read it (R-146). */
+export function blockOwnLooks(plan: Pick<AudiobookPlan, "blocks" | "record">, block: string): PictureOwnLooks {
+  const record = plan.record === "unreadable" || plan.record === null ? null : plan.record;
+  if (record === null) return {};
+  const index = plan.blocks.findIndex((planned) => planned.block.key === block);
+  const blocks = plan.blocks.map((planned) => ({ key: planned.block.key, text: planned.block.text }));
+  const made = index < 0 ? undefined : placePictures(blocks, record.pictures ?? {}).placed.find((entry) => entry.index === index)?.picture.look;
+  return pictureOwnLooks(record.ownLooks?.[block], made);
 }
 
 export async function pictureRoom(store: WorldStore, productionId: string, chapterId: string, look: AudiobookLook | null): Promise<PictureRoom> {
@@ -214,6 +260,7 @@ export async function pictureRoom(store: WorldStore, productionId: string, chapt
     mood: pictureMood(look, artDirectionFor(store, productionId)),
     synopsis: clip(summary?.synopsis, PICTURE_BOUNDS.synopsis),
     note,
+    own: (block) => blockOwnLooks(plan, block),
   };
 }
 
@@ -247,7 +294,10 @@ export async function suggestPicture(store: WorldStore, room: PictureRoom, block
   const sheets = store.getBundle().sheets;
   const speaker = blockSpeakers(sheets, planned.block);
   const maxChars = promptRoom(options.model);
-  const lines = briefLines(store, room.look, visible.map((person) => person.key), referenceBudgetFor(options.model) > 0);
+  // A look chosen for this block's picture alone is what the brief is written for and what rides (R-146).
+  const own = ownLooksThatRide(store, room.look, room.own(blockKey));
+  const library = kitLookLibrary(store.getBundle().referenceKits, room.look);
+  const lines = briefLines(store, room.look, visible.map((person) => person.key), referenceBudgetFor(options.model) > 0, own);
   const given: PictureDeriverInput = {
     title: room.plan.chapter.title,
     ...(room.mood !== undefined ? { mood: room.mood } : {}),
@@ -269,9 +319,10 @@ export async function suggestPicture(store: WorldStore, room: PictureRoom, block
     const prompt = clipPrompt(raw.prompt, maxChars);
     if (prompt === "") throw new Error("the writing service gave no picture");
     const drafted = holdBrief(raw, { people: visible, places: room.places, prompt, fallback: () => namedIn(planned.block, visible) });
-    const who = pictureWho(store, options.model, briefRiders(drafted), { look: room.look, frame: drafted.frame });
+    const who = pictureWho(store, options.model, briefRiders(drafted), { look: room.look, frame: drafted.frame, own });
     const held = { ...drafted, prompt: neutralWhereLooksRide(drafted.prompt, who) };
-    const used = lookLinesFor(room.look, [...held.inFrame.map((person) => person.key), ...held.details.map((detail) => detail.of)], ridingPicks(who));
+    // A detail's hand keeps the look its person has for this picture too.
+    const used = lookLinesFor(room.look, [...held.inFrame.map((person) => person.key), ...held.details.map((detail) => detail.of)], { ...ownLookPicks(own), ...ridingPicks(who) }, library);
     const checks = pictureChecks({ held, who, people: visible, lines: used, block: planned.block.text, mood: room.mood });
     return { held, who, used, checks };
   };
@@ -282,7 +333,7 @@ export async function suggestPicture(store: WorldStore, room: PictureRoom, block
   const { held, who, used, checks } = drafted;
   const picks = ridingPicks(who);
   const aspect = pictureAspect(options.model);
-  const stamp = pictureLookFor(room.look, held.inFrame.map((person) => person.key), picks);
+  const stamp = pictureLookFor(room.look, held.inFrame.map((person) => person.key), picks, library);
   return {
     block: blockKey,
     prompt: held.prompt,
