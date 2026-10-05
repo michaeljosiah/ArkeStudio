@@ -617,6 +617,38 @@ describe("the book's requests (design turn 185d)", () => {
     assert.equal(written.requests, "per-paragraph");
   });
 
+  it("asks the door again when whisper answers after the page opened, and not for a probe that changes nothing (2026-10-05)", async () => {
+    // Installed 0.5.60-local.24: the page opened before the start-up probe heard whisper, the door
+    // answered without Requests, and nothing asked again — leaving the page and coming back read
+    // the same stamp — until a change of reading did.
+    const m = await mount(inkbound());
+    const asked = () => m.sent.filter((message) => message.kind === "open-audiobook").length;
+    await answerDoor(m, door("narrator", { voices: [GROUPED] }));
+    await openReading(m);
+    assert.equal(q(m, '[data-testid="book-requests"]'), null, "no transcriber yet");
+    const whisper = (available: boolean, at: string) => ({ id: "whispercpp" as const, configured: true, validation: "valid" as const, probes: [{ capability: "voice-stt" as const, available, ...(available ? {} : { reason: "whisper.cpp is not running on this machine" }) }], lastValidated: at, fault: null });
+    const status = (available: boolean, at: string) => act(async () => __applyEventForTest({ at, type: "provider.status", providers: [...FIXTURE_STATE.app.providers, whisper(available, at)] }));
+    await status(false, "2026-09-14T09:00:01.000Z");
+    const settled = asked();
+    await status(false, "2026-09-14T09:00:06.000Z");
+    assert.equal(asked(), settled, "a probe that finds whisper still away asks nothing");
+    await status(true, "2026-09-14T09:00:11.000Z");
+    assert.equal(asked(), settled + 1, "whisper answering asks the door once");
+    await answerDoor(m, door("narrator", { voices: [GROUPED], requests: "grouped", price: { chapters: 1, blocks: 169, cloudBlocks: 169, characters: 18_000, estimatedMicroUsd: 460_000, voices: [], requests: 5, perParagraph: 169 } }));
+    assert.ok(q(m, '[data-testid="book-requests"]'), "the Requests row, from the answer");
+    assert.match(q(m, '[data-testid="read-book"]')!.textContent!, /^Read the book · 1 chapter · /);
+    await status(true, "2026-09-14T09:00:16.000Z");
+    assert.equal(asked(), settled + 1, "and a later probe of the same answer asks nothing");
+    // The narrator's engine coming and going changes who can read: asked once each way.
+    const kokoro = (available: boolean) => ({ id: "kokoro" as const, configured: true, validation: "valid" as const, probes: [{ capability: "voice-tts" as const, available, ...(available ? {} : { reason: "Kokoro is not running" }) }], lastValidated: AT, fault: null });
+    const engine = (available: boolean) => act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: [...FIXTURE_STATE.app.providers, whisper(true, AT), kokoro(available)] }));
+    await engine(true);
+    assert.equal(asked(), settled + 2, "the narrator's engine answering asks the door again");
+    await answerDoor(m, door("narrator", { voices: [GROUPED], requests: "grouped" }));
+    await engine(false);
+    assert.equal(asked(), settled + 3, "and its going away asks once more");
+  });
+
   it("is not offered where the coordinator says the reader cannot group here", async () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator"));
