@@ -21,7 +21,9 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1600, innerHeight: 1000 });
-Object.assign(dom.HTMLElement.prototype, { focus() {}, scrollIntoView() {} });
+// Chromium 150 (Electron 43) answers scrollIntoView with a Promise: an effect that returned it
+// handed React a cleanup that is not a function, and putting the look menu away blanked the screen.
+Object.assign(dom.HTMLElement.prototype, { focus() {}, scrollIntoView: () => Promise.resolve() });
 Object.assign(globalThis, {
   window: dom.window,
   document: dom.document,

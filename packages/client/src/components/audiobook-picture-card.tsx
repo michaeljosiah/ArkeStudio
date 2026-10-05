@@ -153,7 +153,11 @@ function LookMenu({ id, label, who, kit, slug, chapter, mode, onMode, chosen, of
   const photo = kit === null ? null : mainPhotoFor(kit);
   // Opened from the last row it falls below the panel's held foot, out of sight on a phone: the
   // body scrolls just far enough to show it whole, clear of the foot (its scroll margin).
-  useEffect(() => box.current?.scrollIntoView?.({ block: "nearest" }), []);
+  // Braced: Chromium 150 returns a Promise here, and an effect that returns it gives React a
+  // cleanup that is not a function — closing the menu threw and blanked the chapter screen.
+  useEffect(() => {
+    box.current?.scrollIntoView?.({ block: "nearest" });
+  }, []);
   // Away from the menu, or Escape, puts it away; the row's control keeps the focus it gave.
   useEffect(() => {
     const away = (event: Event) => {
