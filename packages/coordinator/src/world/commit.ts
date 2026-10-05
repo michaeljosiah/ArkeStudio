@@ -409,6 +409,12 @@ export const AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION = 61;
  * sixty-three are the production cards' (SPEC-051), so this is 64.
  */
 export const AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION = 64;
+/**
+ * Looks chosen for one picture and not yet made (design turn 193d, SPEC-047 R-146): `ownLooks` on
+ * the chapter's strict audiobook record, held on the block until the picture is made. A build
+ * before it reads such a record as unreadable, so the world is raised before the first.
+ */
+export const AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION = 65;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

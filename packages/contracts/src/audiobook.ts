@@ -8,7 +8,7 @@ import { chapterParagraphs, voicedBlocks, type VoicedBlock } from "./prose.js";
 import { textDigest } from "./subtitles.js";
 import { AudiobookGroupedSchema, AudiobookLoudnessSchema, AudiobookSplitFlagSchema } from "./audiobook-grouped.js";
 import { AudiobookPictureSchema } from "./audiobook-pictures.js";
-import { AudiobookLookSchema } from "./audiobook-look.js";
+import { AudiobookLookSchema, PictureOwnLooksSchema } from "./audiobook-look.js";
 import { AudiobookBedSchema, AudiobookBlockSoundSchema, AudiobookReactionSchema, BlockTimingSchema } from "./audiobook-timing.js";
 
 /**
@@ -423,6 +423,14 @@ export const ChapterAudiobookSchema = z
      * schema 49, and so does a picture that keeps the look it was made under.
      */
     look: AudiobookLookSchema.optional(),
+    /**
+     * Looks chosen for one block's picture alone and not yet made (design turn 193d, SPEC-047
+     * R-146), by block key, then by person: a kit look's id or the main photo. Kept so the choice
+     * survives a reload until the picture is made, when it is stamped on the picture instead and
+     * goes from here. Absent on a record with none; the first record with one raises the world to
+     * schema 65.
+     */
+    ownLooks: z.record(z.string(), PictureOwnLooksSchema).optional(),
     /**
      * Timing held to the blocks (design turn 187, SPEC-047 R-80..R-89): each block's start, trim,
      * `under` and nudge by block key; the reactions under their hosts by reaction key (`x<n>`),

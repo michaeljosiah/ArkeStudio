@@ -3,13 +3,17 @@ import {
   AudiobookLookSchema,
   LOOK_CHARACTERS_MAX,
   LOOK_LINE_MAX,
+  MAIN_PHOTO_LOOK,
   chooseLook,
   cutMoodClothing,
   editLook,
   lookClothing,
   lookKey,
+  mainPhotoFor,
   mergeLook,
   normalizeSpeechText,
+  pictureOwnLooks,
+  placePictures,
   productionStyleFor,
   type AudiobookBlock,
   type AudiobookLook,
@@ -19,6 +23,7 @@ import {
   type HarnessAdapter,
   type LookConflict,
   type LookTarget,
+  type PictureOwnLooks,
   type Sheet,
 } from "@arke-studio/contracts";
 import type { SessionInput } from "../harness/session-files.js";
@@ -396,12 +401,21 @@ export async function chooseChapterLook(
   chapterId: string,
   who: { key: string; name?: string; sheet?: string },
   lookId: string | null,
+  /**
+   * From a block's look menu (design turn 193d, R-146): with `only`, the look — null, the main
+   * photo — is chosen for that block's picture alone and held on the block, the chapter's choice
+   * left as it is; without, it is the chapter's choice and the block's picture lets go of any look
+   * chosen for it alone for this person, so it follows the chapter's.
+   */
+  picture?: { block: string; only: boolean },
 ): Promise<ChapterAudiobook> {
   const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId) });
   const at = store.now();
   const held = lookOf(plan.record);
   const sheetId = who.sheet ?? held?.characters[who.key]?.sheet;
   const sheet = sheetId === undefined ? undefined : store.getBundle().sheets.find((candidate) => candidate.id === sheetId);
+  const index = picture === undefined ? -1 : plan.blocks.findIndex((candidate) => candidate.block.key === picture.block);
+  if (picture !== undefined && index < 0) throw new Error("that block is no longer in the chapter");
   let pick: { lookId: string; text: string } | null = null;
   if (lookId !== null) {
     if (sheetId === undefined || sheet === undefined) throw new Error("that character has no sheet, so no looks");
@@ -410,15 +424,48 @@ export async function chooseChapterLook(
     if (look === undefined) throw new Error("that look is gone");
     // The look's clothing line, not a Cast page's whole exploration prompt with its drawing directions.
     pick = { lookId, text: lookClothing(look) };
+  } else if (picture?.only === true) {
+    // The main photo for one picture: it has to be there to ride.
+    if (sheetId === undefined || sheet === undefined) throw new Error("that character has no sheet, so no main photo");
+    const kit = (await readKit(store, sheetId))?.kit;
+    if (kit === undefined || mainPhotoFor(kit) === null) throw new Error("that character has no main photo");
   }
   const name = who.name ?? sheet?.name;
   return updateAudiobook(store, productionId, plan.chapter, (current) => {
-    const next = chooseLook(current.look, { key: who.key, ...(name !== undefined ? { name } : {}), ...(sheetId !== undefined ? { sheet: sheetId } : {}) }, pick, { chapterHash: plan.chapter.hash, at });
-    if (next === null) return null;
-    const parsed = AudiobookLookSchema.safeParse(next);
-    if (!parsed.success) throw new Error("that is not a look the chapter can hold");
-    return { ...current, updatedAt: at, look: parsed.data };
+    let chosen: AudiobookLook | null = null;
+    if (picture?.only !== true) {
+      chosen = chooseLook(current.look, { key: who.key, ...(name !== undefined ? { name } : {}), ...(sheetId !== undefined ? { sheet: sheetId } : {}) }, pick, { chapterHash: plan.chapter.hash, at });
+      if (chosen !== null && !AudiobookLookSchema.safeParse(chosen).success) throw new Error("that is not a look the chapter can hold");
+    }
+    const owned = picture === undefined ? undefined : ownLooksAfter(current, plan, index, picture.block, who.key, picture.only ? (lookId ?? MAIN_PHOTO_LOOK) : null);
+    if (chosen === null && owned === undefined) return null;
+    const { ownLooks: _held, ...rest } = current;
+    const ownLooks = owned === undefined ? current.ownLooks : owned;
+    return { ...rest, updatedAt: at, ...(chosen !== null ? { look: chosen } : {}), ...(ownLooks !== undefined && Object.keys(ownLooks).length > 0 ? { ownLooks } : {}) };
   });
+}
+
+/**
+ * The record's held looks once one person's look for one block's picture is set (`lookId`) or let
+ * go (null) — R-146. What the block's next picture would be made with is what is held for it, else
+ * what its picture was made with alone; the change is laid over that. Held only where it differs
+ * from the picture's own, so a choice put back as it was leaves nothing held. Undefined where
+ * nothing changes.
+ */
+function ownLooksAfter(current: ChapterAudiobook, plan: AudiobookPlan, index: number, block: string, key: string, lookId: string | null): Record<string, PictureOwnLooks> | undefined {
+  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text }));
+  const made = placePictures(blocks, current.pictures ?? {}).placed.find((entry) => entry.index === index)?.picture.look;
+  const pending = current.ownLooks?.[block];
+  const base = pictureOwnLooks(pending, made);
+  const { [key]: _was, ...others } = base;
+  const next: PictureOwnLooks = lookId === null ? others : { ...others, [key]: lookId };
+  // The record's own bound, checked before the write: a record past it would read back as unreadable.
+  if (Object.keys(next).length > LOOK_CHARACTERS_MAX) throw new Error("too many looks for one picture");
+  const same = (a: PictureOwnLooks, b: PictureOwnLooks) => Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([who, id]) => b[who] === id);
+  const { [block]: _old, ...rest } = current.ownLooks ?? {};
+  // Nothing held where the next picture would be made as the picture already was.
+  const after = same(next, pictureOwnLooks(undefined, made)) ? rest : { ...rest, [block]: next };
+  return same(after[block] ?? {}, pending ?? {}) && (block in after) === (pending !== undefined) ? undefined : after;
 }
 
 /** The look a chapter holds, or null: read from the record, never from the model. */

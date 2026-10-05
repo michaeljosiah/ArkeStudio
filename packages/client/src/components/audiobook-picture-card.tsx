@@ -3,14 +3,18 @@ import { useNavigate } from "react-router";
 import { Check, ChevronDown } from "./icons.js";
 import {
   CLOSE_FRAMES,
+  MAIN_PHOTO_LOOK,
   chapterLooksOf,
   characterLabels,
   frameWord,
   lookClothing,
   lookName,
+  lookViewFor,
   mainPhotoFor,
+  pictureOwnLooks,
   priceLabel,
   type AudiobookLook,
+  type PictureOwnLooks,
   type PictureShot,
   type PictureSuggestion,
   type PictureWho,
@@ -18,7 +22,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
-import { chooseAudiobookLook } from "../lib/store.js";
+import { chooseAudiobookLook, rewriteAudiobookPicturePrompt, useAudiobookAsks } from "../lib/store.js";
 import type { PictureSuggestionState } from "./audiobook-suggest.js";
 import { NewLookSheet } from "./audiobook-new-look.js";
 import { Button, Checkbox, Textarea, cx } from "./ui.js";
@@ -30,6 +34,9 @@ import { Button, Checkbox, Textarea, cx } from "./ui.js";
  * look menu (194g), Not in frame as dashed names, the prompt to edit, and the seven
  * checks, each ticked or marked. The author reads the words, then the card, and sees at once whether
  * the frame, the people and the references are what the words say. A mark never blocks Generate.
+ * A look chosen in the menu for this picture alone (193d, R-146) rides at Make again, the row says
+ * `this picture only`, and the prompt is marked Look changed, with Update prompt, until that
+ * person's clothing words are rewritten for it.
  */
 
 /** Which image of a person rode, as the card words it: a look's close view or full body, else the main photo. */
@@ -83,24 +90,58 @@ export interface PictureCardChapter {
   chapterFile: string;
   order: number;
   look: AudiobookLook | null;
+  /**
+   * The looks held on this block for its next picture alone (design turn 193d, R-146), as the
+   * chapter's record keeps them until the picture is made; absent where none is held.
+   */
+  own?: PictureOwnLooks;
+}
+
+/** What a tile in the menu does (rule 8's two boxes): choose for this picture alone, or set the chapter's choice. */
+type LookMode = "only" | "chapter";
+
+/**
+ * Who rides once the looks chosen for this picture alone are laid over the card (design turn 193d,
+ * R-146): a person with a look of their own rides it — the frame takes its close view or its full
+ * body, as the coordinator will — or the main photo; a person whose own look was let go rides the
+ * chapter's choice again. Everyone else is as the card was drafted or made.
+ */
+export function withOwnLooks(who: readonly PictureWho[], own: Readonly<PictureOwnLooks>, chapter: AudiobookLook | null, kits: readonly ReferenceKit[], frame: string | undefined): PictureWho[] {
+  return who.map((entry) => {
+    if (entry.kind !== "character" || entry.sheet === undefined) return entry;
+    const mine = own[entry.key];
+    if (mine === undefined && entry.only !== true) return entry;
+    const target = mine ?? chapter?.characters[entry.key]?.lookId ?? MAIN_PHOTO_LOOK;
+    const kit = kits.find((candidate) => candidate.sheetId === entry.sheet);
+    const { look: _look, only: _only, ...base } = entry;
+    const tag = mine !== undefined ? { only: true as const } : {};
+    const look = target === MAIN_PHOTO_LOOK ? undefined : kit?.looks?.find((candidate) => candidate.id === target && candidate.kind === "costume");
+    if (look !== undefined) {
+      const view = lookViewFor(frame) === "close" && look.closeFile !== undefined ? "close" : "full";
+      return { ...base, reference: `references/${entry.sheet}/${view === "close" ? look.closeFile! : look.file}`, look: { lookId: look.id, view }, ...tag };
+    }
+    const photo = kit === undefined ? null : mainPhotoFor(kit);
+    return { ...base, reference: photo === null ? null : `references/${entry.sheet}/${photo.file}`, carried: photo !== null && entry.carried, ...tag };
+  });
 }
 
 /**
- * A person's look menu (design turn 193, rule 11; 193c's popover under the row): the character's
- * looks, Main photo and New look as tiles, the one chosen ringed, then Only this picture and Set for
- * Chapter N. The record keeps a one-picture look (`only` on the picture's stamp, R-115), but nothing
- * yet makes a picture with one — the press would have to carry the pick to the Bench and rewrite
- * that person's clothing words — so a tile here sets the chapter's choice, which is what Make again
- * then rides, and the boxes say so: Set for Chapter N held on, Only this picture held off.
+ * A person's look menu (design turn 193, rule 8 and 11; 193c's popover under the row, 193d): the
+ * character's looks, Main photo and New look as tiles, the one that rides ringed, then the two
+ * boxes. Only this picture (on as it opens) makes a tile this picture's own look — held on the
+ * block until the picture is made, then stamped on it (R-115, R-146); Set for Chapter N makes it
+ * the chapter's choice, as before, and this picture follows it.
  */
-function LookMenu({ id, label, who, kit, slug, chapter, chosen, off, onChoose, onNewLook, onClose }: {
+function LookMenu({ id, label, who, kit, slug, chapter, mode, onMode, chosen, off, onChoose, onNewLook, onClose }: {
   id: string;
   label: string;
   who: PictureWho;
   kit: ReferenceKit | null;
   slug: string;
   chapter: PictureCardChapter;
-  /** The look the chapter has chosen for them (or was just pressed), null for the main photo. */
+  mode: LookMode;
+  onMode: (mode: LookMode) => void;
+  /** The look ringed for the box that is on (or was just pressed), null for the main photo. */
   chosen: string | null;
   off: boolean;
   onChoose: (lookId: string | null) => void;
@@ -143,7 +184,8 @@ function LookMenu({ id, label, who, kit, slug, chapter, chosen, off, onChoose, o
             <span>{lookName(look)}</span>
           </button>
         ))}
-        <button type="button" className={cx("fy-pcard__tile", chosen === null && "fy-pcard__tile--on")} aria-pressed={chosen === null} disabled={off} onClick={() => onChoose(null)} data-testid="picture-card-look-tile" data-look="main">
+        {/* The main photo for this picture alone has to be there to ride; as the chapter's choice it is choosing none. */}
+        <button type="button" className={cx("fy-pcard__tile", chosen === null && "fy-pcard__tile--on")} aria-pressed={chosen === null} disabled={off || (mode === "only" && photo === null)} onClick={() => onChoose(null)} data-testid="picture-card-look-tile" data-look="main">
           {photo !== null && who.sheet !== undefined ? <img src={mediaUrl(slug, `references/${who.sheet}/${photo.file}`)} alt="" /> : <i aria-hidden="true" />}
           <span>Main photo</span>
         </button>
@@ -152,8 +194,9 @@ function LookMenu({ id, label, who, kit, slug, chapter, chosen, off, onChoose, o
           <span>New look</span>
         </button>
       </div>
-      <Checkbox label="Only this picture" checked={false} disabled readOnly data-testid="picture-card-look-only" />
-      <Checkbox label={`Set for Chapter ${chapter.order}`} checked disabled readOnly data-testid="picture-card-look-chapter" />
+      {/* Two boxes as 193d draws them, one of them on: the other is the box turned off. */}
+      <Checkbox label="Only this picture" checked={mode === "only"} disabled={off} onChange={(event) => onMode(event.target.checked ? "only" : "chapter")} data-testid="picture-card-look-only" />
+      <Checkbox label={`Set for Chapter ${chapter.order}`} checked={mode === "chapter"} disabled={off} onChange={(event) => onMode(event.target.checked ? "chapter" : "only")} data-testid="picture-card-look-chapter" />
     </div>
   );
 }
@@ -202,6 +245,12 @@ function InFrameRow({ who, label, full, kits, slug, shot, onMake, menu }: {
           </span>
         )}
       </span>
+      {/* A look chosen for this picture alone, not the chapter's (193d). */}
+      {who.kind === "character" && who.only === true && (
+        <span className="fy-pcard__only" data-testid="picture-card-only">
+          this picture only
+        </span>
+      )}
       {who.kind === "character" && menu !== undefined ? (
         <button type="button" className="fy-pcard__look" aria-label={`${label} · look`} aria-haspopup="true" aria-expanded={menu.open} {...(menu.open ? { "aria-controls": id } : {})} onClick={menu.onToggle} data-testid="picture-card-look">
           {view}
@@ -261,6 +310,19 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
    * reads as the record has it the next time the menu opens.
    */
   const [pressed, setPressed] = useState<Record<string, string | null>>({});
+  /** What a tile does while a menu is open (rule 8): this picture alone as the menu opens, or the chapter's choice. */
+  const [mode, setMode] = useState<LookMode>("only");
+  /**
+   * Looks pressed under Only this picture and not yet in the record, by key — null where a press
+   * let one go — ringed and laid over the row at once, as a chapter's press is. Held until the
+   * block's held looks next change, or the menu is put away.
+   */
+  const [pressedOwn, setPressedOwn] = useState<Record<string, string | null>>({});
+  /** The look the prompt names once Update prompt has rewritten it (R-146), by key. */
+  const [rewrittenFor, setRewrittenFor] = useState<Record<string, string>>({});
+  /** Update prompt on its way: the request, and the look each person's words are being rewritten for. */
+  const [updating, setUpdating] = useState<{ id: string; to: Record<string, string> } | null>(null);
+  const asks = useAudiobookAsks();
   const labels = useMemo(() => characterLabels(world.sheets), [world.sheets]);
   const chapterLook = chapter?.look ?? null;
   const chosenIn = (key: string): string | null => chapterLook?.characters[key]?.lookId ?? null;
@@ -271,6 +333,24 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
       return Object.keys(left).length === Object.keys(held).length ? held : left;
     });
   }, [chapterLook]);
+  // The record's answer to a press for this picture alone is the record: what was held here goes.
+  const heldOwn = JSON.stringify(chapter?.own ?? null);
+  useEffect(() => setPressedOwn({}), [heldOwn]);
+  // Another suggestion, or another block's picture: what an Update prompt rewrote was that prompt's.
+  const drafted = state.ask?.state === "suggested" ? `${state.ask.suggestion.block}\n${state.ask.suggestion.prompt}` : null;
+  useEffect(() => {
+    setRewrittenFor({});
+    setUpdating(null);
+  }, [drafted]);
+  const answered = updating === null ? null : (asks[updating.id] ?? null);
+  const setPrompt = state.setPrompt;
+  useEffect(() => {
+    if (updating === null || answered?.state !== "prompt") return;
+    // The rewritten prompt is the author's to edit and make, as a draft is; the mark goes with it.
+    setPrompt(answered.prompt);
+    setRewrittenFor((held) => ({ ...held, ...updating.to }));
+    setUpdating(null);
+  }, [answered, updating, setPrompt]);
   const { ask, making } = state;
   if (ask === null) return null;
   if (ask.state === "working") return <p className="fy-mono fy-ab__card-line" data-testid="suggest-reading">reading…</p>;
@@ -307,21 +387,76 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
     return look === undefined ? undefined : look.closeFile !== undefined;
   };
   const detail = shot !== undefined && frameWord(shot.frame) === "Detail";
+  // The looks this picture is made with for itself (design turn 193d, R-146): those held on the
+  // block, else those it was made with alone, with any just pressed laid over — what Make again
+  // sends, and what the rows show riding.
+  const held = pictureOwnLooks(chapter?.own, suggestion.look);
+  const own: PictureOwnLooks = Object.fromEntries(
+    [...Object.entries(held).filter(([key]) => !(key in pressedOwn)), ...Object.entries(pressedOwn).flatMap(([key, lookId]) => (lookId === null ? [] : [[key, lookId] as const]))],
+  );
+  const riding = chapter === undefined ? suggestion.who : withOwnLooks(suggestion.who, own, chapterLook, world.referenceKits, shot?.frame);
+  // Whose look is not the one the prompt was written for (rule 8): their clothing words are marked
+  // until Update prompt rewrites them. The prompt was written for what the card was drafted or made
+  // with, and since an Update prompt, for what it rewrote it for.
+  const lookIdOf = (who: PictureWho): string => who.look?.lookId ?? MAIN_PHOTO_LOOK;
+  const changes = chapter === undefined
+    ? []
+    : riding.flatMap((now, index) => {
+        const was = suggestion.who[index];
+        if (now.kind !== "character" || was === undefined) return [];
+        const from = rewrittenFor[now.key] ?? lookIdOf(was);
+        const to = lookIdOf(now);
+        return from === to ? [] : [{ key: now.key, from, to }];
+      });
+  const lookLabel = (key: string, lookId: string): string => {
+    if (lookId === MAIN_PHOTO_LOOK) return "main photo";
+    const sheet = suggestion.who.find((who) => who.key === key)?.sheet;
+    const look = world.referenceKits.find((kit) => kit.sheetId === sheet)?.looks?.find((candidate) => candidate.id === lookId);
+    return look === undefined ? "another look" : lookName(look);
+  };
+  const updatingNow = answered?.state === "working";
+  const updateRefused = answered?.state === "refused" ? answered.refused : null;
+  const update = () => {
+    if (chapter === undefined || changes.length === 0) return;
+    const id = rewriteAudiobookPicturePrompt(worldId, chapter.productionId, chapter.chapterFile, suggestion.block, prompt, changes);
+    if (id !== null) setUpdating({ id, to: Object.fromEntries(changes.map((change) => [change.key, change.to])) });
+  };
   const make = (who: PictureWho) => void navigate(`/w/${worldId}/${who.kind === "place" ? "locations" : "cast"}/${who.sheet}`);
-  const newLook = (who: PictureWho) => {
+  const closeMenu = () => {
     setMenuFor(null);
     setPressed({});
+    setPressedOwn({});
+  };
+  const newLook = (who: PictureWho) => {
+    closeMenu();
     const kit = kitOf(who);
     // A look is made from the main photo, over the panel; with none to make it from, on the person's page.
     if (chapter !== undefined && kit !== null && who.sheet !== undefined && mainPhotoFor(kit) !== null) setNewLookFor(who);
     else make(who);
   };
+  const ringed = (key: string): string | null => {
+    if (mode === "chapter") return key in pressed ? pressed[key]! : chosenIn(key);
+    const mine = own[key];
+    return mine === undefined ? chosenIn(key) : mine === MAIN_PHOTO_LOOK ? null : mine;
+  };
   const chooseFor = (who: PictureWho, lookId: string | null) => {
     if (chapter === undefined) return;
+    const person = { key: who.key, name: who.name, ...(who.sheet !== undefined ? { sheet: who.sheet } : {}) };
+    if (mode === "only") {
+      // For this picture alone (R-146): held on the block, the chapter's choice left as it is.
+      const target = lookId ?? MAIN_PHOTO_LOOK;
+      if (own[who.key] === target) return;
+      const sent = chooseAudiobookLook(worldId, chapter.productionId, chapter.chapterFile, person, lookId, { block: suggestion.block, only: true });
+      if (sent !== null) setPressedOwn((pressing) => ({ ...pressing, [who.key]: target }));
+      return;
+    }
+    // The chapter's choice, as before; this picture lets go of a look of its own for them and follows it.
     const now = who.key in pressed ? pressed[who.key]! : chosenIn(who.key);
-    if (now === lookId) return;
-    const sent = chooseAudiobookLook(worldId, chapter.productionId, chapter.chapterFile, { key: who.key, name: who.name, ...(who.sheet !== undefined ? { sheet: who.sheet } : {}) }, lookId);
-    if (sent !== null) setPressed((held) => ({ ...held, [who.key]: lookId }));
+    if (now === lookId && own[who.key] === undefined) return;
+    const sent = chooseAudiobookLook(worldId, chapter.productionId, chapter.chapterFile, person, lookId, { block: suggestion.block });
+    if (sent === null) return;
+    setPressed((pressing) => ({ ...pressing, [who.key]: lookId }));
+    if (own[who.key] !== undefined) setPressedOwn((pressing) => ({ ...pressing, [who.key]: null }));
   };
   const menuOf = (who: PictureWho) =>
     chapter === undefined || who.kind !== "character" || who.sheet === undefined
@@ -331,6 +466,9 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
           onToggle: () => {
             setMenuFor((open) => (open === who.key ? null : who.key));
             setPressed({});
+            setPressedOwn({});
+            // Rule 8: Only this picture is on as the menu opens.
+            setMode("only");
           },
           render: (id: string) => (
             <LookMenu
@@ -340,14 +478,13 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
               kit={kitOf(who)}
               slug={slug}
               chapter={chapter}
-              chosen={who.key in pressed ? pressed[who.key]! : chosenIn(who.key)}
+              mode={mode}
+              onMode={setMode}
+              chosen={ringed(who.key)}
               off={offline}
               onChoose={(lookId) => chooseFor(who, lookId)}
               onNewLook={() => newLook(who)}
-              onClose={() => {
-                setMenuFor(null);
-                setPressed({});
-              }}
+              onClose={closeMenu}
             />
           ),
         };
@@ -372,7 +509,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
           )}
           <div className="fy-pcard__fact">
             <span className="fy-mono">Rides</span>
-            <b data-testid="picture-card-rides">{ridesLabel(suggestion.who, shot, { labelOf, hasClose })}</b>
+            <b data-testid="picture-card-rides">{ridesLabel(riding, shot, { labelOf, hasClose })}</b>
           </div>
           <div className="fy-pcard__fact">
             <span className="fy-mono">Model</span>
@@ -385,10 +522,10 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
       </div>
       <div className="fy-pcard__sec" data-testid="picture-card-in-frame">
         <span className="fy-pcard__h">In frame</span>
-        {suggestion.who.length === 0 ? (
+        {riding.length === 0 ? (
           <span className="fy-pcard__none">{detail ? "no one · a detail" : "no one"}</span>
         ) : (
-          suggestion.who.map((who) => (
+          riding.map((who) => (
             <InFrameRow key={who.key} who={who} label={labelOf(who)} full={who.kind === "character" && who.sheet !== undefined ? labels.get(who.sheet)?.full : undefined} kits={world.referenceKits} slug={slug} shot={shot} onMake={make} menu={menuOf(who)} />
           ))
         )}
@@ -407,7 +544,15 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
         </div>
       )}
       <div className="fy-pcard__sec">
-        <span className="fy-pcard__h">Prompt</span>
+        <span className="fy-pcard__hrow">
+          <span className="fy-pcard__h">Prompt</span>
+          {/* 193d: Update prompt at the Prompt's right while someone's clothing words are not their look's. */}
+          {changes.length > 0 && (
+            <button type="button" className="fy-pcard__update" disabled={offline || busy || updatingNow} onClick={update} data-testid="picture-card-update-prompt">
+              {updatingNow ? "Updating…" : "Update prompt"}
+            </button>
+          )}
+        </span>
         {editing || busy ? (
           <Textarea className="fy-sugg__prompt" aria-label="Prompt" rows={5} value={prompt} disabled={busy} autoFocus={editing} onChange={(event) => state.setPrompt(event.target.value)} />
         ) : (
@@ -416,15 +561,23 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
           </button>
         )}
       </div>
-      {shot !== undefined && shot.checks.length > 0 && (
+      {((shot !== undefined && shot.checks.length > 0) || changes.length > 0) && (
         <ul className="fy-pcard__checks" data-testid="picture-card-checks">
-          {shot.checks.map((check) => (
+          {(shot?.checks ?? []).map((check) => (
             <li key={check.id} className={cx("fy-pcard__check", !check.ok && "fy-pcard__check--mark")} data-testid="picture-card-check" data-check={check.id} data-ok={check.ok ? "true" : "false"}>
               <i aria-hidden="true">{check.ok ? <Check size={12} /> : "!"}</i>
               <span>{check.label}</span>
               {check.note !== undefined && <span className="fy-mono">{check.note}</span>}
             </li>
           ))}
+          {/* 193d: the prompt still names the look it was written for, until Update prompt rewrites it. */}
+          {changes.length > 0 && (
+            <li className="fy-pcard__check fy-pcard__check--mark" data-testid="picture-card-look-changed">
+              <i aria-hidden="true">!</i>
+              <span>Look changed</span>
+              <span className="fy-mono">{updateRefused ?? `prompt still says ${[...new Set(changes.map((change) => lookLabel(change.key, change.from)))].join(" · ")}`}</span>
+            </li>
+          )}
         </ul>
       )}
       {failed !== null && (
@@ -443,10 +596,11 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
           </Button>
         )}
         <span className="fy-ch__panelpush" />
-        <Button variant="outline" disabled={offline || busy} onClick={() => onEdit(suggestion, prompt)} data-testid="suggest-edit">
+        {/* The Bench takes the pictures that will ride: a look chosen for this picture alone among them. */}
+        <Button variant="outline" disabled={offline || busy} onClick={() => onEdit({ ...suggestion, who: riding }, prompt)} data-testid="suggest-edit">
           Edit prompt
         </Button>
-        <Button variant="primary" disabled={offline || busy || prompt.trim() === ""} onClick={() => state.generate(suggestion, prompt)} data-testid="suggest-generate">
+        <Button variant="primary" disabled={offline || busy || updatingNow || prompt.trim() === ""} onClick={() => state.generate(suggestion, prompt, chapter !== undefined ? own : undefined)} data-testid="suggest-generate">
           {busy ? "Generating…" : `${picture !== null ? "Make again" : "Generate"} · ${priceLabel(suggestion.estimatedMicroUsd, suggestion.model.plan)}`}
         </Button>
       </div>

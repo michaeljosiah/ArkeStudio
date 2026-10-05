@@ -9,6 +9,7 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import type { LookDeriver } from "../../src/productions/audiobook-look.js";
 import type { IllustrateDeriver } from "../../src/productions/audiobook-illustrate.js";
 import type { PictureDeriver, PictureDeriverInput } from "../../src/productions/audiobook-picture-suggest.js";
+import type { PromptRewriter } from "../../src/productions/audiobook-picture-rewrite.js";
 import { pngBytes } from "../queue/fake-provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
@@ -51,6 +52,8 @@ export interface HarnessOptions {
   picture?: PictureDeriver;
   look?: LookDeriver;
   illustrate?: IllustrateDeriver;
+  /** Update prompt's writer (design turn 193d): absent, the writing service is not running. */
+  rewrite?: PromptRewriter;
   model?: ManifestModel | null;
   /** All jobs land, or this says what the nth job (from 0) does. */
   land?: boolean | "fail" | ((n: number) => Landing);
@@ -95,6 +98,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
       options.look ??
       (async () => ({ place: { text: "The rail desk at dawn, grey light." }, characters: [{ who: "maren-kest", text: "Oilskin coat, dark with salt." }, { who: "bray-half-hitch", text: "Three belts, a wet cap." }] })),
     ...(options.illustrate !== undefined ? { illustrateDeriver: options.illustrate } : {}),
+    ...(options.rewrite !== undefined ? { promptRewriter: options.rewrite } : {}),
   });
   // Every job made a submission call, as a provider refusal does: `attempt` is how a run tells one.
   const jobs: Array<{ id: string; attempt: number }> = [];

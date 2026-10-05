@@ -4,8 +4,10 @@ import {
   PICTURE_PROPOSAL_GAP_SEC,
   PICTURE_TITLE_MAX,
   audiobookTextHash,
+  kitLookLibrary,
   lookLinesFor,
   normalizeSpeechText,
+  ownLookPicks,
   pictureCap,
   pictureLookFor,
   placePictures,
@@ -25,7 +27,8 @@ import { listeningBlocks } from "./audiobook-listening.js";
 import { blockSpeakers } from "./audiobook-look.js";
 import { makeAdapterJsonDeriver } from "./continuity.js";
 import { BRIEF_EXAMPLES, briefGiven, briefRiders, briefRules, holdBrief, pictureChecks, type BriefLine } from "./audiobook-picture-brief.js";
-import { briefLines, clipPrompt, depictable, neutralWhereLooksRide, pictureAspect, pictureQuote, pictureWho, promptRoom, type PictureRoom } from "./audiobook-picture-suggest.js";
+import { briefLines, clipPrompt, depictable, neutralWhereLooksRide, ownLooksThatRide, pictureAspect, pictureQuote, pictureWho, promptRoom, type PictureRoom } from "./audiobook-picture-suggest.js";
+import { ownLookChanges, rewritePictureClothing, type PromptRewriter } from "./audiobook-picture-rewrite.js";
 
 /**
  * Illustrate this chapter (design turn 191b, SPEC-047 R-101): the writing service reads the
@@ -114,7 +117,7 @@ export interface ProposedIllustrations {
  * The proposal (R-101): the deriver's pictures held to the chapter. Refuses, in one clause, a
  * chapter with nothing to read and one that has its pictures already.
  */
-export async function proposeIllustrations(store: WorldStore, room: PictureRoom, model: ManifestModel, deriver: IllustrateDeriver, signal?: AbortSignal): Promise<ProposedIllustrations> {
+export async function proposeIllustrations(store: WorldStore, room: PictureRoom, model: ManifestModel, deriver: IllustrateDeriver, signal?: AbortSignal, rewrite?: PromptRewriter): Promise<ProposedIllustrations> {
   const plan = room.plan;
   if (plan.blocks.length === 0) throw new Error("nothing to illustrate · the chapter has no words");
   const inputs = listeningBlocks(store, plan);
@@ -173,18 +176,39 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
   candidates.sort((a, b) => a.index - b.index);
   const kept = thinPictures(candidates, standing, cap);
   dropped += candidates.length - kept.length;
+  const library = kitLookLibrary(store.getBundle().referenceKits, room.look);
+  // The illustrator wrote every row from the chapter's looks. A row on a block held a look of its
+  // own for someone in frame (design turn 193d, R-146) has that person's clothing words rewritten
+  // for it, as Update prompt does; a rewrite that fails leaves the row as written, and its look
+  // lines check says what the words invented.
+  const rewritten = new Map<number, string>();
+  if (rewrite !== undefined) {
+    for (const position of kept) {
+      const candidate = candidates[position]!;
+      const own = ownLooksThatRide(store, room.look, room.own(plan.blocks[candidate.index]!.block.key));
+      const changes = ownLookChanges(store, room.look, candidate.held.inFrame.map((person) => person.key), own, referenceBudgetFor(model) > 0);
+      if (changes.length === 0) continue;
+      try {
+        rewritten.set(candidate.index, await rewritePictureClothing(rewrite, candidate.held.prompt, changes, maxChars, signal));
+      } catch {
+        if (signal?.aborted) throw new Error("stopped");
+      }
+    }
+  }
   const rows: IllustrationRow[] = kept.map((position) => {
     const candidate = candidates[position]!;
     const planned = plan.blocks[candidate.index]!;
-    // Who rides is who is in frame (rule 12): a detail carries no one, a frame with nobody in it the place.
-    const who = pictureWho(store, model, briefRiders(candidate.held), { look: room.look, frame: candidate.held.frame });
+    // Who rides is who is in frame (rule 12): a detail carries no one, a frame with nobody in it the
+    // place; a look held on the block for its picture alone rides for that person (R-146).
+    const own = ownLooksThatRide(store, room.look, room.own(planned.block.key));
+    const who = pictureWho(store, model, briefRiders(candidate.held), { look: room.look, frame: candidate.held.frame, own });
     // Rule 4 where a look image rides: no skin, cut or body in the words (2026-10-04).
-    const held = { ...candidate.held, prompt: neutralWhereLooksRide(candidate.held.prompt, who) };
+    const held = { ...candidate.held, prompt: neutralWhereLooksRide(rewritten.get(candidate.index) ?? candidate.held.prompt, who) };
     const needs = who.filter((entry) => entry.kind === "character" && entry.sheet !== undefined && entry.reference === null).map((entry) => entry.name);
     const picks = ridingPicks(who);
     const keys = held.inFrame.map((person) => person.key);
-    const stamp = pictureLookFor(room.look, keys, picks);
-    const used = lookLinesFor(room.look, [...keys, ...held.details.map((detail) => detail.of)], picks);
+    const stamp = pictureLookFor(room.look, keys, picks, library);
+    const used = lookLinesFor(room.look, [...keys, ...held.details.map((detail) => detail.of)], { ...ownLookPicks(own), ...picks }, library);
     const checks = pictureChecks({ held, who, people: visible, lines: used, block: planned.block.text, mood: room.mood });
     const shot = { frame: held.frame, inFrame: keys, notInFrame: held.notInFrame, expressions: held.expressions, details: held.details, checks };    return {
       block: planned.block.key,

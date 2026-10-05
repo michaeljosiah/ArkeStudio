@@ -11,7 +11,7 @@ import { isManuscriptLanguage } from "./manuscript.js";
 import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema } from "./audiobook.js";
 import { AudiobookPictureSourceSchema } from "./audiobook-pictures.js";
 import { AudiobookVideoOptionsSchema } from "./audiobook-video.js";
-import { LOOK_LINE_MAX, LookTargetSchema } from "./audiobook-look.js";
+import { LOOK_LINE_MAX, LookTargetSchema, PictureOwnLooksSchema } from "./audiobook-look.js";
 import { PICTURE_PROMPT_MAX, PictureShotSchema } from "./audiobook-illustrate.js";
 import { BedInputSchema, BlockSoundInputSchema, BlockTimingInputSchema, ReactionInputSchema } from "./audiobook-timing.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
@@ -3386,7 +3386,35 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       frame: z.string().max(120).optional(),
       /** The suggestion's shot, kept on the picture it makes so its card still shows it (design turn 194g). */
       shot: PictureShotSchema.optional(),
+      /**
+       * The looks chosen for this picture alone (design turn 193d, SPEC-047 R-146), by person: a kit
+       * look's id or the main photo. Each rides for that person in place of the chapter's choice and
+       * is stamped `only`. Absent, the block's held choices are used, else the picture's own.
+       */
+      looks: PictureOwnLooksSchema.optional(),
       confirmedMicroUsd: z.number().int().min(0),
+      requestId: UlidSchema,
+    })
+    .strict(),
+  /**
+   * Update prompt (design turn 193d, SPEC-047 R-146): a person's look for this picture is not the
+   * one the prompt was written for, so the writing service rewrites that person's clothing words
+   * from the look now chosen — `from` and `to` each a kit look's id or the main photo — and leaves
+   * every other word as the author has it. Nothing is made or spent. Answered as
+   * `audiobook.picture-prompt` under the same id.
+   */
+  z
+    .object({
+      kind: z.literal("rewrite-audiobook-picture-prompt"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      block: z.string().min(1).max(40),
+      prompt: z.string().min(1).max(PICTURE_PROMPT_MAX),
+      changes: z
+        .array(z.object({ key: z.string().min(1).max(120), from: z.string().min(1).max(120), to: z.string().min(1).max(120) }).strict())
+        .min(1)
+        .max(24),
       requestId: UlidSchema,
     })
     .strict(),
@@ -3449,6 +3477,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * A kit look chosen for a character in this chapter (design turn 193, SPEC-047 R-112), or the
    * choice taken away with null. Chosen by pointer; the look stays unattached (SPEC-017 R-18). The
    * character's line becomes the look's own clothing line. Answered as `audiobook.record`.
+   *
+   * From a block's look menu (design turn 193d, R-146) it names the `block`: with `only`, the look
+   * (null: the main photo) is chosen for that block's picture alone and held on the block until it
+   * is made, the chapter left as it is; without, it is the chapter's choice, as above, and that
+   * block's picture follows it — any look chosen for it alone for this person is let go.
    */
   z
     .object({
@@ -3460,6 +3493,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().min(1).max(120).optional(),
       sheet: SlugSchema.optional(),
       lookId: z.string().min(1).max(120).nullable(),
+      block: z.string().min(1).max(40).optional(),
+      only: z.literal(true).optional(),
       requestId: UlidSchema.optional(),
     })
     .strict(),

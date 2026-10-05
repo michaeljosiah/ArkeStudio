@@ -189,7 +189,15 @@ export async function setAudiobookPicture(
    * A picture Arke made keeps the look it was made under (design turn 191c, R-98), to be marked
    * when that changes, and the shot it was made from (194g), for its card.
    */
-  made: { look?: PictureLook; shot?: PictureShot } = {},
+  made: {
+    look?: PictureLook;
+    shot?: PictureShot;
+    /**
+     * Arke made it from the block's card or a proposal's row (design turn 193d, R-146): the looks
+     * held on the block for its next picture are its stamp's now, and leave the block.
+     */
+    arke?: true;
+  } = {},
 ): Promise<ChapterAudiobook> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   const summary = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
@@ -211,7 +219,10 @@ export async function setAudiobookPicture(
     const rest: Record<string, AudiobookPicture> = Object.fromEntries(Object.entries(held).filter(([key]) => !here.has(key)));
     if (picture === null && Object.keys(rest).length === Object.keys(held).length) return null;
     const next: Record<string, AudiobookPicture> = picture === null ? rest : { ...rest, [block]: { file: picture.file, source: picture.source, textHash: audiobookTextHash(planned.block.text), at: store.now(), ...(made.look !== undefined ? { look: made.look } : {}), ...(made.shot !== undefined ? { shot: made.shot } : {}) } };
-    const { pictures: _old, ...without } = current;
-    return { ...without, updatedAt: store.now(), ...(Object.keys(next).length > 0 ? { pictures: next } : {}) };
+    const { pictures: _old, ownLooks: pending, ...without } = current;
+    // What was held for this block's next picture is that picture's own now (R-146): on its stamp.
+    const { [block]: _made, ...others } = pending ?? {};
+    const owned = made.arke === true && picture !== null ? others : (pending ?? {});
+    return { ...without, updatedAt: store.now(), ...(Object.keys(next).length > 0 ? { pictures: next } : {}), ...(Object.keys(owned).length > 0 ? { ownLooks: owned } : {}) };
   });
 }

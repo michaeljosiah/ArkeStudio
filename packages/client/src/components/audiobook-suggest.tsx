@@ -19,7 +19,8 @@ export interface PictureSuggestionState {
   /** Where the press to Generate stands: making, held with its reason, or on the block. */
   making: ReturnType<typeof useAudiobookAsks>[string] | null;
   suggest: () => void;
-  generate: (suggestion: PictureSuggestion, prompt: string) => void;
+  /** `looks`: those chosen for this picture alone (design turn 193d, R-146), each riding in place of the chapter's for that person. */
+  generate: (suggestion: PictureSuggestion, prompt: string, looks?: Readonly<Record<string, string>>) => void;
   /** Put the card away: a suggestion not wanted, or one made and standing on its block. */
   dismiss: () => void;
 }
@@ -53,9 +54,9 @@ export function usePictureSuggestion(worldId: string, productionId: string, chap
       setPrompt(null);
       setSuggestId(suggestAudiobookPicture(worldId, productionId, chapterFile, blockKey));
     },
-    generate: (suggestion, words) => {
+    generate: (suggestion, words, looks) => {
       // The shot goes with it, kept on the picture so the block's card still shows it once made (194g).
-      setMakeId(makeAudiobookPicture(worldId, productionId, chapterFile, blockKey, { prompt: words, who: suggestion.who.map((who) => who.key), ...(suggestion.shot?.frame ? { frame: suggestion.shot.frame } : {}), ...(suggestion.shot !== undefined ? { shot: suggestion.shot } : {}), confirmedMicroUsd: suggestion.estimatedMicroUsd }));
+      setMakeId(makeAudiobookPicture(worldId, productionId, chapterFile, blockKey, { prompt: words, who: suggestion.who.map((who) => who.key), ...(suggestion.shot?.frame ? { frame: suggestion.shot.frame } : {}), ...(suggestion.shot !== undefined ? { shot: suggestion.shot } : {}), ...(looks !== undefined ? { looks } : {}), confirmedMicroUsd: suggestion.estimatedMicroUsd }));
     },
     dismiss: () => {
       setSuggestId(null);

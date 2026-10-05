@@ -40,6 +40,15 @@
 .fy-pcard__view { flex: none; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; }
 .fy-pcard__look { flex: none; align-self: stretch; display: inline-flex; align-items: center; gap: 10px; padding: 0; border: 0; background: none; color: var(--foreground); font: inherit; cursor: pointer; }
 .fy-pcard__look:hover .fy-pcard__view { color: var(--foreground); }
+/* A look chosen for this picture alone (193d's tag): mono, muted, before the row's end. In a narrow
+   row it wraps to two lines before the name and the look beside it are squeezed to a letter a line. */
+.fy-pcard__only { flex: 0 1 auto; min-width: 0; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); text-align: right; }
+.fy-pcard__who:has(.fy-pcard__only) .fy-pcard__whotx { min-width: 96px; }
+/* The Prompt's head (193d): the label, then Update prompt at the right, underlined, while a look changed. */
+.fy-pcard__hrow { display: flex; align-items: baseline; gap: 8px; }
+.fy-pcard__hrow .fy-pcard__h { flex: 1; }
+.fy-pcard__update { padding: 0; border: 0; background: none; font: var(--type-label); color: var(--foreground); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.fy-pcard__update:disabled { color: var(--muted-foreground); cursor: default; }
 /* The look menu (193c's popover): under its row, the row's width, over the rows below it. Scrolled
    into view on opening, it stops clear of the panel's held foot (44-high presses on a phone). */
 .fy-pcard__menu { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 4; scroll-margin-bottom: 84px; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 12px; background: var(--popover, var(--background)); box-shadow: var(--shadow-lg); }

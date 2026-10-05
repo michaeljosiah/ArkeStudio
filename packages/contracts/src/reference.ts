@@ -1,6 +1,7 @@
 import { CharacterVoiceSampleSchema } from "./voice-sample.js";
 import { z } from "zod";
 import { IsoDateTimeSchema, JobIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+import type { AudiobookLook, LookLibrary } from "./audiobook-look.js";
 
 /**
  * Reference kits and model sheets (SPEC-010; master spec §6). `references/<sheet>/kit.json` is
@@ -190,6 +191,20 @@ export function lookClothing(look: Pick<CharacterLook, "prompt" | "framing">): s
   const worn = plain.filter((sentence) => /\bwears?\b|\bwearing\b|\bdressed\b/i.test(sentence));
   const kept = worn.length > 0 ? worn : plain;
   return clipWords(kept.length > 0 ? kept.join(" ") : whole, LOOK_CLOTHING_MAX);
+}
+
+/**
+ * The kit looks as a picture's look lines read them for a look chosen for one picture alone
+ * (R-115, R-146): the person's kit — by the sheet the chapter's look names for them, else by their
+ * key, which is the sheet's id — and that costume look's clothing line. The coordinator stamps a
+ * picture with it and the card judges `look changed` with it, so the two agree.
+ */
+export function kitLookLibrary(kits: ReadonlyArray<Pick<ReferenceKit, "sheetId" | "looks">>, look: Pick<AudiobookLook, "characters"> | null | undefined): LookLibrary {
+  return (key, lookId) => {
+    const sheet = look?.characters[key]?.sheet ?? key;
+    const found = kits.find((kit) => kit.sheetId === sheet)?.looks?.find((candidate) => candidate.id === lookId && candidate.kind === "costume");
+    return found === undefined ? undefined : { text: lookClothing(found) };
+  };
 }
 
 /** A look's name in a picker: the first clause of its clothing line, after who wears it. */

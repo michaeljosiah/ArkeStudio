@@ -1,4 +1,5 @@
 import {
+  MAIN_PHOTO_LOOK,
   PICTURE_PROMPT_MAX,
   pictureAspect,
   pictureQuote,
@@ -56,7 +57,9 @@ export function madePicture(
       kind: place ? "place" : "character",
       reference,
       carried,
-      ...(pick !== undefined ? { look: { lookId: pick.lookId, view: pick.view } } : {}),
+      // The main photo chosen for this picture alone rode as the main photo does: no look (design turn 193d, R-146).
+      ...(pick !== undefined && pick.lookId !== MAIN_PHOTO_LOOK ? { look: { lookId: pick.lookId, view: pick.view } } : {}),
+      ...(pick?.only === true ? { only: true as const } : {}),
     });
   };
   // What rode, as the Bench sent it: each picture under `references/<sheet>/`.

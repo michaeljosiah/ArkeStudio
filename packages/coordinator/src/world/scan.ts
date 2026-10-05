@@ -152,7 +152,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Sixty-one is the shot a made picture keeps on the chapter's audiobook record (design turn 194g).
 // Sixty-two and sixty-three are the production conversation's frozen cards (SPEC-051).
 // Sixty-four is where a picture's subject stands, for the audiobook's video (design turn 197b).
-export const SUPPORTED_SCHEMA_VERSION = 64;
+// Sixty-five is the looks chosen for one picture and held on its block until made (turn 193d).
+export const SUPPORTED_SCHEMA_VERSION = 65;
 
 export class WorldOpenError extends Error {
   constructor(

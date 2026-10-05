@@ -155,7 +155,9 @@ import {
   type ArtifactGeneration,
   type CharacterReferenceWorkflow,
   pictureLookFor,
+  kitLookLibrary,
   ridingPicks,
+  PICTURE_PROMPT_MAX,
   type PictureWho,
   pictureBench,
   priceLabel,
@@ -338,6 +340,7 @@ import { bookLookChoices, lookUsage } from "./productions/audiobook-look-book.js
 import { chooseChapterLook, deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
 import { makeAdapterIllustrateDeriver, proposeIllustrations, type IllustrateDeriver } from "./productions/audiobook-illustrate.js";
 import { clipPrompt, depictable, makeAdapterPictureDeriver, neutralWhereLooksRide, pictureAspect, pictureRoom, pictureWho, promptRoom, suggestPicture, type PictureDeriver } from "./productions/audiobook-picture-suggest.js";
+import { clothingChange, makeAdapterPromptRewriter, rewritePictureClothing, type PromptRewriter } from "./productions/audiobook-picture-rewrite.js";
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
 import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
@@ -463,6 +466,7 @@ import {
   imageModelFor,
   locationViewRequests,
   missingTileAngles,
+  referenceBudgetFor,
   tileRequest,
 } from "./references/generate.js";
 import { makeArtDirector } from "./references/art-director.js";
@@ -1010,6 +1014,8 @@ export interface CoordinatorOptions {
   pictureDeriver?: PictureDeriver;
   /** Turn 191b: the chapter-illustration model seam; every row is held to the chapter, the pace and the twenty-second rule regardless (SPEC-047 R-101). */
   illustrateDeriver?: IllustrateDeriver;
+  /** Turn 193d: Update prompt's model seam; the answer is held to the model's room and rule 4 regardless (SPEC-047 R-146). */
+  promptRewriter?: PromptRewriter;
   /** Desktop-owned update commands. Electron APIs remain outside the coordinator. */
   updates?: {
     check: () => Promise<void>;
@@ -1637,6 +1643,12 @@ export class Coordinator {
     return this.opts.adapter?.readiness().ready && this.opts.authoring ? makeAdapterPictureDeriver(this.opts.adapter, this.sessionInput, this.extractScratch()) : null;
   }
 
+  /** Update prompt's writer (design turn 193d): the seam under test, else the harness when it is ready to author. */
+  private promptRewriterFor(): PromptRewriter | null {
+    if (this.opts.promptRewriter) return this.opts.promptRewriter;
+    return this.opts.adapter?.readiness().ready && this.opts.authoring ? makeAdapterPromptRewriter(this.opts.adapter, this.sessionInput, this.extractScratch()) : null;
+  }
+
   /** The chapter illustrator (design turn 191b): the seam under test, else the harness when it is ready to author. */
   private illustrateDeriverFor(): IllustrateDeriver | null {
     if (this.opts.illustrateDeriver) return this.opts.illustrateDeriver;
@@ -1685,8 +1697,9 @@ export class Coordinator {
             continue;
           }
           const chosen = row.who.map((entry) => ({ key: entry.key, name: entry.name, ...(entry.sheet !== undefined ? { sheet: entry.sheet } : {}), kind: entry.kind, ...(room.people.find((person) => person.key === entry.key)?.billing !== undefined ? { billing: room.people.find((person) => person.key === entry.key)!.billing! } : {}) }));
-          // The chapter's look as it stands now: a look chosen since the proposal rides (R-119).
-          const who = pictureWho(store, model, chosen, { look: record?.look ?? null, frame: row.shot?.frame ?? null });
+          // The chapter's look as it stands now: a look chosen since the proposal rides (R-119); and a
+          // look held on the block for its picture alone rides for that person in its place (R-146).
+          const who = pictureWho(store, model, chosen, { look: record?.look ?? null, frame: row.shot?.frame ?? null, own: room.own(row.block) });
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${row.block === "title" ? "title" : row.title}`,
             // Held to rule 4 again: a look chosen since the proposal rides now, and its image carries the clothes (codex on PR 1559).
@@ -1709,8 +1722,8 @@ export class Coordinator {
             continue;
           }
           progress.spentMicroUsd += made.costMicroUsd ?? made.estimatedMicroUsd;
-          const stamp = pictureLookFor(record?.look ?? null, who.filter((entry) => entry.kind === "character").map((entry) => entry.key), ridingPicks(who));
-          const next = await setAudiobookPicture(store, productionId, chapter.file, row.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, { ...(stamp !== undefined ? { look: stamp } : {}), ...(row.shot !== undefined ? { shot: row.shot } : {}) });
+          const stamp = pictureLookFor(record?.look ?? null, who.filter((entry) => entry.kind === "character").map((entry) => entry.key), ridingPicks(who), kitLookLibrary(store.getBundle().referenceKits, record?.look ?? null));
+          const next = await setAudiobookPicture(store, productionId, chapter.file, row.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, { ...(stamp !== undefined ? { look: stamp } : {}), ...(row.shot !== undefined ? { shot: row.shot } : {}), arke: true });
           progress.made.push(row.block);
           this.refreshIfStillOpen(store);
           this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record: next });
@@ -15343,10 +15356,14 @@ export class Coordinator {
           if (index < 0) return fail("that block is no longer in the chapter");
           const characters = depictable(room.people).filter((person) => msg.who.includes(person.key));
           const place = room.places.find((candidate) => msg.who.includes(candidate.key));
+          // The looks chosen for this picture alone (turn 193d, R-146): as the card sent them, else
+          // those held on the block, else those the picture was made with — each in place of the
+          // chapter's choice for that person only.
+          const own = msg.looks ?? room.own(msg.block);
           const who = pictureWho(store, model, [
             ...characters.map((person) => ({ key: person.key, name: person.name, ...(person.sheet !== undefined ? { sheet: person.sheet } : {}), kind: "character" as const, ...(person.billing !== undefined ? { billing: person.billing } : {}) })),
             ...(place === undefined ? [] : [{ key: place.key, name: place.name, sheet: place.key, kind: "place" as const }]),
-          ], { look, frame: msg.frame ?? null });
+          ], { look, frame: msg.frame ?? null, own });
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${msg.block === "title" ? "title" : `block ${index + 1}`}`,
             prompt: clipPrompt(msg.prompt, promptRoom(model)),
@@ -15360,9 +15377,10 @@ export class Coordinator {
             signal: control.signal,
           });
           if (!made.ok) return fail(made.reason, made.sessionId);
-          const stamp = pictureLookFor(look, characters.map((person) => person.key), ridingPicks(who));
+          // A look chosen for this picture alone is stamped `only` (R-115): the chapter's later choice never marks it.
+          const stamp = pictureLookFor(look, characters.map((person) => person.key), ridingPicks(who), kitLookLibrary(store.getBundle().referenceKits, look));
           // The shot the press was made from rides on the picture, so its card still says it (design turn 194g).
-          const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, { ...(stamp !== undefined ? { look: stamp } : {}), ...(msg.shot !== undefined ? { shot: msg.shot } : {}) });
+          const record = await setAudiobookPicture(store, msg.productionId, chapter.file, msg.block, { file: `artifacts/${made.artifact.file}`, source: "generated" }, { ...(stamp !== undefined ? { look: stamp } : {}), ...(msg.shot !== undefined ? { shot: msg.shot } : {}), arke: true });
           this.refreshIfStillOpen(store);
           // The record the picture now stands in goes to every window as any record write does: the margin's chip and the panel read it from there, and the card's own word is only that it is done.
           this.emit({ at: at(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, requestId: msg.requestId, record });
@@ -15373,6 +15391,40 @@ export class Coordinator {
         } finally {
           store.closingSignal.removeEventListener("abort", onClose);
           this.makingPictures.delete(key);
+        }
+        return;
+      }
+      case "rewrite-audiobook-picture-prompt": {
+        // Update prompt (design turn 193d, SPEC-047 R-146): a person's look for this picture is not
+        // the one the prompt was written for; the writing service rewrites their clothing words
+        // and leaves every other word as the author has it. Answered to the window that asked;
+        // nothing is made and nothing is spent.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, block: msg.block };
+        const at = () => new Date().toISOString();
+        const answer = (said: { prompt: string } | { refused: string }) => this.emit({ at: at(), type: "audiobook.picture-prompt", ...ids, ...said });
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        try {
+          const rewriter = this.promptRewriterFor();
+          if (!rewriter) return answer({ refused: "the writing service is not running" });
+          const model = await this.pictureModel(store);
+          const held = await readAudiobook(store, msg.productionId, chapter.file);
+          const look = held === null || held === "unreadable" ? null : (held.look ?? null);
+          // The words are named neutrally where a look image rides; a model that takes no reference carries none.
+          const carries = model === null ? true : referenceBudgetFor(model) > 0;
+          const changes = msg.changes.flatMap((change) => clothingChange(store, look, change.key, change.from, change.to, carries));
+          const prompt = await rewritePictureClothing(rewriter, msg.prompt, changes, model === null ? PICTURE_PROMPT_MAX : promptRoom(model), control.signal);
+          answer({ prompt });
+        } catch (err) {
+          if (!control.signal.aborted) void this.appLog?.append({ kind: "audiobook.picture-prompt-failed", chapter: chapter.file, block: msg.block, message: err instanceof Error ? err.message : String(err) });
+          answer({ refused: control.signal.aborted ? "stopped" : describeCoordinatorError(err) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
         }
         return;
       }
@@ -15412,7 +15464,8 @@ export class Coordinator {
           const looked = await this.chapterLook(store, msg.productionId, chapter, control.signal);
           if (typeof looked === "string") return finish("failed", { reason: looked });
           const room = await pictureRoom(store, msg.productionId, chapter.id, looked.look);
-          const { proposal } = await proposeIllustrations(store, room, model, deriver, control.signal);
+          // A row on a block holding a look of its own has that person's clothing words rewritten for it (R-146).
+          const { proposal } = await proposeIllustrations(store, room, model, deriver, control.signal, this.promptRewriterFor() ?? undefined);
           finish("proposed", { proposal: { ...proposal, proposalId: ulid() } });
         } catch (err) {
           if (control.signal.aborted) return finish("stopped");
@@ -15515,7 +15568,8 @@ export class Coordinator {
         const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
         const at = () => new Date().toISOString();
         try {
-          const record = await chooseChapterLook(store, msg.productionId, chapter.id, { key: msg.key, ...(msg.name !== undefined ? { name: msg.name } : {}), ...(msg.sheet !== undefined ? { sheet: msg.sheet } : {}) }, msg.lookId);
+          // From a block's look menu (turn 193d, R-146): for that block's picture alone, or the chapter's with the picture following it.
+          const record = await chooseChapterLook(store, msg.productionId, chapter.id, { key: msg.key, ...(msg.name !== undefined ? { name: msg.name } : {}), ...(msg.sheet !== undefined ? { sheet: msg.sheet } : {}) }, msg.lookId, msg.block !== undefined ? { block: msg.block, only: msg.only === true } : undefined);
           // The answer first, as for a line written above.
           this.emit({ at: at(), type: "audiobook.record", ...ids, record });
           this.refreshIfStillOpen(store);
