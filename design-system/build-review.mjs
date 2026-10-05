@@ -436,6 +436,18 @@ const SCREENS = [
   { group: "Around it", screen: "Audiobook block seams on a phone (story)", frame: "198j", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-10-05",
     controls: ["Join next", "Split", "Cast 2 paragraphs"],
     notes: ["Turn 198j: no hover on touch, so the block's sheet carries Join next and Split; Split on a block of three or more lines offers a press at each gap between them. The lines to cast and Reset sit in the ⋯ menu. Not built yet."] },
+  { group: "Around it", screen: "Audiobook page · the show page (story)", frame: "199a", route: "#/w/:worldId/p/:prodId/story/audiobook", status: "drawn", checked: "2026-10-05",
+    controls: ["Continue", "Export", "Read the book", "Cast", "Chapters", "Narrator", "planned", "to read"],
+    notes: ["Turn 199a-b: the page as a show page — the key art as a backdrop, one meta line, Continue or Listen first, Export, and Read the book only while something is left to read, with one warning word (2 no voice) in place of the voice chips; the cast as 2:3 portraits with names only, the narrator first; the chapters as episodes with a thumbnail, its listened bar, length, a state word only when not simply ready, and the synopsis. A row plays from there; its chevron opens the chapter's Audiobook view. The read bar and the strip go. Amends 190a and 146a. Not built yet."] },
+  { group: "Around it", screen: "Audiobook hero never clips (story)", frame: "199c", route: "#/w/:worldId/p/:prodId/story/audiobook", status: "drawn", checked: "2026-10-05",
+    controls: ["Continue", "Export", "Read the book"],
+    notes: ["Turn 199c: the fix for the owner's 2026-10-05 report — the head's fixed height cut off Read the book in a window that was not full screen. The hero has no fixed or maximum height; its presses wrap to a second line and it grows. The test asserts every press lies inside the hero at 1100 by 790 and 1440 by 900. Not built yet."] },
+  { group: "Around it", screen: "Audiobook Reading sheet (story)", frame: "199e", route: "#/w/:worldId/p/:prodId/story/audiobook · ⋯ · Reading", status: "drawn", checked: "2026-10-05",
+    controls: ["Reading", "Narrator", "Speakers", "Book note", "Requests", "Grouped", "Per paragraph", "Book", "Done"],
+    notes: ["Turn 199d-e: the hero's ⋯ holds Reading and Narrator; Reading is a 460 side sheet holding what the page held — the reading seg, the narrator, a row a speaker with its voice or no voice · narrator in warning and its blocks, the book note, Requests where the reader groups, and the book's request counts. Replaces the voice chips, BookRequests and the book-note panel on the page. Not built yet."] },
+  { group: "Around it", screen: "Audiobook page on a phone (story)", frame: "199f", route: "#/w/:worldId/p/:prodId/story/audiobook", status: "drawn", checked: "2026-10-05",
+    controls: ["Continue", "Read the book", "Export", "Cast", "Chapters", "Reading", "Done"],
+    notes: ["Turn 199f: the hero with Continue full width under the thumb; the cast as a row of portraits that scrolls; chapters as episodes; the player docked at the foot instead of Read the book (amends 173b); Reading as a sheet from the foot. Not built yet."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
