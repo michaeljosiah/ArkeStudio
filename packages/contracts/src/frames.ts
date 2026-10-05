@@ -8,7 +8,7 @@ import { GenesisImageTargetSchema } from "./genesis-images.js";
 import { AccountPageSchema } from "./account.js";
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
-import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema } from "./audiobook.js";
+import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema, AudiobookTurnPlaceSchema } from "./audiobook.js";
 import { AudiobookPictureSourceSchema } from "./audiobook-pictures.js";
 import { AudiobookVideoOptionsSchema } from "./audiobook-video.js";
 import { LOOK_LINE_MAX, LookTargetSchema, PictureOwnLooksSchema } from "./audiobook-look.js";
@@ -3284,6 +3284,25 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema.optional(),
     })
     .strict(),
+  /**
+   * Join or Split pressed on a gap between two of the chapter's lines (design turn 198, SPEC-047
+   * R-147..R-150): the gap named by the turns either side and the hash of their words as the press
+   * saw them. A press the gap does not offer, a limit, or words changed since are refused. Answered
+   * as `audiobook.record`.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-seam"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      press: z.enum(["join", "split"]),
+      anchor: z.object({ before: AudiobookTurnPlaceSchema, after: AudiobookTurnPlaceSchema, textHash: z.string().min(1).max(200) }).strict(),
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /** Reset (design turn 198, R-151): every seam of the chapter back to the automatic split. Answered as `audiobook.record`. */
+  z.object({ kind: z.literal("reset-audiobook-seams"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema.optional() }).strict(),
   z
     .object({
       kind: z.literal("direct-chapter"),

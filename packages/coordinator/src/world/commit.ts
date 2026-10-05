@@ -415,6 +415,12 @@ export const AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION = 64;
  * before it reads such a record as unreadable, so the world is raised before the first.
  */
 export const AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION = 65;
+/**
+ * Seams set by hand between a chapter's blocks (design turn 198, SPEC-047 R-147): `seams` on the
+ * chapter's strict audiobook record. A build before it reads such a record as unreadable, and
+ * would read every take of the chapter as lost, so the world is raised before the first.
+ */
+export const AUDIOBOOK_SEAMS_SCHEMA_VERSION = 66;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

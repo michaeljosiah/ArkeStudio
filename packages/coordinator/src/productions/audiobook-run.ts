@@ -489,7 +489,9 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       ...(noteHeld ? { noteHeld: true as const } : {}),
       ...(held?.plan.cues.some((cue) => cue.kind === "sound") === true ? { sounds: true as const } : {}),
       ...(refusal === undefined && takeHash !== undefined ? { takeHash } : {}),
-      ...(held !== null && override?.directions === undefined && audiobookDirectionFor(record, planned.block) === null ? { carried: held } : {}),
+      // A block a seam shaped is directed from its blocks' own entries every time (design turn 198):
+      // writing that here would put it over the first block's, which a split or Reset wants back.
+      ...(held !== null && override?.directions === undefined && planned.block.shaped !== true && audiobookDirectionFor(record, planned.block) === null ? { carried: held } : {}),
       reader,
       model,
       local,

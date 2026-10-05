@@ -1,4 +1,4 @@
-import { chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
+import { chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import {
   AUDIOBOOK_DELIVERIES,
@@ -20,8 +20,10 @@ import {
   audiobookNoteFor,
   audiobookRekeyed,
   audiobookRecordingKey,
+  audiobookSeamLabel,
   audiobookSpeakerColours,
   audiobookSpeakerKey,
+  audiobookTextHash,
   retailLevel,
   cadenceSupport,
   holdDirection,
@@ -40,6 +42,7 @@ import {
   type ArtifactSidecar,
   type AudiobookBlock,
   type AudiobookBlockState,
+  type AudiobookGap,
   type AudiobookDirectionInput,
   type HeldControl,
   type AudiobookReader,
@@ -101,6 +104,8 @@ import {
   useDirectionRuns,
   useStore,
   keepAudiobookSplit,
+  resetAudiobookSeams,
+  setAudiobookSeam,
   setAudiobookRequests,
   type ReadingVoice,
 } from "../lib/store.js";
@@ -153,6 +158,8 @@ export interface ChapterAudiobookInput {
   illustrate?: { press: () => void; busy: boolean; again: boolean; state?: string; running?: { line: string; stop?: () => void } };
   /** The chapter's Looks (design turn 193a), in the same menu (194): opens the Looks sheet; `state` is what it says beside it. */
   looks?: { open: () => void; state?: string };
+  /** On a phone (design turn 198, rule 10) the Blocks press and its Reset are in the toolbar's ⋯ menu. */
+  seamsInMenu?: boolean;
 }
 
 /** What a press asks for once the save lands: the chapter, these blocks alone, a direction, or a card's acceptance. */
@@ -389,7 +396,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // the record's cast would split the paragraphs elsewhere and give the lines other readers.
   const blockCast = proposal?.castRecord ?? cast;
   // One reader, one block (design turn 190): the same blocks the coordinator plans, from the same rule.
-  const blockOptions = useMemo(() => audiobookBlockOptions({ reading, ...(recordedList !== undefined ? { recorded: [...recordedList] } : {}) }), [reading, recordedList]);
+  // The seams set by hand reshape them (design turn 198), read off the same record.
+  const seamList = recordOrNull?.seams;
+  const blockOptions = useMemo(() => audiobookBlockOptions({ reading, ...(recordedList !== undefined ? { recorded: [...recordedList] } : {}) }, seamList === undefined ? null : { seams: seamList }), [reading, recordedList, seamList]);
   const derived = useMemo(() => audiobookBlocks(body, blockCast, audiobookHeading(chapter.order, chapter.title), blockOptions), [body, blockCast, chapter.order, chapter.title, blockOptions]);
   // A take the record names but the shelf no longer holds is not made (codex on PR 1180): the
   // coordinator plans the same way, so the block is made again rather than shown unplayable.
@@ -831,6 +840,47 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     [locked, connection, worldId, prodId, chapter.file],
   );
   const lastRecord = useAudiobookRecords()[`${worldId}/${prodId}/${chapter.id}`];
+
+  // Block seams (design turn 198): Join and Split on a gap, Reset on them all, written on the
+  // record and read nowhere else. Not while a read runs, as the notes cannot change then (194). A
+  // block a seam change puts back in a shape it had, found made again with nothing to read, says
+  // `made` in green until the author leaves the view: the made blocks are noted at the press and
+  // compared once the record answers.
+  const seamView = derived.seams;
+  const seamLabel = audiobookSeamLabel(seamView);
+  const seamsHeld = locked || connection !== "open" || reading_;
+  const madeAtPress = useRef<{ made: ReadonlySet<string>; updatedAt: string | null } | null>(null);
+  const [madeAgain, setMadeAgain] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    madeAtPress.current = null;
+    setMadeAgain(new Set());
+  }, [chapter.id]);
+  const notePress = useCallback(() => {
+    madeAtPress.current = { made: new Set(rows.filter((row) => row.state === "made").map(blockIdentity)), updatedAt: recordOrNull?.updatedAt ?? null };
+  }, [rows, recordOrNull?.updatedAt]);
+  useEffect(() => {
+    const held = madeAtPress.current;
+    if (held === null || (recordOrNull?.updatedAt ?? null) === held.updatedAt) return;
+    madeAtPress.current = null;
+    const again = rows.filter((row) => row.state === "made" && !held.made.has(blockIdentity(row))).map(blockIdentity);
+    if (again.length > 0) setMadeAgain((was) => new Set([...was, ...again]));
+  }, [rows, recordOrNull?.updatedAt]);
+  useEffect(() => {
+    if (lastRecord?.refused !== undefined) madeAtPress.current = null;
+  }, [lastRecord?.seq, lastRecord?.refused]);
+  const pressSeam = useCallback(
+    (gap: AudiobookGap) => {
+      if (seamsHeld || gap.anchor === undefined || (gap.press === "join" && gap.limit !== undefined)) return;
+      notePress();
+      setAudiobookSeam(worldId, prodId, chapter.file, gap.press, gap.anchor);
+    },
+    [seamsHeld, notePress, worldId, prodId, chapter.file],
+  );
+  const resetSeams = useCallback(() => {
+    if (seamsHeld) return;
+    notePress();
+    resetAudiobookSeams(worldId, prodId, chapter.file);
+  }, [seamsHeld, notePress, worldId, prodId, chapter.file]);
   // A take a person recorded (turn 155c): the host's picker opens for the block, the checks come
   // back as a dialog, and the keep answers as the block's record does.
   const [uploadId, setUploadId] = useState<string | null>(null);
@@ -991,6 +1041,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             : []),
           ...(input.looks !== undefined
             ? [{ key: "looks", label: "Looks", state: input.looks.state ?? "", disabled: connection !== "open", press: input.looks.open, testId: "audiobook-looks-open" }]
+            : []),
+          // On a phone the Blocks press is in this menu (design turn 198, rule 10): Reset, with what it puts back.
+          ...(input.seamsInMenu === true && seamLabel !== null
+            ? [{ key: "blocks-reset", label: "Reset", state: `Blocks · ${seamLabel}`, disabled: seamsHeld, press: resetSeams, testId: "audiobook-blocks-reset" }]
             : []),
         ]}
       />
@@ -1180,7 +1234,23 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     mixed,
     timed,
     mixPlayer,
+    /**
+     * Block seams (design turn 198): every gap a press can change and why one cannot, the Blocks
+     * press's data (null when no seam is set), Join or Split pressed, Reset, whether they wait on a
+     * read, and the blocks made again at no cost since the view opened.
+     */
+    seams: { gaps: seamView.gaps, label: seamLabel, changed: seamView.changed, notRead: rows.filter((row) => row.block.shaped === true && row.state === "not made").length, press: pressSeam, reset: resetSeams, held: seamsHeld, madeAgain },
   };
+}
+
+/** One press's place among the gaps, for the confirm it may open. */
+function seamKey(gap: Pick<AudiobookGap, "press" | "block" | "row">): string {
+  return `${gap.press}:${gap.block}:${gap.row ?? ""}`;
+}
+
+/** A block as it was made: its key and its words, the two a take is found by. */
+function blockIdentity(row: Pick<BlockRow, "block">): string {
+  return `${row.block.key}\n${audiobookTextHash(row.block.text)}`;
 }
 
 /** The three readings as the head's menu offers them, each with its data (turn 165a). */
@@ -1374,7 +1444,15 @@ function SpeakerMenu({ row, choices, onPick, onClose }: {
   );
 }
 
-export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, onSelect, onPlayOne, slug, filter = null, choices, onPin, marker = null, onMarker, modelOf, onDirect, brackets = [], onReRead, reReadPrice, pictures }: {
+export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, onSelect, onPlayOne, slug, filter = null, choices, onPin, marker = null, onMarker, modelOf, onDirect, brackets = [], onReRead, reReadPrice, pictures, seams, madeAgain }: {
+  /**
+   * Block seams (design turn 198): the gaps a fine pointer can press, a Join on the bracket line
+   * between two blocks and a Split between two rows of one, drawn on hover. Absent while a read
+   * runs, and on touch, where the block's sheet carries them.
+   */
+  seams?: { gaps: readonly AudiobookGap[]; onPress: (gap: AudiobookGap) => void };
+  /** Blocks made again at no cost by a seam change (198g), by key and words: `made` in green. */
+  madeAgain?: ReadonlySet<string>;
   /** What reading a block again with its neighbours would cost, as its button says it. */
   reReadPrice?: (key: string) => string | null;
   rows: BlockRow[];
@@ -1405,6 +1483,21 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
   const coarse = useMediaQuery("(pointer: coarse)");
   const pressedSelection = useRef<BlockSelection | null>(null);
   const [menu, setMenu] = useState<{ key: string; selection?: { from: number; to: number } } | null>(null);
+  // The join that would take a picture off, asking (design turn 198d); closed by Cancel, Escape or a press elsewhere.
+  const [confirming, setConfirming] = useState<string | null>(null);
+  useEffect(() => {
+    if (confirming === null) return;
+    const close = () => setConfirming(null);
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    document.addEventListener("click", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("click", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [confirming]);
   useEffect(() => {
     const changed = () => {
       const captured = audiobookSelection(rows);
@@ -1445,6 +1538,48 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
   }, [markable, rows, onMarker]);
   if (rows.length === 0) return <p className="fy-bible__empty">Nothing to read yet.</p>;
   const pinnable = choices !== undefined && onPin !== undefined;
+  // The seams a fine pointer finds on hover (design turn 198, rules 1 and 15): each Join on the
+  // line above its block, each Split on the rule between two rows. Touch has the block's sheet.
+  const hovers = seams !== undefined && !coarse;
+  const joinAbove = new Map((hovers ? seams.gaps : []).filter((gap) => gap.press === "join").map((gap) => [gap.block, gap] as const));
+  const splitsIn = (key: string) => (hovers ? seams.gaps : []).filter((gap) => gap.press === "split" && gap.block === key);
+  const seamPress = (gap: AudiobookGap, row: BlockRow) => {
+    const off = gap.press === "join" && gap.limit !== undefined;
+    const word = gap.press === "join" ? "Join" : "Split";
+    const id = seamKey(gap);
+    // A join that would take a picture off its block asks once, in one plain line (rule 6, 198d):
+    // the block above shows its own picture, so the one below comes off. Every other is at once.
+    const above = rows[rows.indexOf(row) - 1];
+    const losing = gap.press === "join" && above !== undefined && pictures?.byKey.has(above.block.key) === true && pictures.byKey.has(row.block.key);
+    return (
+      <span className={`fy-ab__seam${gap.press === "split" ? " fy-ab__seam--in" : ""}${off ? " fy-ab__seam--off" : ""}${confirming === id ? " fy-ab__seam--open" : ""}`} data-testid="audiobook-seam" onClick={(event) => event.stopPropagation()}>
+        {/* The word is drawn from its data, never written in the page: a Split sits in the block's
+            words, and a selection's offsets there must count the words alone. */}
+        <button
+          type="button"
+          className="fy-ab__seam-press"
+          aria-disabled={off}
+          aria-label={off ? `${word} · ${gap.limit}` : word}
+          data-label={off ? `${word} · ${gap.limit}` : word}
+          data-testid={`audiobook-${gap.press}`}
+          onClick={() => {
+            if (off) return;
+            if (losing) setConfirming(id);
+            else seams!.onPress(gap);
+          }}
+        />
+        {confirming === id && (
+          <span className="fy-ab__seam-confirm" role="dialog" aria-label="Join" data-testid="audiobook-join-confirm">
+            <span>Block {rows.indexOf(row) + 1}’s picture comes off. It stays in the world.</span>
+            <span className="fy-ab__seam-confirm-foot">
+              <Button variant="ghost" onClick={() => setConfirming(null)}>Cancel</Button>
+              <Button variant="primary" onClick={() => { setConfirming(null); seams!.onPress(gap); }}>Join</Button>
+            </span>
+          </span>
+        )}
+      </span>
+    );
+  };
   const renderRow = (row: BlockRow) => {
         // The margin names who speaks (R-33): a colour a speaker with a sheet, grey for the
         // narrator, a dashed dot for a name no sheet carries; a line is tinted, narration is not.
@@ -1516,6 +1651,10 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
                   held={new Set(row.held.flatMap((control) => (control.cueIndex !== undefined ? [control.cueIndex] : [])))}
                   {...(laterTurns !== undefined ? { turns: laterTurns } : {})}
                   {...(markable ? { onPlate: (index: number) => onMarker({ key: row.block.key, span: { from: 0, to: 0 }, edit: index }) } : {})}
+                  {...(laterTurns !== undefined && hovers ? { gap: (index: number) => {
+                    const gap = splitsIn(row.block.key).find((candidate) => candidate.row === index);
+                    return gap === undefined ? null : seamPress(gap, row);
+                  } } : {})}
                 />
               )}
             </span>
@@ -1551,8 +1690,13 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
                 a fine pointer finds on hover. On touch the row's press selects it and its sheet plays. */}
             <span className="fy-ab__marks">
               {picture !== undefined && slug !== undefined ? <PictureChip slug={slug} picture={picture} /> : proposedPicture !== undefined ? <ProposedChip title={proposedPicture.title} /> : null}
+              {/* A block whose shape a seam changed is `not read` (design turn 198, rule 4); one put back
+                  and found made again is `made` in green until the author leaves the view (198g). */}
               {row.state !== "made" && (
-                <span className={`fy-ab__state fy-ab__state--${row.state.replace(" ", "-")}`} data-testid="audiobook-state">{row.state === "not made" ? "waiting" : STATE_LABEL[row.state]}</span>
+                <span className={`fy-ab__state fy-ab__state--${row.state.replace(" ", "-")}`} data-testid="audiobook-state">{row.state === "not made" ? (row.block.shaped === true ? "not read" : "waiting") : STATE_LABEL[row.state]}</span>
+              )}
+              {row.state === "made" && madeAgain?.has(blockIdentity(row)) === true && (
+                <span className="fy-ab__state fy-ab__state--again" data-testid="audiobook-state">made</span>
               )}
               {row.state === "made" && row.artifact !== null && (
                 <button
@@ -1569,6 +1713,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
                 </button>
               )}
             </span>
+            {joinAbove.has(row.block.key) && seamPress(joinAbove.get(row.block.key)!, row)}
           </div>
           {split !== null && (
             <div className="fy-ab__split" data-testid="audiobook-split">
@@ -1836,6 +1981,162 @@ export function AudiobookFilterMenu({ filters, filter, onFilter }: {
   );
 }
 
+/**
+ * `Blocks · 3 changed ▾` (design turn 198, rule 10): after the speaker filter once a seam is set
+ * by hand, the same press as its neighbours, the data counting the blocks whose shape differs
+ * from the automatic split, the joins held and the seams dropped. Its menu holds Reset, which asks
+ * nothing: the old takes are found again.
+ */
+export function BlocksPress({ label, changed, held, onReset }: { label: string; changed: number; held: boolean; onReset: () => void }) {
+  const pop = usePopover();
+  useEffect(() => {
+    if (pop.open) pop.panel.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [pop.open]);
+  return (
+    <span className="fy-ab__tool">
+      <button
+        ref={pop.press}
+        type="button"
+        className={`fy-ab__pill${pop.open ? " fy-ab__pill--on" : ""}`}
+        aria-haspopup="menu"
+        aria-expanded={pop.open}
+        onClick={() => pop.setOpen((was) => !was)}
+        data-testid="audiobook-blocks-press"
+      >
+        Blocks
+        {SPOKEN_GAP}
+        <em>{label}</em>
+        <ChevronDown size={13} stroke={2} aria-hidden="true" />
+      </button>
+      {pop.open && (
+        <div ref={pop.panel} className="fy-ab__menu fy-ab__toolmenu fy-ab__blocksmenu" role="menu" aria-label="Blocks" onKeyDown={pop.onKey}>
+          <button
+            type="button"
+            role="menuitem"
+            aria-disabled={held}
+            className="fy-ab__menu-opt"
+            onClick={() => {
+              if (held) return;
+              pop.close(true);
+              onReset();
+            }}
+            data-testid="audiobook-blocks-reset"
+          >
+            <span className="fy-ab__menu-label">Reset</span>
+            <span className="fy-ab__menu-meta">{changed > 0 ? `${changed} block${changed === 1 ? "" : "s"}` : label}</span>
+          </button>
+        </div>
+      )}
+    </span>
+  );
+}
+
+/**
+ * The block's seams on touch (design turn 198, rule 2; 198j): `Join next` and `Split` under the
+ * sheet's head, one line of presses. Join next joins the block with the one after it. Split on a
+ * block of two lines splits it at its one gap; on one of three or more it shows the block's lines
+ * in the sheet with a Split at each gap between them. A press that would break a limit is drawn
+ * off with its reason, as on the desktop; a join that takes a picture off asks, as there.
+ */
+export function useBlockSeamActs(input: {
+  row: BlockRow | null;
+  rows: readonly BlockRow[];
+  gaps: readonly AudiobookGap[];
+  /** A read runs, or the window is offline: the presses hold. */
+  held: boolean;
+  onPress: (gap: AudiobookGap) => void;
+  /** The blocks that show a picture now, by key. */
+  pictured?: ReadonlySet<string>;
+}): { bar: ReactNode; lines: ReactNode | null } {
+  const { row, rows, gaps, held, onPress, pictured } = input;
+  const [open, setOpen] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const key = row?.block.key ?? null;
+  useEffect(() => {
+    setOpen(false);
+    setAsking(false);
+  }, [key, gaps]);
+  if (row === null) return { bar: null, lines: null };
+  const at = rows.indexOf(row);
+  const next = rows[at + 1];
+  const joinNext = next === undefined ? undefined : gaps.find((gap) => gap.press === "join" && gap.block === next.block.key);
+  const splits = gaps.filter((gap) => gap.press === "split" && gap.block === row.block.key);
+  if (joinNext === undefined && splits.length === 0) return { bar: null, lines: null };
+  const joinOff = joinNext?.limit !== undefined;
+  const losing = next !== undefined && pictured?.has(row.block.key) === true && pictured.has(next.block.key);
+  const bar = (
+    <>
+      <div className="fy-abp__acts" data-testid="audiobook-seam-acts">
+        {joinNext !== undefined && (
+          <button
+            type="button"
+            className={`fy-ab__pill${joinOff ? " fy-ab__pill--off" : ""}`}
+            disabled={held}
+            aria-disabled={joinOff}
+            onClick={() => {
+              if (joinOff) return;
+              if (losing) setAsking(true);
+              else onPress(joinNext);
+            }}
+            data-testid="audiobook-join-next"
+          >
+            {joinOff ? `Join next · ${joinNext.limit}` : "Join next"}
+          </button>
+        )}
+        {splits.length > 0 && (
+          <button
+            type="button"
+            className={`fy-ab__pill${open ? " fy-ab__pill--on" : ""}`}
+            disabled={held}
+            aria-expanded={splits.length > 1 ? open : undefined}
+            onClick={() => (splits.length === 1 ? onPress(splits[0]!) : setOpen((was) => !was))}
+            data-testid="audiobook-split-sheet"
+          >
+            Split
+          </button>
+        )}
+      </div>
+      {asking && joinNext !== undefined && next !== undefined && (
+        <div className="fy-ab__seam-confirm fy-ab__seam-confirm--sheet" role="dialog" aria-label="Join" data-testid="audiobook-join-confirm">
+          <span>Block {at + 2}’s picture comes off. It stays in the world.</span>
+          <span className="fy-ab__seam-confirm-foot">
+            <Button variant="ghost" onClick={() => setAsking(false)}>Cancel</Button>
+            <Button variant="primary" onClick={() => { setAsking(false); onPress(joinNext); }}>Join</Button>
+          </span>
+        </div>
+      )}
+    </>
+  );
+  if (!open || splits.length < 2) return { bar, lines: null };
+  // The block's lines, as the list draws them on a phone, with a Split at each gap between.
+  const turns = row.block.rows ?? [{ text: row.block.text }];
+  const lines = (
+    <div className="fy-abp__lines" data-testid="audiobook-seam-lines">
+      {turns.map((turn, index) => {
+        const mark = row.turnMarks?.[index];
+        const gap = splits.find((candidate) => candidate.row === index);
+        return (
+          <Fragment key={index}>
+            <div className="fy-abp__line">
+              <span className={`fy-abp__line-who fy-voice--${mark?.tone ?? "narrator"}`}>
+                <i className="fy-ab__speaker-dot" aria-hidden="true" />
+                {mark?.label ?? (turn.speaker ?? "narrator")}
+              </span>
+              <span className="fy-abp__line-text">{turn.text}</span>
+            </div>
+            {gap !== undefined && index < turns.length - 1 && (
+              <span className="fy-ab__seam fy-ab__seam--sheet">
+                <button type="button" className="fy-ab__seam-press" disabled={held} aria-label="Split" data-label="Split" onClick={() => onPress(gap)} data-testid="audiobook-split" />
+              </span>
+            )}
+          </Fragment>
+        );
+      })}
+    </div>
+  );
+  return { bar, lines };
+}
+
 /** One control's word on the panel (R-9): what this reader does with it, in one clause. */
 function supportWord(support: { status: string; method?: string; reason?: string }): string {
   return support.status === "unsupported" ? (support.reason ?? "unsupported") : support.status === "best-effort" ? (support.method ?? "best-effort") : "mapped";
@@ -2052,7 +2353,9 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   const flag = record?.flags[row.block.key];
   // This chapter's takes of this block (codex on PR 1180): every chapter has a `title` and a
   // `p0.0`, so the key alone would list another chapter's reading under this one's name.
-  const takes = blockTakes(artifacts, productionId, chapterId, row.block.key);
+  const takes = blockTakes(artifacts, productionId, chapterId, row.block.key, row.block.shaped === true ? row.block.text : undefined);
+  // A block a seam shaped, not read yet (198c): no takes to list, and Make reads it alone.
+  const unread = row.block.shaped === true && takes.length === 0;
   // The direction that stands for these words, and what the reader that will speak does with
   // each control (R-9): read off that reader's row and the line's language, so a delivery the
   // row lacks is struck with the reason before it is pressed, and the plan's own report says
@@ -2275,6 +2578,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
         )}
       </section>
       )}
+      {!unread && (
       <section className="fy-abp__sec fy-abp__takes" data-testid="audiobook-takes">
         <span className="fy-abp__k">Takes</span>
         {takes.length === 0 ? (
@@ -2315,6 +2619,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
           })
         )}
       </section>
+      )}
       {/* Sent as, folded (rule 12): what the reader is sent, each part named, opened on a press. */}
       {row.proposed === null && row.sentAs !== null && (
         <details className="fy-abp__disc" data-testid="audiobook-sent">
@@ -2373,6 +2678,11 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
             Make again{price !== null ? ` · ${price}` : ""}
           </Button>
         )}
+        {unread && (
+          <Button variant="primary" onClick={() => onMakeAgain(row.block.key)} data-testid="audiobook-make">
+            Make{price !== null ? ` · ${price}` : ""}
+          </Button>
+        )}
       </div>
     </>
   );
@@ -2387,9 +2697,17 @@ const PANEL_TABS: ReadonlyArray<{ tab: PanelTab; label: string }> = [
 ];
 
 /** This chapter's takes of a block, newest first: every chapter has a `title` and a `p0.0`, so the key alone would list another chapter's (codex on PR 1180). */
-export function blockTakes(artifacts: readonly ArtifactSidecar[], productionId: string, chapterId: string, key: string): ArtifactSidecar[] {
+export function blockTakes(
+  artifacts: readonly ArtifactSidecar[],
+  productionId: string,
+  chapterId: string,
+  key: string,
+  /** A block a seam shaped (design turn 198c): only its own words' takes, never another shape's under the same key. */
+  words?: string,
+): ArtifactSidecar[] {
+  const hash = words === undefined ? null : audiobookTextHash(words);
   return artifacts
-    .filter((artifact) => artifact.generation?.source === "audiobook" && artifact.generation.productionId === productionId && artifact.generation.chapterId === chapterId && artifact.generation.block === key && artifact.retiredAt === undefined)
+    .filter((artifact) => artifact.generation?.source === "audiobook" && artifact.generation.productionId === productionId && artifact.generation.chapterId === chapterId && artifact.generation.block === key && artifact.retiredAt === undefined && (hash === null || artifact.generation.textHash === hash))
     .sort((a, b) => (a.created < b.created ? 1 : -1));
 }
 
@@ -2407,13 +2725,15 @@ export function blockPanelHead(row: BlockRow, rows: readonly BlockRow[], record:
   const lines = row.turnMarks?.length ?? 1;
   const take = record?.takes[row.block.key];
   const seconds = row.state === "made" ? (row.artifact?.mediaInfo?.durationSec ?? take?.grouped?.durationSec ?? null) : null;
+  // A block a seam shaped and not read yet says how long it will be, at the reading rate (198c).
+  const reshaped = row.block.shaped === true && row.state === "not made";
   const sub = [
     `${lines} line${lines === 1 ? "" : "s"}`,
-    ...(seconds !== null ? [`${seconds.toFixed(1)} s`] : []),
+    ...(seconds !== null ? [`${seconds.toFixed(1)} s`] : reshaped ? [`~${expectedSpeechSeconds(row.block.text).toFixed(1)} s`] : []),
     `read by ${voiceDisplayLabel(row.speaker, names)}`,
     ...(row.speaker !== row.assigned ? ["stands in"] : row.byNarrator && row.note !== undefined ? ["performed"] : []),
     ...(row.proposed !== null ? ["proposed"] : []),
-    STATE_LABEL[row.state],
+    reshaped ? "not read" : STATE_LABEL[row.state],
   ].join(" · ");
   const flag = record?.flags[row.block.key];
   return { title, ...(full !== title ? { full } : {}), sub, flag: row.state === "flagged" && flag !== undefined && flag.split === undefined ? flag.reason : null };
@@ -2426,13 +2746,17 @@ export function blockPanelHead(row: BlockRow, rows: readonly BlockRow[], record:
  * (194h) this head is the sheet's: the sheet draws none of its own, and the title takes the focus
  * a sheet gives its heading on opening.
  */
-export function BlockPanel({ head, tab, onTab, facts, onClose, children }: {
+export function BlockPanel({ head, tab, onTab, facts, onClose, children, acts = null, lines = null }: {
   head: { title: string; full?: string; sub: string; flag: string | null };
   tab: PanelTab;
   onTab: (tab: PanelTab) => void;
   facts: Partial<Record<PanelTab, string>>;
   onClose: () => void;
   children: Record<PanelTab, ReactNode>;
+  /** On touch, the block's seams under its head (design turn 198j): Join next and Split. */
+  acts?: ReactNode;
+  /** The block's lines with a Split at each gap, shown in the tabs' place while Split is open (198j). */
+  lines?: ReactNode;
 }) {
   const id = useId();
   return (
@@ -2447,6 +2771,9 @@ export function BlockPanel({ head, tab, onTab, facts, onClose, children }: {
         <p className="fy-abp__sub">{head.sub}</p>
         {head.flag !== null && <p className="fy-abp__flag">{head.flag}</p>}
       </header>
+      {acts}
+      {lines !== null ? lines : (
+      <>
       <div className="fy-abp__tabs" role="tablist" aria-label="Block">
         {PANEL_TABS.map((item) => (
           <button
@@ -2468,6 +2795,8 @@ export function BlockPanel({ head, tab, onTab, facts, onClose, children }: {
       <div className="fy-abp__body" role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${tab}`}>
         {children[tab]}
       </div>
+      </>
+      )}
     </section>
   );
 }

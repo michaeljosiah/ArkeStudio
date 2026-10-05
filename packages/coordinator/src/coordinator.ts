@@ -333,6 +333,7 @@ import {
   type SpeakerNotesDeriver,
 } from "./productions/audiobook-direction.js";
 import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiobookBook } from "./productions/audiobook-book.js";
+import { resetAudiobookSeams, SeamRefusal, setAudiobookSeam } from "./productions/audiobook-seams.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
 import { anyNarrator, audiobookListening, setAudiobookPicture, setAudiobookPictureFocus } from "./productions/audiobook-listening.js";
 import { audiobookVideoState, exportAudiobookVideo, forgetVideoJob, listVideoExports, pendingVideoJobs } from "./productions/audiobook-video.js";
@@ -14904,6 +14905,34 @@ export class Coordinator {
           this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record });
         } catch (err) {
           this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "set-audiobook-seam":
+      case "reset-audiobook-seams": {
+        // Join, Split and Reset (design turn 198, SPEC-047 R-147..R-152): a seam between two of the
+        // chapter's lines, kept on its audiobook record. Not while the book or a chapter of it is
+        // read, as the notes are not (194); the record answered to every window as a block's
+        // direction is, or why nothing was written.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
+        if (this.audiobookBusy(msg.worldId, msg.productionId)) {
+          this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, refused: "reading · seams wait until it ends" });
+          return;
+        }
+        try {
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
+          const record = msg.kind === "reset-audiobook-seams"
+            ? await resetAudiobookSeams(store, msg.productionId, chapter.id, { narrator })
+            : await setAudiobookSeam(store, msg.productionId, chapter.id, { press: msg.press, anchor: msg.anchor }, { narrator });
+          this.refreshIfStillOpen(store);
+          this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record });
+        } catch (err) {
+          if (!(err instanceof SeamRefusal)) void this.appLog?.append({ kind: "audiobook.seam-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, refused: err instanceof SeamRefusal ? err.message : describeCoordinatorError(err) });
         }
         return;
       }

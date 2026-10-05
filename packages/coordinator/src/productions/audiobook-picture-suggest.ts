@@ -242,7 +242,7 @@ export function blockOwnLooks(plan: Pick<AudiobookPlan, "blocks" | "record">, bl
   const record = plan.record === "unreadable" || plan.record === null ? null : plan.record;
   if (record === null) return {};
   const index = plan.blocks.findIndex((planned) => planned.block.key === block);
-  const blocks = plan.blocks.map((planned) => ({ key: planned.block.key, text: planned.block.text }));
+  const blocks = plan.blocks.map((planned) => ({ key: planned.block.key, text: planned.block.text, ...(planned.block.starts !== undefined ? { starts: planned.block.starts } : {}) }));
   const made = index < 0 ? undefined : placePictures(blocks, record.pictures ?? {}).placed.find((entry) => entry.index === index)?.picture.look;
   return pictureOwnLooks(record.ownLooks?.[block], made);
 }

@@ -53,7 +53,7 @@ function takeSeconds(store: WorldStore, artifactId: string, take: { grouped?: { 
 export function listeningBlocks(store: WorldStore, plan: Pick<AudiobookPlan, "blocks" | "record" | "present">): ListeningInputBlock[] {
   const record = plan.record === "unreadable" ? null : plan.record;
   return plan.blocks.map((planned) => {
-    const block = { key: planned.block.key, text: planned.block.text };
+    const block = { key: planned.block.key, text: planned.block.text, ...(planned.block.starts !== undefined ? { starts: planned.block.starts } : {}) };
     const take = record?.takes[planned.block.key];
     if (take === undefined || !plan.present.has(take.artifactId) || take.textHash !== audiobookTextHash(planned.block.text)) return block;
     const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === take.artifactId);
@@ -155,7 +155,7 @@ export async function setAudiobookPictureFocus(store: WorldStore, productionId: 
   const summary = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
   if (summary === undefined) throw new Error("that chapter is no longer in this production");
   const plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId) });
-  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text }));
+  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
   const index = blocks.findIndex((candidate) => candidate.key === block);
   if (index < 0) throw new Error("that block is no longer in the chapter");
   const round = (share: number) => Math.round(Math.min(1, Math.max(0, share)) * 1000) / 1000;
@@ -209,7 +209,7 @@ export async function setAudiobookPicture(
     const listed = worldImageReferences(store.getBundle()).some((reference) => reference.file === picture.file);
     if (!listed || !(await onShelf(store, picture.file))) throw new Error("that picture is not in this world");
   }
-  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text }));
+  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
   const index = blocks.findIndex((candidate) => candidate.key === block);
   return updateAudiobook(store, productionId, plan.chapter, (current) => {
     const held = current.pictures ?? {};

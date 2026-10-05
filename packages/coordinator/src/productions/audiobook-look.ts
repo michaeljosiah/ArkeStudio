@@ -453,7 +453,7 @@ export async function chooseChapterLook(
  * nothing changes.
  */
 function ownLooksAfter(current: ChapterAudiobook, plan: AudiobookPlan, index: number, block: string, key: string, lookId: string | null): Record<string, PictureOwnLooks> | undefined {
-  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text }));
+  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
   const made = placePictures(blocks, current.pictures ?? {}).placed.find((entry) => entry.index === index)?.picture.look;
   const pending = current.ownLooks?.[block];
   const base = pictureOwnLooks(pending, made);
