@@ -1808,6 +1808,79 @@ export class Coordinator {
    * shared by the chapter's own press and by the book's run, which reads each chapter through
    * it on the book's answer. Resolves with the run's ending, for the book to count.
    */
+  /**
+   * The cast of lines (turn 130, SPEC-012 §2.4.2): continuity's press, turned on speech — one run
+   * per chapter at a time, keyed by world as well, ended with the world that began it, and every
+   * ending short of cast leaving the last cast standing. `changed` casts only the paragraphs
+   * edited since (design turn 198, R-68). A read that casts first runs it the same way, its own
+   * stop stopping the cast too (R-69); the outcome and why it fell short are answered to it.
+   */
+  private async castChapterVoices(
+    store: WorldStore,
+    worldId: string,
+    productionId: string,
+    chapter: { id: string; file: string },
+    scope?: "changed",
+    signal?: AbortSignal,
+  ): Promise<{ outcome: "cast" | "stopped" | "unavailable" | "failed" | "busy"; reason?: string }> {
+    const key = `${worldId}/${productionId}/${chapter.file}`;
+    if (this.castingVoices.has(key)) return { outcome: "busy", reason: "casting… · wait for the cast" };
+    const control = new AbortController();
+    this.castingVoices.set(key, { control, worldId, productionId, chapterId: chapter.id });
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    signal?.addEventListener("abort", onClose, { once: true });
+    const finished = (
+      outcome: "cast" | "stopped" | "unavailable" | "failed",
+      counts: { lines: number; dropped: number; omitted: number },
+      extra: { reason?: string; record?: ChapterVoices } = {},
+    ) => {
+      this.emit({
+        at: new Date().toISOString(),
+        type: "voices.finished",
+        worldId,
+        productionId,
+        chapterId: chapter.id,
+        outcome,
+        ...counts,
+        ...(extra.record !== undefined ? { record: extra.record } : {}),
+        ...(extra.reason !== undefined ? { reason: extra.reason } : {}),
+      });
+      return { outcome, ...(extra.reason !== undefined ? { reason: extra.reason } : {}) };
+    };
+    this.emit({ at: new Date().toISOString(), type: "voices.started", worldId, productionId, chapterId: chapter.id });
+    const none = { lines: 0, dropped: 0, omitted: 0 };
+    try {
+      let deriver = this.opts.voicesDeriver ?? null;
+      if (!deriver && this.opts.adapter?.readiness().ready && this.opts.authoring) {
+        deriver = makeAdapterVoicesDeriver(
+          this.opts.adapter,
+          this.sessionInput,
+          this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`,
+        );
+      }
+      if (!deriver) {
+        void this.appLog?.append({ kind: "voices.unavailable", chapter: chapter.file, reason: "casting needs the authoring harness running" });
+        return finished("unavailable", none, { reason: "the writing service is not running" });
+      }
+      const cast = await castLines(store, productionId, chapter.id, deriver, control.signal, scope);
+      // A cast made current gives its lines their voices (SPEC-047 R-12): the chapter's
+      // standing directions, left alone while the cast was not current, are re-checked
+      // against the readers that speak them now (R-13; codex on PR 1187).
+      await this.conformAudiobookDirections(store, worldId, [productionId]);
+      this.refreshIfStillOpen(store);
+      return finished("cast", { lines: cast.lines, dropped: cast.dropped, omitted: cast.omitted }, { record: cast.record });
+    } catch (err) {
+      if (control.signal.aborted) return finished("stopped", none);
+      void this.appLog?.append({ kind: "voices.failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+      return finished("failed", none, { reason: describeCoordinatorError(err) });
+    } finally {
+      store.closingSignal.removeEventListener("abort", onClose);
+      signal?.removeEventListener("abort", onClose);
+      this.castingVoices.delete(key);
+    }
+  }
+
   private async readAudiobookChapter(
     store: WorldStore,
     voice: VoiceService,
@@ -1816,7 +1889,7 @@ export class Coordinator {
     requestId: string,
     command: QueueCommand,
     signal: AbortSignal,
-    options: { confirmationToken?: string; voiceUploadConfirmedFor?: string; only?: readonly string[]; priced?: string },
+    options: { confirmationToken?: string; voiceUploadConfirmedFor?: string; only?: readonly string[]; priced?: string; castFirst?: true },
   ): Promise<{ outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; reason?: string }> {
     const at = () => new Date().toISOString();
     let ending: { outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; reason?: string } = { outcome: "failed", made: 0, flagged: 0, reason: "the run ended without a word" };
@@ -1839,6 +1912,17 @@ export class Coordinator {
       ...(options.confirmationToken !== undefined ? { confirmationToken: options.confirmationToken } : {}),
       ...(options.only !== undefined ? { only: options.only } : {}),
       ...(options.priced !== undefined ? { priced: options.priced } : {}),
+      // Cast first (design turn 198, R-69): the paragraphs left to cast, as `Cast 2 paragraphs` casts them.
+      ...(options.castFirst === true && options.only === undefined
+        ? {
+            castFirst: async () => {
+              const chapter = store.getBundle().productions.find((p) => p.meta.id === ids.productionId)?.chapters.find((c) => c.id === ids.chapterId);
+              if (chapter === undefined) return "that chapter is gone";
+              const cast = await this.castChapterVoices(store, ids.worldId, ids.productionId, chapter, "changed", signal);
+              return cast.outcome === "cast" ? null : `could not cast · ${cast.reason ?? cast.outcome}`;
+            },
+          }
+        : {}),
       // The voice and the vendor on the question (SPEC-046 R-16): a hosted reader's
       // consent is per voice, written onto the library entry; without `reader` only the
       // engine's destination is asked about, and a hosted line is refused at dispatch
@@ -1886,7 +1970,7 @@ export class Coordinator {
             this.emit({ at: at(), type: "audiobook.started", ...ids, requestId, toMake: event.toMake, blocks: event.blocks, ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.groups !== undefined ? { groups: event.groups } : {}) });
             return;
           case "priced":
-            this.emit({ at: at(), type: "audiobook.priced", ...ids, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}), ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}), ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.perParagraph !== undefined ? { perParagraph: event.perParagraph } : {}) });
+            this.emit({ at: at(), type: "audiobook.priced", ...ids, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}), ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}), ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.perParagraph !== undefined ? { perParagraph: event.perParagraph } : {}), ...(event.toCast !== undefined ? { toCast: event.toCast } : {}) });
             return;
           case "request":
             if (held !== undefined) held.request = event.index;
@@ -14329,62 +14413,7 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId) return;
         const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
         if (!chapter) return;
-        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
-        if (this.castingVoices.has(key)) return;
-        const control = new AbortController();
-        this.castingVoices.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
-        const onClose = () => control.abort();
-        store.closingSignal.addEventListener("abort", onClose, { once: true });
-        const finished = (
-          outcome: "cast" | "stopped" | "unavailable" | "failed",
-          counts: { lines: number; dropped: number; omitted: number },
-          extra: { reason?: string; record?: ChapterVoices } = {},
-        ) =>
-          this.emit({
-            at: new Date().toISOString(),
-            type: "voices.finished",
-            worldId: msg.worldId,
-            productionId: msg.productionId,
-            chapterId: chapter.id,
-            outcome,
-            ...counts,
-            ...(extra.record !== undefined ? { record: extra.record } : {}),
-            ...(extra.reason !== undefined ? { reason: extra.reason } : {}),
-          });
-        this.emit({ at: new Date().toISOString(), type: "voices.started", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
-        const none = { lines: 0, dropped: 0, omitted: 0 };
-        try {
-          let deriver = this.opts.voicesDeriver ?? null;
-          if (!deriver && this.opts.adapter?.readiness().ready && this.opts.authoring) {
-            deriver = makeAdapterVoicesDeriver(
-              this.opts.adapter,
-              this.sessionInput,
-              this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`,
-            );
-          }
-          if (!deriver) {
-            void this.appLog?.append({ kind: "voices.unavailable", chapter: chapter.file, reason: "casting needs the authoring harness running" });
-            finished("unavailable", none, { reason: "the writing service is not running" });
-            return;
-          }
-          const cast = await castLines(store, msg.productionId, chapter.id, deriver, control.signal);
-          // A cast made current gives its lines their voices (SPEC-047 R-12): the chapter's
-          // standing directions, left alone while the cast was not current, are re-checked
-          // against the readers that speak them now (R-13; codex on PR 1187).
-          await this.conformAudiobookDirections(store, msg.worldId, [msg.productionId]);
-          this.refreshIfStillOpen(store);
-          finished("cast", { lines: cast.lines, dropped: cast.dropped, omitted: cast.omitted }, { record: cast.record });
-        } catch (err) {
-          if (control.signal.aborted) {
-            finished("stopped", none);
-            return;
-          }
-          void this.appLog?.append({ kind: "voices.failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
-          finished("failed", none, { reason: describeCoordinatorError(err) });
-        } finally {
-          store.closingSignal.removeEventListener("abort", onClose);
-          this.castingVoices.delete(key);
-        }
+        await this.castChapterVoices(store, msg.worldId, msg.productionId, chapter, msg.scope);
         return;
       }
       case "set-voice-pin": {
@@ -15209,6 +15238,7 @@ export class Coordinator {
             ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
             ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
             ...(msg.blocks !== undefined ? { only: msg.blocks } : {}),
+            ...(msg.castFirst === true ? { castFirst: true as const } : {}),
           });
           ended = true;
         } catch (err) {

@@ -24,6 +24,8 @@ import {
   pinTarget,
   performanceNote,
   pinnedLines,
+  castStanding,
+  reconcileCast,
   legacyVoiceModel,
   voicedBlocks,
   type ProductionBundle,
@@ -57,7 +59,7 @@ import { BlockPicturePanel, pictureStart, useChapterPictures } from "../componen
 import { IllustrationSheet, IllustrationStatus, useIllustration, useIllustrationSheet } from "../components/audiobook-illustrate.js";
 import { LookSheet } from "../components/audiobook-look.js";
 import { NewLookSheet } from "../components/audiobook-new-look.js";
-import { AudiobookBlocks, AudiobookFilterMenu, AudiobookSide, BlockPanel, BlocksPress, useBlockSeamActs, DirectSheet, DirectionCard, NotesPress, ReadSheet, PerformedSpeaker, ReadingMenu, SpeakerLinesDialog, blockPanelHead, blockTakes, useChapterAudiobook, type AudiobookIntent, type BlockRow, type PanelTab, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
+import { AudiobookBlocks, AudiobookFilterMenu, AudiobookSide, BlockPanel, BlocksPress, useBlockSeamActs, DirectSheet, DirectionCard, MenuPress, NotesPress, ReadSheet, PerformedSpeaker, ReadingMenu, SpeakerLinesDialog, blockPanelHead, blockTakes, paragraphsToCast, useChapterAudiobook, type AudiobookIntent, type BlockRow, type PanelTab, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { BlockTimingPanel, TimingProposalCard, TimingSide, TimingView, betweenClocks, chapterTimingOf, proposedView, timingLanes, useTimingProposal } from "./chapter-timing.js";
 import { BedPanel, ReactionsPanel } from "../components/audiobook-beds.js";
@@ -620,8 +622,8 @@ export function ChapterWorkspace({
   const readAfterSave = useRef(false);
   /** A derivation asked for while a save was pending; sent once the save lands (turn 129, SPEC-012 R-41). */
   const deriveAfterSave = useRef(false);
-  /** A cast asked for while a save was pending, the same way (turn 130). */
-  const castAfterSave = useRef(false);
+  /** A cast asked for while a save was pending, the same way (turn 130); `changed` for the edited paragraphs alone (turn 198). */
+  const castAfterSave = useRef<false | { scope?: "changed" }>(false);
   /** A voiced read asked for while a save was pending (turn 130): begun once the save lands. */
   const voicedAfterSave = useRef(false);
   /** An audiobook read, or a direction, asked for while a save was pending (turn 146): sent once the save lands, so the takes are of the words on disk. */
@@ -811,9 +813,10 @@ export function ChapterWorkspace({
           deriveAfterSave.current = false;
           deriveContinuity(worldId, prodId, chapter.file);
         }
-        if (castAfterSave.current) {
+        if (castAfterSave.current !== false) {
+          const { scope } = castAfterSave.current;
           castAfterSave.current = false;
-          castVoices(worldId, prodId, chapter.file);
+          castVoices(worldId, prodId, chapter.file, scope);
         }
         if (voicedAfterSave.current) {
           voicedAfterSave.current = false;
@@ -984,7 +987,15 @@ export function ChapterWorkspace({
   }, [record?.voices, finishedCast]);
   const castingNow = castingState?.state === "casting";
   const voicesRecord = voices === "unreadable" ? null : voices;
-  const voicesStale = voicesRecord !== null && chapter.bodyHash !== undefined && chapter.bodyHash !== voicesRecord.hash;
+  // Where the cast stands against the saved words (design turn 198): current, stale in the
+  // paragraphs an edit touched, or — a cast from before paragraph hashes — stale whole (`moved`).
+  const castStand = useMemo(
+    () => (voicesRecord === null ? null : castStanding(voicesRecord, record?.body ?? live, chapter.bodyHash)),
+    [voicesRecord, record?.body, live, chapter.bodyHash],
+  );
+  const voicesStale = castStand !== null && !castStand.current;
+  const voicesMoved = voicesStale && castStand.legacy;
+  const toCastCount = castStand?.toCast.length ?? 0;
   const voiced = useMemo(() => voicedBlocks(live, voicesRecord), [live, voicesRecord]);
   const sheetNameOf = (id: string) => world.sheets.find((sheet) => sheet.id === id)?.name ?? id;
   const voicedRead = useProsePageRead({
@@ -1026,18 +1037,24 @@ export function ChapterWorkspace({
       : castingState?.state === "stopped"
         ? "stopped · the last cast stands"
         : null;
-  const castLinesPress = () => {
+  // `changed` casts only the paragraphs edited since the cast (design turn 198, rule 13).
+  const castLinesPress = (scope?: "changed") => {
     if (castingNow || locked) return;
     if ((draft !== null && draft !== live) || pendingSave.current !== null) {
-      castAfterSave.current = true;
+      castAfterSave.current = scope !== undefined ? { scope } : {};
       if (draft !== null && draft !== live) flushSave(draft);
       return;
     }
-    castVoices(worldId, prodId, chapter.file);
+    castVoices(worldId, prodId, chapter.file, scope);
   };
   /** Who speaks, by lines, the narration first: the Voices panel's rows. */
   // The lines as read, the author's pins applied (SPEC-012 R-64): what the panel counts is what is voiced.
-  const castLinesRead = useMemo(() => (voicesRecord === null ? [] : pinnedLines(voicesRecord.lines, voicesRecord.pins, live).lines), [voicesRecord, live]);
+  // Held to the prose first (design turn 198): a moved paragraph keeps its lines, a kept line counts.
+  const castLinesRead = useMemo(() => {
+    if (voicesRecord === null) return [];
+    const standing = reconcileCast(voicesRecord, live);
+    return pinnedLines(standing.lines, standing.pins, live).lines;
+  }, [voicesRecord, live]);
   const speakers = useMemo(() => {
     const counts = new Map<string, { speaker: string; sheet?: string; lines: number }>();
     for (const line of castLinesRead) {
@@ -1202,6 +1219,8 @@ export function ChapterWorkspace({
           : {}),
     },
     looks: { open: () => setIllustrationLookOpen(true), state: lookState(audiobookRecord.record) },
+    // Cast the edited paragraphs or the chapter from the view (design turn 198), as the rail does.
+    casting: { press: castLinesPress, busy: castingNow },
     // The press waits out the autosave (turn 126's fourth rule, codex on PR 1180): a read of
     // the words on disk while newer ones are on their way would make takes stale on arrival.
     beforeRead: (intent) => {
@@ -1213,10 +1232,12 @@ export function ChapterWorkspace({
       return true;
     },
   });
-  // Who a block can be given to (design turn 155b, SPEC-012 R-63): offered only while the cast is
-  // current and can be written — a pin names a paragraph and an occurrence in the saved prose.
+  // Who a block can be given to (design turn 155b, SPEC-012 R-63): offered while the cast can be
+  // written — a pin names a paragraph and an occurrence in the saved prose. A cast stale only in
+  // some paragraphs keeps it on (design turn 198, rule 14); the row whose words wait for their
+  // paragraph's cast has none. A cast stale whole, from before paragraph hashes, does not.
   const pinChoices = useMemo((): SpeakerChoices | null => {
-    if (voicesRecord === null || voicesStale || castingNow || locked || record === null || connection !== "open") return null;
+    if (voicesRecord === null || voicesMoved || castingNow || locked || record === null || connection !== "open") return null;
     const chapterSpeakers = new Map<string, SpeakerChoices["chapter"][number]>();
     for (const row of audiobook.rows) {
       if (row.speakerKey === null || chapterSpeakers.has(row.speakerKey)) continue;
@@ -1226,7 +1247,7 @@ export function ChapterWorkspace({
       .filter((sheet) => sheet.type === "character" && !sheet.retired && (sheet.production === undefined || sheet.production === prodId) && !chapterSpeakers.has(sheet.id))
       .map((sheet) => ({ sheet: sheet.id, label: sheet.name, voice: sheet.voice === undefined ? null : voiceDisplayLabel(sheet.voice, world), colour: null }));
     return { chapter: [...chapterSpeakers.values()], cast };
-  }, [voicesRecord, voicesStale, castingNow, locked, record, connection, audiobook.rows, world.sheets, prodId]);
+  }, [voicesRecord, voicesMoved, castingNow, locked, record, connection, audiobook.rows, world.sheets, prodId]);
   const pinBlock = (row: BlockRow, pick: SpeakerPick, selection?: { from: number; to: number }) => {
     const index = audiobook.rows.indexOf(row);
     const target = pinTarget(record?.body ?? "", audiobook.rows.map((candidate) => candidate.block), index, selection);
@@ -2018,6 +2039,8 @@ export function ChapterWorkspace({
                 {record !== null && <AudiobookFilterMenu filters={audiobook.filters} filter={audiobook.filter} onFilter={audiobook.setFilter} />}
                 {/* Blocks · 3 changed (design turn 198, rule 10): after the filter once a seam is set by hand; on a phone it is in the ⋯. */}
                 {record !== null && !phone && audiobook.seams.label !== null && <BlocksPress label={audiobook.seams.label} changed={audiobook.seams.changed} held={audiobook.seams.held} onReset={audiobook.seams.reset} />}
+                {/* The paragraphs an edit left to cast (design turn 198h), after the filter; on a phone they head the ⋯ (198j). */}
+                {record !== null && !phone && stagedDraft === undefined && audiobook.castPress}
                 <span className="fy-ch__viewpush" />
                 {/* Below 1100 (194, rule 15) the line ends with the Direct and illustrate ⋯ and the
                     tablet's Arke press; the read and Listen are held at the foot, under the list. */}
@@ -2482,17 +2505,22 @@ export function ChapterWorkspace({
                       Stop
                     </button>
                   </span>
+                ) : toCastCount > 0 && audiobook.castItems.length > 0 ? (
+                  // Only edited paragraphs need casting (design turn 198, rule 13): Cast again offers
+                  // them beside the chapter, as the Audiobook toolbar's press does.
+                  <MenuPress className="fy-ch__derive" testId="voices-cast-again" items={audiobook.castItems} disabled={locked || connection !== "open"} end label={<><RotateCcw size={11} />Cast again</>} />
                 ) : (
-                  <button type="button" className="fy-ch__derive" disabled={locked || connection !== "open"} onClick={castLinesPress}>
+                  <button type="button" className="fy-ch__derive" disabled={locked || connection !== "open"} onClick={() => castLinesPress()}>
                     <RotateCcw size={11} />
                     {voices === null ? "Cast the lines" : "Cast again"}
                   </button>
                 )}
               </h2>
               {voices === "unreadable" && <div className="fy-ch__moved fy-ch__moved--line">record unreadable · Cast again replaces it</div>}
-              {voicesStale && voicesRecord !== null && (
+              {voicesMoved && voicesRecord !== null && (
                 <div className="fy-ch__moved fy-ch__moved--line">chapter moved · cast against v{voicesRecord.version}</div>
               )}
+              {toCastCount > 0 && <div className="fy-ch__moved fy-ch__moved--line">{paragraphsToCast(toCastCount)}</div>}
               {castNote !== null && !castingNow && <div className="fy-ch__moved fy-ch__moved--line">{castNote}</div>}
               {voicesRecord === null ? null : (
                 <ul className="fy-ch__who">
@@ -2832,7 +2860,7 @@ export function ChapterWorkspace({
               // Held against the style only when there is one (codex on PR 1232), as the menu does.
               ? [TIGHTEN.line, { label: (style !== null ? HOLD_TO_STYLE : passageAction("critique")!).line, replyOnly: true }]
               : voicesRecord !== null && voicesStale
-                ? [{ label: "Cast again", press: castLinesPress }, question("Who speaks in this chapter?")]
+                ? [toCastCount > 0 ? { label: `Cast ${toCastCount} paragraph${toCastCount === 1 ? "" : "s"}`, press: () => castLinesPress("changed") } : { label: "Cast again", press: () => castLinesPress() }, question("Who speaks in this chapter?")]
                 : voicesRecord !== null && speakers.length > 0 && !(continuityRecord !== null && continuityStale)
                   ? [question("Who speaks in this chapter?"), question(`Which lines are ${speakers[0]!.sheet !== undefined ? sheetNameOf(speakers[0]!.sheet) : speakers[0]!.speaker}’s?`)]
               : continuityRecord !== null && continuityStale

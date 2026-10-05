@@ -155,6 +155,11 @@ export interface VoicedBlock {
   sheet?: string;
   /** The author set this line's speaker by hand (SPEC-012 R-62): a pin, not the derivation. */
   pinned?: true;
+  /**
+   * An edited quote that kept the speaker of the line it was (design turn 198, SPEC-012 R-66):
+   * drawn with a dashed `kept` mark until its paragraph is cast or the author chooses its speaker.
+   */
+  kept?: true;
 }
 
 /**
@@ -174,6 +179,340 @@ export interface VoicePin {
 type CastLine = { speaker: string; sheet?: string; paragraph: number; occurrence: number; quote: string };
 
 /**
+ * A cast as its readers take it (design turn 198): the lines and pins, and — on a record cast by a
+ * build that keeps them — the hash of each paragraph the lines were placed in, by index.
+ */
+export interface CastShape {
+  lines: ReadonlyArray<CastLine>;
+  pins?: readonly VoicePin[];
+  paragraphs?: readonly string[];
+}
+
+/**
+ * A paragraph's hash for the cast (design turn 198, SPEC-012 R-66): its words with whitespace
+ * folded, so a rewrap is no edit, through a 53-bit string hash. Not a seal, a change detector,
+ * and synchronous, since the screen and the coordinator must reach the same answer on the same
+ * words and a browser's digest is promised only asynchronously.
+ */
+export function paragraphHash(paragraph: string): string {
+  const text = paragraph.replace(/\s+/g, " ").trim();
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, "0");
+}
+
+/** Every paragraph's hash, in order: what a cast written now records beside its lines. */
+export function castParagraphHashes(body: string): string[] {
+  return chapterParagraphs(body).map(paragraphHash);
+}
+
+/**
+ * The quoted spans of a paragraph, in order (design turn 198): from an opening mark to its
+ * closing one, marks included as the cast quotes them. Double marks first — curly, straight
+ * (which open and close in turn) and guillemets; single curly marks only in a paragraph with no
+ * double mark, where a `’` closes only when no letter follows it, so `don’t` stays inside. A
+ * quote left open runs to the paragraph's end, as speech carried into the next paragraph is
+ * written.
+ */
+export function quoteSpans(paragraph: string): Array<{ start: number; end: number }> {
+  const spans: Array<{ start: number; end: number }> = [];
+  let open = -1;
+  for (let i = 0; i < paragraph.length; i++) {
+    const c = paragraph[i]!;
+    if (c === "“" || c === "«") {
+      if (open < 0) open = i;
+    } else if (c === "”" || c === "»") {
+      if (open >= 0) {
+        spans.push({ start: open, end: i + 1 });
+        open = -1;
+      }
+    } else if (c === '"') {
+      if (open < 0) open = i;
+      else {
+        spans.push({ start: open, end: i + 1 });
+        open = -1;
+      }
+    }
+  }
+  if (open >= 0) spans.push({ start: open, end: paragraph.trimEnd().length });
+  if (spans.length > 0) return spans;
+  for (let i = 0; i < paragraph.length; i++) {
+    const c = paragraph[i]!;
+    if (c === "‘" && open < 0 && !/\p{L}/u.test(paragraph[i - 1] ?? "")) open = i;
+    else if (c === "’" && open >= 0 && !/\p{L}/u.test(paragraph[i + 1] ?? "")) {
+      spans.push({ start: open, end: i + 1 });
+      open = -1;
+    }
+  }
+  if (open >= 0) spans.push({ start: open, end: paragraph.trimEnd().length });
+  return spans;
+}
+
+/** Words too common to say two quotes are the same line: they would join any two sentences. */
+const FUNCTION_WORDS = new Set(
+  ("the and but for nor yet was were are has have had his her him she you your our ours they them their its this that these those with " +
+    "from into onto upon what when where who whom why how not all any can did does done will would could should shall there here then " +
+    "than just very been being also about out off over under again some such only own same too more most each few both other which while " +
+    "let get got say said says one two").split(" "),
+);
+
+/** A quote's words, lower-cased: letters and digits, with an apostrophe or hyphen inside a word kept. */
+export function castWords(text: string): string[] {
+  return (text.toLowerCase().match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) ?? []);
+}
+
+/** The words that carry a quote's sense: three letters or more, and not a function word. */
+function contentWords(text: string): Set<string> {
+  return new Set(castWords(text).filter((word) => word.length >= 3 && !FUNCTION_WORDS.has(word)));
+}
+
+/**
+ * How many words an edited quote shares with a quote of the cast, when it shares enough to keep
+ * that quote's speaker; 0 when it does not (design turn 198, SPEC-012 R-66). The rule: the two
+ * share at least one content word — three letters or more, not a function word — and at least
+ * half of the edited quote's content words. A quote too short to have any (`“No, no.”`) is
+ * judged on all its words instead. Content words, because the words every sentence has would let
+ * `“I was in the market”` keep the speaker of `“The goat was in the boot”`; half of the edited
+ * quote's own, because a quote split by a new tag is two halves of the old one, and each half
+ * must keep it: `“Ehn-ehn. The goat was in the boot spiritually,”` shares three of its four with
+ * the old line, `“Physically, he was in front.”` both of its two.
+ */
+export function keptOverlap(edited: string, cast: string): number {
+  let mine = contentWords(edited);
+  let theirs = contentWords(cast);
+  if (mine.size === 0 || theirs.size === 0) {
+    mine = new Set(castWords(edited));
+    theirs = new Set(castWords(cast));
+  }
+  if (mine.size === 0) return 0;
+  let shared = 0;
+  for (const word of mine) if (theirs.has(word)) shared += 1;
+  return shared >= 1 && shared * 2 >= mine.size ? shared : 0;
+}
+
+/** The pairs of equal entries two sequences keep in order: the paragraphs an edit left alone. */
+function alignedPairs(was: readonly string[], now: readonly string[]): Array<[number, number]> {
+  const n = was.length;
+  const m = now.length;
+  const pairs: Array<[number, number]> = [];
+  // Past this the table is not worth its memory: equal entries at the same place are taken.
+  if (n * m > 4_000_000) {
+    for (let i = 0; i < Math.min(n, m); i++) if (was[i] !== "" && was[i] === now[i]) pairs.push([i, i]);
+    return pairs;
+  }
+  const width = m + 1;
+  const table = new Uint32Array((n + 1) * width);
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      table[i * width + j] = was[i] !== "" && was[i] === now[j] ? table[(i + 1) * width + j + 1]! + 1 : Math.max(table[(i + 1) * width + j]!, table[i * width + j + 1]!);
+    }
+  }
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (was[i] !== "" && was[i] === now[j]) {
+      pairs.push([i, j]);
+      i++;
+      j++;
+    } else if (table[(i + 1) * width + j]! >= table[i * width + j + 1]!) i++;
+    else j++;
+  }
+  return pairs;
+}
+
+/** A line of the cast as it stands in the prose now: placed again, and `kept` where an edit kept its speaker. */
+export type StandingLine = CastLine & { kept?: true };
+
+/** A cast held to the prose as it is now (design turn 198, SPEC-012 R-66..R-68). */
+export interface ReconciledCast {
+  /** The lines placed in the body as it is now: a paragraph that moved keeps its lines, an edited one keeps what it can. */
+  lines: StandingLine[];
+  /** The pins placed the same way; a pin whose words are gone keeps an index no paragraph has, and is lost when applied. */
+  pins: VoicePin[];
+  /** The paragraphs, by their index now, whose words changed since they were cast and that hold a quote: what is left to cast. */
+  toCast: number[];
+  /** A record with no paragraph hashes (cast before design turn 198): its lines as recorded, current only by the chapter's hash. */
+  legacy: boolean;
+  /** Each kept line's source, the cast line whose speaker it kept: what a record written now carries for it. */
+  sources: Map<StandingLine, CastLine>;
+  /** The lines of edited paragraphs found there word for word, which a record written now carries as they are. */
+  carried: Set<StandingLine>;
+}
+
+/**
+ * The cast held to the prose as it stands now (design turn 198, SPEC-012 R-66..R-68). The record
+ * keeps a hash for each paragraph it placed lines in; the paragraphs whose hash is still in the
+ * body, in the same order, are untouched, and their lines are placed again wherever the paragraph
+ * now stands, so one that only moved keeps them. Every other paragraph was edited: it is aligned
+ * with the edited paragraphs of the record between the same two untouched ones, and
+ *   - a line whose words are still there, word for word, stays cast;
+ *   - a quote that shares words with a line of those paragraphs (`keptOverlap`) keeps that line's
+ *     speaker and is `kept`, so a quote split by a new tag keeps it on both parts and the tag
+ *     between them is narration;
+ *   - any other quote is narration until the paragraph is cast.
+ * An edited paragraph holding a quote is left to cast; one holding none has nothing to cast. A
+ * record without paragraph hashes is taken as it was written, and a caller judges it whole by the
+ * chapter's hash, as before.
+ */
+export function reconcileCast(record: CastShape, body: string): ReconciledCast {
+  const sources = new Map<StandingLine, CastLine>();
+  const carried = new Set<StandingLine>();
+  if (record.paragraphs === undefined) return { lines: [...record.lines], pins: [...(record.pins ?? [])], toCast: [], legacy: true, sources, carried };
+  const paragraphs = chapterParagraphs(body);
+  const now = paragraphs.map(paragraphHash);
+  const was = record.paragraphs;
+  const anchors = alignedPairs(was, now);
+  const newOf = new Map<number, number>(anchors.map(([i, j]) => [i, j]));
+  const oldOf = new Map<number, number>(anchors.map(([i, j]) => [j, i]));
+  // A paragraph moved out of order is still itself: matched by its hash once, apart from the anchors.
+  const moved = new Map<number, number>();
+  for (let j = 0; j < now.length; j++) {
+    if (oldOf.has(j)) continue;
+    const i = was.findIndex((hash, at) => hash !== "" && hash === now[j] && !newOf.has(at) && !moved.has(at));
+    if (i >= 0) moved.set(i, j);
+  }
+  const placed = (i: number) => newOf.get(i) ?? moved.get(i);
+  const movedTo = new Set(moved.values());
+  const settled = (j: number) => oldOf.has(j) || movedTo.has(j);
+  // The edited paragraphs of the record a paragraph of the body is aligned with: those between the
+  // same two anchors that did not move elsewhere.
+  const gapOf = (j: number): number[] => {
+    let low = -1;
+    let high = was.length;
+    for (const [i, at] of anchors) {
+      if (at < j) low = i;
+      else if (at > j) {
+        high = i;
+        break;
+      }
+    }
+    const gap: number[] = [];
+    for (let i = low + 1; i < high; i++) if (placed(i) === undefined) gap.push(i);
+    return gap;
+  };
+  const lines: StandingLine[] = [];
+  for (const line of record.lines) {
+    const j = placed(line.paragraph);
+    if (j !== undefined) lines.push({ ...line, paragraph: j });
+  }
+  const fold = (text: string) => text.replace(/\s+/g, " ").trim();
+  const toCast: number[] = [];
+  const used = new Set<CastLine>();
+  for (let j = 0; j < now.length; j++) {
+    if (settled(j)) continue;
+    const paragraph = paragraphs[j]!;
+    const gap = new Set(gapOf(j));
+    const candidates = record.lines.filter((line) => gap.has(line.paragraph));
+    const taken: Array<{ start: number; end: number }> = [];
+    const overlaps = (start: number, end: number) => taken.some((span) => start < span.end && span.start < end);
+    // Word for word first: the line is still there, and is cast, whatever else the edit did.
+    for (const line of candidates) {
+      if (used.has(line)) continue;
+      const already = lines.filter((other) => other.paragraph === j && fold(other.quote) === fold(line.quote)).length;
+      const hit = occurrencesOf(paragraph, line.quote)[already];
+      if (hit === undefined || overlaps(hit.start, hit.end)) continue;
+      used.add(line);
+      taken.push(hit);
+      const standing: StandingLine = { ...line, paragraph: j, occurrence: already };
+      carried.add(standing);
+      lines.push(standing);
+    }
+    // Left to cast while a quote is not a line found word for word: a typo mended in the
+    // narration around a line asks nothing, and neither does a paragraph with no quote at all.
+    let left = false;
+    for (const span of quoteSpans(paragraph)) {
+      if (overlaps(span.start, span.end)) continue;
+      left = true;
+      const quote = paragraph.slice(span.start, span.end);
+      let best: { line: CastLine; shared: number } | null = null;
+      for (const line of candidates) {
+        if (used.has(line)) continue;
+        const shared = keptOverlap(quote, line.quote);
+        if (shared > 0 && (best === null || shared > best.shared)) best = { line, shared };
+      }
+      if (best === null) continue;
+      const occurrence = occurrencesOf(paragraph, quote).findIndex((hit) => hit.start === span.start);
+      if (occurrence < 0) continue;
+      const standing: StandingLine = {
+        speaker: best.line.speaker,
+        ...(best.line.sheet !== undefined ? { sheet: best.line.sheet } : {}),
+        paragraph: j,
+        occurrence,
+        quote,
+        kept: true,
+      };
+      sources.set(standing, best.line);
+      lines.push(standing);
+    }
+    if (left) toCast.push(j);
+  }
+  // A pin stands where its words still are (R-64): its paragraph placed again, or an edited
+  // paragraph aligned with it that holds its words at its occurrence. Otherwise it is lost.
+  const pins = (record.pins ?? []).map((pin): VoicePin => {
+    const j = placed(pin.paragraph);
+    if (j !== undefined) return { ...pin, paragraph: j };
+    for (let at = 0; at < now.length; at++) {
+      if (settled(at) || !gapOf(at).includes(pin.paragraph)) continue;
+      if (occurrencesOf(paragraphs[at]!, pin.quote)[pin.occurrence] !== undefined) return { ...pin, paragraph: at };
+    }
+    return { ...pin, paragraph: -1 };
+  });
+  return { lines, pins, toCast, legacy: false, sources, carried };
+}
+
+/**
+ * Where a cast stands against the prose (design turn 198): current, or the paragraphs left to
+ * cast. A record without paragraph hashes is current only while the chapter's hash is its own,
+ * and is otherwise stale whole (`legacy`), as every cast was before.
+ */
+export function castStanding(record: CastShape & { hash: string }, body: string, bodyHash: string | undefined): { current: boolean; toCast: number[]; legacy: boolean } {
+  if (record.paragraphs === undefined) return { current: bodyHash === undefined || bodyHash === record.hash, toCast: [], legacy: true };
+  const { toCast } = reconcileCast(record, body);
+  return { current: toCast.length === 0, toCast, legacy: false };
+}
+
+/**
+ * A cast written again against the prose as it is now (design turn 198, SPEC-012 R-67): the
+ * reconciled lines and pins, every index the body's own. An untouched paragraph, or an edited one
+ * holding no quote, takes its hash now; a paragraph left to cast takes the empty hash, which no
+ * paragraph has, so it stays left to cast — and carries the lines it can still be read by: those
+ * found there word for word, and for each kept quote the cast line it kept, so the next reading
+ * keeps it again. A pin whose words are gone is dropped and counted. The record must hold
+ * paragraph hashes; a caller takes them from the body first when the chapter's hash proves it is
+ * the body that was cast.
+ */
+export function rebaseCast(record: CastShape, body: string): { lines: CastLine[]; pins: VoicePin[]; paragraphs: string[]; toCast: number[]; lost: number } {
+  const reconciled = reconcileCast(record, body);
+  const waiting = new Set(reconciled.toCast);
+  const paragraphs = castParagraphHashes(body).map((hash, j) => (waiting.has(j) ? "" : hash));
+  const lines: CastLine[] = [];
+  const sourced = new Set<CastLine>();
+  for (const line of reconciled.lines) {
+    const source = reconciled.sources.get(line);
+    if (source === undefined) {
+      const { kept: _kept, ...plain } = line;
+      lines.push(plain);
+      continue;
+    }
+    // A kept quote is carried as the line it kept, in the paragraph it now stands in, once.
+    if (sourced.has(source)) continue;
+    sourced.add(source);
+    lines.push({ speaker: source.speaker, ...(source.sheet !== undefined ? { sheet: source.sheet } : {}), paragraph: line.paragraph, occurrence: source.occurrence, quote: source.quote });
+  }
+  const at = (line: CastLine) => occurrencesOf(chapterParagraphs(body)[line.paragraph] ?? "", line.quote)[line.occurrence]?.start ?? 0;
+  lines.sort((a, b) => a.paragraph - b.paragraph || at(a) - at(b));
+  const pins = reconciled.pins.filter((pin) => pin.paragraph >= 0);
+  return { lines, pins, paragraphs, toCast: reconciled.toCast, lost: reconciled.pins.length - pins.length };
+}
+
+/**
  * The cast's lines with the author's pins applied (SPEC-012 R-64): a pin stands only while its
  * words are still at its occurrence in its paragraph — otherwise it is lost and counted, never
  * re-placed by guess — and a derived line whose words overlap a standing pin's gives way to it.
@@ -181,10 +520,10 @@ type CastLine = { speaker: string; sheet?: string; paragraph: number; occurrence
  * cast goes through: the voiced read, the audiobook's blocks, the Voices panel and the stamp.
  */
 export function pinnedLines(
-  lines: readonly CastLine[],
+  lines: readonly StandingLine[],
   pins: readonly VoicePin[] | undefined,
   body: string,
-): { lines: Array<CastLine & { pinned?: true }>; lost: number; standing: number } {
+): { lines: Array<StandingLine & { pinned?: true }>; lost: number; standing: number } {
   if (pins === undefined || pins.length === 0) return { lines: [...lines], lost: 0, standing: 0 };
   const paragraphs = chapterParagraphs(body);
   const spans: Array<{ pin: VoicePin; start: number; end: number }> = [];
@@ -196,7 +535,7 @@ export function pinnedLines(
   }
   const overlaps = (paragraph: number, start: number, end: number) =>
     spans.some((span) => span.pin.paragraph === paragraph && start < span.end && span.start < end);
-  const kept: Array<CastLine & { pinned?: true }> = lines.filter((line) => {
+  const kept: Array<StandingLine & { pinned?: true }> = lines.filter((line) => {
     const hit = occurrencesOf(paragraphs[line.paragraph] ?? "", line.quote)[line.occurrence];
     return hit === undefined || !overlaps(line.paragraph, hit.start, hit.end);
   });
@@ -218,13 +557,16 @@ export function pinnedLines(
  */
 export function voicedBlocks(
   body: string,
-  record: { lines: ReadonlyArray<CastLine>; pins?: readonly VoicePin[] } | null,
+  record: CastShape | null,
 ): { blocks: VoicedBlock[]; ambiguous: number } {
   const paragraphs = chapterParagraphs(body);
   const blocks: VoicedBlock[] = [];
   let ambiguous = 0;
   const fold = (text: string) => text.replace(/\s+/g, " ").trim();
-  const lines = record === null ? [] : pinnedLines(record.lines, record.pins, body).lines;
+  // The cast held to the prose as it is now (design turn 198): a moved paragraph keeps its lines
+  // and an edited quote keeps its speaker, before the author's pins are laid over them.
+  const standing = record === null ? null : reconcileCast(record, body);
+  const lines = standing === null ? [] : pinnedLines(standing.lines, standing.pins, body).lines;
   // How often the whole chapter holds each quoted line, against how often the cast names it
   // (codex on PR 914): a line copied into another paragraph while the original stands is two
   // spans for one attribution, and neither is the one the cast meant.
@@ -236,7 +578,7 @@ export function voicedBlocks(
     if (!held.has(key)) held.set(key, paragraphs.reduce((sum, paragraph) => sum + occurrencesOf(paragraph, line.quote).length, 0));
   }
   for (const [index, paragraph] of paragraphs.entries()) {
-    const spans: Array<{ start: number; end: number; speaker: string; sheet?: string; pinned?: true }> = [];
+    const spans: Array<{ start: number; end: number; speaker: string; sheet?: string; pinned?: true; kept?: true }> = [];
     const here = lines.filter((line) => line.paragraph === index);
     for (const line of here) {
       // The paragraph must hold these words exactly as many times as the cast says it does
@@ -254,7 +596,7 @@ export function voicedBlocks(
         ambiguous += 1;
         continue;
       }
-      spans.push({ ...hit, speaker: line.speaker, ...(line.sheet !== undefined ? { sheet: line.sheet } : {}), ...(line.pinned === true ? { pinned: true as const } : {}) });
+      spans.push({ ...hit, speaker: line.speaker, ...(line.sheet !== undefined ? { sheet: line.sheet } : {}), ...(line.pinned === true ? { pinned: true as const } : {}), ...(line.kept === true ? { kept: true as const } : {}) });
     }
     // Two spans sharing bytes are neither speaker's (codex on PR 914): the extractor gave two
     // people words that overlap, and keeping whichever came first would voice the shared words
@@ -273,6 +615,7 @@ export function voicedBlocks(
         speaker: span.speaker,
         ...(span.sheet !== undefined ? { sheet: span.sheet } : {}),
         ...(span.pinned === true ? { pinned: true as const } : {}),
+        ...(span.kept === true ? { kept: true as const } : {}),
       });
       cursor = span.end;
     }

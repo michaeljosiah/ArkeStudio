@@ -1,4 +1,4 @@
-import { chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
+import { castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import {
   AUDIOBOOK_DELIVERIES,
@@ -160,10 +160,15 @@ export interface ChapterAudiobookInput {
   looks?: { open: () => void; state?: string };
   /** On a phone (design turn 198, rule 10) the Blocks press and its Reset are in the toolbar's ⋯ menu. */
   seamsInMenu?: boolean;
+  /**
+   * Casting from the view (design turn 198): the paragraphs edited since the cast (`changed`) or
+   * the chapter, through the workspace's press, which waits out the autosave; busy while a cast runs.
+   */
+  casting?: { press: (scope?: "changed") => void; busy: boolean };
 }
 
 /** What a press asks for once the save lands: the chapter, these blocks alone, a direction, or a card's acceptance. */
-export type AudiobookIntent = { kind: "read"; blocks?: readonly string[] } | { kind: "direct"; also?: DirectAlso } | { kind: "accept" } | { kind: "open-direct" };
+export type AudiobookIntent = { kind: "read"; blocks?: readonly string[]; /** The paragraphs left to cast, cast first (design turn 198). */ castFirst?: boolean } | { kind: "direct"; also?: DirectAlso } | { kind: "accept" } | { kind: "open-direct" };
 
 /** What the Direct sheet's `Also` asks for with the direction (design turn 184a, R-53, R-54). */
 export interface DirectAlso {
@@ -199,6 +204,13 @@ export interface BlockRow {
   turnMarks?: ReadonlyArray<TurnBreak>;
   /** The speaker's colour, `--voice-N`, the same in every chapter; null for the narrator and a name no sheet carries. */
   colour: number | null;
+  /** An edited quote that kept its speaker (design turn 198): the dashed `kept` mark beside the name, until checked. */
+  kept?: boolean;
+  /**
+   * Words in a paragraph edited since the cast that are neither cast nor kept (design turn 198,
+   * rule 14): they wait for the paragraph's cast, so no speaker can be given to them yet.
+   */
+  waits?: boolean;
   /** The kept take was recorded by a person (SPEC-047 R-34), not made by a voice. */
   recorded: boolean;
   /** The block's speaker is recorded by a person (R-37): made only by a recording. */
@@ -400,6 +412,11 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const seamList = recordOrNull?.seams;
   const blockOptions = useMemo(() => audiobookBlockOptions({ reading, ...(recordedList !== undefined ? { recorded: [...recordedList] } : {}) }, seamList === undefined ? null : { seams: seamList }), [reading, recordedList, seamList]);
   const derived = useMemo(() => audiobookBlocks(body, blockCast, audiobookHeading(chapter.order, chapter.title), blockOptions), [body, blockCast, chapter.order, chapter.title, blockOptions]);
+  // Where the cast stands against the saved words (design turn 198): the paragraphs an edit left
+  // to cast, by their index now, and how many the chapter has — `Cast the chapter`'s count.
+  const toCast = useMemo(() => (cast === null ? [] : castStanding(cast, body, chapter.bodyHash).toCast), [cast, body, chapter.bodyHash]);
+  const paragraphCount = useMemo(() => chapterParagraphs(body).length, [body]);
+  const waiting = useMemo(() => new Set(toCast), [toCast]);
   // A take the record names but the shelf no longer holds is not made (codex on PR 1180): the
   // coordinator plans the same way, so the block is made again rather than shown unplayable.
   // The sidecar this window can see for itself; the media it cannot, so the coordinator says
@@ -471,7 +488,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
           const key = audiobookSpeakerKey(turn);
           const sheetOf = turn.sheet === undefined ? undefined : world?.sheets.find((candidate) => candidate.id === turn.sheet);
           const tone = key === null ? "narrator" : turn.sheet === undefined ? "none" : String(colours.get(turn.sheet) ?? "none");
-          marks.push({ at: marks.length === 0 ? 0 : found, label: key === null ? "narrator" : called(sheetOf, turn.speaker ?? key), full: key === null ? "narrator" : (sheetOf?.name ?? turn.speaker ?? key), tone });
+          marks.push({ at: marks.length === 0 ? 0 : found, label: key === null ? "narrator" : called(sheetOf, turn.speaker ?? key), full: key === null ? "narrator" : (sheetOf?.name ?? turn.speaker ?? key), tone, ...(turn.kept === true ? { kept: true } : {}) });
           from = found + turn.text.length;
         }
         return marks;
@@ -512,6 +529,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         ...(inside !== undefined && inside.length > 0 ? { speakers: inside } : {}),
         ...(turnMarks !== undefined ? { turnMarks } : {}),
         colour,
+        // The first turn's mark is the row's (design turn 198): a later turn's is drawn on its break.
+        kept: turnMarks !== undefined ? turnMarks[0]!.kept === true : block.kept === true,
+        waits: block.paragraph >= 0 && waiting.has(block.paragraph) && block.speaker === undefined && block.rows === undefined,
         recorded,
         byPerson,
         direction,
@@ -520,7 +540,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         byNarrator: speaker === narrator,
       };
     });
-  }, [derived.blocks, narrator, reading, world, labels, recordOrNull, hasArtifact, catalogue, modelOf, colours, recordedKeys, notes, readingNotes, proposal]);
+  }, [derived.blocks, narrator, reading, world, labels, recordOrNull, hasArtifact, catalogue, modelOf, colours, recordedKeys, notes, readingNotes, proposal, waiting]);
   // The filter is the page's (R-33): not kept, and gone with the chapter.
   const [filter, setFilter] = useState<AudiobookFilter>(null);
   useEffect(() => setFilter(null), [chapter.id]);
@@ -733,17 +753,26 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // `Make again` reads these blocks alone (R-30), held across the same chain of answers as the
   // consent is, and cleared with it: the chapter's own press reads what is not made.
   const only = useRef<readonly string[] | null>(null);
+  // The chapter's press casts the paragraphs left to cast first (design turn 198, rule 13), held
+  // across the same chain of answers and cleared with it; the confirm's tick is the author's say.
+  const castFirst = useRef(false);
+  const [castTick, setCastTick] = useState(true);
   const ended = run !== undefined && run.state !== "reading" && run.state !== "priced";
   useEffect(() => {
     if (ended) {
       uploadAllowed.current = null;
       only.current = null;
+      castFirst.current = false;
     }
   }, [ended]);
   useEffect(() => {
     uploadAllowed.current = null;
     only.current = null;
+    castFirst.current = false;
   }, [chapter.id]);
+  // Each price asked comes with the box ticked again, as Direct's sheet opens with it ticked.
+  const askedToCast = run?.state === "priced" ? run.price?.toCast : undefined;
+  useEffect(() => setCastTick(true), [askedToCast, run?.price?.confirmationToken]);
   const send = useCallback(
     (options: { confirmationToken?: string; voiceUploadConfirmedFor?: string } = {}): boolean => {
       const consent = options.voiceUploadConfirmedFor ?? uploadAllowed.current ?? undefined;
@@ -752,7 +781,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         ...(consent !== undefined ? { voiceUploadConfirmedFor: consent } : {}),
       };
       if (only.current !== null) return readAudiobookBlocks(worldId, prodId, chapter.file, only.current, answers);
-      return readAudiobookChapter(worldId, prodId, chapter.file, answers);
+      return readAudiobookChapter(worldId, prodId, chapter.file, { ...answers, ...(castFirst.current ? { castFirst: true } : {}) });
     },
     [worldId, prodId, chapter.file],
   );
@@ -777,6 +806,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       setUpload(null);
       uploadAllowed.current = null;
       only.current = intent.blocks ?? null;
+      castFirst.current = intent.castFirst === true;
       send();
     },
     [worldId, prodId, chapter.id, chapter.file, send],
@@ -786,11 +816,14 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       if (locked || connection !== "open" || reading_) return;
       // Unsaved typing is not what is read (R-2): the press waits out the autosave, as the
       // chapter's other reads do, and the workspace sends it once the save lands.
-      const intent: AudiobookIntent = { kind: "read", ...(blocks !== null ? { blocks } : {}) };
+      // The chapter's read under a reading that needs the cast casts what is left first (design
+      // turn 198): ticked by default in the confirm, and done at once where nothing is asked.
+      const castingFirst = blocks === null && reading !== "narrator" && toCast.length > 0;
+      const intent: AudiobookIntent = { kind: "read", ...(blocks !== null ? { blocks } : {}), ...(castingFirst ? { castFirst: true } : {}) };
       if (input.beforeRead !== undefined && !input.beforeRead(intent)) return;
       resume(intent);
     },
-    [locked, connection, reading_, input, resume],
+    [locked, connection, reading_, input, resume, reading, toCast.length],
   );
   const begin = useCallback(() => press(null), [press]);
   const makeAgain = useCallback((key: string) => press([key]), [press]);
@@ -914,6 +947,16 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     if (uploadId !== null && staged === undefined) setUploadId(null);
   }, [uploadId, staged]);
 
+  // Only edited paragraphs need casting (design turn 198, rule 13): the two casts the toolbar's
+  // press offers, the rail's Cast again and, below 1100, the head of the ⋯ menu.
+  const casting = input.casting;
+  const castItems: ToolMenuItem[] = casting === undefined || toCast.length === 0
+    ? []
+    : [
+        { key: "cast-changed", label: `Cast ${toCast.length} paragraph${toCast.length === 1 ? "" : "s"}`, state: "", disabled: casting.busy || locked || connection !== "open", press: () => casting.press("changed"), testId: "cast-changed" },
+        { key: "cast-chapter", label: "Cast the chapter", state: String(paragraphCount), disabled: casting.busy || locked || connection !== "open", press: () => casting.press(), testId: "cast-chapter" },
+      ];
+  const castPress = castItems.length === 0 ? null : <CastPress count={toCast.length} items={castItems} busy={casting?.busy === true} />;
   const directable = rows.length > 0 && proposal === null && directionRun?.state !== "directing";
   // The head in its two parts (design turn 194, rule 15): the Direct and illustrate menu and the
   // read's own control. Wide, they are one control on the toolbar line; below 1100 the menu is the
@@ -961,8 +1004,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       const free = price.freePlan !== undefined ? freePlanAskCopy(price.freePlan) : null;
       return whole(
         <span className="fy-ab__control">
+          {/* Cast first (design turn 198, rule 13): ticked, as Direct's `Cast the lines first`; unticked, nothing reads. */}
+          {price.toCast !== undefined && <CastFirstCheck count={price.toCast} on={castTick} onChange={setCastTick} />}
           <Button
-            disabled={starting}
+            disabled={starting || (price.toCast !== undefined && !castTick)}
             data-testid="audiobook-confirm"
             onClick={() => {
               // A press that never left has no answer coming, so it is not shown as starting.
@@ -1005,6 +1050,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     const running = directing
       ? { line: directionRun?.state === "accepting" ? "accepting…" : "directing…" }
       : input.illustrate?.running;
+    // On a phone the Blocks press is in this menu (design turn 198, rule 10): Reset, with what it puts back.
+    const seamReset: ToolMenuItem[] = input.seamsInMenu === true && seamLabel !== null
+      ? [{ key: "blocks-reset", label: "Reset", state: `Blocks · ${seamLabel}`, disabled: seamsHeld, press: resetSeams, testId: "audiobook-blocks-reset" }]
+      : [];
     const menu = rows.length === 0 ? null : running !== undefined ? (
       <span className="fy-ab__control" data-testid="audiobook-run-line">
         <span className="fy-mono">{running.line}</span>
@@ -1019,6 +1068,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         label="Direct and illustrate"
         testId="direct-illustrate"
         icon={input.compact === true}
+        // On a phone the lines to cast head the menu (design turn 198j), Reset beside them over Direct and illustrate.
+        {...(input.seamsInMenu === true && castItems.length > 0 ? { lead: { head: paragraphsToCast(toCast.length), items: castItems, also: seamReset } } : {})}
         items={[
           {
             key: "direct",
@@ -1043,9 +1094,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             ? [{ key: "looks", label: "Looks", state: input.looks.state ?? "", disabled: connection !== "open", press: input.looks.open, testId: "audiobook-looks-open" }]
             : []),
           // On a phone the Blocks press is in this menu (design turn 198, rule 10): Reset, with what it puts back.
-          ...(input.seamsInMenu === true && seamLabel !== null
-            ? [{ key: "blocks-reset", label: "Reset", state: `Blocks · ${seamLabel}`, disabled: seamsHeld, press: resetSeams, testId: "audiobook-blocks-reset" }]
-            : []),
+          ...(castItems.length === 0 ? seamReset : []),
         ]}
       />
     );
@@ -1133,6 +1182,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         ...(run.price.freePlan !== undefined ? { freeDay: run.price.freePlan } : {}),
         estimate: `${speechPricePrefix(models, run.price.voices.map((voice) => voice.provider))}${formatMicroUsd(run.price.estimatedMicroUsd)}`,
         starting,
+        ...(run.price.toCast !== undefined ? { castFirst: { count: run.price.toCast, on: castTick, set: setCastTick } } : {}),
         confirm: () => {
           if (run.price !== undefined && send({ confirmationToken: run.price.confirmationToken })) setStartingFrom(run);
         },
@@ -1199,6 +1249,11 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     head,
     /** The head in two parts for below 1100 (design turn 194, rule 15): the menu as the toolbar's ⋯, the read to be held at the foot. */
     headMenu: headParts.menu,
+    /** The paragraphs an edit left to cast (design turn 198), by index now; `2 paragraphs to cast ▾` and its two casts, for the toolbar and the rail. */
+    toCast,
+    paragraphCount,
+    castItems,
+    castPress,
     headRead: headParts.read,
     /** The foot line's Play (design turn 194, rule 4), and why the mix could not play where it could not. */
     footPlay,
@@ -1604,7 +1659,10 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
             onClick={() => { onSelectionChange?.(audiobookSelection(rows) ?? pressedSelection.current); pressedSelection.current = null; onSelect(row.block.key); }}
           >
             {(() => {
-              const speaker = pinnable && row.block.paragraph >= 0 && row.turnMarks === undefined ? (
+              // A kept line keeps the menu (design turn 198, rule 14); words that wait for their
+              // paragraph's cast do not, and say nothing about it.
+              const kept = row.kept === true ? <em className="fy-ab__kept">kept</em> : null;
+              const speaker = pinnable && row.block.paragraph >= 0 && row.turnMarks === undefined && row.waits !== true ? (
               <button
                 type="button"
                 className={`fy-ab__speaker fy-ab__speaker--press${menu?.key === row.block.key && menu.selection === undefined ? " fy-ab__speaker--open" : ""}`}
@@ -1618,11 +1676,13 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
               >
                 <i className="fy-ab__speaker-dot" aria-hidden="true" />
                 <span className={`fy-ab__mark${row.markWarn ? " fy-ab__mark--warn" : ""}`}>{row.mark}</span>
+                {kept}
               </button>
             ) : (
               <span className="fy-ab__speaker" title={row.markWarn ? `${row.full} · narrator` : row.full}>
                 <i className="fy-ab__speaker-dot" aria-hidden="true" />
                 <span className={`fy-ab__mark${row.markWarn ? " fy-ab__mark--warn" : ""}`}>{row.mark}</span>
+                {kept}
               </span>
             );
               return speaker;
@@ -1632,7 +1692,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
               onMouseUp={(event) => {
                 // Words selected in narration can be made a line (SPEC-012 R-63): within one block,
                 // between 1 and 600 characters; the menu opens for the selection.
-                if (coarse || !pinnable || row.speakerKey !== null || row.block.paragraph < 0) return;
+                if (coarse || !pinnable || row.speakerKey !== null || row.block.paragraph < 0 || row.waits === true) return;
                 const span = rawSelection(event.currentTarget);
                 if (span === null) return;
                 const words = row.block.text.slice(span.from, span.to);
@@ -1781,10 +1841,11 @@ export function ReadSheet({ sheet }: { sheet: NonNullable<ReturnType<typeof useC
         {sheet.freeDay !== undefined && row("Google today", `${sheet.freeDay.allowed} a day · ${sheet.freeDay.allowed - sheet.freeDay.left} used`)}
         {row("Estimate", sheet.estimate)}
       </div>
+      {sheet.castFirst !== undefined && <CastFirstCheck count={sheet.castFirst.count} on={sheet.castFirst.on} onChange={sheet.castFirst.set} />}
       <div className="fy-ab__control fy-ab__directsheet-foot">
         <span className="fy-ch__panelpush" />
         <Button variant="ghost" onClick={sheet.cancel}>Cancel</Button>
-        <Button variant="primary" data-testid="audiobook-confirm" disabled={sheet.starting} onClick={sheet.confirm}>
+        <Button variant="primary" data-testid="audiobook-confirm" disabled={sheet.starting || (sheet.castFirst !== undefined && !sheet.castFirst.on)} onClick={sheet.confirm}>
           {sheet.starting ? "starting…" : `Confirm · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"} · ${sheet.estimate}`}
         </Button>
       </div>
@@ -1858,11 +1919,57 @@ export interface ToolMenuItem { key: string; label: string; state: string; disab
  * Direct and illustrate (design turn 194, rule 3): one press, its menu drawn with the reading
  * menu's primitive, each item saying where it stands. The items keep the head's handlers.
  */
-export function ToolMenu({ label, items, testId, icon = false }: { label: string; items: readonly ToolMenuItem[]; testId?: string; /** Below 1100 (194, rule 15) the press is a ⋯ and the label is its name. */ icon?: boolean }) {
+export function ToolMenu({ label, items, testId, icon = false, lead }: {
+  label: string;
+  items: readonly ToolMenuItem[];
+  testId?: string;
+  /** Below 1100 (194, rule 15) the press is a ⋯ and the label is its name. */
+  icon?: boolean;
+  /**
+   * Presses that head the menu (design turn 198j: the lines to cast, on a phone), under their own
+   * heading and over a rule; the menu's own items are then one row, `label ›`, that opens them.
+   */
+  lead?: { head: string; items: readonly ToolMenuItem[]; /** Presses under the rule, before the menu's own row (part A's Reset). */ also?: readonly ToolMenuItem[] };
+}) {
   const pop = usePopover();
+  const [inner, setInner] = useState(false);
+  useEffect(() => {
+    if (!pop.open) setInner(false);
+  }, [pop.open]);
   useEffect(() => {
     if (pop.open) pop.panel.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')?.focus();
-  }, [pop.open]);
+  }, [pop.open, inner]);
+  const leading = lead !== undefined && lead.items.length > 0 && !inner;
+  if (leading) {
+    return (
+      <span className="fy-ab__tool">
+        <button
+          ref={pop.press}
+          type="button"
+          className={icon ? `fy-ab__ico${pop.open ? " fy-ab__ico--on" : ""}` : `fy-ab__pill${pop.open ? " fy-ab__pill--on" : ""}`}
+          aria-haspopup="menu"
+          aria-expanded={pop.open}
+          {...(icon ? { "aria-label": label, title: label } : {})}
+          onClick={() => pop.setOpen((was) => !was)}
+          {...(testId !== undefined ? { "data-testid": testId } : {})}
+        >
+          {icon ? <More size={16} /> : <>{label}<ChevronDown size={13} stroke={2} aria-hidden="true" /></>}
+        </button>
+        {pop.open && (
+          <div ref={pop.panel} className="fy-ab__menu fy-ab__toolmenu fy-ab__toolmenu--end fy-ab__toolmenu--lead" role="menu" aria-label={label} onKeyDown={pop.onKey}>
+            <div className="fy-ab__menu-hd">{lead.head}</div>
+            {lead.items.map((item) => <ToolMenuOption key={item.key} item={item} onDone={() => pop.close(false)} />)}
+            <div className="fy-ab__menu-rule" role="separator" />
+            {(lead.also ?? []).map((item) => <ToolMenuOption key={item.key} item={item} onDone={() => pop.close(false)} />)}
+            <button type="button" role="menuitem" className="fy-ab__menu-opt" onClick={() => setInner(true)} data-testid={testId !== undefined ? `${testId}-items` : undefined}>
+              <span className="fy-ab__menu-label">{label}</span>
+              <ChevronRight size={13} stroke={2} aria-hidden="true" />
+            </button>
+          </div>
+        )}
+      </span>
+    );
+  }
   return (
     <span className="fy-ab__tool">
       <button
@@ -1907,6 +2014,88 @@ export function ToolMenu({ label, items, testId, icon = false }: { label: string
         </div>
       )}
     </span>
+  );
+}
+
+/** One item of a toolbar menu, as the toolbar's menus draw it: its label, its state at the right. */
+function ToolMenuOption({ item, onDone }: { item: ToolMenuItem; onDone: () => void }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      aria-disabled={item.disabled}
+      className="fy-ab__menu-opt"
+      onClick={() => {
+        if (item.disabled) return;
+        onDone();
+        item.press();
+      }}
+      {...(item.testId !== undefined ? { "data-testid": item.testId } : {})}
+    >
+      <span className="fy-ab__menu-label">{item.label}</span>
+      {item.state !== "" && <span className="fy-ab__menu-meta">{item.state}</span>}
+    </button>
+  );
+}
+
+/**
+ * A press and the menu it opens (design turn 198): `2 paragraphs to cast ▾` on the toolbar, after
+ * the speaker filter, with its stale dot, and the Voices rail's `Cast again` — both offering
+ * `Cast 2 paragraphs` and `Cast the chapter` with its count of paragraphs.
+ */
+export function MenuPress({ label, items, testId, className, disabled = false, end = false }: { label: ReactNode; items: readonly ToolMenuItem[]; testId: string; className: string; disabled?: boolean; /** The menu's right edge under the press's, for a press at the window's edge. */ end?: boolean }) {
+  const pop = usePopover();
+  useEffect(() => {
+    if (pop.open) pop.panel.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')?.focus();
+  }, [pop.open]);
+  return (
+    <span className="fy-ab__tool">
+      <button
+        ref={pop.press}
+        type="button"
+        className={`${className}${pop.open ? ` ${className}--on` : ""}`}
+        aria-haspopup="menu"
+        aria-expanded={pop.open}
+        disabled={disabled}
+        onClick={() => pop.setOpen((was) => !was)}
+        data-testid={testId}
+      >
+        {label}
+      </button>
+      {pop.open && (
+        <div ref={pop.panel} className={`fy-ab__menu fy-ab__toolmenu fy-ab__castmenu${end ? " fy-ab__toolmenu--end" : ""}`} role="menu" aria-label="Cast" onKeyDown={pop.onKey}>
+          {items.map((item) => <ToolMenuOption key={item.key} item={item} onDone={() => pop.close(false)} />)}
+        </div>
+      )}
+    </span>
+  );
+}
+
+/** `2 paragraphs to cast ▾` (design turn 198h): the stale dot, the count, the menu's two casts. */
+export function CastPress({ count, items, busy }: { count: number; items: readonly ToolMenuItem[]; busy: boolean }) {
+  return (
+    <MenuPress
+      className="fy-ab__pill"
+      testId="audiobook-cast"
+      items={items}
+      disabled={busy}
+      label={busy ? "casting…" : <><i className="fy-ab__pill-dot" aria-hidden="true" />{paragraphsToCast(count)}<ChevronDown size={13} stroke={2} aria-hidden="true" /></>}
+    />
+  );
+}
+
+/** `2 paragraphs to cast`, one paragraph said once. */
+export function paragraphsToCast(count: number): string {
+  return `${count} paragraph${count === 1 ? "" : "s"} to cast`;
+}
+
+/** `Cast 2 paragraphs first`, ticked (design turn 198, rule 13), as Direct's `Cast the lines first`. */
+function CastFirstCheck({ count, on, onChange }: { count: number; on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <label className="fy-ab__also" data-testid="audiobook-cast-first">
+      <input type="checkbox" checked={on} onChange={() => onChange(!on)} />
+      <span>Cast {count} paragraph{count === 1 ? "" : "s"} first</span>
+    </label>
   );
 }
 

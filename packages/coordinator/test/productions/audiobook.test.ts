@@ -12,7 +12,10 @@ import {
   audiobookRowLabel,
   audiobookTextHash,
   billableCharacters,
+  castParagraphHashes,
+  chapterParagraphs,
   normalizeSpeechText,
+  paragraphHash,
   quoteSpeech,
   speechInputFits,
   type Job,
@@ -157,6 +160,8 @@ async function withHarness(
     localVoices?: Array<{ id: string; label: string; attributes: string[] }>;
     /** Counts every vendor voice list asked for, as a provider would see the calls. */
     lists?: { count: number };
+    /** The cast's model seam (turn 130): what the model would say are a chapter's lines. */
+    voices?: import("../../src/productions/voices.js").VoicesDeriver;
   },
   run: (h: {
     root: string;
@@ -203,6 +208,7 @@ async function withHarness(
     observeEvent: (event) => events.push(event),
     ...(input.durations ? { mediaProbe: { durationSec: async () => input.durations!(), info: async () => ({ durationSec: input.durations!(), hasAudio: true }) } } : {}),
     ...(input.direction ? { directionDeriver: input.direction } : {}),
+    ...(input.voices ? { voicesDeriver: input.voices } : {}),
     ...(input.voiceless
       ? {}
       : {
@@ -257,7 +263,7 @@ async function withHarness(
   }
 }
 
-const read = (send: (message: ClientMessage) => Promise<void>, extra: { confirmationToken?: string; voiceUploadConfirmedFor?: string; chapterFile?: string; blocks?: string[] } = {}) =>
+const read = (send: (message: ClientMessage) => Promise<void>, extra: { confirmationToken?: string; voiceUploadConfirmedFor?: string; chapterFile?: string; blocks?: string[]; castFirst?: true } = {}) =>
   send({ kind: "read-audiobook-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", ...extra });
 const recordPath = (worldDir: string, chapterFile = "01-neap") => join(worldDir, "productions", LEDGER, ".audiobook", "chapters", `${chapterFile}.json`);
 const readRecord = async (worldDir: string, chapterFile = "01-neap") => ChapterAudiobookSchema.parse(JSON.parse(await readFile(recordPath(worldDir, chapterFile), "utf8")));
@@ -1249,6 +1255,64 @@ describe("the audiobook run (turn 146)", () => {
       assert.equal(finished.reason, "cast moved · cast again");
       assert.equal(spoken.length, 0);
     }));
+
+  describe("a cast stale only in the paragraphs an edit touched (design turn 198, SPEC-012 R-67, R-69)", () => {
+    const LINE = "\"Six bells, and the tide not called,\" Maren said.";
+    const WAS = "\"Six bells, and the tide not yet called.\"";
+    // The chapter opens on a line Maren says; the cast was made when it read as WAS.
+    const before = async (worldDir: string) => {
+      const file = join(worldDir, "productions", LEDGER, "chapters", "01-neap.md");
+      const text = await readFile(file, "utf8");
+      await writeFile(file, text.replace("\nThe ledger of the Vigil", `\n${LINE}\n\nThe ledger of the Vigil`), "utf8");
+    };
+    const seed = async (worldDir: string) => {
+      const text = await readFile(join(worldDir, "productions", LEDGER, "chapters", "01-neap.md"), "utf8");
+      const body = text.slice(text.indexOf("---", 3) + 3);
+      const paragraphs = castParagraphHashes(body);
+      paragraphs[0] = paragraphHash(WAS);
+      const record: ChapterVoices = {
+        ...castRecord(`sha256:${"0".repeat(64)}`),
+        lines: [
+          { speaker: "Maren Kest", sheet: "maren-kest", paragraph: 0, occurrence: 0, quote: WAS },
+          { speaker: "Maren Kest", sheet: "maren-kest", paragraph: 1, occurrence: 0, quote: SPAN },
+        ],
+        paragraphs,
+      };
+      assert.equal(chapterParagraphs(body)[0], LINE);
+      await writeFile(join(worldDir, "productions", LEDGER, ".voices", "01-neap.json"), JSON.stringify(record), "utf8");
+    };
+    const casting = async () => ({ lines: [{ speaker: "maren-kest", quote: "\"Six bells, and the tide not called,\"" }] });
+
+    it("refuses the read by the paragraphs left to cast, and still makes a block alone where the edit left its paragraph", () =>
+      withHarness({ before, seed }, async ({ events, send }) => {
+        await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
+        await read(send);
+        assert.equal(events.find((e): e is Finished => e.type === "audiobook.finished")?.reason, "1 paragraph to cast");
+        events.length = 0;
+        await read(send, { blocks: ["p1.0"] });
+        assert.equal(events.find((e): e is Finished => e.type === "audiobook.finished")?.outcome, "read", "its speaker is the cast's");
+      }));
+
+    it("Cast 1 paragraph first: priced as the cast stands and saying so, cast once the price is answered, then read", () =>
+      withHarness({ before, seed, cloud: [LOW_TIDE], voices: casting }, async ({ events, send }) => {
+        await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
+        await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
+        await read(send, { castFirst: true });
+        const priced = events.find((e): e is Priced => e.type === "audiobook.priced");
+        assert.ok(priced, "the kept line is Maren's cloud voice, so the read asks");
+        assert.equal(priced.toCast, 1, "and says the paragraph it will cast first");
+        assert.ok(!events.some((e) => e.type === "voices.started"), "nothing cast before the answer");
+        events.length = 0;
+        await read(send, { confirmationToken: priced.confirmationToken, castFirst: true });
+        type Cast = Extract<DomainEvent, { type: "voices.finished" }>;
+        const cast = events.find((e): e is Cast => e.type === "voices.finished");
+        assert.equal(cast?.outcome, "cast");
+        assert.deepEqual(cast?.record?.lines.map((line) => [line.paragraph, line.quote]), [[0, "\"Six bells, and the tide not called,\""], [1, SPAN]]);
+        const finished = events.find((e): e is Finished => e.type === "audiobook.finished");
+        assert.equal(finished?.outcome, "read", "the cast kept the line its kept speaker, so the price answered stands");
+        assert.ok(!events.some((e) => e.type === "audiobook.priced"), "not asked again");
+      }));
+  });
 });
 
 describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {

@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import {
   audiobookSeamHash,
   audiobookTextHash,
+  castParagraphHashes,
   type ArtifactSidecar,
   type AudiobookDirection,
   type CadencePlan,
@@ -2266,5 +2267,155 @@ describe("block seams (design turn 198)", () => {
     const sent = seamSent(m).at(-1) as Extract<ClientMessage, { kind: "set-audiobook-seam" }>;
     assert.deepEqual([sent.press, sent.anchor.before, sent.anchor.after], ["split", { paragraph: 1, turn: 0 }, { paragraph: 1, turn: 1 }]);
     assert.equal(d('[data-testid="audiobook-seam-lines"]') === null, true, "no list for one gap");
+  });
+});
+
+/**
+ * An edited line keeps its speaker, and only edited paragraphs need casting (design turn 198h,
+ * 198i, 198j; SPEC-012 R-66..R-70), on the case that asked for it: "Na love or Juju", chapter 1,
+ * 2026-10-05 — Ade's line given a name, Tunde's split by a new tag.
+ */
+describe("edited lines keep their speaker (design turn 198)", () => {
+  const BEFORE = [
+    "\"It is not possible,\" Ade said.",
+    "\"The goat was in the boot.\"",
+    "\"The goat was in the boot spiritually. Physically, he was in front.\"",
+    // HTML sends the gate to the source editor, the one that mounts under linkedom.
+    "Ade laughed until his chest <br> hurt.",
+  ].join("\n\n");
+  const AFTER = BEFORE
+    .replace("\"The goat was in the boot.\"", "\"The goat was in the boot, Tunde.\"")
+    .replace("\"The goat was in the boot spiritually. Physically, he was in front.\"", "\"Ehn-ehn. The goat was in the boot spiritually,\" Tunde said. \"Physically, he was in front.\"");
+  const ADE = { speaker: "Maren Kest", sheet: "maren-kest" };
+  const GOAT_CAST: ChapterVoices = {
+    version: 4,
+    hash: `sha256:${"c".repeat(64)}`,
+    derivedAt: AT,
+    passes: 1,
+    dropped: 0,
+    omitted: 0,
+    lines: [
+      { ...ADE, paragraph: 0, occurrence: 0, quote: "\"It is not possible,\"" },
+      { ...ADE, paragraph: 1, occurrence: 0, quote: "\"The goat was in the boot.\"" },
+      { speaker: "Tunde", paragraph: 2, occurrence: 0, quote: "\"The goat was in the boot spiritually. Physically, he was in front.\"" },
+    ],
+    paragraphs: castParagraphHashes(BEFORE),
+  };
+  const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+  async function openEdited(m: Mounted): Promise<void> {
+    const ask = m.sent.findLast((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
+    await act(async () => {
+      __applyEventForTest({ at: AT, type: "chapter.open-result", requestId: ask.requestId, ...ids, disposition: "opened", body: AFTER, version: 4, hash: HASH, versions: [1, 2, 3], voices: GOAT_CAST });
+    });
+  }
+  const row = (m: Mounted, words: string) => all(m, ".fy-ab__block").find((block) => block.querySelector(".fy-ab__text")?.textContent === words);
+
+  it("draws both edited lines with their speakers and the dashed kept mark; the new tag is narration; untouched lines are unmarked", async () => {
+    const m = await mount(inkbound("cast"));
+    await openEdited(m);
+    const ade = row(m, "\"The goat was in the boot, Tunde.\"");
+    assert.equal(ade?.getAttribute("data-speaker"), "maren-kest", "Ade keeps the edited line");
+    assert.equal(ade?.querySelector(".fy-ab__kept")?.textContent, "kept");
+    assert.equal(row(m, "\"Ehn-ehn. The goat was in the boot spiritually,\"")?.getAttribute("data-speaker"), "Tunde");
+    assert.equal(row(m, "\"Physically, he was in front.\"")?.getAttribute("data-speaker"), "Tunde", "both parts of the split line");
+    assert.ok(row(m, "\"Physically, he was in front.\"")?.querySelector(".fy-ab__kept"));
+    const tag = row(m, "Tunde said.");
+    assert.equal(tag?.getAttribute("data-speaker"), "narrator", "the tag between them is narration");
+    assert.equal(tag?.querySelector(".fy-ab__kept"), null);
+    assert.equal(row(m, "\"It is not possible,\"")?.querySelector(".fy-ab__kept"), null, "a line the edit did not touch is cast, not kept");
+  });
+
+  it("under a reading of one voice, a kept turn inside a block carries the mark on its break", async () => {
+    const m = await mount(inkbound("performed"));
+    await openEdited(m);
+    const marks = all(m, ".fy-ab__turn-who").map((turn) => turn.getAttribute("data-who"));
+    assert.deepEqual(marks, ["Tunde"], "the second part's break names Tunde, kept; the first part is the block's own row");
+    assert.ok(all(m, ".fy-ab__kept").length >= 2, "and the rows that begin with a kept line carry it beside the name");
+  });
+
+  it("the toolbar says 2 paragraphs to cast, and its menu casts those paragraphs or the chapter with its count", async () => {
+    const m = await mount(inkbound("cast"));
+    await openEdited(m);
+    const press = q(m, '.fy-ch__viewline [data-testid="audiobook-cast"]')!;
+    assert.ok(press, "after the speaker filter, on the toolbar line");
+    assert.equal(press.textContent, "2 paragraphs to cast");
+    assert.ok(press.querySelector(".fy-ab__pill-dot"), "with the stale dot");
+    await act(async () => press.click());
+    const items = all(m, ".fy-ab__castmenu .fy-ab__menu-opt").map((item) => item.textContent);
+    assert.deepEqual(items, ["Cast 2 paragraphs", "Cast the chapter4"], "the chapter's paragraphs as its data");
+    await act(async () => q(m, '[data-testid="cast-changed"]')!.click());
+    assert.deepEqual(m.sent.findLast((message) => message.kind === "cast-voices"), { kind: "cast-voices", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterFile: "01-neap", scope: "changed" });
+    await act(async () => q(m, '[data-testid="audiobook-cast"]')!.click());
+    await act(async () => q(m, '[data-testid="cast-chapter"]')!.click());
+    assert.deepEqual(m.sent.findLast((message) => message.kind === "cast-voices"), { kind: "cast-voices", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterFile: "01-neap" });
+    // The rail's Cast again offers the same two.
+    await act(async () => q(m, '[data-testid="voices-cast-again"]')!.click());
+    assert.deepEqual(all(m, '[data-testid="chapter-voices"] .fy-ab__menu-opt').map((item) => item.textContent), ["Cast 2 paragraphs", "Cast the chapter4"]);
+  });
+
+  it("the speaker menu stays on for a kept line and an untouched paragraph, ticks the kept speaker, and a choice writes a pin; words waiting for their cast have none", async () => {
+    const m = await mount(inkbound("cast"));
+    await openEdited(m);
+    const ade = row(m, "\"The goat was in the boot, Tunde.\"")!;
+    const chip = ade.querySelector("button.fy-ab__speaker") as HTMLElement;
+    assert.ok(chip, "a kept line keeps the menu while two paragraphs wait");
+    assert.ok(row(m, "\"It is not possible,\"")!.querySelector("button.fy-ab__speaker"), "and so does a paragraph the edit left");
+    assert.equal(row(m, "Tunde said.")!.querySelector("button.fy-ab__speaker"), null, "narration in an edited paragraph waits for its cast");
+    await act(async () => chip.click());
+    const ticked = [...ade.querySelectorAll(".fy-ab__menu-opt")].find((option) => option.textContent?.includes("✓"));
+    assert.match(ticked?.textContent ?? "", /^Maren/, "the kept speaker is the current one");
+    await act(async () => (ticked as HTMLElement).click());
+    const asked = m.sent.findLast((message) => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }>;
+    assert.deepEqual(
+      { paragraph: asked.paragraph, occurrence: asked.occurrence, quote: asked.quote, sheet: asked.sheet },
+      { paragraph: 1, occurrence: 0, quote: "\"The goat was in the boot, Tunde.\"", sheet: "maren-kest" },
+      "choosing the kept speaker confirms it: a pin on the words as they stand",
+    );
+    const pinned = { ...GOAT_CAST, pins: [{ paragraph: 1, occurrence: 0, quote: "\"The goat was in the boot, Tunde.\"", speaker: "Maren Kest", sheet: "maren-kest" }] };
+    await act(async () => __applyEventForTest({ at: AT, type: "voices.record", ...ids, record: pinned }));
+    assert.equal(row(m, "\"The goat was in the boot, Tunde.\"")!.querySelector(".fy-ab__kept"), null, "and the kept mark goes");
+  });
+
+  it("Read the chapter casts the paragraphs first: the press asks for it, and the confirm carries the tick, unticked holding the read", async () => {
+    const m = await mount(voiced(inkbound("cast")));
+    await openEdited(m);
+    await act(async () => q(m, '[data-testid="read-audiobook"]')!.click());
+    const asked = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.equal(asked.castFirst, true, "the chapter's read casts what is left first");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 60, estimatedMicroUsd: 6_000, confirmationToken: "tok", voices: [{ label: "Low tide", provider: "elevenlabs", characters: 60, estimatedMicroUsd: 6_000 }], toCast: 2 }));
+    const tick = q(m, '[data-testid="audiobook-cast-first"] input') as HTMLInputElement;
+    assert.equal(q(m, '[data-testid="audiobook-cast-first"]')!.textContent, "Cast 2 paragraphs first");
+    assert.equal(tick.checked, true, "ticked, as Direct's Cast the lines first");
+    await act(async () => tick.click());
+    assert.equal((q(m, '[data-testid="audiobook-confirm"]') as HTMLButtonElement).disabled, true, "unticked, nothing reads");
+    await act(async () => tick.click());
+    await act(async () => q(m, '[data-testid="audiobook-confirm"]')!.click());
+    const confirmed = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.deepEqual([confirmed.confirmationToken, confirmed.castFirst], ["tok", true]);
+  });
+
+  it("on a phone the lines to cast head the ⋯ menu, over Direct and illustrate", async () => {
+    Object.assign(dom.window, {
+      matchMedia: (query: string) => {
+        const widths = [...query.matchAll(/\((min|max)-width: (\d+)px\)/g)];
+        return { matches: widths.length > 0 && !query.includes("pointer") && widths.every(([, kind, value]) => (kind === "min" ? 390 >= Number(value) : 390 <= Number(value))), addEventListener() {}, removeEventListener() {} };
+      },
+    });
+    try {
+      const m = await mount(inkbound("cast"));
+      await openEdited(m);
+      assert.equal(q(m, '.fy-ch__viewline [data-testid="audiobook-cast"]'), null, "no press of its own on the line");
+      await act(async () => q(m, '[data-testid="direct-illustrate"]')!.click());
+      assert.equal(q(m, ".fy-ab__toolmenu--lead .fy-ab__menu-hd")?.textContent, "2 paragraphs to cast");
+      assert.deepEqual(all(m, ".fy-ab__toolmenu--lead .fy-ab__menu-opt").map((item) => item.textContent), ["Cast 2 paragraphs", "Cast the chapter4", "Direct and illustrate"]);
+      await act(async () => q(m, '[data-testid="direct-illustrate-items"]')!.click());
+      assert.ok(q(m, '[data-testid="direct-audiobook"]'), "Direct and illustrate opens its own items");
+      await act(async () => q(m, '[data-testid="direct-illustrate"]')!.click());
+      await act(async () => q(m, '[data-testid="direct-illustrate"]')!.click());
+      await act(async () => q(m, '[data-testid="cast-changed"]')!.click());
+      assert.equal((m.sent.findLast((message) => message.kind === "cast-voices") as Extract<ClientMessage, { kind: "cast-voices" }>).scope, "changed");
+    } finally {
+      delete (dom.window as unknown as { matchMedia?: unknown }).matchMedia;
+    }
   });
 });

@@ -120,7 +120,7 @@ export function sentenceEnd(text: string, from: number): number {
  * paragraph of several speakers' turns. The break holds no text, so a selection's offsets still
  * count the words alone; the stylesheet draws the rule and the speaker's name from its data.
  */
-export interface TurnBreak { at: number; label: string; tone: string; /** The full name, where `label` is a short one (design turn 194, rule 12b). */ full?: string }
+export interface TurnBreak { at: number; label: string; tone: string; /** The full name, where `label` is a short one (design turn 194, rule 12b). */ full?: string; /** An edited quote that kept its speaker (design turn 198): the dashed `kept` mark beside the name. */ kept?: boolean }
 
 /**
  * The words with their markers in place (R-42): each its word in brackets on a plate — drawn by
@@ -173,12 +173,14 @@ export function DirectedText({ raw, cues, held, onPlate, turns = [], gap }: {
       if (turn.at !== from) return;
       // The rule holds no words; a press on it is the one thing in it a reader of the page meets.
       const on = gap?.(at) ?? null;
+      // A kept turn draws its name and the mark from a child's data (design turn 198), so the
+      // break still holds no text and a selection's offsets still count the words alone.
+      const who = turn.kept === true ? <span className="fy-ab__turn-who" data-who={turn.label} /> : null;
       out.push(
-        on === null ? (
-          <span key={`turn${from}`} className={`fy-ab__turn fy-voice--${turn.tone}`} data-who={turn.label} aria-hidden="true" />
-        ) : (
-          <span key={`turn${from}`} className={`fy-ab__turn fy-voice--${turn.tone}`} data-who={turn.label}>{on}</span>
-        ),
+        <span key={`turn${from}`} className={`fy-ab__turn fy-voice--${turn.tone}`} data-who={turn.kept === true ? "" : turn.label} {...(on === null ? { "aria-hidden": true } : {})}>
+          {who}
+          {on}
+        </span>,
       );
     });
     cues.forEach((cue, cueIndex) => {
