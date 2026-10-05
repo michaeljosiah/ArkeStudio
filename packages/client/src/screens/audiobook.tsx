@@ -575,7 +575,10 @@ export function AudiobookScreen() {
                   const seconds = chapterSeconds(row, words(row.chapterId));
                   const synopsis = chapters.find((chapter) => chapter.id === row.chapterId)?.synopsis;
                   const playable = row.made > 0;
-                  const heard = place !== null && place.chapterId === row.chapterId && row.seconds !== null && row.seconds > 0 ? Math.min(100, (place.at / row.seconds) * 100) : null;
+                  // Against the made takes' time, which is what plays; where that is not measured, the
+                  // length the row says — the bar went missing beside "Continue · Chapter 1" when it was null.
+                  const heardOf = row.seconds !== null && row.seconds > 0 ? row.seconds : seconds;
+                  const heard = place !== null && place.chapterId === row.chapterId && heardOf > 0 ? Math.min(100, (place.at / heardOf) * 100) : null;
                   const thumb = row.planned ? null : (row.picture ?? (hasArt ? art : null));
                   const heading = chapterHeading(row);
                   return (
