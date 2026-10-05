@@ -89,8 +89,12 @@ type Row = {
   inline: string[];
 };
 
-/** The chapter dock's composer for each case and width, measured once the fonts are in. */
-async function measure(chrome: string, cases: { key: string; value: string | undefined; set: boolean; variant?: string }[], widths: number[]): Promise<Row[]> {
+/**
+ * The chapter dock's composer for each case and width, measured once the fonts are in. `touch` lays
+ * it out under a coarse pointer, as a phone's sheet does; Read replies joins the row when a case
+ * offers it.
+ */
+async function measure(chrome: string, cases: { key: string; value: string | undefined; set: boolean; variant?: string; readReplies?: boolean }[], widths: number[], { touch = false } = {}): Promise<Row[]> {
   const s = state();
   // Dictation off, as in the installed app: the reason that used to be written into the row.
   __setStateForTest(s, { voiceSidecar: { state: "unavailable", detail: "the dictation model has not been downloaded" } });
@@ -99,7 +103,7 @@ async function measure(chrome: string, cases: { key: string; value: string | und
     for (const c of cases) {
       for (const width of widths) {
         const chip = <ModelChip state={s} value={c.value} set={c.set} onPick={() => {}} onVariant={() => {}} {...(c.variant === undefined ? {} : { variant: c.variant })} />;
-        const html = renderToString(<Composer value="" onChange={() => {}} onSubmit={() => {}} placeholder="Ask about chapter 01" modelControl={chip} onAttach={() => {}} onDictate={() => {}} />);
+        const html = renderToString(<Composer value="" onChange={() => {}} onSubmit={() => {}} placeholder="Ask about chapter 01" modelControl={chip} onAttach={() => {}} onDictate={() => {}} {...(c.readReplies ? { readReplies: { offered: true, on: false, onToggle: () => {}, notice: null } } : {})} />);
         // The dock's own frame (fidelity.css: .fy-arke__foot pads 14 a side here, and the dock has a 1px rule), sized so the composer is `width`.
         body += `<section data-key="${c.key}" data-width="${width}"><div class="fy-sw" data-screen="chapter" style="display:block;height:auto;min-height:0"><aside class="fy-arke" data-dock="conversation" data-conversation-first="true" style="width:${width + 29}px;height:auto;position:static"><div class="fy-arke__foot">${html}</div></aside></div></section>`;
       }
@@ -130,6 +134,8 @@ async function measure(chrome: string, cases: { key: string; value: string | und
     writeFileSync(file, `<!doctype html><html class="dark"><head><meta charset="utf-8"><style>${stylesheets()}
 *,*::before,*::after{animation:none!important;transition:none!important}body{margin:0;padding:16px}</style></head><body>${body}<script>${script}</script></body></html>`);
     const args = ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--user-data-dir=${join(dir, "profile")}`, "--window-size=1200,900", "--virtual-time-budget=5000", "--dump-dom", pathToFileURL(file).href];
+    // A coarse pointer with no hover, as the chapter smoke scripts emulate a phone.
+    if (touch) args.unshift("--blink-settings=primaryPointerType=2,availablePointerTypes=2,primaryHoverType=0,availableHoverTypes=0");
     // The runner's Chrome on Linux has no usable sandbox under Ubuntu's user-namespace policy; the page is our own file.
     if (process.platform === "linux") args.unshift("--no-sandbox");
     const dom = await new Promise<string>((resolve, reject) => {
@@ -180,5 +186,26 @@ describe("the composer's tool row in the production dock (local.16)", { skip: ch
     assert.deepEqual(effort("zen", 430).visible.map((part) => part.split(":")[0] === "name" ? part.split(":").slice(0, 2).join(":") : part), ["name:Effort", "chevron"], "with room, the word, as 195 draws it");
     assert.deepEqual(effort("gpt", 302).visible.map((part) => part.split(":").slice(0, 2).join(":")), ["name:High"], "the value and nothing else");
     assert.deepEqual(effort("gpt", 430).visible.map((part) => part.split(":")[0] === "name" ? part.split(":").slice(0, 2).join(":") : part), ["name:High", "chevron"], "195b's chip, with room");
+  });
+
+  // The phone's Arke sheet (2026-10-05): under a coarse pointer the tools stood in a grid column beside
+  // the editor and left it 0 wide, and with Read replies offered send sat past the screen's edge.
+  it("puts the tools under the words on a touch screen, send whole, at the phone sheet's 330 and 360", async () => {
+    const rows = await measure(chrome!, [
+      { key: "zen", value: undefined, set: false },
+      { key: "zen-read", value: undefined, set: false, readReplies: true },
+      { key: "gpt", value: "openai/gpt-5.4", set: true, variant: "high" },
+    ], [330, 360], { touch: true });
+    assert.equal(rows.length, 6);
+    for (const row of rows) {
+      const at = `${row.key} at ${row.width}, touch`;
+      assert.ok(row.editor.w >= row.composer.w - 4, `${at}: the editor has the composer's width (${row.editor.w} of ${row.composer.w})`);
+      const send = row.controls.find((control) => control.label === "Send")!;
+      assert.ok(send.box.w >= 43.5 && send.box.r <= row.composer.r - 1, `${at}: send is whole and inside the composer (${send.box.l} to ${send.box.r}, composer ends ${row.composer.r})`);
+      for (const control of row.controls.filter((candidate) => candidate !== send)) {
+        assert.ok(control.box.r <= send.box.l, `${at}: ${control.label ?? "Read replies"} ends at ${control.box.r}, before send at ${send.box.l}`);
+        assert.ok(control.box.t >= row.editor.b - 1, `${at}: ${control.label ?? "Read replies"} stays in the tool row, under the editor`);
+      }
+    }
   });
 });

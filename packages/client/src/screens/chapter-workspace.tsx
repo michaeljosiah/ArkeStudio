@@ -1444,6 +1444,8 @@ export function ChapterWorkspace({
   const dockPrefix = passage !== null
     ? `About this passage in ${chapterLabel}${selection?.paragraph ? `, paragraph ${selection.paragraph}` : ""}: «${passage}»`
     : `About ${chapterLabel}:`;
+  // The dock's head, and the sheet's on a phone: Arke names what it is about (126a, 172a, 195g).
+  const dockTitle = `Arke · Chapter ${String(chapter.order).padStart(2, "0")}`;
   /*
    * An ask from the menu beside the selection. The page holds it, not the dock, until the dock
    * says it is done with it (codex on PR 1232): putting the dock away while it waits, or while
@@ -2824,7 +2826,7 @@ export function ChapterWorkspace({
       )}
 
       {compact && stagedDraft !== undefined && passageChange !== null && <HeldBar className="fy-passage-decision"><span>{keptCount} of {editCount} kept</span><StagedDecision worldId={worldId} subject={chapterLabel} staged={stagedDraft.staged} {...(accept !== undefined ? { accept } : {})} /></HeldBar>}
-      <ResponsiveSheet sheet={compact || !dock} open={compact && dock} title="Arke" onClose={() => setDock(false)} className="fy-season-arke-sheet">
+      <ResponsiveSheet sheet={compact || !dock} open={compact && dock} title={dockTitle} onClose={() => setDock(false)} className="fy-season-arke-sheet">
         <ProductionConversation
           key={`dock:${say?.seq ?? 0}`}
           worldId={worldId}
@@ -2836,7 +2838,7 @@ export function ChapterWorkspace({
           // and these words, whatever the model retold.
           subject={dockSubject}
           dock={{
-            title: `Arke · Chapter ${String(chapter.order).padStart(2, "0")}`,
+            title: dockTitle,
             subject: `${chapter.title} · ${production.meta.title}`,
             conversationFirst: true,
             onPutAway: () => setDock(false),
@@ -2871,6 +2873,7 @@ export function ChapterWorkspace({
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.
             subjectPrefix: dockPrefix,
+            about: chapterLabel,
             // A line a menu press started is about the passage it was pressed on, and the dock
             // says that one, not whatever is selected now (codex on PR 1232).
             ...(shownSubject.kind === "passage" ? { subjectLine: `about this passage · ${countWords(shownSubject.text).toLocaleString()} words` } : {}),

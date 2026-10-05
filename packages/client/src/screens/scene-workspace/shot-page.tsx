@@ -604,6 +604,7 @@ function ShotWorkspace({
               prompts: [`Tighten shot ${shot.number}`, `What does shot ${shot.number} need?`],
               shotLabel,
               subjectPrefix: `About shot ${shot.number}:`,
+              about: `shot ${shot.number}`,
             }}
             openingNote="opening…"
             emptyLine={`Nothing written with Arke for shot ${shot.number} yet.`}
