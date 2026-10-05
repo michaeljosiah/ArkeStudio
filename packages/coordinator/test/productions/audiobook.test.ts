@@ -1384,6 +1384,22 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       assert.match(audiobookDoorLine(cast.rows).line, /^1 of 2 chapters read · \d+:\d\d$/, "the time is the kept takes', whatever the reading");
     }));
 
+  it("names every speaker in the order of their first line whatever the reading, and each chapter's first picture (design turn 199)", () =>
+    withHarness({ before: twoChapters }, async ({ events, send }) => {
+      const narrated = await openDoor(send, events);
+      assert.equal(narrated.reading, "narrator");
+      assert.deepEqual(narrated.voices.map((v) => v.name), ["George"], "the narrator's reading sets nobody apart");
+      assert.deepEqual(narrated.cast, [{ sheet: "maren-kest", name: "Maren Kest" }], "yet the book's cast is the page's");
+      assert.equal(narrated.rows[0]!.picture, undefined, "no picture yet");
+      await send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p1.0", picture: { file: "world-art.png", source: "world" }, requestId: "01J8F3K2QW9VZX4N7M0RTYB6D9" });
+      const pictured = await openDoor(send, events, "01J8F3K2QW9VZX4N7M0RTYB6D2");
+      assert.equal(pictured.rows[0]!.picture, "world-art.png", "the chapter's first picture, for its thumbnail");
+      assert.equal(pictured.rows[1]!.picture, undefined);
+      await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
+      const cast = await openDoor(send, events, "01J8F3K2QW9VZX4N7M0RTYB6D3");
+      assert.deepEqual(cast.cast, narrated.cast, "the same cast under Cast");
+    }));
+
   // UI audit A1 (0.5.60): every door, and every catalogue a window asked for, went to every
   // keyed vendor for its voice list — Google about twenty-eight times a minute — and the door's
   // answers came back a minute and more late. A door asks a vendor at most once, never a block

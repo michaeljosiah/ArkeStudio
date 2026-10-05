@@ -17,7 +17,6 @@ import {
 } from "../lib/store.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
-import { bookHasTakes } from "./audiobook-player.js";
 import { BodyLayer } from "./body-layer.js";
 import { EditorDialog } from "./editor-dialog.js";
 import { Button } from "./ui.js";
@@ -394,23 +393,6 @@ export function AudiobookExportSheet({ worldId, production, onClose }: { worldId
           }}
         />
       )}
-    </>
-  );
-}
-
-/**
- * `Export` on the audiobook door (186e): offered once a block anywhere is made. What is whole is the
- * listening plan's to say, by the words (codex on PR 1498): a chapter whose takes the door calls
- * stale after a narrator or a direction changed still says its words, and still goes in.
- */
-export function ExportAudiobookButton({ worldId, production }: { worldId: string; production: ProductionBundle }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <Button variant="ghost" disabled={!bookHasTakes(production)} onClick={() => setOpen(true)} data-testid="audiobook-export-open">
-        Export
-      </Button>
-      {open && <AudiobookExportSheet worldId={worldId} production={production} onClose={() => setOpen(false)} />}
     </>
   );
 }

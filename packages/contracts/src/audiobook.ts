@@ -1053,9 +1053,18 @@ export const AudiobookRowSchema = z
     seconds: z.number().min(0).nullable(),
     /** Under `cast`, the run's refusal (R-12) when the cast is not current — said on the row. */
     castTrouble: z.string().min(1).optional(),
+    /**
+     * The chapter's first picture (design turn 199): the first block's picture the player would
+     * show (R-69), world-relative, for the row's thumbnail; absent when the chapter has none.
+     */
+    picture: z.string().min(1).optional(),
   })
   .strict();
 export type AudiobookRow = z.infer<typeof AudiobookRowSchema>;
+
+/** A speaker of the book (design turn 199): their sheet when the cast names one, and their name. */
+export const AudiobookCastMemberSchema = z.object({ sheet: SlugSchema.optional(), name: z.string().min(1) }).strict();
+export type AudiobookCastMember = z.infer<typeof AudiobookCastMemberSchema>;
 
 /** A voice on the door's row (R-12): who reads, in what, or why the narrator does instead. */
 export const AudiobookVoiceRowSchema = z
@@ -1118,6 +1127,12 @@ export const AudiobookDoorSchema = z
       .strict(),
     /** How the book's groupable reader sends blocks (design turn 185d); absent when its reader cannot group or this machine cannot split. */
     requests: z.enum(["grouped", "per-paragraph"]).optional(),
+    /**
+     * Every speaker of the book in the order of their first line, whatever the reading (design
+     * turn 199): the page's cast. `voices` names only those the reading sets apart, so under
+     * `narrator` it holds the narrator alone.
+     */
+    cast: z.array(AudiobookCastMemberSchema).optional(),
   })
   .strict();
 export type AudiobookDoor = z.infer<typeof AudiobookDoorSchema>;

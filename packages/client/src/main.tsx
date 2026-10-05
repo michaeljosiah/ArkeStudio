@@ -57,7 +57,7 @@ import "./components/production-studio.css";
 import "./components/activity-panel.css";
 import "./components/account-menu.css";
 import "./components/model-chip.css";
-import "./screens/audiobook-cover.css";
+import "./screens/audiobook-show.css";
 import "./components/design-voice-dialog.css";
 import "./components/free-plan.css";
 import "./components/audiobook-look.css";

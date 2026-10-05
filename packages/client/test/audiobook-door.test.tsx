@@ -138,6 +138,13 @@ async function typeInto(input: HTMLInputElement, value: string): Promise<void> {
   });
 }
 
+/** The hero's ⋯ and one of its entries (design turn 199d): Reading or Narrator. */
+async function fromMenu(m: Mounted, entry: "menu-reading" | "menu-narrator"): Promise<void> {
+  await act(async () => q(m, '[data-testid="audiobook-more"]')!.click());
+  await act(async () => q(m, `[data-testid="${entry}"]`)!.click());
+}
+const openReading = (m: Mounted) => fromMenu(m, "menu-reading");
+
 async function answerDoor(m: Mounted, answer: AudiobookDoor): Promise<void> {
   const ask = m.sent.findLast((message) => message.kind === "open-audiobook") as Extract<ClientMessage, { kind: "open-audiobook" }>;
   assert.ok(ask, "the door is asked for");
@@ -151,13 +158,14 @@ describe("the Audiobook door (turn 146)", () => {
     assert.match(text(m), /Inkbound/);
     assert.equal(q(m, 'section[aria-label="Audiobook"]') !== null, true);
     await answerDoor(m, door("narrator"));
-    assert.equal(q(m, '[data-testid="audiobook-line"]')?.textContent, "1 of 2 chapters read · 31:04 · 1 planned");
+    // One meta line (design turn 199): every chapter, the made takes' time and the rest from the words, who reads it.
+    assert.equal(q(m, '[data-testid="audiobook-line"]')?.textContent, "Audiobook · 3 chapters · 53 min · Read by George");
     const rows = all(m, '[data-testid="audiobook-row"]');
     assert.deepEqual(
-      rows.map((row) => row.querySelector(".fy-row__meta")?.textContent),
-      ["read · 31:04", "22 of 26 made · 1 flagged", "planned"],
+      rows.map((row) => row.getAttribute("data-state")),
+      ["ready", "4 to read", "planned"],
     );
-    assert.equal(q(m, '[data-testid="audiobook-bar"]')?.getAttribute("aria-valuenow"), "46");
+    assert.equal(q(m, '[data-testid="audiobook-bar"]'), null, "no read bar (199)");
     assert.equal(q(m, '[data-testid="read-book"]')?.textContent, "Read the book · 1 chapter", "a local narrator costs nothing, so no price rides on the press");
     assert.ok(!/\bis\b.*\bbecause\b/.test(text(m)), "no sentence explains the door");
     // The door is asked again as the book moves, and only the latest ask's answer stands: an
@@ -204,14 +212,16 @@ describe("the Audiobook door (turn 146)", () => {
     await act(async () => __setStateForTest(voiced, kept()));
     assert.equal(asks(), asked + 3, "a sheet's voice asks the door again");
     await answerDoor(m, door("narrator"));
-    await act(async () => all(m, '[data-testid="audiobook-row"]')[1]!.click());
-    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap?view=audiobook`, "a row opens the chapter in its Audiobook view");
+    await act(async () => all(m, '[data-testid="audiobook-row-open"]')[1]!.click());
+    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap?view=audiobook`, "a row's chevron opens the chapter in its Audiobook view");
   });
 
-  it("the voices row says who reads and who has no voice under Cast, and only the narrator under Narrator (R-12)", async () => {
+  it("Reading names who reads and who has no voice under Cast, and only the narrator under Narrator (R-12, design turn 199e)", async () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator"));
-    assert.deepEqual(all(m, '[data-testid="audiobook-voice"]').map((chip) => chip.getAttribute("data-state")), ["narrator"]);
+    await openReading(m);
+    assert.ok(q(m, '[data-testid="reading-narrator"]'), "the narrator's row");
+    assert.deepEqual(all(m, '[data-testid="audiobook-voice"]').map((chip) => chip.getAttribute("data-state")), [], "no speaker row under the narrator's reading");
     assert.doesNotMatch(text(m), /no voice/);
     await act(async () => all(m, '[aria-label="Reading"] button').find((b) => b.textContent === "Cast")!.click());
     assert.deepEqual(m.sent.filter((message) => message.kind === "set-audiobook-reading").map((message) => (message as Extract<ClientMessage, { kind: "set-audiobook-reading" }>).reading), ["cast"]);
@@ -229,14 +239,16 @@ describe("the Audiobook door (turn 146)", () => {
       }),
     );
     const chips = all(m, '[data-testid="audiobook-voice"]');
-    assert.deepEqual(chips.map((chip) => chip.getAttribute("data-state")), ["narrator", "reads", "no voice", "no voice"]);
-    assert.match(chips[1]!.textContent ?? "", /Maren KestAnna · ElevenLabs · cloud · 4 blocks/);
-    assert.match(chips[2]!.textContent ?? "", /Odile Sarnno voice · narrator · 3 blocks/);
-    assert.ok(chips[2]!.className.includes("fy-abdoor__voice--warn"), "in warning");
-    assert.match(chips[3]!.textContent ?? "", /unattributedno voice · narrator · 2 blocks/);
-    // A chip goes to where its voice is set (issue 1191); the unattributed lines have nowhere to go.
-    assert.deepEqual(chips.map((chip) => chip.tagName.toLowerCase()), ["button", "button", "button", "span"]);
-    await act(async () => chips[2]!.click());
+    assert.deepEqual(chips.map((chip) => chip.getAttribute("data-state")), ["reads", "no voice", "unattributed"]);
+    assert.match(chips[0]!.textContent ?? "", /^Maren KestAnnaElevenLabs · cloud4 blocks$/);
+    assert.match(chips[1]!.textContent ?? "", /^Odile Sarnno voice · narrator3 blocks$/);
+    assert.ok(chips[1]!.querySelector(".fy-abshow__v--w"), "in warning");
+    assert.match(chips[2]!.textContent ?? "", /^unattributed2 lines · narrator$/);
+    // The one warning word on the page, never a chip (199 rule 5): on Read the book and the ⋯ menu's Reading.
+    assert.match(q(m, '[data-testid="read-book"]')!.textContent!, / · 1 no voice$/);
+    // A row goes to where its voice is set (issue 1191); the unattributed lines have nowhere to go.
+    assert.deepEqual(chips.map((chip) => chip.tagName.toLowerCase()), ["button", "button", "div"]);
+    await act(async () => chips[1]!.click());
     assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/cast/odile-sarn/voice`, "a speaker's chip opens their voice page");
   });
 
@@ -244,8 +256,8 @@ describe("the Audiobook door (turn 146)", () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator"));
     const where = m.where();
-    await act(async () => all(m, '[data-testid="audiobook-voice"]')[0]!.click());
-    assert.equal(m.where(), where, "the chip no longer leaves for Settings, which keeps the app's default");
+    await fromMenu(m, "menu-narrator");
+    assert.equal(m.where(), where, "Narrator does not leave for Settings, which keeps the app's default");
     const dialog = dom.document.querySelector('[data-testid="narrator-dialog"]') as HTMLElement | null;
     assert.ok(dialog, "the Narrator dialog opens");
     const seg = [...dialog.querySelectorAll('[aria-label="Narrator"] button')] as HTMLButtonElement[];
@@ -261,7 +273,7 @@ describe("the Audiobook door (turn 146)", () => {
   it("the narrator is found by search: the voices on this machine first, providers named, and the press waits for what the switch costs (design turn 165c)", async () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator"));
-    await act(async () => all(m, '[data-testid="audiobook-voice"]')[0]!.click());
+    await fromMenu(m, "menu-narrator");
     const dialog = dom.document.querySelector('[data-testid="narrator-dialog"]') as HTMLElement;
     const voice = (provider: string, model: string, voiceId: string, label: string, local: boolean, attributes: string[] = []) => ({ provider, model, voiceId, label, attributes, local, canClone: false, usedBy: [] });
     // The catalogue's own order puts the paid voices first, as the build listed them (issue 1324 §3).
@@ -406,13 +418,15 @@ describe("the Audiobook door (turn 146)", () => {
     assert.equal(m.sent.filter((message) => message.kind === "open-audiobook").length, asksBefore + 2, "and the book's end once more, once that is answered");
     // While a chapter is read, the seg holds: a reading switched under a run would leave every take it files stale.
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H9", toMake: 26, blocks: 26 }));
+    await openReading(m);
+    assert.equal(all(m, '[aria-label="Reading"] button').length, 3, "the reading's seg, in the Reading sheet");
     assert.ok(all(m, '[aria-label="Reading"] button').every((b) => (b as HTMLButtonElement).disabled), "Narrator · Cast held while a chapter is read");
     // The run tried the four blocks not made (R-16): three made, one flagged.
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, chapterId: "neap", outcome: "read", made: 3, flagged: 1 }));
     assert.ok(all(m, '[aria-label="Reading"] button').every((b) => !(b as HTMLButtonElement).disabled));
     // A chapter the book has read shows as its run ended until the door answers: the row's
     // counts plus the run's.
-    assert.match(all(m, '[data-testid="audiobook-row"]')[1]?.textContent ?? "", /25 of 26 made · 1 flagged/);
+    assert.equal(all(m, '[data-testid="audiobook-row"]')[1]?.getAttribute("data-state"), "1 to read", "25 of 26 made: the flagged one is left to read");
   });
 
   it("a window that joins a run going elsewhere still asks for the door it has none of (codex on PR 1187)", async () => {
@@ -566,24 +580,22 @@ describe("the Audiobook door (turn 146)", () => {
         { sheet: "perrin-tallow", name: "Perrin Tallow", state: "narrator", blocks: 2 },
       ],
     });
-    const where = m.where();
-    await act(async () => all(m, '[data-testid="audiobook-voice"]')[1]!.click());
-    assert.equal(m.where(), where, "a performed speaker's chip opens the book's reading, not their voice page");
-    const panel = q(m, '[data-testid="book-reading"]')!;
-    assert.match(panel.querySelector("h3")?.textContent ?? "", /^Performed · George$/);
+    // Speaker notes stay where 184c put them, under Performed: in the Reading sheet (design turn 199e).
+    await openReading(m);
+    const panel = q(m, '[data-testid="reading-sheet"]')!;
     const bookNote = panel.querySelector('textarea[aria-label="Book note"]') as HTMLTextAreaElement;
     const reactValue = (bookNote as unknown as Record<string, { value?: string }>)[Object.keys(bookNote).find((k) => k.startsWith("__reactProps$"))!]?.value;
     assert.equal(reactValue, "Harbour English, unhurried and close.");
-    const speakers = [...panel.querySelectorAll('[data-testid="book-reading-speaker"]')].map((row) => `${row.querySelector("b")!.textContent}|${row.querySelector("small")!.textContent}`);
-    assert.deepEqual(speakers, ["Maren Kest|10 / 60 · sheet", "Odile Sarn|14 / 60 · you", "Perrin Tallow|0 / 60"]);
-    assert.match(panel.textContent ?? "", /drafted from the sheets/);
+    const speakers = [...panel.querySelectorAll('[data-testid="audiobook-voice"]')].map((row) => `${row.querySelector("b")!.textContent}|${(row.querySelector("input") as HTMLInputElement | null)?.getAttribute("aria-label")}|${row.querySelector("small")!.textContent}`);
+    assert.deepEqual(speakers, ["Maren Kest|Note · Maren Kest|10 / 60 · sheet", "Odile Sarn|Note · Odile Sarn|14 / 60 · you", "Perrin Tallow|Note · Perrin Tallow|0 / 60"]);
     await act(async () => (panel.querySelector('[data-testid="draft-from-sheets"]') as HTMLButtonElement).click());
     const drafted = m.sent.findLast((message) => message.kind === "draft-audiobook-speaker-notes") as Extract<ClientMessage, { kind: "draft-audiobook-speaker-notes" }>;
     assert.ok(drafted, "the speakers with no note are drafted from their sheets");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.speaker-notes", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: drafted.requestId, drafted: 1 }));
-    assert.match(q(m, '[data-testid="book-reading"]')?.textContent ?? "", /1 drafted/);
-    await act(async () => all(m, '[data-testid="book-reading"] button').find((b) => b.textContent === "Done")!.click());
-    assert.equal(q(m, '[data-testid="book-reading"]'), null);
+    assert.match(q(m, '[data-testid="reading-sheet"]')?.textContent ?? "", /1 drafted/);
+    // A performed speaker's row still goes to their Voice page, by its chevron.
+    await act(async () => (panel.querySelector('[aria-label="Voice · Odile Sarn"]') as HTMLButtonElement).click());
+    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/cast/odile-sarn/voice`);
   });
 });
 
@@ -592,12 +604,14 @@ describe("the book's requests (design turn 185d)", () => {
   it("Requests · Grouped · Per paragraph shows only where the reader can group, with the book's counts, and a press writes the book", async () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator", { voices: [GROUPED], requests: "grouped", price: { chapters: 1, blocks: 169, cloudBlocks: 169, characters: 18_000, estimatedMicroUsd: 460_000, voices: [], requests: 5, perParagraph: 169 } }));
+    assert.equal(q(m, '[data-testid="book-requests"]'), null, "never on the page (199)");
+    await openReading(m);
     const panel = q(m, '[data-testid="book-requests"]')!;
     assert.ok(panel, "offered for a groupable reader");
     assert.match(panel.textContent!, /RequestsGroupedPer paragraphGoogle · up to ~5 min a request/);
     assert.match(panel.textContent!, /Book5 requests169 per paragraph/);
     assert.equal(all(m, '[data-testid="book-requests"] [aria-checked="true"]')[0]!.textContent, "Grouped", "grouped by default");
-    assert.match(q(m, '[data-testid="read-book"]')!.textContent!, /Read the book · 1 chapter · 5 requests · (~|up to )\$0\.46/);
+    assert.match(q(m, '[data-testid="read-book"]')!.textContent!, /^Read the book · 1 chapter · (~|up to )\$0\.46$/);
     await act(async () => all(m, '[data-testid="book-requests"] button').find((button) => button.textContent === "Per paragraph")!.click());
     const written = m.sent.findLast((message) => message.kind === "set-audiobook-requests") as Extract<ClientMessage, { kind: "set-audiobook-requests" }>;
     assert.equal(written.requests, "per-paragraph");
@@ -606,6 +620,8 @@ describe("the book's requests (design turn 185d)", () => {
   it("is not offered where the coordinator says the reader cannot group here", async () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator"));
+    await openReading(m);
+    assert.ok(q(m, '[data-testid="reading-sheet"]'));
     assert.equal(q(m, '[data-testid="book-requests"]'), null);
   });
 });

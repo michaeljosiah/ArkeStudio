@@ -79,6 +79,22 @@ async function usablePictures(store: WorldStore, pictures: Readonly<Record<strin
   return usable;
 }
 
+/**
+ * A chapter's first picture (design turn 199): the earliest block's picture as the player would
+ * place it — listed in the world's catalogue (`listed`, asked once for the whole door) and on the
+ * shelf — for the row's thumbnail on the audiobook page. Only the pictures in reading order are
+ * looked at on disk, and only until one is there.
+ */
+export async function chapterFirstPicture(store: WorldStore, plan: Pick<AudiobookPlan, "blocks" | "record">, listed: ReadonlySet<string>): Promise<string | null> {
+  const record = plan.record === "unreadable" ? null : plan.record;
+  if (record?.pictures === undefined) return null;
+  const blocks = plan.blocks.map((planned) => ({ key: planned.block.key, text: planned.block.text }));
+  for (const placed of placePictures(blocks, record.pictures, (file) => listed.has(file)).placed) {
+    if (await onShelf(store, placed.picture.file)) return placed.picture.file;
+  }
+  return null;
+}
+
 /** The book's cover (R-69): the world's key art, when it is on the shelf. */
 export async function bookCover(store: WorldStore): Promise<string | null> {
   const keyArt = store.getBundle().keyArt;

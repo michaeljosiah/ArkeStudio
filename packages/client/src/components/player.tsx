@@ -1,7 +1,53 @@
-import { useCallback, useRef, useState, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, Copy, PauseSolid, PlaySolid, RotateCcw, Speaker, X } from "./icons.js";
+import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
+import { Back15, ChevronLeft, ChevronRight, Copy, Forward30, OpenOut, PauseSolid, PlaySolid, RotateCcw, Speaker, X } from "./icons.js";
 import { cx } from "./ui.js";
 import { dismissPlayback, nextPlaylistLine, playClip, restartPlaylistLine, seekTo, togglePlayback, usePlayback, usePlaylist, type Clip } from "../lib/audio.js";
+
+/**
+ * Where the dock sits in a page's flow rather than floating (design turn 199, rule 9): a page
+ * that keeps a place for it at the foot of its column registers that element, and the one dock
+ * draws there as a bar the page's scroll ends above, so it never covers what the page lists.
+ * Every other screen keeps the floating dock (25c). One host at a time: the page on screen.
+ */
+export interface DockHost {
+  element: HTMLElement;
+  /** What the bar shows beside the clip's title: the page's picture for what plays. */
+  picture: string | null;
+  /** `Open`: the full player the page opens (186). */
+  onOpen?: () => void;
+}
+
+let dockHost: DockHost | null = null;
+const hostListeners = new Set<() => void>();
+function publishHost(next: DockHost | null): void {
+  dockHost = next;
+  hostListeners.forEach((listener) => listener());
+}
+function subscribeHost(listener: () => void): () => void {
+  hostListeners.add(listener);
+  return () => hostListeners.delete(listener);
+}
+
+/** The page's place for the dock, held while the page is mounted. */
+export function useDockHost(ref: RefObject<HTMLElement | null>, picture: string | null, onOpen?: () => void): void {
+  const open = useRef(onOpen);
+  open.current = onOpen;
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const host: DockHost = { element, picture, onOpen: () => open.current?.() };
+    publishHost(host);
+    return () => {
+      if (dockHost === host) publishHost(null);
+    };
+  }, [ref, picture]);
+}
+
+/** The registered host, for a test or a screen that asks where the dock is. */
+export function useDockHostState(): DockHost | null {
+  return useSyncExternalStore(subscribeHost, () => dockHost, () => null);
+}
 
 /** "0:03", "1:07" — the dock's own clock, tabular so it does not jitter as it counts. */
 export function clock(seconds: number): string {
@@ -19,6 +65,7 @@ export function PlayerDock() {
   // A read of the scene's lines (SPEC-044 R-33) is a playlist on this one player, so its
   // Previous, Skip and Restart live here, where the read goes on sounding after Preview is left.
   const playlist = usePlaylist();
+  const host = useDockHostState();
   const { clip, status, currentTime, duration } = playback;
 
   const scrub = useCallback(
@@ -55,6 +102,56 @@ export function PlayerDock() {
   if (!clip) return null;
   const playing = status === "playing";
   const known = duration > 0;
+
+  if (host !== null) {
+    // Docked (199): a 2-high position line on the top edge, the picture, what plays over where it
+    // is from, back 15 · play · forward 30, the time, Open and ×. A phone keeps back 15 and play.
+    return createPortal(
+      <div className="fy-dockbar" role="region" aria-label="Audio player" onKeyDown={onKeyDown} tabIndex={-1} data-testid="player-dock">
+        <span className="fy-dockbar__line" style={{ width: known ? `${Math.min(100, (currentTime / duration) * 100)}%` : "0%" }} aria-hidden="true" />
+        {host.picture !== null && <img className="fy-dockbar__pic" src={host.picture} alt="" />}
+        <div className="fy-dockbar__tx">
+          <b title={clip.title}>{clip.title}</b>
+          {clip.sub && <span title={clip.sub}>{clip.sub}</span>}
+        </div>
+        <div className="fy-dockbar__tr">
+          <button type="button" className="fy-dockbar__ib fy-dockbar__ib--mute" aria-label="Back 15 seconds" onClick={() => seekTo(currentTime - 15)}>
+            <Back15 size={20} stroke={1.8} />
+          </button>
+          <button type="button" className="fy-dockbar__ib fy-dockbar__pp" aria-label={playing ? `Pause ${clip.title}` : `Play ${clip.title}`} onClick={togglePlayback}>
+            {playing ? <PauseSolid size={16} /> : <PlaySolid size={16} />}
+          </button>
+          <button type="button" className="fy-dockbar__ib fy-dockbar__ib--mute fy-dockbar__wide" aria-label="Forward 30 seconds" onClick={() => seekTo(currentTime + 30)}>
+            <Forward30 size={20} stroke={1.8} />
+          </button>
+          {playlist !== null && (
+            <span className="fy-dock__lines fy-dockbar__wide">
+              <button type="button" className="fy-dock__line" aria-label="Previous line" onClick={() => nextPlaylistLine(-1)}><ChevronLeft size={12} /></button>
+              <button type="button" className="fy-dock__line" aria-label="Restart line" onClick={restartPlaylistLine}><RotateCcw size={11} /></button>
+              <button type="button" className="fy-dock__line" aria-label="Skip line" onClick={() => nextPlaylistLine()}><ChevronRight size={12} /></button>
+              <span className="fy-dock__linecount">{playlist.index + 1} of {playlist.items.length}</span>
+            </span>
+          )}
+        </div>
+        {status === "error" ? (
+          <span className="fy-dock__error fy-dockbar__wide">{playback.error}</span>
+        ) : (
+          <span className="fy-dockbar__tm fy-dockbar__wide">
+            {clock(currentTime)} / {known ? clock(duration) : "–:––"}
+          </span>
+        )}
+        {host.onOpen !== undefined && (
+          <button type="button" className="fy-dockbar__ib fy-dockbar__ib--mute fy-dockbar__wide" aria-label="Open" title="Open" onClick={host.onOpen}>
+            <OpenOut size={16} stroke={1.9} />
+          </button>
+        )}
+        <button type="button" className="fy-dockbar__ib fy-dockbar__ib--mute fy-dockbar__wide" aria-label="Dismiss the player" onClick={dismissPlayback}>
+          <X size={15} stroke={1.9} />
+        </button>
+      </div>,
+      host.element,
+    );
+  }
 
   return (
     <div className="fy-dock" role="region" aria-label="Audio player" onKeyDown={onKeyDown} tabIndex={-1}>

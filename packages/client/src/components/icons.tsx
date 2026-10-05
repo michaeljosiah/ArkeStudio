@@ -570,6 +570,11 @@ export const Pointer = icon(<><path d="M4 4l7.07 17 2.51-7.39L21 11.07z" /></>);
 export const Scissors = icon(<><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4 8.12 15.88" /><path d="M14.47 14.48 20 20" /><path d="M8.12 8.12 12 12" /></>);
 export const Hand = icon(<><path d="M18 11V6a2 2 0 0 0-4 0v1" /><path d="M14 10V4a2 2 0 0 0-4 0v2" /><path d="M10 10.5V6a2 2 0 0 0-4 0v8" /><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" /></>);
 export const RotateCw = icon(<><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></>);
+/* The docked player's skips (design turn 199): the turn arrows with their seconds inside, as 186's transport draws them. */
+export const Back15 = icon(<><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /><text x="12" y="15.5" fontSize="7" textAnchor="middle" fill="currentColor" stroke="none" fontFamily="sans-serif">15</text></>);
+export const Forward30 = icon(<><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /><text x="12" y="15.5" fontSize="7" textAnchor="middle" fill="currentColor" stroke="none" fontFamily="sans-serif">30</text></>);
+/** Open the full player from the dock (design turn 199): out of the box it sits in. */
+export const OpenOut = icon(<path d="M14 4h6v6M20 4l-8 8M10 5H5v14h14v-5" />);
 export const Trash = icon(<><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></>);
 export const Collapse = icon(<><path d="M10 6 4 12l6 6" /><path d="m14 6 6 6-6 6" /><path d="M4 12h6" /><path d="M14 12h6" /></>);
 export const Snap = icon(<><path d="M9 3v18" /><path d="M15 3v18" /></>);

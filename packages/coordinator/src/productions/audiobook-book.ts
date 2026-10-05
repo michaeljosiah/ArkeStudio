@@ -26,8 +26,10 @@ import {
   type FreePlanShort,
   type VoiceNames,
   voiceDisplayLabel,
+  worldImageReferences,
 } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
+import { chapterFirstPicture } from "./audiobook-listening.js";
 import type { WorldStore } from "../world/store.js";
 import { checkDirection } from "../voice/direction.js";
 import { castRefusal, effectiveReader, planAudiobook, readAudiobookBook, readerLanguage, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
@@ -154,14 +156,27 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
   const narratorModel = room.models.find((m) => m.provider === room.narrator.provider && m.id === room.narrator.model && m.capability === "voice-tts") ?? null;
   const narratorLanguage = readerLanguage(store.getBundle().clonedVoices ?? [], room.narrator);
   const toRead: Array<Extract<ChapterPreparation, { kind: "ready" }>["prepared"]> = [];
+  // The page's cast and thumbnails (design turn 199): every speaker in the order of their first
+  // line whatever the reading, and each chapter's first picture, from the plans read here anyway.
+  const cast = new Map<string, { sheet?: string; name: string }>();
+  const listed = new Set(worldImageReferences(store.getBundle()).map((reference) => reference.file));
   for (const { summary, preparation } of book.chapters) {
-    const base = { chapterId: summary.id, file: summary.file, order: summary.order, title: summary.title, version: summary.version };
+    const base: Pick<AudiobookRow, "chapterId" | "file" | "order" | "title" | "version" | "picture"> = { chapterId: summary.id, file: summary.file, order: summary.order, title: summary.title, version: summary.version };
     if (preparation.kind === "unavailable") {
       rows.push({ ...base, planned: false, total: 0, made: 0, stale: 0, flagged: 0, notMade: 0, seconds: null, castTrouble: preparation.reason });
       continue;
     }
     const plan = preparation.kind === "ready" ? preparation.prepared.plan : preparation.plan;
     unattributed += plan.cast !== null && plan.cast !== "unreadable" ? plan.ambiguous : 0;
+    for (const planned of plan.blocks) {
+      for (const turn of planned.block.rows ?? [planned.block]) {
+        if (turn.speaker === undefined) continue;
+        const key = turn.sheet ?? `:${turn.speaker}`;
+        if (!cast.has(key)) cast.set(key, { ...(turn.sheet !== undefined ? { sheet: turn.sheet } : {}), name: turn.sheet !== undefined ? sheetName(turn.sheet) : turn.speaker });
+      }
+    }
+    const picture = await chapterFirstPicture(store, plan, listed);
+    if (picture !== null) base.picture = picture;
     const counts: { total: number; made: number; stale: number; flagged: number; notMade: number; awaiting?: number } = { total: plan.blocks.length, made: 0, stale: 0, flagged: 0, notMade: 0 };
     for (const planned of plan.blocks) {
       if (planned.state === "made") counts.made += 1;
@@ -264,6 +279,7 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
     },
     // The book's Requests row (design turn 185d) shows only where the narrator's reader groups and this machine can split.
     ...(groupingOffered(narratorModel, room.transcriber === true) ? { requests: bookFile !== null && bookFile !== "unreadable" && bookFile.requests === "per-paragraph" ? "per-paragraph" as const : "grouped" as const } : {}),
+    cast: [...cast.values()],
   };
 }
 
