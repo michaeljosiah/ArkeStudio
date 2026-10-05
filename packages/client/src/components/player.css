@@ -116,6 +116,45 @@
   color: var(--destructive);
 }
 
+/* ---- The dock in a page's flow (design turn 199) ----------------
+   A page that keeps a place for the dock at the foot of its column
+   gets it there as a 64-high bar (60 on a phone): the page's scroll
+   ends above it, so nothing it lists is ever under the player. */
+.fy-dockbar {
+  position: relative;
+  flex: none;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 18px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  box-sizing: border-box;
+}
+.fy-dockbar__line { position: absolute; left: 0; top: -1px; height: 2px; background: var(--foreground); }
+.fy-dockbar__pic { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; flex: none; }
+.fy-dockbar__tx { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.fy-dockbar__tx b { font: var(--type-ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-dockbar__tx span { font: var(--type-mono); font-size: var(--text-xs); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-dockbar__tr { display: flex; align-items: center; gap: 6px; margin: 0 auto; }
+.fy-dockbar__ib { width: 36px; height: 36px; flex: none; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 999px; background: none; color: var(--foreground); cursor: pointer; transition: var(--transition-control); }
+.fy-dockbar__ib--mute { color: var(--muted-foreground); }
+.fy-dockbar__ib:hover { background: var(--accent); color: var(--foreground); }
+.fy-dockbar__pp, .fy-dockbar__pp:hover { width: 40px; height: 40px; background: var(--foreground); color: var(--background); }
+.fy-dockbar__tm { font: var(--type-mono); font-size: var(--text-xs); color: var(--muted-foreground); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fy-dockbar__ib:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+@media (max-width: 599px) {
+  .fy-dockbar { height: 60px; padding: 0 12px; gap: 10px; }
+  .fy-dockbar__tx { flex: 1; }
+  .fy-dockbar__tr { margin: 0; }
+  .fy-dockbar__wide { display: none; }
+  .fy-dockbar__ib { width: 44px; height: 44px; }
+  .fy-dockbar .fy-dockbar__pp { width: 40px; height: 40px; }
+}
+
 /* ---- The round transport control on a row --------------------
    30px, filled — the same object as the dock's, so starting a clip
    from a row reads as the row's button moving into the dock. */

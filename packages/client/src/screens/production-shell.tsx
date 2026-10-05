@@ -364,7 +364,10 @@ export function ProductionLayout() {
   const crumbChapter = chapterRoute && !compact && (chapterView === "audiobook" || chapterView === "timing")
     ? production?.chapters.find((chapter) => chapter.id === chapterId || chapter.file === chapterId)
     : undefined;
-  const sceneDeepPhone = !refusal && (chapterDeep || episodeDeep || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
+  // The audiobook's show page (design turn 199f) is its own phone page: the backdrop is the top
+  // of the screen under a back press, and the page's own bar takes over once it scrolls away.
+  const audiobookDeep = phone && /\/story\/audiobook\/?$/.test(location.pathname) && production !== undefined && production !== null;
+  const sceneDeepPhone = !refusal && (chapterDeep || episodeDeep || audiobookDeep || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
   const wantsFold = compact && chapterRoute ? false : compact && (sceneRoute || cutRoute) || (railChoice ?? (cutRoute || sceneDetailDefault));
   const drawerMode = !phone && wantsFold && (compact || coarse);
   const folded = !phone && wantsFold && !drawerMode;

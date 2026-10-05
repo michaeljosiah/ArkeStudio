@@ -94,7 +94,8 @@ it('compact chapters retain voiced playback whenever a voice record exists',asyn
 });
 it('the phone audiobook door holds no count, price or eyebrow until the door lands',async()=>{
  await mount('p/ledger/story/audiobook');
- assert.equal(find('[data-testid="audiobook-line"]').textContent,'','no stray "…" eyebrow over the title');
+ // The meta line holds what the bundle knows (design turn 199): no length and no reader, and no stray "…", until the door lands.
+ assert.match(find('[data-testid="audiobook-line"]').textContent!,/^Audiobook · \d+ chapters?$/);
  assert.equal(find('.fy-abdoor-held'),null,'"0 blocks · price unavailable" is not held at the foot while the door opens');
 });
 it('a compact read-only chapter with no time set draws no empty When pill',async()=>{

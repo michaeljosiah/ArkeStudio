@@ -3204,7 +3204,7 @@ export function NotesPress({ worldId, productionId, chapterFile, notes, disabled
  * a chapter note runs to 300 characters, and on one line it was cut off however wide the window
  * (turn 188). Enter still leaves the field, as it does on the single line.
  */
-function NoteRow({ label, value, disabled, onCommit, max = CADENCE_NOTE_MAX, multiline = false, area = false, stacked = false }: { label: string; value: string | undefined; disabled: boolean; onCommit: (note: string | null) => void; max?: number; multiline?: boolean; area?: boolean; /** The label and count over the field (194e's notes sheet). */ stacked?: boolean }) {
+export function NoteRow({ label, value, disabled, onCommit, max = CADENCE_NOTE_MAX, multiline = false, area = false, stacked = false }: { label: string; value: string | undefined; disabled: boolean; onCommit: (note: string | null) => void; max?: number; multiline?: boolean; area?: boolean; /** The label and count over the field (194e's notes sheet). */ stacked?: boolean }) {
   const [draft, setDraft] = useState<string | null>(null);
   const shown = draft ?? value ?? "";
   const commit = () => {
@@ -3434,7 +3434,7 @@ export function BookReadingPanel({ worldId, productionId, title, bookNote, speak
   );
 }
 
-function SpeakerNoteInput({ worldId, productionId, speaker, disabled }: { worldId: string; productionId: string; speaker: { key: string; name: string; note?: string }; disabled: boolean }) {
+export function SpeakerNoteInput({ worldId, productionId, speaker, disabled }: { worldId: string; productionId: string; speaker: { key: string; name: string; note?: string }; disabled: boolean }) {
   const [draft, setDraft] = useState<string | null>(null);
   const value = draft ?? speaker.note ?? "";
   const commit = () => {

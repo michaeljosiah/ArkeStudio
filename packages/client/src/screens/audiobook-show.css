@@ -1,0 +1,193 @@
+/*
+ * The audiobook page as a show page (design turn 199, SPEC-047). A listener starts here, as on a
+ * series' page: the world's key art as a backdrop under the title, one meta line and the presses,
+ * the cast as portraits, the chapters as episodes. What sets the reading up is one press away, in
+ * the Reading sheet, and never on the page. The hero always wears the media overlay colours, as
+ * the players do, whatever the app's theme (SPEC-001 R-11).
+ *
+ * The page keeps its own scroll and a place for the player at its foot (`__dock`), so the page's
+ * scroll ends above the player and nothing it lists is ever under it.
+ */
+.fy-prodmain.fy-abshow { position: relative; padding: 0; gap: 0; overflow: hidden; display: flex; flex-direction: column; }
+.fy-abshow__page { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.fy-abshow__dock { flex: none; display: flex; flex-direction: column; }
+
+/* The column the hero's content and the body share: the page's 1080 (188), 56 in at 1440, 40 at
+   1100, 32 narrower. */
+.fy-abshow__wrap { position: relative; width: 100%; max-width: 1192px; margin: 0 auto; padding: 0 var(--abshow-pad, 56px); box-sizing: border-box; }
+.fy-abshow { --abshow-pad: 56px; --abshow-card: 220px; --abshow-thumb: 240px; }
+@media (max-width: 1299px) { .fy-abshow { --abshow-pad: 40px; --abshow-card: 188px; --abshow-thumb: 208px; } }
+@media (max-width: 999px) { .fy-abshow { --abshow-pad: 32px; } }
+
+/* ---- The hero: no fixed and no maximum height, so its presses never clip (rule 2). ---------- */
+.fy-abshow__hero { position: relative; min-height: 440px; display: flex; flex-direction: column; justify-content: flex-end; background: var(--media-overlay-bg); color: var(--media-overlay-fg); }
+/* The backdrop and its scrims clip in a layer of their own: the hero itself does not, so the ⋯
+   menu can open past its foot. */
+.fy-abshow__bd { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.fy-abshow__bd .fy-portrait, .fy-abshow__bd .fy-portrait--fallback { position: absolute; top: 0; right: 0; height: 100%; width: 74%; object-fit: cover; object-position: center 26%; border-radius: 0; font-size: 0; background: none; }
+.fy-abshow__bd::before { content: ""; position: absolute; inset: 0; z-index: 1; background: linear-gradient(90deg, var(--media-overlay-bg) 26%, color-mix(in srgb, var(--media-overlay-bg) 72%, transparent) 42%, color-mix(in srgb, var(--media-overlay-bg) 10%, transparent) 72%, transparent); }
+.fy-abshow__bd::after { content: ""; position: absolute; inset: 0; z-index: 1; background: linear-gradient(to top, var(--media-overlay-bg), color-mix(in srgb, var(--media-overlay-bg) 40%, transparent) 26%, transparent 48%); }
+.fy-abshow__hero > .fy-abshow__wrap { padding-top: 150px; padding-bottom: 44px; }
+.fy-abshow__title { margin: 0; max-width: 640px; font: var(--type-title); font-size: var(--text-5xl); line-height: 1.04; letter-spacing: var(--tracking-tight); color: inherit; }
+.fy-abshow__meta { margin-top: 12px; font-size: var(--text-md); color: color-mix(in srgb, var(--media-overlay-fg) 72%, transparent); }
+.fy-abshow__acts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 24px; }
+.fy-abshow__btn { position: relative; height: 44px; padding: 0 18px; border-radius: 999px; display: inline-flex; align-items: center; gap: 8px; flex: none; white-space: nowrap; font: var(--type-ui); font-weight: 600; color: var(--media-overlay-fg); border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 34%, transparent); background: color-mix(in srgb, var(--media-overlay-bg) 45%, transparent); cursor: pointer; transition: var(--transition-control); }
+.fy-abshow__btn:hover:not(:disabled) { background: color-mix(in srgb, var(--media-overlay-fg) 14%, transparent); }
+.fy-abshow__btn:disabled { opacity: 0.55; cursor: default; }
+.fy-abshow__btn:focus-visible { outline: 2px solid var(--media-overlay-fg); outline-offset: 2px; }
+.fy-abshow__btn--pri, .fy-abshow__btn--pri:hover:not(:disabled) { background: var(--media-overlay-fg); color: var(--media-overlay-bg); border-color: transparent; padding: 0 24px; }
+.fy-abshow__btn--pri:hover:not(:disabled) { opacity: 0.9; }
+.fy-abshow__btn em { font-style: normal; font-weight: 400; opacity: 0.7; }
+.fy-abshow__btn .fy-abshow__w { color: var(--warning); font-weight: 500; }
+.fy-abshow__btn--ic { width: 44px; padding: 0; justify-content: center; }
+.fy-abshow__btn--on { background: color-mix(in srgb, var(--media-overlay-fg) 18%, transparent); }
+.fy-abshow__dot { position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--warning); }
+.fy-abshow__run { display: inline-flex; align-items: center; gap: 10px; font: var(--type-mono); font-size: var(--text-xs); color: color-mix(in srgb, var(--media-overlay-fg) 80%, transparent); }
+.fy-abshow__acts .fy-rvu { color: var(--foreground); }
+.fy-abshow__note { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 14px; font: var(--type-mono); font-size: var(--text-xs); color: color-mix(in srgb, var(--media-overlay-fg) 72%, transparent); }
+.fy-abshow__note .fy-abshow__warn { color: var(--warning); }
+.fy-abshow__note button { margin-left: 6px; padding: 0 4px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+
+/* The ⋯ menu: Reading, with its reading and one warning word as data, and Narrator. */
+.fy-abshow__more { position: relative; display: inline-flex; }
+.fy-abshow__menu { position: absolute; z-index: 6; left: 0; top: calc(100% + 8px); width: 300px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--foreground); box-shadow: var(--shadow-lg); padding: 6px; font-size: var(--text-sm); }
+.fy-abshow__menu button { width: 100%; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; font-weight: 500; text-align: left; cursor: pointer; }
+.fy-abshow__menu button:hover, .fy-abshow__menu button:focus-visible { background: var(--secondary); outline: none; }
+.fy-abshow__menu button span { flex: 1; }
+.fy-abshow__menu em { font-style: normal; font: var(--type-mono); font-size: var(--text-xs); color: var(--muted-foreground); }
+.fy-abshow__menu em.fy-abshow__w { color: var(--warning); }
+
+/* ---- The body: Cast, then Chapters. --------------------------------------------------------- */
+.fy-abshow__body { padding-top: 36px; padding-bottom: 40px; }
+.fy-abshow__h { margin: 0 0 16px; font: var(--type-h3); color: var(--foreground); }
+.fy-abshow__castwrap { position: relative; margin-bottom: 44px; }
+.fy-abshow__cast { display: flex; gap: 18px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; }
+.fy-abshow__cast::-webkit-scrollbar { display: none; }
+.fy-abshow__card { width: var(--abshow-card); flex: none; display: flex; flex-direction: column; justify-content: flex-start; align-self: flex-start; padding: 0; border: 0; background: none; color: var(--foreground); text-align: left; cursor: pointer; scroll-snap-align: start; font: inherit; }
+.fy-abshow__card:disabled { cursor: default; }
+.fy-abshow__card-im { position: relative; display: block; aspect-ratio: 2 / 3; border-radius: 12px; overflow: hidden; background: var(--secondary); }
+.fy-abshow__card-im .fy-portrait, .fy-abshow__card-im .fy-portrait--fallback { width: 100%; height: 100%; object-fit: cover; object-position: center 20%; display: block; border-radius: 0; font-size: 0; }
+.fy-abshow__card--narrator .fy-abshow__card-im .fy-portrait { object-position: center 6%; }
+.fy-abshow__ini { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: var(--type-title); font-size: var(--text-4xl); color: var(--muted-foreground); }
+.fy-abshow__wv { position: absolute; left: 10px; bottom: 10px; width: 30px; height: 30px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--media-overlay-bg) 62%, transparent); color: var(--media-overlay-fg); }
+.fy-abshow__card-nm { display: block; margin-top: 10px; font: var(--type-ui); font-size: var(--text-base); }
+.fy-abshow__card-rl { display: block; margin-top: 1px; font-size: var(--text-sm); color: var(--muted-foreground); }
+.fy-abshow__card:hover:not(:disabled) .fy-abshow__card-im, .fy-abshow__card:focus-visible .fy-abshow__card-im { outline: 2px solid var(--foreground); outline-offset: 3px; }
+.fy-abshow__card:focus-visible { outline: none; }
+/* More cards than fit scroll sideways, with arrows on hover. */
+.fy-abshow__arrow { position: absolute; top: calc(var(--abshow-card) * 0.75 - 18px); z-index: 2; width: 36px; height: 36px; border-radius: 999px; display: none; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--border); background: var(--background); color: var(--foreground); box-shadow: var(--shadow-lg); cursor: pointer; }
+.fy-abshow__arrow--prev { left: -12px; }
+.fy-abshow__arrow--next { right: -12px; }
+@media (hover: hover) { .fy-abshow__castwrap:hover .fy-abshow__arrow { display: inline-flex; } }
+
+/* A chapter as an episode: thumbnail, title, length, a state word only when needed, synopsis. */
+.fy-abshow__ep { display: grid; grid-template-columns: minmax(0, 1fr) 36px; gap: 22px; align-items: center; padding: 14px 12px; margin: 0 -12px; border-radius: 14px; }
+.fy-abshow__ep:hover, .fy-abshow__ep:focus-within { background: var(--secondary); }
+.fy-abshow__ep-main { display: grid; grid-template-columns: var(--abshow-thumb) minmax(0, 1fr); grid-template-rows: 1fr auto auto 1fr; grid-template-areas: "th ." "th tx" "th syn" "th ."; column-gap: 22px; align-items: center; padding: 0; border: 0; background: none; color: var(--foreground); text-align: left; font: inherit; cursor: pointer; min-width: 0; }
+.fy-abshow__ep-main:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; border-radius: 10px; }
+.fy-abshow__th { grid-area: th; position: relative; display: block; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; background: var(--secondary); }
+.fy-abshow__th .fy-portrait, .fy-abshow__th .fy-portrait--fallback { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 0; font-size: 0; }
+.fy-abshow__th--none { display: flex; align-items: center; justify-content: center; background: transparent; border: 1px dashed var(--border); color: var(--muted-foreground); font: var(--type-title); }
+.fy-abshow__pb { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: color-mix(in srgb, var(--media-overlay-fg) 26%, transparent); }
+.fy-abshow__pb i { display: block; height: 100%; background: var(--media-overlay-fg); }
+.fy-abshow__pl { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: color-mix(in srgb, var(--media-overlay-bg) 22%, transparent); }
+.fy-abshow__pl span { width: 44px; height: 44px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: var(--media-overlay-fg); color: var(--media-overlay-bg); }
+.fy-abshow__ep:hover .fy-abshow__pl, .fy-abshow__ep-main:focus-visible .fy-abshow__pl { display: flex; }
+.fy-abshow__tx { grid-area: tx; display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; font: var(--type-ui); font-size: var(--text-md); min-width: 0; }
+.fy-abshow__m { display: inline-flex; align-items: baseline; gap: 4px 12px; }
+.fy-abshow__d { font: var(--type-mono); font-size: var(--text-xs); color: var(--muted-foreground); }
+.fy-abshow__st { font-size: var(--text-sm); font-weight: 400; color: var(--muted-foreground); }
+.fy-abshow__syn { grid-area: syn; margin-top: 6px; max-width: 640px; font-size: var(--text-sm); line-height: 1.55; color: var(--muted-foreground); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.fy-abshow__go { width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; padding: 0; color: var(--muted-foreground); border: 1px solid transparent; background: none; cursor: pointer; }
+.fy-abshow__ep:hover .fy-abshow__go, .fy-abshow__go:focus-visible { border-color: var(--border); color: var(--foreground); background: var(--background); }
+
+/* ---- Reading: one sheet, 460 from the side (a sheet from the foot on a phone). ------------- */
+.fy-abshow__scrim { position: absolute; inset: 0; z-index: 5; background: color-mix(in srgb, var(--background) 55%, transparent); }
+.fy-abshow__sheet { position: absolute; z-index: 6; top: 0; right: 0; bottom: 0; width: 460px; max-width: 100%; border-left: 1px solid var(--border); background: var(--background); color: var(--foreground); box-shadow: -18px 0 50px color-mix(in srgb, var(--foreground) 10%, transparent); display: flex; flex-direction: column; outline: none; }
+.fy-abshow__sheet-hd { display: flex; align-items: center; gap: 10px; padding: 20px 22px 6px; }
+.fy-abshow__sheet-hd h3 { margin: 0; flex: 1; font: var(--type-h3); }
+.fy-abshow__x { width: 28px; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; background: none; color: var(--muted-foreground); cursor: pointer; }
+.fy-abshow__x:hover { background: var(--accent); color: var(--foreground); }
+.fy-abshow__sheet-bdy { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 22px; display: flex; flex-direction: column; gap: 14px; --abshow-nw: 170px; }
+.fy-abshow__sheet-ft { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 22px 18px; border-top: 1px solid var(--border); }
+.fy-abshow__lbl { display: flex; justify-content: space-between; font: var(--type-label); color: var(--muted-foreground); margin-top: 4px; }
+.fy-abshow__mono { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abshow__kv { display: flex; align-items: center; gap: 10px; min-height: 40px; font-size: var(--text-sm); }
+.fy-abshow__kv > b { width: var(--abshow-nw); flex: none; font: var(--type-label); font-weight: 500; color: var(--muted-foreground); }
+/* The reading's seg, as 184's sheets draw it. */
+.fy-abshow__sheet .fy-seg { display: inline-flex; gap: 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: none; }
+.fy-abshow__sheet .fy-seg__item { height: 26px; min-height: 0; padding: 0 10px; display: inline-flex; align-items: center; border: 0; border-radius: 0; background: none; box-shadow: none; font: var(--type-label); color: var(--muted-foreground); }
+.fy-abshow__sheet .fy-seg__item--active { background: var(--secondary); color: var(--foreground); }
+.fy-abshow__speakers { display: flex; flex-direction: column; margin-top: -8px; }
+.fy-abshow__sp { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 0; border: 0; border-bottom: 1px solid var(--border); background: none; color: var(--foreground); font: inherit; font-size: var(--text-sm); text-align: left; width: 100%; }
+button.fy-abshow__sp { cursor: pointer; }
+button.fy-abshow__sp:hover .fy-abshow__c { color: var(--foreground); }
+.fy-abshow__sp > b { width: var(--abshow-nw); flex: none; font-weight: 500; overflow-wrap: anywhere; }
+.fy-abshow__sp--key > b { font: var(--type-label); font-weight: 500; color: var(--muted-foreground); }
+.fy-abshow__v { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.fy-abshow__v small { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abshow__v--w, .fy-abshow__v small.fy-abshow__w { color: var(--warning); }
+.fy-abshow__v .fy-ab__note-input { width: 100%; }
+.fy-abshow__c { color: var(--muted-foreground); display: inline-flex; flex: none; padding: 0; border: 0; background: none; cursor: pointer; }
+.fy-abshow__sp > .fy-abshow__mono { flex: none; white-space: nowrap; }
+.fy-abshow__draft { display: flex; align-items: center; gap: 10px; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+/* The book note, as 194e's notes sheet draws a note: the label and count over the field. */
+.fy-abshow__sheet .fy-vd__note { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "k n" "f f"; row-gap: 6px; align-items: baseline; }
+.fy-abshow__sheet .fy-vd__note > .fy-vd__note-k { grid-area: k; font: var(--type-label); color: var(--muted-foreground); }
+.fy-abshow__sheet .fy-vd__note > .fy-vd__note-count { grid-area: n; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abshow__sheet .fy-vd__note > textarea { grid-area: f; width: 100%; height: 68px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: var(--type-body); font-size: var(--text-sm); resize: none; background: var(--background); color: var(--foreground); }
+/* The book's requests (185d) in the sheet's row grammar: the key, the choice, the cap under it. */
+.fy-abshow__sheet .fy-ab__requests { display: flex; flex-direction: column; gap: 14px; }
+.fy-abshow__sheet .fy-ab__requests-row { display: grid; grid-template-columns: var(--abshow-nw) 1fr; column-gap: 10px; row-gap: 3px; align-items: center; min-height: 40px; font-size: var(--text-sm); }
+.fy-abshow__sheet .fy-ab__requests-row > .fy-vd__note-k { grid-row: span 2; font: var(--type-label); font-weight: 500; color: var(--muted-foreground); }
+.fy-abshow__sheet .fy-ab__requests-row > .fy-mono { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abshow__sheet .fy-ab__requests-row > :nth-child(2) { justify-self: start; }
+
+/* ---- A phone (199f). ------------------------------------------------------------------------ */
+.fy-abshow__ptop { position: absolute; left: 10px; top: 6px; z-index: 2; width: 40px; height: 40px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; color: var(--media-overlay-fg); background: color-mix(in srgb, var(--media-overlay-bg) 50%, transparent); cursor: pointer; }
+.fy-abshow__pbar { position: absolute; left: 0; right: 0; top: 0; z-index: 4; height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--border); background: var(--background); color: var(--foreground); font: var(--type-ui); }
+.fy-abshow__pbar > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-abshow__pbar > button, .fy-abshow__pbar .fy-abshow__more > button { position: relative; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; }
+.fy-abshow__pbar > button { width: 28px; }
+.fy-abshow__pbar .fy-abshow__more > button { color: var(--muted-foreground); }
+
+@media (max-width: 599px) {
+  .fy-abshow { --abshow-pad: 16px; --abshow-card: 132px; --abshow-thumb: 128px; }
+  .fy-abshow__hero { min-height: 0; justify-content: flex-start; }
+  .fy-abshow__bd { position: relative; height: 300px; flex: none; }
+  .fy-abshow__bd .fy-portrait, .fy-abshow__bd .fy-portrait--fallback { width: 100%; object-position: 62% 20%; }
+  .fy-abshow__bd::before { display: none; }
+  .fy-abshow__bd::after { background: linear-gradient(to top, var(--media-overlay-bg), transparent 34%); }
+  .fy-abshow__hero > .fy-abshow__wrap { margin-top: -64px; padding-top: 0; padding-bottom: 20px; }
+  .fy-abshow__hero--bare > .fy-abshow__wrap { margin-top: 0; padding-top: 64px; }
+  .fy-abshow__title { font-size: var(--text-3xl); }
+  .fy-abshow__meta { margin-top: 8px; font-size: var(--text-sm); }
+  .fy-abshow__acts { margin-top: 16px; gap: 8px; }
+  .fy-abshow__btn { padding: 0 14px; }
+  .fy-abshow__btn--pri { width: 100%; justify-content: center; height: 48px; }
+  .fy-abshow__btn--grow { flex: 1; justify-content: center; min-width: 0; }
+  .fy-abshow__btn--ic { padding: 0; }
+  .fy-abshow__more { margin-left: auto; }
+  .fy-abshow__menu { left: auto; right: 0; }
+  .fy-abshow__body { padding-top: 22px; padding-bottom: 24px; }
+  .fy-abshow__h { margin-bottom: 12px; }
+  .fy-abshow__castwrap { margin: 0 calc(var(--abshow-pad) * -1) 26px 0; }
+  .fy-abshow__cast { gap: 12px; }
+  .fy-abshow__chapters .fy-abshow__h { margin-bottom: 4px; }
+  .fy-abshow__ep { display: block; padding: 12px 0; margin: 0; border-radius: 0; border-bottom: 1px solid var(--border); }
+  .fy-abshow__ep:hover, .fy-abshow__ep:focus-within { background: none; }
+  .fy-abshow__ep-main { width: 100%; grid-template-rows: auto auto; grid-template-areas: "th tx" "syn syn"; column-gap: 12px; }
+  .fy-abshow__tx { flex-direction: column; align-items: flex-start; gap: 3px; font-size: var(--text-base); }
+  .fy-abshow__m { gap: 8px; font-size: var(--text-sm); }
+  .fy-abshow__th--none { font: var(--type-h3); }
+  .fy-abshow__syn { margin-top: 8px; line-height: 1.5; }
+  .fy-abshow__go { display: none; }
+  .fy-abshow__sheet { top: 120px; left: 0; width: auto; border-left: 0; border-top: 1px solid var(--border); border-radius: 22px 22px 0 0; box-shadow: 0 -12px 40px color-mix(in srgb, var(--foreground) 14%, transparent); }
+  .fy-abshow__sheet::before { content: ""; width: 40px; height: 4px; border-radius: 2px; background: var(--neutral-400); align-self: center; margin-top: 8px; flex: none; }
+  .fy-abshow__sheet-hd { padding: 12px 16px 4px; }
+  .fy-abshow__sheet-bdy { padding: 8px 16px; --abshow-nw: 78px; }
+  .fy-abshow__sheet-bdy .fy-seg { display: flex; flex: 1; }
+  .fy-abshow__sheet-bdy .fy-seg .fy-seg__item { flex: 1; justify-content: center; }
+  .fy-abshow__sheet-ft { padding: 12px 16px 26px; }
+  .fy-abshow__sheet-ft .ui-btn { height: 44px; flex: 1; justify-content: center; }
+}

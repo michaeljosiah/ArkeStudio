@@ -63,7 +63,10 @@ it("replaces the phone rail with every film destination and switches production 
   assert.equal(dom.document.querySelector(".fy-page-sheet[open]"), null);
   assert.deepEqual(labels(), ["Dashboard", "Cast", "Develop", "Overview", "Chapters", "Audiobook", "Artifacts"]);
   await click('[aria-label="Production pages"] a[href$="/story/audiobook"]');
-  assert.equal(dom.document.querySelector('[aria-label="Production pages"] [aria-current="page"]')?.textContent, "Audiobook");
+  // The audiobook's show page is a phone page of its own (design turn 199f): its backdrop is the
+  // top of the screen under a back press, with no production chrome over it.
+  assert.ok(dom.document.querySelector('[data-screen="audiobook"]'), "the audiobook page");
+  assert.equal(dom.document.querySelector('[aria-label="Production pages"]'), null);
 });
 
 it("gives episodic and branching productions their own page destinations", async () => {

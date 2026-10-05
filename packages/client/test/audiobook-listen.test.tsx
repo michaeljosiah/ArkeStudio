@@ -131,7 +131,8 @@ describe("Listen (turn 186)", () => {
     assert.equal(bookHasTakes({ chapters: chapters(0) }), false);
     assert.equal(bookHasTakes({ chapters: chapters(2) }), true);
     const m = await mount(inkbound(0));
-    assert.equal(q(m, '[data-testid="audiobook-listen"]')?.hasAttribute("disabled"), true);
+    // Not drawn, not disabled (design turn 199): until a block is made, Read the book leads.
+    assert.equal(q(m, '[data-testid="audiobook-listen"]'), null);
   });
 
   it("opens the player over the window on the coordinator's plan, a chapter read in part included", async () => {
@@ -215,11 +216,13 @@ describe("Listen (turn 186)", () => {
     assert.equal(q(m, '[data-testid="audiobook-player"]'), null, "and gone from the body when closed");
   });
 
-  it("is the head's one primary, with a play icon, once a block is made — Read the book stands back", async () => {
+  it("is the hero's primary, with a play mark, once a block is made — Export follows and Read the book stands back (199)", async () => {
     const none = await mount(inkbound(0));
-    const waiting = q(none, '[data-testid="audiobook-listen"]');
-    assert.equal(waiting?.classList.contains("ui-btn--primary"), false, "a ghost while there is nothing to hear");
-    assert.ok(waiting?.querySelector("svg"), "the play icon either way");
+    const doorAsk0 = none.sent.filter((message): message is Extract<ClientMessage, { kind: "open-audiobook" }> => message.kind === "open-audiobook").at(-1)!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: doorAsk0.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: DOOR }));
+    assert.equal(q(none, '[data-testid="audiobook-listen"]'), null, "nothing to hear: no Listen");
+    assert.equal(q(none, '[data-testid="audiobook-export-open"]'), null, "and no Export");
+    assert.ok(q(none, '[data-testid="read-book"]')?.classList.contains("fy-abshow__btn--pri"), "Read the book leads");
     await act(async () => none.root.unmount());
     open.splice(0);
     none.container.remove();
@@ -227,14 +230,13 @@ describe("Listen (turn 186)", () => {
     const doorAsk = m.sent.filter((message): message is Extract<ClientMessage, { kind: "open-audiobook" }> => message.kind === "open-audiobook").at(-1)!;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: doorAsk.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: DOOR }));
     const listen = q(m, '[data-testid="audiobook-listen"]');
-    assert.equal(listen?.classList.contains("ui-btn--primary"), true);
-    assert.equal(q(m, '[data-testid="read-book"]')?.classList.contains("ui-btn--secondary"), true, "the read of the rest stands back");
+    assert.equal(listen?.classList.contains("fy-abshow__btn--pri"), true);
+    assert.equal(q(m, '[data-testid="read-book"]')?.classList.contains("fy-abshow__btn--pri"), false, "the read of the rest stands back");
     assert.ok(listen?.querySelector("svg"));
-    const head = listen!.closest(".fy-h1row")!;
+    const head = q(m, '[data-testid="audiobook-presses"]')!;
     const order = [...head.querySelectorAll("button")].map((button) => button.getAttribute("data-testid"));
-    assert.ok(order.indexOf("audiobook-listen") < order.indexOf("audiobook-export-open"), "Listen before Export");
-    assert.equal(q(m, '[data-testid="audiobook-export-open"]')?.classList.contains("ui-btn--ghost"), true);
-    assert.equal(head.querySelectorAll(".ui-btn--primary").length, 1, "one primary in the head");
+    assert.deepEqual(order, ["audiobook-listen", "audiobook-export-open", "read-book", "audiobook-more"], "Listen, Export, Read the book, ⋯");
+    assert.equal(head.querySelectorAll(".fy-abshow__btn--pri").length, 1, "one primary in the hero");
   });
 
   it("serves every file the plan names through the app", () => {
