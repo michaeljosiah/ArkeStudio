@@ -1169,6 +1169,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       /** The requests the read makes, and as many as it would make a block a request (design turn 185a). */
       requests: z.number().int().min(0).optional(),
       perParagraph: z.number().int().min(0).optional(),
+      /** The paragraphs a read asked to cast first will cast once the price is answered (design turn 198): the confirm's `Cast 2 paragraphs first`. */
+      toCast: z.number().int().min(1).optional(),
     })
     .strict(),
   z

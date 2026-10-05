@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { voicedBlocks } from "@arke-studio/contracts";
 import { castLines, mergeVoicePasses, readVoices, setVoicePin, verifyVoices, voicesPath, type RawVoices, type VoicesDeriverInput } from "../../src/productions/voices.js";
-import { VOICE_PINS_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { CAST_PARAGRAPHS_SCHEMA_VERSION, VOICE_PINS_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { openChapter, saveChapter } from "../../src/productions/ops.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -167,11 +167,13 @@ describe("the author's corrections to the cast (design turn 155, SPEC-012 R-62..
   it("a pin is written beside the derived lines, raises the world first, and the read applies it", async () => {
     const { dir, store } = await open();
     await castLines(store, PRODUCTION, "neap", async () => ({ lines: [{ speaker: "maren-kest", quote: SPAN }] }));
-    assert.ok((await worldSchema(dir)) < VOICE_PINS_SCHEMA_VERSION, "a cast with no pins leaves the world where earlier builds read it");
+    // A cast written now keeps each paragraph's hash (design turn 198), a field the builds before
+    // it read as unreadable, so the cast itself raises the world past them.
+    assert.equal(await worldSchema(dir), CAST_PARAGRAPHS_SCHEMA_VERSION, "a cast keeps its paragraphs' hashes, which raises the world");
     const body = (await openChapter(store, PRODUCTION, "neap")).body;
     const record = await setVoicePin(store, PRODUCTION, "neap", { paragraph: 0, occurrence: 0, quote: SPAN, narration: true });
     assert.deepEqual(record.pins, [{ paragraph: 0, occurrence: 0, quote: SPAN, narration: true }]);
-    assert.equal(await worldSchema(dir), VOICE_PINS_SCHEMA_VERSION, "raised before the first record with pins");
+    assert.ok((await worldSchema(dir)) >= VOICE_PINS_SCHEMA_VERSION, "raised before the first record with pins");
     assert.deepEqual(await readVoices(store, PRODUCTION, "01-neap"), record);
     assert.ok(!voicedBlocks(body, record).blocks.some((block) => block.sheet === "maren-kest"), "the span reads as narration now");
     const stamp = chapterOf(store, "neap").voices;
@@ -190,6 +192,10 @@ describe("the author's corrections to the cast (design turn 155, SPEC-012 R-62..
     await castLines(store, PRODUCTION, "neap", async () => ({ lines: [{ speaker: "maren-kest", quote: SPAN }] }));
     await assert.rejects(() => setVoicePin(store, PRODUCTION, "neap", { paragraph: 0, occurrence: 0, quote: "not in the chapter", narration: true }), /not there/);
     await assert.rejects(() => setVoicePin(store, PRODUCTION, "neap", { paragraph: 0, occurrence: 0, quote: SPAN, speaker: "Nobody", sheet: "nobody-at-all" }), /no such character/);
+    // A cast from before paragraph hashes is stale whole once the prose moves under it, as before.
+    const path = join(store.dir, ...voicesPath(PRODUCTION, "01-neap").split("/"));
+    const { paragraphs: _paragraphs, ...legacy } = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    await writeFile(path, JSON.stringify(legacy), "utf8");
     const live = await openChapter(store, PRODUCTION, "neap");
     await saveChapter(store, PRODUCTION, "01-neap", `${live.body}\n\nAnd one more line.`, { baseHash: live.hash });
     await assert.rejects(() => setVoicePin(store, PRODUCTION, "neap", { paragraph: 0, occurrence: 0, quote: SPAN, narration: true }), /cast moved/);
@@ -211,5 +217,120 @@ describe("the author's corrections to the cast (design turn 155, SPEC-012 R-62..
     assert.equal(moved.record.lost, 1, "and it is counted");
     const stamp = chapterOf(store, "neap").voices;
     assert.ok(stamp && !("unreadable" in stamp) && stamp.lost === 1);
+  });
+});
+
+/**
+ * Edited lines keep their speaker, and only edited paragraphs need casting (design turn 198,
+ * SPEC-012 R-66..R-71), on the case that asked for it: "Na love or Juju", chapter 1, 2026-10-05.
+ */
+describe("an edit makes stale only the paragraphs it touches (design turn 198)", () => {
+  const GOAT = [
+    "Tunde was telling the goat story again.",
+    "\"It is not possible,\" Ade said.",
+    "\"The goat was in the boot.\"",
+    "\"The goat was in the boot spiritually. Physically, he was in front.\"",
+    "Ade laughed until his chest hurt.",
+  ].join("\n\n");
+  const EDITED = GOAT
+    .replace("\"The goat was in the boot.\"", "\"The goat was in the boot, Tunde.\"")
+    .replace("\"The goat was in the boot spiritually. Physically, he was in front.\"", "\"Ehn-ehn. The goat was in the boot spiritually,\" Tunde said. \"Physically, he was in front.\"");
+  const FIRST: RawVoices = {
+    lines: [
+      { speaker: "Ade", quote: "\"It is not possible,\"" },
+      { speaker: "maren-kest", quote: "\"The goat was in the boot.\"" },
+      { speaker: "Tunde", quote: "\"The goat was in the boot spiritually. Physically, he was in front.\"" },
+    ],
+  };
+
+  async function goatWorld() {
+    const { dir, store } = await open();
+    const live = await openChapter(store, PRODUCTION, "neap");
+    await saveChapter(store, PRODUCTION, "01-neap", GOAT, { baseHash: live.hash });
+    await castLines(store, PRODUCTION, "neap", async () => FIRST);
+    const cast = await openChapter(store, PRODUCTION, "neap");
+    await saveChapter(store, PRODUCTION, "01-neap", EDITED, { baseHash: cast.hash });
+    return { dir, store };
+  }
+  const read = (body: string, record: Parameters<typeof voicedBlocks>[1]) =>
+    voicedBlocks(body, record).blocks.map((block) => [block.text, block.speaker ?? null, block.kept === true]);
+
+  it("keeps both edited lines' speakers, kept, and the new tag is narration", async () => {
+    const { store } = await goatWorld();
+    const record = await readVoices(store, PRODUCTION, "01-neap");
+    assert.ok(record !== null && record !== "unreadable" && record.paragraphs !== undefined);
+    assert.deepEqual(read(EDITED, record).slice(3), [
+      ["\"The goat was in the boot, Tunde.\"", "maren-kest", true],
+      ["\"Ehn-ehn. The goat was in the boot spiritually,\"", "Tunde", true],
+      ["Tunde said.", null, false],
+      ["\"Physically, he was in front.\"", "Tunde", true],
+      ["Ade laughed until his chest hurt.", null, false],
+    ]);
+  });
+
+  it("Cast 2 paragraphs sends the model those paragraphs with the chapter around them, and merges only their lines", async () => {
+    const { store } = await goatWorld();
+    const seen: VoicesDeriverInput[] = [];
+    const cast = await castLines(store, PRODUCTION, "neap", async (input) => {
+      seen.push(input);
+      return {
+        lines: [
+          { speaker: "maren-kest", quote: "\"The goat was in the boot, Tunde.\"" },
+          { speaker: "Tunde", quote: "\"Ehn-ehn. The goat was in the boot spiritually,\"" },
+          { speaker: "Tunde", quote: "\"Physically, he was in front.\"" },
+          // A line of an untouched paragraph is not this run's to place.
+          { speaker: "Somebody", quote: "\"It is not possible,\"" },
+        ],
+      };
+    }, undefined, "changed");
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0]!.edited, true);
+    assert.equal(seen[0]!.body, EDITED.split("\n\n").slice(2, 4).join("\n\n"), "the two edited paragraphs alone");
+    assert.ok(seen[0]!.context?.includes("Ade laughed"), "with the chapter around them as context");
+    assert.equal(cast.lines, 3);
+    assert.equal(cast.dropped, 1, "the line the model placed outside the edited paragraphs is not written");
+    assert.deepEqual(cast.record.lines.map((line) => [line.paragraph, line.speaker, line.quote]), [
+      [1, "Ade", "\"It is not possible,\""],
+      [2, "maren-kest", "\"The goat was in the boot, Tunde.\""],
+      [3, "Tunde", "\"Ehn-ehn. The goat was in the boot spiritually,\""],
+      [3, "Tunde", "\"Physically, he was in front.\""],
+    ]);
+    assert.equal(cast.record.hash, (await openChapter(store, PRODUCTION, "neap")).bodyHash, "current again");
+    assert.ok(read(EDITED, cast.record).every(([, , kept]) => kept === false), "cast, so nothing is kept any more");
+  });
+
+  it("gives a line to a speaker while paragraphs wait: on an untouched paragraph and on a kept line, never on uncast words of an edited one", async () => {
+    const { store } = await goatWorld();
+    // Untouched paragraph: narration given to Odile.
+    const one = await setVoicePin(store, PRODUCTION, "neap", { paragraph: 1, occurrence: 0, quote: "Ade said.", speaker: "Odile" });
+    assert.deepEqual(one.pins, [{ paragraph: 1, occurrence: 0, quote: "Ade said.", speaker: "Odile" }]);
+    // A kept line: choosing its speaker is what checks it, so it is a pin and the mark goes.
+    const kept = "\"The goat was in the boot, Tunde.\"";
+    const two = await setVoicePin(store, PRODUCTION, "neap", { paragraph: 2, occurrence: 0, quote: kept, speaker: "maren-kest", sheet: "maren-kest" });
+    assert.ok(two.pins?.some((pin) => pin.quote === kept && pin.sheet === "maren-kest"));
+    const blocks = read(EDITED, two);
+    assert.deepEqual(blocks.find(([text]) => text === kept), [kept, "maren-kest", false]);
+    assert.deepEqual(blocks.find(([text]) => text === "\"Physically, he was in front.\""), ["\"Physically, he was in front.\"", "Tunde", true], "the other paragraph still waits, kept");
+    // Narration in a paragraph left to cast waits for its cast.
+    await assert.rejects(() => setVoicePin(store, PRODUCTION, "neap", { paragraph: 3, occurrence: 0, quote: "Tunde said.", speaker: "Odile" }), /paragraph to cast/);
+  });
+
+  it("a cast written before paragraph hashes is given them at open while current, and stamped by the save that edits it", async () => {
+    const { ProseAuthoringService } = await import("../../src/application/prose-authoring.js");
+    const { store } = await open();
+    const live = await openChapter(store, PRODUCTION, "neap");
+    await saveChapter(store, PRODUCTION, "01-neap", GOAT, { baseHash: live.hash });
+    await castLines(store, PRODUCTION, "neap", async () => FIRST);
+    const path = join(store.dir, ...voicesPath(PRODUCTION, "01-neap").split("/"));
+    const { paragraphs: _paragraphs, ...legacy } = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    await writeFile(path, JSON.stringify(legacy), "utf8");
+    const service = new ProseAuthoringService(store);
+    const opened = await service.open(PRODUCTION, "neap");
+    assert.ok("voices" in opened && opened.voices?.paragraphs !== undefined, "derived on read: the chapter's hash proves the body is the one cast");
+    assert.ok(!("paragraphs" in JSON.parse(await readFile(path, "utf8"))), "and nothing written by an open");
+    await service.save(PRODUCTION, "01-neap", EDITED, { baseHash: opened.hash });
+    const stamped = await readVoices(store, PRODUCTION, "01-neap");
+    assert.ok(stamped !== null && stamped !== "unreadable" && stamped.paragraphs !== undefined, "stamped before the save moved the prose");
+    assert.equal(read(EDITED, stamped)[3]![2], true, "so the edit keeps its speaker");
   });
 });

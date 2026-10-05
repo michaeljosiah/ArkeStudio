@@ -154,7 +154,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Sixty-four is where a picture's subject stands, for the audiobook's video (design turn 197b).
 // Sixty-five is the looks chosen for one picture and held on its block until made (turn 193d).
 // Sixty-six is the seams set by hand between a chapter's audiobook blocks (turn 198).
-export const SUPPORTED_SCHEMA_VERSION = 66;
+// Sixty-seven is the hash of each paragraph beside a chapter's cast, so an edit makes stale only
+// the paragraphs it touches (turn 198, part B).
+export const SUPPORTED_SCHEMA_VERSION = 67;
 
 export class WorldOpenError extends Error {
   constructor(

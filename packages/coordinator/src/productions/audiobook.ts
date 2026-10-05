@@ -8,6 +8,7 @@ import {
   audiobookBlockOptions,
   audiobookNoteFor,
   audiobookReadingNotes,
+  castStanding,
   hasReadingNotes,
   lookNeedsChoiceBoundary,
   audiobookDirectionFor,
@@ -246,14 +247,35 @@ export async function updateAudiobook(
  * PR 1186): a line whose speaker the cast cannot name would otherwise be directed for the
  * narrator, and a model turn spent on a chapter the next read refuses at once.
  */
-export function castRefusal(plan: Pick<AudiobookPlan, "reading" | "cast" | "chapter">): string | null {
+export function castRefusal(
+  plan: Pick<AudiobookPlan, "reading" | "cast" | "chapter" | "body"> & Partial<Pick<AudiobookPlan, "blocks">>,
+  options: { only?: readonly string[]; castPending?: boolean } = {},
+): string | null {
   // Under `performed`, as under `cast`, a line's note follows its speaker (R-44), so the cast
   // must be current before anything is made.
   if (plan.reading === "narrator") return null;
   if (plan.cast === null) return "not cast · cast the lines first";
   if (plan.cast === "unreadable") return "cast unreadable · cast again";
-  if (plan.cast.hash !== plan.chapter.hash) return "cast moved · cast again";
-  return null;
+  // A cast with paragraph hashes is stale only in the paragraphs an edit touched (design turn
+  // 198, SPEC-012 R-66); one without them is stale whole once the chapter's hash moves, as before.
+  const standing = castStanding(plan.cast, plan.body, plan.chapter.hash);
+  if (standing.current) return null;
+  if (standing.legacy) return "cast moved · cast again";
+  // A read asked to cast those paragraphs first goes on to its price (R-69); a block made alone
+  // in a paragraph the edit left is made as it stands, since its speaker is the cast's (R-67).
+  if (options.castPending === true) return null;
+  if (options.only !== undefined && plan.blocks !== undefined) {
+    const waiting = new Set(standing.toCast);
+    const named = plan.blocks.filter((planned) => options.only!.includes(planned.block.key));
+    if (named.length > 0 && named.every((planned) => !waiting.has(planned.block.paragraph))) return null;
+  }
+  return `${standing.toCast.length} paragraph${standing.toCast.length === 1 ? "" : "s"} to cast`;
+}
+
+/** The paragraphs a cast stale only in some leaves to cast (design turn 198): none for a cast current or stale whole. */
+export function castLeftToCast(plan: Pick<AudiobookPlan, "reading" | "cast" | "chapter" | "body">): number[] {
+  if (plan.reading === "narrator" || plan.cast === null || plan.cast === "unreadable") return [];
+  return castStanding(plan.cast, plan.body, plan.chapter.hash).toCast;
 }
 
 /**

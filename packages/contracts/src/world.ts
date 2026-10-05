@@ -807,6 +807,14 @@ export const ChapterVoicesSchema = z
     pins: z.array(ChapterVoicePinSchema).max(400).optional(),
     /** Pins the last `Cast again` found gone from their words and dropped (R-64), said in the stamp. */
     lost: z.number().int().min(1).optional(),
+    /**
+     * The hash of each paragraph the lines were placed in, by index (design turn 198, SPEC-012
+     * R-66, `paragraphHash`): an edit makes stale only the paragraphs whose hash is gone, and a
+     * paragraph that moved is found again by its own. The empty hash marks a paragraph edited
+     * since it was cast, carried while it waits to be cast again. Absent on a record cast before
+     * it, which is current only by the chapter's hash, as every cast was.
+     */
+    paragraphs: z.array(z.string().max(32)).max(20_000).optional(),
   })
   .strict();
 export type ChapterVoices = z.infer<typeof ChapterVoicesSchema>;

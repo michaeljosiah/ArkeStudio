@@ -1,6 +1,6 @@
 import { createChapter, openChapter, saveChapter, editChapterPlan, restoreChapter, setChapterRetired } from "../productions/ops.js";
 import { readContinuity } from "../productions/continuity.js";
-import { readVoices } from "../productions/voices.js";
+import { openedVoices, readVoices, stampCastParagraphs } from "../productions/voices.js";
 import { readAudiobook, presentTakes } from "../productions/audiobook.js";
 import type { WorldStore } from "../world/store.js";
 
@@ -20,7 +20,9 @@ export class ProseAuthoringService {
     const chapter = await openChapter(this.store, productionId, chapterId);
     // The bundle holds stamps, not the records needed to open the editing workspace.
     const continuity = await readContinuity(this.store, productionId, chapter.file);
-    const voices = await readVoices(this.store, productionId, chapter.file);
+    const read = await readVoices(this.store, productionId, chapter.file);
+    // A cast from before paragraph hashes still current is given them (design turn 198).
+    const voices = read === null || read === "unreadable" ? read : openedVoices(read, chapter.body);
     const audiobook = await readAudiobook(this.store, productionId, chapter.file);
     const present = audiobook === null || audiobook === "unreadable" ? null : await presentTakes(this.store, audiobook);
     const missing = present === null || audiobook === null || audiobook === "unreadable" ? []
@@ -34,7 +36,10 @@ export class ProseAuthoringService {
     };
   }
 
-  save(productionId: string, chapterFile: string, body: string, options: Parameters<typeof saveChapter>[4]) {
+  async save(productionId: string, chapterFile: string, body: string, options: Parameters<typeof saveChapter>[4]) {
+    // A cast written before paragraph hashes takes them from the prose it was cast against while
+    // it still is that prose, so this save makes stale only the paragraphs it edits (design turn 198).
+    await stampCastParagraphs(this.store, productionId, chapterFile);
     return saveChapter(this.store, productionId, chapterFile, body, options);
   }
 

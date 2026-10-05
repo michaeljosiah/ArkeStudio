@@ -421,6 +421,13 @@ export const AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION = 65;
  * would read every take of the chapter as lost, so the world is raised before the first.
  */
 export const AUDIOBOOK_SEAMS_SCHEMA_VERSION = 66;
+/**
+ * The hash of each paragraph beside a chapter's cast (design turn 198, SPEC-012 R-66):
+ * `paragraphs` on the strict `.voices/<chapter>.json`, which a build before it reads as
+ * unreadable — the chapter refused under `Cast` until it is cast again, paid again — so the world
+ * is raised before the first record carrying it. Sixty-six is the same turn's block seams.
+ */
+export const CAST_PARAGRAPHS_SCHEMA_VERSION = 67;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

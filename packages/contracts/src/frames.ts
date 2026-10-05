@@ -3090,9 +3090,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("stop-continuity"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
     .strict(),
-  /** The cast of lines (turn 130): cast by a press, never by a save, one run per chapter at a time, stoppable. */
+  /**
+   * The cast of lines (turn 130): cast by a press, never by a save, one run per chapter at a time,
+   * stoppable. `changed` casts only the paragraphs edited since the cast (design turn 198, SPEC-012
+   * R-68), worked out when the run starts, and merges their lines into the record.
+   */
   z
-    .object({ kind: z.literal("cast-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .object({ kind: z.literal("cast-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), scope: z.literal("changed").optional() })
     .strict(),
   z
     .object({ kind: z.literal("stop-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
@@ -3134,6 +3138,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       voiceUploadConfirmedFor: z.string().min(1).optional(),
       /** These blocks alone, made again whatever their state — the panel's `Make again` (SPEC-047 R-30). */
       blocks: z.array(z.string().min(1)).min(1).max(400).optional(),
+      /**
+       * Cast the paragraphs left to cast before a word is read (design turn 198, SPEC-012 R-69): the
+       * confirm's ticked `Cast 2 paragraphs first`. Priced first, cast once the price is answered.
+       */
+      castFirst: z.literal(true).optional(),
     })
     .strict(),
   z

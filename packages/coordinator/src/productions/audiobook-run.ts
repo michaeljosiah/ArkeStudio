@@ -45,7 +45,7 @@ import type { TimedWord } from "../voice/word-times.js";
 import { LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "./audiobook-split.js";
 import { checkDirection, directionPlan, type RenderedPart } from "../voice/direction.js";
 import { plannedReactions } from "./audiobook-timing.js";
-import { audiobookLanding, recordsLoudness, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
+import { audiobookLanding, recordsLoudness, castLeftToCast, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
 
 /**
  * A read ended by a limit the rest of the run would only meet again — the free day, a billed key,
@@ -71,7 +71,7 @@ class FreePlanEnded extends Error {
 
 export type AudiobookRunEvent =
   | { type: "started"; toMake: number; blocks: number; requests?: number; groups?: string[][] }
-  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number }
+  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number; toCast?: number }
   | { type: "request"; index: number; of: number; keys: string[] }
   | { type: "progress"; block: string; outcome: "made" | "adopted" | "flagged"; reason?: string; made: number; toMake: number }
   | { type: "finished"; outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; record?: ChapterAudiobook; reason?: string };
@@ -99,6 +99,13 @@ export interface AudiobookRunDeps {
    * what was priced, and refused — never read unpriced — once it has moved under the book's run.
    */
   priced?: string;
+  /**
+   * Cast the paragraphs left to cast before a word is read (design turn 198, SPEC-012 R-69): the
+   * confirm's ticked `Cast 2 paragraphs first`. The chapter is priced as its cast stands, and the
+   * cast runs once the price is answered, or at once where nothing is asked; the read then goes
+   * on as the new cast says, asking again only if that moved its price. Null when cast, else why not.
+   */
+  castFirst?: () => Promise<string | null>;
   /**
    * Ask for a cloned voice's recording to leave the machine (SPEC-046 R-16): per voice and
    * vendor for a hosted reader, whose answer is written onto the voice, per request for the
@@ -263,6 +270,8 @@ export function priorPartJob(jobs: readonly Job[], identity: PartIdentity, part:
 
 /** What a run, the book's run and the door share of a chapter: its plan, its record, and every block to make with the reader that will speak it. */
 export interface PreparedChapter {
+  /** The paragraphs a read that casts first will cast before a word is read (design turn 198); none otherwise. */
+  toCast: number[];
   plan: AudiobookPlan;
   record: ChapterAudiobook;
   toMake: PlannedBlock[];
@@ -316,11 +325,22 @@ export interface ReadingRoom {
  * The run, the book's run and the door read the same answer, so a price the door shows is the
  * price the run asks for.
  */
-export async function prepareChapter(store: WorldStore, productionId: string, chapterId: string, room: ReadingRoom, now: () => string, only?: readonly string[], override?: ProposalOverride): Promise<ChapterPreparation> {
+export async function prepareChapter(
+  store: WorldStore,
+  productionId: string,
+  chapterId: string,
+  room: ReadingRoom,
+  now: () => string,
+  only?: readonly string[],
+  override?: ProposalOverride,
+  options: { castPending?: boolean } = {},
+): Promise<ChapterPreparation> {
   const plan = await planAudiobook(store, productionId, chapterId, { narrator: room.narrator, ...(override !== undefined ? { override } : {}) });
   // Under `cast` a run needs a cast that is current (R-12): a line whose speaker the cast cannot
-  // name would otherwise be made in the narrator's voice without the door having said so.
-  const castTrouble = castRefusal(plan);
+  // name would otherwise be made in the narrator's voice without the door having said so. One
+  // stale in some paragraphs (design turn 198) is priced as it stands when the read will cast
+  // them first, and lets a block be made alone where the edit left its paragraph.
+  const castTrouble = castRefusal(plan, { ...(only !== undefined ? { only } : {}), ...(options.castPending === true ? { castPending: true } : {}) });
   if (castTrouble !== null) return { kind: "refused", reason: castTrouble, plan };
   // An unreadable record is no record: the takes it named are still on the shelf, and a run
   // that cannot read which block each was for makes the chapter afresh rather than guessing.
@@ -572,7 +592,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
   const names = store.getBundle().sheets.filter((sheet) => sheet.retired !== true).flatMap((sheet) => [sheet.name, ...(sheet.region !== undefined ? [sheet.region] : [])]);
   const speakers = plan.cast === null || plan.cast === "unreadable" ? [] : [...new Set(plan.cast.lines.map((line) => line.speaker))];
   const lexicon = splitLexicon([...names, ...speakers], plan.blocks.map((planned) => planned.block.text));
-  return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate, asks, creditDraw, freeReads, freePlan, groups, requests, perParagraph, lexicon } };
+  return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate, asks, creditDraw, freeReads, freePlan, groups, requests, perParagraph, lexicon, toCast: options.castPending === true ? castLeftToCast(plan) : [] } };
 }
 
 /** A grouped request as a run sends it (design turn 185): its blocks, the ones it keeps, its turns and its one quote. */
@@ -721,13 +741,32 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     emit({ type: "finished", outcome, made, flagged: flaggedCount, ...extra });
 
   const transcriber = deps.wordTimes !== undefined;
-  const preparation = await prepareChapter(store, productionId, chapterId, { narrator, models: deps.models, catalogue: deps.catalogue, transcriber, ...(deps.creditLeftMicroUsd !== undefined ? { creditLeftMicroUsd: deps.creditLeftMicroUsd } : {}), ...(deps.freePlanAllowance !== undefined ? { freePlanAllowance: deps.freePlanAllowance } : {}) }, deps.now, deps.only);
+  const preparation = await prepareChapter(store, productionId, chapterId, { narrator, models: deps.models, catalogue: deps.catalogue, transcriber, ...(deps.creditLeftMicroUsd !== undefined ? { creditLeftMicroUsd: deps.creditLeftMicroUsd } : {}), ...(deps.freePlanAllowance !== undefined ? { freePlanAllowance: deps.freePlanAllowance } : {}) }, deps.now, deps.only, undefined, deps.castFirst !== undefined ? { castPending: true } : {});
   if (preparation.kind !== "ready") {
     if (preparation.kind === "unavailable") emit({ type: "started", toMake: 0, blocks: 0 });
     finish(preparation.kind, { reason: preparation.reason });
     return;
   }
-  const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks, freePlan, groups, requests, perParagraph } = preparation.prepared;
+  const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks, freePlan, groups, requests, perParagraph, toCast } = preparation.prepared;
+  // Cast first (design turn 198, R-69): the price is asked as the cast stands, saying what will be
+  // cast; once answered — or where nothing is asked — the paragraphs are cast and the read is
+  // prepared again from the new cast, so it reads what the cast now says.
+  if (deps.castFirst !== undefined && toCast.length > 0) {
+    const priced = chapterPriceToken(deps.worldId, productionId, chapterId, plan.chapter, misses, groups);
+    const asked = freePlan !== null ? createHash("sha256").update(`${priced}\n${JSON.stringify(freePlan.short)}`).digest("hex") : priced;
+    if (asks && deps.confirmationToken !== asked) {
+      emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: asked, voices: priceLines(misses, priceOf, store.getBundle()), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}), toCast: toCast.length });
+      return;
+    }
+    const refused = await deps.castFirst();
+    if (refused !== null) {
+      finish("refused", { reason: refused });
+      return;
+    }
+    const { castFirst: _castFirst, ...read } = deps;
+    await runAudiobookChapter(read);
+    return;
+  }
   const partPrices = new Map(misses.map(block => [block, block.quotes.map(quote => quote.expectedMicroUsd)]));
   let record = preparation.prepared.record;
   const chapterFile = plan.chapter.file;

@@ -34,6 +34,8 @@ export interface AudiobookTurn {
   text: string;
   speaker?: string;
   sheet?: string;
+  /** An edited quote that kept its speaker (design turn 198): the row's dashed `kept` mark. */
+  kept?: true;
 }
 
 export interface AudiobookBlock extends VoicedBlock {
@@ -337,7 +339,7 @@ export function audiobookBlocks(
       blocks.push({ ...first.turn, key, ...shape });
       continue;
     }
-    const rows = units.slice(from, to + 1).map(({ turn }) => ({ text: turn.text, ...(turn.speaker !== undefined ? { speaker: turn.speaker } : {}), ...(turn.sheet !== undefined ? { sheet: turn.sheet } : {}) }));
+    const rows = units.slice(from, to + 1).map(({ turn }) => ({ text: turn.text, ...(turn.speaker !== undefined ? { speaker: turn.speaker } : {}), ...(turn.sheet !== undefined ? { sheet: turn.sheet } : {}), ...(turn.kept === true ? { kept: true as const } : {}) }));
     // Turns of one speaker joined by hand are that speaker's block (rule 8 keeps Cast's joins to one voice).
     const one = shaped && rows.every((row) => row.speaker !== undefined && audiobookSpeakerKey(row) === audiobookSpeakerKey(rows[0]!)) ? { speaker: rows[0]!.speaker!, ...(rows[0]!.sheet !== undefined ? { sheet: rows[0]!.sheet } : {}) } : {};
     blocks.push({ paragraph: first.place.paragraph, text: textOf(from, to), key, ...one, rows, ...shape });

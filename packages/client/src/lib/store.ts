@@ -369,7 +369,7 @@ interface StoreState {
       flagged: number;
       /** The last block that landed or was flagged, and why, for the foot. */
       last?: { block: string; outcome: "made" | "adopted" | "flagged"; reason?: string };
-      price?: { characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: import("@arke-studio/contracts").FreePlanShort; requests?: number; perParagraph?: number };
+      price?: { characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: import("@arke-studio/contracts").FreePlanShort; requests?: number; perParagraph?: number; toCast?: number };
       /** A grouped run (design turn 185b): its requests, each grouped request's blocks, and the one being read. */
       requests?: number;
       groups?: string[][];
@@ -2048,7 +2048,7 @@ function handleFrame(json: string): void {
       const held = audiobook[key] ?? { toMake: 0, blocks: 0, made: 0, flagged: 0 };
       audiobook = {
         ...audiobook,
-        [key]: { ...held, state: "priced", price: { characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, notices: event.notices ?? [], ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}), ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.perParagraph !== undefined ? { perParagraph: event.perParagraph } : {}) } },
+        [key]: { ...held, state: "priced", price: { characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, notices: event.notices ?? [], ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}), ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.perParagraph !== undefined ? { perParagraph: event.perParagraph } : {}), ...(event.toCast !== undefined ? { toCast: event.toCast } : {}) } },
       };
     } else if (event.type === "audiobook.request") {
       // A grouped request begins (design turn 185b): the margin darkens its bracket.
@@ -5324,9 +5324,9 @@ export function useDeriving(): StoreState["deriving"] {
   return useStore().deriving;
 }
 
-/** Cast a chapter's lines (turn 130): a press, never a save. */
-export function castVoices(worldId: string, productionId: string, chapterFile: string): boolean {
-  return send({ kind: "cast-voices", worldId, productionId, chapterFile });
+/** Cast a chapter's lines (turn 130): a press, never a save; `changed` casts only the paragraphs edited since (design turn 198). */
+export function castVoices(worldId: string, productionId: string, chapterFile: string, scope?: "changed"): boolean {
+  return send({ kind: "cast-voices", worldId, productionId, chapterFile, ...(scope !== undefined ? { scope } : {}) });
 }
 
 /** A correction to the cast (design turn 155, SPEC-012 R-62): the span given a speaker, narration, or cleared. */
@@ -5350,7 +5350,7 @@ export function readAudiobookChapter(
   worldId: string,
   productionId: string,
   chapterFile: string,
-  options: { confirmationToken?: string; voiceUploadConfirmedFor?: string } = {},
+  options: { confirmationToken?: string; voiceUploadConfirmedFor?: string; castFirst?: boolean } = {},
 ): boolean {
   return send({
     kind: "read-audiobook-chapter",
@@ -5359,6 +5359,8 @@ export function readAudiobookChapter(
     chapterFile,
     ...(options.confirmationToken !== undefined ? { confirmationToken: options.confirmationToken } : {}),
     ...(options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
+    // Cast the paragraphs left to cast first (design turn 198): the confirm's ticked press.
+    ...(options.castFirst === true ? { castFirst: true as const } : {}),
   });
 }
 
