@@ -144,6 +144,10 @@ button.fy-abshow__sp:hover .fy-abshow__c { color: var(--foreground); }
 .fy-abshow__sheet .fy-ab__requests-row > .fy-vd__note-k { grid-row: span 2; font: var(--type-label); font-weight: 500; color: var(--muted-foreground); }
 .fy-abshow__sheet .fy-ab__requests-row > .fy-mono { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-abshow__sheet .fy-ab__requests-row > :nth-child(2) { justify-self: start; }
+/* 199e draws Grouped / Per paragraph as the Reading row's segmented control, not 185d's pills. */
+.fy-abshow__sheet .fy-ab__requests .fy-ab__chips { display: inline-flex; gap: 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.fy-abshow__sheet .fy-ab__requests .fy-ab__chip { height: 26px; min-height: 0; padding: 0 10px; display: inline-flex; align-items: center; border: 0; border-radius: 0; background: none; box-shadow: none; font: var(--type-label); color: var(--muted-foreground); }
+.fy-abshow__sheet .fy-ab__requests .fy-ab__chip--on { background: var(--secondary); color: var(--foreground); }
 
 /* ---- A phone (199f). ------------------------------------------------------------------------ */
 .fy-abshow__ptop { position: absolute; left: 10px; top: 6px; z-index: 2; width: 40px; height: 40px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; color: var(--media-overlay-fg); background: color-mix(in srgb, var(--media-overlay-bg) 50%, transparent); cursor: pointer; }

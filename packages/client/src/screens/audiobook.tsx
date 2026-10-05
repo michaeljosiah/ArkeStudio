@@ -954,7 +954,7 @@ function ReadingSheet({ worldId, productionId, production, door, reading, runnin
           {requests !== null && <BookRequests {...requests} />}
         </div>
         <div className="fy-abshow__sheet-ft">
-          <Button variant="primary" onClick={onClose} data-testid="reading-done">
+          <Button variant="primary" size="sm" onClick={onClose} data-testid="reading-done">
             Done
           </Button>
         </div>
