@@ -61,7 +61,9 @@
 .fy-abshow__body { padding-top: 36px; padding-bottom: 40px; }
 .fy-abshow__h { margin: 0 0 16px; font: var(--type-h3); color: var(--foreground); }
 .fy-abshow__castwrap { position: relative; margin-bottom: 44px; }
-.fy-abshow__cast { display: flex; gap: 18px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; }
+/* The row scrolls, and a scroll box clips what it holds: the card's ring, 3px out and 2px wide,
+   lost its top and left edges. Five pixels of room inside, taken back outside, keep it whole. */
+.fy-abshow__cast { display: flex; gap: 18px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; padding: 5px; margin: -5px; scroll-padding-inline: 5px; }
 .fy-abshow__cast::-webkit-scrollbar { display: none; }
 .fy-abshow__card { width: var(--abshow-card); flex: none; display: flex; flex-direction: column; justify-content: flex-start; align-self: flex-start; padding: 0; border: 0; background: none; color: var(--foreground); text-align: left; cursor: pointer; scroll-snap-align: start; font: inherit; }
 .fy-abshow__card:disabled { cursor: default; }

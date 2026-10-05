@@ -216,6 +216,14 @@ describe("the hero (199a, 199b, rule 4)", () => {
     assert.ok(ask, "on the book's plan");
   });
 
+  it("draws the listened bar where the made takes' time is not measured, against the length the row says", async () => {
+    store.set(audiobookPlaceKey(FIXTURE_WORLD_ID, "inkbound"), JSON.stringify({ place: { chapterId: "chapter-1", key: "p3.0", offset: 2, at: 95 } }));
+    await mount(inkbound(91), door({ rows: [{ ...ROWS[0]!, seconds: null }, ...ROWS.slice(1)] }));
+    const bar = all('[data-testid="audiobook-row"]')[0]!.querySelector(".fy-abshow__pb i") as HTMLElement | null;
+    assert.ok(bar, "unmeasured takes still show how far this device got");
+    assert.notEqual(bar.style.width, "0%");
+  });
+
   it("Read the book is absent, not disabled, when nothing is left to read", async () => {
     await mount(inkbound(91), door({ price: { ...PRICE, chapters: 0, blocks: 0, estimatedMicroUsd: 0 } }));
     assert.deepEqual(presses(), ["audiobook-listen", "audiobook-export-open", "audiobook-more"]);
