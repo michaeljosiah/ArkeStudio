@@ -421,6 +421,21 @@ const SCREENS = [
   { group: "Around it", screen: "Audiobook video render and files (story)", frame: "197e", route: "#/w/:worldId/p/:prodId/story/audiobook · Export · Activity", status: "drifted", checked: "2026-10-04",
     controls: ["Open", "Show in folder", "Render again", "Done"],
     notes: ["Turn 197d-f: the render is one row in Activity — the book, a percent of the chapters' length, Cancel, the bar, the chapter and time left; a finished file is a row with its shape and size, Open and Show in folder here, Download from a phone. The sheet lists the files with their thumbnail, length, shape, size and captions, Open (the system player), Show in folder and Render again, which remakes only chapters whose content changed. On a phone the sheet comes from the foot in one column with 44-high presses, and says it renders on the desktop.", "Drift: Activity is turn 136's panel and the rows sit in its list. A finished render's row lasts for the session. The phone's sheet carries a row choosing Player or Video, which the frame does not draw, so the player package stays reachable from a phone."] },
+  { group: "Around it", screen: "Audiobook block seams · Join and Split (story)", frame: "198a", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-10-05",
+    controls: ["Join"],
+    notes: ["Turn 198a-b, d-e: hovering the line between two blocks shows Join on the bracket line, and between two lines of one block Split; a press changes the bracket at once. A join that would take a picture off its block asks once in one plain line; a limit (the title, a scene break, over one read, two voices under Cast) is drawn off on the seam with its reason. Splits are between lines only. Not built yet."] },
+  { group: "Around it", screen: "Audiobook changed blocks (story)", frame: "198c", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-10-05",
+    controls: ["Blocks", "not read", "Read the chapter"],
+    notes: ["Turn 198c: a joined or split block is marked not read and nothing reads on its own; Read the chapter counts and prices every changed block with the rest, and the neighbours keep their takes. A join keeps the first block's key, delivery, note and speed; markers travel with their words. Seams are kept on the chapter's audiobook record, never in the manuscript, and an edit under a seam drops it. Not built yet."] },
+  { group: "Around it", screen: "Audiobook Blocks · Reset (story)", frame: "198f", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-10-05",
+    controls: ["Blocks", "Reset"],
+    notes: ["Turn 198f-g: Blocks · 3 changed sits in the toolbar after the filter only while a seam is set by hand; Reset returns every block to one a paragraph, and a block back in an old shape finds its old take by its words, made again with no price. Not built yet."] },
+  { group: "Around it", screen: "Audiobook kept speakers (story)", frame: "198h", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-10-05",
+    controls: ["kept", "Cast 2 paragraphs", "Cast the chapter"],
+    notes: ["Turn 198h-i: an edited quote in the same paragraph that shares words with a cast quote keeps its speaker, marked kept until checked; a quote split by a new tag keeps it on both parts. Only edited paragraphs go stale: the toolbar says how many wait to be cast and offers them beside the whole chapter, and the speaker menu stays on for untouched paragraphs and kept lines. Not built yet."] },
+  { group: "Around it", screen: "Audiobook block seams on a phone (story)", frame: "198j", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-10-05",
+    controls: ["Join next", "Split", "Cast 2 paragraphs"],
+    notes: ["Turn 198j: no hover on touch, so the block's sheet carries Join next and Split; Split on a block of three or more lines offers a press at each gap between them. The lines to cast and Reset sit in the ⋯ menu. Not built yet."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
