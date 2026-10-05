@@ -57,7 +57,7 @@ import { BlockPicturePanel, pictureStart, useChapterPictures } from "../componen
 import { IllustrationSheet, IllustrationStatus, useIllustration, useIllustrationSheet } from "../components/audiobook-illustrate.js";
 import { LookSheet } from "../components/audiobook-look.js";
 import { NewLookSheet } from "../components/audiobook-new-look.js";
-import { AudiobookBlocks, AudiobookFilterMenu, AudiobookSide, BlockPanel, DirectSheet, DirectionCard, NotesPress, ReadSheet, PerformedSpeaker, ReadingMenu, SpeakerLinesDialog, blockPanelHead, blockTakes, useChapterAudiobook, type AudiobookIntent, type BlockRow, type PanelTab, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
+import { AudiobookBlocks, AudiobookFilterMenu, AudiobookSide, BlockPanel, BlocksPress, useBlockSeamActs, DirectSheet, DirectionCard, NotesPress, ReadSheet, PerformedSpeaker, ReadingMenu, SpeakerLinesDialog, blockPanelHead, blockTakes, useChapterAudiobook, type AudiobookIntent, type BlockRow, type PanelTab, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { BlockTimingPanel, TimingProposalCard, TimingSide, TimingView, betweenClocks, chapterTimingOf, proposedView, timingLanes, useTimingProposal } from "./chapter-timing.js";
 import { BedPanel, ReactionsPanel } from "../components/audiobook-beds.js";
@@ -1186,6 +1186,8 @@ export function ChapterWorkspace({
     locked: locked || record === null,
     listenLeads: listenLeads(production, chapter.id),
     compact,
+    // On a phone the Blocks press and its Reset are in the toolbar's ⋯ (design turn 198, rule 10).
+    seamsInMenu: phone,
     // What the Direct and illustrate menu says of each (design turn 194, rule 3), and the run line
     // that takes the menu's place while pictures are read or made.
     illustrate: {
@@ -1767,7 +1769,18 @@ export function ChapterWorkspace({
   const shownPicture = pictureRow === null ? undefined : placedPictures.byKey.get(pictureRow.block.key);
   const panelTab: PanelTab = chosenTab ?? (shownPicture !== undefined || (pictureRow !== null && illustration.proposed.has(pictureRow.block.key)) ? "picture" : "voice");
   const panelHead = pictureRow === null ? null : blockPanelHead(pictureRow, audiobook.rows, audiobookRecord.record === "unreadable" ? null : audiobookRecord.record, chapter.title, world);
-  const panelTakes = pictureRow === null ? 0 : blockTakes(world.artifacts, prodId, chapter.id, pictureRow.block.key).length;
+  const panelTakes = pictureRow === null ? 0 : blockTakes(world.artifacts, prodId, chapter.id, pictureRow.block.key, pictureRow.block.shaped === true ? pictureRow.block.text : undefined).length;
+  // The block's seams on touch (design turn 198j): Join next and Split under the sheet's head; a
+  // fine pointer finds them on the list's lines instead.
+  const pictured = useMemo(() => new Set(placedPictures.byKey.keys()), [placedPictures]);
+  const seamActs = useBlockSeamActs({
+    row: coarse || phone ? pictureRow : null,
+    rows: audiobook.rows,
+    gaps: audiobook.seams.gaps,
+    held: audiobook.seams.held,
+    onPress: audiobook.seams.press,
+    pictured,
+  });
   /*
    * The Audiobook view's side is the block's panel (165k/146b), and it is never left empty
    * (turn 188). With nothing chosen it used to show the manuscript's rail, the book and the
@@ -2003,6 +2016,8 @@ export function ChapterWorkspace({
                   disabled={connection !== "open" || audiobook.run?.state === "reading"}
                 />
                 {record !== null && <AudiobookFilterMenu filters={audiobook.filters} filter={audiobook.filter} onFilter={audiobook.setFilter} />}
+                {/* Blocks · 3 changed (design turn 198, rule 10): after the filter once a seam is set by hand; on a phone it is in the ⋯. */}
+                {record !== null && !phone && audiobook.seams.label !== null && <BlocksPress label={audiobook.seams.label} changed={audiobook.seams.changed} held={audiobook.seams.held} onReset={audiobook.seams.reset} />}
                 <span className="fy-ch__viewpush" />
                 {/* Below 1100 (194, rule 15) the line ends with the Direct and illustrate ⋯ and the
                     tablet's Arke press; the read and Listen are held at the foot, under the list. */}
@@ -2048,6 +2063,9 @@ export function ChapterWorkspace({
                   onSelect={audiobook.setSelected}
                   slug={worldSlug}
                   pictures={chapterPictures}
+                  // Join and Split on hover (design turn 198); none while a read runs.
+                  {...(!audiobook.seams.held ? { seams: { gaps: audiobook.seams.gaps, onPress: audiobook.seams.press } } : {})}
+                  madeAgain={audiobook.seams.madeAgain}
                   onPlayOne={(row) => {
                     if (row.artifact === null) return;
                     void playClip({ id: row.artifact.id, url: mediaUrl(worldSlug, `artifacts/${row.artifact.file}`), title: `${chapter.title} · ${row.mark}`, sub: "audiobook · one block" });
@@ -2338,6 +2356,8 @@ export function ChapterWorkspace({
               <aside className="fy-ch__side fy-ch__block-side">
                 {pictureRow !== null && panelHead !== null && (
                   <BlockPanel
+                    acts={seamActs.bar}
+                    lines={seamActs.lines}
                     head={panelHead}
                     tab={panelTab}
                     onTab={setChosenTab}
@@ -2720,7 +2740,9 @@ export function ChapterWorkspace({
                 `${audiobook.counts.made} made`,
                 ...(audiobook.counts.stale > 0 ? [`${audiobook.counts.stale} stale`] : []),
                 ...(audiobook.counts.flagged > 0 ? [`${audiobook.counts.flagged} flagged`] : []),
-                ...(audiobook.counts.notMade > 0 ? [`${audiobook.counts.notMade} not made`] : []),
+                // A block a seam shaped is `not read` (design turn 198c), apart from the blocks never made.
+                ...(audiobook.counts.notMade - audiobook.seams.notRead > 0 ? [`${audiobook.counts.notMade - audiobook.seams.notRead} not made`] : []),
+                ...(audiobook.seams.notRead > 0 ? [`${audiobook.seams.notRead} not read`] : []),
                 ...(audiobook.counts.awaiting > 0 ? [`${audiobook.counts.awaiting} awaiting recording`] : []),
               ].join(" · ")}
             </span>

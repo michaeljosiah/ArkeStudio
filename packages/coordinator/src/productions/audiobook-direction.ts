@@ -616,7 +616,7 @@ async function chapterBefore(store: WorldStore, productionId: string, order: num
   }
   const cast = await readVoices(store, productionId, previous.file);
   const bookFile = await readAudiobookBook(store, productionId);
-  const derived = audiobookBlocks(body, cast === "unreadable" ? null : cast, audiobookHeading(previous.order, previous.title), audiobookBlockOptions(bookFile === null || bookFile === "unreadable" ? null : bookFile));
+  const derived = audiobookBlocks(body, cast === "unreadable" ? null : cast, audiobookHeading(previous.order, previous.title), audiobookBlockOptions(bookFile === null || bookFile === "unreadable" ? null : bookFile, record));
   const sheets = store.getBundle().sheets;
   const directed = derived.blocks.flatMap((block) => {
     const direction = audiobookDirectionFor(record, block);

@@ -5553,6 +5553,16 @@ export function setAudiobookBlock(worldId: string, productionId: string, chapter
   return send({ kind: "set-audiobook-block", worldId, productionId, chapterFile, block, direction });
 }
 
+/** Join or Split pressed on a gap between two lines (design turn 198): answered with the record, or why not. */
+export function setAudiobookSeam(worldId: string, productionId: string, chapterFile: string, press: "join" | "split", anchor: import("@arke-studio/contracts").AudiobookSeamAnchor): boolean {
+  return send({ kind: "set-audiobook-seam", worldId, productionId, chapterFile, press, anchor });
+}
+
+/** Reset (design turn 198): every seam of the chapter back to the automatic split. */
+export function resetAudiobookSeams(worldId: string, productionId: string, chapterFile: string): boolean {
+  return send({ kind: "reset-audiobook-seams", worldId, productionId, chapterFile });
+}
+
 /** The book as a listener hears it (design turn 186): answered as `audiobook.listening` under the id returned. */
 export function openAudiobookListening(worldId: string, productionId: string): string | null {
   const requestId = ulid();

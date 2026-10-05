@@ -6,6 +6,7 @@ import { isSceneBreak } from "./manuscript.js";
 import { DeliverySchema } from "./voice.js";
 import { chapterParagraphs, voicedBlocks, type VoicedBlock } from "./prose.js";
 import { textDigest } from "./subtitles.js";
+import { expectedSpeechSeconds } from "./speech-pricing.js";
 import { AudiobookGroupedSchema, AudiobookLoudnessSchema, AudiobookSplitFlagSchema } from "./audiobook-grouped.js";
 import { AudiobookPictureSchema } from "./audiobook-pictures.js";
 import { AudiobookLookSchema, PictureOwnLooksSchema } from "./audiobook-look.js";
@@ -41,9 +42,19 @@ export interface AudiobookBlock extends VoicedBlock {
   /**
    * The turns a block holds when one reader reads them all (design turn 190): a line and its tag
    * are one block, read straight through, and the cast's speakers are rows inside it. Absent on a
-   * block that is a single turn. A block with rows has no speaker of its own.
+   * block that is a single turn. A block with rows has no speaker of its own, unless a seam set by
+   * hand joined turns of one speaker alone (design turn 198), which that speaker reads.
    */
   rows?: AudiobookTurn[];
+  /**
+   * A seam set by hand gave the block this shape (design turn 198): it is not one of the blocks
+   * the reading cuts on its own. Absent on every block the automatic split makes.
+   */
+  shaped?: true;
+  /** On a shaped block: the automatic blocks it takes words from, by key, in order — whose delivery, note, speed and markers it carries. */
+  sources?: string[];
+  /** On a shaped block: the automatic blocks whose first turn it holds — a join's, whose first picture it shows. */
+  starts?: string[];
 }
 
 /** How a chapter's turns become its blocks. */
@@ -55,6 +66,95 @@ export interface AudiobookBlockOptions {
   merge?: boolean;
   /** A turn read apart from its neighbours whatever the reading: a speaker a person records. */
   apart?: (turn: VoicedBlock) => boolean;
+  /** The seams set by hand on the chapter's record (design turn 198), joins and splits between its turns. */
+  seams?: readonly AudiobookSeam[];
+}
+
+/**
+ * Where a turn stands in the chapter (design turn 198): its paragraph, as `chapterParagraphs`
+ * counts them, and its place among that paragraph's turns (SPEC-012 R-46's narration and lines).
+ */
+export const AudiobookTurnPlaceSchema = z.object({ paragraph: z.number().int().min(0), turn: z.number().int().min(0) }).strict();
+export type AudiobookTurnPlace = z.infer<typeof AudiobookTurnPlaceSchema>;
+
+/**
+ * A seam set by hand (design turn 198, SPEC-047 R-147): a gap between two turns made a block's
+ * edge (`split`) or taken out of one (`join`). It names the turns it sits between and the hash of
+ * their words, so a paragraph inserted above leaves it where its words are, and an edit to either
+ * turn drops it: the block goes back to its automatic split, as a take goes stale. Kept on the
+ * chapter's audiobook record, never in the manuscript.
+ */
+export const AudiobookSeamSchema = z
+  .object({
+    kind: z.enum(["join", "split"]),
+    before: AudiobookTurnPlaceSchema,
+    after: AudiobookTurnPlaceSchema,
+    textHash: z.string().min(1),
+    at: IsoDateTimeSchema,
+  })
+  .strict();
+export type AudiobookSeam = z.infer<typeof AudiobookSeamSchema>;
+/** A chapter's seams at most: one a gap of a long chapter's turns, with room. */
+export const AUDIOBOOK_SEAMS_MAX = 4000;
+
+/**
+ * The longest a joined block may be (design turn 198, rule 8): one read, about five minutes of
+ * expected speech, the grouped request's own cap (`GROUPED_READ_CAPS.speechSeconds`, turn 185),
+ * which a block must fit to be read in one request at all.
+ */
+export const AUDIOBOOK_JOIN_MAX_SECONDS = 300;
+
+/** Why a Join is drawn off on its seam (rule 8): said only where it bites. */
+export type AudiobookSeamLimit = "title" | "scene break" | "over 5 min" | "two voices";
+
+/** A gap's anchor as a press sends it: the turns either side and their words' hash. */
+export interface AudiobookSeamAnchor {
+  before: AudiobookTurnPlace;
+  after: AudiobookTurnPlace;
+  textHash: string;
+}
+
+/**
+ * A gap the Audiobook view can press (design turn 198): between two blocks, a Join; between two
+ * rows of one block, a Split. `block` is the block under a Join's gap, or the block a Split's gap
+ * is inside, the gap coming after its row `row`. `seam` is the index in the record's seams of the
+ * seam that sits on it, applied or held; `auto` says whether the reading would cut there on its own.
+ */
+export interface AudiobookGap {
+  press: "join" | "split";
+  block: string;
+  row?: number;
+  /** Absent only on the title's gap, which no press can change. */
+  anchor?: AudiobookSeamAnchor;
+  auto: boolean;
+  seam?: number;
+  limit?: AudiobookSeamLimit;
+}
+
+/** What the seams do under this reading: the blocks they shape, the joins held, the seams whose words changed, and every gap. */
+export interface AudiobookSeamView {
+  changed: number;
+  held: number;
+  dropped: number;
+  /** The record's seams no gap holds any more (their words changed), by index. */
+  droppedSeams: number[];
+  gaps: AudiobookGap[];
+}
+
+/** The words either side of a gap, as a seam remembers them. */
+export function audiobookSeamHash(before: string, after: string): string {
+  const fold = (text: string) => text.replace(/\s+/g, " ").trim();
+  return textDigest(`seam-v1:${JSON.stringify([fold(before), fold(after)])}`);
+}
+
+/** The label a Blocks press carries (design turn 198, rule 10): `3 changed · 1 held`, `1 seam dropped · words changed`; null when nothing is set. */
+export function audiobookSeamLabel(view: Pick<AudiobookSeamView, "changed" | "held" | "dropped">): string | null {
+  if (view.changed === 0 && view.held === 0 && view.dropped === 0) return null;
+  return [
+    ...(view.changed > 0 || (view.held === 0 && view.dropped === 0) ? [`${view.changed} changed`] : []),
+    ...(view.held > 0 ? [`${view.held} held`] : []),
+    ...(view.dropped > 0 ? [`${view.dropped} seam${view.dropped === 1 ? "" : "s"} dropped · words changed`] : []),
+  ].join(" · ");
 }
 
 /**
@@ -77,53 +177,199 @@ export function audiobookBlocks(
   record: Parameters<typeof voicedBlocks>[1],
   heading: string,
   options: AudiobookBlockOptions = {},
-): { blocks: AudiobookBlock[]; ambiguous: number } {
+): { blocks: AudiobookBlock[]; ambiguous: number; seams: AudiobookSeamView } {
   const paragraphs = chapterParagraphs(body);
-  if (paragraphs.every((paragraph) => isSceneBreak(paragraph))) return { blocks: [], ambiguous: 0 };
+  const none: AudiobookSeamView = { changed: 0, held: 0, dropped: 0, droppedSeams: [], gaps: [] };
+  if (paragraphs.every((paragraph) => isSceneBreak(paragraph))) return { blocks: [], ambiguous: 0, seams: { ...none, dropped: options.seams?.length ?? 0, droppedSeams: (options.seams ?? []).map((_, index) => index) } };
   const voiced = voicedBlocks(body, record);
-  const blocks: AudiobookBlock[] = [{ key: AUDIOBOOK_TITLE_KEY, paragraph: AUDIOBOOK_TITLE_PARAGRAPH, text: heading }];
-  const within = new Map<number, number>();
-  const push = (block: VoicedBlock, rows?: AudiobookTurn[]): void => {
-    const n = within.get(block.paragraph) ?? 0;
-    within.set(block.paragraph, n + 1);
-    blocks.push({ ...block, key: `p${block.paragraph}.${n}`, ...(rows !== undefined ? { rows } : {}) });
-  };
-  // One reader, one block (design turn 190): the turns of a paragraph that one reader reads are a
-  // run, read as the one passage they are. A line and its tag were two takes with a pause inside
-  // a sentence.
-  let run: VoicedBlock[] = [];
-  const flush = (): void => {
-    if (run.length === 0) return;
-    if (run.length === 1) push(run[0]!);
-    else {
-      const paragraph = run[0]!.paragraph;
-      // The whole paragraph when the run is all of it, so the block is an exact slice of it (a pin
-      // finds its words there); else the turns as they read, one space between.
-      const whole = paragraphs[paragraph];
-      const joined = run.map((turn) => turn.text).join(" ");
-      const covers = whole !== undefined && run.map((turn) => turn.text.trim()).join("").replace(/\s+/g, "") === whole.replace(/\s+/g, "");
-      push(
-        { paragraph, text: covers ? whole : joined },
-        run.map((turn) => ({ text: turn.text, ...(turn.speaker !== undefined ? { speaker: turn.speaker } : {}), ...(turn.sheet !== undefined ? { sheet: turn.sheet } : {}) })),
-      );
-    }
-    run = [];
-  };
-  for (const block of voiced.blocks) {
-    if (isSceneBreak(block.text)) {
-      flush();
+  // The chapter's turns in order, each with its place (design turn 198): a scene break is in no
+  // block (turn 190), so it is no turn here, and the turn after it remembers that it was there.
+  interface Unit { turn: VoicedBlock; place: AudiobookTurnPlace; sceneBefore: boolean; apart: boolean }
+  const units: Unit[] = [];
+  const counted = new Map<number, number>();
+  let scene = false;
+  for (const turn of voiced.blocks) {
+    const at = counted.get(turn.paragraph) ?? 0;
+    counted.set(turn.paragraph, at + 1);
+    if (isSceneBreak(turn.text)) {
+      scene = true;
       continue;
     }
-    if (options.merge !== true || options.apart?.(block) === true) {
-      flush();
-      push(block);
-      continue;
-    }
-    if (run.length > 0 && run[0]!.paragraph !== block.paragraph) flush();
-    run.push(block);
+    units.push({ turn, place: { paragraph: turn.paragraph, turn: at }, sceneBefore: scene && units.length > 0, apart: options.apart?.(turn) === true });
+    scene = false;
   }
-  flush();
-  return { blocks, ambiguous: voiced.ambiguous };
+  // One reader, one block (design turn 190): the turns of a paragraph that one reader reads are a
+  // run, read as the one passage they are; under `cast` every turn is its own block, and a turn a
+  // person records is read apart. A gap is a block's edge on its own (`auto`) by that rule alone.
+  const gapCount = Math.max(0, units.length - 1);
+  const auto = Array.from({ length: gapCount }, (_, g) => {
+    const a = units[g]!;
+    const b = units[g + 1]!;
+    return options.merge !== true || a.apart || b.apart || b.sceneBefore || a.place.paragraph !== b.place.paragraph;
+  });
+  const speakerOf = (unit: Unit) => audiobookSpeakerKey(unit.turn);
+  // Under Cast only lines in the same voice join (rule 8), and a speaker a person records is a
+  // voice of its own whatever the reading.
+  const twoVoices = (g: number) => units[g]!.apart || units[g + 1]!.apart || (options.merge !== true && speakerOf(units[g]!) !== speakerOf(units[g + 1]!));
+  const gapHash = (g: number) => audiobookSeamHash(units[g]!.turn.text, units[g + 1]!.turn.text);
+  const samePlace = (a: AudiobookTurnPlace, b: AudiobookTurnPlace) => a.paragraph === b.paragraph && a.turn === b.turn;
+  // A seam stands where its two turns still say what they said: at its own place, else at the one
+  // gap whose words are its words (a paragraph inserted above moved it); never placed by guess.
+  const locate = (seam: AudiobookSeam): number | null => {
+    const own = units.findIndex((unit) => samePlace(unit.place, seam.before));
+    if (own >= 0 && own < gapCount && samePlace(units[own + 1]!.place, seam.after) && gapHash(own) === seam.textHash) return own;
+    const found: number[] = [];
+    for (let g = 0; g < gapCount; g += 1) if (gapHash(g) === seam.textHash) found.push(g);
+    return found.length === 1 ? found[0]! : null;
+  };
+  const edge = [...auto];
+  const seamAt = new Map<number, number>();
+  const joined = new Set<number>();
+  const droppedSeams: number[] = [];
+  let held = 0;
+  (options.seams ?? []).forEach((seam, index) => {
+    const g = locate(seam);
+    // A scene break written between its turns is an edit under it too.
+    if (g === null || seamAt.has(g) || units[g + 1]!.sceneBefore) {
+      droppedSeams.push(index);
+      return;
+    }
+    seamAt.set(g, index);
+    if (seam.kind === "split") {
+      edge[g] = true;
+      return;
+    }
+    if (!auto[g]) return;
+    // Seams follow the reading (rule 9): a join of two voices under Cast is held, not dropped.
+    if (twoVoices(g)) {
+      held += 1;
+      return;
+    }
+    edge[g] = false;
+    joined.add(g);
+  });
+  const seconds = (from: number, to: number) => {
+    let sum = 0;
+    for (let at = from; at <= to; at += 1) sum += expectedSpeechSeconds(units[at]!.turn.text);
+    return sum;
+  };
+  // A joined block must fit one read (rule 8). The press refuses one that would not; words grown
+  // since under a join that stands hold its joins, as the reading's limit does.
+  {
+    let from = 0;
+    for (let g = 0; g <= gapCount; g += 1) {
+      if (g < gapCount && !edge[g]) continue;
+      const inside = [...joined].filter((gap) => gap >= from && gap < g);
+      if (inside.length > 0 && seconds(from, g) > AUDIOBOOK_JOIN_MAX_SECONDS) {
+        for (const gap of inside) {
+          edge[gap] = true;
+          joined.delete(gap);
+          held += 1;
+        }
+      }
+      from = g + 1;
+    }
+  }
+  const runsOf = (edges: readonly boolean[]): Array<[number, number]> => {
+    const runs: Array<[number, number]> = [];
+    let from = 0;
+    for (let g = 0; g <= gapCount; g += 1) {
+      if (g < gapCount && !edges[g]) continue;
+      if (units.length > 0) runs.push([from, g]);
+      from = g + 1;
+    }
+    return runs;
+  };
+  // The automatic blocks and their keys, as the reading cuts them: `p<paragraph>.<n>`.
+  const autoRuns = runsOf(auto);
+  const autoKeyAt = new Map<number, string>();
+  const autoOf: number[] = [];
+  const within = new Map<number, number>();
+  autoRuns.forEach(([from, to], index) => {
+    const paragraph = units[from]!.place.paragraph;
+    const n = within.get(paragraph) ?? 0;
+    within.set(paragraph, n + 1);
+    autoKeyAt.set(from, `p${paragraph}.${n}`);
+    for (let at = from; at <= to; at += 1) autoOf[at] = index;
+  });
+  const autoKey = (index: number) => autoKeyAt.get(autoRuns[index]![0])!;
+  const textOf = (from: number, to: number): string => {
+    if (from === to) return units[from]!.turn.text;
+    // Each paragraph's part: the whole paragraph when the turns cover it, so the block is an exact
+    // slice of it (a pin finds its words there); else the turns as they read, one space between.
+    const parts: string[] = [];
+    let at = from;
+    while (at <= to) {
+      const paragraph = units[at]!.place.paragraph;
+      const run: VoicedBlock[] = [];
+      while (at <= to && units[at]!.place.paragraph === paragraph) run.push(units[at++]!.turn);
+      const whole = paragraphs[paragraph];
+      const covers = whole !== undefined && run.map((turn) => turn.text.trim()).join("").replace(/\s+/g, "") === whole.replace(/\s+/g, "");
+      parts.push(covers ? whole : run.map((turn) => turn.text).join(" "));
+    }
+    return parts.join("\n\n");
+  };
+  const blocks: AudiobookBlock[] = [{ key: AUDIOBOOK_TITLE_KEY, paragraph: AUDIOBOOK_TITLE_PARAGRAPH, text: heading }];
+  const runs = runsOf(edge);
+  const runOf: number[] = [];
+  for (const [index, [from, to]] of runs.entries()) {
+    for (let at = from; at <= to; at += 1) runOf[at] = index;
+    const first = units[from]!;
+    const startsAuto = autoKeyAt.get(from);
+    // A join keeps the first block's key, a split's first part the block's; a later part takes the
+    // next free key of its paragraph in the same scheme, so a key reused never finds another
+    // block's take, which is found by its words as well (rules 6 and 7).
+    let key = startsAuto;
+    if (key === undefined) {
+      const n = within.get(first.place.paragraph) ?? 0;
+      within.set(first.place.paragraph, n + 1);
+      key = `p${first.place.paragraph}.${n}`;
+    }
+    const shaped = startsAuto === undefined || autoRuns[autoOf[from]!]![1] !== to;
+    const shape = shaped
+      ? {
+          shaped: true as const,
+          sources: [...new Set(Array.from({ length: to - from + 1 }, (_, i) => autoKey(autoOf[from + i]!)))],
+          starts: Array.from({ length: to - from + 1 }, (_, i) => from + i).filter((at) => autoKeyAt.has(at)).map((at) => autoKeyAt.get(at)!),
+        }
+      : {};
+    if (from === to) {
+      blocks.push({ ...first.turn, key, ...shape });
+      continue;
+    }
+    const rows = units.slice(from, to + 1).map(({ turn }) => ({ text: turn.text, ...(turn.speaker !== undefined ? { speaker: turn.speaker } : {}), ...(turn.sheet !== undefined ? { sheet: turn.sheet } : {}) }));
+    // Turns of one speaker joined by hand are that speaker's block (rule 8 keeps Cast's joins to one voice).
+    const one = shaped && rows.every((row) => row.speaker !== undefined && audiobookSpeakerKey(row) === audiobookSpeakerKey(rows[0]!)) ? { speaker: rows[0]!.speaker!, ...(rows[0]!.sheet !== undefined ? { sheet: rows[0]!.sheet } : {}) } : {};
+    blocks.push({ paragraph: first.place.paragraph, text: textOf(from, to), key, ...one, rows, ...shape });
+  }
+  // Every gap the view can press, with what a press there would do and why it cannot.
+  const gaps: AudiobookGap[] = [];
+  if (runs.length > 0) gaps.push({ press: "join", block: blocks[1]!.key, auto: true, limit: "title" });
+  for (let g = 0; g < gapCount; g += 1) {
+    const anchor = { before: units[g]!.place, after: units[g + 1]!.place, textHash: gapHash(g) };
+    const seam = seamAt.get(g);
+    const common = { anchor, auto: auto[g]!, ...(seam !== undefined ? { seam } : {}) };
+    if (!edge[g]) {
+      const run = runs[runOf[g]!]!;
+      gaps.push({ press: "split", block: blocks[runOf[g]! + 1]!.key, row: g - run[0], ...common });
+      continue;
+    }
+    const above = runs[runOf[g]!]!;
+    const below = runs[runOf[g + 1]!]!;
+    const limit: AudiobookSeamLimit | undefined = units[g + 1]!.sceneBefore
+      ? "scene break"
+      : twoVoices(g)
+        ? "two voices"
+        : seconds(above[0], below[1]) > AUDIOBOOK_JOIN_MAX_SECONDS
+          ? "over 5 min"
+          : undefined;
+    gaps.push({ press: "join", block: blocks[runOf[g + 1]! + 1]!.key, ...common, ...(limit !== undefined ? { limit } : {}) });
+  }
+  return {
+    blocks,
+    ambiguous: voiced.ambiguous,
+    seams: { changed: blocks.filter((block) => block.shaped === true).length, held, dropped: droppedSeams.length, droppedSeams, gaps },
+  };
 }
 
 /**
@@ -369,14 +615,54 @@ export function rekeyCues(oldText: string, cues: readonly CadenceCue[], newText:
  * carried. Null when the direction stands for these words already, or was written by a build
  * that did not keep its words, which a wording change drops whole as before.
  */
-export function audiobookRekeyed(record: Pick<ChapterAudiobook, "direction"> | null, block: Pick<AudiobookBlock, "key" | "text">): { input: AudiobookDirectionInput; dropped: number } | null {
+export function audiobookRekeyed(record: Pick<ChapterAudiobook, "direction"> | null, block: Pick<AudiobookBlock, "key" | "text" | "shaped" | "sources">): { input: AudiobookDirectionInput; dropped: number } | null {
   const held = record?.direction[block.key];
+  if (block.shaped === true && (held === undefined || held.textHash !== audiobookTextHash(block.text))) return shapedDirection(record, block);
   if (held === undefined || held.text === undefined || held.textHash === audiobookTextHash(block.text)) return null;
   const { cues, dropped } = rekeyCues(held.text, held.plan.cues, block.text);
   return {
     input: { ...(held.plan.delivery !== undefined ? { delivery: held.plan.delivery } : {}), speed: held.plan.speed, cues, ...(held.plan.note !== undefined ? { note: held.plan.note } : {}) },
     dropped: dropped + (held.dropped ?? 0),
   };
+}
+
+/**
+ * A block a seam set by hand shaped, directed from the blocks it was made of (design turn 198,
+ * rules 6 and 7): the first one's delivery, note and speed — a split's every part a copy of
+ * them — and each one's markers where their words now are. Derived every time and written
+ * nowhere, so the blocks it came from keep their own directions on the record and a block put
+ * back finds them, and its take, as they were. A marker whose words went to another part is in
+ * that part, not dropped. Null when none of them is directed.
+ */
+function shapedDirection(record: Pick<ChapterAudiobook, "direction"> | null, block: Pick<AudiobookBlock, "text" | "sources">): { input: AudiobookDirectionInput; dropped: number } | null {
+  const entries = (block.sources ?? []).flatMap((key) => {
+    const entry = record?.direction[key];
+    return entry === undefined ? [] : [entry];
+  });
+  if (entries.length === 0) return null;
+  // The first block's own: a join of an undirected block and a directed one reads undirected, but
+  // for the markers the second's words carry.
+  const first = record?.direction[block.sources?.[0] ?? ""];
+  const moved = entries.flatMap((entry) => (entry.text === undefined ? [] : rekeyCues(entry.text, entry.plan.cues, block.text).cues));
+  const ordered = [...moved].sort((a, b) => (isPointCue(a) ? a.at : a.span.from) - (isPointCue(b) ? b.at : b.span.from));
+  const cues = orderCues(ordered);
+  if (first === undefined && cues.length === 0) return null;
+  return {
+    input: { ...(first?.plan.delivery !== undefined ? { delivery: first.plan.delivery } : {}), speed: first?.plan.speed ?? 1, cues, ...(first?.plan.note !== undefined ? { note: first.plan.note } : {}) },
+    dropped: 0,
+  };
+}
+
+/**
+ * The direction a block is read and judged under (R-14): the record's for these words, or — on
+ * a block a seam shaped — the one its blocks make together (design turn 198). A take of a shaped
+ * block is named by it, and keeps nothing of it on the record.
+ */
+export function audiobookBlockPlan(record: Pick<ChapterAudiobook, "direction"> | null, block: Pick<AudiobookBlock, "key" | "text" | "shaped" | "sources">): CadencePlan | null {
+  const standing = audiobookDirectionFor(record, block);
+  if (standing !== null || block.shaped !== true) return standing?.plan ?? null;
+  const shaped = shapedDirection(record, block);
+  return shaped === null ? null : { schemaVersion: 1, sourceTextHash: audiobookTextHash(block.text), ...shaped.input };
 }
 
 /** The deliveries, for a panel's seg and a prompt's list. */
@@ -441,6 +727,12 @@ export const ChapterAudiobookSchema = z
     reactions: z.record(z.string(), AudiobookReactionSchema).optional(),
     beds: z.record(z.string(), AudiobookBedSchema).optional(),
     sounds: z.record(z.string(), AudiobookBlockSoundSchema).optional(),
+    /**
+     * The seams set by hand (design turn 198, SPEC-047 R-147): joins and splits between the
+     * chapter's turns, kept for the chapter and not for one reading. Absent on a record with none;
+     * the first record with one raises the world to schema 66.
+     */
+    seams: z.array(AudiobookSeamSchema).max(AUDIOBOOK_SEAMS_MAX).optional(),
   })
   .strict();
 export type ChapterAudiobook = z.infer<typeof ChapterAudiobookSchema>;
@@ -619,12 +911,18 @@ export const DEFAULT_AUDIOBOOK_BOOK: AudiobookBook = { schemaVersion: 1, reading
  * and a speaker a person records is read apart whatever the reading. Every caller derives its
  * blocks with this, so the window and the coordinator name the same ones.
  */
-export function audiobookBlockOptions(book: Pick<AudiobookBook, "reading" | "recorded"> | null): AudiobookBlockOptions {
+export function audiobookBlockOptions(
+  book: Pick<AudiobookBook, "reading" | "recorded"> | null,
+  /** The chapter's record, whose seams set by hand reshape the blocks (design turn 198). */
+  record?: Pick<ChapterAudiobook, "seams"> | null,
+): AudiobookBlockOptions {
   const reading = book?.reading ?? DEFAULT_AUDIOBOOK_BOOK.reading;
   const recorded = new Set(book?.recorded ?? []);
+  const seams = record?.seams;
   return {
     merge: reading !== "cast",
     ...(recorded.size > 0 ? { apart: (turn: Pick<AudiobookBlock, "speaker" | "sheet">) => recorded.has(audiobookRecordingKey(turn)) } : {}),
+    ...(seams !== undefined && seams.length > 0 ? { seams } : {}),
   };
 }
 
@@ -650,7 +948,7 @@ const sameReader = (a: AudiobookReader, b: AudiobookReader): boolean =>
  * or it could neither play nor be read again (codex on PR 1180).
  */
 export function audiobookBlockState(
-  block: Pick<AudiobookBlock, "key" | "text">,
+  block: Pick<AudiobookBlock, "key" | "text" | "shaped" | "sources">,
   record: ChapterAudiobook | null,
   assigned: AudiobookReader,
   hasArtifact?: (artifactId: string) => boolean,
@@ -673,14 +971,15 @@ export function audiobookBlockState(
   if (flag !== undefined && (take === undefined || flag.at > take.madeAt)) return "flagged";
   if (take === undefined) return "not made";
   if (hasArtifact !== undefined && !hasArtifact(take.artifactId)) return "not made";
-  if (take.textHash !== audiobookTextHash(block.text)) return "stale";
+  // A block whose shape a seam changed has no take for its words yet (design turn 198, rule 4):
+  // the take under its key is another shape's, kept, and the block is not read rather than stale.
+  if (take.textHash !== audiobookTextHash(block.text)) return block.shaped === true ? "not made" : "stale";
   // A recording is current while its words are (R-34): no reader and no direction made it.
   if (take.source === "recorded") return "made";
   if (!sameReader(take.assigned ?? take.reader, assigned)) return "stale";
   // The direction the take was made under against the one that stands (R-14): a direction
   // added, changed or dropped since is a different take; one authored for other words is none.
-  const direction = audiobookDirectionFor(record, block);
-  if (audiobookTakeDirectionHash(direction?.plan ?? null, note, reading) !== take.directionHash) return "stale";
+  if (audiobookTakeDirectionHash(audiobookBlockPlan(record, block), note, reading) !== take.directionHash) return "stale";
   return "made";
 }
 

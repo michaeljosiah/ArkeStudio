@@ -129,7 +129,15 @@ export interface TurnBreak { at: number; label: string; tone: string; /** The fu
  * (design turn 181), a delivery marker's span underlined, a held control struck (R-47). A press
  * on a plate opens the menu to change or remove it.
  */
-export function DirectedText({ raw, cues, held, onPlate, turns = [] }: { raw: string; cues: readonly CadenceCue[]; held: ReadonlySet<number>; onPlate?: (index: number) => void; turns?: readonly TurnBreak[] }) {
+export function DirectedText({ raw, cues, held, onPlate, turns = [], gap }: {
+  raw: string;
+  cues: readonly CadenceCue[];
+  held: ReadonlySet<number>;
+  onPlate?: (index: number) => void;
+  turns?: readonly TurnBreak[];
+  /** What sits on the rule before each later turn, by its index in `turns`: the Split a fine pointer finds there (design turn 198). */
+  gap?: (index: number) => ReactNode;
+}) {
   if (cues.length === 0 && turns.length === 0) return <>{raw}</>;
   const map = normalisedToRaw(raw);
   // Where each later turn of a block begins, in the normalised words the cues use.
@@ -161,9 +169,18 @@ export function DirectedText({ raw, cues, held, onPlate, turns = [] }: { raw: st
   if (at(0) > 0) out.push(raw.slice(0, at(0)));
   for (let index = 0; index < edges.length; index += 1) {
     const from = edges[index]!;
-    for (const turn of turnAt) {
-      if (turn.at === from) out.push(<span key={`turn${from}`} className={`fy-ab__turn fy-voice--${turn.tone}`} data-who={turn.label} aria-hidden="true" />);
-    }
+    turnAt.forEach((turn, at) => {
+      if (turn.at !== from) return;
+      // The rule holds no words; a press on it is the one thing in it a reader of the page meets.
+      const on = gap?.(at) ?? null;
+      out.push(
+        on === null ? (
+          <span key={`turn${from}`} className={`fy-ab__turn fy-voice--${turn.tone}`} data-who={turn.label} aria-hidden="true" />
+        ) : (
+          <span key={`turn${from}`} className={`fy-ab__turn fy-voice--${turn.tone}`} data-who={turn.label}>{on}</span>
+        ),
+      );
+    });
     cues.forEach((cue, cueIndex) => {
       if (cueStart(cue) === from) out.push(plate(cue, cueIndex));
     });

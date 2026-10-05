@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  audiobookBlockPlan,
   audiobookDirectionFor,
   audiobookNoteFor,
   freeCreditOverrun,
@@ -474,67 +475,75 @@ export async function followTakes(store: WorldStore, productionId: string, room:
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) return 0;
   let chosen = 0;
-  for (const summary of production.chapters.filter((c) => !c.retired)) {
-    let plan: AudiobookPlan;
-    try {
-      plan = await planAudiobook(store, productionId, summary.id, { narrator: room.narrator });
-    } catch {
-      continue;
-    }
-    if (castRefusal(plan) !== null || plan.record === null || plan.record === "unreadable") continue;
-    const record = plan.record;
-    const picks: Record<string, AudiobookTake> = {};
-    for (const planned of plan.blocks) {
-      if (planned.recorded === true || (planned.state !== "stale" && planned.state !== "not made" && planned.state !== "flagged")) continue;
-      const textHash = audiobookTextHash(planned.block.text);
-      const want = audiobookTakeDirectionHash(audiobookDirectionFor(record, planned.block)?.plan ?? null, planned.note, planned.reading);
-      const candidates = store
-        .getBundle()
-        .artifacts.filter((artifact) => {
-          const g = artifact.generation;
-          return (
-            artifact.retiredAt === undefined &&
-            g?.source === "audiobook" &&
-            g.recording === undefined &&
-            g.productionId === productionId &&
-            g.chapterId === plan.chapter.id &&
-            g.block === planned.block.key &&
-            g.textHash === textHash &&
-            sameVoice(g, planned.assigned) &&
-            g.directionHash === want
-          );
-        })
-        .sort((a, b) => (a.created < b.created ? 1 : -1));
-      for (const artifact of candidates) {
-        if (artifact.id === record.takes[planned.block.key]?.artifactId) break;
-        const there = await stat(toExtendedLength(join(store.dir, "artifacts", fromPortable(artifact.file)))).then((s) => s.isFile(), () => false);
-        if (!there) continue;
-        const g = artifact.generation as Extract<NonNullable<typeof artifact.generation>, { source: "audiobook" }>;
-        const format = artifact.file.toLowerCase().endsWith(".mp3") ? "mp3" : artifact.file.toLowerCase().endsWith(".flac") ? "flac" : "wav";
-        picks[planned.block.key] = {
-          artifactId: artifact.id,
-          textHash,
-          reader: { provider: g.provider, model: g.model, voiceId: g.voiceId, ...(g.voiceLabel !== undefined ? { label: g.voiceLabel } : {}) },
-          ...(g.sheetId !== undefined ? { sheet: g.sheetId } : {}),
-          format,
-          characters: g.characters,
-          parts: g.parts,
-          estimatedMicroUsd: g.estimatedMicroUsd,
-          costMicroUsd: g.costMicroUsd,
-          ...(g.directionHash !== undefined ? { directionHash: g.directionHash } : {}),
-          madeAt: artifact.created,
-        };
-        break;
-      }
-    }
-    if (Object.keys(picks).length === 0) continue;
-    await updateAudiobook(store, productionId, { file: summary.file, version: plan.chapter.version, hash: plan.chapter.hash }, (current) => {
-      const flags = Object.fromEntries(Object.entries(current.flags).filter(([key]) => picks[key] === undefined));
-      return { ...current, updatedAt: store.now(), takes: { ...current.takes, ...picks }, flags };
-    });
-    chosen += Object.keys(picks).length;
-  }
+  for (const summary of production.chapters.filter((c) => !c.retired)) chosen += await followChapterTakes(store, productionId, summary, room);
   return chosen;
+}
+
+/**
+ * One chapter's blocks finding their kept takes again (R-48), as `followTakes` does for the book.
+ * A seam changed by hand asks the same (design turn 198, rule 5): a block returned to a shape it
+ * had before — split back, joined back, reset — finds its old take by its key and its words, and
+ * is made again with nothing to read.
+ */
+export async function followChapterTakes(store: WorldStore, productionId: string, summary: Pick<ChapterSummary, "id" | "file">, room: Pick<ReadingRoom, "narrator">): Promise<number> {
+  let plan: AudiobookPlan;
+  try {
+    plan = await planAudiobook(store, productionId, summary.id, { narrator: room.narrator });
+  } catch {
+    return 0;
+  }
+  if (castRefusal(plan) !== null || plan.record === null || plan.record === "unreadable") return 0;
+  const record = plan.record;
+  const picks: Record<string, AudiobookTake> = {};
+  for (const planned of plan.blocks) {
+    if (planned.recorded === true || (planned.state !== "stale" && planned.state !== "not made" && planned.state !== "flagged")) continue;
+    const textHash = audiobookTextHash(planned.block.text);
+    const want = audiobookTakeDirectionHash(audiobookBlockPlan(record, planned.block), planned.note, planned.reading);
+    const candidates = store
+      .getBundle()
+      .artifacts.filter((artifact) => {
+        const g = artifact.generation;
+        return (
+          artifact.retiredAt === undefined &&
+          g?.source === "audiobook" &&
+          g.recording === undefined &&
+          g.productionId === productionId &&
+          g.chapterId === plan.chapter.id &&
+          g.block === planned.block.key &&
+          g.textHash === textHash &&
+          sameVoice(g, planned.assigned) &&
+          g.directionHash === want
+        );
+      })
+      .sort((a, b) => (a.created < b.created ? 1 : -1));
+    for (const artifact of candidates) {
+      if (artifact.id === record.takes[planned.block.key]?.artifactId) break;
+      const there = await stat(toExtendedLength(join(store.dir, "artifacts", fromPortable(artifact.file)))).then((s) => s.isFile(), () => false);
+      if (!there) continue;
+      const g = artifact.generation as Extract<NonNullable<typeof artifact.generation>, { source: "audiobook" }>;
+      const format = artifact.file.toLowerCase().endsWith(".mp3") ? "mp3" : artifact.file.toLowerCase().endsWith(".flac") ? "flac" : "wav";
+      picks[planned.block.key] = {
+        artifactId: artifact.id,
+        textHash,
+        reader: { provider: g.provider, model: g.model, voiceId: g.voiceId, ...(g.voiceLabel !== undefined ? { label: g.voiceLabel } : {}) },
+        ...(g.sheetId !== undefined ? { sheet: g.sheetId } : {}),
+        format,
+        characters: g.characters,
+        parts: g.parts,
+        estimatedMicroUsd: g.estimatedMicroUsd,
+        costMicroUsd: g.costMicroUsd,
+        ...(g.directionHash !== undefined ? { directionHash: g.directionHash } : {}),
+        madeAt: artifact.created,
+      };
+      break;
+    }
+  }
+  if (Object.keys(picks).length === 0) return 0;
+  await updateAudiobook(store, productionId, { file: summary.file, version: plan.chapter.version, hash: plan.chapter.hash }, (current) => {
+    const flags = Object.fromEntries(Object.entries(current.flags).filter(([key]) => picks[key] === undefined));
+    return { ...current, updatedAt: store.now(), takes: { ...current.takes, ...picks }, flags };
+  });
+  return Object.keys(picks).length;
 }
 
 function sameVoice(g: { provider: string; model: string; voiceId: string }, reader: AudiobookReader): boolean {

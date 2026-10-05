@@ -478,6 +478,59 @@
 .fy-abp__add { flex: none; padding: 0; border: 0; background: transparent; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); cursor: pointer; }
 .fy-abp__add:hover { color: var(--foreground); }
 .fy-abp__none { font-size: var(--text-sm); }
+
+/*
+ * Block seams (design turn 198, rules 1, 2 and 15). On a fine pointer the line between two blocks
+ * is a seam: hovered, it darkens across the row (the foreground at 55%) and a Join sits on the
+ * bracket line, its left 22 px left of the bracket, 20 high, mono 2xs in a 1-px foreground border;
+ * the rule between two rows of one block is the same with Split. A Join a limit refuses is drawn
+ * off with its reason, border and words muted. The seam sits in the lower block, over the upper
+ * one's bottom rule: 5 px up where the blocks' margins stand apart in the list, 3 where they meet
+ * inside a request's bracket. The press's word is its data, never the page's, so a Split inside
+ * the words leaves a selection's offsets as they were.
+ */
+.fy-ab__seam { position: absolute; left: 0; right: 0; top: -5px; height: 1px; z-index: 3; cursor: default; }
+.fy-ab__request .fy-ab__seam:not(.fy-ab__seam--in) { top: -3px; }
+.fy-ab__seam::after { content: ""; position: absolute; left: -22px; right: 0; top: -6px; height: 13px; }
+.fy-ab__seam::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: var(--foreground); opacity: 0; }
+.fy-ab__seam:is(:hover, :focus-within, .fy-ab__seam--open)::before { opacity: 0.55; }
+.fy-ab__seam--off:is(:hover, :focus-within)::before { background: var(--muted-foreground); opacity: 0.3; }
+.fy-ab__seam-press { position: absolute; z-index: 1; top: -10px; left: -22px; height: 20px; padding: 0 8px; border: 1px solid var(--foreground); border-radius: 6px; background: var(--background); color: var(--foreground); font: var(--type-mono); font-size: var(--text-2xs); line-height: 1; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; box-sizing: border-box; cursor: pointer; opacity: 0; user-select: none; }
+.fy-ab__seam-press::before { content: attr(data-label); }
+.fy-ab__seam:is(:hover, .fy-ab__seam--open) .fy-ab__seam-press, .fy-ab__seam-press:focus-visible { opacity: 1; }
+.fy-ab__seam-press:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.fy-ab__seam--off .fy-ab__seam-press { border-color: var(--border); color: var(--muted-foreground); cursor: default; }
+/* Between two rows of one block: the rule the row before draws, from the bracket across. */
+.fy-ab__seam--in { top: -1px; left: -12px; }
+.fy-ab__block:has(.fy-ab__seam--open, .fy-ab__seam:focus-within) { z-index: 7; }
+/* The one join that asks (198d): a picture would come off. One line over Cancel and Join, 300 wide, under the press. */
+.fy-ab__seam-confirm { position: absolute; z-index: 6; top: 16px; left: -22px; width: 300px; display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover, var(--background)); color: var(--foreground); box-shadow: var(--shadow-lg); box-sizing: border-box; font: var(--type-ui); font-size: var(--text-sm); line-height: 1.5; cursor: default; }
+.fy-ab__seam-confirm-foot { display: flex; gap: 8px; justify-content: flex-end; }
+.fy-ab__seam-confirm .ui-btn { height: 30px; min-height: 0; padding: 0 11px; border-radius: 8px; font: var(--type-label); box-shadow: none; }
+.fy-ab__seam-confirm .ui-btn--primary { background: var(--foreground); color: var(--background); }
+.fy-ab__seam-confirm--sheet { position: static; width: auto; margin: 10px 22px 0; box-shadow: none; }
+/* A block put back and found made again (198g): `made` with a green dot until the author leaves the view. */
+.fy-ab__state--again::before { background: var(--success); }
+/* On touch, in the block's sheet (198j): Join next and Split under the head, 30 high on one line. */
+.fy-abp__acts { display: flex; gap: 8px; padding: 10px 22px 0; }
+.fy-abp__acts .fy-ab__pill { height: 30px; }
+/* 30 and 28 high as 198j draws them, under the phone sheet's 44-high rule for its other presses. */
+.fy-chapter-block-sheet .fy-abp__acts .fy-ab__pill { min-height: 30px; }
+.fy-chapter-block-sheet .fy-ab__seam--sheet .fy-ab__seam-press { min-height: 0; }
+.fy-ab__pill--off { color: var(--muted-foreground); cursor: default; }
+.fy-ab__pill--off:hover:not(:disabled) { background: var(--background); }
+/* Split on a block of three or more lines: its lines, a Split at the right of each gap between them. */
+.fy-abp__lines { flex: 1; min-height: 0; overflow: auto; padding: 4px 22px 16px; }
+.fy-abp__line { display: flex; flex-direction: column; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.fy-abp__line:last-child { border-bottom: 0; }
+.fy-abp__line-who { display: flex; align-items: center; gap: 7px; font: var(--type-label); color: var(--muted-foreground); }
+.fy-abp__line-who .fy-ab__speaker-dot { width: 7px; height: 7px; background: var(--fy-voice); }
+.fy-abp__line-text { margin-top: 3px; font-size: var(--text-base); line-height: 1.6; color: var(--foreground); }
+.fy-ab__seam--sheet { position: relative; display: block; top: 0; height: 0; z-index: 1; }
+.fy-ab__seam--sheet::after { content: none; }
+.fy-ab__seam--sheet::before { top: -1px; opacity: 0.55; }
+.fy-ab__seam--sheet .fy-ab__seam-press { left: auto; right: 0; top: -14px; height: 28px; padding: 0 12px; border-radius: 8px; font: var(--type-label); opacity: 1; }
+.fy-ab__blocksmenu { min-width: 240px; }
 .fy-abp .fy-ab__cues { flex: 1; }
 .fy-abp .fy-ab__direction { display: flex; flex-direction: column; gap: 13px; }
 .fy-abp .fy-ab__chips { gap: 6px; }

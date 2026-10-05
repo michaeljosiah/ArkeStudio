@@ -549,6 +549,9 @@ const CLIENT_COMMAND_METADATA = {
   "quote-audiobook-narrator": readOnly(QUERY),
   "hear-audiobook-line": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
   "set-audiobook-block": action("production", "command", "voice", "external-network-action", ["chapters"]),
+  // Block seams (turn 198): Join, Split and Reset are commands on the chapter's record; nothing is read.
+  "set-audiobook-seam": action("production", "command", "voice", "authored-change", ["chapters"]),
+  "reset-audiobook-seams": action("production", "command", "voice", "authored-change", ["chapters"]),
   "direct-chapter": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "discard-direction": action("production", "command", "extraction", "external-network-action", ["chapters"]),
   // The director reads the book (turn 184): what it would read is a query; the book note and

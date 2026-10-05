@@ -29,6 +29,7 @@ import {
   type AudiobookReader,
   type AudiobookReadingNotes,
   type AudiobookReading,
+  type AudiobookSeamView,
   type AudiobookSubstitution,
   type CadencePlan,
   type ChapterAudiobook,
@@ -43,7 +44,7 @@ import {
 import { clipFor } from "../voice/library.js";
 import { directionPlan } from "../voice/direction.js";
 import { atomicWriteFile } from "../world/atomic.js";
-import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_LOOKS_SCHEMA_VERSION, AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_LOOKS_SCHEMA_VERSION, AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
@@ -142,7 +143,7 @@ async function writeOwned(store: WorldStore, rel: string, value: unknown, supers
 export async function writeAudiobook(store: WorldStore, productionId: string, chapterFile: string, untimed: ChapterAudiobook): Promise<void> {
   // Timing, reactions, beds and sounds (design turn 187, R-89) the same way: each part written
   // only when it holds something, and the world raised before the first record carrying any.
-  const { timing, reactions, beds, sounds, ownLooks, ...bare } = untimed;
+  const { timing, reactions, beds, sounds, ownLooks, seams, ...bare } = untimed;
   const parts = { timing, reactions, beds, sounds };
   const kept = Object.fromEntries(Object.entries(parts).filter(([, part]) => part !== undefined && Object.keys(part).length > 0));
   if (Object.keys(kept).length > 0) await store.ensureSchemaVersion(AUDIOBOOK_TIMING_SCHEMA_VERSION, "audiobook-timing");
@@ -150,7 +151,11 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
   // while one is held, and the world raised before the first record that holds one.
   const owned = ownLooks !== undefined && Object.keys(ownLooks).length > 0;
   if (owned) await store.ensureSchemaVersion(AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, "audiobook-own-looks");
-  const record: ChapterAudiobook = { ...bare, ...kept, ...(owned ? { ownLooks } : {}) };
+  // Seams set by hand (design turn 198): written only while one is set, and the world raised
+  // before the first record that holds one, since the builds before read it as unreadable.
+  const seamed = seams !== undefined && seams.length > 0;
+  if (seamed) await store.ensureSchemaVersion(AUDIOBOOK_SEAMS_SCHEMA_VERSION, "audiobook-seams");
+  const record: ChapterAudiobook = { ...bare, ...kept, ...(owned ? { ownLooks } : {}), ...(seamed ? { seams } : {}) };
   // A record with no picture is written without the field, in the shape the builds before
   // pictures read; one with a picture raises the world past them first (design turn 186, R-73).
   const { pictures, ...unpictured } = record;
@@ -371,8 +376,15 @@ export async function writeBlockDirection(
   return updateAudiobook(store, productionId, chapter, (record) => {
     const { [key]: _was, ...rest } = record.direction;
     const kept: ChapterAudiobook["direction"] = {};
-    for (const other of Object.keys(rest)) {
+    for (const [other, entry] of Object.entries(rest)) {
       const block = blocks.find((candidate) => candidate.key === other);
+      // A key a join took into another block, and a block a seam shaped, keep their own entries as
+      // they are (design turn 198): the shaped block is directed from them, and a split or Reset
+      // wants them back. Carrying them to the shaped words would write over what is put back.
+      if (block === undefined ? (record.seams ?? []).length > 0 : block.shaped === true) {
+        kept[other] = entry;
+        continue;
+      }
       const carried = block === undefined ? null : currentDirection(record, block, store.now());
       if (carried !== null) kept[other] = carried;
     }
@@ -484,6 +496,8 @@ export interface AudiobookPlan {
   body: string;
   cast: ChapterVoices | "unreadable" | null;
   ambiguous: number;
+  /** What the record's seams do under this reading (design turn 198): the blocks they shape, the joins held, the gaps. */
+  seams: AudiobookSeamView;
   record: ChapterAudiobook | "unreadable" | null;
   /** The artifact ids of the record's takes that are still on the shelf with their media (codex on PR 1180). */
   present: Set<string>;
@@ -532,7 +546,8 @@ export async function planAudiobook(
   // One reader, one block (design turn 190): under `narrator` and `performed` one voice reads the
   // chapter, so a paragraph's turns are one block; a speaker a person records is read apart.
   const recorded = new Set(book === null ? [] : (book.recorded ?? []));
-  const derived = audiobookBlocks(opened.body, cast === "unreadable" ? null : cast, audiobookHeading(summary.order, summary.title), audiobookBlockOptions(book));
+  // The seams set by hand on the record reshape the blocks (design turn 198), under every reading.
+  const derived = audiobookBlocks(opened.body, cast === "unreadable" ? null : cast, audiobookHeading(summary.order, summary.title), audiobookBlockOptions(book, record === "unreadable" ? null : record));
   const sheets = store.getBundle().sheets.filter((sheet) => sheet.type === "character" && !sheet.retired);
   const present = await presentTakes(store, record === "unreadable" ? null : record);
   // A drafted note stands only where the author has none (R-54): the author's always wins.
@@ -547,6 +562,7 @@ export async function planAudiobook(
     body: opened.body,
     cast,
     ambiguous: derived.ambiguous,
+    seams: derived.seams,
     record,
     present,
     reading,

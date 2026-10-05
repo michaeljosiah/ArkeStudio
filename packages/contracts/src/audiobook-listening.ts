@@ -97,6 +97,8 @@ export type AudiobookListening = z.infer<typeof AudiobookListeningSchema>;
 export interface ListeningInputBlock {
   key: string;
   text: string;
+  /** A block joined by hand (design turn 198): the automatic blocks whose first turn it holds, whose first picture it shows. */
+  starts?: readonly string[];
   take?: { file: string; seconds: number; grouped: boolean; artifactId?: string };
 }
 
@@ -118,19 +120,31 @@ export interface PlacedPicture {
  * keep the one set there.
  */
 export function placePictures(
-  blocks: readonly Pick<ListeningInputBlock, "key" | "text">[],
+  blocks: readonly Pick<ListeningInputBlock, "key" | "text" | "starts">[],
   pictures: Readonly<Record<string, AudiobookPicture>> | undefined,
   usable: (file: string) => boolean = () => true,
-): { placed: PlacedPicture[]; lost: string[] } {
+): { placed: PlacedPicture[]; lost: string[]; /** Pictures a join took off their block (design turn 198): kept on the record under it, shown nowhere, never lost. */ off: string[] } {
   const hashes = blocks.map((block) => audiobookTextHash(block.text));
   const byIndex = new Map<number, PlacedPicture>();
   const lost: string[] = [];
+  const off: string[] = [];
+  // A block joined by hand shows the first picture among the blocks it was made of (design turn
+  // 198, rule 6); a later one comes off its block and stays on the record under it, so a split or
+  // Reset puts it back.
+  const joinedInto = new Map<string, { index: number; order: number }>();
+  blocks.forEach((block, index) => block.starts?.forEach((key, order) => joinedInto.set(key, { index, order })));
+  const offered: Array<{ key: string; index: number; order: number; picture: AudiobookPicture }> = [];
   for (const [key, picture] of Object.entries(pictures ?? {})) {
     if (!usable(picture.file)) {
       lost.push(key);
       continue;
     }
     const own = blocks.findIndex((block) => block.key === key);
+    const into = own < 0 ? joinedInto.get(key) : undefined;
+    if (into !== undefined && into.order > 0) {
+      offered.push({ key, ...into, picture });
+      continue;
+    }
     let index = own >= 0 && hashes[own] === picture.textHash ? own : -1;
     if (index < 0) {
       const found = hashes.flatMap((hash, at) => (hash === picture.textHash ? [at] : []));
@@ -145,7 +159,11 @@ export function placePictures(
     if (held === undefined || (held.moved && !placed.moved)) byIndex.set(index, placed);
     else lost.push(key);
   }
-  return { placed: [...byIndex.values()].sort((a, b) => a.index - b.index), lost };
+  for (const entry of offered.sort((a, b) => a.order - b.order)) {
+    if (byIndex.has(entry.index)) off.push(entry.key);
+    else byIndex.set(entry.index, { key: entry.key, index: entry.index, picture: entry.picture, moved: true });
+  }
+  return { placed: [...byIndex.values()].sort((a, b) => a.index - b.index), lost, off };
 }
 
 /** A block's sentences, at sentence ends; a text with none is one sentence. */
@@ -261,7 +279,7 @@ export function listeningChapter(input: {
  * (design turn 194 draws `10:22` on a chapter with a block not yet made below it).
  */
 export function pictureSpans(
-  blocks: ReadonlyArray<Pick<ListeningInputBlock, "key" | "text"> & { seconds: number | null }>,
+  blocks: ReadonlyArray<Pick<ListeningInputBlock, "key" | "text" | "starts"> & { seconds: number | null }>,
   pictures: Readonly<Record<string, AudiobookPicture>> | undefined,
   usable?: (file: string) => boolean,
 ): { spans: Array<PlacedPicture & { at: number; seconds: number; short: boolean; until: number | null; startEstimated: boolean }>; lost: string[]; estimated: boolean } {

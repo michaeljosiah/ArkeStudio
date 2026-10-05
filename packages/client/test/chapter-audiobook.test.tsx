@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import {
+  audiobookSeamHash,
   audiobookTextHash,
   type ArtifactSidecar,
   type AudiobookDirection,
@@ -2109,5 +2110,161 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
     assert.ok(hold.querySelector('[data-testid="audiobook-listen"]'), "beside Listen");
     assert.equal(q(m, '.fy-ch__viewline [data-testid="direct-illustrate"]'), null, "a menu of things that cannot be pressed says nothing");
     assert.equal(q(m, '.fy-ch__viewline [data-testid="audiobook-progress"]'), null, "the line does not repeat it");
+  });
+});
+
+describe("block seams (design turn 198)", () => {
+  /** A window `width` wide: the width queries answer by it, a fine pointer, nothing else. */
+  function windowOf(width: number): void {
+    Object.assign(dom.window, {
+      matchMedia: (query: string) => {
+        const widths = [...query.matchAll(/\((min|max)-width: (\d+)px\)/g)];
+        return {
+          matches: widths.length > 0 && !query.includes("pointer") && widths.every(([, kind, value]) => (kind === "min" ? width >= Number(value) : width <= Number(value))),
+          addEventListener() {},
+          removeEventListener() {},
+        };
+      },
+    });
+  }
+  afterEach(() => {
+    delete (dom.window as unknown as { matchMedia?: unknown }).matchMedia;
+  });
+  const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+  const P0 = "Maren counted the bells.";
+  const QUOTE = "“You hear it too,”";
+  const P3 = "Six, and the tide <br> not yet called.";
+  /** Every block of the chapter under one reader made, and the join of the first paragraph with the line's set by hand. */
+  const TEXTS = { title: "Chapter 2 · The counting of bells", "p0.0": P0, "p1.0": LINE, "p3.0": P3 };
+  const joined = (): ChapterAudiobook => ({
+    ...record(["title", "p0.0", "p1.0", "p3.0"], TEXTS),
+    seams: [{ kind: "join", before: { paragraph: 0, turn: 0 }, after: { paragraph: 1, turn: 0 }, textHash: audiobookSeamHash(P0, QUOTE), at: AT }],
+  });
+  const seamSent = (m: Mounted) => m.sent.filter((message) => message.kind === "set-audiobook-seam" || message.kind === "reset-audiobook-seams");
+  /** The block's sheet is drawn on the body, outside the mounted container. */
+  const d = (selector: string): HTMLElement | null => dom.document.querySelector(selector) as HTMLElement | null;
+
+  it("on a fine pointer, Join sits on the line above a block and Split on the rule between its rows; a limit is drawn off with its reason and does nothing", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: CAST });
+    const joins = all(m, '[data-testid="audiobook-join"]');
+    assert.deepEqual(joins.map((press) => press.getAttribute("data-label")), ["Join · title", "Join", "Join · scene break"]);
+    assert.deepEqual(joins.map((press) => press.closest("[data-block]")!.getAttribute("data-block")), ["p0.0", "p1.0", "p3.0"], "each in the block below its line");
+    const split = all(m, '[data-testid="audiobook-split"]');
+    assert.equal(split.length, 1, "between the line and its tag");
+    assert.equal(split[0]!.closest(".fy-ab__turn") !== null, true, "on the rule between the two rows");
+    assert.equal(q(m, '[data-block="p1.0"] .fy-ab__text')!.textContent, LINE, "the press adds nothing to the block's words, so offsets still count them alone");
+    await act(async () => joins[0]!.click());
+    await act(async () => joins[2]!.click());
+    assert.deepEqual(seamSent(m), [], "an off press does nothing");
+    await act(async () => joins[1]!.click());
+    const sent = seamSent(m).at(-1) as Extract<ClientMessage, { kind: "set-audiobook-seam" }>;
+    assert.equal(sent.press, "join");
+    assert.deepEqual(sent.anchor, { before: { paragraph: 0, turn: 0 }, after: { paragraph: 1, turn: 0 }, textHash: audiobookSeamHash(P0, QUOTE) });
+    await act(async () => split[0]!.click());
+    const cut = seamSent(m).at(-1) as Extract<ClientMessage, { kind: "set-audiobook-seam" }>;
+    assert.equal(cut.press, "split");
+    assert.deepEqual(cut.anchor.before, { paragraph: 1, turn: 0 });
+    assert.equal(q(m, '[data-testid="audiobook-blocks-press"]') === null, true, "with no seam set the Blocks press is not drawn");
+  });
+
+  it("a changed block is not read and counted on the read; Blocks · 1 changed opens Reset, and blocks found made again say made in green", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: CAST, audiobook: joined() });
+    const rows = all(m, ".fy-ab__block");
+    assert.deepEqual(rows.map((row) => row.getAttribute("data-block")), ["title", "p0.0", "p3.0"]);
+    assert.equal(rows[1]!.querySelector('[data-testid="audiobook-state"]')!.textContent, "not read");
+    assert.equal(rows[1]!.querySelectorAll(".fy-ab__turn").length, 2, "three rows under one bracket");
+    assert.match(q(m, '[data-testid="read-audiobook"]')!.textContent ?? "", /· 1 block/, "the toolbar's read counts it");
+    assert.equal(rows[2]!.querySelector('[data-testid="audiobook-state"]') === null, true, "its neighbour keeps its take");
+    // Its panel (198c): how long it will be and not read, no other shape's takes, and Make reads it alone.
+    await act(async () => rows[1]!.click());
+    assert.match(d(".fy-abp__sub")?.textContent ?? "", /^3 lines · ~\d+\.\d s · read by .* · not read$/);
+    assert.equal(d('[data-testid="audiobook-takes"]') === null, true, "no takes for its words");
+    await act(async () => d('[data-testid="audiobook-make"]')!.click());
+    const made = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }> | undefined;
+    assert.deepEqual(made?.blocks, ["p0.0"]);
+    const press = q(m, '[data-testid="audiobook-blocks-press"]')!;
+    assert.equal(press.textContent, "Blocks 1 changed");
+    const line = [...q(m, ".fy-ch__viewline")!.querySelectorAll("[data-testid]")].map((node) => node.getAttribute("data-testid"));
+    assert.equal(line.indexOf("audiobook-blocks-press"), line.indexOf("audiobook-filter") + 1, "after the speaker filter");
+    await act(async () => press.click());
+    const reset = q(m, '[data-testid="audiobook-blocks-reset"]')!;
+    assert.equal(reset.querySelector(".fy-ab__menu-meta")!.textContent, "1 block");
+    await act(async () => reset.click());
+    assert.equal(seamSent(m).at(-1)?.kind, "reset-audiobook-seams");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, record: { ...record(["title", "p0.0", "p1.0", "p3.0"], TEXTS), updatedAt: "2026-09-14T09:00:05.000Z" } }));
+    const back = all(m, ".fy-ab__block");
+    assert.deepEqual(back.map((row) => row.getAttribute("data-block")), ["title", "p0.0", "p1.0", "p3.0"]);
+    const again = all(m, '[data-testid="audiobook-state"]').filter((mark) => mark.className.includes("again")).map((mark) => mark.closest("[data-block]")!.getAttribute("data-block"));
+    assert.deepEqual(again, ["p0.0", "p1.0"], "made again, no price");
+    assert.equal(q(m, '[data-testid="audiobook-blocks-press"]') === null, true);
+    assert.equal(q(m, '[data-testid="read-audiobook"]') === null, true, "nothing left to read");
+  });
+
+  it("a join that would take a picture off asks once, in one plain line; Cancel sends nothing", async () => {
+    const m = await mount(inkbound());
+    const picture = (text: string) => ({ file: "world-art.png", source: "generated" as const, textHash: audiobookTextHash(text), at: AT });
+    await answerOpen(m, { audiobook: { ...record([], {}), pictures: { "p0.0": picture(P0), "p1.0": picture(LINE) } } });
+    const join = q(m, '[data-block="p1.0"] [data-testid="audiobook-join"]')!;
+    await act(async () => join.click());
+    assert.deepEqual(seamSent(m), [], "it asks first");
+    const ask = q(m, '[data-testid="audiobook-join-confirm"]')!;
+    assert.equal(ask.querySelector("span")!.textContent, "Block 3’s picture comes off. It stays in the world.");
+    await act(async () => ([...ask.querySelectorAll("button")].find((button) => button.textContent === "Cancel") as HTMLElement).click());
+    assert.equal(q(m, '[data-testid="audiobook-join-confirm"]') === null, true);
+    assert.deepEqual(seamSent(m), []);
+    await act(async () => join.click());
+    await act(async () => ([...q(m, '[data-testid="audiobook-join-confirm"]')!.querySelectorAll("button")].find((button) => button.textContent === "Join") as HTMLElement).click());
+    assert.equal(seamSent(m).length, 1, "Join in the confirm joins");
+  });
+
+  it("holds while a read runs", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: CAST, audiobook: joined() });
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 1, blocks: 3 }));
+    assert.equal(all(m, '[data-testid="audiobook-join"]').length, 0, "no press on the lines");
+    await act(async () => q(m, '[data-testid="audiobook-blocks-press"]')!.click());
+    assert.equal(q(m, '[data-testid="audiobook-blocks-reset"]')!.getAttribute("aria-disabled"), "true");
+  });
+
+  it("a phone: Join next and Split in the block's sheet, Split listing the gaps between its lines, and Reset in the ⋯ menu", async () => {
+    windowOf(390);
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: CAST, audiobook: joined() });
+    assert.equal(q(m, '[data-testid="audiobook-blocks-press"]') === null, true, "no Blocks press on a phone's line");
+    await act(async () => q(m, '[data-testid="direct-illustrate"]')!.click());
+    const item = q(m, '[data-testid="audiobook-blocks-reset"]')!;
+    assert.equal(item.querySelector(".fy-ab__menu-label")!.textContent, "Reset");
+    assert.equal(item.querySelector(".fy-ab__menu-meta")!.textContent, "Blocks · 1 changed");
+    await act(async () => item.click());
+    assert.equal(seamSent(m).at(-1)?.kind, "reset-audiobook-seams");
+
+    await act(async () => q(m, '[data-block="p0.0"]')!.click());
+    const acts = d('[data-testid="audiobook-seam-acts"]')!;
+    assert.deepEqual([...acts.querySelectorAll("button")].map((button) => button.textContent), ["Join next · scene break", "Split"]);
+    await act(async () => d('[data-testid="audiobook-join-next"]')!.click());
+    assert.equal(seamSent(m).length, 1, "an off Join next does nothing");
+    await act(async () => d('[data-testid="audiobook-split-sheet"]')!.click());
+    const lines = d('[data-testid="audiobook-seam-lines"]')!;
+    assert.equal(lines.querySelectorAll(".fy-abp__line").length, 3, "the block's lines in the tabs' place");
+    assert.equal(d(".fy-abp__tabs") === null, true);
+    const gaps = [...lines.querySelectorAll('[data-testid="audiobook-split"]')] as HTMLElement[];
+    assert.equal(gaps.length, 2, "a Split at each gap between them");
+    await act(async () => gaps[0]!.click());
+    const sent = seamSent(m).at(-1) as Extract<ClientMessage, { kind: "set-audiobook-seam" }>;
+    assert.deepEqual([sent.press, sent.anchor.before, sent.anchor.after], ["split", { paragraph: 0, turn: 0 }, { paragraph: 1, turn: 0 }], "the join undone");
+  });
+
+  it("a phone: Split on a block of two lines splits it at its one gap", async () => {
+    windowOf(390);
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: CAST });
+    await act(async () => q(m, '[data-block="p1.0"]')!.click());
+    assert.deepEqual([...d('[data-testid="audiobook-seam-acts"]')!.querySelectorAll("button")].map((button) => button.textContent), ["Join next · scene break", "Split"]);
+    await act(async () => d('[data-testid="audiobook-split-sheet"]')!.click());
+    const sent = seamSent(m).at(-1) as Extract<ClientMessage, { kind: "set-audiobook-seam" }>;
+    assert.deepEqual([sent.press, sent.anchor.before, sent.anchor.after], ["split", { paragraph: 1, turn: 0 }, { paragraph: 1, turn: 1 }]);
+    assert.equal(d('[data-testid="audiobook-seam-lines"]') === null, true, "no list for one gap");
   });
 });
