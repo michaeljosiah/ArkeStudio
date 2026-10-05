@@ -162,6 +162,8 @@ async function withHarness(
     lists?: { count: number };
     /** The cast's model seam (turn 130): what the model would say are a chapter's lines. */
     voices?: import("../../src/productions/voices.js").VoicesDeriver;
+    /** What the local runtimes answer when they are asked, as the start-up probe asks them. */
+    validators?: ConstructorParameters<typeof Coordinator>[0]["validators"];
   },
   run: (h: {
     root: string;
@@ -178,6 +180,8 @@ async function withHarness(
     replay: () => DomainEvent[];
     /** What every refresh of the world told the windows was still going, in order. */
     refreshes: DomainEvent[][];
+    /** The local runtimes asked again, as the probe does on its tick. */
+    probeLocal: () => Promise<void>;
   }) => Promise<void>,
 ): Promise<void> {
   const { root, worldDir } = await makeTempRoot();
@@ -209,6 +213,7 @@ async function withHarness(
     ...(input.durations ? { mediaProbe: { durationSec: async () => input.durations!(), info: async () => ({ durationSec: input.durations!(), hasAudio: true }) } } : {}),
     ...(input.direction ? { directionDeriver: input.direction } : {}),
     ...(input.voices ? { voicesDeriver: input.voices } : {}),
+    ...(input.validators ? { validators: input.validators } : {}),
     ...(input.voiceless
       ? {}
       : {
@@ -237,6 +242,7 @@ async function withHarness(
   // A refresh sends the snapshot and then replays every run on the register: what the replay
   // held at each refresh is what a window was told, so it is kept for the tests to read.
   const refreshes: DomainEvent[][] = [];
+  let providersRead: Promise<void> | undefined;
   const replay = () => coordinator.serverApplication.getInitialEvents!();
   coordinator.serverApplication.attachTransport({
     broadcast() {},
@@ -257,6 +263,13 @@ async function withHarness(
       },
       replay,
       refreshes,
+      probeLocal: async () => {
+        // `start()` reads the keyless providers in before its probe asks them; the harness never starts.
+        const seam = coordinator as unknown as { providerService: { init(): Promise<void> }; revalidateLocalRuntimes(): Promise<void> };
+        providersRead ??= seam.providerService.init();
+        await providersRead;
+        await seam.revalidateLocalRuntimes();
+      },
     });
   } finally {
     await provider.close();
@@ -1871,6 +1884,34 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
         assert.equal(record.direction["p0.1"]?.plan.note, "under her breath");
       },
     ));
+
+  it("asks the transcriber afresh: a door opened before whisper answers has no Requests, and the ask after it answers does (design turn 185d, 2026-10-05)", () => {
+    // Installed 0.5.60-local.24 opened the page before the start-up probe had heard whisper, and
+    // the door it was given then had no Requests row and no request count until something else
+    // asked again. Each ask reads the transcriber as it stands; a window asks again on the
+    // `provider.status` the probe publishes.
+    let whisper = false;
+    const validators = { whispercpp: { validateKey: async () => [{ capability: "voice-stt" as const, available: whisper, ...(whisper ? {} : { reason: "whisper.cpp is not running on this machine" }) }] } };
+    // George read grouped: a reader that groups, billed by the token, so only the transcriber decides.
+    const groupable: ManifestModel = { ...KOKORO, cadence: { ...KOKORO.cadence!, groupable: true }, pricing: {
+      kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
+      speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25, rates: [
+        { version: "intro", effectiveFrom: "2026-09-01T00:00:00.000Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 },
+      ] },
+    } };
+    return withHarness({ models: [ELEVEN, groupable, FISH], validators }, async ({ events, send, probeLocal }) => {
+      await probeLocal();
+      const before = await openDoor(send, events, "01J8F3K2QW9VZX4N7M0RTYB6F1");
+      assert.equal(before.requests, undefined, "no transcriber yet, so no Requests row");
+      whisper = true;
+      await probeLocal();
+      type Status = Extract<DomainEvent, { type: "provider.status" }>;
+      const status = events.filter((e): e is Status => e.type === "provider.status").at(-1);
+      assert.ok(status?.providers.some((p) => p.id === "whispercpp" && p.probes.some((probe) => probe.capability === "voice-stt" && probe.available)), "the probe tells the windows whisper answers");
+      const after = await openDoor(send, events, "01J8F3K2QW9VZX4N7M0RTYB6F2");
+      assert.equal(after.requests, "grouped", "the next ask offers the book's requests");
+    });
+  });
 });
 
 describe("one narrator performs the cast, and a narrator for the book (turn 155g/h, SPEC-047 R-44..R-48)", () => {
