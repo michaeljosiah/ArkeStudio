@@ -216,6 +216,57 @@ describe("names and words not in English (2026-10-03)", () => {
     assert.ok(cuts.every((cut) => cut.heard !== "" && cut.end > cut.start), JSON.stringify(cuts.map((cut) => [cut.key, cut.heard])));
   });
 
+  it("cuts before the next block's interjection, whatever whisper made of it (2026-10-05)", () => {
+    // Chapter 1 of Na Love or Juju read p3.0–p5.0 grouped, and p4.0's cut ended on Tunde's
+    // "Ehn-ehn": Ade's line, a 0.87 s pause, the interjection, a pause, then Tunde's line.
+    const blocks = [
+      { key: "p3.0", text: "Ade put his glass down." },
+      { key: "p4.0", text: "“The goat was in the boot, Tunde.”" },
+      { key: "p5.0", text: "“Ehn-ehn. The goat was in the boot spiritually,” Tunde said. “Physically, he was in front.”" },
+    ];
+    for (const after of [0.41, 2.17]) {
+      const tunde = 6.13 + after;
+      // Each stretch whisper transcribes, and the words it heard there spread across it.
+      const stretches: Array<[number, number, string]> = [
+        [0.3, 2.0, "Ade put his glass down."],
+        [2.9, 4.37, "The goat was in the boot, Tunde."],
+        [5.24, 6.13, "Ehn-ehn."],
+        [tunde, tunde + 2.2, "The goat was in the boot spiritually,"],
+        [tunde + 2.6, tunde + 3.3, "Tunde said."],
+        [tunde + 3.8, tunde + 5.2, "Physically, he was in front."],
+      ];
+      const seconds = tunde + 5.5;
+      const pauses = stretches.map(([start], at) => ({ start: at === 0 ? 0 : stretches[at - 1]![1], end: start }));
+      pauses.push({ start: stretches.at(-1)![1], end: seconds });
+      for (const interjection of ["", "Mm-hmm.", "Eh.", "Ah, ah.", "Eh, eh."]) {
+        const words = stretches.flatMap(([start, end, text]): TimedWord[] => {
+          const heard = (text === "Ehn-ehn." ? interjection : text).split(" ").filter((word) => word !== "");
+          const letters = heard.reduce((sum, word) => sum + word.length, 0);
+          let at = start;
+          return heard.map((word) => {
+            const length = ((end - start) * word.length) / letters;
+            at += length;
+            return { text: word, start: at - length, end: at };
+          });
+        });
+        const cuts = splitRequest(blocks, words, seconds, () => hash, { pauses, tailAt: null }, NAMES);
+        const where = JSON.stringify({ after, interjection, cuts: cuts.map((cut) => [cut.key, cut.start, cut.end, cut.heard]) });
+        assert.ok(cuts[1]!.end > 4.37 && cuts[1]!.end < 5.24, `p4.0 ends in the pause before "Ehn-ehn": ${where}`);
+        assert.ok(cuts[1]!.matched, where);
+        assert.equal(cuts[2]!.heard.startsWith(interjection === "" ? "The" : interjection), true, where);
+        if (interjection !== "") assert.ok(cuts[2]!.matched, where);
+      }
+    }
+  });
+
+  it("hears a block's own interjection as its words where the direction makes sounds (2026-10-05)", () => {
+    const tunde = "“Ehn-ehn. The goat was in the boot spiritually,” Tunde said. “Physically, he was in front.”";
+    const heard = "The goat was in the boot spiritually, Tunde said. Physically, he was in front.";
+    for (const opening of ["Eh, eh.", "Mm-hmm."]) assert.equal(judgeSplit(tunde, `${opening} ${heard}`, hash, { lexicon: NAMES, sounds: true }).matched, true, opening);
+    assert.equal(judgeSplit("“Ehen. So you went.”", "Eh. So you went.", hash, { sounds: true }).matched, true);
+    assert.equal(judgeSplit("“No.”", "Haha. Uh-huh. Hmm. Ah. No.", hash, { sounds: true }).matched, true, "a block without one still sets the sound's fillers aside");
+  });
+
   it("builds the lexicon from the world's names and the chapter's capitalised words", () => {
     assert.ok(["ade", "adeyemi", "akinola", "tunde", "ife", "ikoyi", "ilesha", "lekki", "ozumba", "mbadiwe"].every((token) => NAMES.has(token)), [...NAMES].join(" "));
     assert.ok(!NAMES.has("they") && !NAMES.has("i") && !NAMES.has("the"));
