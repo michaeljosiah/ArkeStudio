@@ -16,7 +16,7 @@ import {
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { planAudiobook, readAudiobook, writeAudiobook } from "../../src/productions/audiobook.js";
-import { AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION, CAST_PARAGRAPHS_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta, SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { WorldStore } from "../../src/world/store.js";
@@ -206,10 +206,12 @@ describe("Join, Split and Reset (design turn 198)", () => {
 });
 
 describe("the world boundary for seams (schema 66)", () => {
-  it("is the newest this build reads, above the looks for one picture", () => {
+  it("is above the looks for one picture, and below the cast's paragraph hashes this build also reads", () => {
     assert.equal(AUDIOBOOK_SEAMS_SCHEMA_VERSION, 66);
     assert.equal(AUDIOBOOK_SEAMS_SCHEMA_VERSION, AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION + 1);
-    assert.equal(SUPPORTED_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION);
+    // Part B of the same turn (the cast's paragraph hashes) takes the next number.
+    assert.equal(CAST_PARAGRAPHS_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION + 1);
+    assert.equal(SUPPORTED_SCHEMA_VERSION, CAST_PARAGRAPHS_SCHEMA_VERSION);
   });
 
   it("raises the world before the first record with a seam, and an older build is then refused by name", async () => {
