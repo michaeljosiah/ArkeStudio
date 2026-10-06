@@ -95,6 +95,7 @@ export function ConversationTranscript({
   shotLabel,
   empty,
   autoRead = null,
+  about,
 }: {
   workspace: WorldChatWorkspace | null;
   running: boolean;
@@ -113,6 +114,8 @@ export function ConversationTranscript({
   empty?: React.ReactNode;
   /** The reply that has just finished and reads itself — Read replies (design turn 183). */
   autoRead?: string | null;
+  /** What a docked thread is about (`chapter 02`): the author's lines about it lose their prefix. */
+  about?: string;
 }) {
   const navigate = useNavigate();
   const worldId = useStore().state?.world?.meta.worldId;
@@ -158,7 +161,7 @@ export function ConversationTranscript({
           )}
         >
           <div className="fy-chat__bubble">
-            {m.role === "studio" ? renderInlineMarkdown(m.text) : m.text}
+            {m.role === "studio" ? renderInlineMarkdown(m.text) : about === undefined ? m.text : withoutSubject(m.text, about)}
             {m.role === "studio" && m.receipts.length > 0 && (
               // One tick for the row, not one per receipt: the tick means "this is what was
               // read", and repeating it turned a footnote into a checklist.
@@ -516,6 +519,20 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
 }
 
 /**
+ * An author's line as they said it, without the subject prefix the dock put before it for the
+ * thread — when that prefix names `about`, what the dock is about. The master draws the line bare
+ * (126b `Draft the rest.`, 128b `Tighten this.`); shown whole, four presses of one prompt read
+ * `About chapter 02: Draft the rest` four times in the bubbles (installed app, 2026-10-05). A
+ * passage's prefix goes with its quote, which is on the page. The thread is the production's own,
+ * so a line about another chapter, said from that chapter's dock, keeps its words whole here.
+ */
+export function withoutSubject(text: string, about: string): string {
+  const name = about.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const prefix = new RegExp(`^About (?:${name}:|this passage in ${name}(?:, paragraph \\d+)?: «[\\s\\S]*?») ([\\s\\S]+)$`);
+  return prefix.exec(text)?.[1] ?? text;
+}
+
+/**
  * Why a turn ended without a reply, in the words the screen can say out loud.
  *
  * A rejected answer is not a failed request, and telling somebody "that did not go through" when
@@ -734,6 +751,11 @@ export function ProductionConversation({
      * so the shot the dock names has to be in the words themselves or the studio never hears it.
      */
     subjectPrefix?: string;
+    /**
+     * What the prefix names while this dock says it — `chapter 02`, `shot 12`. A line said about
+     * it is drawn without the prefix (`withoutSubject`); the head already names the subject.
+     */
+    about?: string;
     /**
      * A line over the prompts that says what the subject is right now — `about this passage ·
      * 42 words` (turn 128). The prefix is what the thread hears; this is what the author sees.
@@ -1271,6 +1293,7 @@ export function ProductionConversation({
       frameRuns={state?.frameRuns ?? []}
       onSelectShot={onSelectShot}
       {...(dock?.shotLabel === undefined ? {} : { shotLabel: dock.shotLabel })}
+      {...(dock?.about === undefined ? {} : { about: dock.about })}
       {...(worldId && conversationId ? { onStop: () => cancelWorldChat(worldId, conversationId) } : {})}
       {...(worldId && conversationId
         ? { onRetry: (turnId: string) => retryWorldChatTurn(worldId, conversationId, turnId) }

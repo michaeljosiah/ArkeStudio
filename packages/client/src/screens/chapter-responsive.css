@@ -80,6 +80,10 @@
   .fy-ch__viewrow { padding: 0; }
   .fy-ch__compact-actions { display: flex; gap: 8px; margin-left: auto; }
   .fy-ch__compact-actions > button, .fy-ch__compact-actions .fy-page-read, .fy-ch__viewrow .fy-seg__item { min-width: 44px; min-height: 44px; }
+  /* A press that is only its icon is 173's 44 outline, not a filled button: Read and Notes on a
+     phone (173a), Read beside the labelled Notes on a Fold (173c). Notes had no variant, so it
+     was filled in the browser's own button grey (installed app, 2026-10-05). */
+  .fy-ch__compact-actions > .ui-btn:has(> .fy-sr-only) { width: 44px; padding-inline: 0; border-color: var(--border); border-radius: 10px; background: transparent; box-shadow: none; color: var(--foreground); }
   .fy-chapter-notes-sheet, .fy-chapter-block-sheet { inset: 52px 42px 0 auto; width: 340px; max-width: 100%; border-radius: 0; }
   .fy-chapter-notes-sheet .fy-page-sheet__grab, .fy-chapter-block-sheet .fy-page-sheet__grab { display: none; }
   .fy-chapter-notes-sheet .fy-ch__side, .fy-chapter-block-sheet .fy-ch__side { width: 100%; gap: 18px; overflow: visible; }

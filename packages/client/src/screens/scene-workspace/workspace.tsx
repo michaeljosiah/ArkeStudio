@@ -807,7 +807,7 @@ export function SceneWorkspace({
                 ? [...(scene.title === "Untitled" ? ["Name this scene"] : []), "What is missing from this scene?", "Which shots need a frame?"]
                 : [`Tighten shot ${focused.number}`, `What does shot ${focused.number} need?`],
               shotLabel,
-              ...(focused === undefined ? {} : { subjectPrefix: `About shot ${focused.number}:` }),
+              ...(focused === undefined ? {} : { subjectPrefix: `About shot ${focused.number}:`, about: `shot ${focused.number}` }),
             }}
             openingNote="opening…"
             emptyLine={`Nothing written with Arke for scene ${scene.number} yet.`}

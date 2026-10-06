@@ -35,19 +35,18 @@
 .fy-mchip__gauge { display: none; }
 .fy-mchip__btn .fy-mchip__gauge svg { width: 15px; height: 15px; }
 
-/* The row the chips share, wherever it is a row: not under a coarse pointer, where the tools stand in
-   the composer's own grid beside the editor (develop-responsive.css), and not on a phone, where the
-   bar dissolves into the composer's wrapping row. The bar is measured, not the window: the production
-   dock is 302 to 331 wide on any screen.
+/* The row the chips share, wherever it is a row — under a coarse pointer too, where a composer with
+   the chip puts its tools on their own row (develop-responsive.css), but not where the bar dissolves
+   into the composer's wrapping row (World Chat on a phone), since a bar with display: contents has no
+   box to measure or clip. The bar is measured, not the window: the production dock is 302 to 331
+   wide on any screen, and its phone sheet 330 to 360.
    Words beside the tools (a press that failed, Listening, Read replies off) keep to one line and give
    way first: wrapped, a sentence was squeezed to a word a line and climbed over the editor (local.16).
    And whatever the row cannot hold is cut at its own edge, never drawn under send; the margin keeps
    attach's pull to the edge and the chips' focus rings. */
-@media not (pointer: coarse) {
-  .fy-cx__bar:has(.fy-mchip) { container: cx-tools / inline-size; }
-  .fy-cx__left:has(> .fy-mchip) { overflow: clip; overflow-clip-margin: 8px; }
-  .fy-cx__left:has(> .fy-mchip) > :is(.fy-cx__busy, .fy-cx__agent) { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-}
+.fy-cx__bar:has(.fy-mchip) { container: cx-tools / inline-size; }
+.fy-cx__left:has(> .fy-mchip) { overflow: clip; overflow-clip-margin: 8px; }
+.fy-cx__left:has(> .fy-mchip) > :is(.fy-cx__busy, .fy-cx__agent) { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Narrower than 195b's 356 composer (the dock: 302 to 331), the row tightens to the frames' 6 between
    tools, the effort says its value and no chevron (High), and an effort with no default to name, the
    word Effort, is its glyph: its name stays on the press for a screen reader and on its tip. */
