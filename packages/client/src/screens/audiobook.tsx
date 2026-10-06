@@ -31,7 +31,8 @@ import { EditorDialog } from "../components/editor-dialog.js";
 import { ChevronLeft, ChevronRight, More, PlaySolid, Waveform, X } from "../components/icons.js";
 import { Portrait } from "../components/portrait.js";
 import { EmptyState } from "../components/layout.js";
-import { AudiobookPlayerView, audiobookPlaceKey, bookHasTakes } from "../components/audiobook-player.js";
+import { AudiobookPlayerView, bookHasTakes } from "../components/audiobook-player.js";
+import { keptPlace } from "../lib/audiobook-place.js";
 import { AudiobookExportSheet } from "../components/audiobook-export.js";
 import { useDockHost } from "../components/player.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
@@ -213,19 +214,6 @@ export function readingWarning(door: Pick<AudiobookDoor, "reading" | "voices" | 
   if (unavailable > 0) return `${unavailable} unavailable`;
   if (door.unattributed > 0) return `${door.unattributed} unattributed`;
   return null;
-}
-
-/** Where the player keeps this device's place in the book (R-71), as the player wrote it. */
-export function keptPlace(worldId: string, productionId: string): { chapterId: string; at: number } | null {
-  try {
-    const kept = JSON.parse(window.localStorage.getItem(audiobookPlaceKey(worldId, productionId)) ?? "null") as { place?: { chapterId?: unknown; at?: unknown } } | null;
-    const place = kept?.place;
-    if (place === undefined || typeof place.chapterId !== "string") return null;
-    return { chapterId: place.chapterId, at: typeof place.at === "number" && Number.isFinite(place.at) ? Math.max(0, place.at) : 0 };
-  } catch {
-    // No storage here, or a place nobody can read: Listen, as on a first visit.
-    return null;
-  }
 }
 
 /** A picture for a sheet: its main photo, else its first look. */
