@@ -24,9 +24,9 @@ import { makeTempWorld } from "../world/helpers.js";
 import { wav } from "../audio/helpers.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
 
-// Now, not a date: performance-generation.ts holds a quote fresh for a day by the wall clock, so a
-// fixed 2026-10-04 sealed quotes that every run from 2026-10-05 12:00 refused as stale.
-const AT = new Date().toISOString();
+// A date, not now: the store below runs on it, and a sealed performance quote's day of freshness
+// is counted on the store's clock, so its quotes stay fresh however far the wall clock runs past.
+const AT = "2026-10-04T12:00:00.000Z";
 const providers: ProviderStatus[] = [{ id: "google", configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] }];
 const action = (productionId: string, request: Extract<ModelWorldChatAction, { kind: "production-audio-generation" }>["request"]): ModelWorldChatAction =>
   ({ kind: "production-audio-generation", productionId, request, checkReceiptIds: [newId("check")] });
