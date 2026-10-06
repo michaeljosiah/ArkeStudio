@@ -13,6 +13,7 @@ import { openAudiobookListening, subscribeAudiobookListening, useAudiobookRecord
 import { BodyLayer } from "./body-layer.js";
 import { Play, PlaySolid } from "./icons.js";
 import { Button } from "./ui.js";
+import { audiobookPlaceKey } from "../lib/audiobook-place.js";
 
 /**
  * The audiobook player in the app (design turn 186, SPEC-047 R-66): the same module the exported
@@ -27,9 +28,6 @@ import { Button } from "./ui.js";
 
 /** The book's claim on the app's one read (design turn 183's rule). */
 const READ_KEY = "audiobook-player";
-
-/** Where a book's listener's place is kept on this device, in the app. */
-export const audiobookPlaceKey = (worldId: string, productionId: string): string => `arke-ab-${worldId}-${productionId}`;
 
 /** The plan as the player reads it: each file a URL the app serves, each chapter its takes in order. */
 export function playerChapters(listening: AudiobookListening, src: (file: string) => string): AudiobookPlayerChapter[] {

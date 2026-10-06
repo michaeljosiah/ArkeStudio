@@ -11,6 +11,12 @@
 
 @media (pointer: coarse) {
   .fy-cx { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; border-radius: 16px; }
+  /* With the model chip the tools are their own row under the words (190e). Beside the editor —
+     attach, mic, chip, effort and send — they took the whole of the phone sheet's 360 and left the
+     editor none: the placeholder stood a word a line under the paperclip, and Read replies pushed
+     send off the screen (installed app, 2026-10-05). */
+  .fy-cx:has(.fy-mchip) { grid-template-columns: minmax(0, 1fr); }
+  .fy-cx:has(.fy-mchip) > .fy-cx__bar { padding: 0 4px 4px; }
   .fy-cx__editorwrap { min-width: 0; }
   .fy-cx__editor { min-height: 44px; max-height: 160px; padding: 14px; font: 400 var(--text-sm)/1.5 var(--font-sans); }
   .fy-cx__placeholder { padding: 14px; font: 400 var(--text-sm)/1.5 var(--font-sans); }

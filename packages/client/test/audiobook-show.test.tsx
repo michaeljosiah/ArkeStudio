@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import type { AudiobookDoor, ChapterSummary, ClientMessage, ClientState } from "@arke-studio/contracts";
 import { AudiobookScreen, chapterHeading, chapterSeconds, chapterStateWord, formatBookLength, readingWarning } from "../src/screens/audiobook.js";
-import { audiobookPlaceKey } from "../src/components/audiobook-player.js";
+import { audiobookPlaceKey } from "../src/lib/audiobook-place.js";
 import { PlayerDock } from "../src/components/player.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { dismissPlayback, playClip, setAudioFactoryForTest } from "../src/lib/audio.js";

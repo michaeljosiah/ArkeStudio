@@ -121,6 +121,19 @@ try {
       if(label==='chapters'&&width<600){await click('.fy-chapter-card__more');await check(name+'-chapter-menu');await escape();await click('.fy-chapters-more');await check(name+'-manuscript-menu');await escape();}
       if(label==='chapter'){
         if(width<1100){await click('[aria-label="Notes"]');await check(name+'-notes');await escape();assert.equal(await js('!!document.querySelector(".fy-rme__doc")'),true);}
+        // Arke's sheet, before a selection hides its press (installed app, 2026-10-05): the head names
+        // the chapter, the synopsis is the Notes sheet's, and with the model chip the editor has the
+        // composer's width and the tools sit under it, send inside the screen.
+        if(width<1100&&!process.argv.includes('--hover')){
+          assert.equal(await js('getComputedStyle(document.querySelector(".fy-sw__head > .fy-sbsynopsis")).display'),'none',name+': the synopsis is not drawn below 1100');
+          await click(width<600?'button.fy-season-arke':'.fy-season-arke-rail');await check(name+'-arke');
+          const arke=await js('(()=>{const sheet=document.querySelector(".fy-season-arke-sheet[open]"),b=s=>sheet.querySelector(s).getBoundingClientRect(),cx=b(".fy-cx"),ed=b(".fy-cx__editorwrap"),send=b(".fy-cx__send");return {title:sheet.querySelector(".fy-page-sheet__head h2").textContent,chip:!!sheet.querySelector(".fy-cx .fy-mchip"),composer:cx.width,editor:ed.width,editorBottom:ed.bottom,send:{left:send.left,right:send.right,top:send.top}};})()');
+          assert.equal(arke.title,'Arke · Chapter 01',name+': the sheet names the chapter');
+          assert.ok(arke.chip,name+': the dock has its model chip');
+          assert.ok(arke.editor>=arke.composer-4,name+': the editor has the composer\'s width ('+arke.editor+' of '+arke.composer+')');
+          assert.ok(arke.send.top>=arke.editorBottom-1&&arke.send.right<=width&&arke.send.left>=0,name+': send sits under the words, inside the screen');
+          await escape();
+        }
         await js('(()=>{const p=document.querySelector(".fy-rme__doc p:last-child"),t=p.firstChild,r=document.createRange();r.setStart(t,t.textContent.indexOf("Not the scrape"));r.setEnd(t,t.textContent.indexOf(", because the form"));const s=getSelection();s.removeAllRanges();s.addRange(r);document.dispatchEvent(new Event("selectionchange"));})()');await js('window.settleLayout()');await check(name+'-passage');
         if(!process.argv.includes('--hover')){assert.ok(await js('!!document.querySelector(".fy-passage-ask")'));if(width>=600)assert.ok(await js('document.querySelector(".fy-passage-ask").getBoundingClientRect().top>=document.querySelector(".fy-rme__doc p:last-child").getBoundingClientRect().bottom'));}
       }
