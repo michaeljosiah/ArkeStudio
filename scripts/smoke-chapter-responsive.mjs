@@ -141,7 +141,10 @@ try {
         await js('window.mountLayout("p/ledger/story/chapters/neap","source")');await js('(()=>{const area=document.querySelector(".fy-ch__source");area.focus();area.setSelectionRange(0,31);document.dispatchEvent(new Event("selectionchange"));})()');await js('window.settleLayout()');await check(name+'-source-passage');
         assert.ok(await js('document.querySelector(".fy-passage-anchor").getBoundingClientRect().top < document.querySelector(".fy-ch__source").getBoundingClientRect().bottom'));
       }
-      if(label==='audiobook' && width<600){await click('[data-testid="audiobook-voice"]');await check(name+'-narrator');await click('[aria-label="Narrator"] button:last-child');await check(name+'-narrator-book');await escape();}
+      // Turn 199 took the voice row off the page (it lives in the Reading sheet now); the narrator's cast card is the page's press for 165c.
+      if(label==='audiobook' && width<600){await click('.fy-abshow__card--narrator');assert.ok(await js('!!document.querySelector(".fy-page-sheet[open] [data-testid=narrator-dialog]")'),name+' narrator sheet');await check(name+'-narrator');
+        await click('[aria-label="Narrator"] button:last-child');assert.equal(await js('document.querySelector("[aria-label=Narrator] button:last-child").getAttribute("aria-pressed")'),'true',name+' this book');await check(name+'-narrator-book');
+        await escape();assert.equal(await js('!!document.querySelector("[data-testid=narrator-dialog]")'),false,name+' narrator sheet closed');}
       if(label==='blocks'){
         await js(`(()=>{const e=document.querySelector('[data-block="p0.0"] .fy-ab__text'),t=e.firstChild,r=document.createRange();r.setStart(t,0);r.setEnd(t,20);const s=getSelection();s.removeAllRanges();s.addRange(r);document.dispatchEvent(new Event("selectionchange"));})()`);await js('window.settleLayout()');
         await js(`document.querySelector('[data-block="p0.0"]').click();window.settleLayout()`);await check(name+'-block');
