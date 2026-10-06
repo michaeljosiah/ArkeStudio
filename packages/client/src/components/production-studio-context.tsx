@@ -8,6 +8,12 @@ export type StudioControls = { active: boolean; canvasHost: HTMLElement | null; 
   /** What the side holds when there is no portal host to move into it: server rendering only. */
   restingSide: ReactNode };
 export const ProductionStudioContext = createContext<StudioControls | null>(null);
+/**
+ * Told when a Studio opens inside the page rather than over it (design turn 196o). The production
+ * shell owns the rail, and the rail is what has to give way: on a Fold the full rail kept 270px
+ * beside an open Studio, and the canvas — meant to take the rest — was left a third of the screen.
+ */
+export const StudioInlineContext = createContext<((open: boolean) => void) | null>(null);
 export const useProductionStudio = () => useContext(ProductionStudioContext);
 
 const subscribe = () => () => {};

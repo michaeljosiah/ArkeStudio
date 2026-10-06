@@ -18,6 +18,7 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import { BodyLayer } from "../components/body-layer.js";
+import { StudioInlineContext } from "../components/production-studio-context.js";
 import { AppChrome } from "../components/chrome.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import {
@@ -263,6 +264,7 @@ export function ProductionLayout() {
   const pages = useRef<HTMLElement>(null);
   const drawer = useRef<HTMLDialogElement>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [studioInline, setStudioInline] = useState(false);
   // The switcher changes parents at the phone breakpoint; its open choice survives that move.
   const switchMenu = useState<SwitcherAt | null>(null);
   // The rail is the format's (design 54a): a surface the format cannot use is not present,
@@ -369,8 +371,13 @@ export function ProductionLayout() {
   const audiobookDeep = phone && /\/story\/audiobook\/?$/.test(location.pathname) && production !== undefined && production !== null;
   const sceneDeepPhone = !refusal && (chapterDeep || episodeDeep || audiobookDeep || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
   const wantsFold = compact && chapterRoute ? false : compact && (sceneRoute || cutRoute) || (railChoice ?? (cutRoute || sceneDetailDefault));
-  const drawerMode = !phone && wantsFold && (compact || coarse);
-  const folded = !phone && wantsFold && !drawerMode;
+  // An open Studio on a Fold or a tablet folds the rail to its marks and keeps it there (design
+  // turn 196o): a drawer would put the production's pages a press away while the canvas is the
+  // page, and the full rail left the canvas a third of the screen. The person's own choice
+  // returns when the Studio closes.
+  const studioFold = !phone && compact && studioInline;
+  const drawerMode = !phone && !studioFold && wantsFold && (compact || coarse);
+  const folded = studioFold || !phone && wantsFold && !drawerMode;
   useEffect(() => { setDrawerOpen(false); }, [location.pathname, location.search]);
   useEffect(() => {
     const node = drawer.current;
@@ -775,7 +782,9 @@ export function ProductionLayout() {
           ) : (
             <NewSceneContext.Provider value={newScene}>
               <NewChapterContext.Provider value={newChapter}>
-                <Outlet />
+                <StudioInlineContext.Provider value={setStudioInline}>
+                  <Outlet />
+                </StudioInlineContext.Provider>
               </NewChapterContext.Provider>
             </NewSceneContext.Provider>
           )}

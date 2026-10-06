@@ -1,11 +1,16 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { orderedShots, type ConversationActionCard, type WorldBundle, type WorldChatContext, type WorldChatWorkspace } from "@arke-studio/contracts";
 import { BodyLayer } from "./body-layer.js";
-import { ProductionStudioContext, useClientRender, type StudioControls } from "./production-studio-context.js";
+import { ProductionStudioContext, StudioInlineContext, useClientRender, type StudioControls } from "./production-studio-context.js";
 import { ProductionStudioCanvas } from "./production-studio-canvas.js";
 import { useStore } from "../lib/store.js";
 import { studioActionFocus, studioEntry, type StudioFocus } from "../lib/production-studio.js";
+
+/** The canvas view as the breadcrumb says it; the nav's own labels, so the two never disagree. */
+const VIEW_NAMES: Partial<Record<StudioFocus["view"], string>> = {
+  production: "Production", understanding: "What it understood", proposal: "Proposal", scene: "Shots", shot: "Shot", board: "Board", stage: "Stage", cut: "Cut",
+};
 
 /** A presentation owner. The same conversation and each full-size card keep one portal instance. */
 export function ProductionStudio({ world, productionId, entry, workspace, docked, understanding, proposal, children }: {
@@ -96,6 +101,12 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
         ...("sceneId" in target ? { sceneId: target.sceneId } : {}), ...("shotId" in target ? { shotId: target.shotId } : {}) });
       returnId.current = card.id; setActive(true); setFullCardId(card.id); setPinned(true); setPhoneView("canvas");
     } };
+  const inlineOpen = useContext(StudioInlineContext);
+  useEffect(() => {
+    if (!inlineOpen || docked) return;
+    inlineOpen(active);
+    return () => inlineOpen(false);
+  }, [inlineOpen, active, docked]);
   useEffect(() => {
     if (!active || !docked) return;
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) close(); };
@@ -114,7 +125,7 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
   const studio = !active ? null : <section className="fy-production-studio" data-docked={docked || undefined} data-phone-view={phoneView}
     aria-label="Production Chat Studio" style={{ "--studio-thread-width": `${width}px` } as CSSProperties}>
     <header className="fy-production-studio__head"><strong>Production conversation · {production?.meta.title ?? "Studio"}</strong>
-      <button type="button" onClick={() => setPhoneView(phoneView === "thread" ? "canvas" : "thread")}>{phoneView === "thread" ? "Canvas" : "Conversation"}</button>
+      <button type="button" className="fy-production-studio__switch" onClick={() => setPhoneView(phoneView === "thread" ? "canvas" : "thread")}>{phoneView === "thread" ? "Canvas" : "Conversation"}</button>
       <button type="button" onClick={close}>Close Studio</button></header>
     <div ref={thread} className="fy-production-studio__thread" />
     <div role="separator" aria-label="Transcript width" aria-orientation="vertical" aria-valuenow={Math.round(width)} tabIndex={0} className="fy-production-studio__divider"
@@ -125,7 +136,7 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
       <div className="fy-production-studio__breadcrumb"><button type="button" onClick={() => choose({ view: "production" })}>{production?.meta.title ?? "Production"}</button>
         {scene && <><span>›</span><button type="button" onClick={() => choose({ view: "scene", sceneId: scene.id })}>{scene.title}</button></>}
         {shot && <><span>›</span><span>Shot {shot.number}</span></>}
-        <span>› {fullCardId ? "Full card" : focus.view}</span>
+        <span>› {fullCardId ? "Full card" : VIEW_NAMES[focus.view] ?? focus.view}</span>
         <button type="button" aria-pressed={pinned} onClick={() => setPinned(value => !value)}>{pinned ? "Unpin canvas" : "Pin canvas"}</button>
       </div>
       <nav aria-label="Canvas views">{["production", "understanding", ...(hasProposal ? ["proposal"] : [])].map(view =>
@@ -136,7 +147,9 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
         {production && <button type="button" aria-pressed={focus.view === "cut" && !fullCardId} onClick={() => choose({view:"cut"})}>Cut</button>}
       </nav>
       {pinned && latest && latest.actionId !== focus.actionId && <button type="button" onClick={() => { setPinned(false); setFocus(latestFocus); setFullCardId(null); }}>New card · Follow latest</button>}
-      <button type="button" className="fy-production-studio__back" onClick={back}>Back to card</button>
+      {/* Only when a card sent the canvas here (196o draws it so): with none, it was a press
+          with nowhere to go, taking a row of the canvas on a Fold. */}
+      {(fullCardId || returnId.current) && <button type="button" className="fy-production-studio__back" onClick={back}>Back to card</button>}
       <div className="fy-production-studio__body">
         <div ref={setCanvasHost} hidden={!fullCardId} className="fy-production-studio__full-card" />
         <div ref={understandingSlot} data-studio-view="understanding" hidden={!!fullCardId || focus.view !== "understanding"}>{!understandingHost && understanding}</div>
