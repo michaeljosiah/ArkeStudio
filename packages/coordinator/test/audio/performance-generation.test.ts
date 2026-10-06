@@ -85,6 +85,33 @@ it("quotes exact decorated wording and keeps paid output with unknown duration t
   await store.close(); store = await WorldStore.open(dir);
   assert.deepEqual(store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.performances.find(p => p.id === id), record);
 });
+
+it("holds a sealed quote fresh for a day by the store's clock, to the millisecond", async t => {
+  const dir = await makeTempWorld();
+  const sheetPath = join(dir, "characters", "maren-kest.md");
+  await writeFile(sheetPath, (await readFile(sheetPath, "utf8")).replace(/(  voiceId: v_8Kq2\r?\n)/, "$1  model: eleven-v3\n"));
+  // Days behind the wall clock on purpose: a check that read Date.now() refuses even the
+  // in-date read below, as it did production-audio.test.ts's quotes from 2026-10-05.
+  const sealedAt = Date.parse("2026-10-04T12:00:00.000Z");
+  let now = sealedAt;
+  const store = await WorldStore.open(dir, { clock: () => new Date(now).toISOString() }); t.after(() => store.close());
+  const hasLine = (scene: ReturnType<typeof store.getBundle>["productions"][number]["scenes"][number]) =>
+    orderedShots(scene).some(shot => { const line = resolvePerformanceLine(scene, shot.id); return line.ok && line.speakerSheetId === "maren-kest"; });
+  const production = store.getBundle().productions.find(p => p.scenes.some(hasLine))!;
+  const scene = production.scenes.find(hasLine)!;
+  const shot = orderedShots(scene).find(shot => { const line = resolvePerformanceLine(scene, shot.id); return line.ok && line.speakerSheetId === "maren-kest"; })!;
+  const line = resolvePerformanceLine(scene, shot.id); assert.ok(line.ok);
+  const model = SHIPPED_MANIFEST.models.find(m => m.id === "eleven-v3")!;
+  const quote = await preparePerformanceGeneration(store, model, { kind: "prepare-performance-generation", requestId: ulid(), worldId: store.worldId,
+    productionId: production.meta.id, sceneId: scene.id, shotId: shot.id, expectedSceneVersion: scene.version, expectedVoiceId: "v_8Kq2", modelId: model.id,
+    cadencePlan: { schemaVersion: 1, sourceTextHash: audioHash(Buffer.from(normalizeSpeechText(line.text))), speed: 1, cues: [] } });
+  assert.equal(quote.createdAt, new Date(sealedAt).toISOString());
+  now = sealedAt + 86_400_000;
+  assert.deepEqual(await readPerformanceGenerationQuote(store, quote.operationId), quote, "a day to the millisecond is still in date");
+  now += 1;
+  await assert.rejects(readPerformanceGenerationQuote(store, quote.operationId), /Prepare a fresh generation estimate/);
+});
+
 it("explicit local retakes synthesize again and forward cancellation and mapped pace", async () => {
   let calls = 0;
   const signal = new AbortController().signal;

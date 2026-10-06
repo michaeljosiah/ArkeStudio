@@ -67,7 +67,11 @@ export async function retainPerformanceGenerationQuote(store: WorldStore, value:
 export async function readPerformanceGenerationQuote(store: WorldStore, operationId: string): Promise<PerformanceGenerationQuote> {
   // The command schema owns UUID validation; the filesystem boundary independently rejects traversal.
   const quote = PerformanceGenerationQuoteSchema.parse(JSON.parse(await readFile(await audioWorldPath(store.dir, `.staging/performances/${operationId}/quote.json`), "utf8")));
-  if (quote.operationId !== operationId || Date.now() - Date.parse(quote.createdAt) > 86_400_000) throw new Error("Prepare a fresh generation estimate.");
+  // The day is counted on the store's clock: the quote was sealed on it, and GenerationQuotes
+  // checks its own expiry against it. When this read the wall clock, a world on a pinned clock
+  // aged its quotes out in real time, and production-audio.test.ts went red on every branch a day
+  // after the date it sealed them on.
+  if (quote.operationId !== operationId || Date.parse(store.now()) - Date.parse(quote.createdAt) > 86_400_000) throw new Error("Prepare a fresh generation estimate.");
   return quote;
 }
 export function validatePerformanceGeneration(store: WorldStore, model: ManifestModel, quote: PerformanceGenerationQuote, confirmedMicroUsd: number) {

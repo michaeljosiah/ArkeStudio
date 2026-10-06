@@ -24,6 +24,8 @@ import { makeTempWorld } from "../world/helpers.js";
 import { wav } from "../audio/helpers.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
 
+// A date, not now: the store below runs on it, and a sealed performance quote's day of freshness
+// is counted on the store's clock, so its quotes stay fresh however far the wall clock runs past.
 const AT = "2026-10-04T12:00:00.000Z";
 const providers: ProviderStatus[] = [{ id: "google", configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] }];
 const action = (productionId: string, request: Extract<ModelWorldChatAction, { kind: "production-audio-generation" }>["request"]): ModelWorldChatAction =>
