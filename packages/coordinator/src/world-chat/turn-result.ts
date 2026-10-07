@@ -118,6 +118,9 @@ export function personLine(problems: readonly TurnProblem[]): string {
       ? "the reply came back in a form the studio could not read"
       : p.code === "reply-too-long"
         ? "the answer ran longer than one reply can be. Ask for it shorter, or a part at a time"
+      : p.code === "action-preparation"
+        // The reason is the person's too; the instruction after it is the model's.
+        ? p.safeMessage.replace(/\. If a read is missing[\s\S]*$/, "")
       : p.code === "schema"
         ? "the reply was not in the shape the studio needs"
         : p.safeMessage.replace(/[.!?\s]+$/, "") || p.code,
@@ -208,6 +211,28 @@ function schemaIssueLine(issue: z.ZodIssue): string {
     default:
       return `${path} does not match the required shape`;
   }
+}
+
+/**
+ * Why a turn's changes could not be prepared, as a problem the one corrective turn can act on.
+ *
+ * Every refusal from preparation was one sentence — "could not be prepared safely. Answer without
+ * it." — and that sentence failed live on 2026-10-07: a 17,600-character chapter draft was refused,
+ * the model was told to drop it, the author got a reply saying no draft could be made, and the
+ * reason was recorded nowhere. The reasons preparation throws are the coordinator's own sentences
+ * ("requires a complete current story read", "is no longer current") and a model can act on them:
+ * read again and return the change. A schema refusal is worded the way the turn's own are, by
+ * path and expectation, never by echoing a value.
+ */
+export function preparationProblem(error: unknown): TurnProblem {
+  const reason = error instanceof z.ZodError
+    ? [...new Set(error.issues.slice(0, 3).map(schemaIssueLine))].join("; ")
+    : error instanceof Error ? error.message : "";
+  const why = reason.trim() === "" ? "" : `: ${truncate(reason.trim().replace(/[.\s]+$/, ""), MAX_PROBLEM_CHARS)}`;
+  return problem(
+    "action-preparation",
+    `The requested change could not be prepared${why}. If a read is missing or no longer current, read it again and return the complete result with the change; otherwise answer without it.`,
+  );
 }
 
 /**

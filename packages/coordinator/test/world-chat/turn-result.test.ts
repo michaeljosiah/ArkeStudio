@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { z } from "zod";
 import {
   newId,
   WORLD_CHAT_SHAPE_EXAMPLES,
@@ -23,6 +24,7 @@ import {
   correctiveMessage,
   parseTurnResult,
   personLine,
+  preparationProblem,
   validateTurnResult,
   type ValidateInput,
 } from "../../src/world-chat/turn-result.js";
@@ -247,6 +249,20 @@ describe("parsing a turn result", () => {
     assert.ok(!tooLong.safeMessage.includes("hand on his arm"), "the reply's words are not echoed back");
     assert.match(correctiveMessage(parsed.ok === false ? parsed.problems : []), /under 1000 words/);
     assert.match(personLine(parsed.ok === false ? parsed.problems : []), /ran longer than one reply can be/);
+  });
+
+  it("passes preparation's own reason to the retry and the person (2026-10-07)", () => {
+    const stale = preparationProblem(new Error("The complete chapters read is no longer current."));
+    assert.equal(stale.code, "action-preparation");
+    assert.match(stale.safeMessage, /could not be prepared: The complete chapters read is no longer current\. If a read is missing/);
+    assert.match(correctiveMessage([stale]), /read it again and return the complete result with the change/);
+    assert.equal(personLine([stale]), "The requested change could not be prepared: The complete chapters read is no longer current");
+    const shape = z.object({ title: z.string().max(3) }).safeParse({ title: "The seventh bell" });
+    assert.ok(!shape.success);
+    const refused = preparationProblem(shape.error);
+    assert.match(refused.safeMessage, /title allows at most 3 characters/);
+    assert.ok(!refused.safeMessage.includes("seventh bell"), "a refused value is not echoed");
+    assert.match(preparationProblem("thrown string").safeMessage, /^The requested change could not be prepared\. If a read/);
   });
 
   it("names the fields at fault without echoing their values", () => {
