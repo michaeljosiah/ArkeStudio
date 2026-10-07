@@ -3070,7 +3070,7 @@ Return one JSON object and nothing else — no prose around it, no markdown fenc
 
 {"reply": "...", "candidateOperations": [...], "groupOperations": [...], "bibleEdits": [...], "editorRequests": [...], "sceneEdits": [...], "actions": [...]}
 
-reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn} (${TURN_RESULT_BOUNDS.productionEditorRequests} in production threads), sceneEdits at most ${SCENE_EDIT_BOUNDS.perTurn}, actions at most ${TURN_RESULT_BOUNDS.actions} (${TURN_RESULT_BOUNDS.productionActions} in production threads); all are [] when there is nothing to record.
+reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters, which is about 1,000 words: a longer answer is refused whole, so give the most useful part and offer the rest). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn} (${TURN_RESULT_BOUNDS.productionEditorRequests} in production threads), sceneEdits at most ${SCENE_EDIT_BOUNDS.perTurn}, actions at most ${TURN_RESULT_BOUNDS.actions} (${TURN_RESULT_BOUNDS.productionActions} in production threads); all are [] when there is nothing to record.
 
 A complete result:
 ${JSON.stringify(exampleTurnResult, null, 1)}

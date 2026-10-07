@@ -22,6 +22,7 @@ import { contentHash } from "../../src/world-chat/observations.js";
 import {
   correctiveMessage,
   parseTurnResult,
+  personLine,
   validateTurnResult,
   type ValidateInput,
 } from "../../src/world-chat/turn-result.js";
@@ -233,6 +234,19 @@ describe("parsing a turn result", () => {
       JSON.stringify({ reply: "hi", candidateOperations: Array.from({ length: 13 }, () => op), groupOperations: [] }),
     );
     assert.equal(parsed.ok, false);
+  });
+
+  it("says how far over a long reply ran and aims the retry at a word count (2026-10-07)", () => {
+    const reply = "She lays her hand on his arm. ".repeat(400);
+    const parsed = parseTurnResult(JSON.stringify({ reply, candidateOperations: [], groupOperations: [] }));
+    assert.equal(parsed.ok, false);
+    const tooLong = parsed.ok === false ? parsed.problems.find((p) => p.code === "reply-too-long") : undefined;
+    assert.ok(tooLong, "the length gets its own code, not the generic schema one");
+    assert.match(tooLong.safeMessage, new RegExp(`this one was ${reply.length}`));
+    assert.match(tooLong.safeMessage, /under 1000 words/);
+    assert.ok(!tooLong.safeMessage.includes("hand on his arm"), "the reply's words are not echoed back");
+    assert.match(correctiveMessage(parsed.ok === false ? parsed.problems : []), /under 1000 words/);
+    assert.match(personLine(parsed.ok === false ? parsed.problems : []), /ran longer than one reply can be/);
   });
 
   it("names the fields at fault without echoing their values", () => {
