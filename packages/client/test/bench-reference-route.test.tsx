@@ -140,6 +140,19 @@ describe("H3 Video's Reference lane (design turn 179)", () => {
     assert.match(button, /disabled/);
   });
 
+  it("the brief's notices count what the route carries, not the row's one native picture", () => {
+    // H3 Video binds one picture natively and carries nine by the route: a brief naming the second
+    // picture was told it could not be carried while the engine received both (2026-10-07).
+    const nine: ManifestModel = { ...ROUTED, referenceRoute: { maxImages: 9, referenceSyntax: "minimax-h3" } };
+    const value = state(ROUTED);
+    value.app.manifest = { ...value.app.manifest!, models: value.app.manifest!.models.map((row) => (row.id === ROUTED.id ? nine : row)) };
+    value.bench!.session.composer.brief = "Ife is @Image 1. Ade is @Image 2. They sit in a parked car at night.";
+    assert.doesNotMatch(render(value), /References beyond the budget cannot be carried/);
+    // Past the route's own budget the notice still speaks, and names the route's number.
+    value.bench!.session.composer.brief = "The tenth guest is @Image 10.";
+    assert.match(render(value), /accepts 9 image references; the prompt names reference 10/);
+  });
+
   it("the wall names the route by how many pictures rode", () => {
     const html = render(state(ROUTED));
     assert.match(html, /Local · H3 Video · 1 reference/);

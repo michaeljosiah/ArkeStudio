@@ -604,6 +604,11 @@ function BenchWorkspace({
     (token) => session.tokenRegistry.find((entry) => entry.token === token)?.kind === "image",
   ).length;
   const routeRefusal = draft.mode === "video" && model !== null ? referenceRouteRefusal(model, ridingPictures) : null;
+  // The brief's notices count against what the clip will actually carry. On the route that is the
+  // route's budget, not the row's native one: H3 Video binds one picture natively but carries nine
+  // by the route, and a brief naming "@Image 2" was told the second could not be carried while the
+  // engine received both.
+  const noticeModel = model !== null && referenceRoute !== null ? referenceRouteModel(model) : model;
   const castName = (entry: BenchReferenceToken): string | undefined =>
     world ? castNameFor(entry, { sheets: world.sheets, artifacts: world.artifacts }) : undefined;
   /** Which take's "What was sent" is open — the take it was opened for, so selection closes it. */
@@ -1794,7 +1799,7 @@ function BenchWorkspace({
               }
               {...(voiceParams !== null ? { onBracket } : {})}
             />
-            <PromptCapabilityNotices text={draft.brief} model={model} />
+            <PromptCapabilityNotices text={draft.brief} model={noticeModel} />
             <div className="fy-bench__brieffoot">
               <button
                 type="button"
@@ -3050,7 +3055,7 @@ function BenchWorkspace({
                       }
                     : {})}
                 />
-                <PromptCapabilityNotices text={draft.brief} model={model} />
+                <PromptCapabilityNotices text={draft.brief} model={noticeModel} />
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                   {promptCap !== undefined && (
                     <span
