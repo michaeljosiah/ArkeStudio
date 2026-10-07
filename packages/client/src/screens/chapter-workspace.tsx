@@ -2039,13 +2039,6 @@ export function ChapterWorkspace({
                   productionId={prodId}
                   chapterFile={chapter.file}
                   notes={audiobookReadingNotes(production.audiobook, chapter.id)}
-                  speakers={production.audiobook?.reading === "performed" ? speakers.map((who) => {
-                    const key = who.sheet ?? who.speaker;
-                    const note = production.audiobook?.notes?.[key];
-                    const model = audiobook.modelOf(audiobook.narrator);
-                    return { key, name: (who.sheet === undefined ? undefined : world.sheets.find((candidate) => candidate.id === who.sheet)?.name) ?? who.speaker,
-                      ...(note !== undefined ? { note } : {}), held: model === null || performanceNote(note ?? "x", model).mode === "unsupported" };
-                  }) : []}
                   disabled={connection !== "open" || audiobook.run?.state === "reading"}
                 />
                 {record !== null && <AudiobookFilterMenu filters={audiobook.filters} filter={audiobook.filter} onFilter={audiobook.setFilter} />}

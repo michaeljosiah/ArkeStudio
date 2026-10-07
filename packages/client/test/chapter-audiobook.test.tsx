@@ -896,25 +896,6 @@ describe("the Audiobook view (turn 146)", () => {
     await act(async () => (input as unknown as Record<string, { onBlur: () => void }>)[key]!.onBlur());
     const note = m.sent.findLast((message) => message.kind === "set-audiobook-note") as Extract<ClientMessage, { kind: "set-audiobook-note" }>;
     assert.deepEqual({ speaker: note.speaker, note: note.note }, { speaker: "maren-kest", note: "flat, far off" });
-
-    // The Notes press holds the speaker notes too: the Audiobook view hides Voices once the
-    // window is 1100 wide, and that view is where Performed is chosen (2026-10-07).
-    const press = q(m, '[data-testid="reading-notes-press"]')!;
-    assert.equal(press.textContent, "Notes 1", "the speaker's note is counted with the others");
-    await act(async () => press.click());
-    const sheet = q(m, '[data-testid="reading-notes"]')!;
-    const fields = [...sheet.querySelectorAll("input, textarea")] as HTMLInputElement[];
-    assert.deepEqual(fields.map((field) => field.getAttribute("aria-label")), ["Book note", "Chapter note", "Maren Kest · not on this reader"]);
-    const speakerField = fields[2]!;
-    // Read afresh after each change, as React hands the field new handlers on every render.
-    const sheetProps = () => {
-      const sheetKey = Object.keys(speakerField).find((k) => k.startsWith("__reactProps$"))!;
-      return (speakerField as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void; onBlur: () => void }>)[sheetKey]!;
-    };
-    await act(async () => sheetProps().onChange({ target: { value: "dry, slow" } }));
-    await act(async () => sheetProps().onBlur());
-    const fromSheet = m.sent.findLast((message) => message.kind === "set-audiobook-note") as Extract<ClientMessage, { kind: "set-audiobook-note" }>;
-    assert.deepEqual({ speaker: fromSheet.speaker, note: fromSheet.note }, { speaker: "maren-kest", note: "dry, slow" });
   });
 
   it("shows a prepared multipart token price and sends consent only on the second press", async () => {

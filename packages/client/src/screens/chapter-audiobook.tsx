@@ -310,9 +310,7 @@ export function directionView(
 
 /** A held book or chapter note in Sent as's words (design turn 184d): `book note · 94 characters · Eleven v3 takes 60 as a tag`. */
 export function readingHeldWords(held: HeldReadingNote, model: ManifestModel | null): string {
-  const words = model?.cadence?.tagWords;
-  const why = held.reason === NOTE_TAG_HOLD ? `${model?.displayName ?? "this reader"} takes ${CADENCE_PHRASE_MAX} as a tag`
-    : words !== undefined && held.reason.startsWith("a tag takes") ? `${model?.displayName ?? "this reader"} takes ${words} word${words === 1 ? "" : "s"} as a tag` : "held";
+  const why = held.reason === NOTE_TAG_HOLD ? `${model?.displayName ?? "this reader"} takes ${CADENCE_PHRASE_MAX} as a tag` : "held";
   return `${held.which} note · ${held.length} characters · ${why}`;
 }
 
@@ -3164,17 +3162,11 @@ export function useProductionReading(worldId: string, productionId: string): boo
  * fields with their counts as built, each written when it is left; Escape or a press outside closes
  * it. The fields hold, and so does the press, offline or while the book is read (codex on PR 1479).
  */
-export function NotesPress({ worldId, productionId, chapterFile, notes, speakers = [], disabled: off }: {
+export function NotesPress({ worldId, productionId, chapterFile, notes, disabled: off }: {
   worldId: string;
   productionId: string;
   chapterFile: string;
   notes: AudiobookReadingNotes;
-  /**
-   * Under `performed`, each speaker's note too. The Audiobook view hides the chapter rail, Voices
-   * and its speaker notes with it, once the window is 1100 wide (2026-10-07): the view where
-   * Performed is chosen could not set how the narrator plays anyone.
-   */
-  speakers?: ReadonlyArray<{ key: string; name: string; note?: string; held: boolean }>;
   disabled: boolean;
 }) {
   // Asked on every render: behind `off ||` the hook was skipped while offline, and the hooks after
@@ -3182,7 +3174,7 @@ export function NotesPress({ worldId, productionId, chapterFile, notes, speakers
   const reading = useProductionReading(worldId, productionId);
   const disabled = off || reading;
   const pop = usePopover();
-  const set = [notes.book, notes.chapter, ...speakers.map((speaker) => speaker.note)].filter((note) => note !== undefined && note !== "").length;
+  const set = [notes.book, notes.chapter].filter((note) => note !== undefined && note !== "").length;
   return (
     <span className="fy-ab__tool">
       <button
@@ -3201,10 +3193,6 @@ export function NotesPress({ worldId, productionId, chapterFile, notes, speakers
         <div ref={pop.panel} className="fy-ab__notes" role="dialog" aria-label="Notes" data-testid="reading-notes" onKeyDown={pop.onKey}>
           <NoteRow label="Book note" value={notes.book} disabled={disabled} stacked area onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note)} />
           <NoteRow label="Chapter note" value={notes.chapter} disabled={disabled} stacked area onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note, chapterFile)} />
-          {speakers.map((speaker) => (
-            <NoteRow key={speaker.key} label={speaker.held && speaker.note !== undefined ? `${speaker.name} · not on this reader` : speaker.name} value={speaker.note} disabled={disabled} stacked max={CADENCE_PHRASE_MAX}
-              onCommit={(note) => setAudiobookNote(worldId, productionId, speaker.key, note)} />
-          ))}
         </div>
       )}
     </span>
