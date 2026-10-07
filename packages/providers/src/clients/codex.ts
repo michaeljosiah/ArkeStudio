@@ -10,6 +10,10 @@ import {
   type SubmitRequest,
   type SubmitResult,
 } from "../types.js";
+import { SHIPPED_MANIFEST } from "../manifest-data.js";
+
+/** The shipped row's verified reference count, so the client and the dispatch surface agree. */
+const MAX_REFERENCES = SHIPPED_MANIFEST.models.find((model) => model.id === "codex-image")?.accepts.referenceImages ?? 1;
 
 /**
  * What the host's Codex app-server can do for images. Structural on purpose: this package never
@@ -69,7 +73,7 @@ export class CodexClient implements ProviderClient {
     const prompt = request.params["prompt"];
     if (typeof prompt !== "string" || prompt.trim().length === 0) throw new Error("codex: image prompt is required");
     const references = request.imageReferences ?? [];
-    if (references.length > 1) throw new ProviderRequestRejectedError("codex: at most one reference image is supported");
+    if (references.length > MAX_REFERENCES) throw new ProviderRequestRejectedError(`codex: at most ${MAX_REFERENCES} reference images are supported`);
     const durable = request.params["references"];
     if (Array.isArray(durable) && durable.length > 0 && durable.length !== references.length) {
       throw new Error("codex: not every image reference was prepared");

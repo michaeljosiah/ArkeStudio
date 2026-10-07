@@ -46,7 +46,7 @@ const model = (id: string) => {
 };
 
 describe("the shipped manifest (R-9, §3.2)", () => {
-  it("offers Codex against an included allowance, with one reference and no invented output controls", () => {
+  it("offers Codex against an included allowance, with four references and no invented output controls", () => {
     const codex = model("codex-image");
     assert.equal(codex.provider, "codex");
     assert.equal(PROVIDERS.codex.local, false);
@@ -55,7 +55,7 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     assert.equal(characterImageEstimateIsUsable(codex, 0), true);
     assert.equal(characterImageEstimateIsUsable(codex, 1), false);
     assert.match(modelPriceCopy(codex), /ChatGPT plan.*Codex allowance/);
-    assert.equal(modelCapabilityCopy(codex), "refs ×1");
+    assert.equal(modelCapabilityCopy(codex), "refs ×4");
     assert.deepEqual(codex.limits, { providerSelectedSize: true });
     assert.deepEqual(offeredAspects(codex), []);
     assert.deepEqual(offeredAspects({ ...codex, limits: { ...codex.limits, aspects: ["16:9"] } }), []);
