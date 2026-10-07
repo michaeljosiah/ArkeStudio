@@ -162,3 +162,22 @@ it("the support report reads off the row what each control would do, one clause 
   assert.deepEqual(cadenceSupport(breeze, "en").pause, { status: "best-effort", method: "tag" });
   assert.deepEqual(cadenceSupport(breeze, "en").deliveries["whispered"], { status: "best-effort", method: "tag" });
 });
+it("holds a note or a marker's phrase past a row's tag word cap, and says the cap (Eleven v4)", () => {
+  // Measured 2026-10-07: v4 said short lines twice under tags of three words or more.
+  const v4: Pick<ManifestModel, "id" | "provider" | "cadence"> = { id: "eleven_v4", provider: "elevenlabs", cadence: {
+    deliveries: ["measured", "warm"], speed: null, pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag",
+    outputTimestamps: "none", phrase: "best-effort-tag", tagWords: 2,
+    deliveryMappings: { measured: { settings: { stability: 0.5 } }, warm: { settings: { stability: 0.5 }, tag: "warmly" } } } };
+  const text = "\"Wait.\"";
+  const short = mapCadence(text, hash(text), { ...plan(text), delivery: "warm", note: "softly, smiling" }, v4);
+  assert.equal(short.providerText, "[warmly] [softly, smiling] \"Wait.\"");
+  const long = mapCadence(text, hash(text), { ...plan(text), delivery: "warm", note: "low and soft, almost a breath" }, v4);
+  assert.equal(long.providerText, "[warmly] \"Wait.\"", "a longer note is held, not sent");
+  assert.match(long.controls.find((control) => control.control === "note")?.reason ?? "", /2 words/);
+  const support = cadenceSupport(v4);
+  assert.equal(support.note.words, 2);
+  assert.equal(support.note.method, "tag · 2 words");
+  const marked = "She said it. Then nothing.";
+  const marker = mapCadence(marked, hash(marked), plan(marked, [{ kind: "delivery", span: { from: 0, to: 12, text: "She said it." }, phrase: "slow and sultry and low" }]), v4);
+  assert.equal(marker.controls.find((control) => control.control === "delivery" && control.cueIndex === 0)?.status, "unsupported");
+});

@@ -1272,6 +1272,7 @@ describe("direct voice models declare the exact provider wire spelling", () => {
     assert.equal(v4.limits.maxPromptChars, 10000);
     assert.equal(v4.cadence?.speed, null, "v4 has no speed; a direction's speed is held, not sent");
     assert.equal(v4.cadence?.phrase, "best-effort-tag");
+    assert.equal(v4.cadence?.tagWords, 2, "a longer tag had short lines said twice");
     assert.equal(v4.cadence?.deliveryMappings["whispered"]?.tag, "whispers");
     assert.deepEqual(Object.keys(v4.cadence?.deliveryMappings ?? {}).sort(), [...v4.cadence!.deliveries].sort());
   });

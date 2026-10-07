@@ -7,6 +7,7 @@ import {
   DeliverySchema,
   SOUNDS,
   SoundSchema,
+  tagWordCount,
   audiobookBlockOptions,
   audiobookBlocks,
   audiobookDirectionFor,
@@ -110,6 +111,8 @@ export interface DirectionBlockInput {
   deliveries: readonly string[];
   /** How the reader takes a note: whole, as a tag of at most 60, or not at all. */
   note: "instruction" | "tag" | "none";
+  /** A tag reader's word cap for the note and a marker's phrase, where its row declares one. */
+  noteWords?: number;
   pause: boolean;
   breath: boolean;
   emphasis: boolean;
@@ -214,7 +217,8 @@ function buildDirectionPrompt(input: DirectionDeriverInput, retryNote?: string):
     .map((block) => {
       const can = [
         `reads ${block.deliveries.join(", ")}`,
-        block.note === "instruction" ? `takes a note to ${CADENCE_NOTE_MAX}` : block.note === "tag" ? `takes a note to ${CADENCE_PHRASE_MAX}` : "no note",
+        block.note === "instruction" ? `takes a note to ${CADENCE_NOTE_MAX}`
+          : block.note === "tag" ? (block.noteWords !== undefined ? `takes a note or phrase of ${block.noteWords} words at most` : `takes a note to ${CADENCE_PHRASE_MAX}`) : "no note",
         block.speed !== null ? `speed ${block.speed.min}–${block.speed.max}` : "no speed",
         block.pause ? "pause" : "no pause",
         block.breath ? "breath" : "no breath",
@@ -322,7 +326,9 @@ export function conformInput(input: AudiobookDirectionInput, support: ReturnType
     // A tag reader takes a note as a tag only up to a marker phrase's length, and would hold a
     // longer one: proposing it would be a direction the read never sends.
     const tagOnly = support.note.method?.startsWith("tag") === true;
-    if (input.note.length > (tagOnly ? CADENCE_PHRASE_MAX : CADENCE_NOTE_MAX) || support.note.status === "unsupported") dropped += 1;
+    // A row may cap a tag in words too (Eleven v4): a longer one had short lines said twice.
+    const overWords = tagOnly && support.note.words !== undefined && tagWordCount(input.note) > support.note.words;
+    if (input.note.length > (tagOnly ? CADENCE_PHRASE_MAX : CADENCE_NOTE_MAX) || overWords || support.note.status === "unsupported") dropped += 1;
     else note = input.note;
   }
   let speed = 1;
@@ -742,6 +748,7 @@ export async function directChapter(
             ...(mixedKeys.has(block.key) ? { mixed: true } : {}),
             deliveries: AUDIOBOOK_DELIVERIES.filter((delivery) => support.deliveries[delivery]?.status !== "unsupported"),
             note: support.note.status === "unsupported" ? "none" : support.note.method?.startsWith("tag") === true ? "tag" : "instruction",
+            ...(support.note.words !== undefined ? { noteWords: support.note.words } : {}),
             pause: support.pause.status !== "unsupported",
             breath: support.breath.status !== "unsupported",
             emphasis: support.emphasis.status !== "unsupported",
