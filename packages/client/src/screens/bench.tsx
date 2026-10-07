@@ -8,7 +8,7 @@ import { AdapterPicker } from "../components/adapter-picker.js";
 import { SamplingChip, hasSampling } from "../components/local-sampling.js";
 import { benchUpscalePlan, hasAdultAdapter, matchingAdapterBundle, upscaleFrameCopy } from "@arke-studio/contracts";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import {
   benchMentionsIn,
   benchSourceKey,
@@ -166,26 +166,33 @@ const VOICE_SPEEDS = [0.8, 0.9, 1, 1.1, 1.2] as const;
 export function BenchScreen() {
   const { worldId, sessionId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const world = useWorld();
   const bench = useBench();
   const state = useClientState();
+  // "New session" comes to the id-less address before the fresh session exists, naming the one it
+  // left. Until the fresh one arrives the store still holds that one, and taking it for the answer
+  // — writing its id into the address, or asking to open it again — left the address on the old
+  // session when the new one landed: "Opening the bench…" until the id was typed (2026-10-07).
+  const leaving = sessionId === undefined ? (location.state as { leaving?: string } | null)?.leaving : undefined;
 
   // Open (or resume) on arrival; put the session id in the URL once it is known, so the
   // address is durable and Activity can return here (issue 305 §8).
   useEffect(() => {
-    if (worldId) sendBenchOpen(worldId, sessionId);
-  }, [worldId, sessionId]);
+    if (worldId && leaving === undefined) sendBenchOpen(worldId, sessionId);
+  }, [worldId, sessionId, leaving]);
   useEffect(() => {
     if (
       worldId &&
       bench &&
       bench.worldId === worldId &&
       bench.session.subject === undefined &&
-      sessionId === undefined
+      sessionId === undefined &&
+      bench.session.id !== leaving
     ) {
       void navigate(`/w/${worldId}/artifacts/bench/${bench.session.id}`, { replace: true });
     }
-  }, [worldId, sessionId, bench, navigate]);
+  }, [worldId, sessionId, bench, navigate, leaving]);
 
   /**
    * A subject session's other mode is a different session (SPEC-036 R-23): the Image / Video
@@ -235,7 +242,7 @@ export function BenchScreen() {
   const session =
     bench !== null &&
     bench.worldId === worldId &&
-    (sessionId === undefined ? bench.session.subject === undefined : bench.session.id === sessionId)
+    (sessionId === undefined ? bench.session.subject === undefined && bench.session.id !== leaving : bench.session.id === sessionId)
       ? bench.session
       : null;
   if (!worldId || !world || !session) {
@@ -1483,7 +1490,7 @@ function BenchWorkspace({
                         sendBenchNewSession(worldId);
                         // Back to the id-less address: the fresh session's id fills it in when
                         // the workspace arrives, so the URL never names a session it left.
-                        void navigate(`/w/${worldId}/artifacts/bench`, { replace: true });
+                        void navigate(`/w/${worldId}/artifacts/bench`, { replace: true, state: { leaving: session.id } });
                       }}
                     >
                       <Plus size={12} />
@@ -1511,7 +1518,7 @@ function BenchWorkspace({
               title="New session — this one keeps running"
               onClick={() => {
                 sendBenchNewSession(worldId);
-                void navigate(`/w/${worldId}/artifacts/bench`, { replace: true });
+                void navigate(`/w/${worldId}/artifacts/bench`, { replace: true, state: { leaving: session.id } });
               }}
             >
               <Plus size={15} />
@@ -1603,7 +1610,7 @@ function BenchWorkspace({
                 type="button"
                 className="fy-bench__clear"
                 title="Clear the bench — a new session; this one keeps running"
-                onClick={() => { sendBenchNewSession(worldId); void navigate(`/w/${worldId}/artifacts/bench`, { replace: true }); }}
+                onClick={() => { sendBenchNewSession(worldId); void navigate(`/w/${worldId}/artifacts/bench`, { replace: true, state: { leaving: session.id } }); }}
               >
                 <Trash size={14} />
               </button>
