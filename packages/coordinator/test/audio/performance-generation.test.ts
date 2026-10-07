@@ -67,7 +67,7 @@ it("quotes exact decorated wording and keeps paid output with unknown duration t
     cadencePlan: { schemaVersion: 1, sourceTextHash: audioHash(Buffer.from(normalizeSpeechText(line.text))), delivery: "whispered", speed: 1,
       cues: [{ kind: "pause", at: 0, length: "short" }] } });
   assert.equal(quote.mapping.providerModel, "eleven_v3");
-  assert.equal(quote.estimatedMicroUsd, quote.mapping.providerText.length * 100);
+  assert.equal(quote.estimatedMicroUsd, quote.mapping.providerText.length * 80);
   assert.deepEqual(await readPerformanceGenerationQuote(store, quote.operationId), quote);
   validatePerformanceGeneration(store, model, quote, quote.estimatedMicroUsd);
   assert.throws(() => validatePerformanceGeneration(store, model, quote, quote.estimatedMicroUsd + 1), /stale/);

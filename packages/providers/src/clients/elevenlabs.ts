@@ -43,7 +43,8 @@ async function refusal(res: Response, what: string): Promise<Error> {
   const status = typeof body?.detail?.status === "string" ? body.detail.status : "";
   if (status === "quota_exceeded") return new ProviderPaymentRequiredError(`elevenlabs: this account's character quota is used up (HTTP ${res.status} quota_exceeded)`);
   if (res.status === 429) return new ProviderBusyError(`elevenlabs: ElevenLabs is busy (HTTP 429${status ? ` ${status}` : ""})`, { witnessed: true });
-  if (res.status === 401 || res.status === 403) return new ProviderAuthError("elevenlabs", `elevenlabs: ${what} was rejected (HTTP ${res.status})`);
+  const said = typeof body?.detail?.message === "string" && body.detail.message.trim() ? `: ${body.detail.message.trim().slice(0, 200)}` : "";
+  if (res.status === 401 || res.status === 403) return new ProviderAuthError("elevenlabs", `elevenlabs: ${what} was rejected${said} (HTTP ${res.status})`);
   if (res.status >= 500) return new Error(`elevenlabs: ${what} failed (HTTP ${res.status})`);
   return new ProviderRequestRejectedError(`elevenlabs: ${what} failed (HTTP ${res.status}${status ? ` ${status}` : ""})`);
 }
@@ -79,7 +80,18 @@ export class ElevenLabsClient implements ProviderClient {
       jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/user/subscription`, { headers: this.headers(key) }),
     );
     if (!probe.ok) {
-      const reason = probe.auth ? "ElevenLabs rejected this key" : `ElevenLabs could not be reached: ${probe.message}`;
+      // A key can be scoped. One without `user_read` authenticates and still cannot read the
+      // subscription this probe asks for — ElevenLabs says so, by name — and calling that a
+      // rejected key sent the owner to replace a key that may read perfectly well (2026-10-07).
+      // Speech is offered on it, unquoted against the quota; a read the key cannot make is
+      // refused at the read with ElevenLabs' own words.
+      const missing = /missing the permission (\w+)/i.exec(probe.message)?.[1];
+      if (probe.auth && missing === "user_read") {
+        const reason = "this key cannot read the subscription (it lacks the User: Read permission), so its plan is unknown";
+        return [{ capability: "voice-tts", available: true }, { capability: "voice-clone", available: false, reason }, { capability: "voice-conversion", available: false, reason }];
+      }
+      const said = probe.message.replace(/^elevenlabs: /, "").replace(/ \(HTTP \d+\)$/, "");
+      const reason = probe.auth ? `ElevenLabs rejected this key: ${said}` : `ElevenLabs could not be reached: ${probe.message}`;
       return [
         { capability: "voice-tts", available: false, reason },
         { capability: "voice-clone", available: false, reason },

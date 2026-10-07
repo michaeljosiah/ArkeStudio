@@ -220,6 +220,21 @@ describe("key validation probes what the key unlocks (R-3, D5, §3.2)", () => {
     assert.ok((await fine.validateKey("xi-y")).every((p) => p.available));
   });
 
+  it("elevenlabs: a refused key says ElevenLabs' own reason, and a key scoped without user_read still speaks", async () => {
+    // ElevenLabs nests its words in `detail.message`; the probe used to drop them and say only
+    // "rejected", which sent the owner to replace a key that might have read perfectly well.
+    const unknown = new ElevenLabsClient(fakeFetch([{ match: /\/v1\/user\/subscription/, status: 401, body: { detail: { status: "invalid_api_key", message: "Invalid API key" } } }]));
+    const refused = await unknown.validateKey("xi-bad");
+    assert.equal(refused[0]?.available, false);
+    assert.equal(refused[0]?.reason, "ElevenLabs rejected this key: Invalid API key");
+
+    const scoped = new ElevenLabsClient(fakeFetch([{ match: /\/v1\/user\/subscription/, status: 401,
+      body: { detail: { status: "missing_permissions", message: "The API key you used is missing the permission user_read to execute this operation." } } }]));
+    const probes = await scoped.validateKey("xi-scoped");
+    assert.equal(probes.find((p) => p.capability === "voice-tts")?.available, true);
+    assert.match(probes.find((p) => p.capability === "voice-clone")!.reason!, /User: Read/);
+  });
+
   it("ollama: a missed probe is transient, while a witnessed empty runtime is definitive", async () => {
     const down = new OllamaClient(fakeFetch([]));
     const probes = await down.validateKey();
