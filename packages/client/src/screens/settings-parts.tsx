@@ -62,9 +62,13 @@ export const CAPABILITY_ROWS: readonly CapabilityRow[] = [
  * stops the local/cloud split reading as two halves of one question. Cloud AI kept a map of its
  * own until Local AI's rows were renamed and only one of the two moved.
  */
-export const CAPABILITY_LABEL: Record<Capability, string> = Object.fromEntries(
-  CAPABILITY_ROWS.flatMap((row) => row.capabilities.map((capability) => [capability, row.label])),
-) as Record<Capability, string>;
+export const CAPABILITY_LABEL: Record<Capability, string> = Object.fromEntries([
+  ...CAPABILITY_ROWS.flatMap((row) => row.capabilities.map((capability) => [capability, row.label])),
+  // The one capability no screen draws as a kind: only ElevenLabs' key probe answers for it. It
+  // still needs its word — without one the provider pane read "Text-to-Speech, Voice clone," and
+  // "undefined — this key cannot read the subscription" (2026-10-07).
+  ["voice-conversion", "Voice conversion"],
+]) as Record<Capability, string>;
 
 /**
  * What an engine is used for, in the capability words every surface shares (SPEC-033 R-62, R-89).
