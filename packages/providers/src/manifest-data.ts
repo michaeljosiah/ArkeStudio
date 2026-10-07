@@ -75,13 +75,16 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     ...COMFYUI_MANIFEST_MODELS,
     // ---- image ------------------------------------------------------------
     // A stable route to Codex's built-in image tool, not a selectable inference model.
-    // One reference is the verified Arke limit; no size or aspect control is promised.
+    // Four references is what has been verified through Arke's own adapter: on 2026-10-07 two,
+    // three and four character looks each came back with every face and outfit kept, where one
+    // reference had left the second person in a two-shot drawn from the prompt alone. Codex itself
+    // set no lower limit; raise this only after the same check. No size or aspect control is promised.
     {
       id: "codex-image",
       provider: "codex",
       capability: "image",
       displayName: "Codex Image",
-      accepts: { referenceImages: 1, referenceRoles: false, startFrame: false, endFrame: false },
+      accepts: { referenceImages: 4, referenceRoles: false, startFrame: false, endFrame: false },
       limits: { providerSelectedSize: true },
       pricing: { kind: "included-plan" },
     },

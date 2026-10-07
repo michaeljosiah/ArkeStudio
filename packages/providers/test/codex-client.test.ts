@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { PROVIDERS } from "@arke-studio/contracts";
 import { CodexClient, type CodexImageRunner } from "../src/clients/codex.js";
+import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
 import { createProviderClients } from "../src/registry.js";
 import { ProviderAuthError, ProviderPlanLimitError, ProviderRequestRejectedError, type FetchLike } from "../src/types.js";
 
@@ -73,8 +74,18 @@ describe("codex image client", () => {
     const client = new CodexClient(runner({ generate: async () => { calls++; return { bytes: PNG, mimeType: "image/png" }; } }));
     await assert.rejects(client.submit("", { model: "unknown", capability: "image", params: { prompt: "x" } }), ProviderRequestRejectedError);
     const reference = { name: "ref", contentType: "image/png" as const, data: PNG };
-    await assert.rejects(client.submit("", { model: "codex-image", capability: "image", params: { prompt: "x" }, imageReferences: [reference, reference] }), /at most one reference/);
+    await assert.rejects(client.submit("", { model: "codex-image", capability: "image", params: { prompt: "x" }, imageReferences: Array(5).fill(reference) }), /at most 4 reference images/);
     assert.equal(calls, 0);
+  });
+
+  it("passes up to the shipped row's four references through to one image", async () => {
+    // A two-shot sends each person's look; one reference left the second face to the prompt.
+    let seen = 0;
+    const client = new CodexClient(runner({ generate: async ({ references }) => { seen = references.length; return { bytes: PNG, mimeType: "image/png" }; } }));
+    const reference = { name: "ref", contentType: "image/png" as const, data: PNG };
+    await client.submit("", { model: "codex-image", capability: "image", params: { prompt: "x", references: [{}, {}, {}, {}] }, imageReferences: Array(4).fill(reference) });
+    assert.equal(seen, 4);
+    assert.equal(SHIPPED_MANIFEST.models.find((model) => model.id === "codex-image")?.accepts.referenceImages, 4);
   });
 
   it("keeps a quota refusal terminal when the reset timestamp is absent or invalid", async () => {
