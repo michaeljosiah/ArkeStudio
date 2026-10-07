@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
 import type { CapabilityProbe, ClientDeclarations, VoiceCandidate } from "@arke-studio/contracts";
 import { jsonRequest, tryProbe } from "./http.js";
+import { SHIPPED_MANIFEST } from "../manifest-data.js";
 import {
   ProviderAuthError,
+  ProviderBusyError,
+  ProviderPaymentRequiredError,
   ProviderRequestRejectedError,
   type FetchedArtifact,
   type FetchLike,
@@ -11,6 +14,39 @@ import {
   type SubmitRequest,
   type SubmitResult,
 } from "../types.js";
+
+/**
+ * The readers a voice is listed under: every shipped ElevenLabs speech row. A catalogue entry is
+ * matched to a narrator or a sheet by provider, model and voice together, so a voice listed only
+ * under Multilingual v2 could never be read by v3 — the row existed and nothing could reach it.
+ */
+const SPEECH_MODELS = SHIPPED_MANIFEST.models.filter((model) => model.provider === "elevenlabs" && model.capability === "voice-tts").map((model) => model.id);
+
+/**
+ * A professional clone is trained per model, and v4 needs its own pass ("open My Voices, hover
+ * the voice, click + next to Eleven v4"), which the voice reports as one of its
+ * `high_quality_base_model_ids`. Offering it to v4 before then would only fail at the read.
+ */
+function readsWith(voice: { category?: string; high_quality_base_model_ids?: unknown }, model: string): boolean {
+  if (model !== "eleven_v4" || voice.category !== "professional" || !Array.isArray(voice.high_quality_base_model_ids)) return true;
+  return voice.high_quality_base_model_ids.includes("eleven_v4");
+}
+
+/**
+ * ElevenLabs names a refusal in `detail.status`, and two of them are not what their status
+ * says: a spent character quota arrives as a 401, which read as a rejected key sends the person
+ * to replace a key that works, and a full house — `too_many_concurrent_requests`,
+ * `system_busy` — is a 429 that clears by itself. Either way the request was not taken.
+ */
+async function refusal(res: Response, what: string): Promise<Error> {
+  const body = (await res.json().catch(() => null)) as { detail?: { status?: unknown; message?: unknown } } | null;
+  const status = typeof body?.detail?.status === "string" ? body.detail.status : "";
+  if (status === "quota_exceeded") return new ProviderPaymentRequiredError(`elevenlabs: this account's character quota is used up (HTTP ${res.status} quota_exceeded)`);
+  if (res.status === 429) return new ProviderBusyError(`elevenlabs: ElevenLabs is busy (HTTP 429${status ? ` ${status}` : ""})`, { witnessed: true });
+  if (res.status === 401 || res.status === 403) return new ProviderAuthError("elevenlabs", `elevenlabs: ${what} was rejected (HTTP ${res.status})`);
+  if (res.status >= 500) return new Error(`elevenlabs: ${what} failed (HTTP ${res.status})`);
+  return new ProviderRequestRejectedError(`elevenlabs: ${what} failed (HTTP ${res.status}${status ? ` ${status}` : ""})`);
+}
 
 /**
  * ElevenLabs — direct voice provider. The subscription read is the probe: free, and it names
@@ -92,11 +128,7 @@ export class ElevenLabsClient implements ProviderClient {
       }),
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
-    if (res.status === 401 || res.status === 403) {
-      throw new ProviderAuthError("elevenlabs", `elevenlabs: the credential was rejected (HTTP ${res.status})`);
-    }
-    if (res.status >= 500) throw new Error(`elevenlabs: synthesis failed (HTTP ${res.status})`);
-    if (res.status >= 400) throw new ProviderRequestRejectedError(`elevenlabs: synthesis failed (HTTP ${res.status})`);
+    if (res.status >= 400) throw await refusal(res, res.status === 401 || res.status === 403 ? "the credential" : "synthesis");
     const data = new Uint8Array(await res.arrayBuffer());
     return {
       remoteId,
@@ -129,9 +161,7 @@ export class ElevenLabsClient implements ProviderClient {
     const res = await this.fetchImpl(`${this.baseUrl}/v1/speech-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128&enable_logging=${request.params.retention === "provider-history"}`, {
       method: "POST", headers: { "xi-api-key": key }, body: form, ...(request.signal ? { signal: request.signal } : {}),
     });
-    if (res.status === 401 || res.status === 403) throw new ProviderAuthError("elevenlabs", `elevenlabs: conversion permission was rejected (HTTP ${res.status})`);
-    if (res.status >= 500) throw new Error(`elevenlabs: conversion failed (HTTP ${res.status})`);
-    if (res.status >= 400) throw new ProviderRequestRejectedError(`elevenlabs: conversion failed (HTTP ${res.status})`);
+    if (res.status >= 400) throw await refusal(res, res.status === 401 || res.status === 403 ? "conversion permission" : "conversion");
     const data = new Uint8Array(await res.arrayBuffer());
     if (!data.length) throw new Error("elevenlabs: conversion returned empty audio");
     return { remoteId: res.headers.get("request-id") ?? `elevenlabs-sts-${++this.counter}-${Date.now()}`,
@@ -152,7 +182,8 @@ export class ElevenLabsClient implements ProviderClient {
 
   /** The cloud voice catalogue (SPEC-011 R-6): labels plus descriptive attributes for matching. */
   async listVoicesCatalog(key: string): Promise<VoiceCandidate[]> {
-    type Voice = { voice_id?: string; name?: string; labels?: Record<string, string>; description?: string | null; preview_url?: string | null };
+    type Voice = { voice_id?: string; name?: string; labels?: Record<string, string>; description?: string | null; preview_url?: string | null;
+      category?: string; high_quality_base_model_ids?: unknown };
     const voices: Voice[] = [];
     const tokens = new Set<string>();
     let token: string | undefined;
@@ -169,9 +200,9 @@ export class ElevenLabsClient implements ProviderClient {
       tokens.add(token);
     } while (true);
     const unique = new Map(voices.filter(v => typeof v.voice_id === "string" && typeof v.name === "string").map(v => [v.voice_id!, v]));
-    return [...unique.values()].map((v) => ({
+    return [...unique.values()].flatMap((v) => SPEECH_MODELS.filter((model) => readsWith(v, model)).map((model) => ({
         provider: "elevenlabs",
-        model: "eleven_multilingual_v2",
+        model,
         voiceId: v.voice_id!,
         label: v.name!,
         attributes: Object.values(v.labels ?? {}).filter(s => typeof s === "string").map((s) => s.toLowerCase()),
@@ -183,7 +214,7 @@ export class ElevenLabsClient implements ProviderClient {
         ...(v.preview_url?.startsWith("https://") ? { previewUrl: v.preview_url } : {}),
         local: false,
         canClone: true, // ElevenLabs supports cloning; each engine declares its own capability
-      }));
+      })));
   }
 
   /**
