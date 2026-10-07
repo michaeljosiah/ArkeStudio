@@ -828,7 +828,19 @@ function worldActionObservations(
       receipt.nextCursor !== null ||
       !receipt.target ||
       !receipt.observedRevisionOrDigest
-    ) throw new Error("A world action requires the final receipt from a complete target read.");
+    ) {
+      /*
+       * Which receipt, and why, because the one corrective turn can only fix what it is told.
+       * A chapter brief shows the model its draws' receipts beside the reads it may cite, and a
+       * draft that cited one of them was refused as a whole with this sentence and nothing else
+       * (2026-10-07, twice in one session). The id is the run's own and carries no world content.
+       */
+      const why = !receipt ? "is not a receipt from this turn"
+        : receipt.tool !== "target-read" ? "is a search or draw, not a read of a target"
+        : receipt.nextCursor !== null || receipt.complete !== true ? "is an earlier page; read on to the last page and cite that one"
+        : "is not a complete read";
+      throw new Error(`A world action requires the final receipt from a complete target read: ${id} ${why}. Cite only those receipts.`);
+    }
     const current = currentWorldObservation(store, receipt.target.requirement, receipt.target.id, deps);
     if (
       !current ||
