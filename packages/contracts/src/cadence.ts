@@ -120,6 +120,14 @@ export const CadenceCapabilitiesSchema = z.object({
    */
   phrase: z.enum(["unsupported", "best-effort-tag", "best-effort-instruction"]).optional(),
   /**
+   * The most words one tag may carry on this row — a note, or a marker's phrase — where fewer
+   * than `CADENCE_PHRASE_MAX` characters are what the reader reliably follows. Absent is the
+   * character cap alone. Eleven v4 (2026-10-07, one scene, six lines a run): a tag of five words
+   * or more ahead of a short line had the line said twice or the tag said aloud in four to six
+   * of six; four and three words still failed one or two; one or two failed none.
+   */
+  tagWords: z.number().int().positive().optional(),
+  /**
    * How a tag is written into the text (SPEC-046 R-21). Absent is `bracket`, the ElevenLabs
    * rendering every row declared before there was a second vendor — `[short pause]`,
    * `[whispers] …`. Breeze reads English tags in parentheses, `(pause)`, `(whispers)`. Gemini 3.8
@@ -196,6 +204,23 @@ export function cueTagWord(model: CadenceRow, cue: PauseCue | BreathCue): string
 /** Why a tag reader holds a note: one tag takes no more than a marker's phrase. */
 export const NOTE_TAG_HOLD = `a tag takes ${CADENCE_PHRASE_MAX} characters`;
 
+/** The words in a tag as a reader hears them: runs of letters or digits. */
+export function tagWordCount(text: string): number {
+  return (text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
+}
+
+/** Whether words fit one tag on this row: the shared character cap, and the row's word cap where it declares one. */
+export function tagFits(text: string, model: CadenceRow): boolean {
+  const words = model.cadence?.tagWords;
+  return text.length <= CADENCE_PHRASE_MAX && (words === undefined || tagWordCount(text) <= words);
+}
+
+/** Why a row holds words too long for its tag. */
+function tagHold(model: CadenceRow): string {
+  const words = model.cadence?.tagWords;
+  return words === undefined ? NOTE_TAG_HOLD : `a tag takes ${words} word${words === 1 ? "" : "s"} on this reader`;
+}
+
 /**
  * A note as a sentence beside the delivery's: capitalised and ended, so the two read as one
  * style. Only a note that ends in a Latin letter or a digit gains a full stop; one in another
@@ -216,7 +241,7 @@ export function noteMode(note: string, model: CadenceRow, language?: string): { 
   if (cap?.phrase === "best-effort-instruction") return { mode: "instruction" };
   if (cap?.phrase === "best-effort-tag") {
     if (!tagsGo(cap, language)) return { mode: "unsupported", reason: UNTAGGED };
-    if (note.length > CADENCE_PHRASE_MAX) return { mode: "unsupported", reason: NOTE_TAG_HOLD };
+    if (!tagFits(note, model)) return { mode: "unsupported", reason: tagHold(model) };
     return { mode: "tag", tag: tagFor(model, note) };
   }
   return { mode: "unsupported", reason: "no note" };
@@ -451,6 +476,7 @@ export function markerMode(marker: DeliveryMarker, plan: Pick<CadencePlan, "deli
   if (marker.phrase !== undefined && !phraseTag && cap?.phrase !== "best-effort-instruction") {
     return { mode: "unsupported", reason: cap?.phrase === "best-effort-tag" ? UNTAGGED : "no phrase" };
   }
+  if (marker.phrase !== undefined && phraseTag && !tagFits(marker.phrase, model)) return { mode: "unsupported", reason: tagHold(model) };
   const deliveryInline = mapping === undefined || (mapping.tag !== undefined && tagged && mapping.instruction === undefined);
   const phraseInline = marker.phrase === undefined || phraseTag;
   const block = plan.delivery !== undefined && cap?.deliveries.includes(plan.delivery) ? cap.deliveryMappings[plan.delivery] : undefined;
@@ -632,7 +658,9 @@ export function sentAs(text: string, plan: CadencePlan, model: Pick<ManifestMode
   return { text: mapped.providerText, ...(mapped.instructions !== undefined ? { style: mapped.instructions } : {}), voiceSettings: mapped.voiceSettings, held, parts, sent };
 }
 
-export interface CadenceControlSupport { status: "mapped" | "best-effort" | "unsupported"; method?: string; reason?: string }
+export interface CadenceControlSupport { status: "mapped" | "best-effort" | "unsupported"; method?: string; reason?: string;
+  /** A tag's word cap on this row (`tagWords`), for the note and a marker's phrase. */
+  words?: number }
 
 /**
  * What a reader does with each control before any plan is written (SPEC-047 R-9): the block
@@ -676,9 +704,10 @@ export function cadenceSupport(model: Pick<ManifestModel, "cadence">, language?:
     deliveries,
     speed: cap?.speed ? { status: "mapped", method: `${cap.speed.min}–${cap.speed.max}` } : { status: "unsupported", reason: "no speed" },
     pause: cue(cap?.pause, "pause"), breath: cue(cap?.breath, "breath"), emphasis: cue(cap?.emphasis, "emphasis"),
-    phrase: cap?.phrase === "best-effort-tag" ? (tagged ? { status: "best-effort", method: "tag" } : { status: "unsupported", reason: UNTAGGED })
+    phrase: cap?.phrase === "best-effort-tag" ? (tagged ? { status: "best-effort", method: "tag", ...(cap.tagWords !== undefined ? { words: cap.tagWords } : {}) } : { status: "unsupported", reason: UNTAGGED })
       : cap?.phrase === "best-effort-instruction" ? { status: "best-effort", method: "instruction" } : { status: "unsupported", reason: "no phrase" },
-    note: cap?.phrase === "best-effort-tag" ? (tagged ? { status: "best-effort", method: `tag · ${CADENCE_PHRASE_MAX}` } : { status: "unsupported", reason: UNTAGGED })
+    note: cap?.phrase === "best-effort-tag" ? (tagged ? { status: "best-effort", method: cap.tagWords !== undefined ? `tag · ${cap.tagWords} words` : `tag · ${CADENCE_PHRASE_MAX}`,
+      ...(cap.tagWords !== undefined ? { words: cap.tagWords } : {}) } : { status: "unsupported", reason: UNTAGGED })
       : cap?.phrase === "best-effort-instruction" ? { status: "best-effort", method: "instruction" } : { status: "unsupported", reason: "no note" },
     sounds,
   };
