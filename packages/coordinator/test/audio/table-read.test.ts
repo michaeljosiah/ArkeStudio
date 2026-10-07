@@ -74,7 +74,7 @@ it("plans exact cache preparation, sees running work, and reuses verified cache 
   const providers: ProviderStatus[] = [{ id: "elevenlabs", configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] }];
   const first = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], providers);
   assert.ok(first.cloud.length > 0);
-  assert.equal(first.plan.totalEstimatedMicroUsd, first.cloud.reduce((sum, input) => sum + String(input.params.text).length * 100, 0));
+  assert.equal(first.plan.totalEstimatedMicroUsd, first.cloud.reduce((sum, input) => sum + String(input.params.text).length * 80, 0));
   const input = first.cloud[0]!;
   const queued = { ...input, id: `jb_${ulid()}`, status: "queued" } as Job;
   const running = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [queued], providers);

@@ -566,7 +566,7 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
   });
 
   it("per character", () => {
-    assert.equal(estimateMicroUsd(model("eleven_multilingual_v2"), { characters: 1000 }), 100000);
+    assert.equal(estimateMicroUsd(model("eleven_multilingual_v2"), { characters: 1000 }), 80000);
   });
 
   it("per token, both directions, ceiling at the millionth", () => {
@@ -1258,10 +1258,22 @@ describe("direct voice models declare the exact provider wire spelling", () => {
       assert.match(m.providerModelId ?? m.id, /^eleven_[a-z0-9_]+$/, `${m.id} has a valid provider spelling`);
     }
     assert.equal(model("eleven-v3").providerModelId, "eleven_v3");
+    // v4's app id is its wire id; nothing maps it on the way out.
+    assert.equal(model("eleven_v4").providerModelId, undefined);
   });
 
   it("still prices the row in the unit it is billed in", () => {
-    assert.equal(estimateMicroUsd(model("eleven_multilingual_v2"), { characters: 1000 }), 100000);
+    assert.equal(estimateMicroUsd(model("eleven_multilingual_v2"), { characters: 1000 }), 80000);
+    assert.equal(estimateMicroUsd(model("eleven_v4"), { characters: 1000 }), 80000);
+  });
+
+  it("reads Eleven v4 by tags and stability alone: no speed, ten thousand characters", () => {
+    const v4 = model("eleven_v4");
+    assert.equal(v4.limits.maxPromptChars, 10000);
+    assert.equal(v4.cadence?.speed, null, "v4 has no speed; a direction's speed is held, not sent");
+    assert.equal(v4.cadence?.phrase, "best-effort-tag");
+    assert.equal(v4.cadence?.deliveryMappings["whispered"]?.tag, "whispers");
+    assert.deepEqual(Object.keys(v4.cadence?.deliveryMappings ?? {}).sort(), [...v4.cadence!.deliveries].sort());
   });
 });
 

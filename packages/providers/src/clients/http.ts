@@ -16,7 +16,10 @@ export function responseReason(body: unknown): string | null {
     });
     if (messages.length) return messages.join("; ");
   }
-  const reason = [record["detail"], record["message"], nestedMessage].find(
+  // ElevenLabs nests its words one deeper: `{ detail: { status, message } }`.
+  const detail = record["detail"];
+  const detailMessage = typeof detail === "object" && detail !== null ? (detail as Record<string, unknown>)["message"] : detail;
+  const reason = [detailMessage, record["message"], nestedMessage].find(
     (value) => typeof value === "string" && value.trim().length > 0,
   );
   return typeof reason === "string" ? reason.trim() : null;

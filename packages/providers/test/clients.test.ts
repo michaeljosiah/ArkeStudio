@@ -10,7 +10,7 @@ import { HiggsfieldClient } from "../src/clients/higgsfield.js";
 import { OllamaClient } from "../src/clients/ollama.js";
 import { OpenAiClient } from "../src/clients/openai.js";
 import { higgsfieldSelectWorkspace, higgsfieldWorkspaces, lazyHiggsfieldRunner } from "../src/higgsfield-cli.js";
-import { ProviderAuthError, type CommandRunner, type FetchLike, type ProviderTransportScope } from "../src/types.js";
+import { ProviderAuthError, ProviderBusyError, ProviderPaymentRequiredError, type CommandRunner, type FetchLike, type ProviderTransportScope } from "../src/types.js";
 import { KokoroClient } from "../src/clients/kokoro.js";
 import { WhisperCppClient } from "../src/clients/whispercpp.js";
 import { createProviderClients, PROVIDER_DECLARATIONS } from "../src/registry.js";
@@ -218,6 +218,21 @@ describe("key validation probes what the key unlocks (R-3, D5, §3.2)", () => {
       ]),
     );
     assert.ok((await fine.validateKey("xi-y")).every((p) => p.available));
+  });
+
+  it("elevenlabs: a refused key says ElevenLabs' own reason, and a key scoped without user_read still speaks", async () => {
+    // ElevenLabs nests its words in `detail.message`; the probe used to drop them and say only
+    // "rejected", which sent the owner to replace a key that might have read perfectly well.
+    const unknown = new ElevenLabsClient(fakeFetch([{ match: /\/v1\/user\/subscription/, status: 401, body: { detail: { status: "invalid_api_key", message: "Invalid API key" } } }]));
+    const refused = await unknown.validateKey("xi-bad");
+    assert.equal(refused[0]?.available, false);
+    assert.equal(refused[0]?.reason, "ElevenLabs rejected this key: Invalid API key");
+
+    const scoped = new ElevenLabsClient(fakeFetch([{ match: /\/v1\/user\/subscription/, status: 401,
+      body: { detail: { status: "missing_permissions", message: "The API key you used is missing the permission user_read to execute this operation." } } }]));
+    const probes = await scoped.validateKey("xi-scoped");
+    assert.equal(probes.find((p) => p.capability === "voice-tts")?.available, true);
+    assert.match(probes.find((p) => p.capability === "voice-clone")!.reason!, /User: Read/);
   });
 
   it("ollama: a missed probe is transient, while a witnessed empty runtime is definitive", async () => {
@@ -444,6 +459,31 @@ describe("witnessed paid submission responses stay distinct from transport failu
       await rejected(submit, 400, true);
       await rejected(submit, 503, false);
     }
+  });
+});
+
+describe("elevenlabs refusals", () => {
+  const speak = (status: number, detail?: { status: string }) =>
+    new ElevenLabsClient(async () => new Response(JSON.stringify(detail ? { detail } : {}), { status })).submit("k", {
+      model: "eleven_v4", capability: "voice-tts", params: { voiceId: "v1", text: "[whispers] x" } });
+
+  it("names a spent quota as payment, not a rejected key", async () => {
+    // ElevenLabs sends quota_exceeded as a 401: read as a key fault, it sent the person to
+    // replace a key that works.
+    await assert.rejects(speak(401, { status: "quota_exceeded" }), (error) => error instanceof ProviderPaymentRequiredError && /quota is used up/.test(error.message));
+    await assert.rejects(speak(401, { status: "invalid_api_key" }), ProviderAuthError);
+  });
+
+  it("retries a full house: a 429 was witnessed and not taken", async () => {
+    await assert.rejects(speak(429, { status: "too_many_concurrent_requests" }),
+      (error) => error instanceof ProviderBusyError && (error as ProviderBusyError).submissionRejected === true && /too_many_concurrent_requests/.test(error.message));
+  });
+
+  it("sends v4 under its own wire id", async () => {
+    let sent: { model_id?: string } = {};
+    await new ElevenLabsClient(async (_url, init) => { sent = JSON.parse(String(init?.body)); return new Response(new Uint8Array([1, 2, 3])); })
+      .submit("k", { model: "eleven_v4", capability: "voice-tts", params: { voiceId: "v1", text: "x" } });
+    assert.equal(sent.model_id, "eleven_v4");
   });
 });
 

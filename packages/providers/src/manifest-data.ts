@@ -36,9 +36,9 @@ function withSamples<T extends { id: string }>(models: T[]): T[] {
 }
 
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 30,
+  manifestVersion: 31,
   dialogueGuidance: [],
-  generated: "2026-10-04",
+  generated: "2026-10-07",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
    * the models rather than about any machine: the gate filters this order by what was measured
@@ -243,14 +243,14 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     geminiSpeechModel("flash"),
     geminiSpeechModel("lite"),
     {
-      // Reviewed 2026-09-05: https://elevenlabs.io/pricing/api — $0.10/1,000 characters.
+      // Reviewed 2026-10-07: https://elevenlabs.io/pricing/api — $0.08/1,000 characters.
       id: "eleven_multilingual_v2",
       provider: "elevenlabs",
       capability: "voice-tts",
       displayName: "Eleven Multilingual v2",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
       limits: { audioFormat: "mp3", maxPromptChars: 10000 },
-      pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 80 },
       // Read 2026-10-02 (design turn 181): Multilingual v2 reads no audio tag — a bracket is
       // spoken — and takes one direction in the text, an SSML break up to three seconds, plus
       // capitals for emphasis and `voice_settings.speed` 0.7–1.2. Its stability and style
@@ -262,13 +262,33 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     {
       // Reviewed 2026-09-05: official best-practices documents tags, capitalization and native speed.
       // https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices
-      // https://elevenlabs.io/pricing/api — v3 $0.10/1,000 characters, 5,000-character maximum.
+      // https://elevenlabs.io/pricing/api — v3 $0.08/1,000 characters (2026-10-07), 5,000-character maximum.
       id: "eleven-v3", providerModelId: "eleven_v3", provider: "elevenlabs", capability: "voice-tts", displayName: "Eleven v3",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { audioFormat: "mp3", maxPromptChars: 5000 },
-      pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 80 },
       // A phrase goes in as one more bracket tag (SPEC-047 R-7): v3 reads `[to the water, flat]`
       // as it reads `[whispers]`, best effort, and the audiobook's block panel offers it.
       cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.2 },
+        pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none", phrase: "best-effort-tag",
+        sounds: ELEVEN_V3_SOUNDS,
+        deliveryMappings: { measured: { settings: { stability: 0.5 } }, whispered: { settings: { stability: 0.5 }, tag: "whispers" },
+          breaking: { settings: { stability: 0 }, tag: "crying" }, cold: { settings: { stability: 1 }, tag: "coldly" },
+          warm: { settings: { stability: 0.5 }, tag: "warmly" }, urgent: { settings: { stability: 0 }, tag: "urgent" } } },
+    },
+    {
+      // Read 2026-10-07: https://elevenlabs.io/docs/overview/capabilities/text-to-speech/eleven-v4,
+      // .../best-practices#prompting-eleven-v4 and https://elevenlabs.io/docs/overview/models —
+      // released 2026-09-28, 10,000 characters a request, $0.08/1,000 at the standard rate (the
+      // launch discount is not modelled, so a quote errs high). v4 reads the same bracket tags as
+      // v3 and follows descriptive ones — `[Quiet, measured narration]` — more reliably, so the
+      // note rides as a tag here too. Only stability and similarity apply: there is no speed (nor
+      // style, nor SSML), so a direction's speed is held rather than sent and silently ignored.
+      // The wire id is the row's id. Its realtime sibling, eleven_v4_turbo, is not a reader here:
+      // nothing in Arke reads live, and a row is a price and a behaviour someone has to check.
+      id: "eleven_v4", provider: "elevenlabs", capability: "voice-tts", displayName: "Eleven v4",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { audioFormat: "mp3", maxPromptChars: 10000 },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 80 },
+      cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: null,
         pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none", phrase: "best-effort-tag",
         sounds: ELEVEN_V3_SOUNDS,
         deliveryMappings: { measured: { settings: { stability: 0.5 } }, whispered: { settings: { stability: 0.5 }, tag: "whispers" },
