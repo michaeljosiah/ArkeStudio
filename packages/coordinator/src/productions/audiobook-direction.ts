@@ -211,6 +211,16 @@ export function renderDirectionContext(context: DirectionContext): string {
   return kept.join("\n");
 }
 
+/**
+ * The word cap a speaker's note must meet: the tightest the pass's readers declare. A speaker's
+ * note leads each of their lines as a tag on a tag row, so it is held to the row's `tagWords`
+ * as a block's note is; on a row without one, the character cap alone.
+ */
+function speakerNoteWords(blocks: ReadonlyArray<Pick<DirectionBlockInput, "noteWords">>): number | undefined {
+  const caps = blocks.flatMap((block) => (block.noteWords !== undefined ? [block.noteWords] : []));
+  return caps.length === 0 ? undefined : Math.min(...caps);
+}
+
 function buildDirectionPrompt(input: DirectionDeriverInput, retryNote?: string): string {
   const part = input.pass.of > 1 ? `This is pass ${input.pass.index} of ${input.pass.of} over the chapter; direct only the blocks listed here.` : "";
   const blocks = input.blocks
@@ -231,9 +241,11 @@ function buildDirectionPrompt(input: DirectionDeriverInput, retryNote?: string):
     .join("\n\n");
   const chapterNote = input.asks?.chapterNote === true;
   const speakerNotes = input.asks?.speakerNotes ?? [];
+  const speakerWords = speakerNoteWords(input.blocks);
+  const speakerCap = speakerWords === undefined ? `at most ${CADENCE_PHRASE_MAX} characters` : `${speakerWords} words at most`;
   const extra = [
     ...(chapterNote ? [`"chapterNote": "<place, time and mood for the whole chapter, at most ${CADENCE_NOTE_MAX} characters>"`] : []),
-    ...(speakerNotes.length > 0 ? [`"speakerNotes": {"<speaker key>": "<how the narrator plays them, at most ${CADENCE_PHRASE_MAX} characters>"}`] : []),
+    ...(speakerNotes.length > 0 ? [`"speakerNotes": {"<speaker key>": "<how the narrator plays them, ${speakerCap}>"}`] : []),
   ];
   const context = input.context === undefined ? "" : `## The book\n\n${renderDirectionContext(input.context)}\n\n`;
   return `Direct the reading of the chapter blocks below for an audiobook. Read what the book is about first, then direct the blocks as one reading. Respond with ONLY a JSON object:
@@ -249,7 +261,7 @@ Rules — every one is enforced mechanically after you answer:
 - The book note, the chapter note and the speaker notes are sent with every block already: never repeat them in a block's note.
 - "after", "before" and "words" are copied from the block character for character and must occur exactly once in it. At most 40 cues a block.
 - Never rewrite the words. Nothing you write goes into the prose.
-${chapterNote ? `- "chapterNote" says where and when the chapter is and its mood, for the reader, in at most ${CADENCE_NOTE_MAX} characters.\n` : ""}${speakerNotes.length > 0 ? `- "speakerNotes" gives each of these speakers, from their sheet, how the narrator plays them, in at most ${CADENCE_PHRASE_MAX} characters: ${speakerNotes.map((speaker) => `${speaker.name} [${speaker.key}]`).join(", ")}.\n` : ""}${part ? `- ${part}\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
+${chapterNote ? `- "chapterNote" says where and when the chapter is and its mood, for the reader, in at most ${CADENCE_NOTE_MAX} characters.\n` : ""}${speakerNotes.length > 0 ? `- "speakerNotes" gives each of these speakers, from their sheet, how the narrator plays them, in ${speakerCap}: ${speakerNotes.map((speaker) => `${speaker.name} [${speaker.key}]`).join(", ")}.\n` : ""}${part ? `- ${part}\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
 ${context}## Chapter (${input.title})
 
 ${blocks}`;
@@ -780,7 +792,8 @@ export async function directChapter(
           continue;
         }
         const note = normalizeSpeechText(value);
-        if (note.length > CADENCE_PHRASE_MAX) dropped += 1;
+        const words = speakerNoteWords(pass.map((block) => ({ ...(block.model.cadence?.tagWords !== undefined ? { noteWords: block.model.cadence.tagWords } : {}) })));
+        if (note.length > CADENCE_PHRASE_MAX || (words !== undefined && tagWordCount(note) > words)) dropped += 1;
         else if (note !== "") speakerNotes[key] = note;
       }
     }

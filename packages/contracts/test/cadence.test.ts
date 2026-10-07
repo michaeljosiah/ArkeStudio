@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { createHash } from "node:crypto";
-import { cadenceSupport, seedCadencePlan, mapCadence, normalizeSpeechText, CadencePlanSchema, type CadencePlan, type ManifestModel } from "../src/index.js";
+import { cadenceSupport, seedCadencePlan, mapCadence, normalizeSpeechText, performanceNote, CadencePlanSchema, type CadencePlan, type ManifestModel } from "../src/index.js";
 const hash = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
 const model: Pick<ManifestModel, "id" | "provider" | "cadence"> = { id: "test-v3", provider: "elevenlabs", cadence: {
   deliveries: ["measured"], speed: { min: 0.7, max: 1.2 }, pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization",
@@ -177,6 +177,9 @@ it("holds a note or a marker's phrase past a row's tag word cap, and says the ca
   const support = cadenceSupport(v4);
   assert.equal(support.note.words, 2);
   assert.equal(support.note.method, "tag · 2 words");
+  // A speaker's note under `performed` leads every one of their lines: held past the cap too.
+  assert.deepEqual(performanceNote("easy, loud", v4), { mode: "tag", tag: "[easy, loud]" });
+  assert.equal(performanceNote("deep, unhurried Lagos businessman", v4).mode, "unsupported");
   const marked = "She said it. Then nothing.";
   const marker = mapCadence(marked, hash(marked), plan(marked, [{ kind: "delivery", span: { from: 0, to: 12, text: "She said it." }, phrase: "slow and sultry and low" }]), v4);
   assert.equal(marker.controls.find((control) => control.control === "delivery" && control.cueIndex === 0)?.status, "unsupported");

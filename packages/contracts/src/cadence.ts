@@ -553,7 +553,9 @@ export function markerSegments(text: string, plan: CadencePlan, model: Pick<Mani
 export function performanceNote(note: string, model: Pick<ManifestModel, "cadence">, language?: string): { mode: "tag"; tag: string } | { mode: "instruction" } | { mode: "unsupported"; reason: string } {
   const cap = model.cadence;
   const tagged = tagsGo(cap, language);
-  if (cap?.phrase === "best-effort-tag" && tagged) return { mode: "tag", tag: tagFor(model, note) };
+  // Held past the row's word cap, as a block's note is: on Eleven v4 a long lead tag had short
+  // lines said twice, and a speaker's note leads every one of their lines.
+  if (cap?.phrase === "best-effort-tag" && tagged) return tagFits(note, model) ? { mode: "tag", tag: tagFor(model, note) } : { mode: "unsupported", reason: tagHold(model) };
   if (cap?.phrase === "best-effort-instruction") return { mode: "instruction" };
   return { mode: "unsupported", reason: cap?.phrase === "best-effort-tag" ? UNTAGGED : "no phrase" };
 }

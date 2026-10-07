@@ -367,6 +367,9 @@ describe("the director writes turn 181's direction (R-52)", () => {
     const prompt = directionPromptFor({ title: "Neap", pass: { index: 1, of: 1 }, blocks: [{ key: "p1.0", text: "No.", reader: "Ife · Eleven v4", deliveries: ["warm"],
       note: "tag", noteWords: 2, pause: true, breath: true, emphasis: true, sounds: [], markers: true, speed: null }] } as unknown as Parameters<typeof directionPromptFor>[0]);
     assert.match(prompt, /takes a note or phrase of 2 words at most/);
+    const asking = directionPromptFor({ title: "Neap", pass: { index: 1, of: 1 }, asks: { speakerNotes: [{ key: "ade", name: "Ade" }] }, blocks: [{ key: "p1.0", text: "No.", reader: "Ife · Eleven v4",
+      deliveries: ["warm"], note: "tag", noteWords: 2, pause: true, breath: true, emphasis: true, sounds: [], markers: true, speed: null }] } as unknown as Parameters<typeof directionPromptFor>[0]);
+    assert.match(asking, /how the narrator plays them, 2 words at most/, "a speaker's note leads every line as a tag, so it meets the same cap");
   });
 
   // Design turn 185: read per paragraph, chapter 01 changed delivery on most blocks.
