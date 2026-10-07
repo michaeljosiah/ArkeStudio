@@ -63,6 +63,13 @@ it("does not mistake an ordinary slash-bearing sentence for a path", () => {
   assert.equal(describeError(new Error("choose either/or, not both")), "choose either/or, not both");
 });
 
+it("does not mistake a link's scheme for a drive letter (2026-10-07)", () => {
+  const credit = "openai: image generation failed (HTTP 429): You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.";
+  assert.equal(describeError(new Error(credit)), credit);
+  const fileUrl = new Error("could not open file:///C:/Users/alex/worlds/w1/performance.json");
+  assert.equal(describeError(fileUrl), GENERIC_ERROR_COPY, "a drive path inside a file URL is still a path");
+});
+
 it("redacts a shallow absolute path too, not only a deep one", () => {
   const err = new Error("EIO: i/o error, read '/tmp/recording.wav'");
   assert.equal(describeError(err), GENERIC_ERROR_COPY);
