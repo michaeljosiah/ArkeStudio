@@ -786,8 +786,9 @@ export const AudiobookBookSchema = z
     recorded: z.array(z.string().min(1).max(120)).max(200).optional(),
     /**
      * How the narrator plays each character under `performed` (R-44): a phrase of at most 60
-     * characters, keyed by sheet id or by a name no sheet carries. The book's, not the sheet's,
-     * since another narrator plays a character another way.
+     * characters, keyed by sheet id or by a name no sheet carries. Since design turn 200 (R-166)
+     * this is the book's own, overriding the character's `narration` for this book alone; a
+     * speaker with none here is played with their sheet's narration.
      */
     notes: z.record(z.string().min(1).max(120), z.string().min(1).max(CADENCE_PHRASE_MAX)).optional(),
     /**
@@ -867,11 +868,44 @@ export function audiobookNoteKey(block: Pick<AudiobookBlock, "speaker" | "sheet"
 }
 
 /**
+ * Each character's narration by sheet id (design turn 200, SPEC-047 R-165): what a book plays a
+ * speaker with when it has no note of its own for them. Only a written one, an empty field none, and
+ * only a character still in the cast: a book is planned with the active characters, so a retired
+ * one's narration would name takes nothing reads.
+ */
+export function sheetNarrations(sheets: ReadonlyArray<{ id: string; narration?: string | undefined; type?: string; retired?: boolean | undefined }>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const sheet of sheets) {
+    if ((sheet.type !== undefined && sheet.type !== "character") || sheet.retired === true) continue;
+    const narration = sheet.narration?.trim();
+    if (narration !== undefined && narration !== "") out[sheet.id] = narration;
+  }
+  return out;
+}
+
+/**
+ * A speaker's note as a book plays it (R-166): the book's own, else — for a speaker a sheet names —
+ * that character's narration. A name no sheet carries has only the book's.
+ */
+export function speakerNoteFor(notes: Readonly<Record<string, string>> | undefined, turn: Pick<AudiobookBlock, "speaker" | "sheet">, narrations?: Readonly<Record<string, string>>): string | undefined {
+  const key = audiobookNoteKey(turn);
+  if (key === null) return undefined;
+  return notes?.[key] ?? (turn.sheet !== undefined ? narrations?.[turn.sheet] : undefined);
+}
+
+/** Where a speaker's note comes from (R-167): the book's own, the character's, or none at all. */
+export function speakerNoteSource(notes: Readonly<Record<string, string>> | undefined, key: string, sheet: string | undefined, narrations?: Readonly<Record<string, string>>): "this book" | "character" | null {
+  if (notes?.[key] !== undefined) return "this book";
+  return sheet !== undefined && narrations?.[sheet] !== undefined ? "character" : null;
+}
+
+/**
  * The note a block is played with under the book's reading (R-44): only under `performed`, only on
  * a line. A block that holds several turns (design turn 190) is played with the notes of the
- * speakers in it: a lone speaker's as it stands, several named by their speaker.
+ * speakers in it: a lone speaker's as it stands, several named by their speaker. `narrations` are
+ * the characters' own (R-166), which a book note overrides; without them only the book's count.
  */
-export function audiobookNoteFor(book: Pick<AudiobookBook, "reading" | "notes"> | null, block: Pick<AudiobookBlock, "speaker" | "sheet"> & { rows?: readonly AudiobookTurn[] }): string | undefined {
+export function audiobookNoteFor(book: Pick<AudiobookBook, "reading" | "notes"> | null, block: Pick<AudiobookBlock, "speaker" | "sheet"> & { rows?: readonly AudiobookTurn[] }, narrations?: Readonly<Record<string, string>>): string | undefined {
   if (book?.reading !== "performed") return undefined;
   if (block.rows !== undefined) {
     const seen = new Set<string>();
@@ -880,14 +914,13 @@ export function audiobookNoteFor(book: Pick<AudiobookBook, "reading" | "notes"> 
       const key = audiobookNoteKey(row);
       if (key === null || seen.has(key)) continue;
       seen.add(key);
-      const note = book.notes?.[key];
+      const note = speakerNoteFor(book.notes, row, narrations);
       if (note !== undefined) noted.push({ who: row.speaker ?? key, note });
     }
     if (noted.length === 0) return undefined;
     return noted.length === 1 ? noted[0]!.note : noted.map(({ who, note }) => `${who}: ${note}`).join(" ");
   }
-  const key = audiobookNoteKey(block);
-  return key === null ? undefined : book.notes?.[key];
+  return speakerNoteFor(book.notes, block, narrations);
 }
 
 /**

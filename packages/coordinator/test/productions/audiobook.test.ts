@@ -1920,6 +1920,34 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       assert.equal(row?.stale, 1, "the one block that holds Maren's line");
     }));
 
+  it("a character's narration is the note every book inherits; the book's own wins, and emptying it falls back (design turn 200, R-165, R-166)", () =>
+    withHarness({}, async ({ worldDir, store, events, send }) => {
+      await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "performed" });
+      await send({ kind: "set-sheet-narration", worldId: WORLD_ID, path: "characters/maren-kest.md", narration: "  low, clipped " });
+      const sheet = await readFile(join(worldDir, "characters", "maren-kest.md"), "utf8");
+      assert.match(sheet, /^narration: low, clipped$/m, "written trimmed onto the sheet");
+      assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 68, "the sheet's new field fences the world past the builds that would drop the sheet");
+      const narrator = { provider: "elevenlabs", model: V3.id, voiceId: "v_8Kq2", label: "Low tide" };
+      const room = { narrator, models: [ELEVEN, KOKORO, FISH, V3], catalogue: [{ provider: "elevenlabs", model: V3.id, voiceId: "v_8Kq2", label: "Low tide", attributes: [], local: false, canClone: false }] };
+      const lead = async () => {
+        const prepared = await prepareChapter(store, LEDGER, "neap", room, () => CLOCK, ["p0.0"]);
+        assert.equal(prepared.kind, "ready");
+        return prepared.kind === "ready" ? prepared.prepared.speaking.find((block) => block.block.key === "p0.0")?.parts[0] : undefined;
+      };
+      assert.ok((await lead())?.startsWith("[low, clipped] "), "the book has no note of its own, so the character's leads");
+      const door = await openDoor(send, events);
+      assert.equal(door.voices.find((row) => row.sheet === "maren-kest")?.note, "low, clipped", "the door says the inherited note");
+
+      await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note: "flat, far off" });
+      assert.ok((await lead())?.startsWith("[flat, far off] "), "the book's own wins for this book");
+      await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note: null });
+      assert.ok((await lead())?.startsWith("[low, clipped] "), "emptied, it falls back to the character's");
+
+      await send({ kind: "set-sheet-narration", worldId: WORLD_ID, path: "characters/maren-kest.md", narration: null });
+      assert.doesNotMatch(await readFile(join(worldDir, "characters", "maren-kest.md"), "utf8"), /^narration:/m, "cleared, the field goes");
+      assert.ok(!(await lead())?.startsWith("["), "no note anywhere: read plain");
+    }));
+
   it("takes follow the reader: a narrator switched back makes its kept takes current again without a call (R-46, R-48)", () =>
     withHarness({ localVoices: TWO }, async ({ worldDir, events, spoken, send }) => {
       await read(send);

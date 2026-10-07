@@ -156,7 +156,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Sixty-six is the seams set by hand between a chapter's audiobook blocks (turn 198).
 // Sixty-seven is the hash of each paragraph beside a chapter's cast, so an edit makes stale only
 // the paragraphs it touches (turn 198, part B).
-export const SUPPORTED_SCHEMA_VERSION = 67;
+// Sixty-eight is a character's `narration` on a strict sheet (design turn 200): how a narrator plays
+// them, which a build without the field would drop the sheet over.
+export const SUPPORTED_SCHEMA_VERSION = 68;
 
 export class WorldOpenError extends Error {
   constructor(

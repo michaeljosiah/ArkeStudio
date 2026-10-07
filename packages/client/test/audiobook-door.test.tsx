@@ -249,7 +249,7 @@ describe("the Audiobook door (turn 146)", () => {
     // A row goes to where its voice is set (issue 1191); the unattributed lines have nowhere to go.
     assert.deepEqual(chips.map((chip) => chip.tagName.toLowerCase()), ["button", "button", "div"]);
     await act(async () => chips[1]!.click());
-    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/cast/odile-sarn/voice`, "a speaker's chip opens their voice page");
+    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/cast/odile-sarn/voice?book=inkbound`, "a speaker's chip opens their voice page, the book carried for its narrator (turn 200)");
   });
 
   it("the narrator's chip opens the book's narrator: the app's, or a voice for this book, and nothing written until the press (SPEC-047 R-46)", async () => {
@@ -566,10 +566,12 @@ describe("the Audiobook door (turn 146)", () => {
     assert.equal(all(m, '[data-testid="audiobook-row"]').length, 3, "an older answer after a newer one changes nothing");
   });
 
-  it("the book's reading: the book note, each performed speaker's note with where it came from, and Draft from the sheets (design turn 184c)", async () => {
+  it("the book's reading: the book note, each performed speaker's note with where it came from — this book or the character — and Draft from the sheets (design turns 184c, 200)", async () => {
     const state = inkbound();
-    const book = { schemaVersion: 1 as const, reading: "performed" as const, note: "Harbour English, unhurried and close.", notes: { "maren-kest": "dry, exact", "odile-sarn": "low and amused" }, noteSources: { "maren-kest": "sheet" as const } };
-    const m = await mount({ ...state, world: { ...state.world!, productions: state.world!.productions.map((p) => (p.meta.id === "inkbound" ? { ...p, audiobook: book } : p)) } });
+    // Odile's note is the book's own; Maren's is her character's narration, which the book inherits.
+    const book = { schemaVersion: 1 as const, reading: "performed" as const, note: "Harbour English, unhurried and close.", notes: { "odile-sarn": "low and amused" } };
+    const sheets = state.world!.sheets.map((sheet) => (sheet.id === "maren-kest" ? { ...sheet, narration: "dry, exact" } : sheet));
+    const m = await mount({ ...state, world: { ...state.world!, sheets, productions: state.world!.productions.map((p) => (p.meta.id === "inkbound" ? { ...p, audiobook: book } : p)) } });
     await answerDoor(m, {
       ...door("narrator"),
       reading: "performed",
@@ -587,7 +589,7 @@ describe("the Audiobook door (turn 146)", () => {
     const reactValue = (bookNote as unknown as Record<string, { value?: string }>)[Object.keys(bookNote).find((k) => k.startsWith("__reactProps$"))!]?.value;
     assert.equal(reactValue, "Harbour English, unhurried and close.");
     const speakers = [...panel.querySelectorAll('[data-testid="audiobook-voice"]')].map((row) => `${row.querySelector("b")!.textContent}|${(row.querySelector("input") as HTMLInputElement | null)?.getAttribute("aria-label")}|${row.querySelector("small")!.textContent}`);
-    assert.deepEqual(speakers, ["Maren Kest|Note · Maren Kest|10 / 60 · sheet", "Odile Sarn|Note · Odile Sarn|14 / 60 · you", "Perrin Tallow|Note · Perrin Tallow|0 / 60"]);
+    assert.deepEqual(speakers, ["Maren Kest|Note · Maren Kest|10 / 60 · character", "Odile Sarn|Note · Odile Sarn|14 / 60 · this book", "Perrin Tallow|Note · Perrin Tallow|0 / 60"]);
     await act(async () => (panel.querySelector('[data-testid="draft-from-sheets"]') as HTMLButtonElement).click());
     const drafted = m.sent.findLast((message) => message.kind === "draft-audiobook-speaker-notes") as Extract<ClientMessage, { kind: "draft-audiobook-speaker-notes" }>;
     assert.ok(drafted, "the speakers with no note are drafted from their sheets");
@@ -595,7 +597,7 @@ describe("the Audiobook door (turn 146)", () => {
     assert.match(q(m, '[data-testid="reading-sheet"]')?.textContent ?? "", /1 drafted/);
     // A performed speaker's row still goes to their Voice page, by its chevron.
     await act(async () => (panel.querySelector('[aria-label="Voice · Odile Sarn"]') as HTMLButtonElement).click());
-    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/cast/odile-sarn/voice`);
+    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/cast/odile-sarn/voice?book=inkbound`);
   });
 });
 

@@ -69,7 +69,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "retire-entity": "studio", "undo-single-act": "studio", "canon-contradictions": "studio",
   "create-sheet-from-sentence": "studio", "promote-guest": "studio", "duplicate-sheet": "studio",
   "set-sheet-status": "studio", "rename-world": "studio", "rename-sheet": "studio",
-  "assign-voice": "studio", "sheet-refs": "studio", "validate-provider": "studio",
+  "assign-voice": "studio", "set-sheet-narration": "studio", "sheet-refs": "studio", "validate-provider": "studio",
   "refresh-provider-tool": "studio", "refresh-vendor-auth": "studio", "set-routing-default": "studio",
   "set-model-enabled": "studio", "set-research-web": "studio", "set-local-sampling": "studio", "set-agent-config": "studio",
   "list-harness-models": "studio", "set-spend-threshold": "studio", "detect-runtimes": "studio",

@@ -428,6 +428,12 @@ export const AUDIOBOOK_SEAMS_SCHEMA_VERSION = 66;
  * is raised before the first record carrying it. Sixty-six is the same turn's block seams.
  */
 export const CAST_PARAGRAPHS_SCHEMA_VERSION = 67;
+/**
+ * A character's `narration` (design turn 200, SPEC-047 R-165), a field of a strict sheet: a build
+ * without it drops the sheet on scan, and with it the character, so the world is fenced with the
+ * first sheet that carries one, however it was written — the Voice tab, a draft, or by hand.
+ */
+export const SHEET_NARRATION_SCHEMA_VERSION = 68;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
@@ -886,6 +892,7 @@ export class Committer {
       // The kind as much as the beat: a visual novel created or converted, before any beat is set.
       files.some(f => classify(f.path).track === "production-meta" && f.newContent != null && carriesVisualNovel(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "shortName" in MarkdownFile.parse(f.newContent).data) ? SHEET_SHORT_NAME_SCHEMA_VERSION : 0,
+      files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "narration" in MarkdownFile.parse(f.newContent).data) ? SHEET_NARRATION_SCHEMA_VERSION : 0,
       // Probe metadata is also written by ordinary artifact filing/backfill.
       sidecarBoundary(files),
       landsProseStyle ? PROSE_STYLE_SCHEMA_VERSION : 0,

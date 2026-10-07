@@ -3591,6 +3591,15 @@ export function renameSheet(worldId: string, path: string, name: string, shortNa
   return send({ kind: "rename-sheet", worldId, requestId, path, name, ...(shortName !== undefined ? { shortName } : {}) }) ? requestId : null;
 }
 
+/**
+ * A character's narration (design turn 200, SPEC-047 R-165): how a narrator plays them under
+ * `performed`, written straight to the sheet. Null or empty clears it. False when disconnected.
+ */
+export function setSheetNarration(worldId: string, path: string, narration: string | null): boolean {
+  const trimmed = narration?.trim() ?? "";
+  return send({ kind: "set-sheet-narration", worldId, path, narration: trimmed === "" ? null : trimmed.slice(0, 60) });
+}
+
 export function assignVoice(
   worldId: string,
   path: string,
@@ -4343,6 +4352,8 @@ export function requestVoicePreview(
   model: string,
   voiceId: string,
   voiceUploadConfirmedFor?: string,
+  /** The character's narration, played as the narrator would play it (design turn 200, R-168). */
+  note?: string,
 ): string {
   const requestId = queueRequest("voice-preview");
   const quoteToken = current.voiceCandidates[sheetId]?.previewQuoteByVoice?.[voiceTargetKey({ provider, model, voiceId })];
@@ -4355,6 +4366,7 @@ export function requestVoicePreview(
     model,
     voiceId,
     ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
+    ...(note !== undefined && note.trim() !== "" ? { note: note.trim() } : {}),
     requestId,
   });
   return requestId;

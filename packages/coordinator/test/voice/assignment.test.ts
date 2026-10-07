@@ -14,7 +14,7 @@ import { FakeProvider } from "../queue/fake-provider.js";
 import type { EnqueueInput, JobQueue } from "../../src/queue/dispatcher.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
-import { normalizeSpeechText, orderedShots, resolvePerformanceLine, ulid } from "@arke-studio/contracts";
+import { normalizeSpeechText, orderedShots, resolvePerformanceLine, ulid, voiceTargetKey } from "@arke-studio/contracts";
 import { audioHash } from "../../src/audio/qc.js";
 
 const REQUEST = "01J8F3K2QW9VZX4N7M0RTYB6HD";
@@ -213,4 +213,52 @@ it("retired local speech preserves the world and refuses selection, preview, pro
   assert.equal(await readFile(sheetPath, "utf8"), saved);
   assert.equal(await readFile(libraryPath, "utf8"), library);
   assert.deepEqual(await readFile(join(worldDir, "voices", "harbour.wav")), clip);
+});
+
+it("a narration is heard as the narrator would play it: a tag on a tag reader, a style on an instruction reader, the note naming the cached take (design turn 200, R-168)", async () => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root);
+  await provider.loadWorld(WORLD_ID);
+  const events: DomainEvent[] = [];
+  const v4 = SHIPPED_MANIFEST.models.find(m => m.id === "eleven_v4")!;
+  const flash = "gemini-3.8-flash-tts";
+  const coordinator = new Coordinator({ provider, adapter: null, appRoot: root, cipher: devCipher(),
+    dispatchClients: { elevenlabs: new FakeProvider(), google: new FakeProvider() },
+    credentialsFileName: "credentials.dev.dat", changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test", manifest: SHIPPED_MANIFEST,
+    voice: { sidecar: null, localPresets: [], cloudSources: [
+      { provider: "elevenlabs", list: async () => [{ provider: "elevenlabs", model: v4.id, voiceId: "rachel", label: "Rachel", attributes: [], local: false, canClone: false }] },
+      { provider: "google", list: async () => [{ provider: "google", model: flash, voiceId: "Charon", label: "Charon", attributes: [], local: false, canClone: false }] },
+    ] },
+    observeEvent: event => events.push(event) });
+  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  await coordinator.start(0);
+  try {
+    await send({ kind: "set-credential", provider: "elevenlabs", key: "xi-fixture" });
+    await send({ kind: "set-credential", provider: "google", key: "fixture-key" });
+    await send({ kind: "voice-candidates", worldId: WORLD_ID, sheetId: "maren-kest" });
+    const candidates = events.filter(e => e.type === "voice.candidates").at(-1)!;
+    const sent = (id: string) => events.filter((e): e is Extract<DomainEvent, { type: "job.updated" }> => e.type === "job.updated" && e.job.params["requestId"] === id).at(-1)?.job;
+
+    const tagged = ulid();
+    await send({ kind: "voice-preview", requestId: tagged, worldId: WORLD_ID, sheetId: "maren-kest", provider: "elevenlabs", model: v4.id, voiceId: "rachel", note: "low, clipped" });
+    const onV4 = sent(tagged);
+    assert.ok(onV4, "the preview was queued");
+    assert.match(String(onV4.params["text"]), /^\[low, clipped\] /, "a tag leads the line on a tag reader");
+    assert.equal(onV4.params["instructions"], undefined);
+
+    const plain = ulid();
+    await send({ kind: "voice-preview", requestId: plain, worldId: WORLD_ID, sheetId: "maren-kest", provider: "elevenlabs", model: v4.id, voiceId: "rachel" });
+    assert.doesNotMatch(String(sent(plain)?.params["text"]), /^\[/, "without a note the line is read plain");
+    assert.notEqual(sent(plain)?.landing?.name, onV4.landing?.name, "the note names its own cached take");
+
+    const styled = ulid();
+    const quoteToken = candidates.previewQuoteByVoice?.[voiceTargetKey({ provider: "google", model: flash, voiceId: "Charon" })];
+    await send({ kind: "voice-preview", requestId: styled, worldId: WORLD_ID, sheetId: "maren-kest", provider: "google", model: flash, voiceId: "Charon", note: "low, clipped", ...(quoteToken !== undefined ? { quoteToken } : {}) });
+    const onGemini = sent(styled);
+    assert.ok(onGemini, events.filter(e => e.type === "queue.enqueue-result").at(-1) ? JSON.stringify(events.filter(e => e.type === "queue.enqueue-result").at(-1)) : "queued");
+    assert.equal(onGemini.params["instructions"], "Low, clipped.", "a style beside the words on an instruction reader");
+    assert.doesNotMatch(String(onGemini.params["text"]), /low, clipped/, "and never in the words");
+  } finally {
+    await coordinator.stop();
+  }
 });

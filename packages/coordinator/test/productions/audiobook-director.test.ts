@@ -30,6 +30,7 @@ import {
 import { prepareChapter } from "../../src/productions/audiobook-run.js";
 import type { VoicesDeriver } from "../../src/productions/voices.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
+import { MarkdownFile } from "../../src/world/text-files.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { FakeProvider } from "../queue/fake-provider.js";
@@ -208,6 +209,8 @@ async function withDirector(
 
 const bookPath = (worldDir: string) => join(worldDir, "productions", LEDGER, ".audiobook", "book.json");
 const readBook = async (worldDir: string) => AudiobookBookSchema.parse(JSON.parse(await readFile(bookPath(worldDir), "utf8")));
+/** A character's narration as their sheet holds it (design turn 200, R-165). */
+const readNarration = async (worldDir: string, sheet: string) => MarkdownFile.parse(await readFile(join(worldDir, "characters", `${sheet}.md`), "utf8")).data["narration"] as string | undefined;
 const recordPath = (worldDir: string) => join(worldDir, "productions", LEDGER, ".audiobook", "chapters", "01-neap.json");
 const schemaOf = async (worldDir: string) => (JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")) as { schemaVersion: number }).schemaVersion;
 const withPlan = (synopsis: string) => async (worldDir: string) => {
@@ -519,7 +522,7 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
       },
     ));
 
-  it("speaker notes are drafted for a speaker with none and written as the sheet's; an author's note is never replaced", () =>
+  it("speaker notes are drafted for a speaker with none and written into the character's narration; an author's note is never replaced (design turn 200)", () =>
     withDirector(
       {
         book: { reading: "performed" },
@@ -537,13 +540,16 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
         assert.ok(!existsSync(bookPath(worldDir)) || (await readBook(worldDir)).notes === undefined, "nothing written before acceptance");
         await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: directed.proposed!, proposalId: directed.proposalId });
         const book = await readBook(worldDir);
-        assert.equal(book.notes?.["maren-kest"], "dry, exact, unhurried");
-        assert.equal(book.noteSources?.["maren-kest"], "sheet", "said where it came from");
+        // The draft is the character's (R-170): every book that reads her inherits it, and this
+        // one holds no note of its own for her.
+        assert.equal(await readNarration(worldDir, "maren-kest"), "dry, exact, unhurried");
+        assert.equal(book.notes?.["maren-kest"], undefined);
+        assert.equal(book.noteSources, undefined);
         assert.equal(book.chapterNotes?.["neap"], "Night at the rail desk.");
 
-        // The author writes their own: the source goes, and a later draft never replaces it.
+        // The author writes the book's own: it wins for this book, and a later draft replaces neither.
         await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note: "low, clipped" });
-        assert.equal((await readBook(worldDir)).noteSources, undefined);
+        assert.equal((await readBook(worldDir)).notes?.["maren-kest"], "low, clipped");
         events.length = 0;
         await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", speakerNotes: true });
         const again = events.find((e): e is Directed => e.type === "direction.finished")!;
@@ -551,7 +557,7 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
       },
     ));
 
-  it("Draft from the sheets fills the missing notes at once, marked as the sheet's, and leaves the author's alone", () => {
+  it("Draft from the sheets fills each character's empty narration at once and leaves the book's own notes alone (design turn 200)", () => {
     const asked: string[][] = [];
     return withDirector(
       {
@@ -568,9 +574,18 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
         assert.equal(answer?.drafted, 1, answer?.refused);
         assert.deepEqual(asked, [["maren-kest"]], "only the speaker with no note is asked about");
         const book = await readBook(worldDir);
-        assert.equal(book.notes?.["maren-kest"], "dry, exact, unhurried");
+        assert.equal(await readNarration(worldDir, "maren-kest"), "dry, exact, unhurried", "the character's own, inherited by every book");
+        assert.equal(book.notes?.["maren-kest"], undefined);
         assert.equal(book.notes?.["someone-else"], "the author's own");
-        assert.deepEqual(book.noteSources, { "maren-kest": "sheet" });
+        assert.equal(book.noteSources, undefined);
+
+        // A narration the author wrote is never replaced, and a character who has one is not asked about.
+        await send({ kind: "set-sheet-narration", worldId: WORLD_ID, path: "characters/maren-kest.md", narration: "low, clipped" });
+        assert.equal(await readNarration(worldDir, "maren-kest"), "low, clipped");
+        events.length = 0;
+        await send({ kind: "draft-audiobook-speaker-notes", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST });
+        assert.equal(asked.length, 1, "nobody left to draft for, so the writing service is not asked");
+        assert.equal(await readNarration(worldDir, "maren-kest"), "low, clipped");
       },
     );
   });

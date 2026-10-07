@@ -457,6 +457,7 @@ import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
 import type { AudiobookVideoOptions, AudiobookVideoProgress } from "@arke-studio/contracts";
 import { worldChatContextExists } from "./world-chat/context-validation.js";
 import { worldChatContextSchemaVersion } from "@arke-studio/contracts";
+import { noteSentence, performanceNote } from "@arke-studio/contracts";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
@@ -615,6 +616,7 @@ import {
   stageSheetRename,
   stageSheetStatus,
   applyVoiceAssignment,
+  applySheetNarration,
 } from "./sheets/authoring.js";
 import { ReadModel } from "./read-model.js";
 import { ChildSupervisor, type SupervisorStatus } from "./supervisor.js";
@@ -9518,6 +9520,27 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "set-sheet-narration": {
+        // How a narrator plays a character (design turn 200, SPEC-047 R-165): the person's own
+        // action, written straight to the sheet as a voice is. Every book under `performed` that
+        // has no note of its own for them is played with it (R-166), so it is refused while any
+        // story production is being read, as a book's own note is: a run half way through would
+        // make lines under a note that no longer stands.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        if (this.storyProductionIds(store).some((id) => this.audiobookBusy(msg.worldId, id))) {
+          void this.appLog?.append({ kind: "sheet.narration-refused", path: msg.path, message: "a book is being read" });
+          return;
+        }
+        try {
+          await applySheetNarration(store, { path: msg.path, narration: msg.narration });
+        } catch (err) {
+          void this.appLog?.append({ kind: "sheet.narration-failed", path: msg.path, message: err instanceof Error ? err.message : String(err) });
+          return;
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "sheet-refs": {
         const store = this.opts.provider.openStore?.();
         const index = store?.getIndex();
@@ -15057,7 +15080,9 @@ export class Coordinator {
       }
       case "draft-audiobook-speaker-notes": {
         // The missing speaker notes drafted from the sheets (design turn 184c, R-54): written at
-        // once, marked as the sheet's, never over a note the author wrote.
+        // once into each character's empty narration (design turn 200, R-170), never over one the
+        // author wrote. A narration reaches every book, so any book being read refuses it, and
+        // the drafts are asked within the book's narrator's tag word cap where it has one.
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         const answer = (drafted: number, refused?: string) =>
@@ -15073,8 +15098,11 @@ export class Coordinator {
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         try {
-          const { drafted } = await draftSpeakerNotes(store, msg.productionId, deriver, control.signal, { blocked: () => (this.audiobookBusy(msg.worldId, msg.productionId) ? "the book is being read" : null) });
-          if (drafted > 0) this.refreshIfStillOpen(store);
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService ?? null, msg.productionId);
+          const words = this.opts.manifest?.models.find((m) => m.provider === narrator.provider && m.id === narrator.model)?.cadence?.tagWords;
+          const reading = () => (this.storyProductionIds(store).some((id) => this.audiobookBusy(msg.worldId, id)) ? "a book is being read" : null);
+          const { drafted } = await draftSpeakerNotes(store, msg.productionId, deriver, control.signal, { blocked: reading, ...(words !== undefined ? { words } : {}) });
+          if (drafted > 0) await this.refreshWorldSnapshot(msg.worldId);
           answer(drafted);
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.note-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
@@ -16304,9 +16332,16 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, `No ${msg.provider} voice model is available.`);
           return;
         }
+        // The character's narration on the line (design turn 200, R-168): led as a book leads it —
+        // a tag in the words on a tag row, a style beside them on an instruction row, nothing where
+        // the reader takes neither. It names the cached take, so a changed note is heard afresh.
+        const playing = msg.note === undefined ? null : performanceNote(msg.note, model, source.kind === "cloned" ? source.voice.language : undefined);
+        const spokenLine = playing?.mode === "tag" ? { ...line, text: `${playing.tag} ${line.text}` } : line;
+        const noteStyle = playing?.mode === "instruction" ? noteSentence(msg.note!) : undefined;
+        const cacheReference = noteStyle === undefined ? previewReference : [previewReference, `style:${noteStyle}`].filter((part) => part !== undefined).join("|");
         // Queued providers: cache hit replays free; a miss dispatches through the queue (R-2, R-10).
         const format = voiceFormatForModel(model);
-        const cached = previewCacheFile(msg.provider, msg.voiceId, line.text, format, model.id, previewReference);
+        const cached = previewCacheFile(msg.provider, msg.voiceId, spokenLine.text, format, model.id, cacheReference);
         try {
           const bytes = new Uint8Array(
             await readFile(toExtendedLength(join(store.dir, fromPortable(cached)))),
@@ -16366,10 +16401,10 @@ export class Coordinator {
             sheet,
             provider: msg.provider,
             voiceId: msg.voiceId,
-            line,
+            line: spokenLine,
             model,
             ...(voiceReference ? { voiceReference: true } : {}),
-            ...(previewReference !== undefined ? { reference: previewReference } : {}),
+            ...(cacheReference !== undefined ? { reference: cacheReference } : {}),
             ...(msg.voiceUploadConfirmedFor !== undefined
               ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
               : {}),
@@ -16386,6 +16421,7 @@ export class Coordinator {
           sheetVersion: sheet.version,
           characterCount: normalizeSpeechText(line.text).length,
           ...(source.kind === "cloned" ? { language: source.voice.language } : {}),
+          ...(noteStyle !== undefined ? { instructions: noteStyle } : {}),
         };
         const queued = await this.enqueueBatch(msg.requestId, msg.kind, [request.input]);
         if (!queued.accepted) {

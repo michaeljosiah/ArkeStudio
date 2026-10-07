@@ -1228,6 +1228,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         .nullable(),
     })
     .strict(),
+  /**
+   * A character's narration (design turn 200, SPEC-047 R-165): how a narrator plays them under
+   * `performed`, written straight to the sheet as a voice is. Null or empty clears it.
+   */
+  z
+    .object({
+      kind: z.literal("set-sheet-narration"),
+      worldId: UlidSchema,
+      path: z.string().min(1),
+      narration: z.string().trim().max(CADENCE_PHRASE_MAX).nullable(),
+    })
+    .strict(),
   /** SPEC-007 R-16: a sheet's computed detail — refs and incoming links from the index. */
   z.object({ kind: z.literal("sheet-refs"), worldId: UlidSchema, sheetId: z.string().min(1) }).strict(),
   /**
@@ -1953,6 +1965,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       voiceId: z.string().min(1),
       /** Opaque engine instance explicitly approved as a remote biometric-upload destination. */
       voiceUploadConfirmedFor: z.string().min(1).optional(),
+      /**
+       * The character's narration (design turn 200, R-168): the line read as a narrator plays
+       * them, the note leading it as a book sends it — a tag, a style, or held where the reader
+       * takes neither.
+       */
+      note: z.string().trim().min(1).max(CADENCE_PHRASE_MAX).optional(),
     })
     .strict(),
   /** SPEC-011 R-17: local push-to-talk transcription. Audio goes to loopback, nowhere else. */

@@ -122,6 +122,9 @@ export function editSheetContent(input: {
       links: [...(input.links ?? sheet.links)],
       ...(sheet.origin ? { origin: sheet.origin } : {}),
       ...(sheet.voice ? { voice: sheet.voice } : {}),
+      // Kept through an edit like the voice: a World Chat edit that listed only the fields it knew
+      // would drop how the narrator plays the character (design turn 200).
+      ...(sheet.narration !== undefined ? { narration: sheet.narration } : {}),
       // Created once, and not by an edit. Only `updated` moves.
       created: sheet.created,
       updated: input.date,
@@ -441,6 +444,44 @@ export async function applyVoiceAssignment(
       assignedAtVersion: currentVersion + 1,
     };
     doc.setData({ voice: assignment });
+  }
+  return store.commit(
+    {
+      kind: "sheet-edit",
+      source: options.source ?? "form",
+      files: [{ path: input.path, action: "replace", content: doc.serialize(), baseHash: sha256(live) }],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    },
+    undefined,
+    options.precondition,
+  );
+}
+
+/**
+ * Write or clear a character's narration (design turn 200, SPEC-047 R-165): how a narrator plays
+ * them under `performed`. The person's own action, committed straight to the sheet as a voice
+ * assignment is. `ifEmpty` is the drafting path's (R-170): a narration already written, by hand or
+ * by an earlier draft, is never replaced, and the commit is skipped.
+ */
+export async function applySheetNarration(
+  store: WorldStore,
+  input: { path: string; narration: string | null; ifEmpty?: boolean },
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
+): Promise<CommitResult | null> {
+  const live = await readLive(store, input.path);
+  if (live === null) throw new Error(`${input.path} does not exist`);
+  const doc = MarkdownFile.parse(live);
+  const current = typeof doc.data["narration"] === "string" ? (doc.data["narration"] as string).trim() : "";
+  const next = input.narration?.trim() ?? "";
+  if (input.ifEmpty === true && current !== "") return null;
+  if (next === current) return null;
+  if (next === "") {
+    const data = { ...doc.data };
+    delete data["narration"];
+    doc.data = data;
+    doc.setData({});
+  } else {
+    doc.setData({ narration: next });
   }
   return store.commit(
     {
