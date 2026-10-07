@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   newId,
+  TURN_RESULT_BOUNDS,
   WorldChatEntityRefSchema,
   type BibleEdit,
   type ModelEditorRequest,
@@ -115,6 +116,8 @@ export function personLine(problems: readonly TurnProblem[]): string {
   const lines = problems.map((p) =>
     p.code === "not-json"
       ? "the reply came back in a form the studio could not read"
+      : p.code === "reply-too-long"
+        ? "the answer ran longer than one reply can be. Ask for it shorter, or a part at a time"
       : p.code === "schema"
         ? "the reply was not in the shape the studio needs"
         : p.safeMessage.replace(/[.!?\s]+$/, "") || p.code,
@@ -252,6 +255,27 @@ export function turnResultJson(raw: string): unknown {
 }
 
 /**
+ * A reply over the bound, said in terms a model can actually aim at.
+ *
+ * The bound alone ("reply allows at most 8000 characters") was the corrective line, and it failed
+ * live on 2026-10-07: asked for notes on a 26-chapter outline, the model wrote past it, was told
+ * the bound, and wrote past it again — two minutes of a considered answer thrown away twice. A
+ * model cannot count characters; it can aim at a word count, and it can see how far over it was.
+ * The length is the reply's own size, never its content, so it is safe to send back.
+ */
+function replyTooLongProblem(json: unknown): TurnProblem {
+  const reply = json !== null && typeof json === "object" ? (json as Record<string, unknown>)["reply"] : undefined;
+  const length = typeof reply === "string" ? reply.length : undefined;
+  // Six characters a word is English prose with its spaces; aim at three quarters of the bound so
+  // a model that undershoots its own estimate by a little still lands inside it.
+  const words = Math.floor((TURN_RESULT_BOUNDS.reply * 0.75) / 6 / 50) * 50;
+  return problem(
+    "reply-too-long",
+    `reply allows at most ${TURN_RESULT_BOUNDS.reply} characters${length ? `; this one was ${length}` : ""}. Write it again in under ${words} words: keep every point, cut restatement and examples, and offer the rest for the next turn.`,
+  );
+}
+
+/**
  * Parse the model's message as the strict turn-result schema.
  *
  * Separate from the rest so a malformed message fails before anything else is attempted — there
@@ -281,11 +305,16 @@ export function parseTurnResult(raw: string, productionThread = false): { ok: tr
      * answer was, at the moment there is least time to spare.
      */
     const lines = new Set<string>();
+    let replyTooLong: TurnProblem | undefined;
     for (const issue of parsed.error.issues) {
+      if (issue.code === z.ZodIssueCode.too_big && issue.path.length === 1 && issue.path[0] === "reply") {
+        replyTooLong = replyTooLongProblem(json);
+        continue;
+      }
       lines.add(truncate(schemaIssueLine(issue), MAX_PROBLEM_CHARS));
       if (lines.size >= MAX_PROBLEMS) break;
     }
-    return { ok: false, problems: [...lines].map((line) => problem("schema", line)) };
+    return { ok: false, problems: [...(replyTooLong ? [replyTooLong] : []), ...[...lines].map((line) => problem("schema", line))] };
   }
   return { ok: true, value: parsed.data };
 }
