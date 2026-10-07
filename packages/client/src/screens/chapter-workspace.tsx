@@ -40,6 +40,7 @@ import {
   audiobookReadingNotes,
   voiceDisplayLabel,
   mainPhotoFor,
+  CHAPTER_PLAN_LIMITS,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
@@ -1923,6 +1924,7 @@ export function ChapterWorkspace({
               placeholder="What this chapter is for."
               className="fy-sbsynopsis fy-ch__synopsis-clamp"
               rows={2}
+              maxLength={CHAPTER_PLAN_LIMITS.synopsis}
               onCommit={(next) => plan({ synopsis: next.trim() === "" ? null : next.trim() })}
             />
           )}
@@ -1961,6 +1963,7 @@ export function ChapterWorkspace({
                     placeholder="When"
                     className="fy-ch__when"
                     rows={1}
+                    maxLength={CHAPTER_PLAN_LIMITS.when}
                     onCommit={(next) => plan({ when: next.trim() === "" ? null : next.trim() })}
                   />
                 )}
@@ -2745,9 +2748,9 @@ export function ChapterWorkspace({
             )}
             {compact && <section className="fy-bible__panel fy-ch__plan"><h2 className="fy-bible__paneltitle">Chapter plan</h2>
               <label>Title{locked ? <span>{chapter.title}</span> : <span className="fy-ch__plan-field"><SceneTitle title={chapter.title} label="Chapter title" onCommit={title => plan({ title })} /></span>}</label>
-              <label>Synopsis{locked ? <span>{chapter.synopsis}</span> : <EditableText value={chapter.synopsis ?? ""} placeholder="What this chapter is for." className="fy-ch__plan-field" rows={2} onCommit={synopsis => plan({ synopsis: synopsis || null })} />}</label>
+              <label>Synopsis{locked ? <span>{chapter.synopsis}</span> : <EditableText value={chapter.synopsis ?? ""} placeholder="What this chapter is for." className="fy-ch__plan-field" rows={2} maxLength={CHAPTER_PLAN_LIMITS.synopsis} onCommit={synopsis => plan({ synopsis: synopsis || null })} />}</label>
               <label>Point of view<select aria-label="Point of view" disabled={locked} value={chapter.pov ?? ""} onChange={event => plan({ pov: event.target.value || null })}><option value="">Not set</option>{characters.map(sheet => <option key={sheet.id} value={sheet.id}>{sheet.name}</option>)}</select></label>
-              <label>When{locked ? <span>{chapter.when}</span> : <EditableText value={chapter.when ?? ""} placeholder="When" className="fy-ch__plan-field" rows={1} onCommit={when => plan({ when: when || null })} />}</label>
+              <label>When{locked ? <span>{chapter.when}</span> : <EditableText value={chapter.when ?? ""} placeholder="When" className="fy-ch__plan-field" rows={1} maxLength={CHAPTER_PLAN_LIMITS.when} onCommit={when => plan({ when: when || null })} />}</label>
             </section>}
           </aside>
           </ResponsiveSheet>

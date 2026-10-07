@@ -571,6 +571,15 @@ export const ChapterImpliesSchema = z.array(
     .strict(),
 );
 export type ChapterImplies = z.infer<typeof ChapterImpliesSchema>;
+/**
+ * The longest synopsis and story-time a writer may put on a chapter (turn 127).
+ *
+ * One constant for the frame that carries the edit and the fields that type it: the fields had no
+ * limit, so a 667-character synopsis was sent, refused by the frame's schema, dropped with nothing
+ * said, and the author's text was simply gone (2026-10-07).
+ */
+export const CHAPTER_PLAN_LIMITS = { synopsis: 600, when: 80 } as const;
+
 /** What a writer may put on the chapter: at most 12 facts of at most 300 characters (turn 127). */
 export const ChapterImpliesWriteSchema = z
   .array(

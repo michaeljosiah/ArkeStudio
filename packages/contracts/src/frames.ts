@@ -55,7 +55,7 @@ import { ReferenceAngleSchema } from "./reference.js";
 import { HarnessEngineSchema } from "./harness.js";
 import { BackgroundNotificationPreferenceSchema, NarratorSettingsSchema, ThemePreferenceSchema } from "./settings.js";
 import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
-import { CHARACTER_ROLE_MAX, SHORT_NAME_MAX, FrameRateSchema, ProductionFormatSchema, ProductionMediumSchema, ChapterImpliesWriteSchema } from "./world.js";
+import { CHARACTER_ROLE_MAX, SHORT_NAME_MAX, FrameRateSchema, ProductionFormatSchema, ProductionMediumSchema, ChapterImpliesWriteSchema, CHAPTER_PLAN_LIMITS } from "./world.js";
 import { DeliverySchema } from "./voice.js";
 import { WorldChatContextSchema, WorldChatInitiativeSchema } from "./world-chat.js";
 import { ProductionSetupCommandSchema } from "./production-setup.js";
@@ -2244,9 +2244,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       changes: z
         .object({
           title: z.string().trim().min(1).max(200).optional(),
-          synopsis: z.string().trim().max(600).nullable().optional(),
+          synopsis: z.string().trim().max(CHAPTER_PLAN_LIMITS.synopsis).nullable().optional(),
           pov: SlugSchema.nullable().optional(),
-          when: z.string().trim().max(80).nullable().optional(),
+          when: z.string().trim().max(CHAPTER_PLAN_LIMITS.when).nullable().optional(),
           implies: ChapterImpliesWriteSchema.nullable().optional(),
         })
         .strict()

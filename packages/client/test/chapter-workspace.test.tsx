@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { paragraphSpans, type ChapterContinuity, type ChapterSummary, type ChapterVoices, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
+import { CHAPTER_PLAN_LIMITS, paragraphSpans, type ChapterContinuity, type ChapterSummary, type ChapterVoices, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
 import { ChapterScreen, __clearHeldAsksForTest, firstPrompt, paragraphAt, passageSubject, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -398,6 +398,18 @@ describe("the chapter, opened (turn 126)", () => {
     assert.match(text(m), /Draft the rest/, "a chapter with prose is continued, not drafted from the synopsis");
     assert.match(text(m), /Implies 2/, "the implied facts are listed with their count");
     assert.match(text(m), /The bells can ring uncalled/);
+  });
+
+  it("stops typing at the frame's limit instead of losing a long synopsis (2026-10-07)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const shown = q(m, ".fy-ch__synopsis-clamp") as HTMLElement | null;
+    assert.ok(shown, "the synopsis is offered for editing");
+    await act(async () => shown.click());
+    assert.equal(q(m, ".fy-ch__synopsis-clamp"), null, "a click opens the synopsis as text");
+    // linkedom keeps the attribute's case as React wrote it; a browser lowers it.
+    const limited = [...m.container.querySelectorAll("textarea")].map((field) => field.getAttribute("maxLength") ?? field.getAttribute("maxlength"));
+    assert.ok(limited.includes(String(CHAPTER_PLAN_LIMITS.synopsis)), "the field holds what the save accepts");
   });
 
   it("a chapter with a synopsis and no prose is drafted from the synopsis (turn 127)", () => {
