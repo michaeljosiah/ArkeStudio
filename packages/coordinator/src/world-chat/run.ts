@@ -36,7 +36,7 @@ import { assembleContext, budgetFor, type ContextAttachment } from "./context.js
 import type { CurrentLook } from "./look.js";
 import { THINKING_LABEL, workingLabel, WRITING_LABEL } from "./project.js";
 import { deriveChecks, planFor } from "./check-plan.js";
-import { correctiveMessage, personLine, validateTurnResult, type TurnProblem } from "./turn-result.js";
+import { correctiveMessage, personLine, preparationProblem, validateTurnResult, type TurnProblem } from "./turn-result.js";
 import type { EvidenceSources } from "./evidence.js";
 import { foldConversation } from "./fold.js";
 import { WorldChatStore } from "./store.js";
@@ -1267,11 +1267,8 @@ export class WorldChatRunner {
         replyOnly,
         at,
       }) ?? [];
-    } catch {
-      return {
-        ok: false,
-        problems: [{ code: "action-preparation", safeMessage: "The requested change could not be prepared safely. Answer without it." }],
-      };
+    } catch (error) {
+      return { ok: false, problems: [preparationProblem(error)] };
     }
     await store.append(
       {
