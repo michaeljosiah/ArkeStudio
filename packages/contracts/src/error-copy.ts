@@ -44,9 +44,12 @@ const MAX_LENGTH = 300;
  * a real path in an fs error — the quote, paren or space Node itself puts there, or the start of
  * the message — rather than counting segments, so a shallow `/tmp/recording.wav` is caught the
  * same as a deep one; a mid-word slash like "either/or" has a letter immediately before it, which
- * the anchor excludes.
+ * the anchor excludes. The drive letter is anchored the same way: unanchored, `https://` read as
+ * the drive `s:/`, so every provider refusal that carried a link — OpenAI's "no credits remaining
+ * … at https://platform.openai.com/…/billing" — reached the screen as "Something went wrong", and
+ * the fault, with "billing" gone from its words, was filed as a key problem (2026-10-07).
  */
-const HAS_PATH = /[A-Za-z]:[\\/]|\\\\[^\s'"()]+|(?:^|['"( ])\/[^\s'"()]+/;
+const HAS_PATH = /(?<![A-Za-z])[A-Za-z]:[\\/]|\\\\[^\s'"()]+|(?:^|['"( ])\/[^\s'"()]+/;
 
 /**
  * The outermost system-error code in the cause chain, or null when the chain names none.
