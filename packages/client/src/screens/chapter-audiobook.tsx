@@ -18,6 +18,7 @@ import {
   audiobookDirectionFor,
   audiobookHeading,
   audiobookNoteFor,
+  sheetNarrations,
   audiobookRekeyed,
   audiobookRecordingKey,
   audiobookSeamLabel,
@@ -433,6 +434,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     [chapters, derived.blocks],
   );
   const rows = useMemo<BlockRow[]>(() => {
+    // The characters' own narration (design turn 200, R-166), as the coordinator plans with it.
+    const narrations = reading === "performed" ? sheetNarrations(world?.sheets ?? []) : {};
     return derived.blocks.map((block) => {
       let assigned = narrator;
       let mark = block.key === AUDIOBOOK_TITLE_KEY ? "title" : "narrator";
@@ -501,7 +504,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       const byPerson = recordedKeys.has(audiobookRecordingKey(block));
       const direction = rowDirection(recordOrNull, block);
       const speakerModel = modelOf(speaker);
-      const note = audiobookNoteFor({ reading, ...(notes !== undefined ? { notes: { ...notes } } : {}) }, block);
+      const note = audiobookNoteFor({ reading, ...(notes !== undefined ? { notes: { ...notes } } : {}) }, block, narrations);
       const led = hasReadingNotes(readingNotes) ? readingNotes : undefined;
       const view = (direction === null && note === undefined && led === undefined) || speakerModel === null ? null : directionView(block.text, direction?.input ?? null, speakerModel, language, note, led);
       // Under the proposal: its direction, the speaker notes and the chapter note it drafted
@@ -2379,7 +2382,7 @@ export function markerAtSelection(rows: readonly BlockRow[]): MarkerAt | null {
  * `Hear <name>` — the selected line if it is theirs, else their first in the chapter, as it
  * would be read, priced on the button for a cloud narrator — and what that line is sent as.
  */
-export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKey, name, lines, tone, note, noteHeld, line, model, slug, focused, onFocus }: {
+export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKey, name, lines, tone, note, source, noteHeld, line, model, slug, focused, onFocus }: {
   worldId: string;
   productionId: string;
   chapterFile: string;
@@ -2388,6 +2391,8 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
   lines: number;
   tone: string;
   note?: string;
+  /** Where the note comes from (design turn 200, R-167): writing here always sets the book's own. */
+  source?: "this book" | "character";
   noteHeld: boolean;
   /** The line Hear plays and Sent as shows. */
   line: BlockRow | null;
@@ -2455,7 +2460,7 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
               if (event.key === "Enter") (event.target as HTMLInputElement).blur();
             }}
           />
-          <span className="fy-ab__note-count fy-mono">{value.length}/60</span>
+          <span className="fy-ab__note-count fy-mono">{`${value.length}/60${source !== undefined ? ` · ${source}` : ""}`}</span>
         </div>
       )}
       {focused && line !== null && (

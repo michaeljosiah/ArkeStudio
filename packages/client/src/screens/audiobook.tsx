@@ -800,9 +800,11 @@ function ReadingSheet({ worldId, productionId, production, door, reading, runnin
   const narrator = door?.voices[0];
   const speakers = door?.voices.slice(1) ?? [];
   const named = (voice: { sheet?: string; name: string }) => (voice.sheet !== undefined ? labels?.get(voice.sheet)?.label : undefined) ?? voice.name;
-  const voicePage = (sheet: string | undefined) => (sheet === undefined ? undefined : () => navigate(`/w/${worldId}/cast/${encodeURIComponent(sheet)}/voice`));
+  // The book rides along (design turn 200, R-168): the Voice tab then hears the narration on this book's narrator.
+  const voicePage = (sheet: string | undefined) => (sheet === undefined ? undefined : () => navigate(`/w/${worldId}/cast/${encodeURIComponent(sheet)}/voice?book=${encodeURIComponent(productionId)}`));
   const blocks = (count: number) => `${count} block${count === 1 ? "" : "s"}`;
-  const noteSource = (key: string) => production.audiobook?.noteSources?.[key];
+  // Where a speaker's note comes from (design turn 200, R-167): the book's own, or their character's narration.
+  const noteSource = (key: string, note: string | undefined) => (production.audiobook?.notes?.[key] !== undefined ? "this book" : note !== undefined ? "character" : undefined);
   const missing = reading === "performed" && speakers.some((voice) => voice.state === "narrator" && voice.note === undefined);
   const requests = door?.requests !== undefined
     ? {
@@ -869,7 +871,7 @@ function ReadingSheet({ worldId, productionId, production, door, reading, runnin
                 {speakers.map((voice) => {
                   const key = voice.sheet ?? voice.name;
                   if (reading === "performed" && voice.state === "narrator") {
-                    const source = noteSource(key);
+                    const source = noteSource(key, voice.note);
                     const speaker = { key, name: voice.name, ...(voice.note !== undefined ? { note: voice.note } : {}) };
                     return (
                       <div key={key} className="fy-abshow__sp" data-testid="audiobook-voice" data-state={voice.state}>
@@ -877,7 +879,7 @@ function ReadingSheet({ worldId, productionId, production, door, reading, runnin
                         <span className="fy-abshow__v">
                           <SpeakerNoteInput worldId={worldId} productionId={productionId} speaker={speaker} disabled={held} />
                           <small className={cx(voice.noteHeld === true && "fy-abshow__w")}>
-                            {voice.noteHeld === true ? "note · not on this reader" : `${voice.note?.length ?? 0} / ${CADENCE_PHRASE_MAX}${voice.note === undefined ? "" : source === "sheet" ? " · sheet" : " · you"}`}
+                            {voice.noteHeld === true ? "note · not on this reader" : `${voice.note?.length ?? 0} / ${CADENCE_PHRASE_MAX}${source === undefined ? "" : ` · ${source}`}`}
                           </small>
                         </span>
                         <span className="fy-abshow__mono">{blocks(voice.blocks)}</span>

@@ -2542,7 +2542,10 @@ export function ChapterWorkspace({
                     speakers.map((who) => {
                       const key = who.sheet ?? who.speaker;
                       const sheet = who.sheet === undefined ? undefined : world.sheets.find((candidate) => candidate.id === who.sheet);
-                      const note = production.audiobook?.notes?.[key];
+                      // The book's own note, else the character's narration (design turn 200, R-166).
+                      const own = production.audiobook?.notes?.[key];
+                      const narration = sheet !== undefined && sheet.type === "character" && !sheet.retired && sheet.narration?.trim() ? sheet.narration.trim() : undefined;
+                      const note = own ?? narration;
                       const model = audiobook.modelOf(audiobook.narrator);
                       const selectedRow = audiobook.rows.find((row) => row.block.key === audiobook.selected);
                       // A speaker's line may sit inside a block of several turns (design turn 190).
@@ -2558,7 +2561,7 @@ export function ChapterWorkspace({
                           name={sheet?.name ?? who.speaker}
                           lines={who.lines}
                           tone={who.sheet === undefined ? "none" : String(speakerColours.get(who.sheet) ?? "none")}
-                          {...(note !== undefined ? { note } : {})}
+                          {...(note !== undefined ? { note, source: own !== undefined ? "this book" as const : "character" as const } : {})}
                           noteHeld={model === null || performanceNote(note ?? "x", model).mode === "unsupported"}
                           line={line}
                           model={model}

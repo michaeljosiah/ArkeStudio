@@ -172,6 +172,14 @@ export const SheetSchema = z
       .strict()
       .optional(),
     voice: VoiceAssignmentSchema.optional(),
+    /**
+     * Characters: how a narrator plays them when one voice reads the book (`performed`, design
+     * turn 200, SPEC-047 R-165). A book's own note for the speaker wins; absent there, this is the
+     * note. Authored within `CADENCE_PHRASE_MAX` (60) and read unbounded, as the role is. Writing
+     * one raises the world to schema 68, so a build that cannot read it refuses the world instead
+     * of dropping the sheet.
+     */
+    narration: z.string().optional(),
     /** References only — the rules themselves are owned by canon, not the sheet (§2.3.2). */
     canonRules: z.array(CanonIdSchema),
     links: z.array(SlugSchema),

@@ -8594,11 +8594,23 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-voiceuse { display: flex; align-items: center; gap: 14px; min-height: 56px; border-bottom: 1px solid var(--border); }
 .fy-voiceuse:last-child { border-bottom: 0; }
 .fy-voiceuse__noplay { width: 30px; flex: none; }
-.fy-voiceuse__name { width: 96px; flex: none; font: 600 13px var(--font-sans); }
+.fy-voiceuse__name { width: 116px; flex: none; display: flex; align-items: center; gap: 6px; font: 600 13px var(--font-sans); }
 .fy-voiceuse__source { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font: 400 12.5px var(--font-sans); }
 .fy-voiceuse__source svg { flex: none; color: var(--neutral-400); }
 .fy-voiceuse--empty .fy-voiceuse__source { color: var(--neutral-400); }
 .fy-voiceuse__meta { white-space: nowrap; color: var(--neutral-400); }
+/* Design turn 200: a character's narration written in place, and the narrator's limit when it bites. */
+.fy-voiceuse__field { flex: 1; min-width: 0; height: 36px; padding: 0 12px; box-sizing: border-box; border: 1px solid var(--foreground); border-radius: 8px; background: transparent; color: var(--foreground); font: 400 12.5px var(--font-sans); }
+.fy-voiceuse__meta--warn { color: var(--warning); }
+/* Help, asked for (turn 200): a glyph after a label, and its popover under it. */
+.fy-helptip { position: relative; display: inline-flex; }
+.fy-helptip__press { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 99px; background: none; color: var(--neutral-400); cursor: help; }
+.fy-helptip__press:hover, .fy-helptip__press:focus-visible { color: var(--foreground); }
+.fy-helptip__pop { position: absolute; left: -8px; top: calc(100% + 8px); z-index: 30; width: 300px; box-sizing: border-box; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--background); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14); display: flex; flex-direction: column; gap: 8px; color: var(--foreground); font: 400 12.5px/1.5 var(--font-sans); text-align: left; white-space: normal; }
+.fy-helptip__pop b { font: 600 13px var(--font-sans); }
+.fy-helptip__eg { display: flex; align-items: center; gap: 8px; }
+.fy-helptip__eg .fy-mono, .fy-helptip__extra { font: 400 10.5px/1.5 var(--font-mono); color: var(--neutral-400); }
+.fy-helptip__chip { padding: 3px 9px; border: 1px solid var(--border); border-radius: 99px; font: 400 12px var(--font-sans); }
 
 .fy-voiceways__head { display: flex; align-items: baseline; gap: 12px; }
 .fy-voiceways__head h2 { font: 600 13px var(--font-sans); }

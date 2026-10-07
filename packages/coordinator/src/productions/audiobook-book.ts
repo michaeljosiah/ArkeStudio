@@ -5,6 +5,7 @@ import {
   audiobookBlockPlan,
   audiobookDirectionFor,
   audiobookNoteFor,
+  sheetNarrations,
   freeCreditOverrun,
   freeLimitReason,
   freePlanShortfall,
@@ -135,6 +136,7 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
   const book = await prepareBook(store, productionId, room, now);
   const sheets = store.getBundle().sheets;
   const sheetName = (id: string) => sheets.find((sheet) => sheet.id === id)?.name ?? id;
+  const narrations = sheetNarrations(sheets);
   const rows: AudiobookRow[] = [];
   const voices = new Map<string, AudiobookVoiceRow>();
   const narratorRow: AudiobookVoiceRow = {
@@ -212,7 +214,8 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
           const sheet = turn.sheet;
           const held = voices.get(key) ?? { ...(sheet !== undefined ? { sheet } : {}), name: sheet !== undefined ? sheetName(sheet) : turn.speaker, state: "narrator" as const, blocks: 0 };
           held.blocks += 1;
-          const note = planned.block.rows === undefined ? planned.note : audiobookNoteFor({ reading: "performed", notes: plan.book?.notes ?? {} }, turn);
+          // A turn of a block of several is its own speaker's: the book's note, else the character's (R-166).
+          const note = planned.block.rows === undefined ? planned.note : audiobookNoteFor({ reading: "performed", notes: plan.book?.notes ?? {} }, turn, narrations);
           if (note !== undefined) {
             held.note = note;
             if (narratorModel === null || performanceNote(note, narratorModel, narratorLanguage).mode === "unsupported") held.noteHeld = true;

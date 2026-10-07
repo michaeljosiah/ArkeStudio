@@ -7,6 +7,7 @@ import {
   audiobookBlocks,
   audiobookBlockOptions,
   audiobookNoteFor,
+  sheetNarrations,
   audiobookReadingNotes,
   castStanding,
   hasReadingNotes,
@@ -461,12 +462,15 @@ export function assignReaders(
   designedVoices: readonly Pick<WorldDesignedVoice, "id" | "revision" | "name">[] = [],
 ): PlannedBlock[] {
   const reading_ = hasReadingNotes(readingNotes) ? readingNotes : undefined;
+  // The characters' own narration (design turn 200, R-166): what a line is played with where the
+  // book has no note of its own for its speaker.
+  const narrations = reading === "performed" ? sheetNarrations(sheets) : {};
   return blocks.map((block) => {
     const planned = ((): Omit<PlannedBlock, "state" | "block"> => {
       // Under `performed` the narrator reads every block, as under `narrator` (R-44); a line
       // carries its speaker's note, and narration none.
       if (reading === "performed") {
-        const note = audiobookNoteFor({ reading: "performed", notes }, block);
+        const note = audiobookNoteFor({ reading: "performed", notes }, block, narrations);
         return { assigned: narrator, ...(note !== undefined ? { note } : {}) };
       }
       if (reading === "narrator" || block.speaker === undefined) return { assigned: narrator };
