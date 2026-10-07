@@ -89,12 +89,15 @@ export function EditableText({
   placeholder,
   className,
   rows = 4,
+  maxLength,
   onCommit,
 }: {
   value: string;
   placeholder: string;
   className?: string;
   rows?: number;
+  /** The most the field's save will accept; typing stops there rather than the save being refused. */
+  maxLength?: number;
   onCommit: (next: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -119,6 +122,7 @@ export function EditableText({
       autoFocus
       defaultValue={value}
       rows={rows}
+      {...(maxLength !== undefined ? { maxLength } : {})}
       style={{ font: "400 12.5px/1.7 var(--font-sans)" }}
       onBlur={(e) => {
         setEditing(false);
