@@ -7,7 +7,7 @@ import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
 import { migrateLegacyScene, newId, orderedShots, type ConversationActionCard, type HumanDecisionCard, type WorldChatWorkspace } from "@arke-studio/contracts";
 import { ProductionStudio } from "../src/components/production-studio.js";
-import { StudioCard, StudioSidebar, StudioToggle, useProductionStudio } from "../src/components/production-studio-context.js";
+import { StudioCard, StudioInlineContext, StudioSidebar, StudioToggle, useProductionStudio } from "../src/components/production-studio-context.js";
 import { ConversationPermissionCard } from "../src/components/conversation.js";
 import { HumanDecisionCardView } from "../src/components/human-decision-card.js";
 import { studioActionFocus } from "../src/lib/production-studio.js";
@@ -170,4 +170,25 @@ it("Stage, board, take and Cut targets choose their native canvas level", () => 
   assert.equal(studioActionFocus({ ...action, actionKind: "world-chat-production-board-compile" }, production, { view: "production" }).view, "board");
   assert.equal(studioActionFocus({ ...action, shown: { ...action.shown, productionPreview: undefined }, targets: [{ kind: "shot", id: orderedShots(scene)[0]!.id }] }, production, { view: "production" }).sceneId, scene.id);
   assert.equal(studioActionFocus({ ...action, actionKind: "world-chat-production-cut-export" }, production, { view: "production" }).view, "cut");
+});
+
+it("tells the shell while it is open inside the page, and drops Back to card until a card sent it (design turn 196o)", async () => {
+  // On a Fold the shell folds its rail for an open Studio, so the canvas can take the rest of the
+  // width; it can only do that if the Studio says so, and stops saying so when it closes.
+  const reports: boolean[] = [];
+  __setBridgeForTest({ send: () => {}, connect() {} } as unknown as ArkeBridge); __setStateForTest(state);
+  const container = dom.document.createElement("div"); dom.document.body.append(container);
+  const root = createRoot(container); roots.push(root);
+  const action = card();
+  await act(async () => root.render(<MemoryRouter><StudioInlineContext.Provider value={open => { reports.push(open); }}>
+    <ProductionStudio world={state.world} productionId={production.meta.id} entry={{ kind: "production", productionId: production.meta.id }}
+      workspace={workspace([action])} docked={false} understanding={<p>Notes</p>}><Thread action={action} /></ProductionStudio>
+  </StudioInlineContext.Provider></MemoryRouter>));
+  assert.equal(reports.at(-1), true, "an inline Studio opens, and says so");
+  assert.equal(dom.document.querySelector(".fy-production-studio__back"), null, "no card sent the canvas here");
+  assert.match(dom.document.querySelector(".fy-production-studio__breadcrumb")?.textContent ?? "", /› [A-Z]/, "the view by its name, not its id (it read › production)");
+  await click("Show");
+  assert.ok(dom.document.querySelector(".fy-production-studio__back"), "a card did, so it can be gone back to");
+  await click("Close Studio");
+  assert.equal(reports.at(-1), false, "closed, the rail is the person's again");
 });

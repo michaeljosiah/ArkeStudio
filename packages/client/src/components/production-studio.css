@@ -24,9 +24,19 @@
 .fy-production-studio-owner[data-wide] .fy-production-studio-inline { position: fixed; z-index: 80; right: 20px; top: 70px; bottom: 20px; width: min(var(--studio-thread-width,560px),calc(100vw - 40px)); height: auto; background: var(--card); border: 1px solid var(--border); box-shadow: var(--shadow-lg); overflow: auto; }
 .fy-production-studio-owner[data-wide] .fy-arke { width: 100%; height: 100%; }
 .fy-arke__head .fy-studio-toggle { padding: 4px 8px; font: var(--type-meta); }
+/* The Conversation/Canvas switch is the phone's way between the two views; wider, both show. */
+@media(min-width:600px) { .fy-production-studio__switch { display: none; } }
 @media(max-width:1099px) and (min-width:600px) {
-  .fy-production-studio { grid-template-columns: minmax(280px,40%) 8px minmax(0,1fr); }
+  /* 380 for the transcript and the canvas takes the rest (design turn 196o). 40% of what the full
+     rail left was ~370 beside a ~340 canvas, whose header then wrapped into four rows. */
+  .fy-production-studio { grid-template-columns: minmax(280px, min(var(--studio-thread-width,380px), 380px)) 8px minmax(0,1fr); }
   .fy-production-studio[data-docked] { inset: 12px; }
+  /* The canvas head is two lines, not a stack: the crumb on one, its views on the other. */
+  .fy-production-studio__breadcrumb { flex-wrap: nowrap; white-space: nowrap; min-width: 0; }
+  .fy-production-studio__breadcrumb > button:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .fy-production-studio__breadcrumb > button:last-child { margin-left: auto; flex: none; }
+  .fy-production-studio nav { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .fy-production-studio nav button { flex: none; border-color: transparent; background: transparent; }
 }
 @media(max-width:599px) {
   .fy-production-studio { display: flex; flex-direction: column; min-height: 0; height: 100%; }

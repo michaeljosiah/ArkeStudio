@@ -95,6 +95,12 @@
   .fy-production-app .fy-prodrail__new-scene, .fy-production-app .fy-prodrail__new-episode, .fy-production-app .fy-prodrail__foot { min-height: 44px; }
   .fy-production-app .fy-prodrail__section-divider { margin: 8px 4px; }
   .fy-production-app .fy-prodrail__count { font: var(--type-meta); }
+  /* Folded beside an open Studio (design turn 196o): the marks alone, each a 44 target. The rules
+     above were written for a rail that is either 206 or a drawer, so the fold is restated here. */
+  .fy-production-app .fy-prodrail--folded { width: 64px; padding: 16px 10px; align-items: center; }
+  .fy-production-app .fy-prodrail--folded :is(.fy-prodrail__item, .fy-prodrail__foot) { width: 44px; min-height: 44px; padding: 0; justify-content: center; }
+  .fy-production-app .fy-prodrail--folded .fy-prodrail__switch { width: 44px; min-height: 44px; margin: 0; padding: 4px; justify-content: center; background: transparent; }
+  .fy-production-app .fy-prodrail--folded :is(.fy-prodrail__switchname, .fy-prodrail__switchsub, .fy-prodrail__switchcopy, .fy-prodrail__switchchevron, .fy-prodrail__scenes, .fy-prodrail__chapters) { display: none; }
   .fy-switchmenu__item { min-height: 44px; }
   [data-screen="productions"] .fy-hero { padding-inline: 48px; }
   .fy-prodcards { padding-inline: 48px; }
