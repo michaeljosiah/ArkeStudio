@@ -67,9 +67,9 @@
   /* The production conversation, conversation first (202c): Arke's replies at the column's width
      as in the half, and what it understood its 340 beside them (171c) rather than spilling out of
      a 32% track it was 80 wider than. */
-  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-production-studio-inline .fy-chat__turn--studio { max-width: none; }
-  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-production-studio-inline .fy-chat__turn--studio .fy-chat__bubble { padding: 0; background: transparent; border-radius: 0; font: 400 var(--text-md)/1.6 var(--font-sans); }
-  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-production-studio-inline .fy-chat__turn--user .fy-chat__bubble { font: 400 var(--text-md)/1.5 var(--font-sans); }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-production-studio-owner[data-dock-owner="false"] .fy-chat__turn--studio { max-width: none; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-production-studio-owner[data-dock-owner="false"] .fy-chat__turn--studio .fy-chat__bubble { padding: 0; background: transparent; border-radius: 0; font: 400 var(--text-md)/1.6 var(--font-sans); }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-production-studio-owner[data-dock-owner="false"] .fy-chat__turn--user .fy-chat__bubble { font: 400 var(--text-md)/1.5 var(--font-sans); }
 }
 
 /* From 900 what it understood is a column, not a sheet (develop-responsive.css): its track is its
