@@ -231,7 +231,7 @@ function buildDirectionPrompt(input: DirectionDeriverInput, retryNote?: string):
     .map((block) => {
       const can = [
         `reads ${block.deliveries.join(", ")}`,
-        block.note === "instruction" ? `takes a note to ${CADENCE_NOTE_MAX}`
+        block.note === "instruction" ? `takes a short note (a few words; ${CADENCE_NOTE_MAX} characters at most)`
           : block.note === "tag" ? (block.noteWords !== undefined ? `takes a note or phrase of ${block.noteWords} words at most` : `takes a note to ${CADENCE_PHRASE_MAX}`) : "no note",
         block.speed !== null ? `speed ${block.speed.min}–${block.speed.max}` : "no speed",
         block.pause ? "pause" : "no pause",
@@ -248,7 +248,7 @@ function buildDirectionPrompt(input: DirectionDeriverInput, retryNote?: string):
   const speakerWords = speakerNoteWords(input.blocks);
   const speakerCap = speakerWords === undefined ? `at most ${CADENCE_PHRASE_MAX} characters` : `${speakerWords} words at most`;
   const extra = [
-    ...(chapterNote ? [`"chapterNote": "<place, time and mood for the whole chapter, at most ${CADENCE_NOTE_MAX} characters>"`] : []),
+    ...(chapterNote ? [`"chapterNote": "<the chapter's mood and pace as a voice carries it, a short phrase>"`] : []),
     ...(speakerNotes.length > 0 ? [`"speakerNotes": {"<speaker key>": "<how the narrator plays them, ${speakerCap}>"}`] : []),
   ];
   const context = input.context === undefined ? "" : `## The book\n\n${renderDirectionContext(input.context)}\n\n`;
@@ -259,13 +259,16 @@ Rules — every one is enforced mechanically after you answer:
 - Address every block by its key, in order. A block left out is counted as dropped.
 - Each block says who reads it and what that reader can do. Use only the deliveries listed for that block; give a note only where the reader takes one and within its length; place only the kinds of cue and the sounds the reader takes; set a speed only where it has one. Anything else is dropped.
 - "measured" is the ordinary reading. Keep one delivery across a run of blocks and change it only where the scene turns: at most about one block in four may change delivery from the block before it, and a change closer to the last one than that is held to the delivery before. Never direct every block the same way for effect.
+- What the deliveries mean: "warm" is tenderness, intimacy and desire, fully voiced — a love scene, a confession, a lowered voice in a quiet room are warm, with a short note such as "low, close, unhurried" if it needs one. "whispered" is a literal whisper: only where the story has someone whisper (the prose says so, or a sleeping house, a secret within earshot), never for mood, and rarely more than a few blocks a chapter. "breaking" is a voice failing through tears; "cold" is withheld and flat; "urgent" is haste or danger.
 - The chapter note carries the chapter's mood. Give a block a note only where it reads differently from that; no note is better than one that restates the chapter note or the delivery.
+- A note is a lasting quality of the voice over the whole block — its feeling, pace or loudness — in a few words ("low and amused", "slower, tired", "brisk, bright"). Never what happens, where or when, never names, ages or accents, and never words to say: the reader may speak anything that is not a direction of the voice.
+- Pauses are rare: at most one in a block, and only where the words have no stop of their own — a comma, full stop, dash or ellipsis already pauses. A long pause is for a scene's turn, not a sentence's end.
 - A sound goes only inside or right after a spoken line — a block marked as a line, or words inside its quotation marks — never in narration.
 - A "delivery" cue turns part of a block: the block's own delivery reads the rest. Only where the reader takes turns.
 - The book note, the chapter note and the speaker notes are sent with every block already: never repeat them in a block's note.
 - "after", "before" and "words" are copied from the block character for character and must occur exactly once in it. At most 40 cues a block.
 - Never rewrite the words. Nothing you write goes into the prose.
-${chapterNote ? `- "chapterNote" says where and when the chapter is and its mood, for the reader, in at most ${CADENCE_NOTE_MAX} characters.\n` : ""}${speakerNotes.length > 0 ? `- "speakerNotes" gives each of these speakers, from their sheet, how the narrator plays them, in ${speakerCap}: ${speakerNotes.map((speaker) => `${speaker.name} [${speaker.key}]`).join(", ")}.\n` : ""}${part ? `- ${part}\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
+${chapterNote ? `- "chapterNote" gives the chapter's mood and pace as a voice carries it, in a short phrase ("close and tender, dread underneath"; ${CADENCE_NOTE_MAX} characters at most): never where or when it is set, never what happens.\n` : ""}${speakerNotes.length > 0 ? `- "speakerNotes" gives each of these speakers, from their sheet, how the narrator plays them, in ${speakerCap}: ${speakerNotes.map((speaker) => `${speaker.name} [${speaker.key}]`).join(", ")}.\n` : ""}${part ? `- ${part}\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
 ${context}## Chapter (${input.title})
 
 ${blocks}`;
@@ -930,7 +933,7 @@ function buildSpeakerNotesPrompt(input: SpeakerNotesInput, retryNote?: string): 
   const speakers = input.speakers
     .map((speaker) => [`[${speaker.key}] ${speaker.name}`, ...(speaker.essence !== undefined ? [`essence: ${speaker.essence}`] : []), ...(speaker.voice !== undefined ? [`voice: ${speaker.voice}`] : [])].join("\n"))
     .join("\n\n");
-  return `One narrator reads an audiobook and plays every character. From each character's sheet below, write how the narrator plays them: a direction in a few words — register, pace, accent, manner — never words they say. Respond with ONLY a JSON object:
+  return `One narrator reads an audiobook and plays every character. From each character's sheet below, write how the narrator plays them: a direction in a few words — register, pace and manner ("deep, measured", "fast, excited") — never words they say, and never their age, gender, name or accent, which the reader's own voice carries. Respond with ONLY a JSON object:
 {"notes": {"<the character's key>": "<${input.words !== undefined ? `${input.words} words at most` : `at most ${CADENCE_PHRASE_MAX} characters`}>"}}
 
 Rules — enforced mechanically after you answer:

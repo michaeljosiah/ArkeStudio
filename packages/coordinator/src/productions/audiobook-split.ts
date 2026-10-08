@@ -109,6 +109,15 @@ const missingWeight = (token: string, lexicon: ReadonlySet<string>) => (lexicon.
 /** A word that turns a line to its opposite, as a matching token: "not", "never", "didn't". */
 const NEGATIONS: ReadonlySet<string> = new Set(["not", "no", "never", "nor", "neither", "none", "nothing", "nobody", "nowhere", "cannot"]);
 const negates = (token: string) => NEGATIONS.has(token) || /^(?:do|does|did|is|are|was|were|has|have|had|ca|can|wo|could|would|should|must|need|ai)nt$/u.test(token);
+/**
+ * Words a reader says only when it speaks a direction aloud (issue 1625): Gemini read
+ * `<short pause>` as "short pause", and invented "She paused." and "Long pause." inside beats,
+ * each passing as a word or two of mishearing at a quarter a word. Heard where the block does not
+ * have them, they are the direction spoken, never whisper's slip.
+ */
+const DIRECTION_WORDS = new Set(["pause", "paused", "pauses", "breath", "breaths", "inhale", "inhales", "exhale", "exhales", "sigh", "sighs", "whisper", "whispers", "whispering", "laugh", "laughs", "laughter", "chuckle", "chuckles", "gasp", "gasps"]);
+const spokeDirection = (runWritten: readonly string[], runSaid: readonly string[]) =>
+  runSaid.some((token) => DIRECTION_WORDS.has(token) && !runWritten.includes(token));
 
 /** How close a cut's edge must read to its neighbour's words — a name's more loosely — to be taken for them. */
 const NEIGHBOUR = 0.6;
@@ -198,6 +207,8 @@ export function heardAsWritten(written: string, heard: string, context: SplitCon
       const noted = note && runSaid.length === 0 && runWritten.length <= 4 && runWritten.some((token) => lexicon.has(token));
       // A negation left out or put in reverses the line: never a discount (codex on PR 1515).
       if ((runSaid.length === 0 && runWritten.some(negates)) || (runWritten.length === 0 && runSaid.some(negates))) return false;
+      // A direction read out is the take wrong, however few its words (issue 1625).
+      if (spokeDirection(runWritten, runSaid)) return false;
       if (runWritten.length > 0 && runSaid.length === 0 && !noted) {
         if (missing >= 1) return false;
         cost += missing;
