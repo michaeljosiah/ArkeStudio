@@ -158,7 +158,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // the paragraphs it touches (turn 198, part B).
 // Sixty-eight is a character's `narration` on a strict sheet (design turn 200): how a narrator plays
 // them, which a build without the field would drop the sheet over.
-export const SUPPORTED_SCHEMA_VERSION = 68;
+// Sixty-nine is the beats a chapter was grouped by, named on its audiobook record (design turn 201).
+export const SUPPORTED_SCHEMA_VERSION = 69;
 
 export class WorldOpenError extends Error {
   constructor(

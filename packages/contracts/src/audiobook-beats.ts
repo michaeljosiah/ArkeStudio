@@ -1,4 +1,4 @@
-import { AUDIOBOOK_JOIN_MAX_SECONDS, AUDIOBOOK_TITLE_KEY, type AudiobookBlock, type AudiobookGap, type AudiobookSeam } from "./audiobook.js";
+import { AUDIOBOOK_JOIN_MAX_SECONDS, AUDIOBOOK_TITLE_KEY, audiobookTextHash, type AudiobookBeat, type AudiobookBlock, type AudiobookGap, type AudiobookSeam } from "./audiobook.js";
 import { expectedSpeechSeconds } from "./speech-pricing.js";
 
 /**
@@ -61,4 +61,21 @@ export function beatSeams(blocks: readonly Pick<AudiobookBlock, "key" | "text">[
     current.seconds += seconds;
   }
   return { seams, beats, cut };
+}
+
+/**
+ * The beat a block is (design turn 201, rule 4): the record names a beat starting at the block's
+ * key, and the block's words are still the words it was joined into. A beat a Join, a Split or an
+ * edit has changed since is no longer the director's, and has no name; null for every block that
+ * is not a named beat.
+ */
+export function audiobookBeatAt(beats: readonly AudiobookBeat[] | undefined, block: Pick<AudiobookBlock, "key" | "text">): AudiobookBeat | null {
+  const beat = beats?.find((candidate) => candidate.start === block.key);
+  return beat !== undefined && beat.textHash === audiobookTextHash(block.text) ? beat : null;
+}
+
+/** How many of the blocks are named beats, for the Blocks press's `N beats` (design turn 201, rule 1). */
+export function audiobookBeatCount(beats: readonly AudiobookBeat[] | undefined, blocks: ReadonlyArray<Pick<AudiobookBlock, "key" | "text">>): number {
+  if (beats === undefined || beats.length === 0) return 0;
+  return blocks.filter((block) => audiobookBeatAt(beats, block) !== null).length;
 }

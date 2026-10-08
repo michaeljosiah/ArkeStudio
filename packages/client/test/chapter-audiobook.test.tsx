@@ -1994,7 +1994,8 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
       assert.equal(more.getAttribute("aria-expanded"), "true");
       assert.deepEqual(
         all(m, '.fy-ab__toolmenu [role="menuitem"]').map((item) => item.querySelector(".fy-ab__menu-label")!.textContent),
-        ["Direct this chapter", "Illustrate this chapter", "Looks"],
+        // On a phone Group by beats is the menu's first item (design turn 201, rule 5); a tablet keeps the Blocks press on the line.
+        [...(name === "a phone" ? ["Group by beats"] : []), "Direct this chapter", "Illustrate this chapter", "Looks"],
       );
     });
   }
@@ -2166,7 +2167,12 @@ describe("block seams (design turn 198)", () => {
     const cut = seamSent(m).at(-1) as Extract<ClientMessage, { kind: "set-audiobook-seam" }>;
     assert.equal(cut.press, "split");
     assert.deepEqual(cut.anchor.before, { paragraph: 1, turn: 0 });
-    assert.equal(q(m, '[data-testid="audiobook-blocks-press"]') === null, true, "with no seam set the Blocks press is not drawn");
+    // With no seam set the Blocks press stands all the same (design turn 201, rule 1): the block count, and Reset with nothing to put back.
+    const blocks = q(m, '[data-testid="audiobook-blocks-press"]')!;
+    assert.equal(blocks.textContent, `Blocks ${all(m, ".fy-ab__block").length}`);
+    await act(async () => blocks.click());
+    assert.equal(q(m, '[data-testid="audiobook-blocks-reset"]')!.getAttribute("aria-disabled"), "true");
+    assert.equal(q(m, '[data-testid="audiobook-blocks-reset"] .fy-ab__menu-meta')!.textContent, "none set");
   });
 
   it("a changed block is not read and counted on the read; Blocks · 1 changed opens Reset, and blocks found made again say made in green", async () => {
@@ -2199,8 +2205,56 @@ describe("block seams (design turn 198)", () => {
     assert.deepEqual(back.map((row) => row.getAttribute("data-block")), ["title", "p0.0", "p1.0", "p3.0"]);
     const again = all(m, '[data-testid="audiobook-state"]').filter((mark) => mark.className.includes("again")).map((mark) => mark.closest("[data-block]")!.getAttribute("data-block"));
     assert.deepEqual(again, ["p0.0", "p1.0"], "made again, no price");
-    assert.equal(q(m, '[data-testid="audiobook-blocks-press"]') === null, true);
+    assert.equal(q(m, '[data-testid="audiobook-blocks-press"]')!.textContent, "Blocks 4", "back to the block count (design turn 201)");
     assert.equal(q(m, '[data-testid="read-audiobook"]') === null, true, "nothing left to read");
+  });
+
+  it("Group by beats (design turn 201): in the Blocks menu with its mark and the block count; pressed, the director is asked, and the press says grouping… while Read waits", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: CAST });
+    await act(async () => q(m, '[data-testid="audiobook-blocks-press"]')!.click());
+    const items = all(m, '.fy-ab__blocksmenu [role="menuitem"]');
+    assert.deepEqual(items.map((item) => item.querySelector(".fy-ab__menu-label")!.textContent), ["Group by beats", "Reset"], "Group by beats above Reset");
+    const group = items[0]!;
+    assert.ok(group.querySelector("svg"), "its mark before the label");
+    assert.equal(group.querySelector(".fy-ab__menu-meta")!.textContent, `${all(m, ".fy-ab__block").length} blocks`);
+    await act(async () => group.click());
+    const asked = m.sent.findLast((message) => message.kind === "group-chapter-beats");
+    assert.ok(asked !== undefined && asked.kind === "group-chapter-beats");
+    assert.equal(q(m, ".fy-ab__blocksmenu"), null, "the menu closes on the press");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.beats", ...ids, outcome: "grouping" }));
+    const busy = q(m, '[data-testid="audiobook-blocks-press"]')!;
+    assert.equal(busy.textContent, "Blocks grouping…");
+    assert.ok(busy.querySelector(".fy-ab__spin"), "a turning mark, not the chevron");
+    assert.equal(busy.getAttribute("aria-disabled"), "true");
+    await act(async () => busy.click());
+    assert.equal(q(m, ".fy-ab__blocksmenu"), null, "no menu while it groups");
+    assert.equal((q(m, '[data-testid="read-audiobook"]') as HTMLButtonElement).disabled, true, "Read waits for the beats");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.beats", ...ids, outcome: "refused", reason: "reading or directing · beats wait until it ends" }));
+    assert.equal((q(m, '[data-testid="read-audiobook"]') as HTMLButtonElement).disabled, false);
+    await act(async () => q(m, '[data-testid="audiobook-blocks-press"]')!.click());
+    assert.equal(q(m, '[data-testid="audiobook-blocks-group"] .fy-ab__menu-meta')!.textContent, "reading or directing · beats wait until it ends", "why it did not group, on the item");
+  });
+
+  it("a beat is one block with its head — its name, whose, paragraphs and length — and the panel names it; a beat changed since keeps no name", async () => {
+    const joinedText = `${P0}\n\n${LINE}`;
+    const named = { ...joined(), beats: [{ start: "p0.0", textHash: audiobookTextHash(joinedText), name: "The bells", whose: "Maren Kest" }] };
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: CAST, audiobook: named });
+    const head = q(m, '[data-block="p0.0"] [data-testid="audiobook-beat-head"]')!;
+    assert.equal(head.querySelector("b")!.textContent, "The bells");
+    assert.match(head.textContent ?? "", /^The bellsMaren · 2 paragraphs · 0:0\d$/, "whose by the name the rows use, then paragraphs and length");
+    assert.equal(q(m, '[data-block="p3.0"] [data-testid="audiobook-beat-head"]'), null, "a block no beat names has no head");
+    assert.equal(q(m, '[data-testid="audiobook-blocks-press"]')!.textContent, "Blocks 1 beat");
+    await act(async () => q(m, '[data-block="p0.0"]')!.click());
+    assert.match(d('[data-testid="audiobook-block-title"]')?.textContent ?? "", /^The bells · /);
+    assert.match(d(".fy-abp__sub")?.textContent ?? "", /^2 paragraphs · /);
+    // Its words moved on (a Join, a Split, an edit): no longer the director's beat, and no name.
+    const moved = { ...joined(), beats: [{ start: "p0.0", textHash: audiobookTextHash("other words"), name: "The bells" }] };
+    const n = await mount(inkbound());
+    await answerOpen(n, { voices: CAST, audiobook: moved });
+    assert.equal(q(n, '[data-testid="audiobook-beat-head"]'), null);
+    assert.equal(q(n, '[data-testid="audiobook-blocks-press"]')!.textContent, "Blocks 1 changed");
   });
 
   it("a join that would take a picture off asks once, in one plain line; Cancel sends nothing", async () => {

@@ -1355,7 +1355,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       productionId: SlugSchema,
       chapterId: SlugSchema,
       requestId: UlidSchema.optional(),
-      outcome: z.enum(["grouped", "unavailable", "refused", "failed"]),
+      /** `grouping` when the director starts reading (design turn 201, rule 3), then how it ended. */
+      outcome: z.enum(["grouping", "grouped", "unavailable", "refused", "failed"]),
       before: z.number().int().min(0).optional(),
       after: z.number().int().min(0).optional(),
       beats: z
