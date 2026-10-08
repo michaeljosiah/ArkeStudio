@@ -1401,6 +1401,9 @@ export function ProductionConversation({
               <span className="fy-mono">{dock.subject}</span>
             </button>
           )}
+          {/* As the hinge half (202) the model is the head's, and the composer keeps one line: its
+              tools measure their row (model-chip.css), so beside the words they had no width. */}
+          {half && modelChip}
           <StudioToggle />
           {dock.onPutAway === undefined ? null : (
             // As the hinge half (202) putting it away is closing the half: a 44 ×, not the pin.
@@ -1466,7 +1469,7 @@ export function ProductionConversation({
             disabledReason={languageUnavailableReason}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             readReplies={readReplies.composer}
-            {...(modelChip !== null ? { modelControl: modelChip } : {})}
+            {...(modelChip !== null && !half ? { modelControl: modelChip } : {})}
             {...attachProps}
           />
           {/* Only a dock that departs from the promise says anything here (issue 1008). The

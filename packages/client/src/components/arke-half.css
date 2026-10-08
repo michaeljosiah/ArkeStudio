@@ -20,6 +20,9 @@
   :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__head { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 6px 6px 6px 16px; }
   :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__thumb { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; }
   :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__thumb svg { width: 16px; height: 16px; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__thumb:empty { display: none; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__head .fy-mchip { flex: none; display: flex; gap: 4px; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__head .fy-mchip__btn { max-width: 140px; min-height: 36px; }
   :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__who { flex-direction: row; align-items: baseline; gap: 8px; }
   :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__name { flex: none; max-width: 60%; font: 600 var(--text-md)/1.2 var(--font-sans); }
   :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__who .fy-mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-meta); color: var(--muted-foreground); }
@@ -51,6 +54,8 @@
 
   /* The page keeps the left half while the half is open; the rail beside a scene goes with it. */
   :root[data-arke-half] .fy-production-app > .fy-prod { padding-right: 50vw; }
+  /* The column a page keeps for its dock beside it is the half now. */
+  :root[data-arke-half] .fy-sw, :root[data-arke-half] .fy-sw[data-dock] { grid-template-columns: minmax(0, 1fr); }
   :root[data-arke-half] :is([data-screen="scene-detail"], [data-screen="shot"]).fy-sw,
   :root[data-arke-half] :is([data-screen="scene-detail"], [data-screen="shot"]).fy-sw[data-dock] { grid-template-columns: minmax(0, 1fr); }
   :root[data-arke-half] :is([data-screen="scene-detail"], [data-screen="shot"]) .fy-sw__centre { padding: 0 24px; }
