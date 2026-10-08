@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { afterEach, it } from "node:test";
 import { act, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -141,6 +142,20 @@ it("a closed Studio draws no canvas, so a docked screen is never rendered twice"
   assert.equal(dom.document.querySelector(".fy-production-studio"), null);
   await click("Studio"); assert.ok(dom.document.querySelector(".fy-production-studio"));
   await click("Close Studio"); assert.equal(dom.document.querySelector(".fy-production-studio"), null);
+});
+
+it("a page's dock is its column, not a band under the page: only the production page's own Studio spans the grid", async () => {
+  // Spanning every column, the owner of a chapter's dock dropped it under the chapter as a
+  // full-width band and halved the chapter (0.5.68, 2026-10-08); the master draws the dock as the
+  // 331 column at the right (126, 165k, 194c).
+  const css = readFileSync(new URL("../src/components/production-studio.css", import.meta.url), "utf8");
+  const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(([, selector, body]) => ({ selector: selector!.trim(), body: body! }));
+  const spanning = rules.filter((rule) => /grid-column:\s*1\s*\/\s*-1/.test(rule.body) && rule.selector.includes("fy-production-studio-owner"));
+  assert.deepEqual(spanning.map((rule) => rule.selector), ['.fy-production-studio-owner[data-dock-owner="false"]']);
+  await setup();
+  const owner = dom.document.querySelector(".fy-production-studio-owner")!;
+  assert.equal(owner.getAttribute("data-dock-owner"), "true");
+  assert.ok(owner.querySelector(".fy-production-studio-chat"), "the dock's mount is named for the page's dock rules");
 });
 
 it("opens on a staged proposal, the newest thing a wrap-up leaves", async () => {
