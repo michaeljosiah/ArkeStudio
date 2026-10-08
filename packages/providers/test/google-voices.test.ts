@@ -118,6 +118,21 @@ it("reads the live service's models/ resource name as the pinned model it was as
   }
 });
 
+it("imports a voice designed in AI Studio without a language as undetermined, and still refuses a malformed one", async () => {
+  // The shape Google returned on 2026-10-08 for "Nigerian Woman 2": no language_code at all.
+  const { language_code: _none, ...bare } = voice();
+  const imported = await new GoogleClient(async () => Response.json(bare)).getDesignedVoice("key", "voice_abc123");
+  assert.equal(imported?.problem, undefined);
+  assert.equal(imported?.voice?.language, "und");
+  assert.equal(imported?.voice?.name, input.name);
+  assert.deepEqual(imported?.sample?.data, wav());
+  for (const language_code of ["", "not a tag!", 7]) {
+    const refused = await new GoogleClient(async () => Response.json({ ...voice(), language_code })).getDesignedVoice("key", "voice_abc123");
+    assert.ok(refused?.problem, String(language_code));
+    assert.equal(refused?.voice, undefined, String(language_code));
+  }
+});
+
 it("keeps witnessed evidence without making invalid metadata into a usable binding", async () => {
   for (const patch of [{ model: "unknown" }, { type: "replicated" }, { expire_time: undefined }, { key: "voicekey_secret" }]) {
     const result = await new GoogleClient(async () => Response.json({ ...voice(), ...patch })).createDesignedVoice("key", input);

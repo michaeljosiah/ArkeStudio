@@ -34,16 +34,30 @@ export function googleVoiceDesignBody(input: VoiceDesignInput): object {
     language_code: input.language, ...(input.gender ? { gender: input.gender } : {}), prompted: { input: input.description.trim() } } };
 }
 
+/**
+ * A voice designed in AI Studio can carry no `language_code`: Google returned "Nigerian Woman 2"
+ * on 2026-10-08 with an id, a model, a name, its description and an expiry, and nothing else, and
+ * the import refused it as "incomplete or mismatched". The language is kept, never used to read a
+ * line, so such a voice is kept as `und` — BCP 47's "undetermined" — rather than refused. One
+ * Google does send must still be a single well-formed tag.
+ */
+function language(value: unknown): string | undefined {
+  if (value === undefined) return "und";
+  if (!text(value, 64)) return undefined;
+  try { return Intl.getCanonicalLocales(value).length === 1 ? value : undefined; } catch { return undefined; }
+}
+
 function metadata(value: unknown): DesignedVoice | undefined {
   const raw = record(value);
   const voice: Record<string, unknown> = { ...raw, model: bareModel(raw.model) };
+  const tag = language(voice.language_code);
   if (!isGoogleVoiceId(voice.id) || voice.type !== "prompted" || voice.key !== undefined
     || !GEMINI_TTS_MODELS.some(model => model === voice.model)
     || !text(voice.display_name, 1000) || !text(record(voice.prompted).input, 16_000)
-    || !text(voice.language_code, 64) || !text(voice.expire_time, 64)
+    || tag === undefined || !text(voice.expire_time, 64)
     || !/^\d{4}-\d{2}-\d{2}T/.test(voice.expire_time) || !Number.isFinite(Date.parse(voice.expire_time))) return undefined;
   return { remoteId: voice.id, model: voice.model as string, name: voice.display_name,
-    description: record(voice.prompted).input as string, language: voice.language_code, expiresAt: voice.expire_time };
+    description: record(voice.prompted).input as string, language: tag, expiresAt: voice.expire_time };
 }
 
 /** Return evidence instead of throwing away an already-created identity when its sample fails. */
