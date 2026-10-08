@@ -2009,12 +2009,14 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       const note = "穏やかに、低く";
       await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note });
       const model = geminiSpeechModel("flash");
+      // The test's own sentence for the ordinary reading: the shipped row sends none (2026-10-08),
+      // and what is under test is a style's bytes reserved, not its wording.
+      model.cadence!.deliveryMappings.measured = { settings: {}, instruction: "Read calmly and evenly, at a steady pace." };
       model.limits.maxSpeechUtf8Bytes = 82;
       const narrator = { provider: "google", model: model.id, voiceId: "Charon", label: "Charon" };
       const room = { narrator, models: [model], catalogue: [{ ...narrator, attributes: [], local: false, canClone: false }] };
       for (const directed of [false, true]) {
-        // Warm, since Gemini's ordinary reading sends no style of its own (2026-10-08).
-        if (directed) await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.0", direction: { delivery: "warm", speed: 1, cues: [] } });
+        if (directed) await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.0", direction: { delivery: "measured", speed: 1, cues: [] } });
         const made = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.0"]);
         assert.equal(made.kind, "ready");
         const block = made.prepared.speaking[0]!;
@@ -2024,9 +2026,9 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
         assert.ok(block.direction?.perPart.every(part => part.instructions?.startsWith(note)));
         if (directed) {
           assert.ok(block.parts.length > 1);
-          assert.ok(block.direction?.perPart.every(part => part.instructions?.includes("Warm and gentle.")));
+          assert.ok(block.direction?.perPart.every(part => part.instructions?.includes("Read calmly")));
           const token = chapterPriceToken(WORLD_ID, LEDGER, "neap", made.prepared.plan.chapter, made.prepared.misses);
-          model.cadence!.deliveryMappings.warm!.instruction = "Calm and gentle.";
+          model.cadence!.deliveryMappings.measured!.instruction = "Read softly and evenly, at a steady pace.";
           const changed = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.0"]);
           assert.equal(changed.kind, "ready");
           assert.equal(changed.prepared.speaking[0]!.parts.length, block.parts.length);
