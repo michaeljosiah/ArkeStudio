@@ -822,7 +822,8 @@ export async function directChapter(
   };
 }
 
-export type AcceptedDirections = { outcome: "accepted"; record: ChapterAudiobook; dropped: number } | { outcome: "refused"; reason: string };
+/** `cast` is the cast the card's acceptance wrote, as written (pins re-applied), for the windows to be told of. */
+export type AcceptedDirections = { outcome: "accepted"; record: ChapterAudiobook; dropped: number; cast?: ChapterVoices } | { outcome: "refused"; reason: string };
 
 /** What a proposal carries besides its directions (R-53, R-54), written on acceptance and not before. */
 export interface ProposalExtras {
@@ -907,10 +908,10 @@ export async function acceptDirections(
     direction[key] = directionEntry(block.text, plan, at);
   }
   // The card verified: its cast, with the pins as they stand now, then its notes, then its directions.
-  if (extras.cast !== undefined) await writeCast(store, productionId, extras.cast);
+  const written = extras.cast === undefined ? undefined : await writeCast(store, productionId, extras.cast);
   if (extras.chapterNote !== undefined || extras.speakerNotes !== undefined) await writeProposalNotes(store, productionId, chapter.id, extras);
   const record = await updateAudiobook(store, productionId, chapter, (current) => ({ ...current, updatedAt: at, direction }));
-  return { outcome: "accepted", record, dropped };
+  return { outcome: "accepted", record, dropped, ...(written !== undefined ? { cast: written } : {}) };
 }
 
 // ---------------------------------------------------------------------------

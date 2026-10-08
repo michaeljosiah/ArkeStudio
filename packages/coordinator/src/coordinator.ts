@@ -14882,7 +14882,14 @@ export class Coordinator {
           this.heldDirections.delete(key);
           this.heldProposals.delete(key);
           // A cast written makes the chapter's other standing directions answer to new readers (R-13).
-          if (extras.cast !== undefined) await this.conformAudiobookDirections(store, msg.worldId, [msg.productionId]);
+          if (accepted.cast !== undefined) {
+            await this.conformAudiobookDirections(store, msg.worldId, [msg.productionId]);
+            // And every window is told of it, as a cast run or a pin is: a window draws the blocks
+            // from the last cast it heard of, so without this a chapter cast by Direct read its
+            // lines as narration, and each line's take, named with its speaker's note, as stale
+            // the moment it landed (issue 1637). Before the record, so the record is judged by it.
+            this.emit({ at: at(), type: "voices.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, record: accepted.cast });
+          }
           let record = accepted.record;
           if (held !== undefined && held.heard.size > 0) {
             const kept = await adoptHeardTakes(store, msg.productionId, chapter.id, [...held.heard], room, {
