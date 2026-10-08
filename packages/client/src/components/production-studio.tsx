@@ -29,7 +29,9 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
   const inline = useRef<HTMLDivElement>(null), thread = useRef<HTMLDivElement>(null);
   const understandingSlot = useRef<HTMLDivElement>(null), proposalSlot = useRef<HTMLDivElement>(null), parked = useRef<HTMLDivElement>(null);
   const client = useClientRender(), host = () => client ? document.createElement("div") : null;
-  const [chatHost] = useState(host), [understandingHost] = useState(host), [proposalHost] = useState(host);
+  // The chat's own mount is named, so a page's dock rules reach the dock through it (see the CSS).
+  const [chatHost] = useState(() => { const element = host(); if (element) element.className = "fy-production-studio-chat"; return element; });
+  const [understandingHost] = useState(host), [proposalHost] = useState(host);
   const returnId = useRef<string | null>(null), drag = useRef<{ x: number; width: number } | null>(null);
   const production = world?.productions.find(p => p.meta.id === productionId);
   // Read as the transcript reads them: a workspace that never went through the schema's default

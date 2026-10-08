@@ -7250,7 +7250,7 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-swrun button[data-primary="true"]:hover, .fy-swrun button[data-primary="true"]:focus-visible { background: var(--accent); }
 .fy-swrun .fy-swrun__review { padding: 4px 9px; }
 .fy-swrun .fy-swrun__dismiss { width: 22px; height: 22px; padding: 0; border-radius: 6px; display: inline-grid; place-items: center; }
-.fy-sw > .fy-arke { width: auto; min-width: 0; }
+.fy-sw > .fy-arke, .fy-sw .fy-production-studio-chat > .fy-arke { width: auto; min-width: 0; }
 /* The design's send is a 24px radius-7 square; the glyph stays the house arrow the other composers share. */
 .fy-sw .fy-cx__send { width: 24px; height: 24px; border-radius: 7px; }
 .fy-swproposal__removes { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; padding: 8px; border: 1px solid var(--danger); border-radius: 8px; color: var(--danger); font-size: 11px; }
