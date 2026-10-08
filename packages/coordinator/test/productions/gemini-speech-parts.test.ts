@@ -15,7 +15,7 @@ it("keeps Gemini delivery and note out of spoken words, restores block style aft
     const check = checkDirection(text, plan, model);
     assert.ok(check.ok);
     assert.deepEqual(check.parts.map(p => p.text), ["The door opened.", "Stay here.", "She left."]);
-    assert.deepEqual(check.parts.map(p => p.instructions), ["Read warmly and gently. Gently reassuring.", "Read in a whisper. Quiet urgency.", "Read warmly and gently. Gently reassuring."]);
+    assert.deepEqual(check.parts.map(p => p.instructions), ["Warm and gentle. Gently reassuring.", "Whispering. Quiet urgency.", "Warm and gentle. Gently reassuring."]);
     assert.ok(check.parts.every(p => Object.keys(p.voiceSettings).length === 0));
     assert.equal(check.mapped.controls.find(c => c.control === "delivery")?.status, "best-effort");
   }
@@ -30,7 +30,7 @@ it("packs long CJK and emoji passages including style before pricing each reques
   assert.ok(check.parts.length > 1);
   assert.equal(check.parts.map(p => p.text).join(" "), text);
   assert.ok(check.parts.every(p => speechInputFits(p.text, model.limits, p.instructions)));
-  assert.ok(check.parts.every(p => p.instructions === "Read warmly and gently. 穏やかに"));
+  assert.ok(check.parts.every(p => p.instructions === "Warm and gentle. 穏やかに"));
   const quotes = check.parts.map(p => quoteSpeech(model, p.text, { at: "2026-09-27T12:00:00Z" }));
   assert.equal(quotes.reduce((sum, q) => sum + q.authorisedMicroUsd, 0), check.parts.length * 151552);
   const plain = piecesFor(text, model, "wav");

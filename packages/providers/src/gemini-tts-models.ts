@@ -41,14 +41,15 @@ export function geminiSpeechModel(variant: "flash" | "lite"): ManifestModel {
       // speech first, since "most requests need no style instruction", and it names long or
       // stacked style as the commonest cause of voice drift (audit, 2026-10-08). The others are
       // the concise descriptive phrases its examples use ("whispered urgently", "warm and
-      // enthusiastic", "speaking slowly"), not sentences addressed to the reader.
+      // enthusiastic", "speaking slowly"), not sentences addressed to the reader — each closed
+      // with a stop, since a note's sentence follows it in the same style.
       deliveryMappings: {
         measured: { settings: {} },
-        whispered: { settings: {}, instruction: "whispering" },
-        breaking: { settings: {}, instruction: "voice breaking, close to tears" },
-        cold: { settings: {}, instruction: "cold and flat" },
-        warm: { settings: {}, instruction: "warm and gentle" },
-        urgent: { settings: {}, instruction: "urgent, at a quick pace" },
+        whispered: { settings: {}, instruction: "Whispering." },
+        breaking: { settings: {}, instruction: "Voice breaking, close to tears." },
+        cold: { settings: {}, instruction: "Cold and flat." },
+        warm: { settings: {}, instruction: "Warm and gentle." },
+        urgent: { settings: {}, instruction: "Urgent, at a quick pace." },
       },
     },
   };

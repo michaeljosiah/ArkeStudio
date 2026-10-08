@@ -426,7 +426,7 @@ describe("the book note and the chapter note (R-53)", () => {
       const title = prepared.prepared.speaking.find((block) => block.block.key === "title")!;
       const style = title.direction?.perPart[0]?.instructions ?? "";
       assert.ok(style.startsWith(`${BOOK_NOTE} ${CHAPTER_NOTE}`), `the book note, then the chapter note, lead the style: ${style}`);
-      assert.ok(style.endsWith("Read warmly and gently."), "then the block's own direction");
+      assert.ok(style.endsWith("Warm and gentle."), "then the block's own direction");
       assert.ok(!title.parts[0]!.includes(BOOK_NOTE), "never in the words a reader speaks");
 
       // A tag reader: the 94-character book note held; a chapter note short enough is a tag.
