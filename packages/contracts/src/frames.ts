@@ -3330,6 +3330,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** Reset (design turn 198, R-151): every seam of the chapter back to the automatic split. Answered as `audiobook.record`. */
   z.object({ kind: z.literal("reset-audiobook-seams"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema.optional() }).strict(),
+  /**
+   * Group by beats (SPEC-047 R-172): the director names where each beat of the chapter begins and
+   * the blocks of a beat are joined, the chapter's seams replaced. Answered as `audiobook.beats`,
+   * the record as `audiobook.record`.
+   */
+  z.object({ kind: z.literal("group-chapter-beats"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema.optional() }).strict(),
   z
     .object({
       kind: z.literal("direct-chapter"),

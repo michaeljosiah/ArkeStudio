@@ -136,6 +136,7 @@ export * from "./speech-pricing.js";
 export * from "./provider-plans.js";
 export * from "./speech-input.js";
 export * from "./grouped-reads.js";
+export * from "./audiobook-beats.js";
 export * from "./audiobook-grouped.js";
 export * from "./audiobook-pictures.js";
 export * from "./audiobook-look.js";

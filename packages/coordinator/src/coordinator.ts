@@ -334,6 +334,7 @@ import {
 } from "./productions/audiobook-direction.js";
 import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiobookBook } from "./productions/audiobook-book.js";
 import { resetAudiobookSeams, SeamRefusal, setAudiobookSeam } from "./productions/audiobook-seams.js";
+import { BeatRefusal, groupChapterByBeats, makeAdapterBeatsDeriver, type BeatsDeriver } from "./productions/audiobook-beats.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
 import { anyNarrator, audiobookListening, setAudiobookPicture, setAudiobookPictureFocus } from "./productions/audiobook-listening.js";
 import { audiobookVideoState, exportAudiobookVideo, forgetVideoJob, listVideoExports, pendingVideoJobs } from "./productions/audiobook-video.js";
@@ -1009,6 +1010,8 @@ export interface CoordinatorOptions {
   voicesDeriver?: VoicesDeriver;
   /** Turn 146: the direction model seam; every control is re-verified against the block's reader regardless (SPEC-047 R-10). */
   directionDeriver?: DirectionDeriver;
+  /** SPEC-047 R-172: the beats model seam; every start is held to the chapter's blocks and every join to the seams' limits regardless. */
+  beatsDeriver?: BeatsDeriver;
   /** Turn 184: the speaker-notes model seam; every note is held to its speaker and its cap regardless (SPEC-047 R-54). */
   speakerNotesDeriver?: SpeakerNotesDeriver;
   /** Turn 191c: the look model seam; every line is held to the chapter's people and blocks regardless (SPEC-047 R-98). */
@@ -14985,6 +14988,64 @@ export class Coordinator {
         } catch (err) {
           if (!(err instanceof SeamRefusal)) void this.appLog?.append({ kind: "audiobook.seam-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, refused: err instanceof SeamRefusal ? err.message : describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "group-chapter-beats": {
+        // Group by beats (SPEC-047 R-172): the director names each beat's first block and the
+        // blocks of a beat are joined, the chapter's seams replaced. Not while the book or a
+        // chapter of it is read, as the seams are not, nor while this chapter is being directed:
+        // a proposal made for the blocks before would be accepted onto other blocks.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
+        const at = () => new Date().toISOString();
+        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
+        if (this.audiobookBusy(msg.worldId, msg.productionId) || this.directingChapters.has(key)) {
+          this.emit({ at: at(), type: "audiobook.beats", ...ids, outcome: "refused", reason: "reading or directing · beats wait until it ends" });
+          return;
+        }
+        let deriver = this.opts.beatsDeriver ?? null;
+        if (!deriver && this.opts.adapter?.readiness().ready && this.opts.authoring) {
+          deriver = makeAdapterBeatsDeriver(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`);
+        }
+        if (!deriver) {
+          this.emit({ at: at(), type: "audiobook.beats", ...ids, outcome: "unavailable", reason: "the writing service is not running" });
+          return;
+        }
+        const control = new AbortController();
+        this.directingChapters.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        try {
+          const room = await this.directionRoom(store, msg.productionId);
+          const grouped = await groupChapterByBeats(store, msg.productionId, chapter.id, deriver, room, control.signal);
+          // A proposal made for the blocks before the grouping names other blocks now.
+          this.heldDirections.delete(key);
+          this.heldProposals.delete(key);
+          void this.appLog?.append({ kind: "audiobook.beats", chapter: chapter.file, before: grouped.before, after: grouped.after, beats: grouped.beats.length, dropped: grouped.dropped, cut: grouped.cut });
+          this.refreshIfStillOpen(store);
+          this.emit({ at: at(), type: "audiobook.record", ...ids, record: grouped.record });
+          this.emit({
+            at: at(),
+            type: "audiobook.beats",
+            ...ids,
+            outcome: "grouped",
+            before: grouped.before,
+            after: grouped.after,
+            beats: grouped.beats,
+            dropped: grouped.dropped,
+            cut: grouped.cut,
+            ...(grouped.summary !== undefined ? { summary: grouped.summary } : {}),
+          });
+        } catch (err) {
+          if (!(err instanceof BeatRefusal)) void this.appLog?.append({ kind: "audiobook.beats-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: at(), type: "audiobook.beats", ...ids, outcome: err instanceof BeatRefusal ? "refused" : "failed", reason: err instanceof BeatRefusal ? err.message : describeCoordinatorError(err) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+          this.directingChapters.delete(key);
         }
         return;
       }
