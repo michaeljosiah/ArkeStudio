@@ -35,7 +35,7 @@ type Beats = Extract<DomainEvent, { type: "audiobook.beats" }>;
 
 async function withHarness(
   beatsDeriver: BeatsDeriver | undefined,
-  run: (h: { worldDir: string; store: WorldStore; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void> }) => Promise<void>,
+  run: (h: { worldDir: string; store: WorldStore; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void>; coordinator: Coordinator }) => Promise<void>,
 ): Promise<void> {
   const { root, worldDir } = await makeTempRoot();
   const castDir = join(worldDir, "productions", LEDGER, ".voices");
@@ -74,7 +74,7 @@ async function withHarness(
   const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
-    await run({ worldDir, store: provider.openStore!()!, events, send });
+    await run({ worldDir, store: provider.openStore!()!, events, send, coordinator });
   } finally {
     await provider.close();
   }
@@ -158,6 +158,31 @@ describe("Group by beats (SPEC-047 R-172)", () => {
     await withHarness(undefined, async ({ events, send }) => {
       await group(send);
       assert.equal(lastBeats(events).outcome, "unavailable");
+    });
+  });
+
+  it("a window that joins while it groups is told it is grouping, never that a direction started, and Direct waits for the beats", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const deriver: BeatsDeriver = async (input) => {
+      await gate;
+      return { beats: [{ start: input.blocks[0]!.key, name: "All of it" }] };
+    };
+    await withHarness(deriver, async ({ events, send, coordinator }) => {
+      const grouping = group(send);
+      for (let i = 0; i < 100 && !events.some((event) => event.type === "audiobook.beats" && event.outcome === "grouping"); i += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+      const replayed = (coordinator.serverApplication as unknown as { getInitialEvents(): DomainEvent[] }).getInitialEvents();
+      assert.ok(replayed.some((event) => event.type === "audiobook.beats" && event.outcome === "grouping"), "replayed as grouping");
+      assert.equal(replayed.some((event) => event.type === "direction.started"), false, "never as a direction started (0.5.67)");
+      await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap" });
+      const refused = events.filter((event): event is Extract<DomainEvent, { type: "direction.finished" }> => event.type === "direction.finished").at(-1);
+      assert.equal(refused?.outcome, "failed");
+      assert.match(refused?.reason ?? "", /grouping by beats/);
+      release();
+      await grouping;
+      assert.equal(lastBeats(events).outcome, "grouped");
+      const after = (coordinator.serverApplication as unknown as { getInitialEvents(): DomainEvent[] }).getInitialEvents();
+      assert.equal(after.some((event) => event.type === "audiobook.beats"), false, "nothing replayed once it is done");
     });
   });
 });
