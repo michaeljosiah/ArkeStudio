@@ -1169,6 +1169,14 @@ export function ChapterWorkspace({
   const [notesOpen, setNotesOpen] = useState(false);
   const [synopsisOpen, setSynopsisOpen] = useState(false);
   const [blockSheet, setBlockSheet] = useState(compact);
+  // The toolbar's compact form follows the room it has, not the window (design turn 203, issue
+  // 1642): 194's one line is drawn while it fits the centre and folds once it would not. At 1200
+  // with Arke open the centre was 823 and the line 1,164, so it ran past the column and the column
+  // scrolled sideways. Folded, it comes back once the line has the room it last measured.
+  const [narrowToolbar, setNarrowToolbar] = useState(compact);
+  const viewLine = useRef<HTMLDivElement>(null);
+  const lineWidth = useRef<number | null>(null);
+  const [readingOpen, setReadingOpen] = useState(false);
   const [blockSelection, setBlockSelection] = useState<import("./chapter-audiobook.js").BlockSelection | null>(null);
   // The Timing view's playhead (turn 187a), on the view's clock; a new chapter starts at its head.
   const [playhead, setPlayhead] = useState(0);
@@ -1183,6 +1191,28 @@ export function ChapterWorkspace({
     observer?.observe(node);
     return () => observer?.disconnect();
   }, [compact]);
+  useLayoutEffect(() => {
+    const line = viewLine.current;
+    if (!line) return;
+    const fit = () => {
+      if (compact) {
+        setNarrowToolbar(true);
+        return;
+      }
+      const room = line.clientWidth;
+      if (room <= 0) return;
+      setNarrowToolbar((narrow) => {
+        if (narrow) return lineWidth.current === null || room < lineWidth.current;
+        if (line.scrollWidth <= room + 1) return false;
+        lineWidth.current = line.scrollWidth;
+        return true;
+      });
+    };
+    fit();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
+    observer?.observe(line);
+    return () => observer?.disconnect();
+  }, [compact, view, narrowToolbar]);
   // Illustrate this chapter (design turn 191b): the proposal this window holds, dashed on the blocks and listed in the dock's card.
   const illustration = useIllustration(worldId, prodId, chapter);
   const illustrationSheet = useIllustrationSheet(illustration.run);
@@ -1206,9 +1236,11 @@ export function ChapterWorkspace({
     connection,
     locked: locked || record === null,
     listenLeads: listenLeads(production, chapter.id),
-    compact,
+    compact: narrowToolbar,
     // On a phone the Blocks press and its Reset are in the toolbar's ⋯ (design turn 198, rule 10).
     seamsInMenu: phone,
+    // Folded where the window is not a tablet's, the reading is the ⋯'s first item (design turn 203).
+    ...(narrowToolbar && !phone ? { readingInMenu: { open: () => setReadingOpen(true), narrator: narratorName } } : {}),
     // What the Direct and illustrate menu says of each (design turn 194, rule 3), and the run line
     // that takes the menu's place while pictures are read or made.
     illustrate: {
@@ -1988,7 +2020,7 @@ export function ChapterWorkspace({
           {/* The view row (turn 146): the Chapters door's seg, Manuscript or Audiobook. In Audiobook it
               is the whole head, one line (design turn 194, rule 1): the reading, Notes, the speaker
               filter, then Direct and illustrate, the priced read, Listen and the Arke press. */}
-          <div className="fy-ch__viewline">
+          <div className="fy-ch__viewline" ref={viewLine} data-narrow={view === "audiobook" && narrowToolbar ? "true" : undefined}>
             <nav className="fy-seg fy-ch__viewrow" aria-label="Chapter view">
               <button type="button" className={cx("fy-seg__item", view === "manuscript" && "fy-seg__item--active")} onClick={() => chooseView("manuscript")}>
                 Manuscript
@@ -2031,12 +2063,14 @@ export function ChapterWorkspace({
             {compact && <div className="fy-ch__compact-actions">{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && !voicedRead.reading && <PageReadControl read={read} label={<><Play size={18} /><span className="fy-sr-only">Read the chapter</span></>} />}{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && voicesRecord !== null && !pageRead.reading && <PageReadControl read={readVoiced} label={phone ? <><Speaker size={18} /><span className="fy-sr-only">Read voiced chapter</span></> : "Voiced"} />}{/* In Audiobook, Notes is the reading's book and chapter note (194, rule 5); the rail's sheet is the Manuscript's. */}{view !== "audiobook" && <button type="button" className="ui-btn ui-btn--secondary" aria-label="Notes" onClick={() => setNotesOpen(true)}><FileText size={18} />{phone ? <span className="fy-sr-only">Notes</span> : "Notes"}</button>}</div>}
             {view === "audiobook" && (
               <>
+                {/* Folded, the reading is the ⋯'s first item and opens from there (design turn 203). */}
                 <ReadingMenu
                   reading={production.audiobook?.reading ?? "narrator"}
                   narrator={audiobook.narrator.label ?? narratorName}
                   disabled={audiobook.run?.state === "reading" || connection !== "open"}
                   onReading={(reading) => setAudiobookReading(worldId, prodId, reading)}
                   onNarrator={() => setNarratorOpen(true)}
+                  {...(narrowToolbar && !phone ? { external: { open: readingOpen, onClose: () => setReadingOpen(false) } } : {})}
                 />
                 {/* The book note and the chapter note behind one press (194, rule 5; turn 184, R-53). */}
                 <NotesPress
@@ -2055,9 +2089,9 @@ export function ChapterWorkspace({
                 <span className="fy-ch__viewpush" />
                 {/* Below 1100 (194, rule 15) the line ends with the Direct and illustrate ⋯ and the
                     tablet's Arke press; the read and Listen are held at the foot, under the list. */}
-                {stagedDraft === undefined && (compact ? audiobook.headMenu : audiobook.head)}
+                {stagedDraft === undefined && (narrowToolbar ? audiobook.headMenu : audiobook.head)}
                 {/* Listen (design turn 186): the book from this chapter, after the chapter's own read. */}
-                {stagedDraft === undefined && !compact && <ListenButton worldId={worldId} production={production} chapterId={chapter.id} solid />}
+                {stagedDraft === undefined && !narrowToolbar && <ListenButton worldId={worldId} production={production} chapterId={chapter.id} solid />}
                 {!phone && arkePress}
               </>
             )}
@@ -2795,8 +2829,8 @@ export function ChapterWorkspace({
         {/* Below 1100 (design turn 194, rule 15) Read and Listen are held at the foot, 44 high, in the
             place the toolbar's line gave up: the read's own control (or its price, its progress) at
             the left and Listen at the right, both the width of the room they share. */}
-        {foldedAudiobook && stagedDraft === undefined && (
-          <div className="fy-ab__hold" data-testid="audiobook-hold">
+        {view === "audiobook" && narrowToolbar && stagedDraft === undefined && (
+          <div className="fy-ab__hold" data-testid="audiobook-hold" data-wide={compact ? undefined : "true"}>
             {audiobook.headRead}
             <ListenButton worldId={worldId} production={production} chapterId={chapter.id} solid />
           </div>
