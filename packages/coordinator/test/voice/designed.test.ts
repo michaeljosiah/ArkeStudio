@@ -112,3 +112,42 @@ it("creates once, keeps a portable audition, assigns a character and a book, and
     assert.ok(designedVoiceCandidates([voice], Date.parse(voice.expiresAt) + 1).every(candidate => candidate.unavailableReason));
   } finally { await coordinator.stop(); await provider.close(); }
 });
+
+it("lists the connected project's designed voices by name for the import, and says why when it cannot (design turn 204, issue 1635)", async () => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root);
+  await provider.loadWorld(WORLD_ID);
+  const events: DomainEvent[] = [];
+  const listed: string[] = [];
+  const google = new GoogleClient(async (url) => {
+    if (String(url).includes("/voices?")) {
+      listed.push(String(url));
+      const named = (id: string, name: string) => ({ ...remoteVoice(), id, display_name: name, sample_audio: undefined, usage: undefined });
+      return Response.json({ voices: [named("voice_e9ki3cpkdhf0", "Nigerian Woman 2"), named("voice_fjwyh1zr45jr", "Nigerian Woman 1")] });
+    }
+    throw new Error(`Unexpected fixture request ${url}`);
+  });
+  const coordinator = new Coordinator({ provider, adapter: null, appRoot: root, cipher: devCipher(),
+    credentialsFileName: "credentials.dev.dat", dispatchClients: { google }, manifest: SHIPPED_MANIFEST,
+    voice: { sidecar: null, localPresets: [], cloudSources: [] }, appVersion: "test",
+    changeLogPath: join(root, "logs", "changes.jsonl"), observeEvent: event => events.push(event) });
+  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  await coordinator.start(0);
+  try {
+    const before = ulid();
+    await send({ kind: "list-designed-voices", requestId: before, worldId: WORLD_ID });
+    const refused = events.findLast((event): event is Extract<DomainEvent, { type: "voice.designed-listed" }> => event.type === "voice.designed-listed")!;
+    assert.equal(refused.requestId, before);
+    assert.equal(refused.voices, null);
+    assert.match(refused.reason ?? "", /Connect Google/, "with no key it says what to do, and asks Google nothing");
+    assert.equal(listed.length, 0);
+    await send({ kind: "set-credential", provider: "google", key: "fixture-key" });
+    const requestId = ulid();
+    await send({ kind: "list-designed-voices", requestId, worldId: WORLD_ID });
+    const answer = events.findLast((event): event is Extract<DomainEvent, { type: "voice.designed-listed" }> => event.type === "voice.designed-listed")!;
+    assert.equal(answer.requestId, requestId);
+    assert.equal(answer.reason, null);
+    assert.deepEqual(answer.voices?.map(voice => [voice.remoteId, voice.name]), [["voice_e9ki3cpkdhf0", "Nigerian Woman 2"], ["voice_fjwyh1zr45jr", "Nigerian Woman 1"]]);
+    assert.match(listed[0]!, /type=prompted/, "the project's own voices, not Google's ready-made ones");
+  } finally { await coordinator.stop(); await provider.close(); }
+});

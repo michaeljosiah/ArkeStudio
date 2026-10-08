@@ -1898,6 +1898,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("save-designed-voice"), requestId: UlidSchema, worldId: UlidSchema,
     jobId: z.string().regex(/^jb_[0-9A-HJKMNP-TV-Z]{26}$/).optional(), remoteId: z.string().regex(/^voice_[A-Za-z0-9_-]{1,200}$/).optional(),
   }).strict(),
+  /** The voices designed in the connected Google project, by name (design turn 204, issue 1635). */
+  z.object({ kind: z.literal("list-designed-voices"), requestId: UlidSchema, worldId: UlidSchema }).strict(),
   z.object({ kind: z.literal("hear-designed-voice"), requestId: UlidSchema, worldId: UlidSchema,
     model: z.string().min(1), voiceId: z.string().min(1), text: z.string().trim().min(1).max(4000),
     confirmedSpeechMicroUsd: z.number().int().nonnegative(),

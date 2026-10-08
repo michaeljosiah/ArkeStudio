@@ -870,6 +870,15 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   }).strict(),
   z.object({ ...base, type: z.literal("voice.design-audition"), requestId: UlidSchema, worldId: UlidSchema, file: z.string().min(1) }).strict(),
   /**
+   * The voices designed in the connected Google project (design turn 204, issue 1635), each as
+   * Google lists it — its ID, name, language, model and how long it reads — or why there are none.
+   */
+  z.object({ ...base, type: z.literal("voice.designed-listed"), requestId: UlidSchema, worldId: UlidSchema,
+    voices: z.array(z.object({ remoteId: z.string().regex(/^voice_[A-Za-z0-9_-]{1,200}$/), name: z.string().min(1).max(1000),
+      language: z.string().max(64), model: z.string().min(1).max(200), expiresAt: z.string().max(64) }).strict()).max(500).nullable(),
+    reason: z.string().nullable(),
+  }).strict(),
+  /**
    * The outcome of deleting a cloned voice (SPEC-046 R-15): the library's part first, then each
    * copy a hosted reader kept — removed, or kept with the vendor's reason. A copy the vendor
    * would not give up never blocks the delete here; it is reported once, on this event.

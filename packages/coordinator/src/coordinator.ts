@@ -16291,6 +16291,30 @@ export class Coordinator {
         }
         return;
       }
+      case "list-designed-voices": {
+        // The project's own voices by name (design turn 204, issue 1635): AI Studio shows no IDs,
+        // and an import by ID was the only way in. Read when the dialog's view asks, page by page
+        // to Google's 50, at most ten pages; a key that changes underneath answers nothing stale.
+        try {
+          const key = await this.credentials?.get("google");
+          if (!key) throw new Error("Connect Google in Settings to list your project's voices.");
+          const client = this.opts.dispatchClients?.google as (DispatchClient & Partial<VoiceDesignClient>) | undefined;
+          if (!client?.listDesignedVoices) throw new Error("Listing Google voices is unavailable on this host.");
+          const voices: Array<{ remoteId: string; name: string; language: string; model: string; expiresAt: string }> = [];
+          let page: string | undefined;
+          for (let n = 0; n < 10; n += 1) {
+            const listed = await client.listDesignedVoices(key, page, AbortSignal.timeout(30_000));
+            for (const voice of listed.voices) voices.push({ remoteId: voice.remoteId, name: voice.name, language: voice.language, model: voice.model, expiresAt: voice.expiresAt });
+            if (listed.nextPageToken === undefined) break;
+            page = listed.nextPageToken;
+          }
+          if (await this.credentials?.get("google") !== key) throw new Error("The Google key changed. List the voices again.");
+          this.emit({ at: this.nowIso(), type: "voice.designed-listed", requestId: msg.requestId, worldId: msg.worldId, voices, reason: null });
+        } catch (error) {
+          this.emit({ at: this.nowIso(), type: "voice.designed-listed", requestId: msg.requestId, worldId: msg.worldId, voices: null, reason: describeCoordinatorError(error) });
+        }
+        return;
+      }
       case "voice-candidates": {
         const store = this.opts.provider.openStore?.();
         if (!store || !this.voiceService) return;
