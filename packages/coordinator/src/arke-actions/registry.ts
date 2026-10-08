@@ -506,6 +506,7 @@ const CLIENT_COMMAND_METADATA = {
   "design-voice": humanOnly("Custom voice creation requires the author's explicit published-rate estimate confirmation."),
   "hear-designed-voice": humanOnly("A custom audition requires a separately confirmed speech quote."),
   "save-designed-voice": humanOnly("The author chooses which verified voice identity to keep."),
+  "list-designed-voices": readOnly("The project's designed voices, listed for the author to import one by name."),
   "stage-voice-clip": action("world", "host-action", "voice", "privacy-sensitive", ["voices"]),
   "discard-voice-clip": humanOnly("Discarding a temporary clip is part of the person's host recording workflow."),
   "delete-voice": humanOnly("Deleting a cloned voice removes its recording here and its copies on vendor accounts; that is the person's decision (SPEC-046 R-15)."),
