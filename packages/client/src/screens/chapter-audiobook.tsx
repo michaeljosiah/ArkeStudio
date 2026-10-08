@@ -2282,8 +2282,10 @@ export function BlocksPress({ label, count, changed, resettable, held, grouping,
         <em>{label}</em>
         {!grouping && <ChevronDown size={13} stroke={2} aria-hidden="true" />}
       </button>
+      {/* Anchored at the press's right edge, as Direct and illustrate's is: the press can end the line, and a menu
+          opened rightward from there ran past the column and was cut off (0.5.67, 2026-10-08). */}
       {pop.open && (
-        <div ref={pop.panel} className="fy-ab__menu fy-ab__toolmenu fy-ab__blocksmenu" role="menu" aria-label="Blocks" onKeyDown={pop.onKey}>
+        <div ref={pop.panel} className="fy-ab__menu fy-ab__toolmenu fy-ab__toolmenu--end fy-ab__blocksmenu" role="menu" aria-label="Blocks" onKeyDown={pop.onKey}>
           <button
             type="button"
             role="menuitem"

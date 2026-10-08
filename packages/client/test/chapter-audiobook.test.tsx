@@ -2213,6 +2213,7 @@ describe("block seams (design turn 198)", () => {
     const m = await mount(inkbound());
     await answerOpen(m, { voices: CAST });
     await act(async () => q(m, '[data-testid="audiobook-blocks-press"]')!.click());
+    assert.ok(q(m, ".fy-ab__blocksmenu")!.className.includes("fy-ab__toolmenu--end"), "anchored at the press's right edge, so it never runs past the column");
     const items = all(m, '.fy-ab__blocksmenu [role="menuitem"]');
     assert.deepEqual(items.map((item) => item.querySelector(".fy-ab__menu-label")!.textContent), ["Group by beats", "Reset"], "Group by beats above Reset");
     const group = items[0]!;
