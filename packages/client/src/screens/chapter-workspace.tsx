@@ -1213,7 +1213,15 @@ export function ChapterWorkspace({
     fit();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
     observer?.observe(line);
-    return () => observer?.disconnect();
+    // The line fills after the chapter opens — the record's presses, the price, a count — without
+    // its box changing size, which is all a ResizeObserver hears: measured only on opening, the
+    // line at 1200 with Arke open ran to 1,269 in 823 and stayed unfolded (installed 0.5.74).
+    const filled = typeof MutationObserver === "undefined" ? null : new MutationObserver(fit);
+    filled?.observe(line, { childList: true, subtree: true, characterData: true });
+    return () => {
+      observer?.disconnect();
+      filled?.disconnect();
+    };
   }, [compact, view, narrowToolbar]);
   // Illustrate this chapter (design turn 191b): the proposal this window holds, dashed on the blocks and listed in the dock's card.
   const illustration = useIllustration(worldId, prodId, chapter);
