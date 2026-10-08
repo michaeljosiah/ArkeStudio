@@ -44,7 +44,8 @@ it("carries Bench and line delivery through structured style, while an explicit 
     const client = new GoogleClient(async (_url, init) => {
       const body = JSON.parse(String(init?.body));
       assert.equal(body.input[0].content[0].text, "Keep these exact words.");
-      assert.equal(body.input[0].content[0].annotations[0].style, geminiSpeechModel("flash").cadence!.deliveryMappings[delivery]!.instruction);
+      // The ordinary reading sends no style at all (2026-10-08); every other delivery its phrase.
+      assert.equal(body.input[0].content[0].annotations?.[0]?.style, geminiSpeechModel("flash").cadence!.deliveryMappings[delivery]!.instruction);
       return Response.json(responseBody());
     });
     await client.submit("test", { ...request, params: { text: request.params.text, voiceId: "Charon", delivery, voiceSettings: {} } });

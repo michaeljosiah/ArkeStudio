@@ -426,7 +426,7 @@ describe("the book note and the chapter note (R-53)", () => {
       const title = prepared.prepared.speaking.find((block) => block.block.key === "title")!;
       const style = title.direction?.perPart[0]?.instructions ?? "";
       assert.ok(style.startsWith(`${BOOK_NOTE} ${CHAPTER_NOTE}`), `the book note, then the chapter note, lead the style: ${style}`);
-      assert.ok(style.endsWith("Read warmly and gently."), "then the block's own direction");
+      assert.ok(style.endsWith("Warm and gentle."), "then the block's own direction");
       assert.ok(!title.parts[0]!.includes(BOOK_NOTE), "never in the words a reader speaks");
 
       // A tag reader: the 94-character book note held; a chapter note short enough is a tag.
@@ -482,6 +482,12 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
         assert.ok(accepted?.record, accepted?.refused);
         assert.ok(existsSync(castFile), "accepted: the cast is written");
         assert.equal((JSON.parse(await readFile(castFile, "utf8")) as ChapterVoices).lines.length, 1);
+        // And every window is told of it before the record, as a cast run or a pin is: a window
+        // that kept the cast it opened with read the cast lines as narration, and their takes,
+        // named with the speaker's note, as stale the moment they landed (issue 1637).
+        const told = events.findIndex((e) => e.type === "voices.record" && e.record?.lines.length === 1);
+        assert.ok(told >= 0, "the written cast is said to the windows");
+        assert.ok(told < events.indexOf(accepted), "before the record it is judged by");
       },
     ));
 

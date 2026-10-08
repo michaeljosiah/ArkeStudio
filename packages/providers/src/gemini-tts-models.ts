@@ -37,13 +37,19 @@ export function geminiSpeechModel(variant: "flash" | "lite"): ManifestModel {
       // 185 probe, 2026-10-03: all three packings came back whole, B chosen by ear). Flash-Lite
       // has not been heard, so it reads per paragraph until it is (SPEC-049 R-48).
       ...(variant === "flash" ? { groupable: true as const } : {}),
+      // The ordinary reading sends no style at all: the page's own advice is to test plain
+      // speech first, since "most requests need no style instruction", and it names long or
+      // stacked style as the commonest cause of voice drift (audit, 2026-10-08). The others are
+      // the concise descriptive phrases its examples use ("whispered urgently", "warm and
+      // enthusiastic", "speaking slowly"), not sentences addressed to the reader — each closed
+      // with a stop, since a note's sentence follows it in the same style.
       deliveryMappings: {
-        measured: { settings: {}, instruction: "Read calmly and evenly, at a steady pace." },
-        whispered: { settings: {}, instruction: "Read in a whisper." },
-        breaking: { settings: {}, instruction: "Read with a breaking voice, through tears." },
-        cold: { settings: {}, instruction: "Read coldly and flatly, without warmth." },
-        warm: { settings: {}, instruction: "Read warmly and gently." },
-        urgent: { settings: {}, instruction: "Read urgently, with a pressing pace." },
+        measured: { settings: {} },
+        whispered: { settings: {}, instruction: "Whispering." },
+        breaking: { settings: {}, instruction: "Voice breaking, close to tears." },
+        cold: { settings: {}, instruction: "Cold and flat." },
+        warm: { settings: {}, instruction: "Warm and gentle." },
+        urgent: { settings: {}, instruction: "Urgent, at a quick pace." },
       },
     },
   };

@@ -21,6 +21,24 @@ const narrator = (seams?: AudiobookSeam[]) =>
   audiobookBlocks(BODY, null, "Chapter 1", audiobookBlockOptions({ reading: "narrator" }, seams === undefined ? null : { seams }));
 
 describe("beatSeams", () => {
+  it("keeps a chapter's beats when its lines are cast after it was grouped (2026-10-08)", () => {
+    const performed = (record: Parameters<typeof audiobookBlocks>[1], seams?: AudiobookSeam[]) =>
+      audiobookBlocks(BODY, record, "Chapter 1", audiobookBlockOptions({ reading: "performed" }, seams === undefined ? null : { seams }));
+    const auto = performed(null);
+    const joins = beatSeams(auto.blocks, auto.seams.gaps, new Set(["p0.0", "p3.0"]), AT);
+    assert.deepEqual(performed(null, joins.seams).blocks.map((block) => block.key), ["title", "p0.0", "p3.0", "p5.0"]);
+    // The cast cuts p1 and p2 into a line and its narration: the turns either side of their edges
+    // say less than the seams remember, and the paragraphs read whole still say what they said.
+    const cast = { version: 4, hash: "h", derivedAt: AT, passes: 1, dropped: 0, omitted: 0, lines: [
+      { speaker: "Ade", paragraph: 1, occurrence: 0, quote: "It is not possible," },
+      { speaker: "Tunde", paragraph: 2, occurrence: 0, quote: "The goat was in the boot," },
+    ] };
+    const castBlocks = performed(cast, joins.seams);
+    assert.deepEqual(castBlocks.blocks.map((block) => block.key), ["title", "p0.0", "p3.0", "p5.0"], "every beat still one block");
+    assert.equal(castBlocks.seams.dropped, 0, "no seam fell away");
+    assert.ok(castBlocks.blocks[1]!.rows!.some((row) => row.speaker === "Ade"), "and the cast's lines are in the beat");
+  });
+
   it("joins each named beat into one block, and a scene break begins a beat whether named or not", () => {
     const auto = narrator();
     assert.deepEqual(auto.blocks.map((block) => block.key), ["title", "p0.0", "p1.0", "p2.0", "p3.0", "p5.0", "p6.0"]);

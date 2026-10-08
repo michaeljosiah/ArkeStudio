@@ -2009,6 +2009,9 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       const note = "穏やかに、低く";
       await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note });
       const model = geminiSpeechModel("flash");
+      // The test's own sentence for the ordinary reading: the shipped row sends none (2026-10-08),
+      // and what is under test is a style's bytes reserved, not its wording.
+      model.cadence!.deliveryMappings.measured = { settings: {}, instruction: "Read calmly and evenly, at a steady pace." };
       model.limits.maxSpeechUtf8Bytes = 82;
       const narrator = { provider: "google", model: model.id, voiceId: "Charon", label: "Charon" };
       const room = { narrator, models: [model], catalogue: [{ ...narrator, attributes: [], local: false, canClone: false }] };

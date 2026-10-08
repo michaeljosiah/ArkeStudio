@@ -147,6 +147,15 @@ describe("names and words not in English (2026-10-03)", () => {
     assert.equal(judgeSplit("“No.”", "Haha. Uh-huh. Hmm. Ah. No.", hash, { sounds: true }).matched, true);
   });
 
+  it("flags a direction read aloud, however short, and only where the block does not have the words (issue 1625)", () => {
+    // As Gemini read chapter 1 (N15) and chapter 2 (N16): a tag spoken, and stops invented.
+    assert.equal(judgeSplit("The bridge was empty.", "Short pause. The bridge was empty.", hash).matched, false);
+    assert.equal(judgeSplit("He waited for her answer, and none came.", "He waited for her answer. She paused. And none came.", hash).matched, false);
+    assert.equal(judgeSplit("“Wait.”", "Wait. Long pause.", hash).matched, false);
+    assert.equal(judgeSplit("She paused at the door and took a breath.", "she paused at the door and took a breath", hash).matched, true, "written, they are the words");
+    assert.equal(judgeSplit("He laughed until he coughed.", "*laughs* He laughed until he coughed.", hash).matched, true, "whisper's note of a laugh is the sound, not a word");
+  });
+
   it("still flags a cut in the wrong place: its last sentence or its first missing, or the block beside's words in it", () => {
     const stared = "Tunde stared at him. Then he put a hand flat on the table and laughed until he coughed.";
     assert.equal(judgeSplit(stared, "to this dead atom. then he put a hand flat on the table.", hash, { lexicon: NAMES }).matched, false, "its last words are missing");

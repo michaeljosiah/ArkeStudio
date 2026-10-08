@@ -31,6 +31,18 @@ export type WhisperTranscribe = (
  * call: a client that captured it at construction would keep pointing at a dead port across a
  * restart.
  */
+/**
+ * How long Voxa's `/health` is given (issue 1620). Idle it answers in about 5 ms; busy splitting a
+ * grouped read, or under a busy coordinator, the app log saw 4.2 to 9.9 s against the 3 s it had,
+ * 23 times in a day — and each late answer read as "no transcriber" for the 30 s to the next probe,
+ * so the read sheet quietly priced one request a block.
+ */
+const HEALTH_TIMEOUT_MS = 10_000;
+/** Late answers in a row a sidecar that last answered ready is taken to be busy for, not gone. */
+const BUSY_PROBES = 2;
+
+const timedOut = (err: unknown) => err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+
 export class WhisperCppClient implements ProviderClient {
   readonly id = "whispercpp" as const;
   readonly declarations: ClientDeclarations = {
@@ -41,6 +53,9 @@ export class WhisperCppClient implements ProviderClient {
   };
 
   private counter = 0;
+  /** Whether the last answer was ready, and the late answers since (issue 1620). */
+  private lastReady = false;
+  private lateAnswers = 0;
 
   constructor(
     private readonly fetchImpl: FetchLike,
@@ -68,8 +83,10 @@ export class WhisperCppClient implements ProviderClient {
     try {
       const res = await this.fetchImpl(`${base}/health`, {
         method: "GET",
-        signal: AbortSignal.timeout(3_000),
+        signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
       });
+      this.lateAnswers = 0;
+      this.lastReady = false;
       if (res.status >= 400) {
         return [{ capability: "voice-stt", available: false, reason: `the Voxa sidecar answered HTTP ${res.status}` }];
       }
@@ -77,7 +94,10 @@ export class WhisperCppClient implements ProviderClient {
         engineStatus?: { whisper?: { ready?: unknown; reason?: unknown } };
       } | null;
       const whisper = body?.engineStatus?.whisper;
-      if (whisper?.ready === true) return [{ capability: "voice-stt", available: true }];
+      if (whisper?.ready === true) {
+        this.lastReady = true;
+        return [{ capability: "voice-stt", available: true }];
+      }
       if (whisper?.ready === false) {
         const reason = typeof whisper.reason === "string" ? whisper.reason : "Whisper is not ready";
         return [{ capability: "voice-stt", available: false, reason }];
@@ -86,6 +106,11 @@ export class WhisperCppClient implements ProviderClient {
         { capability: "voice-stt", available: false, reason: "the Voxa health response omitted Whisper readiness" },
       ];
     } catch (err) {
+      // A sidecar that answered ready and now answers late is busy, not gone: two such probes in a
+      // row keep it available; a third, or a refusal, says it is not (issue 1620).
+      if (this.lastReady && timedOut(err) && ++this.lateAnswers <= BUSY_PROBES) return [{ capability: "voice-stt", available: true }];
+      this.lastReady = false;
+      this.lateAnswers = 0;
       return [
         { capability: "voice-stt", available: false, reason: `the Voxa sidecar could not be reached: ${String(err)}` },
       ];

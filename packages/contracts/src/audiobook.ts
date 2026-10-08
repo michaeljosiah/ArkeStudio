@@ -227,14 +227,34 @@ export function audiobookBlocks(
   const twoVoices = (g: number) => units[g]!.apart || units[g + 1]!.apart || (options.merge !== true && speakerOf(units[g]!) !== speakerOf(units[g + 1]!));
   const gapHash = (g: number) => audiobookSeamHash(units[g]!.turn.text, units[g + 1]!.turn.text);
   const samePlace = (a: AudiobookTurnPlace, b: AudiobookTurnPlace) => a.paragraph === b.paragraph && a.turn === b.turn;
+  // A seam set at a paragraph's edge before its lines were cast stands at that edge after (2026-10-08):
+  // a cast cuts a paragraph into its narration and its lines, so the turns either side of the edge
+  // say less than they did and no gap's words were the seam's — a chapter grouped by beats and then
+  // cast lost 16 of its 29 beats. The paragraphs read whole, uncast, are its words still.
+  let whole: Map<number, string> | undefined;
+  const wholeText = (paragraph: number) => {
+    if (whole === undefined) {
+      whole = new Map();
+      for (const turn of voicedBlocks(body, null).blocks) if (!whole.has(turn.paragraph)) whole.set(turn.paragraph, turn.text);
+    }
+    return whole.get(paragraph);
+  };
+  const paragraphEdge = (seam: AudiobookSeam): number | null => {
+    if (seam.before.paragraph === seam.after.paragraph) return null;
+    const before = wholeText(seam.before.paragraph), after = wholeText(seam.after.paragraph);
+    if (before === undefined || after === undefined || audiobookSeamHash(before, after) !== seam.textHash) return null;
+    const g = units.findIndex((unit, at) => at < gapCount && unit.place.paragraph === seam.before.paragraph && units[at + 1]!.place.paragraph === seam.after.paragraph);
+    return g >= 0 ? g : null;
+  };
   // A seam stands where its two turns still say what they said: at its own place, else at the one
-  // gap whose words are its words (a paragraph inserted above moved it); never placed by guess.
+  // gap whose words are its words (a paragraph inserted above moved it), else at its paragraphs'
+  // edge as above; never placed by guess.
   const locate = (seam: AudiobookSeam): number | null => {
     const own = units.findIndex((unit) => samePlace(unit.place, seam.before));
     if (own >= 0 && own < gapCount && samePlace(units[own + 1]!.place, seam.after) && gapHash(own) === seam.textHash) return own;
     const found: number[] = [];
     for (let g = 0; g < gapCount; g += 1) if (gapHash(g) === seam.textHash) found.push(g);
-    return found.length === 1 ? found[0]! : null;
+    return found.length === 1 ? found[0]! : paragraphEdge(seam);
   };
   const edge = [...auto];
   const seamAt = new Map<number, number>();

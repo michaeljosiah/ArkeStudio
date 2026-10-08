@@ -1674,6 +1674,30 @@ describe("local transcription rides the same queue as the cloud (issue 462)", ()
     ]);
   });
 
+  it("reads a late answer from a sidecar that was ready as busy, twice, and then as gone (issue 1620)", async () => {
+    let answer: "ready" | "late" | "refused" = "ready";
+    const client = new WhisperCppClient(
+      async () => {
+        if (answer === "late") throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+        if (answer === "refused") throw new TypeError("fetch failed");
+        return new Response(JSON.stringify({ engineStatus: { whisper: { ready: true } } }), { status: 200 });
+      },
+      () => "http://127.0.0.1:7777",
+    );
+    const available = async () => (await client.validateKey())[0]!.available;
+    assert.equal(await available(), true);
+    answer = "late";
+    assert.equal(await available(), true, "busy splitting a grouped read, not gone");
+    assert.equal(await available(), true);
+    assert.equal(await available(), false, "a third late answer in a row is a sidecar that is not answering");
+    answer = "ready";
+    assert.equal(await available(), true);
+    answer = "refused";
+    assert.equal(await available(), false, "a refusal is never busy");
+    answer = "late";
+    assert.equal(await available(), false, "late after a refusal: it was not ready to be busy");
+  });
+
   it("accepts Whisper readiness even when another engine makes aggregate health false", async () => {
     const client = new WhisperCppClient(
       async () =>
