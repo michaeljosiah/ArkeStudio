@@ -59,7 +59,12 @@
 
 .fy-production-studio__body .fy-production-preview__stage { height: 560px; max-height: none; }
 .fy-production-studio__dock-divider { position: absolute; left: 0; inset-block: 0; width: 8px; z-index: 2; cursor: col-resize; background: var(--border); touch-action: none; }
-.fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline > div { display: grid; grid-template-columns: minmax(0,1fr) minmax(260px,32%); height: 100%; }
+/* One row the height of the page, so the thread scrolls and the composer holds the foot. The row was
+   the thread's own height (9,544 on Saltlight), clipped by the page, and with the Studio closed the
+   composer was out of reach at every width (installed 0.5.72, design turn 202c). */
+.fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline > div { display: grid; grid-template-columns: minmax(0,1fr) minmax(260px,32%); grid-template-rows: minmax(0,1fr); height: 100%; }
+.fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline :is(.fy-story__chat, .fy-story__log) { min-height: 0; }
+.fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline .fy-story__side { min-height: 0; overflow-y: auto; }
 @media(max-width:599px) { .fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline > div { grid-template-columns: minmax(0,1fr); } }
 
 /* The Canvas press (design turn 202c): with the Studio closed, the page's way back to its canvas,

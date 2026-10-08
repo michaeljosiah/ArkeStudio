@@ -152,6 +152,12 @@ it("a page's dock is its column, not a band under the page: only the production 
   const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(([, selector, body]) => ({ selector: selector!.trim(), body: body! }));
   const spanning = rules.filter((rule) => /grid-column:\s*1\s*\/\s*-1/.test(rule.body) && rule.selector.includes("fy-production-studio-owner"));
   assert.deepEqual(spanning.map((rule) => rule.selector), ['.fy-production-studio-owner[data-dock-owner="false"]']);
+  // With the Studio closed the page's conversation is one row the page's height, so its thread
+  // scrolls and the composer holds the foot: an auto row grew to the thread (9,544 on Saltlight),
+  // the page clipped it, and the composer was out of reach (installed 0.5.72, design turn 202c).
+  const inline = rules.find((rule) => rule.selector === '.fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline > div');
+  assert.match(inline?.body ?? "", /grid-template-rows:\s*minmax\(0,\s*1fr\)/);
+  assert.ok(rules.some((rule) => rule.selector.includes(".fy-production-studio-inline :is(.fy-story__chat, .fy-story__log)") && /min-height:\s*0/.test(rule.body)));
   await setup();
   const owner = dom.document.querySelector(".fy-production-studio-owner")!;
   assert.equal(owner.getAttribute("data-dock-owner"), "true");
