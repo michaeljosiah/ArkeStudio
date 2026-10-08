@@ -2043,7 +2043,8 @@ export function ChapterWorkspace({
                 />
                 {record !== null && <AudiobookFilterMenu filters={audiobook.filters} filter={audiobook.filter} onFilter={audiobook.setFilter} />}
                 {/* Blocks · 3 changed (design turn 198, rule 10): after the filter once a seam is set by hand; on a phone it is in the ⋯. */}
-                {record !== null && !phone && audiobook.seams.label !== null && <BlocksPress label={audiobook.seams.label} changed={audiobook.seams.changed} held={audiobook.seams.held} onReset={audiobook.seams.reset} />}
+                {/* Blocks stands from the start (design turn 201, rule 1); on a phone it is the ⋯ menu's. */}
+                {!phone && audiobook.blocks !== null && <BlocksPress {...audiobook.blocks} />}
                 {/* The paragraphs an edit left to cast (design turn 198h), after the filter; on a phone they head the ⋯ (198j). */}
                 {record !== null && !phone && stagedDraft === undefined && audiobook.castPress}
                 <span className="fy-ch__viewpush" />

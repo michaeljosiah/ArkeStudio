@@ -5,6 +5,7 @@ import {
   audiobookBlockOptions,
   audiobookBlocks,
   audiobookHeading,
+  audiobookTextHash,
   beatSeams,
   normalizeSpeechText,
   type AudiobookBlock,
@@ -189,9 +190,17 @@ export async function groupChapterByBeats(
     if (typeof raw.summary === "string" && normalizeSpeechText(raw.summary) !== "") summaries.push(normalizeSpeechText(raw.summary));
   }
   const joins = beatSeams(auto.blocks, auto.seams.gaps, new Set(starts.keys()), store.now());
+  // Each beat kept with the words of the block it became (design turn 201, R-175), so a beat changed
+  // later by hand or by an edit shows no name: the blocks the joins make, read as the plan reads them.
+  const shaped = audiobookBlocks(plan.body, cast, audiobookHeading(plan.chapter.order, plan.chapter.title), audiobookBlockOptions(plan.book, { seams: joins.seams }));
+  const named = joins.beats.flatMap((beat) => {
+    const block = shaped.blocks.find((candidate) => candidate.key === beat.start);
+    const held = starts.get(beat.start);
+    return block === undefined ? [] : [{ start: beat.start, textHash: audiobookTextHash(block.text), ...held }];
+  });
   const record = await updateAudiobook(store, productionId, plan.chapter, (current) => {
-    const { seams: _replaced, ...rest } = current;
-    return { ...rest, updatedAt: store.now(), ...(joins.seams.length > 0 ? { seams: joins.seams } : {}) };
+    const { seams: _replaced, beats: _was, ...rest } = current;
+    return { ...rest, updatedAt: store.now(), ...(joins.seams.length > 0 ? { seams: joins.seams } : {}), ...(named.length > 0 ? { beats: named } : {}) };
   });
   await followChapterTakes(store, productionId, plan.chapter, room);
   const after = (await planAudiobook(store, productionId, chapterId, { narrator: room.narrator })).blocks.length;

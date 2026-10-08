@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BEAT_MAX_SECONDS, audiobookBlockOptions, audiobookBlocks, beatSeams, expectedSpeechSeconds, type AudiobookSeam } from "../src/index.js";
+import { BEAT_MAX_SECONDS, audiobookBeatAt, audiobookBeatCount, audiobookBlockOptions, audiobookBlocks, audiobookTextHash, beatSeams, expectedSpeechSeconds, type AudiobookSeam } from "../src/index.js";
 
 /**
  * Blocks grouped by beats (SPEC-047 R-172): the director names where each beat begins, and the
@@ -58,5 +58,18 @@ describe("beatSeams", () => {
     assert.equal(joins.seams.length, 0);
     assert.equal(joins.beats.length, keys.length);
     assert.equal(joins.cut, 0);
+  });
+
+  it("a block is its beat while its words are the words it was joined into (design turn 201)", () => {
+    const auto = narrator();
+    const joins = beatSeams(auto.blocks, auto.seams.gaps, new Set(["p0.0", "p3.0"]), AT);
+    const grouped = narrator(joins.seams);
+    const goat = grouped.blocks.find((block) => block.key === "p0.0")!;
+    const beats = [{ start: "p0.0", textHash: audiobookTextHash(goat.text), name: "The goat story", whose: "Tunde" }, { start: "p5.0", textHash: audiobookTextHash("words since changed") }];
+    assert.equal(audiobookBeatAt(beats, goat)?.name, "The goat story");
+    assert.equal(audiobookBeatAt(beats, grouped.blocks.find((block) => block.key === "p5.0")!), null, "its words moved on: no longer the director's beat");
+    assert.equal(audiobookBeatAt(beats, grouped.blocks.find((block) => block.key === "p3.0")!), null, "a block no beat names");
+    assert.equal(audiobookBeatCount(beats, grouped.blocks), 1);
+    assert.equal(audiobookBeatCount(undefined, grouped.blocks), 0);
   });
 });

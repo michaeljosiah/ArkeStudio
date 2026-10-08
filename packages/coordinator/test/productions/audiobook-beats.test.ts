@@ -7,6 +7,7 @@ import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { planAudiobook, readAudiobook } from "../../src/productions/audiobook.js";
 import { beatsPromptFor, type BeatsDeriver, type BeatsDeriverInput } from "../../src/productions/audiobook-beats.js";
+import { AUDIOBOOK_BEATS_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
@@ -117,11 +118,24 @@ describe("Group by beats (SPEC-047 R-172)", () => {
       const prompt = beatsPromptFor(asked[0]!);
       assert.match(prompt, /A beat is the stretch where one character's intention and the pressure of the scene hold/);
       assert.match(prompt, /\[p0\.0\] narration with lines spoken by Maren Kest/);
+      // The beats are kept on the record with the words each became (design turn 201, R-175), and
+      // the world raised past the builds that would read such a record as unreadable.
+      assert.deepEqual(record.beats?.map((beat) => [beat.start, beat.name, beat.whose]), [[after.blocks[1]!.block.key, "The ledger", "Maren"], [after.blocks[2]!.block.key, "The correction", "Maren"]]);
+      assert.equal(store.getBundle().meta.schemaVersion, AUDIOBOOK_BEATS_SCHEMA_VERSION);
+      const kinds = events.filter((event): event is Beats => event.type === "audiobook.beats").map((event) => event.outcome);
+      assert.deepEqual(kinds, ["grouping", "grouped"], "every window is told it is grouping first");
       // Grouping again starts from the automatic blocks: the seams are replaced, not added to.
       await group(send);
       const again = await readAudiobook(store, LEDGER, "01-neap");
       assert.ok(again !== null && again !== "unreadable");
       assert.equal(again.seams?.length, record.seams?.length);
+      // Reset: one block a paragraph again, and the beats named for the seams go with them.
+      await send({ kind: "reset-audiobook-seams", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap" });
+      const reset = await readAudiobook(store, LEDGER, "01-neap");
+      assert.ok(reset !== null && reset !== "unreadable");
+      assert.equal(reset.seams, undefined);
+      assert.equal(reset.beats, undefined);
+      assert.equal((await plan(store)).blocks.length, before.blocks.length);
     });
   });
 

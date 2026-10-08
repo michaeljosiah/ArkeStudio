@@ -15019,6 +15019,8 @@ export class Coordinator {
         this.directingChapters.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
+        // Every window shows the press as grouping until the answer (design turn 201, rule 3).
+        this.emit({ at: at(), type: "audiobook.beats", ...ids, outcome: "grouping" });
         try {
           const room = await this.directionRoom(store, msg.productionId);
           const grouped = await groupChapterByBeats(store, msg.productionId, chapter.id, deriver, room, control.signal);

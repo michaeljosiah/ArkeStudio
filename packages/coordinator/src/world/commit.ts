@@ -434,6 +434,12 @@ export const CAST_PARAGRAPHS_SCHEMA_VERSION = 67;
  * first sheet that carries one, however it was written — the Voice tab, a draft, or by hand.
  */
 export const SHEET_NARRATION_SCHEMA_VERSION = 68;
+/**
+ * The beats the director named when a chapter was grouped by beats (design turn 201, SPEC-047
+ * R-175): `beats` on the chapter's strict audiobook record, which a build before it reads as
+ * unreadable — every take of the chapter read as lost — so the world is raised before the first.
+ */
+export const AUDIOBOOK_BEATS_SCHEMA_VERSION = 69;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

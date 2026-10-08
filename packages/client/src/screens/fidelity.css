@@ -6599,6 +6599,15 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-voice--6 { --fy-voice: var(--voice-6); }
 .fy-ab__block--dim { opacity: 0.4; }
 /* Who speaks: the colour is the dot's; the name is the label type in the muted ink (194). */
+/* A beat (design turn 201, rule 4): its head over its first line, in the text column, the block's own
+   rows below it. Its name in the foreground, then whose it is, its paragraphs and length, muted. */
+.fy-ab__beathead { grid-column: 2 / -1; display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 1px 0 4px; font: 400 12px/1.4 var(--font-sans); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-ab__beathead b { font: 600 13px/1.4 var(--font-sans); color: var(--foreground); }
+/* Grouping (design turn 201, rule 3): the press's mark turns while the director reads. */
+.fy-ab__pill--busy { cursor: default; }
+.fy-ab__spin { display: inline-flex; animation: fy-ab-spin 0.9s linear infinite; }
+@keyframes fy-ab-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .fy-ab__spin { animation: none; } }
 .fy-ab__speaker { display: inline-flex; align-items: center; gap: 7px; max-width: 120px; padding-top: 3px; min-width: 0; font: var(--type-label); color: var(--muted-foreground); white-space: nowrap; }
 .fy-ab__speaker .fy-ab__speaker-dot { width: 7px; height: 7px; }
 .fy-ab__speaker-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--fy-voice); box-sizing: border-box; }

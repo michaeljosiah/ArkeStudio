@@ -413,6 +413,11 @@ interface StoreState {
   >;
   audiobookRecords: Record<string, { record?: import("@arke-studio/contracts").ChapterAudiobook; refused?: string; seq: number; requestId?: string }>;
   /**
+   * Group by beats (design turn 201), by `world/production/chapter`: grouping while the director
+   * reads, then what came of it — the blocks before and after, or why nothing was grouped.
+   */
+  beats: Record<string, { state: "grouping" | "grouped" | "refused" | "failed" | "unavailable"; reason?: string; before?: number; after?: number }>;
+  /**
    * Recordings on their way to being a block's take (design turn 155c), by the window's request
    * id: the host's picker open, the checks back, the keep on its way, or refused in one clause.
    */
@@ -620,6 +625,7 @@ let current: StoreState = {
   direction: {},
   illustration: {},
   audiobookRecords: {},
+  beats: {},
   stagedTakes: {},
   speakerLines: {},
   narratorQuotes: {},
@@ -1535,6 +1541,8 @@ function handleFrame(json: string): void {
       // A replay restores a proposal held or a run going; what ended while this window was away is not kept.
       illustration: changedWorld || rejoined ? {} : current.illustration,
       audiobookRecords: changedWorld ? {} : current.audiobookRecords,
+      // As a direction: a grouping still going is dropped, and the replay restores it when it is.
+      beats: changedWorld ? {} : Object.fromEntries(Object.entries(current.beats).filter(([, held]) => held.state !== "grouping")),
       stagedTakes: changedWorld ? {} : current.stagedTakes,
       speakerLines: changedWorld ? {} : current.speakerLines,
       narratorQuotes: changedWorld ? {} : current.narratorQuotes,
@@ -1573,6 +1581,7 @@ function handleFrame(json: string): void {
     let direction = current.direction;
     let illustration = current.illustration;
     let audiobookRecords = current.audiobookRecords;
+    let beats = current.beats;
     let stagedTakes = current.stagedTakes;
     let speakerLines = current.speakerLines;
     let narratorQuotes = current.narratorQuotes;
@@ -2292,6 +2301,17 @@ function handleFrame(json: string): void {
       if (current.state?.world?.meta.worldId === event.worldId) {
         audiobookNotes = { ...audiobookNotes, [event.productionId]: { dropped: event.dropped, held: event.held ?? 0, chapters: event.chapters, seq: (audiobookNotes[event.productionId]?.seq ?? 0) + 1 } };
       }
+    } else if (event.type === "audiobook.beats") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      beats = {
+        ...beats,
+        [key]: {
+          state: event.outcome,
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+          ...(event.before !== undefined ? { before: event.before } : {}),
+          ...(event.after !== undefined ? { after: event.after } : {}),
+        },
+      };
     } else if (event.type === "direction.started") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
       // A replay reaches every refresh: a window that already holds the run keeps what it knows.
@@ -2635,6 +2655,7 @@ function handleFrame(json: string): void {
       direction,
       illustration,
       audiobookRecords,
+      beats,
       stagedTakes,
       speakerLines,
       narratorQuotes,
@@ -5803,6 +5824,11 @@ export function useDirectionRuns(): StoreState["direction"] {
   return useStore().direction;
 }
 
+/** Group by beats as it runs and ends (design turn 201), by `world/production/chapter`. */
+export function useBeatRuns(): StoreState["beats"] {
+  return useStore().beats;
+}
+
 export function useAudiobookRecords(): StoreState["audiobookRecords"] {
   return useStore().audiobookRecords;
 }
@@ -6203,6 +6229,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     direction: {},
     illustration: {},
     audiobookRecords: {},
+    beats: {},
     stagedTakes: {},
     speakerLines: {},
   narratorQuotes: {},

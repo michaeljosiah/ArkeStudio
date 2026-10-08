@@ -96,6 +96,18 @@ export const AudiobookSeamSchema = z
   })
   .strict();
 export type AudiobookSeam = z.infer<typeof AudiobookSeamSchema>;
+/** A beat the director named (design turn 201, SPEC-047 R-175), kept beside the seams that join it. */
+export const AudiobookBeatSchema = z
+  .object({
+    start: z.string().min(1).max(40),
+    /** The words of the block the beat was joined into, as `audiobookTextHash` names them. */
+    textHash: z.string().min(1),
+    name: z.string().min(1).max(80).optional(),
+    whose: z.string().min(1).max(120).optional(),
+  })
+  .strict();
+export type AudiobookBeat = z.infer<typeof AudiobookBeatSchema>;
+
 /** A chapter's seams at most: one a gap of a long chapter's turns, with room. */
 export const AUDIOBOOK_SEAMS_MAX = 4000;
 
@@ -735,6 +747,14 @@ export const ChapterAudiobookSchema = z
      * the first record with one raises the world to schema 66.
      */
     seams: z.array(AudiobookSeamSchema).max(AUDIOBOOK_SEAMS_MAX).optional(),
+    /**
+     * The beats the director named when the chapter was grouped by beats (design turn 201,
+     * SPEC-047 R-175): each beat's first block, the words of the block it was joined into, its
+     * name and whose beat it is. A block shows its beat while its words are those words, so a beat
+     * changed by hand or by an edit keeps no name. Absent on a record with none; the first record
+     * with one raises the world to schema 69.
+     */
+    beats: z.array(AudiobookBeatSchema).max(AUDIOBOOK_SEAMS_MAX).optional(),
   })
   .strict();
 export type ChapterAudiobook = z.infer<typeof ChapterAudiobookSchema>;

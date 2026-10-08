@@ -607,6 +607,8 @@ export const Tag = icon(<><path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2
 /* Split is not the blade: the tool cuts wherever you click, this one cuts at the playhead — so
    the mark is the line between two pieces rather than a second pair of scissors. */
 export const SplitMark = icon(<><path d="M12 3v18" /><path d="M8 8H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h4" /><path d="M16 8h4a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-4" /></>);
+/* Group by beats (design turn 201): Lucide's `group`, corner brackets around two offset blocks — paragraphs gathered into one. */
+export const GroupMark = icon(<><path d="M3 7V5c0-1.1.9-2 2-2h2" /><path d="M17 3h2c1.1 0 2 .9 2 2v2" /><path d="M21 17v2c0 1.1-.9 2-2 2h-2" /><path d="M7 21H5c-1.1 0-2-.9-2-2v-2" /><rect width="7" height="5" x="7" y="7" rx="1" /><rect width="7" height="5" x="10" y="12" rx="1" /></>);
 
 /* The branch map's marks (design turn 157): an ending's flag, a warning's triangle, an exclusion. */
 export const Flag = icon(<><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" x2="4" y1="22" y2="15" /></>);

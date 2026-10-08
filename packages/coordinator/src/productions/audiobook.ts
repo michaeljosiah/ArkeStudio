@@ -46,7 +46,7 @@ import {
 import { clipFor } from "../voice/library.js";
 import { directionPlan } from "../voice/direction.js";
 import { atomicWriteFile } from "../world/atomic.js";
-import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_LOOKS_SCHEMA_VERSION, AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_LOOKS_SCHEMA_VERSION, AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION, AUDIOBOOK_BEATS_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
@@ -145,7 +145,7 @@ async function writeOwned(store: WorldStore, rel: string, value: unknown, supers
 export async function writeAudiobook(store: WorldStore, productionId: string, chapterFile: string, untimed: ChapterAudiobook): Promise<void> {
   // Timing, reactions, beds and sounds (design turn 187, R-89) the same way: each part written
   // only when it holds something, and the world raised before the first record carrying any.
-  const { timing, reactions, beds, sounds, ownLooks, seams, ...bare } = untimed;
+  const { timing, reactions, beds, sounds, ownLooks, seams, beats, ...bare } = untimed;
   const parts = { timing, reactions, beds, sounds };
   const kept = Object.fromEntries(Object.entries(parts).filter(([, part]) => part !== undefined && Object.keys(part).length > 0));
   if (Object.keys(kept).length > 0) await store.ensureSchemaVersion(AUDIOBOOK_TIMING_SCHEMA_VERSION, "audiobook-timing");
@@ -157,7 +157,10 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
   // before the first record that holds one, since the builds before read it as unreadable.
   const seamed = seams !== undefined && seams.length > 0;
   if (seamed) await store.ensureSchemaVersion(AUDIOBOOK_SEAMS_SCHEMA_VERSION, "audiobook-seams");
-  const record: ChapterAudiobook = { ...bare, ...kept, ...(owned ? { ownLooks } : {}), ...(seamed ? { seams } : {}) };
+  // The beats a chapter was grouped by (design turn 201) the same way: only while it has some.
+  const beaten = beats !== undefined && beats.length > 0;
+  if (beaten) await store.ensureSchemaVersion(AUDIOBOOK_BEATS_SCHEMA_VERSION, "audiobook-beats");
+  const record: ChapterAudiobook = { ...bare, ...kept, ...(owned ? { ownLooks } : {}), ...(seamed ? { seams } : {}), ...(beaten ? { beats } : {}) };
   // A record with no picture is written without the field, in the shape the builds before
   // pictures read; one with a picture raises the world past them first (design turn 186, R-73).
   const { pictures, ...unpictured } = record;
